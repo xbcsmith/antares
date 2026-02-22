@@ -4,10 +4,12 @@
 use crate::domain::types;
 use crate::domain::world;
 use crate::domain::world::SpriteReference;
+use crate::game::components::creature::CreatureVisual;
 use crate::game::components::sprite::{ActorType, AnimatedSprite, TileSprite};
 use crate::game::resources::sprite_assets::SpriteAssets;
 use crate::game::resources::GlobalState;
 use crate::game::systems::actor::spawn_actor_sprite;
+use crate::game::systems::creature_spawning::spawn_creature;
 use crate::game::systems::procedural_meshes;
 use rand::Rng;
 
@@ -46,6 +48,13 @@ pub struct TileCoord(pub types::Position);
 pub struct NpcMarker {
     /// NPC ID from the definition
     pub npc_id: String,
+}
+
+/// Component tagging a spawned visual as originating from a recruitable map event.
+#[derive(bevy::prelude::Component, Debug, Clone, PartialEq, Eq)]
+pub struct RecruitableVisualMarker {
+    /// Character ID stored in the recruitable event.
+    pub character_id: String,
 }
 
 /// Event trigger component - attached to entities that represent in-world event triggers
@@ -104,8 +113,40 @@ impl Plugin for MapManagerPlugin {
             // spawner observe the changed world state and spawn/despawn accordingly.
             .add_systems(
                 Update,
-                (map_change_handler, handle_door_opened, spawn_map_markers),
+                (
+                    map_change_handler,
+                    handle_door_opened,
+                    spawn_map_markers,
+                    cleanup_recruitable_visuals,
+                ),
             );
+    }
+}
+
+/// Despawns recruitable visual entities when their backing map event is no longer present.
+fn cleanup_recruitable_visuals(
+    mut commands: Commands,
+    global_state: Res<GlobalState>,
+    query: Query<(Entity, &MapEntity, &TileCoord, &RecruitableVisualMarker)>,
+) {
+    let game_state = &global_state.0;
+    let Some(current_map) = game_state.world.get_current_map() else {
+        return;
+    };
+
+    for (entity, map_entity, tile_coord, marker) in query.iter() {
+        if map_entity.0 != current_map.id {
+            continue;
+        }
+
+        let should_keep = matches!(
+            current_map.get_event(tile_coord.0),
+            Some(world::MapEvent::RecruitableCharacter { character_id, .. }) if character_id == &marker.character_id
+        );
+
+        if !should_keep {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -282,6 +323,72 @@ fn map_event_to_event_type(ev: &world::MapEvent) -> Option<MapEventType> {
         }
         _ => None,
     }
+}
+
+/// Normalizes identifiers and names for loose cross-database matching.
+fn normalize_lookup_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// Resolves a creature id for a recruitable map event character id.
+///
+/// Resolution order:
+/// 1. Treat the id as an NPC id and use its configured `creature_id`
+/// 2. Strip `npc_` prefix and try character definitions by id
+/// 3. Match character name against creature definition name (normalized)
+fn resolve_recruitable_creature_id(
+    character_id: &str,
+    content: &crate::application::resources::GameContent,
+) -> Option<types::CreatureId> {
+    if let Some(npc_def) = content.0.npcs.get_npc(character_id) {
+        if let Some(creature_id) = npc_def.creature_id {
+            return Some(creature_id);
+        }
+    }
+
+    let mut candidates = Vec::with_capacity(2);
+    candidates.push(character_id);
+    if let Some(stripped) = character_id.strip_prefix("npc_") {
+        candidates.push(stripped);
+    }
+
+    for candidate in candidates {
+        if let Some(character_def) = content.0.characters.get_character(candidate) {
+            let target_name = normalize_lookup_key(&character_def.name);
+            if let Some(creature) = content
+                .0
+                .creatures
+                .all_creatures()
+                .find(|creature| normalize_lookup_key(&creature.name) == target_name)
+            {
+                return Some(creature.id);
+            }
+        }
+    }
+
+    None
+}
+
+/// Resolves a creature id for an encounter marker from a monster group.
+///
+/// Uses the first monster entry that has a configured `visual_id`.
+fn resolve_encounter_creature_id(
+    monster_group: &[types::MonsterId],
+    content: &crate::application::resources::GameContent,
+) -> Option<types::CreatureId> {
+    for monster_id in monster_group {
+        if let Some(monster_def) = content.0.monsters.get_monster(*monster_id) {
+            if let Some(creature_id) = monster_def.visual_id {
+                return Some(creature_id);
+            }
+        }
+    }
+
+    None
 }
 
 /// System that handles explicit MapChangeEvent messages by updating the world
@@ -872,11 +979,45 @@ fn spawn_map(
         // Spawn NPC visual markers (Phase 2: NPC Visual Representation)
         let resolved_npcs = map.resolve_npcs(&content.0.npcs);
 
-        // For each resolved NPC, spawn an actor sprite. NPCs without specific sprite
-        // assets default to a placeholder sprite sheet.
+        // For each resolved NPC, prefer creature mesh rendering when a creature_id
+        // is configured; otherwise fall back to sprite rendering.
         for resolved_npc in resolved_npcs.iter() {
             let x = resolved_npc.position.x as f32;
             let y = resolved_npc.position.y as f32;
+
+            if let Some(creature_id) = resolved_npc.creature_id {
+                if let Some(creature_def) = content.0.creatures.get_creature(creature_id) {
+                    let entity = spawn_creature(
+                        &mut commands,
+                        creature_def,
+                        &mut meshes,
+                        &mut materials,
+                        Vec3::new(x + TILE_CENTER_OFFSET, 0.0, y + TILE_CENTER_OFFSET),
+                        None,
+                        None,
+                    );
+
+                    commands.entity(entity).insert((
+                        CreatureVisual {
+                            creature_id,
+                            scale_override: None,
+                        },
+                        MapEntity(map.id),
+                        TileCoord(resolved_npc.position),
+                        NpcMarker {
+                            npc_id: resolved_npc.npc_id.clone(),
+                        },
+                        Visibility::default(),
+                    ));
+
+                    continue;
+                }
+
+                warn!(
+                    "NPC '{}' references missing creature_id {} - falling back to sprite",
+                    resolved_npc.npc_id, creature_id
+                );
+            }
 
             // Prefer per-NPC sprite if defined, otherwise use default placeholder
             let sprite_ref = resolved_npc
@@ -911,8 +1052,7 @@ fn spawn_map(
             ));
         }
 
-        // Spawn procedural event markers for signs and portals
-        // Note: Recruitables handled by sprite system (see sprite_support_implementation_plan.md)
+        // Spawn procedural event markers and recruitable character visuals.
         for (position, event) in map.events.iter() {
             // Get tile visual metadata for rotation (if tile exists)
             let rotation_y = map
@@ -968,8 +1108,124 @@ fn spawn_map(
                         procedural_cache,
                     );
                 }
-                // RecruitableCharacter rendering handled by sprite system
-                // Other events (Encounter, Trap, Treasure, NpcDialogue, InnEntry) have no visual markers
+                world::MapEvent::Encounter { monster_group, .. } => {
+                    let x = position.x as f32;
+                    let y = position.y as f32;
+
+                    if let Some(creature_id) =
+                        resolve_encounter_creature_id(monster_group, &content)
+                    {
+                        if let Some(creature_def) = content.0.creatures.get_creature(creature_id) {
+                            let entity = spawn_creature(
+                                &mut commands,
+                                creature_def,
+                                &mut meshes,
+                                &mut materials,
+                                Vec3::new(x + TILE_CENTER_OFFSET, 0.0, y + TILE_CENTER_OFFSET),
+                                None,
+                                None,
+                            );
+
+                            commands.entity(entity).insert((
+                                CreatureVisual {
+                                    creature_id,
+                                    scale_override: None,
+                                },
+                                MapEntity(map.id),
+                                TileCoord(*position),
+                                Visibility::default(),
+                            ));
+
+                            continue;
+                        }
+                    }
+
+                    warn!(
+                        "Encounter at ({}, {}) has no resolvable creature visual; no marker spawned",
+                        position.x, position.y
+                    );
+                }
+                world::MapEvent::RecruitableCharacter {
+                    character_id, name, ..
+                } => {
+                    let x = position.x as f32;
+                    let y = position.y as f32;
+
+                    if let Some(creature_id) =
+                        resolve_recruitable_creature_id(character_id, &content)
+                    {
+                        if let Some(creature_def) = content.0.creatures.get_creature(creature_id) {
+                            let entity = spawn_creature(
+                                &mut commands,
+                                creature_def,
+                                &mut meshes,
+                                &mut materials,
+                                Vec3::new(x + TILE_CENTER_OFFSET, 0.0, y + TILE_CENTER_OFFSET),
+                                None,
+                                None,
+                            );
+
+                            commands.entity(entity).insert((
+                                CreatureVisual {
+                                    creature_id,
+                                    scale_override: None,
+                                },
+                                MapEntity(map.id),
+                                TileCoord(*position),
+                                RecruitableVisualMarker {
+                                    character_id: character_id.clone(),
+                                },
+                                NpcMarker {
+                                    npc_id: character_id.clone(),
+                                },
+                                Visibility::default(),
+                            ));
+
+                            continue;
+                        }
+
+                        warn!(
+                            "Recruitable '{}' ('{}') references missing creature_id {} - falling back to sprite",
+                            name, character_id, creature_id
+                        );
+                    } else {
+                        warn!(
+                            "Recruitable '{}' ('{}') has no resolvable creature mapping - falling back to sprite",
+                            name, character_id
+                        );
+                    }
+
+                    let sprite_ref = SpriteReference {
+                        sheet_path: DEFAULT_NPC_SPRITE_PATH.to_string(),
+                        sprite_index: 0,
+                        animation: None,
+                        material_properties: None,
+                    };
+
+                    let entity = spawn_actor_sprite(
+                        &mut commands,
+                        &mut sprite_assets,
+                        &asset_server,
+                        &mut materials,
+                        &mut meshes,
+                        &sprite_ref,
+                        Vec3::new(x + TILE_CENTER_OFFSET, 0.9, y + TILE_CENTER_OFFSET),
+                        ActorType::Npc,
+                    );
+
+                    commands.entity(entity).insert((
+                        MapEntity(map.id),
+                        TileCoord(*position),
+                        RecruitableVisualMarker {
+                            character_id: character_id.clone(),
+                        },
+                        NpcMarker {
+                            npc_id: character_id.clone(),
+                        },
+                        Visibility::default(),
+                    ));
+                }
+                // Other events (Trap, Treasure, NpcDialogue, InnEntry) have no visual markers
                 _ => {}
             }
         }
@@ -1222,6 +1478,7 @@ mod tests {
             description: "A test merchant NPC".to_string(),
             portrait_id: "merchant.png".to_string(),
             sprite: None,
+            creature_id: None,
             position: Position::new(5, 5),
             facing: None,
             dialogue_id: Some(100u16), // Dialogue ID present
@@ -1264,6 +1521,7 @@ mod tests {
             description: "An NPC with no dialogue".to_string(),
             portrait_id: "silent.png".to_string(),
             sprite: None,
+            creature_id: None,
             position: Position::new(10, 10),
             facing: None,
             dialogue_id: None, // No dialogue ID
@@ -1379,6 +1637,100 @@ mod tests {
 
         assert_eq!(map_entity.0, map_id);
         assert_eq!(map_entity.0, 5u16);
+    }
+
+    #[test]
+    fn test_resolve_encounter_creature_id_returns_first_visual_match() {
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let monster = crate::domain::combat::database::MonsterDefinition {
+            id: 42,
+            name: "Encounter Goblin".to_string(),
+            stats: crate::domain::character::Stats::new(8, 6, 6, 8, 10, 8, 5),
+            hp: crate::domain::character::AttributePair16::new(10),
+            ac: crate::domain::character::AttributePair::new(6),
+            attacks: vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            flee_threshold: 0,
+            special_attack_threshold: 0,
+            resistances: crate::domain::combat::monster::MonsterResistances::new(),
+            can_regenerate: false,
+            can_advance: false,
+            is_undead: false,
+            magic_resistance: 0,
+            loot: crate::domain::combat::monster::LootTable::default(),
+            visual_id: Some(7),
+            conditions: crate::domain::combat::monster::MonsterCondition::Normal,
+            active_conditions: Vec::new(),
+            has_acted: false,
+        };
+
+        db.monsters.add_monster(monster).unwrap();
+
+        let content = crate::application::resources::GameContent::new(db);
+        let result = resolve_encounter_creature_id(&[42], &content);
+
+        assert_eq!(result, Some(7));
+    }
+
+    #[test]
+    fn test_resolve_encounter_creature_id_skips_monsters_without_visuals() {
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let without_visual = crate::domain::combat::database::MonsterDefinition {
+            id: 10,
+            name: "No Visual".to_string(),
+            stats: crate::domain::character::Stats::new(8, 6, 6, 8, 10, 8, 5),
+            hp: crate::domain::character::AttributePair16::new(10),
+            ac: crate::domain::character::AttributePair::new(6),
+            attacks: vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            flee_threshold: 0,
+            special_attack_threshold: 0,
+            resistances: crate::domain::combat::monster::MonsterResistances::new(),
+            can_regenerate: false,
+            can_advance: false,
+            is_undead: false,
+            magic_resistance: 0,
+            loot: crate::domain::combat::monster::LootTable::default(),
+            visual_id: None,
+            conditions: crate::domain::combat::monster::MonsterCondition::Normal,
+            active_conditions: Vec::new(),
+            has_acted: false,
+        };
+
+        let with_visual = crate::domain::combat::database::MonsterDefinition {
+            id: 11,
+            name: "Has Visual".to_string(),
+            stats: crate::domain::character::Stats::new(10, 8, 8, 10, 10, 10, 8),
+            hp: crate::domain::character::AttributePair16::new(12),
+            ac: crate::domain::character::AttributePair::new(7),
+            attacks: vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 6, 0),
+            )],
+            flee_threshold: 0,
+            special_attack_threshold: 0,
+            resistances: crate::domain::combat::monster::MonsterResistances::new(),
+            can_regenerate: false,
+            can_advance: false,
+            is_undead: false,
+            magic_resistance: 0,
+            loot: crate::domain::combat::monster::LootTable::default(),
+            visual_id: Some(99),
+            conditions: crate::domain::combat::monster::MonsterCondition::Normal,
+            active_conditions: Vec::new(),
+            has_acted: false,
+        };
+
+        db.monsters.add_monster(without_visual).unwrap();
+        db.monsters.add_monster(with_visual).unwrap();
+
+        let content = crate::application::resources::GameContent::new(db);
+        let result = resolve_encounter_creature_id(&[10, 250, 11], &content);
+
+        assert_eq!(result, Some(99));
     }
 
     #[test]
@@ -1502,6 +1854,285 @@ mod tests {
         assert!(world_ref
             .get::<crate::game::components::sprite::AnimatedSprite>(entity)
             .is_none());
+    }
+
+    #[test]
+    fn test_spawn_map_uses_npc_creature_id_when_available() {
+        // Integration-style test: NPCs with creature_id should spawn CreatureVisual entities.
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        // Prepare ContentDatabase with one NPC and one matching creature definition.
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let npc =
+            crate::domain::world::npc::NpcDefinition::new("elder", "Village Elder", "elder.png")
+                .with_creature_id(51);
+        db.npcs
+            .add_npc(npc)
+            .expect("Failed to add NPC to ContentDatabase");
+
+        let mesh = crate::domain::visual::MeshDefinition {
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.25, 0.5, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let creature = crate::domain::visual::CreatureDefinition {
+            id: 51,
+            name: "VillageElder".to_string(),
+            meshes: vec![mesh],
+            mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+        };
+        db.creatures
+            .add_creature(creature)
+            .expect("Failed to add creature to ContentDatabase");
+
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        // Build GameState with one NPC placement.
+        let mut game_state = crate::application::GameState::new();
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "elder",
+                crate::domain::types::Position::new(5, 5),
+            ));
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        // Run startup systems (including spawn_map_system).
+        app.update();
+
+        // Assert CreatureVisual exists and uses the configured creature id.
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(
+            &crate::game::components::creature::CreatureVisual,
+            &NpcMarker,
+        )>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(results.len(), 1);
+        let (visual, marker) = results[0];
+        assert_eq!(visual.creature_id, 51);
+        assert_eq!(marker.npc_id, "elder");
+
+        // Ensure we did not spawn a fallback actor sprite for this NPC.
+        let mut sprite_query =
+            world_ref.query::<(&crate::game::components::sprite::ActorSprite, &NpcMarker)>();
+        let sprite_results: Vec<_> = sprite_query.iter(&*world_ref).collect();
+        assert_eq!(sprite_results.len(), 0);
+    }
+
+    #[test]
+    fn test_spawn_map_uses_recruitable_character_creature_visual() {
+        // Integration-style test: recruitable character events should spawn CreatureVisual entities
+        // when a creature mapping can be resolved from the character definition.
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let mut old_gareth = crate::domain::character_definition::CharacterDefinition::new(
+            "old_gareth".to_string(),
+            "Old Gareth".to_string(),
+            "dwarf".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Neutral,
+        );
+        old_gareth.is_premade = true;
+        db.characters
+            .add_character(old_gareth)
+            .expect("Failed to add character to ContentDatabase");
+
+        let mesh = crate::domain::visual::MeshDefinition {
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.25, 0.5, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let creature = crate::domain::visual::CreatureDefinition {
+            id: 58,
+            name: "OldGareth".to_string(),
+            meshes: vec![mesh],
+            mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+        };
+        db.creatures
+            .add_creature(creature)
+            .expect("Failed to add creature to ContentDatabase");
+
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        let mut game_state = crate::application::GameState::new();
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let recruitable_pos = crate::domain::types::Position::new(4, 4);
+        map.events.insert(
+            recruitable_pos,
+            crate::domain::world::MapEvent::RecruitableCharacter {
+                name: "Old Gareth".to_string(),
+                description: "A veteran smith".to_string(),
+                character_id: "npc_old_gareth".to_string(),
+                dialogue_id: None,
+            },
+        );
+
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(
+            &crate::game::components::creature::CreatureVisual,
+            &NpcMarker,
+            &TileCoord,
+        )>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(results.len(), 1);
+
+        let (visual, marker, coord) = results[0];
+        assert_eq!(visual.creature_id, 58);
+        assert_eq!(marker.npc_id, "npc_old_gareth");
+        assert_eq!(coord.0, recruitable_pos);
+    }
+
+    #[test]
+    fn test_recruitable_visual_despawns_after_event_removed() {
+        // Integration-style test: recruitable visuals are cleaned up after the
+        // backing RecruitableCharacter event is removed from the map.
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let mut old_gareth = crate::domain::character_definition::CharacterDefinition::new(
+            "old_gareth".to_string(),
+            "Old Gareth".to_string(),
+            "dwarf".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Neutral,
+        );
+        old_gareth.is_premade = true;
+        db.characters
+            .add_character(old_gareth)
+            .expect("Failed to add character to ContentDatabase");
+
+        let mesh = crate::domain::visual::MeshDefinition {
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.25, 0.5, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let creature = crate::domain::visual::CreatureDefinition {
+            id: 58,
+            name: "OldGareth".to_string(),
+            meshes: vec![mesh],
+            mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+        };
+        db.creatures
+            .add_creature(creature)
+            .expect("Failed to add creature to ContentDatabase");
+
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        let mut game_state = crate::application::GameState::new();
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let recruitable_pos = crate::domain::types::Position::new(4, 4);
+        map.events.insert(
+            recruitable_pos,
+            crate::domain::world::MapEvent::RecruitableCharacter {
+                name: "Old Gareth".to_string(),
+                description: "A veteran smith".to_string(),
+                character_id: "npc_old_gareth".to_string(),
+                dialogue_id: None,
+            },
+        );
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        // First frame: spawn map visuals.
+        app.update();
+
+        {
+            let world_ref = app.world_mut();
+            let mut query = world_ref.query::<(&RecruitableVisualMarker, &TileCoord)>();
+            let results: Vec<_> = query.iter(&*world_ref).collect();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].0.character_id, "npc_old_gareth");
+            assert_eq!(results[0].1 .0, recruitable_pos);
+        }
+
+        // Remove the recruitable event from map data.
+        {
+            let mut global_state = app
+                .world_mut()
+                .resource_mut::<crate::game::resources::GlobalState>();
+            let current_map = global_state
+                .0
+                .world
+                .get_current_map_mut()
+                .expect("Current map should exist");
+            current_map.remove_event(recruitable_pos);
+        }
+
+        // Next frame: cleanup system should despawn recruitable visual.
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<&RecruitableVisualMarker>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(results.len(), 0);
     }
 
     #[test]

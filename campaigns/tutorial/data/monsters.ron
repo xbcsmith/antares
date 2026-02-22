@@ -243,6 +243,249 @@
         has_acted: false,
     ),
     (
+        id: 4,
+        name: "Dire Wolf",
+        stats: (
+            might: (
+                base: 12,
+                current: 12,
+            ),
+            intellect: (
+                base: 4,
+                current: 4,
+            ),
+            personality: (
+                base: 6,
+                current: 6,
+            ),
+            endurance: (
+                base: 12,
+                current: 12,
+            ),
+            speed: (
+                base: 16,
+                current: 16,
+            ),
+            accuracy: (
+                base: 13,
+                current: 13,
+            ),
+            luck: (
+                base: 6,
+                current: 6,
+            ),
+        ),
+        hp: (
+            base: 30,
+            current: 30,
+        ),
+        ac: (
+            base: 14,
+            current: 14,
+        ),
+        attacks: [
+            (
+                damage: (
+                    count: 1,
+                    sides: 8,
+                    bonus: 2,
+                ),
+                attack_type: Physical,
+                special_effect: None,
+            ),
+        ],
+        flee_threshold: 10,
+        special_attack_threshold: 30,
+        resistances: (
+            physical: false,
+            fire: false,
+            cold: false,
+            electricity: false,
+            energy: false,
+            paralysis: false,
+            fear: false,
+            sleep: false,
+        ),
+        can_regenerate: false,
+        can_advance: true,
+        is_undead: false,
+        magic_resistance: 0,
+        loot: (
+            gold_min: 0,
+            gold_max: 10,
+            gems_min: 0,
+            gems_max: 0,
+            items: [],
+            experience: 50,
+        ),
+        visual_id: Some(4),
+        conditions: Normal,
+        active_conditions: [],
+        has_acted: false,
+    ),
+    (
+        id: 5,
+        name: "Dire Wolf Leader",
+        stats: (
+            might: (
+                base: 16,
+                current: 16,
+            ),
+            intellect: (
+                base: 5,
+                current: 5,
+            ),
+            personality: (
+                base: 7,
+                current: 7,
+            ),
+            endurance: (
+                base: 14,
+                current: 14,
+            ),
+            speed: (
+                base: 14,
+                current: 14,
+            ),
+            accuracy: (
+                base: 15,
+                current: 15,
+            ),
+            luck: (
+                base: 7,
+                current: 7,
+            ),
+        ),
+        hp: (
+            base: 40,
+            current: 40,
+        ),
+        ac: (
+            base: 15,
+            current: 15,
+        ),
+        attacks: [
+            (
+                damage: (
+                    count: 2,
+                    sides: 6,
+                    bonus: 1,
+                ),
+                attack_type: Physical,
+                special_effect: None,
+            ),
+        ],
+        flee_threshold: 15,
+        special_attack_threshold: 35,
+        resistances: (
+            physical: false,
+            fire: false,
+            cold: false,
+            electricity: false,
+            energy: false,
+            paralysis: false,
+            fear: false,
+            sleep: false,
+        ),
+        can_regenerate: false,
+        can_advance: true,
+        is_undead: false,
+        magic_resistance: 0,
+        loot: (
+            gold_min: 0,
+            gold_max: 20,
+            gems_min: 0,
+            gems_max: 0,
+            items: [],
+            experience: 100,
+        ),
+        visual_id: Some(5),
+        conditions: Normal,
+        active_conditions: [],
+        has_acted: false,
+    ),
+    (
+        id: 6,
+        name: "Bandit",
+        stats: (
+            might: (
+                base: 10,
+                current: 10,
+            ),
+            intellect: (
+                base: 5,
+                current: 5,
+            ),
+            personality: (
+                base: 5,
+                current: 5,
+            ),
+            endurance: (
+                base: 8,
+                current: 8,
+            ),
+            speed: (
+                base: 10,
+                current: 10,
+            ),
+            accuracy: (
+                base: 8,
+                current: 8,
+            ),
+            luck: (
+                base: 5,
+                current: 5,
+            ),
+        ),
+        hp: (
+            base: 20,
+            current: 20,
+        ),
+        ac: (
+            base: 12,
+            current: 12,
+        ),
+        attacks: [
+            (
+                damage: (
+                    count: 1,
+                    sides: 6,
+                    bonus: 1,
+                ),
+                attack_type: Physical,
+                special_effect: None,
+            ),
+        ],
+        flee_threshold: 5,
+        special_attack_threshold: 20,
+        resistances: (
+            physical: false,
+            fire: false,
+            cold: false,
+            electricity: false,
+            energy: false,
+            paralysis: false,
+            fear: false,
+            sleep: false,
+        ),
+        can_regenerate: false,
+        can_advance: true,
+        is_undead: false,
+        magic_resistance: 0,
+        loot: (
+            gold_min: 5,
+            gold_max: 20,
+            gems_min: 0,
+            gems_max: 1,
+            items: [],
+            experience: 70,
+        ),
+        visual_id: Some(6),
+        conditions: Normal,
+        active_conditions: [],
+        has_acted: false,
+    ),
+    (
         id: 10,
         name: "Orc",
         stats: (
@@ -919,6 +1162,249 @@
             experience: 1500,
         ),
         visual_id: Some(31),
+        conditions: Normal,
+        active_conditions: [],
+        has_acted: false,
+    ),
+    (
+        id: 32,
+        name: "Ancient Wolf",
+        stats: (
+            might: (
+                base: 16,
+                current: 16,
+            ),
+            intellect: (
+                base: 5,
+                current: 5,
+            ),
+            personality: (
+                base: 7,
+                current: 7,
+            ),
+            endurance: (
+                base: 14,
+                current: 14,
+            ),
+            speed: (
+                base: 14,
+                current: 14,
+            ),
+            accuracy: (
+                base: 15,
+                current: 15,
+            ),
+            luck: (
+                base: 7,
+                current: 7,
+            ),
+        ),
+        hp: (
+            base: 40,
+            current: 40,
+        ),
+        ac: (
+            base: 15,
+            current: 15,
+        ),
+        attacks: [
+            (
+                damage: (
+                    count: 2,
+                    sides: 6,
+                    bonus: 1,
+                ),
+                attack_type: Physical,
+                special_effect: None,
+            ),
+        ],
+        flee_threshold: 15,
+        special_attack_threshold: 35,
+        resistances: (
+            physical: false,
+            fire: false,
+            cold: false,
+            electricity: false,
+            energy: false,
+            paralysis: false,
+            fear: false,
+            sleep: false,
+        ),
+        can_regenerate: false,
+        can_advance: true,
+        is_undead: false,
+        magic_resistance: 0,
+        loot: (
+            gold_min: 0,
+            gold_max: 20,
+            gems_min: 0,
+            gems_max: 0,
+            items: [],
+            experience: 100,
+        ),
+        visual_id: Some(5),
+        conditions: Normal,
+        active_conditions: [],
+        has_acted: false,
+    ),
+    (
+        id: 133,
+        name: "Ancient Skeleton",
+        stats: (
+            might: (
+                base: 10,
+                current: 10,
+            ),
+            intellect: (
+                base: 1,
+                current: 1,
+            ),
+            personality: (
+                base: 1,
+                current: 1,
+            ),
+            endurance: (
+                base: 8,
+                current: 8,
+            ),
+            speed: (
+                base: 6,
+                current: 6,
+            ),
+            accuracy: (
+                base: 9,
+                current: 9,
+            ),
+            luck: (
+                base: 2,
+                current: 2,
+            ),
+        ),
+        hp: (
+            base: 20,
+            current: 20,
+        ),
+        ac: (
+            base: 13,
+            current: 13,
+        ),
+        attacks: [
+            (
+                damage: (
+                    count: 1,
+                    sides: 6,
+                    bonus: 0,
+                ),
+                attack_type: Physical,
+                special_effect: None,
+            ),
+        ],
+        flee_threshold: 0,
+        special_attack_threshold: 10,
+        resistances: (
+            physical: false,
+            fire: false,
+            cold: true,
+            electricity: false,
+            energy: false,
+            paralysis: true,
+            fear: true,
+            sleep: true,
+        ),
+        can_regenerate: false,
+        can_advance: true,
+        is_undead: true,
+        magic_resistance: 10,
+        loot: (
+            gold_min: 5,
+            gold_max: 20,
+            gems_min: 0,
+            gems_max: 0,
+            items: [],
+            experience: 40,
+        ),
+        visual_id: Some(11),
+        conditions: Normal,
+        active_conditions: [],
+        has_acted: false,
+    ),
+    (
+        id: 34,
+        name: "SkeletonWarrior",
+        stats: (
+            might: (
+                base: 12,
+                current: 12,
+            ),
+            intellect: (
+                base: 8,
+                current: 8,
+            ),
+            personality: (
+                base: 1,
+                current: 1,
+            ),
+            endurance: (
+                base: 12,
+                current: 12,
+            ),
+            speed: (
+                base: 8,
+                current: 8,
+            ),
+            accuracy: (
+                base: 11,
+                current: 11,
+            ),
+            luck: (
+                base: 2,
+                current: 2,
+            ),
+        ),
+        hp: (
+            base: 20,
+            current: 20,
+        ),
+        ac: (
+            base: 13,
+            current: 13,
+        ),
+        attacks: [
+            (
+                damage: (
+                    count: 1,
+                    sides: 6,
+                    bonus: 0,
+                ),
+                attack_type: Physical,
+                special_effect: None,
+            ),
+        ],
+        flee_threshold: 0,
+        special_attack_threshold: 10,
+        resistances: (
+            physical: false,
+            fire: false,
+            cold: true,
+            electricity: false,
+            energy: false,
+            paralysis: true,
+            fear: true,
+            sleep: true,
+        ),
+        can_regenerate: true,
+        can_advance: true,
+        is_undead: true,
+        magic_resistance: 10,
+        loot: (
+            gold_min: 5,
+            gold_max: 20,
+            gems_min: 0,
+            gems_max: 0,
+            items: [],
+            experience: 40,
+        ),
+        visual_id: Some(11),
         conditions: Normal,
         active_conditions: [],
         has_acted: false,

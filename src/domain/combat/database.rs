@@ -545,7 +545,7 @@ mod tests {
     fn test_load_tutorial_monsters_visual_ids() {
         // This test validates that the tutorial campaign monsters.ron file
         // has valid visual_id mappings
-        let monsters_path = "campaigns/tutorial/data/monsters.ron";
+        let monsters_path = "data/test_campaign/data/monsters.ron";
 
         // Skip if file doesn't exist (running tests outside project root)
         if !std::path::Path::new(monsters_path).exists() {
@@ -561,6 +561,9 @@ mod tests {
             (1, Some(1)),   // Goblin -> Goblin
             (2, Some(2)),   // Kobold -> Kobold
             (3, Some(3)),   // Giant Rat -> GiantRat
+            (4, Some(4)),   // Dire Wolf -> DireWolf
+            (5, Some(5)),   // Dire Wolf Leader -> DireWolfLeader
+            (6, Some(6)),   // Bandit -> Bandit
             (10, Some(10)), // Orc -> Orc
             (11, Some(11)), // Skeleton -> Skeleton
             (12, Some(12)), // Wolf -> Wolf
@@ -583,8 +586,8 @@ mod tests {
             );
         }
 
-        // Verify all 11 monsters have visual_id set
-        assert_eq!(db.len(), 11, "Expected 11 monsters in tutorial campaign");
+        // Verify all tutorial monsters have visual_id set.
+        assert_eq!(db.len(), 14, "Expected 14 monsters in tutorial campaign");
 
         for monster in db.all_monsters() {
             assert!(

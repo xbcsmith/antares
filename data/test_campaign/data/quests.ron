@@ -1,0 +1,394 @@
+[
+    (
+        id: 0,
+        name: "Arcturus\'s Quest",
+        description: "The Great Arcturus\'s Quest for Foo",
+        stages: [
+            (
+                stage_number: 1,
+                name: "Find the Foo",
+                description: "Find the Foo in the area",
+                objectives: [
+                    TalkToNpc(
+                        npc_id: "tutorial_wizard_arcturus",
+                        map_id: 2,
+                    ),
+                    CollectItems(
+                        item_id: 102,
+                        quantity: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+            (
+                stage_number: 2,
+                name: "Return the Foo",
+                description: "Return the Foo to Arcturus",
+                objectives: [
+                    TalkToNpc(
+                        npc_id: "tutorial_wizard_arcturus",
+                        map_id: 2,
+                    ),
+                    DeliverItem(
+                        item_id: 102,
+                        npc_id: "tutorial_wizard_arcturus",
+                        quantity: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+            (
+                stage_number: 3,
+                name: "Find the Foo Stand",
+                description: "Find the Foo Stand",
+                objectives: [
+                    TalkToNpc(
+                        npc_id: "tutorial_wizard_arcturus",
+                        map_id: 2,
+                    ),
+                    CollectItems(
+                        item_id: 103,
+                        quantity: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+            (
+                stage_number: 4,
+                name: "Return the Foo Stand",
+                description: "Return the Foo Stand to Arcturus",
+                objectives: [
+                    TalkToNpc(
+                        npc_id: "tutorial_wizard_arcturus",
+                        map_id: 2,
+                    ),
+                    DeliverItem(
+                        item_id: 103,
+                        npc_id: "tutorial_wizard_arcturus",
+                        quantity: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Experience(100),
+            Gold(50),
+        ],
+        min_level: Some(1),
+        max_level: Some(30),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: Some("tutorial_wizard_arcturus"),
+        quest_giver_map: Some(2),
+        quest_giver_position: Some((
+            x: 13,
+            y: 4,
+        )),
+    ),
+    (
+        id: 1,
+        name: "Arcturus\'s Brother\'s Quest",
+        description: "The Great Arcturus\'s Brother\'s Quest for Bar",
+        stages: [
+            (
+                stage_number: 1,
+                name: "Find the Bar",
+                description: "Find the Bar in the area",
+                objectives: [
+                    TalkToNpc(
+                        npc_id: "tutorial_wizard_arcturus_brother",
+                        map_id: 2,
+                    ),
+                    CollectItems(
+                        item_id: 104,
+                        quantity: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+            (
+                stage_number: 2,
+                name: "Return the Bar",
+                description: "Return the Bar to Arcturus\'s Brother",
+                objectives: [
+                    TalkToNpc(
+                        npc_id: "tutorial_wizard_arcturus_brother",
+                        map_id: 2,
+                    ),
+                    DeliverItem(
+                        item_id: 104,
+                        npc_id: "tutorial_wizard_arcturus_brother",
+                        quantity: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+            (
+                stage_number: 3,
+                name: "Get the Foo from Arcturus",
+                description: "Get the Foo and the Foo Stand from Arcturus",
+                objectives: [
+                    TalkToNpc(
+                        npc_id: "tutorial_wizard_arcturus",
+                        map_id: 2,
+                    ),
+                    CollectItems(
+                        item_id: 102,
+                        quantity: 1,
+                    ),
+                    CollectItems(
+                        item_id: 103,
+                        quantity: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+            (
+                stage_number: 4,
+                name: "Give the Foo and the Foo Stand",
+                description: "Give the Foo and the Foo Stand to Arcturus\'s Brother",
+                objectives: [
+                    TalkToNpc(
+                        npc_id: "tutorial_wizard_arcturus_brother",
+                        map_id: 2,
+                    ),
+                    DeliverItem(
+                        item_id: 102,
+                        npc_id: "tutorial_wizard_arcturus_brother",
+                        quantity: 1,
+                    ),
+                    DeliverItem(
+                        item_id: 103,
+                        npc_id: "tutorial_wizard_arcturus_brother",
+                        quantity: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Experience(250),
+            Gold(50),
+        ],
+        min_level: Some(1),
+        max_level: Some(30),
+        required_quests: [
+            0,
+        ],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: Some("tutorial_wizard_arcturus_brother"),
+        quest_giver_map: Some(2),
+        quest_giver_position: Some((
+            x: 3,
+            y: 16,
+        )),
+    ),
+    (
+        id: 3,
+        name: "Kill Skeletons for Village Elder",
+        description: "Kill Monsters",
+        stages: [
+            (
+                stage_number: 1,
+                name: "Kill Monsters",
+                description: "Kill Monsters",
+                objectives: [
+                    KillMonsters(
+                        monster_id: 11,
+                        quantity: 10,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Items([
+                (42, 1),
+            ]),
+            Experience(250),
+            Gold(50),
+        ],
+        min_level: Some(1),
+        max_level: Some(30),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: Some("1:tutorial_elder_village"),
+        quest_giver_map: Some(1),
+        quest_giver_position: Some((
+            x: 1,
+            y: 16,
+        )),
+    ),
+    (
+        id: 4,
+        name: "Goblin Extermination",
+        description: "Clear the goblin camp",
+        stages: [
+            (
+                stage_number: 1,
+                name: "Defeat Goblins",
+                description: "Defeat 10 goblins",
+                objectives: [
+                    KillMonsters(
+                        monster_id: 1,
+                        quantity: 10,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Experience(150),
+            Gold(200),
+        ],
+        min_level: Some(2),
+        max_level: None,
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: Some("tutorial_goblin_dying"),
+        quest_giver_map: Some(6),
+        quest_giver_position: Some((
+            x: 1,
+            y: 1,
+        )),
+    ),
+    (
+        id: 5,
+        name: "The Lich\'s Tomb",
+        description: "Journey to the Harrow Downs to face the Lich",
+        stages: [
+            (
+                stage_number: 1,
+                name: "The Lich\'s Tomb",
+                description: "Journey to the Harrow Downs to face the Lich",
+                objectives: [
+                    ReachLocation(
+                        map_id: 6,
+                        position: (
+                            x: 1,
+                            y: 1,
+                        ),
+                        radius: 1,
+                    ),
+                    KillMonsters(
+                        monster_id: 31,
+                        quantity: 1,
+                    ),
+                    TalkToNpc(
+                        npc_id: "tutorial_elder_village2",
+                        map_id: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Experience(1000),
+            Gold(500),
+            Items([
+                (11, 1),
+            ]),
+        ],
+        min_level: Some(5),
+        max_level: Some(255),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: true,
+        quest_giver_npc: Some("5:tutorial_elder_village2"),
+        quest_giver_map: Some(5),
+        quest_giver_position: Some((
+            x: 10,
+            y: 4,
+        )),
+    ),
+    (
+        id: 6,
+        name: "Lost Ranger\'s Bow",
+        description: "Find and return the Lost Ranger\'s Bow",
+        stages: [
+            (
+                stage_number: 1,
+                name: "Retrieve the Bow",
+                description: "Retrieve the Lost Ranger\'s Bow from the Dragon",
+                objectives: [
+                    ReachLocation(
+                        map_id: 2,
+                        position: (
+                            x: 5,
+                            y: 3,
+                        ),
+                        radius: 1,
+                    ),
+                    DeliverItem(
+                        item_id: 105,
+                        npc_id: "2:tutorial_ranger_lost",
+                        quantity: 1,
+                    ),
+                    KillMonsters(
+                        monster_id: 2,
+                        quantity: 6,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Experience(100),
+            Reputation(
+                faction: "Rangers",
+                change: 10,
+            ),
+        ],
+        min_level: Some(1),
+        max_level: Some(30),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: Some("2:tutorial_ranger_lost"),
+        quest_giver_map: Some(2),
+        quest_giver_position: Some((
+            x: 2,
+            y: 2,
+        )),
+    ),
+    (
+        id: 7,
+        name: "Kill Kobalds for Village Elder",
+        description: "Kill the Kobalds for the Village Elder",
+        stages: [
+            (
+                stage_number: 1,
+                name: "",
+                description: "",
+                objectives: [
+                    KillMonsters(
+                        monster_id: 2,
+                        quantity: 10,
+                    ),
+                    TalkToNpc(
+                        npc_id: "1:tutorial_elder_village",
+                        map_id: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [],
+        min_level: Some(1),
+        max_level: Some(30),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: Some("1:tutorial_elder_village"),
+        quest_giver_map: Some(1),
+        quest_giver_position: Some((
+            x: 1,
+            y: 16,
+        )),
+    ),
+]

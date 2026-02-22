@@ -5,6 +5,7 @@ target
 saves
 *.log
 *.png
+*.jpg
 *.txt
 *.sh
 

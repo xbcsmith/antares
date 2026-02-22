@@ -26,17 +26,16 @@ use std::path::PathBuf;
 
 /// Load tutorial campaign databases for testing
 fn load_tutorial_databases() -> (ClassDatabase, RaceDatabase, ProficiencyDatabase) {
-    let campaign_root = PathBuf::from("campaigns/tutorial");
+    let data_root = PathBuf::from("data");
 
-    let class_db = ClassDatabase::load_from_file(campaign_root.join("data/classes.ron"))
-        .expect("Failed to load classes.ron");
+    let class_db = ClassDatabase::load_from_file(data_root.join("classes.ron"))
+        .expect("Failed to load classes.ron from global data");
 
-    let race_db = RaceDatabase::load_from_file(campaign_root.join("data/races.ron"))
-        .expect("Failed to load races.ron");
+    let race_db = RaceDatabase::load_from_file(data_root.join("races.ron"))
+        .expect("Failed to load races.ron from global data");
 
-    let proficiency_db =
-        ProficiencyDatabase::load_from_file(PathBuf::from("data/proficiencies.ron"))
-            .expect("Failed to load proficiencies.ron");
+    let proficiency_db = ProficiencyDatabase::load_from_file(data_root.join("proficiencies.ron"))
+        .expect("Failed to load proficiencies.ron from global data");
 
     (class_db, race_db, proficiency_db)
 }

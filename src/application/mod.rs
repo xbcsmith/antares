@@ -443,8 +443,8 @@ impl GameState {
     /// use antares::sdk::campaign_loader::{Campaign, CampaignLoader};
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loader = CampaignLoader::new("campaigns");
-    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let loader = CampaignLoader::new("data");
+    /// let campaign = loader.load_campaign("test_campaign")?;
     /// // `new_game` returns a Result<(GameState, ContentDatabase), CampaignError>
     /// let (state, _content_db) = GameState::new_game(campaign)?;
     ///
@@ -533,8 +533,8 @@ impl GameState {
     /// use antares::sdk::campaign_loader::CampaignLoader;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loader = CampaignLoader::new("campaigns");
-    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let loader = CampaignLoader::new("data");
+    /// let campaign = loader.load_campaign("test_campaign")?;
     /// let (mut state, content_db) = GameState::new_game(campaign)?;
     /// // new_game calls initialize_roster internally; alternatively you may call:
     /// // state.initialize_roster(&content_db)?;
@@ -626,8 +626,8 @@ impl GameState {
     /// use antares::sdk::campaign_loader::CampaignLoader;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loader = CampaignLoader::new("campaigns");
-    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let loader = CampaignLoader::new("data");
+    /// let campaign = loader.load_campaign("test_campaign")?;
     /// let (mut state, _db) = GameState::new_game(campaign)?;
     ///
     /// // Recruit character at roster index 0 (if not already in party)
@@ -666,8 +666,8 @@ impl GameState {
     /// use antares::sdk::campaign_loader::CampaignLoader;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loader = CampaignLoader::new("campaigns");
-    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let loader = CampaignLoader::new("data");
+    /// let campaign = loader.load_campaign("test_campaign")?;
     /// let (mut state, _db) = GameState::new_game(campaign)?;
     ///
     /// // Assuming we have multiple party members, dismiss index 0 to inn 'tutorial_innkeeper_town'
@@ -714,8 +714,8 @@ impl GameState {
     /// use antares::sdk::campaign_loader::CampaignLoader;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loader = CampaignLoader::new("campaigns");
-    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let loader = CampaignLoader::new("data");
+    /// let campaign = loader.load_campaign("test_campaign")?;
     /// let (mut state, _db) = GameState::new_game(campaign)?;
     ///
     /// // Swap party member 0 with roster character 3
@@ -774,8 +774,8 @@ impl GameState {
     /// use antares::sdk::campaign_loader::CampaignLoader;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loader = CampaignLoader::new("campaigns");
-    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let loader = CampaignLoader::new("data");
+    /// let campaign = loader.load_campaign("test_campaign")?;
     /// let (state, _db) = GameState::new_game(campaign)?;
     ///
     /// let innkeeper_id = state.find_nearest_inn();
@@ -827,8 +827,8 @@ impl GameState {
     /// use antares::sdk::campaign_loader::CampaignLoader;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loader = CampaignLoader::new("campaigns");
-    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let loader = CampaignLoader::new("data");
+    /// let campaign = loader.load_campaign("test_campaign")?;
     /// let (mut state, content_db) = GameState::new_game(campaign)?;
     ///
     /// // Player encounters "npc_old_gareth" on the map
@@ -1088,9 +1088,9 @@ mod tests {
     #[test]
     fn test_load_campaign_content_success() {
         // Uses the tutorial campaign (existing in repo) to validate loading
-        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("data");
         let campaign = loader
-            .load_campaign("tutorial")
+            .load_campaign("test_campaign")
             .expect("Failed to load tutorial campaign");
 
         // GameState::new_game now returns (GameState, ContentDatabase)
@@ -1117,9 +1117,9 @@ mod tests {
 
     #[test]
     fn test_new_game_returns_content_database() {
-        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("data");
         let campaign = loader
-            .load_campaign("tutorial")
+            .load_campaign("test_campaign")
             .expect("Failed to load tutorial campaign");
 
         let (state, content_db) = GameState::new_game(campaign).expect("new_game failed");
@@ -1265,9 +1265,9 @@ mod tests {
     #[test]
     fn test_recruit_from_map_sends_to_innkeeper() {
         // When party is full, recruiting from map should send character to nearest inn (string ID)
-        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("data");
         let campaign = loader
-            .load_campaign("tutorial")
+            .load_campaign("test_campaign")
             .expect("Failed to load tutorial campaign");
 
         let (mut state, content_db) = GameState::new_game(campaign).expect("new_game failed");
@@ -1307,9 +1307,9 @@ mod tests {
 
     #[test]
     fn test_initialize_roster_loads_all_characters() {
-        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("data");
         let campaign = loader
-            .load_campaign("tutorial")
+            .load_campaign("test_campaign")
             .expect("Failed to load tutorial campaign");
 
         let (state, content_db) = GameState::new_game(campaign).expect("new_game failed");
@@ -1320,9 +1320,9 @@ mod tests {
 
     #[test]
     fn test_initialize_roster_applies_class_modifiers() {
-        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("data");
         let campaign = loader
-            .load_campaign("tutorial")
+            .load_campaign("test_campaign")
             .expect("Failed to load tutorial campaign");
 
         let (state, _content_db) = GameState::new_game(campaign).expect("new_game failed");
@@ -1342,9 +1342,9 @@ mod tests {
 
     #[test]
     fn test_initialize_roster_applies_race_modifiers() {
-        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("data");
         let campaign = loader
-            .load_campaign("tutorial")
+            .load_campaign("test_campaign")
             .expect("Failed to load tutorial campaign");
 
         let (state, _content_db) = GameState::new_game(campaign).expect("new_game failed");
@@ -1361,9 +1361,9 @@ mod tests {
 
     #[test]
     fn test_initialize_roster_sets_initial_hp_sp() {
-        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("data");
         let campaign = loader
-            .load_campaign("tutorial")
+            .load_campaign("test_campaign")
             .expect("Failed to load tutorial campaign");
 
         let (state, _content_db) = GameState::new_game(campaign).expect("new_game failed");

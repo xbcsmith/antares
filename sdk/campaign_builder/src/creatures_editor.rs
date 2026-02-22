@@ -7,7 +7,10 @@ use crate::creature_undo_redo::CreatureUndoRedoManager;
 use crate::creatures_manager::CreaturesManager;
 use crate::creatures_workflow::{CreatureWorkflowState, WorkflowMode};
 use crate::keyboard_shortcuts::ShortcutManager;
+use crate::mesh_validation;
 use crate::preview_features::PreviewState;
+use crate::preview_features::PreviewStatistics;
+use crate::preview_renderer::PreviewRenderer;
 use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
 use antares::domain::types::CreatureId;
 use antares::domain::visual::{
@@ -70,6 +73,10 @@ pub struct CreaturesEditorState {
     pub selected_registry_entry: Option<usize>,
     pub registry_sort_by: RegistrySortBy,
     pub show_validation_panel: bool,
+    pub validation_errors: Vec<String>,
+    pub validation_warnings: Vec<String>,
+    pub validation_info: Vec<String>,
+    pub last_validated_mesh_index: Option<usize>,
     /// Phase 3: Two-step delete confirmation flag for the registry preview panel.
     ///
     /// When `true` the Delete button shows "⚠ Confirm Delete"; a second click
@@ -105,6 +112,8 @@ pub struct CreaturesEditorState {
     pub background_color: [f32; 4],
     pub camera_distance: f32,
     pub uniform_scale: bool,
+    pub show_save_as_dialog: bool,
+    pub save_as_path_buffer: String,
 
     // Phase 5: Workflow Integration & Polish
     /// Unified workflow state (undo/redo, shortcuts, context menus, auto-save, preview).
@@ -117,6 +126,10 @@ pub struct CreaturesEditorState {
     pub context_menu_manager: ContextMenuManager,
     /// Enhanced preview state (camera, lighting, grid, statistics).
     pub preview_state: PreviewState,
+    /// Embedded renderer used by the center preview panel.
+    preview_renderer: Option<PreviewRenderer>,
+    /// Last preview subsystem error shown in fallback UI.
+    preview_error: Option<String>,
 }
 
 /// Primitive type for mesh generation
@@ -153,6 +166,22 @@ enum RegistryPreviewAction {
 
 impl Default for CreaturesEditorState {
     fn default() -> Self {
+        let mut preview_renderer = None;
+        let mut preview_error = None;
+        match std::panic::catch_unwind(PreviewRenderer::new) {
+            Ok(renderer) => {
+                preview_renderer = Some(renderer);
+            }
+            Err(_) => {
+                preview_error = Some(
+                    "Preview renderer initialization failed; falling back to diagnostics UI"
+                        .to_string(),
+                );
+            }
+        }
+
+        let preview_state = PreviewState::new();
+
         Self {
             mode: CreaturesEditorMode::List,
             search_query: String::new(),
@@ -173,6 +202,10 @@ impl Default for CreaturesEditorState {
             selected_registry_entry: None,
             registry_sort_by: RegistrySortBy::Id,
             show_validation_panel: false,
+            validation_errors: Vec::new(),
+            validation_warnings: Vec::new(),
+            validation_info: Vec::new(),
+            last_validated_mesh_index: None,
             show_primitive_dialog: false,
             primitive_type: PrimitiveType::Cube,
             primitive_size: 1.0,
@@ -183,13 +216,15 @@ impl Default for CreaturesEditorState {
             primitive_preserve_transform: true,
             primitive_keep_name: true,
             mesh_visibility: Vec::new(),
-            show_grid: true,
-            show_wireframe: false,
-            show_normals: false,
-            show_axes: true,
-            background_color: [0.2, 0.2, 0.25, 1.0],
+            show_grid: preview_state.options.show_grid,
+            show_wireframe: preview_state.options.show_wireframe,
+            show_normals: preview_state.options.show_normals,
+            show_axes: preview_state.options.show_axes,
+            background_color: preview_state.options.background_color,
             camera_distance: 5.0,
             uniform_scale: true,
+            show_save_as_dialog: false,
+            save_as_path_buffer: String::new(),
 
             registry_delete_confirm_pending: false,
 
@@ -204,7 +239,9 @@ impl Default for CreaturesEditorState {
             undo_redo: CreatureUndoRedoManager::new(),
             shortcut_manager: ShortcutManager::new(),
             context_menu_manager: ContextMenuManager::new(),
-            preview_state: PreviewState::new(),
+            preview_state,
+            preview_renderer,
+            preview_error,
         }
     }
 }
@@ -251,7 +288,7 @@ impl CreaturesEditorState {
                 self.show_registry_mode(ui, creatures, campaign_dir, unsaved_changes)
             }
             CreaturesEditorMode::Add | CreaturesEditorMode::Edit => {
-                self.show_edit_mode(ui, creatures, unsaved_changes)
+                self.show_edit_mode(ui, creatures, campaign_dir, unsaved_changes)
             }
         }
     }
@@ -1129,111 +1166,27 @@ impl CreaturesEditorState {
         (monsters, npcs, templates, variants, custom)
     }
 
+    #[allow(dead_code)]
+    #[deprecated(note = "Legacy list-mode path is retired; use show_registry_mode instead")]
     fn show_list_mode(
         &mut self,
-        ui: &mut egui::Ui,
-        creatures: &mut [CreatureDefinition],
-        unsaved_changes: &mut bool,
+        _ui: &mut egui::Ui,
+        _creatures: &mut [CreatureDefinition],
+        _unsaved_changes: &mut bool,
     ) -> Option<String> {
-        let result_message: Option<String> = None;
-
-        // Toolbar
-        let toolbar_action = EditorToolbar::new("creatures_toolbar")
-            .with_search(&mut self.search_query)
-            .show(ui);
-
-        match toolbar_action {
-            ToolbarAction::New => {
-                self.mode = CreaturesEditorMode::Add;
-                self.edit_buffer = Self::default_creature();
-                self.edit_buffer.id = self.next_available_id(creatures);
-                self.selected_mesh_index = None;
-                self.mesh_edit_buffer = None;
-                self.mesh_transform_buffer = None;
-            }
-            ToolbarAction::Save => {
-                // Save creatures to campaign
-            }
-            ToolbarAction::Load => {
-                // Load creatures from file
-            }
-            ToolbarAction::Import => {
-                // Import creatures from RON text
-            }
-            ToolbarAction::Export => {
-                // Export creatures to file
-            }
-            ToolbarAction::Reload => {
-                // Reload creatures from campaign
-            }
-            ToolbarAction::None => {
-                // No action triggered
-            }
-        }
-
-        // Action buttons for selected creature (separate from toolbar)
-
-        ui.separator();
-
-        // Creature list
-        egui::ScrollArea::vertical()
-            .id_salt("creatures_list_mode_scroll")
-            .show(ui, |ui| {
-                let filtered_creatures: Vec<(usize, &CreatureDefinition)> = creatures
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| {
-                        self.search_query.is_empty()
-                            || c.name
-                                .to_lowercase()
-                                .contains(&self.search_query.to_lowercase())
-                            || c.id.to_string().contains(&self.search_query)
-                    })
-                    .collect();
-
-                if filtered_creatures.is_empty() {
-                    ui.label("No creatures found. Click 'Add' to create one.");
-                } else {
-                    for (idx, creature) in filtered_creatures {
-                        let is_selected = self.selected_creature == Some(idx);
-
-                        let response = ui.selectable_label(
-                            is_selected,
-                            format!(
-                                "{} (ID: {}, {} mesh{})",
-                                creature.name,
-                                creature.id,
-                                creature.meshes.len(),
-                                if creature.meshes.len() == 1 { "" } else { "es" }
-                            ),
-                        );
-
-                        if response.clicked() {
-                            self.selected_creature = Some(idx);
-                        }
-
-                        if response.double_clicked() {
-                            self.mode = CreaturesEditorMode::Edit;
-                            self.edit_buffer = creature.clone();
-                            self.selected_mesh_index = None;
-                            self.mesh_edit_buffer = None;
-                            self.mesh_transform_buffer = None;
-                            self.preview_dirty = true;
-                        }
-                    }
-                }
-            });
-
-        result_message
+        panic!("Deprecated show_list_mode() path should never be called")
     }
 
     fn show_edit_mode(
         &mut self,
         ui: &mut egui::Ui,
         creatures: &mut Vec<CreatureDefinition>,
+        campaign_dir: &Option<PathBuf>,
         unsaved_changes: &mut bool,
     ) -> Option<String> {
         let mut result_message: Option<String> = None;
+
+        self.refresh_validation_state();
 
         // Action buttons
         let action = ActionButtons::new().show(ui);
@@ -1342,7 +1295,9 @@ impl CreaturesEditorState {
             .min_width(300.0)
             .max_width(500.0)
             .show_inside(ui, |ui| {
-                self.show_mesh_properties_panel(ui, unsaved_changes);
+                if let Some(msg) = self.show_mesh_properties_panel(ui, unsaved_changes) {
+                    result_message = Some(msg);
+                }
             });
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -1359,8 +1314,23 @@ impl CreaturesEditorState {
             .resizable(false)
             .min_height(100.0)
             .show_inside(ui, |ui| {
-                self.show_creature_level_properties(ui, unsaved_changes);
+                if let Some(msg) = self.show_creature_level_properties(
+                    ui,
+                    creatures,
+                    campaign_dir,
+                    unsaved_changes,
+                ) {
+                    result_message = Some(msg);
+                }
             });
+
+        if self.show_save_as_dialog {
+            if let Some(msg) =
+                self.show_save_as_dialog_window(ui.ctx(), creatures, campaign_dir, unsaved_changes)
+            {
+                result_message = Some(msg);
+            }
+        }
 
         result_message
     }
@@ -1426,38 +1396,43 @@ impl CreaturesEditorState {
                     ui.label("No meshes. Click 'Add Primitive' to get started.");
                 } else {
                     for (idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            // Visibility checkbox
-                            let mut visible =
-                                self.mesh_visibility.get(idx).copied().unwrap_or(true);
-                            if ui.checkbox(&mut visible, "").changed() {
-                                if idx < self.mesh_visibility.len() {
-                                    self.mesh_visibility[idx] = visible;
+                        ui.push_id(idx, |ui| {
+                            ui.horizontal(|ui| {
+                                // Visibility checkbox
+                                let mut visible =
+                                    self.mesh_visibility.get(idx).copied().unwrap_or(true);
+                                if ui.checkbox(&mut visible, "").changed() {
+                                    if idx < self.mesh_visibility.len() {
+                                        self.mesh_visibility[idx] = visible;
+                                    }
+                                    self.preview_dirty = true;
+                                    ui.ctx().request_repaint();
                                 }
-                                self.preview_dirty = true;
-                            }
 
-                            // Color indicator dot
-                            let color = egui::Color32::from_rgba_premultiplied(
-                                (mesh.color[0] * 255.0) as u8,
-                                (mesh.color[1] * 255.0) as u8,
-                                (mesh.color[2] * 255.0) as u8,
-                                (mesh.color[3] * 255.0) as u8,
-                            );
-                            ui.colored_label(color, "●");
+                                // Color indicator dot
+                                let color = egui::Color32::from_rgba_premultiplied(
+                                    (mesh.color[0] * 255.0) as u8,
+                                    (mesh.color[1] * 255.0) as u8,
+                                    (mesh.color[2] * 255.0) as u8,
+                                    (mesh.color[3] * 255.0) as u8,
+                                );
+                                ui.colored_label(color, "●");
 
-                            // Mesh name and info
-                            let is_selected = self.selected_mesh_index == Some(idx);
-                            let default_name = format!("unnamed_mesh_{}", idx);
-                            let name = mesh.name.as_deref().unwrap_or(&default_name);
-                            let label = format!("{} ({} verts)", name, mesh.vertices.len());
+                                // Mesh name and info
+                                let is_selected = self.selected_mesh_index == Some(idx);
+                                let default_name = format!("unnamed_mesh_{}", idx);
+                                let name = mesh.name.as_deref().unwrap_or(&default_name);
+                                let label = format!("{} ({} verts)", name, mesh.vertices.len());
 
-                            if ui.selectable_label(is_selected, label).clicked() {
-                                self.selected_mesh_index = Some(idx);
-                                self.mesh_edit_buffer = Some(mesh.clone());
-                                self.mesh_transform_buffer =
-                                    Some(self.edit_buffer.mesh_transforms[idx]);
-                            }
+                                if ui.selectable_label(is_selected, label).clicked() {
+                                    self.selected_mesh_index = Some(idx);
+                                    self.mesh_edit_buffer = Some(mesh.clone());
+                                    self.mesh_transform_buffer =
+                                        Some(self.edit_buffer.mesh_transforms[idx]);
+                                    self.preview_dirty = true;
+                                    ui.ctx().request_repaint();
+                                }
+                            });
                         });
                     }
                 }
@@ -1470,39 +1445,99 @@ impl CreaturesEditorState {
 
         // Preview controls overlay
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.show_grid, "Grid");
-            ui.checkbox(&mut self.show_wireframe, "Wireframe");
-            ui.checkbox(&mut self.show_normals, "Normals");
-            ui.checkbox(&mut self.show_axes, "Axes");
+            if ui.checkbox(&mut self.show_grid, "Grid").changed() {
+                self.preview_dirty = true;
+                ui.ctx().request_repaint();
+            }
+            if ui.checkbox(&mut self.show_wireframe, "Wireframe").changed() {
+                self.preview_dirty = true;
+                ui.ctx().request_repaint();
+            }
+            if ui.checkbox(&mut self.show_normals, "Normals").changed() {
+                self.preview_dirty = true;
+                ui.ctx().request_repaint();
+            }
+            if ui.checkbox(&mut self.show_axes, "Axes").changed() {
+                self.preview_dirty = true;
+                ui.ctx().request_repaint();
+            }
 
             if ui.button("🔄 Reset Camera").clicked() {
                 self.camera_distance = 5.0;
+                self.preview_state.reset_camera();
+                self.preview_dirty = true;
+                ui.ctx().request_repaint();
             }
         });
 
         ui.horizontal(|ui| {
             ui.label("Camera Distance:");
-            ui.add(
-                egui::Slider::new(&mut self.camera_distance, 1.0..=10.0)
-                    .text("units")
-                    .show_value(true),
-            );
+            if ui
+                .add(
+                    egui::Slider::new(&mut self.camera_distance, 1.0..=10.0)
+                        .text("units")
+                        .show_value(true),
+                )
+                .changed()
+            {
+                self.preview_dirty = true;
+                ui.ctx().request_repaint();
+            }
 
             ui.label("Background:");
-            ui.color_edit_button_rgba_unmultiplied(&mut self.background_color);
+            if ui
+                .color_edit_button_rgba_unmultiplied(&mut self.background_color)
+                .changed()
+            {
+                self.preview_dirty = true;
+                ui.ctx().request_repaint();
+            }
         });
 
         ui.separator();
 
-        // Preview area placeholder
-        let (rect, _response) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), ui.available_height() - 20.0),
-            egui::Sense::click_and_drag(),
+        if self.preview_dirty {
+            if let Err(error) = self.sync_preview_renderer_from_edit_buffer() {
+                self.preview_error = Some(error);
+            }
+        }
+
+        if let Some(renderer) = self.preview_renderer.as_mut() {
+            renderer.options.resolution = (
+                ui.available_width().max(240.0) as u32,
+                ui.available_height().max(220.0) as u32,
+            );
+
+            let interacted = renderer.show(ui);
+            self.camera_distance = renderer.camera.distance;
+            self.preview_state.camera.position = renderer.camera.position();
+
+            if interacted {
+                self.preview_dirty = true;
+                ui.ctx().request_repaint();
+            }
+        } else {
+            self.show_preview_fallback(ui);
+        }
+
+        if let Some(error) = &self.preview_error {
+            ui.separator();
+            ui.colored_label(
+                egui::Color32::YELLOW,
+                format!("Preview fallback: {}", error),
+            );
+        }
+    }
+
+    fn show_preview_fallback(&mut self, ui: &mut egui::Ui) {
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), ui.available_height().max(220.0)),
+            egui::Sense::hover(),
         );
 
         ui.painter().rect_filled(
             rect,
-            0.0,
+            4.0,
             egui::Color32::from_rgba_premultiplied(
                 (self.background_color[0] * 255.0) as u8,
                 (self.background_color[1] * 255.0) as u8,
@@ -1511,32 +1546,90 @@ impl CreaturesEditorState {
             ),
         );
 
-        // Draw simple placeholder text
-        let center = rect.center();
-        ui.painter().text(
-            center,
-            egui::Align2::CENTER_CENTER,
-            "3D Preview (Bevy integration pending)",
-            egui::FontId::proportional(16.0),
-            egui::Color32::GRAY,
-        );
+        let fallback = if self.preview_error.is_some() {
+            "3D preview renderer unavailable.\nDiagnostics mode is active."
+        } else {
+            "Preparing preview renderer..."
+        };
 
-        // TODO: Integrate actual preview_renderer.rs here
-        // - Left-drag: Rotate camera
-        // - Right-drag: Pan camera
-        // - Scroll: Zoom
-        // - Double-click: Focus on selected mesh
-        // - Highlight selected mesh
-        // - Show mesh coordinate axes when selected
-        // - Display bounding box
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            fallback,
+            egui::FontId::proportional(15.0),
+            egui::Color32::LIGHT_GRAY,
+        );
+    }
+
+    fn sync_preview_renderer_from_edit_buffer(&mut self) -> Result<(), String> {
+        let visible = self.current_mesh_visibility();
+        let preview_creature = self.edit_buffer.clone();
+        let selected_mesh_index = self.selected_mesh_index;
+
+        let renderer = self
+            .preview_renderer
+            .as_mut()
+            .ok_or_else(|| "preview renderer is not available".to_string())?;
+
+        renderer.options.show_grid = self.show_grid;
+        renderer.options.show_wireframe = self.show_wireframe;
+        renderer.options.show_normals = self.show_normals;
+        renderer.options.show_axes = self.show_axes;
+        renderer.options.background_color = self.background_color;
+        renderer.camera.distance = self.camera_distance;
+
+        renderer.set_mesh_visibility(visible.clone());
+        renderer.set_selected_mesh_index(selected_mesh_index);
+        renderer.update_creature(Some(preview_creature));
+
+        self.preview_state.options.show_grid = self.show_grid;
+        self.preview_state.options.show_wireframe = self.show_wireframe;
+        self.preview_state.options.show_normals = self.show_normals;
+        self.preview_state.options.show_axes = self.show_axes;
+        self.preview_state.options.background_color = self.background_color;
+
+        let stats = self.build_preview_statistics(&visible);
+        self.preview_state.update_statistics(stats);
+
+        self.preview_dirty = false;
+        Ok(())
+    }
+
+    fn current_mesh_visibility(&self) -> Vec<bool> {
+        self.edit_buffer
+            .meshes
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| self.mesh_visibility.get(idx).copied().unwrap_or(true))
+            .collect()
+    }
+
+    fn build_preview_statistics(&self, visible: &[bool]) -> PreviewStatistics {
+        let mut stats = PreviewStatistics::new();
+        stats.mesh_count = self.edit_buffer.meshes.len();
+        stats.selected_meshes = usize::from(self.selected_mesh_index.is_some());
+
+        for (idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {
+            if visible.get(idx).copied().unwrap_or(true) {
+                stats.vertex_count += mesh.vertices.len();
+                stats.triangle_count += mesh.indices.len() / 3;
+            }
+        }
+
+        stats
     }
 
     /// Show mesh properties panel (right, 350px) - Phase 2.3
-    fn show_mesh_properties_panel(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
+    fn show_mesh_properties_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        unsaved_changes: &mut bool,
+    ) -> Option<String> {
+        let mut result_message = None;
         if let Some(mesh_idx) = self.selected_mesh_index {
             if mesh_idx >= self.edit_buffer.meshes.len() {
                 ui.label("Invalid mesh selection");
-                return;
+                return Some("Invalid mesh selection".to_string());
             }
 
             ui.heading(format!("Mesh {} Properties", mesh_idx));
@@ -1811,7 +1904,8 @@ impl CreaturesEditorState {
                 }
 
                 if ui.button("🔍 Validate Mesh").clicked() {
-                    // TODO: Implement mesh validation
+                    result_message = Some(self.validate_selected_mesh(mesh_idx));
+                    ui.ctx().request_repaint();
                 }
 
                 if ui.button("↺ Reset Transform").clicked() {
@@ -1824,10 +1918,19 @@ impl CreaturesEditorState {
         } else {
             ui.label("Select a mesh to edit its properties");
         }
+
+        result_message
     }
 
     /// Show creature-level properties (bottom panel) - Phase 2.5
-    fn show_creature_level_properties(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
+    fn show_creature_level_properties(
+        &mut self,
+        ui: &mut egui::Ui,
+        creatures: &mut [CreatureDefinition],
+        campaign_dir: &Option<PathBuf>,
+        unsaved_changes: &mut bool,
+    ) -> Option<String> {
+        let mut result_message = None;
         ui.heading("Creature Properties");
 
         egui::Grid::new("creature_properties_grid")
@@ -1895,17 +1998,41 @@ impl CreaturesEditorState {
         // Validation and file operations
         ui.separator();
         ui.horizontal(|ui| {
-            let error_count = 0; // TODO: Implement validation
-            let warning_count = 0;
+            let error_count = self.validation_errors.len();
+            let warning_count = self.validation_warnings.len();
             ui.label(format!(
                 "{} errors, {} warnings",
                 error_count, warning_count
             ));
 
             if ui.button("Show Issues").clicked() {
-                // TODO: Expand validation panel
+                self.show_validation_panel = !self.show_validation_panel;
+                ui.ctx().request_repaint();
             }
         });
+
+        if self.show_validation_panel {
+            ui.separator();
+            ui.label(egui::RichText::new("Validation Issues").strong());
+            egui::ScrollArea::vertical()
+                .id_salt("creature_validation_issues_scroll")
+                .max_height(120.0)
+                .show(ui, |ui| {
+                    if self.validation_errors.is_empty() && self.validation_warnings.is_empty() {
+                        ui.label(egui::RichText::new("No validation issues.").weak());
+                    } else {
+                        for error in &self.validation_errors {
+                            ui.colored_label(egui::Color32::RED, format!("Error: {}", error));
+                        }
+                        for warning in &self.validation_warnings {
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                format!("Warning: {}", warning),
+                            );
+                        }
+                    }
+                });
+        }
 
         ui.horizontal(|ui| {
             if ui.button("💾 Save Asset").clicked() {
@@ -1913,17 +2040,328 @@ impl CreaturesEditorState {
             }
 
             if ui.button("💾 Save As...").clicked() {
-                // TODO: Implement save as dialog
+                self.show_save_as_dialog = true;
+                if self.save_as_path_buffer.is_empty() {
+                    self.save_as_path_buffer = self.default_save_as_path(campaign_dir);
+                }
+                ui.ctx().request_repaint();
             }
 
             if ui.button("📋 Export RON").clicked() {
-                // TODO: Implement RON export to clipboard
+                match self.export_current_creature_to_ron() {
+                    Ok(ron_text) => {
+                        ui.ctx().copy_text(ron_text);
+                        result_message = Some("Creature exported to clipboard".to_string());
+                    }
+                    Err(error) => {
+                        result_message = Some(error);
+                    }
+                }
             }
 
             if ui.button("↺ Revert Changes").clicked() {
-                // TODO: Implement revert from file
+                match self.revert_edit_buffer_from_registry(creatures) {
+                    Ok(message) => {
+                        result_message = Some(message);
+                    }
+                    Err(error) => {
+                        result_message = Some(error);
+                    }
+                }
             }
         });
+
+        let _ = unsaved_changes;
+        result_message
+    }
+
+    fn refresh_validation_state(&mut self) {
+        self.validation_errors.clear();
+        self.validation_warnings.clear();
+        self.validation_info.clear();
+
+        if let Err(error) = self.edit_buffer.validate() {
+            self.validation_errors.push(error);
+        }
+
+        for (mesh_idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {
+            let report = mesh_validation::validate_mesh(mesh);
+            for error in report.errors {
+                self.validation_errors
+                    .push(format!("Mesh {}: {}", mesh_idx, error));
+            }
+            for warning in report.warnings {
+                self.validation_warnings
+                    .push(format!("Mesh {}: {}", mesh_idx, warning));
+            }
+            for info in report.info {
+                self.validation_info
+                    .push(format!("Mesh {}: {}", mesh_idx, info));
+            }
+        }
+    }
+
+    fn validate_selected_mesh(&mut self, mesh_idx: usize) -> String {
+        if mesh_idx >= self.edit_buffer.meshes.len() {
+            return "Cannot validate mesh: invalid selection".to_string();
+        }
+
+        let report = mesh_validation::validate_mesh(&self.edit_buffer.meshes[mesh_idx]);
+        self.last_validated_mesh_index = Some(mesh_idx);
+        self.validation_errors = report
+            .error_messages()
+            .into_iter()
+            .map(|msg| format!("Mesh {}: {}", mesh_idx, msg))
+            .collect();
+        self.validation_warnings = report
+            .warning_messages()
+            .into_iter()
+            .map(|msg| format!("Mesh {}: {}", mesh_idx, msg))
+            .collect();
+        self.validation_info = report
+            .info_messages()
+            .into_iter()
+            .map(|msg| format!("Mesh {}: {}", mesh_idx, msg))
+            .collect();
+        self.show_validation_panel = true;
+
+        if report.is_valid() {
+            format!(
+                "Mesh {} is valid ({} warning{}).",
+                mesh_idx,
+                self.validation_warnings.len(),
+                if self.validation_warnings.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            )
+        } else {
+            format!(
+                "Mesh {} validation failed: {} error{}, {} warning{}.",
+                mesh_idx,
+                self.validation_errors.len(),
+                if self.validation_errors.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                self.validation_warnings.len(),
+                if self.validation_warnings.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            )
+        }
+    }
+
+    fn export_current_creature_to_ron(&self) -> Result<String, String> {
+        ron::ser::to_string_pretty(&self.edit_buffer, Default::default())
+            .map_err(|error| format!("Failed to export creature: {}", error))
+    }
+
+    fn revert_edit_buffer_from_registry(
+        &mut self,
+        creatures: &[CreatureDefinition],
+    ) -> Result<String, String> {
+        match self.mode {
+            CreaturesEditorMode::Edit => {
+                if let Some(idx) = self.selected_creature {
+                    if let Some(creature) = creatures.get(idx) {
+                        self.edit_buffer = creature.clone();
+                        self.selected_mesh_index = None;
+                        self.mesh_edit_buffer = None;
+                        self.mesh_transform_buffer = None;
+                        self.preview_dirty = true;
+                        self.show_validation_panel = false;
+                        self.refresh_validation_state();
+                        self.workflow.mark_clean();
+                        return Ok(format!("Reverted changes for '{}'", creature.name));
+                    }
+                }
+                Err("Cannot revert: selected creature is no longer available".to_string())
+            }
+            CreaturesEditorMode::Add => {
+                self.edit_buffer = Self::default_creature();
+                self.selected_mesh_index = None;
+                self.mesh_edit_buffer = None;
+                self.mesh_transform_buffer = None;
+                self.preview_dirty = true;
+                self.show_validation_panel = false;
+                self.refresh_validation_state();
+                self.workflow.mark_clean();
+                Ok("Reverted new creature form to defaults".to_string())
+            }
+            CreaturesEditorMode::List => Err("Cannot revert while in registry mode".to_string()),
+        }
+    }
+
+    fn normalize_relative_creature_asset_path(path: &str) -> String {
+        path.replace('\\', "/")
+            .trim()
+            .trim_start_matches('/')
+            .to_string()
+    }
+
+    fn default_save_as_path(&self, campaign_dir: &Option<PathBuf>) -> String {
+        let slug = self.edit_buffer.name.to_lowercase().replace(' ', "_");
+        let default_name = if slug.is_empty() {
+            "new_creature".to_string()
+        } else {
+            slug
+        };
+
+        if campaign_dir.is_some() {
+            format!("assets/creatures/{}.ron", default_name)
+        } else {
+            format!("{}.ron", default_name)
+        }
+    }
+
+    fn perform_save_as_with_path(
+        &mut self,
+        creatures: &mut Vec<CreatureDefinition>,
+        relative_path: &str,
+        campaign_dir: &Option<PathBuf>,
+        unsaved_changes: &mut bool,
+    ) -> Result<String, String> {
+        let mut normalized = Self::normalize_relative_creature_asset_path(relative_path);
+        if normalized.is_empty() {
+            return Err("Save As path cannot be empty".to_string());
+        }
+        if !normalized.ends_with(".ron") {
+            normalized.push_str(".ron");
+        }
+        if !normalized.starts_with("assets/creatures/") {
+            return Err(
+                "Save As path must be under assets/creatures/ and use a .ron filename".to_string(),
+            );
+        }
+
+        let file_name = normalized
+            .split('/')
+            .next_back()
+            .ok_or_else(|| "Invalid Save As path".to_string())?;
+        let stem = file_name
+            .strip_suffix(".ron")
+            .ok_or_else(|| "Save As file must end with .ron".to_string())?;
+        if stem.is_empty() {
+            return Err("Save As filename cannot be empty".to_string());
+        }
+
+        let mut new_creature = self.edit_buffer.clone();
+        new_creature.id = self.next_available_id(creatures);
+        new_creature.name = stem.replace('_', " ");
+
+        self.write_creature_asset_file(campaign_dir, &normalized, &new_creature)?;
+
+        creatures.push(new_creature.clone());
+        let new_idx = creatures.len() - 1;
+        self.selected_creature = Some(new_idx);
+        self.mode = CreaturesEditorMode::Edit;
+        self.edit_buffer = new_creature.clone();
+        self.mesh_edit_buffer = None;
+        self.mesh_transform_buffer = None;
+        self.selected_mesh_index = None;
+        self.preview_dirty = true;
+        self.workflow
+            .enter_asset_editor(&normalized, &new_creature.name);
+        self.workflow.mark_dirty();
+        *unsaved_changes = true;
+
+        Ok(format!(
+            "Saved as new creature '{}' (ID {}) at {}",
+            new_creature.name, new_creature.id, normalized
+        ))
+    }
+
+    fn write_creature_asset_file(
+        &self,
+        campaign_dir: &Option<PathBuf>,
+        relative_path: &str,
+        creature: &CreatureDefinition,
+    ) -> Result<(), String> {
+        let base_dir = campaign_dir
+            .as_ref()
+            .ok_or_else(|| "Save As requires an open campaign directory".to_string())?;
+        let absolute_path = base_dir.join(relative_path);
+
+        if let Some(parent) = absolute_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "Failed to create Save As directory '{}': {}",
+                    parent.display(),
+                    error
+                )
+            })?;
+        }
+
+        let ron_config = ron::ser::PrettyConfig::new()
+            .struct_names(false)
+            .enumerate_arrays(false)
+            .depth_limit(3);
+        let contents = ron::ser::to_string_pretty(creature, ron_config)
+            .map_err(|error| format!("Failed to serialize creature for Save As: {}", error))?;
+
+        std::fs::write(&absolute_path, contents).map_err(|error| {
+            format!(
+                "Failed to write Save As asset '{}': {}",
+                absolute_path.display(),
+                error
+            )
+        })
+    }
+
+    fn show_save_as_dialog_window(
+        &mut self,
+        ctx: &egui::Context,
+        creatures: &mut Vec<CreatureDefinition>,
+        campaign_dir: &Option<PathBuf>,
+        unsaved_changes: &mut bool,
+    ) -> Option<String> {
+        let mut result_message = None;
+        let mut open = self.show_save_as_dialog;
+
+        egui::Window::new("Save Creature As")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label("Enter a relative asset path (example: assets/creatures/goblin.ron)");
+                ui.text_edit_singleline(&mut self.save_as_path_buffer);
+
+                ui.horizontal(|ui| {
+                    if ui.button("Save As").clicked() {
+                        let save_as_path = self.save_as_path_buffer.clone();
+                        match self.perform_save_as_with_path(
+                            creatures,
+                            &save_as_path,
+                            campaign_dir,
+                            unsaved_changes,
+                        ) {
+                            Ok(msg) => {
+                                result_message = Some(msg);
+                                self.show_save_as_dialog = false;
+                                self.save_as_path_buffer.clear();
+                            }
+                            Err(error) => {
+                                result_message = Some(error);
+                            }
+                        }
+                        ui.ctx().request_repaint();
+                    }
+
+                    if ui.button("Cancel").clicked() {
+                        self.show_save_as_dialog = false;
+                        self.save_as_path_buffer.clear();
+                        ui.ctx().request_repaint();
+                    }
+                });
+            });
+
+        self.show_save_as_dialog = self.show_save_as_dialog && open;
+        result_message
     }
 
     /// Show primitive replacement dialog - Phase 2.4
@@ -2409,6 +2847,7 @@ impl CreaturesEditorState {
             self.selected_creature = Some(index);
             self.edit_buffer = creature.clone();
             self.preview_dirty = true;
+            self.preview_error = None;
             self.workflow.enter_asset_editor(file_name, &creature.name);
         }
     }
@@ -2435,7 +2874,14 @@ impl CreaturesEditorState {
         self.mesh_edit_buffer = None;
         self.mesh_transform_buffer = None;
         self.preview_dirty = false;
+        self.preview_error = None;
         self.registry_delete_confirm_pending = false;
+        self.preview_state.statistics = PreviewStatistics::new();
+        if let Some(renderer) = self.preview_renderer.as_mut() {
+            renderer.update_creature(None);
+            renderer.set_selected_mesh_index(None);
+            renderer.set_mesh_visibility(Vec::new());
+        }
         self.workflow.return_to_registry();
     }
 
@@ -2540,6 +2986,28 @@ impl CreaturesEditorState {
         self.shortcut_manager
             .get_shortcut(action)
             .map(|s| s.to_string())
+    }
+
+    #[cfg(test)]
+    fn previewed_creature_for_tests(&self) -> Option<CreatureDefinition> {
+        self.preview_renderer
+            .as_ref()
+            .and_then(PreviewRenderer::get_creature)
+    }
+
+    #[cfg(test)]
+    fn preview_selected_mesh_for_tests(&self) -> Option<usize> {
+        self.preview_renderer
+            .as_ref()
+            .and_then(PreviewRenderer::selected_mesh_index)
+    }
+
+    #[cfg(test)]
+    fn preview_visibility_for_tests(&self) -> Vec<bool> {
+        self.preview_renderer
+            .as_ref()
+            .map(|renderer| renderer.mesh_visibility().to_vec())
+            .unwrap_or_default()
     }
 }
 
@@ -2863,6 +3331,87 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // Findings Remediation Phase 4: Preview integration lifecycle
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_preview_sync_clears_dirty_and_updates_statistics() {
+        let mut state = CreaturesEditorState::new();
+        let mut creature = make_creature(7, "Preview Goblin");
+        creature.meshes = vec![make_mesh("body")];
+        creature.mesh_transforms = vec![MeshTransform::identity()];
+
+        state.edit_buffer = creature;
+        state.mesh_visibility = vec![true];
+        state.selected_mesh_index = Some(0);
+        state.preview_dirty = true;
+
+        let result = state.sync_preview_renderer_from_edit_buffer();
+
+        assert!(result.is_ok());
+        assert!(!state.preview_dirty);
+        assert_eq!(state.preview_state.statistics.mesh_count, 1);
+        assert_eq!(state.preview_state.statistics.vertex_count, 3);
+        assert_eq!(state.preview_state.statistics.triangle_count, 1);
+        assert_eq!(state.preview_state.statistics.selected_meshes, 1);
+        assert_eq!(state.preview_selected_mesh_for_tests(), Some(0));
+    }
+
+    #[test]
+    fn test_preview_sync_reflects_transform_changes() {
+        let mut state = CreaturesEditorState::new();
+        let mut creature = make_creature(8, "Transform Goblin");
+        creature.meshes = vec![make_mesh("body")];
+        creature.mesh_transforms = vec![MeshTransform::identity()];
+
+        state.edit_buffer = creature;
+        state.mesh_visibility = vec![true];
+        state.selected_mesh_index = Some(0);
+
+        state.preview_dirty = true;
+        assert!(state.sync_preview_renderer_from_edit_buffer().is_ok());
+
+        state.edit_buffer.mesh_transforms[0].translation = [1.5, -0.5, 0.25];
+        state.preview_dirty = true;
+        assert!(state.sync_preview_renderer_from_edit_buffer().is_ok());
+
+        let previewed = state
+            .previewed_creature_for_tests()
+            .expect("preview creature should be available");
+        assert_eq!(previewed.mesh_transforms[0].translation, [1.5, -0.5, 0.25]);
+    }
+
+    #[test]
+    fn test_preview_sync_reflects_color_changes_and_visibility() {
+        let mut state = CreaturesEditorState::new();
+        let mut creature = make_creature(9, "Color Goblin");
+        let mut mesh_a = make_mesh("body");
+        let mut mesh_b = make_mesh("eyes");
+        mesh_b.color = [0.0, 1.0, 0.0, 1.0];
+        mesh_a.color = [1.0, 0.0, 0.0, 1.0];
+        creature.meshes = vec![mesh_a, mesh_b];
+        creature.mesh_transforms = vec![MeshTransform::identity(), MeshTransform::identity()];
+
+        state.edit_buffer = creature;
+        state.mesh_visibility = vec![true, false];
+        state.selected_mesh_index = Some(1);
+        state.preview_dirty = true;
+
+        assert!(state.sync_preview_renderer_from_edit_buffer().is_ok());
+        assert_eq!(state.preview_visibility_for_tests(), vec![true, false]);
+
+        state.edit_buffer.meshes[1].color = [0.2, 0.4, 1.0, 0.8];
+        state.preview_dirty = true;
+        assert!(state.sync_preview_renderer_from_edit_buffer().is_ok());
+
+        let previewed = state
+            .previewed_creature_for_tests()
+            .expect("preview creature should be available");
+        assert_eq!(previewed.meshes[1].color, [0.2, 0.4, 1.0, 0.8]);
+        assert_eq!(state.preview_selected_mesh_for_tests(), Some(1));
+    }
+
+    // -----------------------------------------------------------------------
     // Phase 2 regression tests: Fix the Silent Data-Loss Bug in Edit Mode
     // -----------------------------------------------------------------------
 
@@ -2876,6 +3425,245 @@ mod tests {
             scale: 1.0,
             color_tint: None,
         }
+    }
+
+    fn make_mesh(name: &str) -> MeshDefinition {
+        MeshDefinition {
+            name: Some(name.to_string()),
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        }
+    }
+
+    #[test]
+    fn test_validate_selected_mesh_reports_invalid_mesh_errors() {
+        let mut state = CreaturesEditorState::new();
+        state.edit_buffer.meshes = vec![MeshDefinition {
+            name: Some("invalid".to_string()),
+            vertices: vec![],
+            indices: vec![],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        }];
+        state.edit_buffer.mesh_transforms = vec![MeshTransform::identity()];
+
+        let message = state.validate_selected_mesh(0);
+
+        assert!(message.contains("validation failed"));
+        assert!(!state.validation_errors.is_empty());
+        assert!(state.show_validation_panel);
+        assert_eq!(state.last_validated_mesh_index, Some(0));
+    }
+
+    #[test]
+    fn test_export_current_creature_to_ron_contains_name() {
+        let mut state = CreaturesEditorState::new();
+        state.edit_buffer = make_creature(42, "Export Goblin");
+        state.edit_buffer.meshes = vec![make_mesh("body")];
+        state.edit_buffer.mesh_transforms = vec![MeshTransform::identity()];
+
+        let ron = state
+            .export_current_creature_to_ron()
+            .expect("export should succeed");
+
+        assert!(ron.contains("Export Goblin"));
+        assert!(ron.contains("id: 42"));
+    }
+
+    #[test]
+    fn test_revert_edit_buffer_from_registry_restores_original() {
+        let mut state = CreaturesEditorState::new();
+        let mut original = make_creature(1, "Goblin");
+        original.meshes = vec![make_mesh("body")];
+        original.mesh_transforms = vec![MeshTransform::identity()];
+        let creatures = vec![original.clone()];
+
+        state.open_for_editing(&creatures, 0, "assets/creatures/goblin.ron");
+        state.edit_buffer.name = "Modified Goblin".to_string();
+
+        let result = state
+            .revert_edit_buffer_from_registry(&creatures)
+            .expect("revert should succeed");
+
+        assert!(result.contains("Reverted changes"));
+        assert_eq!(state.edit_buffer.name, "Goblin");
+        assert!(state.preview_dirty);
+    }
+
+    #[test]
+    fn test_perform_save_as_with_path_appends_new_creature() {
+        use tempfile::tempdir;
+
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+        let mut unsaved_changes = false;
+        let campaign_root = tempdir().expect("tempdir");
+        let campaign_dir = Some(campaign_root.path().to_path_buf());
+
+        state.edit_buffer = creatures[0].clone();
+        state.selected_creature = Some(0);
+        state.mode = CreaturesEditorMode::Edit;
+
+        let message = state
+            .perform_save_as_with_path(
+                &mut creatures,
+                "assets/creatures/goblin_elite.ron",
+                &campaign_dir,
+                &mut unsaved_changes,
+            )
+            .expect("save as should succeed");
+
+        assert!(message.contains("Saved as new creature"));
+        assert_eq!(creatures.len(), 2);
+        assert_eq!(creatures[1].name, "goblin elite");
+        assert_eq!(creatures[1].id, 2);
+        assert_eq!(state.selected_creature, Some(1));
+        assert!(unsaved_changes);
+
+        let saved_file = campaign_root
+            .path()
+            .join("assets/creatures/goblin_elite.ron");
+        assert!(saved_file.exists(), "save as should write a creature file");
+        let saved_text = std::fs::read_to_string(saved_file).expect("read saved creature");
+        assert!(saved_text.contains("goblin elite"));
+        assert!(saved_text.contains("id: 2"));
+    }
+
+    #[test]
+    fn test_perform_save_as_with_path_requires_campaign_directory() {
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+        let mut unsaved_changes = false;
+
+        state.edit_buffer = creatures[0].clone();
+        state.selected_creature = Some(0);
+        state.mode = CreaturesEditorMode::Edit;
+
+        let result = state.perform_save_as_with_path(
+            &mut creatures,
+            "assets/creatures/goblin_clone.ron",
+            &None,
+            &mut unsaved_changes,
+        );
+
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        assert!(error.contains("requires an open campaign directory"));
+        assert_eq!(
+            creatures.len(),
+            1,
+            "failed save-as must not mutate registry"
+        );
+        assert!(!unsaved_changes, "failed save-as must not set unsaved flag");
+    }
+
+    #[test]
+    fn test_perform_save_as_with_path_rejects_non_creature_asset_paths() {
+        use tempfile::tempdir;
+
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+        let mut unsaved_changes = false;
+        let campaign_root = tempdir().expect("tempdir");
+        let campaign_dir = Some(campaign_root.path().to_path_buf());
+
+        state.edit_buffer = creatures[0].clone();
+        state.selected_creature = Some(0);
+        state.mode = CreaturesEditorMode::Edit;
+
+        let result = state.perform_save_as_with_path(
+            &mut creatures,
+            "data/creatures/invalid_location.ron",
+            &campaign_dir,
+            &mut unsaved_changes,
+        );
+
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        assert!(error.contains("must be under assets/creatures/"));
+        assert_eq!(creatures.len(), 1, "invalid path must not mutate registry");
+        assert!(!unsaved_changes, "invalid path must not set unsaved flag");
+    }
+
+    #[test]
+    fn test_perform_save_as_with_path_reports_directory_creation_failure() {
+        use tempfile::tempdir;
+
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+        let mut unsaved_changes = false;
+        let campaign_root = tempdir().expect("tempdir");
+        let campaign_dir = Some(campaign_root.path().to_path_buf());
+
+        state.edit_buffer = creatures[0].clone();
+        state.selected_creature = Some(0);
+        state.mode = CreaturesEditorMode::Edit;
+
+        // Force create_dir_all(parent) to fail by creating a file where a directory is needed.
+        std::fs::write(campaign_root.path().join("assets"), "not a directory")
+            .expect("create blocking file");
+
+        let result = state.perform_save_as_with_path(
+            &mut creatures,
+            "assets/creatures/goblin_elite.ron",
+            &campaign_dir,
+            &mut unsaved_changes,
+        );
+
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        assert!(error.contains("Failed to create Save As directory"));
+        assert_eq!(creatures.len(), 1, "failed write must not mutate registry");
+        assert!(!unsaved_changes, "failed write must not set unsaved flag");
+    }
+
+    #[test]
+    fn test_revert_edit_buffer_from_registry_errors_in_list_mode() {
+        let mut state = CreaturesEditorState::new();
+        let creatures = vec![make_creature(1, "Goblin")];
+
+        let result = state.revert_edit_buffer_from_registry(&creatures);
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Cannot revert while in registry mode".to_string()
+        );
+    }
+
+    #[test]
+    fn test_revert_edit_buffer_from_registry_errors_when_selection_missing() {
+        let mut state = CreaturesEditorState::new();
+        let creatures = vec![make_creature(1, "Goblin")];
+
+        state.mode = CreaturesEditorMode::Edit;
+        state.selected_creature = Some(3);
+
+        let result = state.revert_edit_buffer_from_registry(&creatures);
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Cannot revert: selected creature is no longer available".to_string()
+        );
+    }
+
+    #[test]
+    fn test_normalize_relative_creature_asset_path_rewrites_backslashes() {
+        let normalized = CreaturesEditorState::normalize_relative_creature_asset_path(
+            "\\assets\\creatures\\ogre.ron",
+        );
+        assert_eq!(normalized, "assets/creatures/ogre.ron");
     }
 
     /// Simulates the fixed double-click path: calls `open_for_editing()` and
@@ -3083,5 +3871,38 @@ mod tests {
         assert_eq!(creatures[2].name, "Goblin (Copy)");
         // next_available_id returns max(1,3)+1 = 4
         assert_eq!(creatures[2].id, 4);
+    }
+
+    #[test]
+    fn test_show_list_mode_dispatch_uses_registry_mode_only() {
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+        let mut unsaved_changes = false;
+        let mut result_message = None;
+
+        let ctx = egui::Context::default();
+        let execution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    result_message = state.show(
+                        ui,
+                        &mut creatures,
+                        &None,
+                        "data/creatures.ron",
+                        &mut unsaved_changes,
+                    );
+                });
+            });
+        }));
+
+        assert!(
+            execution.is_ok(),
+            "List-mode dispatch should not hit deprecated show_list_mode()"
+        );
+        assert!(result_message.is_none());
+        assert!(
+            state.id_manager.is_id_used(1),
+            "show_registry_mode should refresh id manager from runtime registry"
+        );
     }
 }
