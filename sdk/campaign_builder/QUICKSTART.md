@@ -31,8 +31,20 @@ sudo pacman -S libxcb libxkbcommon
 # Navigate to antares root directory
 cd antares/
 
-# Run the prototype (will build automatically)
+# Run the prototype (will build automatically) - Cargo (default)
 cargo run --package campaign_builder --bin campaign-builder
+
+# Run and auto-load the tutorial campaign via CLI flag (Cargo)
+cargo run --package campaign_builder --bin campaign-builder -- --campaign campaigns/tutorial
+
+# Run the built binary (after `cargo build --release`)
+# Binary path (from workspace root): target/release/campaign-builder
+./target/release/campaign-builder --campaign campaigns/tutorial
+
+# Or use the Makefile helper (recommended)
+make sdk
+# The `sdk` target runs:
+# cargo run --package campaign_builder --bin campaign-builder -- --campaign campaigns/tutorial
 ```
 
 That's it! The Campaign Builder UI should launch.

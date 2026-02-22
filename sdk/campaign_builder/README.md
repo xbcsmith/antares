@@ -129,14 +129,22 @@ cargo build --release
 ### Running
 
 ```bash
-# From antares/ root
+# From antares/ root (Cargo)
 cargo run --release --package campaign_builder --bin campaign-builder
 
-# Or from sdk/campaign_builder/
+# From antares/ root - auto-load the tutorial campaign via CLI flag
+cargo run --release --package campaign_builder --bin campaign-builder -- --campaign campaigns/tutorial
+
+# Or from sdk/campaign_builder/ (Cargo, local)
 cargo run --release --package campaign_builder
 
 # Binary location after build:
 # target/release/campaign-builder
+
+# Using the top-level Makefile helper (recommended)
+make sdk
+# The `sdk` Makefile target runs:
+# cargo run --package campaign_builder --bin campaign-builder -- --campaign campaigns/tutorial
 ```
 
 ## Usage Guide

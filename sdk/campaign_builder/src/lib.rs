@@ -147,6 +147,174 @@ pub fn run() -> Result<(), eframe::Error> {
                 app.tool_config = cfg;
             }
 
+            // Auto-load campaign if --campaign <path> provided on CLI.
+            // Behavior:
+            // - If the provided path is a directory, append "campaign.ron" and attempt to load it.
+            // - If the provided path is a file, attempt to load that file directly.
+            // - If the resulting campaign.ron does not exist or is not a file, emit an error and continue.
+            let args: Vec<String> = std::env::args().collect();
+            if let Some(pos) = args.iter().position(|a| a == "--campaign") {
+                if let Some(p) = args.get(pos + 1) {
+                    let provided = PathBuf::from(p);
+
+                    // Determine the actual campaign file to load.
+                    // If the provided path is a directory (or ends with a slash), append campaign.ron.
+                    let mut campaign_file = provided.clone();
+                    if provided.exists() && provided.is_dir() {
+                        campaign_file = provided.join("campaign.ron");
+                        app.logger.info(
+                            category::CAMPAIGN,
+                            &format!("Auto-loading campaign: {}", campaign_file.display()),
+                        );
+                    } else {
+                        // Treat provided value as a file path (even if it doesn't exist yet).
+                        app.logger.info(
+                            category::CAMPAIGN,
+                            &format!("Auto-loading campaign: {}", campaign_file.display()),
+                        );
+                    }
+
+                    // Ensure the campaign file exists and is a regular file before attempting to read it.
+                    if campaign_file.exists() && campaign_file.is_file() {
+                        match app.load_campaign_file(&campaign_file) {
+                            Ok(()) => {
+                                // Set campaign path and directory (parent of campaign.ron)
+                                app.campaign_path = Some(campaign_file.clone());
+                                if let Some(parent) = campaign_file.parent() {
+                                    let parent_buf = parent.to_path_buf();
+                                    app.campaign_dir = Some(parent_buf.clone());
+                                    app.update_file_tree(&parent_buf);
+                                }
+
+                                // Load data files (same sequence as do_open_campaign)
+                                app.logger
+                                    .debug(category::FILE_IO, "Loading data files (auto-load)...");
+                                app.load_items();
+                                app.load_spells();
+                                app.load_proficiencies();
+                                app.load_monsters();
+                                app.load_creatures();
+                                app.load_classes_from_campaign();
+                                app.load_races_from_campaign();
+                                app.load_characters_from_campaign();
+                                app.load_maps();
+                                app.load_conditions();
+
+                                if let Err(e) = app.load_quests() {
+                                    app.logger.warn(
+                                        category::FILE_IO,
+                                        &format!("Failed to load quests: {}", e),
+                                    );
+                                }
+
+                                if let Err(e) = app.load_dialogues() {
+                                    app.logger.warn(
+                                        category::FILE_IO,
+                                        &format!("Failed to load dialogues: {}", e),
+                                    );
+                                }
+
+                                if let Err(e) = app.load_npcs() {
+                                    app.logger.warn(
+                                        category::FILE_IO,
+                                        &format!("Failed to load NPCs: {}", e),
+                                    );
+                                }
+
+                                // Initialize AssetManager if we have a campaign directory
+                                if let Some(ref campaign_dir) = app.campaign_dir {
+                                    let mut manager =
+                                        asset_manager::AssetManager::new(campaign_dir.clone());
+                                    if let Err(e) = manager.scan_directory() {
+                                        app.logger.warn(
+                                            category::FILE_IO,
+                                            &format!("Failed to scan assets: {}", e),
+                                        );
+                                    } else {
+                                        let map_file_paths = app.discover_map_files();
+                                        manager.init_data_files(
+                                            &app.campaign.items_file,
+                                            &app.campaign.spells_file,
+                                            &app.campaign.conditions_file,
+                                            &app.campaign.monsters_file,
+                                            &map_file_paths,
+                                            &app.campaign.quests_file,
+                                            &app.campaign.classes_file,
+                                            &app.campaign.races_file,
+                                            &app.campaign.characters_file,
+                                            &app.campaign.dialogue_file,
+                                            &app.campaign.npcs_file,
+                                            &app.campaign.proficiencies_file,
+                                        );
+
+                                        manager.scan_references(
+                                            &app.items,
+                                            &app.quests,
+                                            &app.dialogues,
+                                            &app.maps,
+                                            &app.classes_editor_state.classes,
+                                            &app.characters_editor_state.characters,
+                                            &app.npc_editor_state.npcs,
+                                        );
+                                        manager.mark_data_files_as_referenced();
+
+                                        app.status_message =
+                                            format!("Scanned {} assets", manager.asset_count());
+                                        app.asset_manager = Some(manager);
+
+                                        // Auto-load races after asset manager initializes (keeps UI consistent)
+                                        if app.campaign_dir.is_some() {
+                                            app.load_races_from_campaign();
+                                        }
+                                    }
+                                }
+
+                                app.unsaved_changes = false;
+                                app.logger.info(
+                                    category::FILE_IO,
+                                    &format!("Campaign auto-loaded: {}", app.campaign.name),
+                                );
+                                app.status_message =
+                                    format!("Opened campaign from: {}", campaign_file.display());
+
+                                // Synchronize campaign editor state with the loaded campaign
+                                app.campaign_editor_state.metadata = app.campaign.clone();
+                                app.campaign_editor_state.buffer =
+                                    campaign_editor::CampaignMetadataEditBuffer::from_metadata(
+                                        &app.campaign_editor_state.metadata,
+                                    );
+                                app.campaign_editor_state.has_unsaved_changes = false;
+                                app.campaign_editor_state.mode =
+                                    campaign_editor::CampaignEditorMode::List;
+                            }
+                            Err(e) => {
+                                app.logger.error(
+                                    category::FILE_IO,
+                                    &format!("Failed to auto-load campaign: {}", e),
+                                );
+                                app.status_message = format!("Failed to auto-load campaign: {}", e);
+                            }
+                        }
+                    } else {
+                        // campaign.ron missing or not a file at the resolved location — report error.
+                        app.logger.error(
+                            category::FILE_IO,
+                            &format!(
+                                "campaign.ron not found at expected path: {}",
+                                campaign_file.display()
+                            ),
+                        );
+                        app.status_message =
+                            format!("campaign.ron not found: {}", campaign_file.display());
+                    }
+                } else {
+                    app.logger.warn(
+                        category::FILE_IO,
+                        "--campaign flag provided but no path given",
+                    );
+                }
+            }
+
             app.logger.info(category::APP, "Application initialized");
             Ok(Box::new(app))
         }),
