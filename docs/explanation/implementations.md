@@ -37,6 +37,135 @@
 
 ## Runtime + SDK Fix: Creature Registry Many-to-One Asset Mapping
 
+## Grass Rendering Fix: Direction-Dependent Visual Artifact
+
+### Overview
+
+Fixed a grass rendering artifact where grass looked acceptable from one view
+direction but degraded from the opposite direction.
+
+### Root Cause
+
+Grass blades were spawned with the `Billboard` component, forcing every blade
+to face the camera each frame. That camera-facing behavior conflicts with
+procedural blade orientation/tilt and can create direction-dependent artifacts.
+
+### Changes
+
+- Updated `src/game/systems/advanced_grass.rs`:
+  - Removed `Billboard` from spawned grass blade entities in
+    `spawn_grass_cluster(...)`.
+  - Removed now-unused `Billboard` import.
+
+### Validation
+
+- `cargo fmt --all`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo nextest run --all-features game::systems::advanced_grass::tests::`
+
+All checks passed.
+
+## Grass Rendering Follow-Up: Disable Implicit Chunk Mesh Override
+
+### Overview
+
+Follow-up fix after field verification reported grass still looked wrong when
+viewing from opposite directions.
+
+### Root Cause
+
+`build_grass_chunks_system` was always active even when no
+`GrassChunkConfig` resource was configured. This meant simplified chunk meshes
+were generated implicitly and could visually override/blend with per-blade
+grass, producing directional artifacts.
+
+### Changes
+
+- Updated `src/game/systems/advanced_grass.rs`:
+  - `build_grass_chunks_system(...)` now returns early unless
+    `GrassChunkConfig` is explicitly provided.
+  - Chunking is now truly opt-in instead of implicitly enabled.
+
+### Validation
+
+- `cargo fmt --all`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo nextest run --all-features game::systems::advanced_grass::tests::`
+
+All checks passed.
+
+## Grass Performance + Visibility Tuning
+
+### Overview
+
+Addressed reported input latency (camera response taking seconds) and overly
+strong grass shadows darkening first-person view.
+
+### Changes
+
+- Updated `src/game/systems/advanced_grass.rs`:
+  - Lowered default grass render distances:
+    - `GrassRenderConfig::default().cull_distance`: `50.0 -> 30.0`
+    - `GrassRenderConfig::default().lod_distance`: `25.0 -> 15.0`
+  - Disabled shadow participation for grass blades:
+    - Added `bevy::light::NotShadowCaster`
+    - Added `bevy::light::NotShadowReceiver`
+  - Disabled shadow participation for merged grass chunk meshes:
+    - Added `bevy::light::NotShadowCaster`
+    - Added `bevy::light::NotShadowReceiver`
+  - Updated test expectations for new `GrassRenderConfig` defaults.
+
+### Expected Runtime Impact
+
+- Less GPU work for grass in shadow passes and shorter grass draw distance,
+  improving camera/input responsiveness in dense outdoor areas.
+- Grass no longer creates heavy dark shadow bands that obscure the scene.
+
+### Validation
+
+- `cargo fmt --all`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo nextest run --all-features game::systems::advanced_grass::tests::`
+
+All checks passed.
+
+## Tree Shadow Follow-Up: First-Person Occlusion Reduction
+
+### Overview
+
+Applied the same shadow mitigation strategy used for grass to trees after
+reports that tree shadows were still excessively dark and hurt visibility.
+
+### Changes
+
+- Updated `src/game/systems/procedural_meshes.rs`:
+  - Tree trunk/branch mesh child spawned by `spawn_tree(...)` now includes:
+    - `bevy::light::NotShadowCaster`
+    - `bevy::light::NotShadowReceiver`
+  - Tree foliage spheres spawned by `spawn_foliage_clusters(...)` now include:
+    - `bevy::light::NotShadowCaster`
+    - `bevy::light::NotShadowReceiver`
+  - Shrub meshes spawned by `spawn_shrub(...)` now include:
+    - `bevy::light::NotShadowCaster`
+    - `bevy::light::NotShadowReceiver`
+
+### Expected Impact
+
+- Removes severe tree-driven shadow darkening in first-person view.
+- Reduces shadow rendering cost for dense forest scenes.
+
+### Validation
+
+- `cargo fmt --all`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- Focused nextest sanity checks for map + vegetation spawn paths
+
+All checks passed.
+
 ## Map Rendering Fix: Encounter Monster Mesh Markers
 
 ### Overview
