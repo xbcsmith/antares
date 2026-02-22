@@ -334,7 +334,7 @@ impl CreatureDatabase {
     /// use antares::domain::visual::creature_database::CreatureDatabase;
     /// use std::path::Path;
     ///
-    /// let campaign_root = Path::new("campaigns/tutorial");
+    /// let campaign_root = Path::new("data/test_campaign");
     /// let registry_path = campaign_root.join("data/creatures.ron");
     ///
     /// let db = CreatureDatabase::load_from_registry(&registry_path, campaign_root)
@@ -371,23 +371,18 @@ impl CreatureDatabase {
                 ))
             })?;
 
-            let creature: CreatureDefinition = ron::from_str(&creature_contents).map_err(|e| {
-                CreatureDatabaseError::ParseError(format!(
-                    "Failed to parse creature file '{}': {}",
-                    reference.filepath, e
-                ))
-            })?;
+            let mut creature: CreatureDefinition =
+                ron::from_str(&creature_contents).map_err(|e| {
+                    CreatureDatabaseError::ParseError(format!(
+                        "Failed to parse creature file '{}': {}",
+                        reference.filepath, e
+                    ))
+                })?;
 
-            // Verify that creature ID matches reference ID
-            if creature.id != reference.id {
-                return Err(CreatureDatabaseError::ValidationError(
-                    reference.id,
-                    format!(
-                        "Creature ID mismatch: registry has ID {}, but file '{}' contains ID {}",
-                        reference.id, reference.filepath, creature.id
-                    ),
-                ));
-            }
+            // Registry metadata is authoritative in registry-driven loads.
+            // This allows many registry entries to share a single mesh asset file.
+            creature.id = reference.id;
+            creature.name = reference.name.clone();
 
             // Add to database (this validates and checks for duplicates)
             database.add_creature(creature)?;
@@ -865,7 +860,7 @@ mod tests {
     #[test]
     fn test_load_from_registry() {
         // Load the tutorial campaign creature registry
-        let campaign_root = Path::new("campaigns/tutorial");
+        let campaign_root = Path::new("data/test_campaign");
         let registry_path = campaign_root.join("data/creatures.ron");
 
         // Skip test if campaign files don't exist (e.g., in CI without assets)
@@ -944,7 +939,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_from_registry_id_mismatch() {
+    fn test_load_from_registry_registry_id_overrides_asset_id() {
         use tempfile::TempDir;
 
         // Create temporary directory structure
@@ -983,7 +978,7 @@ mod tests {
         let registry_content = r#"[
     CreatureReference(
         id: 999,
-        name: "TestCreature",
+        name: "AliasName",
         filepath: "assets/creatures/test.ron",
     ),
 ]"#;
@@ -991,12 +986,76 @@ mod tests {
         let registry_path = data_dir.join("creatures.ron");
         std::fs::write(&registry_path, registry_content).unwrap();
 
-        // Should fail due to ID mismatch
+        // Should succeed and normalize to registry metadata
         let result = CreatureDatabase::load_from_registry(&registry_path, campaign_root);
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            CreatureDatabaseError::ValidationError(999, _)
-        ));
+        assert!(result.is_ok());
+
+        let db = result.unwrap();
+        let creature = db.get_creature(999).expect("Creature 999 should be loaded");
+        assert_eq!(creature.id, 999);
+        assert_eq!(creature.name, "AliasName");
+    }
+
+    #[test]
+    fn test_load_from_registry_multiple_ids_can_share_one_asset_file() {
+        use tempfile::TempDir;
+
+        // Create temporary directory structure
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_root = temp_dir.path();
+        let data_dir = campaign_root.join("data");
+        let assets_dir = campaign_root.join("assets/creatures");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::create_dir_all(&assets_dir).unwrap();
+
+        // Shared creature asset file
+        let creature_content = r#"CreatureDefinition(
+    id: 12,
+    name: "Wolf",
+    meshes: [
+        MeshDefinition(
+            vertices: [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.0)],
+            indices: [0, 1, 2],
+            color: (1.0, 1.0, 1.0, 1.0),
+        ),
+    ],
+    mesh_transforms: [
+        MeshTransform(
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+    ],
+    scale: 1.0,
+)"#;
+
+        let creature_path = assets_dir.join("wolf.ron");
+        std::fs::write(&creature_path, creature_content).unwrap();
+
+        // Two IDs map to the same asset file
+        let registry_content = r#"[
+    CreatureReference(
+        id: 4,
+        name: "DireWolf",
+        filepath: "assets/creatures/wolf.ron",
+    ),
+    CreatureReference(
+        id: 12,
+        name: "Wolf",
+        filepath: "assets/creatures/wolf.ron",
+    ),
+]"#;
+
+        let registry_path = data_dir.join("creatures.ron");
+        std::fs::write(&registry_path, registry_content).unwrap();
+
+        let db = CreatureDatabase::load_from_registry(&registry_path, campaign_root)
+            .expect("Registry should support many-to-one asset mapping");
+
+        assert!(db.has_creature(4));
+        assert!(db.has_creature(12));
+        assert_eq!(db.count(), 2);
+        assert_eq!(db.get_creature(4).unwrap().name, "DireWolf");
+        assert_eq!(db.get_creature(12).unwrap().name, "Wolf");
     }
 }

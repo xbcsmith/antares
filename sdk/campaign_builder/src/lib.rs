@@ -2007,20 +2007,13 @@ impl CampaignBuilderApp {
                                             >(
                                                 &creature_contents
                                             ) {
-                                                Ok(creature) => {
-                                                    // Validate ID match
-                                                    if creature.id != reference.id {
-                                                        load_errors.push(
-                                                            format!(
-                                                                "ID mismatch for {}: registry={}, file={}",
-                                                                reference.filepath,
-                                                                reference.id,
-                                                                creature.id
-                                                            )
-                                                        );
-                                                    } else {
-                                                        creatures.push(creature);
-                                                    }
+                                                Ok(mut creature) => {
+                                                    // Registry metadata is authoritative in
+                                                    // registry-driven loads so one asset file can
+                                                    // back multiple creature IDs.
+                                                    creature.id = reference.id;
+                                                    creature.name = reference.name.clone();
+                                                    creatures.push(creature);
                                                 }
                                                 Err(e) => {
                                                     load_errors.push(format!(

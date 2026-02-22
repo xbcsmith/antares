@@ -194,15 +194,12 @@ impl CreatureAssetManager {
             ))
         })?;
 
-        let creature = ron::from_str::<CreatureDefinition>(&content)
+        let mut creature = ron::from_str::<CreatureDefinition>(&content)
             .map_err(|e| CreatureAssetError::DeserializationError(e.to_string()))?;
 
-        if creature.id != reference.id {
-            return Err(CreatureAssetError::DeserializationError(format!(
-                "Creature ID mismatch in {}: registry={}, file={}",
-                reference.filepath, reference.id, creature.id
-            )));
-        }
+        // Registry metadata is authoritative for reference-backed loads.
+        creature.id = reference.id;
+        creature.name = reference.name.clone();
 
         Ok(creature)
     }
@@ -558,5 +555,54 @@ mod tests {
         assert!(manager.has_creature(11).unwrap());
         assert!(!manager.has_creature(4).unwrap());
         assert_eq!(manager.next_creature_id().unwrap(), 12);
+    }
+
+    #[test]
+    fn test_load_all_creatures_supports_shared_asset_filepath_aliasing() {
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_dir = temp_dir.path();
+        let manager = CreatureAssetManager::new(campaign_dir.to_path_buf());
+
+        fs::create_dir_all(campaign_dir.join("data")).unwrap();
+        fs::create_dir_all(campaign_dir.join("assets/creatures")).unwrap();
+
+        let shared_creature = create_test_creature(12, "Wolf");
+        let shared_content =
+            ron::ser::to_string_pretty(&shared_creature, ron::ser::PrettyConfig::new()).unwrap();
+        fs::write(
+            campaign_dir.join("assets/creatures/wolf.ron"),
+            shared_content,
+        )
+        .unwrap();
+
+        let references = vec![
+            CreatureReference {
+                id: 4,
+                name: "DireWolf".to_string(),
+                filepath: "assets/creatures/wolf.ron".to_string(),
+            },
+            CreatureReference {
+                id: 5,
+                name: "DireWolfLeader".to_string(),
+                filepath: "assets/creatures/wolf.ron".to_string(),
+            },
+            CreatureReference {
+                id: 12,
+                name: "Wolf".to_string(),
+                filepath: "assets/creatures/wolf.ron".to_string(),
+            },
+        ];
+
+        let registry_content =
+            ron::ser::to_string_pretty(&references, ron::ser::PrettyConfig::new()).unwrap();
+        fs::write(campaign_dir.join("data/creatures.ron"), registry_content).unwrap();
+
+        let creatures = manager.load_all_creatures().unwrap();
+        assert_eq!(creatures.len(), 3);
+        assert!(creatures.iter().any(|c| c.id == 4 && c.name == "DireWolf"));
+        assert!(creatures
+            .iter()
+            .any(|c| c.id == 5 && c.name == "DireWolfLeader"));
+        assert!(creatures.iter().any(|c| c.id == 12 && c.name == "Wolf"));
     }
 }

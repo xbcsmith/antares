@@ -8026,18 +8026,6 @@
             ],
         ),
         (
-            x: 19,
-            y: 15,
-        ): Teleport(
-            name: "Mountain Pass Portal",
-            description: "Portal to the Mountain Pass",
-            destination: (
-                x: 19,
-                y: 11,
-            ),
-            map_id: 5,
-        ),
-        (
             x: 13,
             y: 17,
         ): Encounter(
@@ -8052,18 +8040,16 @@
             ],
         ),
         (
-            x: 1,
-            y: 3,
-        ): Encounter(
-            name: "The Undead King",
-            description: "The Lich was once a powerful Wizard King who ruled these lands.",
-            monster_group: [
-                31,
-                11,
-                11,
-                11,
-                11,
-            ],
+            x: 19,
+            y: 15,
+        ): Teleport(
+            name: "Mountain Pass Portal",
+            description: "Portal to the Mountain Pass",
+            destination: (
+                x: 19,
+                y: 11,
+            ),
+            map_id: 5,
         ),
         (
             x: 14,
@@ -8074,6 +8060,22 @@
             monster_group: [
                 11,
                 11,
+                11,
+                11,
+                11,
+                11,
+                133,
+                34,
+            ],
+        ),
+        (
+            x: 1,
+            y: 3,
+        ): Encounter(
+            name: "The Undead King",
+            description: "The Lich was once a powerful Wizard King who ruled these lands.",
+            monster_group: [
+                31,
                 11,
                 11,
                 11,

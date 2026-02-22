@@ -35,6 +35,137 @@
 
 ---
 
+## Runtime + SDK Fix: Creature Registry Many-to-One Asset Mapping
+
+## Map Rendering Fix: Encounter Monster Mesh Markers
+
+### Overview
+
+Fixed a map rendering gap where `MapEvent::Encounter` tiles had logic triggers
+but no in-world visual mesh markers, causing encounter locations to appear
+empty in game view.
+
+### Components Updated
+
+- `src/game/systems/map.rs`
+
+### Key Changes
+
+- Added `resolve_encounter_creature_id(monster_group, content)` helper to map
+  encounter monster groups to a creature visual id using the first monster with
+  a configured `visual_id`.
+- Updated `spawn_map(...)` event visual pass to spawn a creature mesh for
+  `MapEvent::Encounter` at the encounter tile center.
+- Tagged spawned encounter visuals with `CreatureVisual`, `MapEntity`, and
+  `TileCoord` for consistent lifecycle and map cleanup behavior.
+- Added warnings for encounter events that cannot resolve a creature visual.
+
+### Testing
+
+- Added tests in `src/game/systems/map.rs`:
+  - `test_resolve_encounter_creature_id_returns_first_visual_match`
+  - `test_resolve_encounter_creature_id_skips_monsters_without_visuals`
+- Validation completed:
+  - `cargo fmt --all`
+  - `cargo check --all-targets --all-features`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - `cargo nextest run --all-features test_resolve_encounter_creature_id`
+
+## Test Stability Update: Decouple Tests From `campaigns/tutorial`
+
+### Overview
+
+Refactored campaign-coupled tests to use a stable immutable fixture campaign at
+`data/test_campaign` so test behavior no longer depends on mutable
+`campaigns/tutorial` content.
+
+### Components Updated
+
+- `data/test_campaign/` (new fixture campaign snapshot)
+- `tests/campaign_integration_tests.rs`
+- `tests/tutorial_campaign_loading_integration.rs`
+- `tests/tutorial_campaign_visual_metadata_test.rs`
+- `tests/tutorial_npc_creature_mapping.rs`
+- `tests/tutorial_monster_creature_mapping.rs`
+- `tests/game_config_integration.rs`
+- `tests/database_integration_test.rs`
+- `src/application/mod.rs` (`#[cfg(test)]` usage)
+- `src/sdk/campaign_loader.rs` (`#[cfg(test)]` usage)
+- `src/domain/character_definition.rs` (`#[cfg(test)]` usage)
+- `src/domain/combat/database.rs` (`#[cfg(test)]` usage)
+- `src/domain/visual/creature_database.rs` (`#[cfg(test)]` usage)
+- `src/domain/campaign_loader.rs` (`#[cfg(test)]` usage)
+- `src/sdk/database.rs` (`#[cfg(test)]` usage)
+- `src/game/resources/sprite_assets.rs` (`#[cfg(test)]` usage)
+
+### Key Changes
+
+- Added fixture campaign under `data/test_campaign` with campaign metadata,
+  campaign data, and required creature assets.
+- Replaced direct `campaigns/tutorial` test references with `data/test_campaign`.
+- Updated loader-based tests to use `CampaignLoader::new("data")` with campaign
+  id `"test_campaign"`.
+- Removed brittle hard-coded creature count assertion in campaign integration
+  test and replaced with fixture-safe threshold assertion.
+- Fixed pre-existing compile/lint/test issues encountered during validation in:
+  - `tests/tutorial_monster_creature_mapping.rs`
+  - `tests/creatures_editor_integration_tests.rs`
+
+### Validation
+
+- `cargo fmt --all` passed
+- `cargo check --all-targets --all-features` passed
+- `cargo clippy --all-targets --all-features -- -D warnings` passed
+- `cargo nextest run --all-features` passed (`2408 passed, 8 skipped`)
+
+### Overview
+
+Enabled creature registry aliasing so multiple registry IDs can point at a
+single creature asset file (for mesh reuse). Registry metadata is now
+authoritative for registry-driven loads, which allows entries like
+`DireWolf`, `DireWolfLeader`, and `Wolf` to share `assets/creatures/wolf.ron`
+without load-time ID mismatch failures.
+
+### Components Updated
+
+- `src/domain/visual/mod.rs`
+- `src/domain/visual/creature_database.rs`
+- `sdk/campaign_builder/src/lib.rs`
+- `sdk/campaign_builder/src/creature_assets.rs`
+- `tests/tutorial_monster_creature_mapping.rs`
+
+### Key Changes
+
+- Updated `CreatureReference` docs to state registry ID authority for
+  registry-driven loads.
+- Changed `CreatureDatabase::load_from_registry` to normalize loaded
+  `CreatureDefinition` identity from registry metadata:
+  - `creature.id = reference.id`
+  - `creature.name = reference.name`
+- Removed hard-fail behavior for asset-file ID mismatches in registry loads.
+- Aligned Campaign Builder `load_creatures()` behavior with runtime loader:
+  ID mismatches no longer count as load errors in registry-driven paths.
+- Aligned `CreatureAssetManager::read_creature_asset()` with the same
+  registry-authoritative normalization semantics.
+
+### Tests Added/Updated
+
+- `src/domain/visual/creature_database.rs`:
+  - `test_load_from_registry_registry_id_overrides_asset_id`
+  - `test_load_from_registry_multiple_ids_can_share_one_asset_file`
+- `sdk/campaign_builder/src/creature_assets.rs`:
+  - `test_load_all_creatures_supports_shared_asset_filepath_aliasing`
+- `tests/tutorial_monster_creature_mapping.rs`:
+  - `test_shared_wolf_asset_aliases_load_with_registry_identity`
+
+### Outcome
+
+Campaign creature registries now support intentional many-to-one mesh reuse
+without startup panics, while keeping runtime and SDK/builder loader behavior
+consistent.
+
+---
+
 ## Findings Remediation - Phase 4: Creature Preview Renderer Integration
 
 ### Overview
@@ -94,6 +225,154 @@ UI for renderer-unavailable scenarios.
 Creature preview now renders through the integrated preview subsystem, reflects
 mesh edits and selection updates without mode switching, and degrades safely to
 diagnostic fallback UI if renderer initialization is unavailable.
+
+---
+
+## Runtime Fix: Tutorial NPC Creature Rendering
+
+### Overview
+
+Fixed a runtime data-flow gap where tutorial NPC `creature_id` values were loaded
+from `npcs.ron` but dropped before rendering. This prevented NPC creature meshes
+from appearing in the game engine even when campaign creature assets were valid.
+
+### Components Updated
+
+- `src/domain/world/types.rs`
+- `src/game/systems/map.rs`
+
+### Key Changes
+
+- Extended `ResolvedNpc` to carry `creature_id: Option<CreatureId>`.
+- Updated `ResolvedNpc::from_placement_and_definition()` to propagate
+  `NpcDefinition.creature_id` into resolved map runtime data.
+- Updated map NPC spawning path to prefer procedural creature mesh spawning when
+  `creature_id` is present and resolvable in `ContentDatabase.creatures`.
+- Added safe fallback to sprite rendering (with warning log) when an NPC has an
+  invalid/missing creature reference.
+
+### Tests Added
+
+- `src/domain/world/types.rs`:
+  - `test_resolved_npc_from_placement_copies_creature_id_when_present`
+- `src/game/systems/map.rs`:
+  - `test_spawn_map_uses_npc_creature_id_when_available`
+
+### Outcome
+
+Tutorial campaign NPCs with valid `creature_id` now render as creature meshes
+in-engine, while NPCs without creature visuals continue to use sprite fallback.
+
+---
+
+## Runtime Fix: Tutorial Recruitable Character Rendering
+
+### Overview
+
+Fixed missing recruitable-character visuals on map load. `MapEvent::RecruitableCharacter`
+entries were creating logical triggers but no rendered entities, so recruitables
+in tutorial map 1 (and other maps) appeared invisible.
+
+### Components Updated
+
+- `src/game/systems/map.rs`
+
+### Key Changes
+
+- Added recruitable visual spawn path during map event processing.
+- Added recruitable creature-id resolver with fallback order:
+  - Use NPC definition `creature_id` when `character_id` matches an NPC ID.
+  - Strip `npc_` prefix and resolve to character definition.
+  - Match character display name to creature definition name using normalized keys.
+- Recruitables now prefer procedural creature mesh spawn when creature mapping
+  resolves and creature definition exists.
+- Added sprite fallback (with warning logs) when mapping or creature asset is missing.
+- Tagged recruitable visuals with `NpcMarker` + `TileCoord` for dialogue-speaker
+  resolution consistency at interaction time.
+
+### Tests Added
+
+- `src/game/systems/map.rs`:
+  - `test_spawn_map_uses_recruitable_character_creature_visual`
+
+### Outcome
+
+Recruitable characters now render in-map with creature meshes when campaign data
+provides a resolvable mapping, and degrade gracefully to sprite visuals otherwise.
+
+---
+
+## Runtime Fix: Default Recruit Trigger Event Resolution
+
+### Overview
+
+Fixed a recruitment execution gap for default recruit dialogues that emit
+`TriggerEvent("recruit_character_to_party")` instead of direct
+`RecruitToParty` actions. Recruitable map context often carries NPC-prefixed IDs
+(for example, `npc_old_gareth`) while character definitions are keyed by
+canonical IDs (for example, `old_gareth`).
+
+### Components Updated
+
+- `src/game/systems/dialogue.rs`
+
+### Key Changes
+
+- Added recruitment-context ID resolver that normalizes `npc_`-prefixed IDs to
+  character-definition IDs when available.
+- Added TriggerEvent handling for `recruit_character_to_party` to execute the
+  same core recruitment path used by `RecruitToParty`.
+- Refactored party-recruitment execution into a shared helper so both action
+  paths apply identical success/error handling and map-event cleanup behavior.
+
+### Tests Added
+
+- `src/game/systems/dialogue.rs`:
+  - `test_trigger_event_recruit_character_to_party_resolves_npc_prefixed_context`
+  - `test_trigger_event_recruit_character_to_party_with_unresolvable_context_noops`
+
+### Outcome
+
+Default recruit dialogues now correctly add characters like Old Gareth to the
+party (or inn when full) instead of only logging the trigger event.
+
+---
+
+## Runtime Fix: Recruitable Post-Recruit Cleanup
+
+### Overview
+
+Fixed two post-recruitment cleanup gaps:
+
+- Recruitable dialogue could remain active after successful recruitment.
+- Recruitable mesh/sprite visuals remained visible after the recruitable event
+  was removed from map state.
+
+### Components Updated
+
+- `src/game/systems/dialogue.rs`
+- `src/game/systems/map.rs`
+
+### Key Changes
+
+- Dialogue flow now exits to exploration immediately after successful
+  `RecruitToParty` outcomes (`AddedToParty` and `SentToInn`).
+- Choice-processing now short-circuits if an action changes mode away from
+  `GameMode::Dialogue`, preventing stale node advancement after recruitment.
+- Added `RecruitableVisualMarker` component for visuals spawned from
+  `MapEvent::RecruitableCharacter`.
+- Added `cleanup_recruitable_visuals` map system that despawns recruitable
+  visuals when no matching recruitable event remains at that tile.
+
+### Tests Added
+
+- `src/game/systems/map.rs`:
+  - `test_recruitable_visual_despawns_after_event_removed`
+
+### Outcome
+
+After recruitment succeeds, dialogue UI closes cleanly and the recruited
+character's in-world visual is removed alongside its map event.
 
 ---
 

@@ -21,7 +21,7 @@ use std::path::PathBuf;
 #[test]
 fn test_campaign_loader_loads_tutorial_creatures() {
     let base_path = PathBuf::from("data");
-    let campaign_path = PathBuf::from("campaigns/tutorial");
+    let campaign_path = PathBuf::from("data/test_campaign");
 
     let mut loader = CampaignLoader::new(base_path, campaign_path);
 
@@ -221,7 +221,7 @@ fn test_npc_spawning_with_creature_id() {
 #[test]
 fn test_campaign_path_resolution() {
     let base_path = PathBuf::from("data");
-    let campaign_path = PathBuf::from("campaigns/tutorial");
+    let campaign_path = PathBuf::from("data/test_campaign");
 
     let loader = CampaignLoader::new(base_path.clone(), campaign_path.clone());
 

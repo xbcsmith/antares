@@ -1,0 +1,177 @@
+[
+    /*[0]*/ (
+        id: 1,
+        name: "Goblin",
+        filepath: "assets/creatures/goblin.ron",
+    ),
+    /*[1]*/ (
+        id: 2,
+        name: "Kobold",
+        filepath: "assets/creatures/kobold.ron",
+    ),
+    /*[2]*/ (
+        id: 3,
+        name: "GiantRat",
+        filepath: "assets/creatures/giantrat.ron",
+    ),
+    /*[3]*/ (
+        id: 4,
+        name: "DireWolf",
+        filepath: "assets/creatures/direwolf.ron",
+    ),
+    /*[4]*/ (
+        id: 5,
+        name: "DireWolfLeader",
+        filepath: "assets/creatures/direwolf_leader.ron",
+    ),
+    /*[5]*/ (
+        id: 6,
+        name: "Bandit",
+        filepath: "assets/creatures/bandit.ron",
+    ),
+    /*[6]*/ (
+        id: 10,
+        name: "Orc",
+        filepath: "assets/creatures/orc.ron",
+    ),
+    /*[7]*/ (
+        id: 11,
+        name: "Skeleton",
+        filepath: "assets/creatures/skeleton.ron",
+    ),
+    /*[5]*/ (
+        id: 12,
+        name: "Wolf",
+        filepath: "assets/creatures/wolf.ron",
+    ),
+    /*[6]*/ (
+        id: 20,
+        name: "Ogre",
+        filepath: "assets/creatures/ogre.ron",
+    ),
+    /*[7]*/ (
+        id: 21,
+        name: "Zombie",
+        filepath: "assets/creatures/zombie.ron",
+    ),
+    /*[8]*/ (
+        id: 22,
+        name: "FireElemental",
+        filepath: "assets/creatures/fireelemental.ron",
+    ),
+    /*[9]*/ (
+        id: 30,
+        name: "Dragon",
+        filepath: "assets/creatures/dragon.ron",
+    ),
+    /*[10]*/ (
+        id: 31,
+        name: "Lich",
+        filepath: "assets/creatures/lich.ron",
+    ),
+    /*[11]*/ (
+        id: 32,
+        name: "RedDragon",
+        filepath: "assets/creatures/reddragon.ron",
+    ),
+    /*[12]*/ (
+        id: 33,
+        name: "PyramidDragon",
+        filepath: "assets/creatures/pyramiddragon.ron",
+    ),
+    /*[13]*/ (
+        id: 51,
+        name: "VillageElder",
+        filepath: "assets/creatures/villageelder.ron",
+    ),
+    /*[14]*/ (
+        id: 52,
+        name: "Innkeeper",
+        filepath: "assets/creatures/innkeeper.ron",
+    ),
+    /*[15]*/ (
+        id: 53,
+        name: "Merchant",
+        filepath: "assets/creatures/merchant.ron",
+    ),
+    /*[16]*/ (
+        id: 54,
+        name: "HighPriest",
+        filepath: "assets/creatures/highpriest.ron",
+    ),
+    /*[17]*/ (
+        id: 55,
+        name: "HighPriestess",
+        filepath: "assets/creatures/highpriestess.ron",
+    ),
+    /*[18]*/ (
+        id: 56,
+        name: "WizardArcturus",
+        filepath: "assets/creatures/wizardarcturus.ron",
+    ),
+    /*[19]*/ (
+        id: 57,
+        name: "Ranger",
+        filepath: "assets/creatures/ranger.ron",
+    ),
+    /*[20]*/ (
+        id: 58,
+        name: "OldGareth",
+        filepath: "assets/creatures/oldgareth.ron",
+    ),
+    /*[21]*/ (
+        id: 59,
+        name: "ApprenticeZara",
+        filepath: "assets/creatures/apprenticezara.ron",
+    ),
+    /*[22]*/ (
+        id: 60,
+        name: "Kira",
+        filepath: "assets/creatures/kira.ron",
+    ),
+    /*[23]*/ (
+        id: 61,
+        name: "Mira",
+        filepath: "assets/creatures/mira.ron",
+    ),
+    /*[24]*/ (
+        id: 62,
+        name: "Sirius",
+        filepath: "assets/creatures/sirius.ron",
+    ),
+    /*[25]*/ (
+        id: 63,
+        name: "Whisper",
+        filepath: "assets/creatures/whisper.ron",
+    ),
+    /*[26]*/ (
+        id: 101,
+        name: "HumanFighter",
+        filepath: "assets/creatures/humanfighter.ron",
+    ),
+    /*[27]*/ (
+        id: 102,
+        name: "ElfMage",
+        filepath: "assets/creatures/elfmage.ron",
+    ),
+    /*[28]*/ (
+        id: 103,
+        name: "DwarfCleric",
+        filepath: "assets/creatures/dwarfcleric.ron",
+    ),
+    /*[29]*/ (
+        id: 151,
+        name: "DyingGoblin",
+        filepath: "assets/creatures/dyinggoblin.ron",
+    ),
+    /*[30]*/ (
+        id: 152,
+        name: "SkeletonWarrior",
+        filepath: "assets/creatures/skeletonwarrior.ron",
+    ),
+    /*[31]*/ (
+        id: 153,
+        name: "EvilLich",
+        filepath: "assets/creatures/evillich.ron",
+    ),
+]
