@@ -15,7 +15,7 @@
 //! - Creature scale multiplier
 //! - Saving assets to files
 
-use antares::domain::visual::{CreatureDefinition, MeshTransform};
+use antares::domain::visual::{CreatureDefinition, CreatureReference, MeshTransform};
 use campaign_builder::creature_assets::CreatureAssetManager;
 use campaign_builder::creatures_editor::{CreaturesEditorState, PrimitiveType};
 use campaign_builder::primitive_generators::*;
@@ -345,9 +345,19 @@ fn test_save_asset_to_file() {
     let result = manager.save_creature(&creature);
     assert!(result.is_ok());
 
-    // Verify file exists (saves to data/creatures.ron)
+    // Verify registry exists and points to a per-creature asset file.
     let creatures_file = campaign_dir.join("data/creatures.ron");
     assert!(creatures_file.exists());
+
+    let registry_text = std::fs::read_to_string(&creatures_file).unwrap();
+    let registry = ron::from_str::<Vec<CreatureReference>>(&registry_text).unwrap();
+    assert_eq!(registry.len(), 1);
+    let asset_file = campaign_dir.join(&registry[0].filepath);
+    assert!(
+        asset_file.exists(),
+        "asset file must exist: {}",
+        registry[0].filepath
+    );
 
     // Load and verify
     let loaded = manager.load_creature(1);

@@ -491,7 +491,11 @@ impl CreatureDefinition {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreatureReference {
-    /// Unique creature identifier matching the referenced creature file
+    /// Unique creature identifier for this registry entry.
+    ///
+    /// This ID is authoritative for registry-driven loads and may intentionally
+    /// differ from the ID stored in the referenced asset file to support
+    /// many-to-one mesh reuse.
     pub id: CreatureId,
 
     /// Display name for editor/debugging

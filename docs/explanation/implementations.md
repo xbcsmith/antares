@@ -24,9 +24,685 @@
 | **Creature Editor UX Fixes Phase 3**    | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**                  |
 | **Creature Editor UX Fixes Phase 4**    | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**           |
 | **Creature Editor UX Fixes Phase 5**    | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder** |
+| **Findings Remediation Phase 1**         | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**  |
+| **Findings Remediation Phase 2**         | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)** |
+| **Findings Remediation Phase 3**         | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard** |
+| **Findings Remediation Phase 4**         | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI** |
+| **Findings Remediation Phase 5**         | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation** |
 
 **Total Lines Implemented**: 8,500+ lines of production code + 5,100+ lines of documentation
 **Total Tests**: 298+ new tests (all passing), 1,776 campaign_builder tests passing
+
+---
+
+## Runtime + SDK Fix: Creature Registry Many-to-One Asset Mapping
+
+## Grass Rendering Fix: Direction-Dependent Visual Artifact
+
+### Overview
+
+Fixed a grass rendering artifact where grass looked acceptable from one view
+direction but degraded from the opposite direction.
+
+### Root Cause
+
+Grass blades were spawned with the `Billboard` component, forcing every blade
+to face the camera each frame. That camera-facing behavior conflicts with
+procedural blade orientation/tilt and can create direction-dependent artifacts.
+
+### Changes
+
+- Updated `src/game/systems/advanced_grass.rs`:
+  - Removed `Billboard` from spawned grass blade entities in
+    `spawn_grass_cluster(...)`.
+  - Removed now-unused `Billboard` import.
+
+### Validation
+
+- `cargo fmt --all`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo nextest run --all-features game::systems::advanced_grass::tests::`
+
+All checks passed.
+
+## Grass Rendering Follow-Up: Disable Implicit Chunk Mesh Override
+
+### Overview
+
+Follow-up fix after field verification reported grass still looked wrong when
+viewing from opposite directions.
+
+### Root Cause
+
+`build_grass_chunks_system` was always active even when no
+`GrassChunkConfig` resource was configured. This meant simplified chunk meshes
+were generated implicitly and could visually override/blend with per-blade
+grass, producing directional artifacts.
+
+### Changes
+
+- Updated `src/game/systems/advanced_grass.rs`:
+  - `build_grass_chunks_system(...)` now returns early unless
+    `GrassChunkConfig` is explicitly provided.
+  - Chunking is now truly opt-in instead of implicitly enabled.
+
+### Validation
+
+- `cargo fmt --all`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo nextest run --all-features game::systems::advanced_grass::tests::`
+
+All checks passed.
+
+## Grass Performance + Visibility Tuning
+
+### Overview
+
+Addressed reported input latency (camera response taking seconds) and overly
+strong grass shadows darkening first-person view.
+
+### Changes
+
+- Updated `src/game/systems/advanced_grass.rs`:
+  - Lowered default grass render distances:
+    - `GrassRenderConfig::default().cull_distance`: `50.0 -> 30.0`
+    - `GrassRenderConfig::default().lod_distance`: `25.0 -> 15.0`
+  - Disabled shadow participation for grass blades:
+    - Added `bevy::light::NotShadowCaster`
+    - Added `bevy::light::NotShadowReceiver`
+  - Disabled shadow participation for merged grass chunk meshes:
+    - Added `bevy::light::NotShadowCaster`
+    - Added `bevy::light::NotShadowReceiver`
+  - Updated test expectations for new `GrassRenderConfig` defaults.
+
+### Expected Runtime Impact
+
+- Less GPU work for grass in shadow passes and shorter grass draw distance,
+  improving camera/input responsiveness in dense outdoor areas.
+- Grass no longer creates heavy dark shadow bands that obscure the scene.
+
+### Validation
+
+- `cargo fmt --all`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo nextest run --all-features game::systems::advanced_grass::tests::`
+
+All checks passed.
+
+## Tree Shadow Follow-Up: First-Person Occlusion Reduction
+
+### Overview
+
+Applied the same shadow mitigation strategy used for grass to trees after
+reports that tree shadows were still excessively dark and hurt visibility.
+
+### Changes
+
+- Updated `src/game/systems/procedural_meshes.rs`:
+  - Tree trunk/branch mesh child spawned by `spawn_tree(...)` now includes:
+    - `bevy::light::NotShadowCaster`
+    - `bevy::light::NotShadowReceiver`
+  - Tree foliage spheres spawned by `spawn_foliage_clusters(...)` now include:
+    - `bevy::light::NotShadowCaster`
+    - `bevy::light::NotShadowReceiver`
+  - Shrub meshes spawned by `spawn_shrub(...)` now include:
+    - `bevy::light::NotShadowCaster`
+    - `bevy::light::NotShadowReceiver`
+
+### Expected Impact
+
+- Removes severe tree-driven shadow darkening in first-person view.
+- Reduces shadow rendering cost for dense forest scenes.
+
+### Validation
+
+- `cargo fmt --all`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- Focused nextest sanity checks for map + vegetation spawn paths
+
+All checks passed.
+
+## Map Rendering Fix: Encounter Monster Mesh Markers
+
+### Overview
+
+Fixed a map rendering gap where `MapEvent::Encounter` tiles had logic triggers
+but no in-world visual mesh markers, causing encounter locations to appear
+empty in game view.
+
+### Components Updated
+
+- `src/game/systems/map.rs`
+
+### Key Changes
+
+- Added `resolve_encounter_creature_id(monster_group, content)` helper to map
+  encounter monster groups to a creature visual id using the first monster with
+  a configured `visual_id`.
+- Updated `spawn_map(...)` event visual pass to spawn a creature mesh for
+  `MapEvent::Encounter` at the encounter tile center.
+- Tagged spawned encounter visuals with `CreatureVisual`, `MapEntity`, and
+  `TileCoord` for consistent lifecycle and map cleanup behavior.
+- Added warnings for encounter events that cannot resolve a creature visual.
+
+### Testing
+
+- Added tests in `src/game/systems/map.rs`:
+  - `test_resolve_encounter_creature_id_returns_first_visual_match`
+  - `test_resolve_encounter_creature_id_skips_monsters_without_visuals`
+- Validation completed:
+  - `cargo fmt --all`
+  - `cargo check --all-targets --all-features`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - `cargo nextest run --all-features test_resolve_encounter_creature_id`
+
+## Test Stability Update: Decouple Tests From `campaigns/tutorial`
+
+### Overview
+
+Refactored campaign-coupled tests to use a stable immutable fixture campaign at
+`data/test_campaign` so test behavior no longer depends on mutable
+`campaigns/tutorial` content.
+
+### Components Updated
+
+- `data/test_campaign/` (new fixture campaign snapshot)
+- `tests/campaign_integration_tests.rs`
+- `tests/tutorial_campaign_loading_integration.rs`
+- `tests/tutorial_campaign_visual_metadata_test.rs`
+- `tests/tutorial_npc_creature_mapping.rs`
+- `tests/tutorial_monster_creature_mapping.rs`
+- `tests/game_config_integration.rs`
+- `tests/database_integration_test.rs`
+- `src/application/mod.rs` (`#[cfg(test)]` usage)
+- `src/sdk/campaign_loader.rs` (`#[cfg(test)]` usage)
+- `src/domain/character_definition.rs` (`#[cfg(test)]` usage)
+- `src/domain/combat/database.rs` (`#[cfg(test)]` usage)
+- `src/domain/visual/creature_database.rs` (`#[cfg(test)]` usage)
+- `src/domain/campaign_loader.rs` (`#[cfg(test)]` usage)
+- `src/sdk/database.rs` (`#[cfg(test)]` usage)
+- `src/game/resources/sprite_assets.rs` (`#[cfg(test)]` usage)
+
+### Key Changes
+
+- Added fixture campaign under `data/test_campaign` with campaign metadata,
+  campaign data, and required creature assets.
+- Replaced direct `campaigns/tutorial` test references with `data/test_campaign`.
+- Updated loader-based tests to use `CampaignLoader::new("data")` with campaign
+  id `"test_campaign"`.
+- Removed brittle hard-coded creature count assertion in campaign integration
+  test and replaced with fixture-safe threshold assertion.
+- Fixed pre-existing compile/lint/test issues encountered during validation in:
+  - `tests/tutorial_monster_creature_mapping.rs`
+  - `tests/creatures_editor_integration_tests.rs`
+
+### Validation
+
+- `cargo fmt --all` passed
+- `cargo check --all-targets --all-features` passed
+- `cargo clippy --all-targets --all-features -- -D warnings` passed
+- `cargo nextest run --all-features` passed (`2408 passed, 8 skipped`)
+
+### Overview
+
+Enabled creature registry aliasing so multiple registry IDs can point at a
+single creature asset file (for mesh reuse). Registry metadata is now
+authoritative for registry-driven loads, which allows entries like
+`DireWolf`, `DireWolfLeader`, and `Wolf` to share `assets/creatures/wolf.ron`
+without load-time ID mismatch failures.
+
+### Components Updated
+
+- `src/domain/visual/mod.rs`
+- `src/domain/visual/creature_database.rs`
+- `sdk/campaign_builder/src/lib.rs`
+- `sdk/campaign_builder/src/creature_assets.rs`
+- `tests/tutorial_monster_creature_mapping.rs`
+
+### Key Changes
+
+- Updated `CreatureReference` docs to state registry ID authority for
+  registry-driven loads.
+- Changed `CreatureDatabase::load_from_registry` to normalize loaded
+  `CreatureDefinition` identity from registry metadata:
+  - `creature.id = reference.id`
+  - `creature.name = reference.name`
+- Removed hard-fail behavior for asset-file ID mismatches in registry loads.
+- Aligned Campaign Builder `load_creatures()` behavior with runtime loader:
+  ID mismatches no longer count as load errors in registry-driven paths.
+- Aligned `CreatureAssetManager::read_creature_asset()` with the same
+  registry-authoritative normalization semantics.
+
+### Tests Added/Updated
+
+- `src/domain/visual/creature_database.rs`:
+  - `test_load_from_registry_registry_id_overrides_asset_id`
+  - `test_load_from_registry_multiple_ids_can_share_one_asset_file`
+- `sdk/campaign_builder/src/creature_assets.rs`:
+  - `test_load_all_creatures_supports_shared_asset_filepath_aliasing`
+- `tests/tutorial_monster_creature_mapping.rs`:
+  - `test_shared_wolf_asset_aliases_load_with_registry_identity`
+
+### Outcome
+
+Campaign creature registries now support intentional many-to-one mesh reuse
+without startup panics, while keeping runtime and SDK/builder loader behavior
+consistent.
+
+---
+
+## Findings Remediation - Phase 4: Creature Preview Renderer Integration
+
+### Overview
+
+Phase 4 replaces the creature editor's placeholder preview panel with the
+integrated preview renderer path, wires deterministic state synchronization
+between edit operations and preview rendering, and adds a fallback diagnostic
+UI for renderer-unavailable scenarios.
+
+### Components Updated
+
+- `sdk/campaign_builder/src/creatures_editor.rs`
+- `sdk/campaign_builder/src/preview_renderer.rs`
+- `sdk/campaign_builder/tests/creature_preview_integration_test.rs`
+
+### Key Changes
+
+- Replaced `show_preview_panel` placeholder drawing code with active
+  `PreviewRenderer` rendering and interaction path.
+- Added renderer lifecycle fields to `CreaturesEditorState`:
+  - `preview_renderer: Option<PreviewRenderer>`
+  - `preview_error: Option<String>`
+- Added deterministic preview synchronization helper that applies current
+  mesh data, transform data, visibility masks, selected mesh index, camera
+  distance, and visual toggles into the renderer.
+- Added preview statistics refresh (`mesh_count`, `vertex_count`,
+  `triangle_count`, `selected_meshes`) during sync to keep preview state
+  coherent with edit buffer state.
+- Added fallback diagnostics panel for unavailable preview subsystem and
+  surfaced fallback status messages directly in the preview panel.
+- Added selected-mesh highlight support in `PreviewRenderer` and per-mesh
+  visibility masking so preview behavior matches mesh list selection and
+  visibility toggles.
+- Added `request_repaint()` on preview-driving state changes and set
+  `preview_dirty = true` on mesh selection changes to ensure deterministic
+  refresh semantics.
+- Added `ui.push_id(...)` around mesh-list row widgets to satisfy egui ID
+  isolation requirements for loop-rendered controls.
+- Cleared renderer state and preview statistics during `back_to_registry()`
+  so mode transitions leave no stale preview selection/model state.
+
+### Tests Added
+
+- `creatures_editor.rs`:
+  - `test_preview_sync_clears_dirty_and_updates_statistics`
+  - `test_preview_sync_reflects_transform_changes`
+  - `test_preview_sync_reflects_color_changes_and_visibility`
+- `preview_renderer.rs`:
+  - `test_preview_renderer_selected_mesh_round_trip`
+  - `test_preview_renderer_mesh_visibility_round_trip`
+- `sdk/campaign_builder/tests/creature_preview_integration_test.rs`:
+  - `test_preview_updates_after_transform_edit_in_ui_frame`
+  - `test_preview_updates_after_color_edit_in_ui_frame`
+
+### Outcome
+
+Creature preview now renders through the integrated preview subsystem, reflects
+mesh edits and selection updates without mode switching, and degrades safely to
+diagnostic fallback UI if renderer initialization is unavailable.
+
+---
+
+## Runtime Fix: Tutorial NPC Creature Rendering
+
+### Overview
+
+Fixed a runtime data-flow gap where tutorial NPC `creature_id` values were loaded
+from `npcs.ron` but dropped before rendering. This prevented NPC creature meshes
+from appearing in the game engine even when campaign creature assets were valid.
+
+### Components Updated
+
+- `src/domain/world/types.rs`
+- `src/game/systems/map.rs`
+
+### Key Changes
+
+- Extended `ResolvedNpc` to carry `creature_id: Option<CreatureId>`.
+- Updated `ResolvedNpc::from_placement_and_definition()` to propagate
+  `NpcDefinition.creature_id` into resolved map runtime data.
+- Updated map NPC spawning path to prefer procedural creature mesh spawning when
+  `creature_id` is present and resolvable in `ContentDatabase.creatures`.
+- Added safe fallback to sprite rendering (with warning log) when an NPC has an
+  invalid/missing creature reference.
+
+### Tests Added
+
+- `src/domain/world/types.rs`:
+  - `test_resolved_npc_from_placement_copies_creature_id_when_present`
+- `src/game/systems/map.rs`:
+  - `test_spawn_map_uses_npc_creature_id_when_available`
+
+### Outcome
+
+Tutorial campaign NPCs with valid `creature_id` now render as creature meshes
+in-engine, while NPCs without creature visuals continue to use sprite fallback.
+
+---
+
+## Runtime Fix: Tutorial Recruitable Character Rendering
+
+### Overview
+
+Fixed missing recruitable-character visuals on map load. `MapEvent::RecruitableCharacter`
+entries were creating logical triggers but no rendered entities, so recruitables
+in tutorial map 1 (and other maps) appeared invisible.
+
+### Components Updated
+
+- `src/game/systems/map.rs`
+
+### Key Changes
+
+- Added recruitable visual spawn path during map event processing.
+- Added recruitable creature-id resolver with fallback order:
+  - Use NPC definition `creature_id` when `character_id` matches an NPC ID.
+  - Strip `npc_` prefix and resolve to character definition.
+  - Match character display name to creature definition name using normalized keys.
+- Recruitables now prefer procedural creature mesh spawn when creature mapping
+  resolves and creature definition exists.
+- Added sprite fallback (with warning logs) when mapping or creature asset is missing.
+- Tagged recruitable visuals with `NpcMarker` + `TileCoord` for dialogue-speaker
+  resolution consistency at interaction time.
+
+### Tests Added
+
+- `src/game/systems/map.rs`:
+  - `test_spawn_map_uses_recruitable_character_creature_visual`
+
+### Outcome
+
+Recruitable characters now render in-map with creature meshes when campaign data
+provides a resolvable mapping, and degrade gracefully to sprite visuals otherwise.
+
+---
+
+## Runtime Fix: Default Recruit Trigger Event Resolution
+
+### Overview
+
+Fixed a recruitment execution gap for default recruit dialogues that emit
+`TriggerEvent("recruit_character_to_party")` instead of direct
+`RecruitToParty` actions. Recruitable map context often carries NPC-prefixed IDs
+(for example, `npc_old_gareth`) while character definitions are keyed by
+canonical IDs (for example, `old_gareth`).
+
+### Components Updated
+
+- `src/game/systems/dialogue.rs`
+
+### Key Changes
+
+- Added recruitment-context ID resolver that normalizes `npc_`-prefixed IDs to
+  character-definition IDs when available.
+- Added TriggerEvent handling for `recruit_character_to_party` to execute the
+  same core recruitment path used by `RecruitToParty`.
+- Refactored party-recruitment execution into a shared helper so both action
+  paths apply identical success/error handling and map-event cleanup behavior.
+
+### Tests Added
+
+- `src/game/systems/dialogue.rs`:
+  - `test_trigger_event_recruit_character_to_party_resolves_npc_prefixed_context`
+  - `test_trigger_event_recruit_character_to_party_with_unresolvable_context_noops`
+
+### Outcome
+
+Default recruit dialogues now correctly add characters like Old Gareth to the
+party (or inn when full) instead of only logging the trigger event.
+
+---
+
+## Runtime Fix: Recruitable Post-Recruit Cleanup
+
+### Overview
+
+Fixed two post-recruitment cleanup gaps:
+
+- Recruitable dialogue could remain active after successful recruitment.
+- Recruitable mesh/sprite visuals remained visible after the recruitable event
+  was removed from map state.
+
+### Components Updated
+
+- `src/game/systems/dialogue.rs`
+- `src/game/systems/map.rs`
+
+### Key Changes
+
+- Dialogue flow now exits to exploration immediately after successful
+  `RecruitToParty` outcomes (`AddedToParty` and `SentToInn`).
+- Choice-processing now short-circuits if an action changes mode away from
+  `GameMode::Dialogue`, preventing stale node advancement after recruitment.
+- Added `RecruitableVisualMarker` component for visuals spawned from
+  `MapEvent::RecruitableCharacter`.
+- Added `cleanup_recruitable_visuals` map system that despawns recruitable
+  visuals when no matching recruitable event remains at that tile.
+
+### Tests Added
+
+- `src/game/systems/map.rs`:
+  - `test_recruitable_visual_despawns_after_event_removed`
+
+### Outcome
+
+After recruitment succeeds, dialogue UI closes cleanly and the recruited
+character's in-world visual is removed alongside its map event.
+
+---
+
+## Findings Remediation - Phase 5: Documentation Parity and Status Reconciliation
+
+### Overview
+
+Phase 5 aligns creature-editor user documentation with currently shipped UI
+behavior and adds an automated parity check script to ensure key documented
+navigation/actions remain wired in code.
+
+### Components Updated
+
+- `docs/how-to/create_creatures.md`
+- `docs/explanation/implementations.md`
+- `scripts/validate_creature_editor_doc_parity.sh`
+
+### Key Changes
+
+- Rewrote `docs/how-to/create_creatures.md` to match active campaign-builder
+  creature workflows only.
+- Removed stale instructions that implied currently unavailable in-flow
+  operations and replaced them with explicit "planned/not yet wired" scope
+  notes for:
+  - Variations
+  - LOD authoring
+  - Animation authoring
+  - Material editing
+- Standardized navigation text to documented entry points that exist in code:
+  - `Tools -> Creature Editor`
+  - `Tools -> Creature Templates...`
+  - Sidebar `Creatures` tab
+- Added `scripts/validate_creature_editor_doc_parity.sh` to validate parity
+  between docs and UI code for critical actions and entry points.
+
+### Parity Script Coverage
+
+`scripts/validate_creature_editor_doc_parity.sh` verifies:
+
+- Documented navigation paths are present in `docs/how-to/create_creatures.md`.
+- Referenced menu actions exist in `sdk/campaign_builder/src/lib.rs`.
+- Referenced creature-editor actions exist in
+  `sdk/campaign_builder/src/creatures_editor.rs`.
+- Critical sentinels and dispatch paths (`OPEN_CREATURE_TEMPLATES_SENTINEL`)
+  remain in place.
+
+### Outcome
+
+Creature-editor documentation now reflects real shipped behavior and no longer
+overstates unsupported workflows. A dedicated script enforces ongoing parity
+between documented actions and actual UI code paths.
+
+---
+
+## Findings Remediation - Phase 3: Core Persistence Alignment and Dead-Path Cleanup
+
+### Overview
+
+Phase 3 aligns campaign-builder creature persistence helpers with the active
+runtime architecture: `data/creatures.ron` as a `Vec<CreatureReference>`
+registry plus per-creature files under `assets/creatures/*.ron`. It also
+removes the old inline-list assumptions and hardens against accidental re-entry
+to the retired list-mode UI path.
+
+### Components Updated
+
+- `sdk/campaign_builder/src/creature_assets.rs`
+- `sdk/campaign_builder/src/creatures_editor.rs`
+- `sdk/campaign_builder/tests/creature_asset_editor_tests.rs`
+
+### Key Changes
+
+- Refactored `CreatureAssetManager` to read/write a reference registry
+  (`Vec<CreatureReference>`) instead of inline `Vec<CreatureDefinition>`.
+- Save path now writes/updates the creature asset file first, then updates
+  registry metadata (`id`, `name`, `filepath`) deterministically.
+- Load path now resolves each registry entry into its asset file and validates
+  ID consistency between registry and asset contents.
+- Added explicit legacy compatibility guard:
+  - Detects inline `Vec<CreatureDefinition>` in `data/creatures.ron`.
+  - Returns `LegacyInlineRegistryDetected { count }` for normal operations.
+- Added migration helper `migrate_legacy_inline_registry()` to convert legacy
+  inline registries into the active reference-backed model.
+- Replaced the dead `show_list_mode` implementation with a deprecated trap so
+  any accidental runtime dispatch fails loudly during development.
+
+### Tests Added/Updated
+
+- `creature_assets.rs` tests:
+  - reference-backed save/load round trip with registry + asset file checks
+  - multi-creature round trip and registry integrity
+  - delete and duplicate behavior in reference-backed format
+  - legacy inline registry detection guard
+  - migration from inline legacy format into reference-backed model
+  - next-id and presence checks using registry entries
+- `creatures_editor.rs` test:
+  - `test_show_list_mode_dispatch_uses_registry_mode_only` verifies `show()` in
+    `List` mode does not reach deprecated list-mode function and refreshes the
+    ID manager through registry mode.
+- `sdk/campaign_builder/tests/creature_asset_editor_tests.rs` update:
+  - save test now validates both `data/creatures.ron` registry contents and the
+    referenced asset file existence.
+
+### Legacy Compatibility Behavior
+
+If `data/creatures.ron` contains legacy inline creature definitions, regular
+asset-manager operations intentionally stop with a targeted compatibility error
+until migration is performed. Running
+`CreatureAssetManager::migrate_legacy_inline_registry()` performs the
+conversion to registry+asset-file format in-place.
+
+### Outcome
+
+No active creature persistence helper assumes
+`data/creatures.ron = Vec<CreatureDefinition>` in the supported code path.
+Registry handling is now consistent with the campaign builder runtime model,
+and the retired list-mode code path is explicitly fenced off.
+
+---
+
+## Findings Remediation - Phase 2: Creature Editor Action Wiring
+
+### Overview
+
+Phase 2 replaces no-op creature editor actions with functional behavior in
+`creatures_editor.rs`. The editor now wires mesh validation, issue display,
+save-as flow, RON export, and revert behavior to real code paths while keeping
+state synchronization deterministic.
+
+### Components Updated
+
+- `sdk/campaign_builder/src/creatures_editor.rs`
+
+### Key Changes
+
+- Added validation state tracking fields (`validation_errors`, `validation_warnings`, `validation_info`, `last_validated_mesh_index`) and save-as dialog state (`show_save_as_dialog`, `save_as_path_buffer`).
+- Added refresh and mesh-level validation helpers using `mesh_validation::validate_mesh`.
+- Implemented `Validate Mesh` button behavior with issue-panel population and status feedback.
+- Implemented `Show Issues` toggle with inline issue rendering in the bottom properties panel.
+- Implemented `Export RON` path via `ron::ser::to_string_pretty` and `ui.ctx().copy_text(...)`.
+- Implemented `Revert Changes` behavior that restores `edit_buffer` from the selected registry entry (Edit mode) or resets defaults (Add mode).
+- Implemented Save-As workflow with normalized relative asset path handling, deterministic new-ID assignment, and editor state transition to the newly created creature variant.
+- Added a dedicated Save-As dialog window and helper methods for path normalization/default generation.
+- Updated Save-As flow to perform real asset-file writes to the selected relative `.ron` path (campaign-root relative), including directory creation and serialization/write error reporting.
+- Constrained Save-As paths to `assets/creatures/*.ron` so editor-created assets remain aligned with registry save/load conventions and avoid orphaned off-model files.
+
+### Tests Added
+
+- `test_validate_selected_mesh_reports_invalid_mesh_errors`
+- `test_export_current_creature_to_ron_contains_name`
+- `test_revert_edit_buffer_from_registry_restores_original`
+- `test_perform_save_as_with_path_appends_new_creature`
+- `test_perform_save_as_with_path_requires_campaign_directory`
+- `test_perform_save_as_with_path_rejects_non_creature_asset_paths`
+- `test_perform_save_as_with_path_reports_directory_creation_failure`
+- `test_revert_edit_buffer_from_registry_errors_in_list_mode`
+- `test_revert_edit_buffer_from_registry_errors_when_selection_missing`
+- `test_normalize_relative_creature_asset_path_rewrites_backslashes`
+
+### Outcome
+
+The previously stubbed Phase 2 creature-editor controls now perform concrete
+operations with explicit status outcomes, reducing silent no-op behavior in the
+asset editing workflow.
+
+---
+
+## Findings Remediation - Phase 1: Template ID Synchronization and Duplicate-ID Guards
+
+### Overview
+
+Phase 1 addresses a correctness issue in template-based creature creation where
+ID suggestions could be produced from stale `CreatureIdManager` state when users
+opened creature templates directly from the Tools menu. The remediation ensures
+ID selection always synchronizes from the authoritative in-memory registry
+(`self.creatures`) before suggestion and adds a defensive duplicate-ID guard
+before insertion.
+
+### Components Updated
+
+- `sdk/campaign_builder/src/lib.rs`
+
+### Key Changes
+
+- Added a shared registry-reference builder (`creature_references_from_current_registry`) to derive `CreatureReference` values from `self.creatures`.
+- Added `sync_creature_id_manager_from_creatures` to refresh `creatures_editor_state.id_manager` from current creature data.
+- Added `next_available_creature_id_for_category` to provide deterministic, bounded ID assignment in a category after synchronization.
+- Updated template `CreateNew` action in `show_creature_template_browser_dialog` to use synchronized ID selection before generation.
+- Added explicit duplicate-ID guard before pushing generated creatures, with actionable status messaging.
+
+### Tests Added
+
+- `test_sync_creature_id_manager_from_creatures_tracks_current_registry`
+- `test_next_available_creature_id_refreshes_stale_id_manager_state`
+- `test_next_available_creature_id_returns_error_when_monster_range_is_full`
+
+### Outcome
+
+Template-based creature creation no longer depends on prior navigation to the
+Creatures tab for correct ID assignment behavior, and duplicate-ID insertion is
+explicitly blocked with clear user feedback.
 
 ---
 

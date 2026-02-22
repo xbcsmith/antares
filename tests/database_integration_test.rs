@@ -16,7 +16,7 @@ fn test_load_full_campaign() {
 
     // Use absolute path relative to cargo manifest dir to ensure we find the campaign
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let campaign_dir = Path::new(&manifest_dir).join("campaigns/tutorial");
+    let campaign_dir = Path::new(&manifest_dir).join("data/test_campaign");
 
     if !campaign_dir.exists() {
         // Skip test if tutorial campaign doesn't exist (e.g. in CI without assets)

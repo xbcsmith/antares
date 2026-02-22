@@ -17,7 +17,7 @@
 //! use antares::sdk::campaign_loader::CampaignLoader;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let loader = CampaignLoader::new("campaigns");
+//! let loader = CampaignLoader::new("data");
 //!
 //! // List available campaigns
 //! let campaigns = loader.list_campaigns()?;
@@ -593,7 +593,7 @@ impl Campaign {
 /// use antares::sdk::campaign_loader::CampaignLoader;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let loader = CampaignLoader::new("campaigns");
+/// let loader = CampaignLoader::new("data");
 /// let campaigns = loader.list_campaigns()?;
 ///
 /// for info in campaigns {
@@ -838,9 +838,9 @@ mod tests {
 
     #[test]
     fn test_tutorial_campaign_has_starting_innkeeper() {
-        let loader = CampaignLoader::new("campaigns");
+        let loader = CampaignLoader::new("data");
         let campaign = loader
-            .load_campaign("tutorial")
+            .load_campaign("test_campaign")
             .expect("Failed to load tutorial campaign");
 
         assert_eq!(
@@ -851,9 +851,9 @@ mod tests {
 
     #[test]
     fn test_validate_tutorial_campaign_is_valid() {
-        let loader = CampaignLoader::new("campaigns");
+        let loader = CampaignLoader::new("data");
         let report = loader
-            .validate_campaign("tutorial")
+            .validate_campaign("test_campaign")
             .expect("validate_campaign failed");
 
         // The tutorial campaign should be fully valid (no errors or warnings).

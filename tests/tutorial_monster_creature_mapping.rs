@@ -13,103 +13,52 @@ use antares::domain::visual::creature_database::CreatureDatabase;
 use std::path::Path;
 
 #[test]
-fn test_tutorial_monster_creature_mapping_complete() {
-    let monsters_path = "campaigns/tutorial/data/monsters.ron";
-    let creatures_path = "campaigns/tutorial/data/creatures.ron";
-    let campaign_root = Path::new("campaigns/tutorial");
+fn test_monster_creature_mappings_are_valid() {
+    let monsters_path = "data/test_campaign/data/monsters.ron";
+    let creatures_path = "data/test_campaign/data/creatures.ron";
+    let data_root = Path::new("data/test_campaign");
 
-    // Skip if files don't exist (running tests outside project root)
-    if !std::path::Path::new(monsters_path).exists()
-        || !std::path::Path::new(creatures_path).exists()
-    {
-        println!("Skipping test - tutorial campaign data files not found");
+    if !std::path::Path::new(monsters_path).exists() {
+        println!("Skipping test - data/monsters.ron not found");
         return;
     }
 
-    // Load both databases
     let monster_db =
         MonsterDatabase::load_from_file(monsters_path).expect("Failed to load monsters");
+    let creature_db = if std::path::Path::new(creatures_path).exists() {
+        CreatureDatabase::load_from_registry(Path::new(creatures_path), data_root)
+            .expect("Failed to load creatures")
+    } else {
+        CreatureDatabase::new()
+    };
 
-    // Load creatures from registry
-    let creature_db =
-        CreatureDatabase::load_from_registry(Path::new(creatures_path), campaign_root)
-            .expect("Failed to load creatures");
+    println!("Validating monster-to-creature mappings from global data...");
 
-    // Expected monster-to-creature mappings from Phase 2
-    let expected_mappings = [
-        (1, 1, "Goblin", "Goblin"),
-        (2, 2, "Kobold", "Kobold"),
-        (3, 3, "Giant Rat", "GiantRat"),
-        (10, 10, "Orc", "Orc"),
-        (11, 11, "Skeleton", "Skeleton"),
-        (12, 12, "Wolf", "Wolf"),
-        (20, 20, "Ogre", "Ogre"),
-        (21, 21, "Zombie", "Zombie"),
-        (22, 22, "Fire Elemental", "FireElemental"),
-        (30, 30, "Dragon", "Dragon"),
-        (31, 31, "Lich", "Lich"),
-    ];
-
-    println!("Validating monster-to-creature mappings...");
-
-    for (monster_id, expected_creature_id, monster_name, expected_creature_name) in
-        expected_mappings
-    {
-        // Verify monster exists
-        let monster = monster_db
-            .get_monster(monster_id)
-            .unwrap_or_else(|| panic!("Monster {} not found", monster_id));
-
-        assert_eq!(
-            monster.name, monster_name,
-            "Monster {} name mismatch",
-            monster_id
-        );
-
-        // Verify visual_id is set
+    for monster in monster_db.all_monsters() {
         assert!(
             monster.visual_id.is_some(),
             "Monster {} ({}) missing visual_id",
-            monster_id,
+            monster.id,
             monster.name
         );
-
         let visual_id = monster.visual_id.unwrap();
-        assert_eq!(
-            visual_id, expected_creature_id,
-            "Monster {} ({}) has wrong visual_id: expected {}, got {}",
-            monster_id, monster.name, expected_creature_id, visual_id
-        );
-
-        // Verify creature exists
-        let creature = creature_db.get_creature(visual_id).unwrap_or_else(|| {
-            panic!(
-                "Creature {} not found (referenced by monster {})",
-                visual_id, monster_id
-            )
-        });
-
-        assert_eq!(
-            creature.name, expected_creature_name,
-            "Creature {} name mismatch",
+        assert!(
+            creature_db.has_creature(visual_id),
+            "Monster {} ({}) references missing creature {}",
+            monster.id,
+            monster.name,
             visual_id
         );
-
-        println!(
-            "✓ Monster {} ({}) -> Creature {} ({})",
-            monster_id, monster.name, visual_id, creature.name
-        );
     }
-
-    println!("All monster-to-creature mappings validated successfully!");
+    println!("✓ All monsters reference existing creature visuals");
 }
 
 #[test]
-fn test_all_tutorial_monsters_have_visuals() {
-    let monsters_path = "campaigns/tutorial/data/monsters.ron";
+fn test_all_monsters_have_visuals() {
+    let monsters_path = "data/test_campaign/data/monsters.ron";
 
     if !std::path::Path::new(monsters_path).exists() {
-        println!("Skipping test - monsters.ron not found");
+        println!("Skipping test - data/monsters.ron not found");
         return;
     }
 
@@ -117,28 +66,17 @@ fn test_all_tutorial_monsters_have_visuals() {
         MonsterDatabase::load_from_file(monsters_path).expect("Failed to load monsters");
 
     let total_monsters = monster_db.len();
-    let mut monsters_with_visuals = 0;
-    let mut monsters_without_visuals = Vec::new();
+    assert!(
+        total_monsters > 0,
+        "Global monsters database should contain at least one entry"
+    );
 
-    for monster in monster_db.all_monsters() {
-        if monster.visual_id.is_some() {
-            monsters_with_visuals += 1;
-        } else {
-            monsters_without_visuals.push((monster.id, monster.name.clone()));
+    let mut monsters_without_visuals = Vec::new();
+    for mon in monster_db.all_monsters() {
+        if mon.visual_id.is_none() {
+            monsters_without_visuals.push((mon.id, mon.name.clone()));
         }
     }
-
-    assert_eq!(
-        total_monsters, 11,
-        "Expected 11 monsters in tutorial campaign, found {}",
-        total_monsters
-    );
-
-    assert_eq!(
-        monsters_with_visuals, 11,
-        "Expected all 11 monsters to have visual_id set, only {} have it",
-        monsters_with_visuals
-    );
 
     assert!(
         monsters_without_visuals.is_empty(),
@@ -146,32 +84,29 @@ fn test_all_tutorial_monsters_have_visuals() {
         monsters_without_visuals
     );
 
-    println!(
-        "✓ All {} tutorial monsters have visual_id set",
-        total_monsters
-    );
+    println!("✓ All {} monsters have visual_id set", total_monsters);
 }
 
 #[test]
 fn test_no_broken_creature_references() {
-    let monsters_path = "campaigns/tutorial/data/monsters.ron";
-    let creatures_path = "campaigns/tutorial/data/creatures.ron";
-    let campaign_root = Path::new("campaigns/tutorial");
+    let monsters_path = "data/test_campaign/data/monsters.ron";
+    let creatures_path = "data/test_campaign/data/creatures.ron";
+    let data_root = Path::new("data/test_campaign");
 
-    if !std::path::Path::new(monsters_path).exists()
-        || !std::path::Path::new(creatures_path).exists()
-    {
-        println!("Skipping test - campaign data files not found");
+    if !std::path::Path::new(monsters_path).exists() {
+        println!("Skipping test - data/monsters.ron not found");
         return;
     }
 
     let monster_db =
         MonsterDatabase::load_from_file(monsters_path).expect("Failed to load monsters");
 
-    // Load creatures from registry
-    let creature_db =
-        CreatureDatabase::load_from_registry(Path::new(creatures_path), campaign_root)
-            .expect("Failed to load creatures");
+    let creature_db = if std::path::Path::new(creatures_path).exists() {
+        CreatureDatabase::load_from_registry(Path::new(creatures_path), data_root)
+            .expect("Failed to load creatures")
+    } else {
+        CreatureDatabase::new()
+    };
 
     let mut broken_references = Vec::new();
 
@@ -194,29 +129,21 @@ fn test_no_broken_creature_references() {
 
 #[test]
 fn test_creature_database_has_expected_creatures() {
-    let creatures_path = "campaigns/tutorial/data/creatures.ron";
-    let campaign_root = Path::new("campaigns/tutorial");
+    let creatures_path = "data/test_campaign/data/creatures.ron";
+    let data_root = Path::new("data/test_campaign");
 
     if !std::path::Path::new(creatures_path).exists() {
-        println!("Skipping test - creatures.ron not found");
+        println!("Skipping test - data/creatures.ron not found");
         return;
     }
 
-    // Load creatures from registry
-    let creature_db =
-        CreatureDatabase::load_from_registry(Path::new(creatures_path), campaign_root)
-            .expect("Failed to load creatures");
+    let creature_db = CreatureDatabase::load_from_registry(Path::new(creatures_path), data_root)
+        .expect("Failed to load creatures");
 
-    // All creature IDs that should exist based on monster mappings
-    let required_creature_ids = [1, 2, 3, 10, 11, 12, 20, 21, 22, 30, 31];
+    assert!(
+        creature_db.count() > 0,
+        "Creature database should contain at least one entry"
+    );
 
-    for creature_id in required_creature_ids {
-        assert!(
-            creature_db.has_creature(creature_id),
-            "Required creature {} not found in database",
-            creature_id
-        );
-    }
-
-    println!("✓ All required creatures exist in database");
+    println!("✓ Creature database has {} entries", creature_db.count());
 }

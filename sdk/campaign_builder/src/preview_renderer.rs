@@ -196,6 +196,12 @@ pub struct PreviewRenderer {
     /// Needs redraw flag
     needs_update: bool,
 
+    /// Currently selected mesh index for highlight rendering.
+    selected_mesh_index: Option<usize>,
+
+    /// Per-mesh visibility flags provided by editor state.
+    mesh_visibility: Vec<bool>,
+
     /// Last mouse position for drag interactions
     last_mouse_pos: Option<(f32, f32)>,
 }
@@ -222,6 +228,8 @@ impl PreviewRenderer {
             camera: CameraState::default(),
             options: PreviewOptions::default(),
             needs_update: true,
+            selected_mesh_index: None,
+            mesh_visibility: Vec::new(),
             last_mouse_pos: None,
         }
     }
@@ -267,6 +275,28 @@ impl PreviewRenderer {
     pub fn reset_camera(&mut self) {
         self.camera.reset();
         self.needs_update = true;
+    }
+
+    /// Set selected mesh index used for highlight overlay.
+    pub fn set_selected_mesh_index(&mut self, selected_mesh_index: Option<usize>) {
+        self.selected_mesh_index = selected_mesh_index;
+        self.needs_update = true;
+    }
+
+    /// Returns the selected mesh index used by preview rendering.
+    pub fn selected_mesh_index(&self) -> Option<usize> {
+        self.selected_mesh_index
+    }
+
+    /// Set per-mesh visibility flags used during rendering.
+    pub fn set_mesh_visibility(&mut self, mesh_visibility: Vec<bool>) {
+        self.mesh_visibility = mesh_visibility;
+        self.needs_update = true;
+    }
+
+    /// Returns the current mesh visibility mask.
+    pub fn mesh_visibility(&self) -> &[bool] {
+        &self.mesh_visibility
     }
 
     /// Show the preview renderer UI
@@ -408,13 +438,19 @@ impl PreviewRenderer {
 
         // Draw creature meshes (simplified wireframe)
         for (mesh_idx, mesh) in creature.meshes.iter().enumerate() {
+            if !self.mesh_visibility.get(mesh_idx).copied().unwrap_or(true) {
+                continue;
+            }
+
             let transform = creature
                 .mesh_transforms
                 .get(mesh_idx)
                 .cloned()
                 .unwrap_or_default();
 
-            self.draw_mesh_wireframe(painter, rect, mesh, &transform, creature.scale);
+            let is_selected = self.selected_mesh_index == Some(mesh_idx);
+
+            self.draw_mesh_wireframe(painter, rect, mesh, &transform, creature.scale, is_selected);
         }
 
         // Draw mesh count info
@@ -520,6 +556,7 @@ impl PreviewRenderer {
         mesh: &MeshDefinition,
         transform: &MeshTransform,
         global_scale: f32,
+        is_selected: bool,
     ) {
         // Simple orthographic-ish projection for Phase 3
         // This is a placeholder - Phase 5 will use proper 3D rendering
@@ -552,6 +589,7 @@ impl PreviewRenderer {
             (mesh.color[2] * 255.0) as u8,
             (mesh.color[3] * 128.0) as u8, // Semi-transparent
         );
+        let selected_stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 165, 0));
 
         // Draw triangles
         for tri in mesh.indices.chunks(3) {
@@ -583,6 +621,12 @@ impl PreviewRenderer {
                             [projected[i2], projected[i0]],
                             egui::Stroke::new(1.0, egui::Color32::BLACK),
                         );
+                    }
+
+                    if is_selected {
+                        painter.line_segment([projected[i0], projected[i1]], selected_stroke);
+                        painter.line_segment([projected[i1], projected[i2]], selected_stroke);
+                        painter.line_segment([projected[i2], projected[i0]], selected_stroke);
                     }
                 }
             }
@@ -786,5 +830,24 @@ mod tests {
 
         renderer.update_creature(None);
         assert!(renderer.get_creature().is_none());
+    }
+
+    #[test]
+    fn test_preview_renderer_selected_mesh_round_trip() {
+        let mut renderer = PreviewRenderer::new();
+        assert_eq!(renderer.selected_mesh_index(), None);
+
+        renderer.set_selected_mesh_index(Some(2));
+        assert_eq!(renderer.selected_mesh_index(), Some(2));
+
+        renderer.set_selected_mesh_index(None);
+        assert_eq!(renderer.selected_mesh_index(), None);
+    }
+
+    #[test]
+    fn test_preview_renderer_mesh_visibility_round_trip() {
+        let mut renderer = PreviewRenderer::new();
+        renderer.set_mesh_visibility(vec![true, false, true]);
+        assert_eq!(renderer.mesh_visibility(), &[true, false, true]);
     }
 }

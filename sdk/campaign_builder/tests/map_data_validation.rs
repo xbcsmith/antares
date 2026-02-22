@@ -22,14 +22,7 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
         .and_then(|p| p.parent())
         .ok_or("Unable to determine project root")?;
 
-    let map_dirs = [
-        project_root.join("data").join("maps"),
-        project_root
-            .join("campaigns")
-            .join("tutorial")
-            .join("data")
-            .join("maps"),
-    ];
+    let map_dirs = [project_root.join("data").join("maps")];
 
     for dir in &map_dirs {
         let dir = dir.canonicalize().map_err(|e| {

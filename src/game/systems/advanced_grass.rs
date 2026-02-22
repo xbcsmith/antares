@@ -20,7 +20,6 @@ use std::collections::HashMap;
 
 use crate::domain::types;
 use crate::domain::world::{self, TileVisualMetadata};
-use crate::game::components::Billboard;
 use crate::game::resources::GrassQualitySettings;
 use crate::game::systems::map::{MapEntity, TileCoord};
 
@@ -127,8 +126,8 @@ pub struct GrassRenderConfig {
 impl Default for GrassRenderConfig {
     fn default() -> Self {
         Self {
-            cull_distance: 50.0,
-            lod_distance: 25.0,
+            cull_distance: 30.0,
+            lod_distance: 15.0,
         }
     }
 }
@@ -471,7 +470,10 @@ fn spawn_grass_cluster(
                     .with_rotation(final_rotation),
                 GlobalTransform::default(),
                 Visibility::default(),
-                Billboard::default(),
+                // Grass should not cast/receive dynamic shadows; this avoids
+                // heavy shadow-map cost and dark first-person self-shadowing.
+                bevy::light::NotShadowCaster,
+                bevy::light::NotShadowReceiver,
                 GrassBlade {
                     lod_index: blade_index as u32,
                 },
@@ -892,12 +894,17 @@ pub fn build_grass_chunks_system(
     mut existing_chunks: Query<Entity, With<GrassChunk>>,
     config: Option<Res<GrassChunkConfig>>,
 ) {
+    // Chunking is optional. If no config is provided, skip building chunk meshes.
+    let Some(config_res) = config else {
+        return;
+    };
+
     for ent in existing_chunks.iter_mut() {
         commands.entity(ent).despawn();
     }
 
     let mut buckets: HashMap<(i32, i32), Vec<BladeGather>> = HashMap::new();
-    let config = config.map(|r| *r).unwrap_or_default();
+    let config = *config_res;
 
     for (children, cluster_global, map_entity) in cluster_query.iter() {
         for child in children.iter() {
@@ -1007,6 +1014,8 @@ pub fn build_grass_chunks_system(
             Transform::from_translation(chunk_center),
             GlobalTransform::default(),
             Visibility::default(),
+            bevy::light::NotShadowCaster,
+            bevy::light::NotShadowReceiver,
             GrassChunk {
                 coords: (cx, cz),
                 cull_distance: GrassChunk::default().cull_distance,
@@ -1095,8 +1104,8 @@ mod tests {
     #[test]
     fn test_grass_render_config_default_values() {
         let config = GrassRenderConfig::default();
-        assert_eq!(config.cull_distance, 50.0);
-        assert_eq!(config.lod_distance, 25.0);
+        assert_eq!(config.cull_distance, 30.0);
+        assert_eq!(config.lod_distance, 15.0);
     }
 
     #[test]

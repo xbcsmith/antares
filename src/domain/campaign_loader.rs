@@ -13,7 +13,7 @@
 //! use std::path::PathBuf;
 //!
 //! let base_path = PathBuf::from("data");
-//! let campaign_path = PathBuf::from("campaigns/tutorial");
+//! let campaign_path = PathBuf::from("data/test_campaign");
 //! let mut loader = CampaignLoader::new(base_path, campaign_path);
 //!
 //! // Load game data
@@ -138,7 +138,7 @@ impl Default for GameData {
 /// use std::path::PathBuf;
 ///
 /// let base_path = PathBuf::from("data");
-/// let campaign_path = PathBuf::from("campaigns/tutorial");
+/// let campaign_path = PathBuf::from("data/test_campaign");
 /// let loader = CampaignLoader::new(base_path, campaign_path);
 /// ```
 #[derive(Debug, Clone)]
@@ -165,7 +165,7 @@ impl CampaignLoader {
     ///
     /// let loader = CampaignLoader::new(
     ///     PathBuf::from("data"),
-    ///     PathBuf::from("campaigns/tutorial")
+    ///     PathBuf::from("data/test_campaign")
     /// );
     /// ```
     pub fn new(base_data_path: PathBuf, campaign_path: PathBuf) -> Self {
@@ -190,7 +190,7 @@ impl CampaignLoader {
     ///
     /// let mut loader = CampaignLoader::new(
     ///     PathBuf::from("data"),
-    ///     PathBuf::from("campaigns/tutorial")
+    ///     PathBuf::from("data/test_campaign")
     /// );
     ///
     /// // let game_data = loader.load_game_data()?;
@@ -327,10 +327,10 @@ mod tests {
     #[test]
     fn test_campaign_loader_new() {
         let loader =
-            CampaignLoader::new(PathBuf::from("data"), PathBuf::from("campaigns/tutorial"));
+            CampaignLoader::new(PathBuf::from("data"), PathBuf::from("data/test_campaign"));
 
         assert_eq!(loader.base_data_path(), &PathBuf::from("data"));
-        assert_eq!(loader.campaign_path(), &PathBuf::from("campaigns/tutorial"));
+        assert_eq!(loader.campaign_path(), &PathBuf::from("data/test_campaign"));
     }
 
     #[test]

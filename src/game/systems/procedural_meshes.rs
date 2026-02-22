@@ -742,6 +742,8 @@ fn spawn_foliage_clusters(
                     Transform::from_translation(position).with_scale(Vec3::splat(sphere_radius)),
                     GlobalTransform::default(),
                     Visibility::default(),
+                    bevy::light::NotShadowCaster,
+                    bevy::light::NotShadowReceiver,
                 ))
                 .id();
 
@@ -839,6 +841,8 @@ pub fn spawn_tree(
             )),
             GlobalTransform::default(),
             Visibility::default(),
+            bevy::light::NotShadowCaster,
+            bevy::light::NotShadowReceiver,
         ))
         .id();
     commands.entity(parent).add_child(tree_structure);
@@ -917,6 +921,8 @@ pub fn spawn_shrub(
             .with_rotation(rotation),
             GlobalTransform::default(),
             Visibility::default(),
+            bevy::light::NotShadowCaster,
+            bevy::light::NotShadowReceiver,
             MapEntity(map_id),
             TileCoord(position),
         ))

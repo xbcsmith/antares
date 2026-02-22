@@ -17,7 +17,7 @@ use std::collections::HashSet;
 #[test]
 fn test_tutorial_npc_creature_mapping_complete() {
     // Load the tutorial campaign
-    let campaign = Campaign::load("campaigns/tutorial").expect("Failed to load tutorial campaign");
+    let campaign = Campaign::load("data/test_campaign").expect("Failed to load tutorial campaign");
     let content = campaign
         .load_content()
         .expect("Failed to load campaign content");
@@ -70,7 +70,7 @@ fn test_tutorial_npc_creature_mapping_complete() {
 #[test]
 fn test_all_tutorial_npcs_have_creature_visuals() {
     // Load the tutorial campaign
-    let campaign = Campaign::load("campaigns/tutorial").expect("Failed to load tutorial campaign");
+    let campaign = Campaign::load("data/test_campaign").expect("Failed to load tutorial campaign");
     let content = campaign
         .load_content()
         .expect("Failed to load campaign content");
@@ -105,7 +105,7 @@ fn test_all_tutorial_npcs_have_creature_visuals() {
 #[test]
 fn test_no_broken_npc_creature_references() {
     // Load the tutorial campaign
-    let campaign = Campaign::load("campaigns/tutorial").expect("Failed to load tutorial campaign");
+    let campaign = Campaign::load("data/test_campaign").expect("Failed to load tutorial campaign");
     let content = campaign
         .load_content()
         .expect("Failed to load campaign content");
@@ -141,7 +141,7 @@ fn test_no_broken_npc_creature_references() {
 #[test]
 fn test_creature_database_has_expected_npc_creatures() {
     // Load the tutorial campaign
-    let campaign = Campaign::load("campaigns/tutorial").expect("Failed to load tutorial campaign");
+    let campaign = Campaign::load("data/test_campaign").expect("Failed to load tutorial campaign");
     let content = campaign
         .load_content()
         .expect("Failed to load campaign content");
@@ -238,7 +238,7 @@ fn test_npc_definition_backward_compatible_without_creature_id() {
 #[test]
 fn test_npc_creature_id_counts() {
     // Load the tutorial campaign
-    let campaign = Campaign::load("campaigns/tutorial").expect("Failed to load tutorial campaign");
+    let campaign = Campaign::load("data/test_campaign").expect("Failed to load tutorial campaign");
     let content = campaign
         .load_content()
         .expect("Failed to load campaign content");
@@ -275,7 +275,7 @@ fn test_npc_creature_id_counts() {
 #[test]
 fn test_npc_creature_reuse() {
     // Load the tutorial campaign
-    let campaign = Campaign::load("campaigns/tutorial").expect("Failed to load tutorial campaign");
+    let campaign = Campaign::load("data/test_campaign").expect("Failed to load tutorial campaign");
     let content = campaign
         .load_content()
         .expect("Failed to load campaign content");

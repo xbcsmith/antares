@@ -2461,10 +2461,10 @@ mod tests {
     #[test]
     fn test_load_tutorial_campaign_characters() {
         // This test verifies that the tutorial campaign characters.ron file is valid
-        let result = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron");
+        let result = CharacterDatabase::load_from_file("data/test_campaign/data/characters.ron");
         assert!(
             result.is_ok(),
-            "Failed to load campaigns/tutorial/data/characters.ron: {:?}",
+            "Failed to load data/test_campaign/data/characters.ron: {:?}",
             result.err()
         );
 
@@ -2539,8 +2539,8 @@ mod tests {
 
     #[test]
     fn test_tutorial_campaign_characters_valid_references() {
-        let db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
-            .expect("Failed to load campaigns/tutorial/data/characters.ron");
+        let db = CharacterDatabase::load_from_file("data/test_campaign/data/characters.ron")
+            .expect("Failed to load data/test_campaign/data/characters.ron");
 
         // Valid race IDs from races.ron
         let valid_races = ["human", "elf", "dwarf", "gnome", "half_elf", "half_orc"];
@@ -2575,7 +2575,7 @@ mod tests {
             .expect("Failed to load core characters");
 
         let tutorial_db =
-            CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+            CharacterDatabase::load_from_file("data/test_campaign/data/characters.ron")
                 .expect("Failed to load tutorial characters");
 
         // Core data should only have pre-made characters
@@ -3345,7 +3345,7 @@ mod tests {
     #[test]
     fn test_tutorial_campaign_loads() {
         // Verify tutorial campaign characters.ron loads with new AttributePair format
-        let result = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron");
+        let result = CharacterDatabase::load_from_file("data/test_campaign/data/characters.ron");
 
         assert!(
             result.is_ok(),
@@ -3380,7 +3380,7 @@ mod tests {
     #[test]
     fn test_tutorial_campaign_hp_override() {
         // Verify that tutorial campaign hp_base fields convert to hp_override correctly
-        let db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+        let db = CharacterDatabase::load_from_file("data/test_campaign/data/characters.ron")
             .expect("Failed to load tutorial campaign");
 
         let kira = db
@@ -3408,7 +3408,7 @@ mod tests {
     #[test]
     fn test_tutorial_campaign_stats_format() {
         // Verify that tutorial campaign base_stats (simple format) deserialize correctly
-        let db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+        let db = CharacterDatabase::load_from_file("data/test_campaign/data/characters.ron")
             .expect("Failed to load tutorial campaign");
 
         let sirius = db
@@ -3495,7 +3495,7 @@ mod tests {
     #[test]
     fn test_campaign_instantiation() {
         // Verify that campaign characters can be instantiated successfully
-        let char_db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+        let char_db = CharacterDatabase::load_from_file("data/test_campaign/data/characters.ron")
             .expect("Failed to load tutorial campaign");
         let races =
             RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
@@ -3538,7 +3538,7 @@ mod tests {
     #[test]
     fn test_all_tutorial_characters_instantiate() {
         // Verify ALL tutorial campaign characters can be instantiated
-        let char_db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+        let char_db = CharacterDatabase::load_from_file("data/test_campaign/data/characters.ron")
             .expect("Failed to load tutorial campaign");
         let races =
             RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");

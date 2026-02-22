@@ -1,0 +1,201 @@
+// races.ron - Race definitions for Antares RPG
+//
+// This file contains all race definitions in RON (Rusty Object Notation) format.
+// See docs/reference/architecture.md for format specifications.
+//
+// Race stat modifiers affect the base stats of characters.
+// Positive values indicate racial bonuses, negative values indicate penalties.
+//
+// Proficiency System:
+//   Races grant proficiency CATEGORIES that combine with class proficiencies using UNION logic.
+//   Standard proficiency IDs:
+//     Weapons: simple_weapon, martial_melee, martial_ranged, blunt_weapon, unarmed
+//     Armor: light_armor, medium_armor, heavy_armor, shield
+//     Magic Items: arcane_item, divine_item
+//
+// Size Categories:
+//   Small  - Gnomes (smaller weapons, can fit in tight spaces)
+//   Medium - Humans, Elves, Dwarves, Half-Elves, Half-Orcs
+//   Large  - Reserved for future races
+
+[
+    // ===== Human - Balanced, no modifiers =====
+    (
+        id: "human",
+        name: "Human",
+        description: "Versatile and adaptable, humans excel in any role. Their balanced nature and determination make them suitable for any class.",
+        stat_modifiers: (
+            might: 0,
+            intellect: 0,
+            personality: 0,
+            endurance: 0,
+            speed: 0,
+            accuracy: 0,
+            luck: 0,
+        ),
+        resistances: (
+            magic: 0,
+            fire: 0,
+            cold: 0,
+            electricity: 0,
+            acid: 0,
+            fear: 0,
+            poison: 0,
+            psychic: 0,
+        ),
+        special_abilities: ["adaptable"],
+        size: Medium,
+        proficiencies: [],
+        incompatible_item_tags: [],
+    ),
+
+    // ===== Elf - Agile and intelligent, but less sturdy =====
+    (
+        id: "elf",
+        name: "Elf",
+        description: "Graceful and long-lived, elves possess natural magical affinity and keen senses. They excel as archers and spellcasters but are physically fragile.",
+        stat_modifiers: (
+            might: -1,
+            intellect: 2,
+            personality: 0,
+            endurance: -1,
+            speed: 1,
+            accuracy: 2,
+            luck: 0,
+        ),
+        resistances: (
+            magic: 5,
+            fire: 0,
+            cold: 0,
+            electricity: 0,
+            acid: 0,
+            fear: 0,
+            poison: 0,
+            psychic: 5,
+        ),
+        special_abilities: ["infravision", "resist_sleep", "resist_charm"],
+        size: Medium,
+        proficiencies: ["martial_ranged", "martial_melee", "longsword"],
+        incompatible_item_tags: [],
+    ),
+
+    // ===== Dwarf - Tough and strong, but slower =====
+    (
+        id: "dwarf",
+        name: "Dwarf",
+        description: "Stout and hardy, dwarves are renowned for their resilience and craftsmanship. Their natural toughness makes them excellent warriors.",
+        stat_modifiers: (
+            might: 1,
+            intellect: 0,
+            personality: -1,
+            endurance: 2,
+            speed: -1,
+            accuracy: 0,
+            luck: 0,
+        ),
+        resistances: (
+            magic: 10,
+            fire: 0,
+            cold: 0,
+            electricity: 0,
+            acid: 0,
+            fear: 5,
+            poison: 15,
+            psychic: 0,
+        ),
+        special_abilities: ["infravision", "stonecunning", "poison_resistance"],
+        size: Medium,
+        proficiencies: ["martial_melee", "blunt_weapon"],
+        incompatible_item_tags: [],
+    ),
+
+    // ===== Gnome - Clever and lucky, but weaker =====
+    (
+        id: "gnome",
+        name: "Gnome",
+        description: "Small but clever, gnomes possess natural magical resistance and extraordinary luck. Their size limits weapon choices but grants access to small spaces.",
+        stat_modifiers: (
+            might: -2,
+            intellect: 1,
+            personality: 0,
+            endurance: 0,
+            speed: 0,
+            accuracy: 0,
+            luck: 2,
+        ),
+        resistances: (
+            magic: 10,
+            fire: 0,
+            cold: 0,
+            electricity: 0,
+            acid: 0,
+            fear: 5,
+            poison: 5,
+            psychic: 10,
+        ),
+        special_abilities: ["infravision", "small_stature"],
+        size: Small,
+        proficiencies: ["simple_weapon", "martial_ranged"],
+        incompatible_item_tags: ["large_weapon", "heavy_armor"],
+    ),
+
+    // ===== Half-Elf - Blend of human and elf traits =====
+    (
+        id: "half_elf",
+        name: "Half-Elf",
+        description: "Combining the best of human versatility and elven grace, half-elves are adaptable adventurers with a touch of magical heritage.",
+        stat_modifiers: (
+            might: 0,
+            intellect: 1,
+            personality: 0,
+            endurance: 0,
+            speed: 0,
+            accuracy: 1,
+            luck: 0,
+        ),
+        resistances: (
+            magic: 3,
+            fire: 0,
+            cold: 0,
+            electricity: 0,
+            acid: 0,
+            fear: 0,
+            poison: 0,
+            psychic: 3,
+        ),
+        special_abilities: ["infravision", "resist_sleep"],
+        size: Medium,
+        proficiencies: ["martial_melee"],
+        incompatible_item_tags: [],
+    ),
+
+    // ===== Half-Orc - Strong and tough, but less charismatic =====
+    (
+        id: "half_orc",
+        name: "Half-Orc",
+        description: "Possessing orcish strength and human cunning, half-orcs are formidable warriors. Their intimidating presence can be both an asset and a hindrance.",
+        stat_modifiers: (
+            might: 2,
+            intellect: -1,
+            personality: -2,
+            endurance: 1,
+            speed: 0,
+            accuracy: 0,
+            luck: 0,
+        ),
+        resistances: (
+            magic: 0,
+            fire: 0,
+            cold: 5,
+            electricity: 0,
+            acid: 0,
+            fear: 10,
+            poison: 5,
+            psychic: 0,
+        ),
+        special_abilities: ["infravision", "intimidating"],
+        size: Medium,
+        proficiencies: ["martial_melee", "blunt_weapon"],
+        incompatible_item_tags: [],
+    ),
+]

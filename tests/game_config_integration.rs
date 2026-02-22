@@ -251,7 +251,7 @@ fn test_campaign_config_validation_passes_for_valid_custom_config() {
 #[test]
 fn test_tutorial_campaign_loads_config() {
     // Load the actual tutorial campaign
-    let tutorial_path = std::path::Path::new("campaigns/tutorial");
+    let tutorial_path = std::path::Path::new("data/test_campaign");
 
     // Skip if tutorial campaign doesn't exist (CI environment)
     if !tutorial_path.exists() {

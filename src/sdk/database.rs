@@ -155,7 +155,7 @@ impl SpellDatabase {
     /// use antares::sdk::database::SpellDatabase;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = SpellDatabase::load_from_file("campaigns/tutorial/data/spells.ron")?;
+    /// let db = SpellDatabase::load_from_file("data/test_campaign/data/spells.ron")?;
     /// println!("Loaded {} spells", db.count());
     /// # Ok(())
     /// # }
@@ -265,7 +265,7 @@ impl MonsterDatabase {
     /// use antares::sdk::database::MonsterDatabase;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = MonsterDatabase::load_from_file("campaigns/tutorial/data/monsters.ron")?;
+    /// let db = MonsterDatabase::load_from_file("data/test_campaign/data/monsters.ron")?;
     /// println!("Loaded {} monsters", db.count());
     /// # Ok(())
     /// # }
@@ -475,7 +475,7 @@ impl QuestDatabase {
     /// use antares::sdk::database::QuestDatabase;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = QuestDatabase::load_from_file("campaigns/tutorial/data/quests.ron")?;
+    /// let db = QuestDatabase::load_from_file("data/test_campaign/data/quests.ron")?;
     /// println!("Loaded {} quests", db.count());
     /// # Ok(())
     /// # }
@@ -596,7 +596,7 @@ impl ConditionDatabase {
     /// use antares::sdk::database::ConditionDatabase;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = ConditionDatabase::load_from_file("campaigns/tutorial/data/conditions.ron")?;
+    /// let db = ConditionDatabase::load_from_file("data/test_campaign/data/conditions.ron")?;
     /// println!("Loaded {} conditions", db.count());
     /// # Ok(())
     /// # }
@@ -699,7 +699,7 @@ impl DialogueDatabase {
     /// use antares::sdk::database::DialogueDatabase;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = DialogueDatabase::load_from_file("campaigns/tutorial/data/dialogues.ron")?;
+    /// let db = DialogueDatabase::load_from_file("data/test_campaign/data/dialogues.ron")?;
     /// println!("Loaded {} dialogues", db.count());
     /// # Ok(())
     /// # }
@@ -798,7 +798,7 @@ impl DialogueDatabase {
 /// use antares::sdk::database::NpcDatabase;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let db = NpcDatabase::load_from_file("campaigns/tutorial/data/npcs.ron")?;
+/// let db = NpcDatabase::load_from_file("data/test_campaign/data/npcs.ron")?;
 /// println!("Loaded {} NPCs", db.count());
 ///
 /// if let Some(npc) = db.get_npc("village_elder") {
@@ -852,7 +852,7 @@ impl NpcDatabase {
     /// use antares::sdk::database::NpcDatabase;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = NpcDatabase::load_from_file("campaigns/tutorial/data/npcs.ron")?;
+    /// let db = NpcDatabase::load_from_file("data/test_campaign/data/npcs.ron")?;
     /// println!("Loaded {} NPCs", db.count());
     /// # Ok(())
     /// # }
@@ -2037,7 +2037,7 @@ mod tests {
     #[test]
     fn test_content_database_load_campaign_characters() {
         // Test loading campaign characters
-        let result = ContentDatabase::load_campaign("campaigns/tutorial");
+        let result = ContentDatabase::load_campaign("data/test_campaign");
 
         if let Ok(db) = result {
             let stats = db.stats();
@@ -2670,8 +2670,8 @@ mod tests {
     #[test]
     fn test_tutorial_npcs_reference_valid_quests() {
         // Test that tutorial NPCs reference valid quest IDs
-        let tutorial_npcs_path = "campaigns/tutorial/data/npcs.ron";
-        let tutorial_quests_path = "campaigns/tutorial/data/quests.ron";
+        let tutorial_npcs_path = "data/test_campaign/data/npcs.ron";
+        let tutorial_quests_path = "data/test_campaign/data/quests.ron";
 
         // Skip test if files don't exist
         if !std::path::Path::new(tutorial_npcs_path).exists()

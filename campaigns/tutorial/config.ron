@@ -24,7 +24,7 @@ GameConfig(
     ),
     camera: CameraConfig(
         mode: FirstPerson,
-        eye_height: 0.6,
+        eye_height: 1.0,
         fov: 70.0,
         near_clip: 0.1,
         far_clip: 1000.0,

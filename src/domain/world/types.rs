@@ -1929,6 +1929,11 @@ pub struct ResolvedNpc {
     /// Optional sprite reference from NPC definition.
     /// When `Some`, runtime spawning prefers this over default placeholder.
     pub sprite: Option<SpriteReference>,
+    /// Optional creature visual reference from NPC definition.
+    ///
+    /// When `Some`, runtime rendering can spawn this NPC using procedural
+    /// creature meshes instead of sprite billboards.
+    pub creature_id: Option<crate::domain::types::CreatureId>,
     /// Position from placement
     pub position: Position,
     /// Facing direction from placement
@@ -1986,6 +1991,7 @@ impl ResolvedNpc {
             description: definition.description.clone(),
             portrait_id: definition.portrait_id.clone(),
             sprite: definition.sprite.clone(),
+            creature_id: definition.creature_id,
             position: placement.position,
             facing: placement.facing,
             dialogue_id: placement.dialogue_override.or(definition.dialogue_id),
@@ -2310,6 +2316,7 @@ mod map_npc_resolution_tests {
         assert_eq!(resolved[0].name, "Bob the Merchant");
         assert_eq!(resolved[0].position, Position::new(5, 5));
         assert_eq!(resolved[0].portrait_id, "merchant.png");
+        assert_eq!(resolved[0].creature_id, None);
     }
 
     #[test]
@@ -2467,6 +2474,7 @@ mod map_npc_resolution_tests {
         assert_eq!(resolved.position, Position::new(3, 4));
         assert_eq!(resolved.facing, Some(Direction::North));
         assert_eq!(resolved.dialogue_id, Some(42));
+        assert_eq!(resolved.creature_id, None);
         assert_eq!(resolved.quest_ids, vec![1]);
         assert_eq!(resolved.faction, Some("Test Faction".to_string()));
         assert!(resolved.is_merchant);
@@ -2496,6 +2504,21 @@ mod map_npc_resolution_tests {
             "sprites/actors/knight.png"
         );
         assert_eq!(resolved.sprite.as_ref().unwrap().sprite_index, 7);
+        assert_eq!(resolved.creature_id, None);
+    }
+
+    #[test]
+    fn test_resolved_npc_from_placement_copies_creature_id_when_present() {
+        // Arrange
+        let definition =
+            NpcDefinition::new("elder", "Village Elder", "elder.png").with_creature_id(54);
+        let placement = NpcPlacement::new("elder", Position::new(2, 3));
+
+        // Act
+        let resolved = ResolvedNpc::from_placement_and_definition(&placement, &definition);
+
+        // Assert
+        assert_eq!(resolved.creature_id, Some(54));
     }
 
     #[test]

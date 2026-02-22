@@ -13,6 +13,9 @@ Document the campaign data structure, including all the RON files that make up a
 ### Campaign Builder command line
 
 Specify the campaign file to open from command line.
+
+The Campaign Builder SDK should mimic the game engine with a `--campaign ./path/to/campaign` flag that automatically loads the `campaign.ron` file in the `./path/to/campaign`.
+
 ### Creatures Editor
 
 Campaign Builder --> Creatures Editor
@@ -27,7 +30,7 @@ Campaign Builder --> Creatures Editor
 
 [@create_creatures.md](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/docs/how-to/create_creatures.md) Tools does not have a link to the Creature Editor. The only way to spawn a creature editor is to select New from The Campaign Builder --> Creatures tab. The Creatures tab has a list of creatures but no preview is rendered when selected. I would expect a Preview in the right column to appear with a Edit button that opens the Creatures Assets .ron file in the Creature Editor window. I would also expect to have a place where I can register an creature asset .ron in the creatures.ron registry. I thought we covered this in the [@creature_editor_enhanced_implementation_plan.md](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/docs/explanation/creature_editor_enhanced_implementation_plan.md) [@creature_templates.md](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/docs/reference/creature_templates.md) are not displayed in the template browser window. and I can't figure out how to get to them.
 
-[creature editor ui fix](./creature_editor_ux_fixes_implementation_plan.md)
+✅ COMPLETED -[creature editor ui fix](./finished/creature_editor_ux_fixes_implementation_plan.md)
 
 Clashing ID in the Creature Template browser.
 
@@ -320,3 +323,73 @@ HUD character names do not need numbers next to them. Order can be determined by
 ### Procedural Meshes Implementation
 
 ✅ COMPLETED - [procedural meshes implementation](./procedural_meshes_implementation_plan.md)
+
+## Inventory System
+
+### ArmorClassification Expansion
+
+The current `ArmorClassification` enum in `src/domain/items/types.rs` only has four variants: `Light`, `Medium`, `Heavy`, and `Shield`. This means helmets and boots cannot be represented as distinct armor classifications, and the `Equipment` struct fields `equipment.helmet` and `equipment.boots` have no corresponding `ItemType` variant to route items into those slots during equip operations. Slot resolution currently falls through to item `tags` as a workaround.
+
+The goal is to expand `ArmorClassification` so that every named slot on `Equipment` has a first-class classification, and so that the total AC score contributed by a character's equipped armor accounts for all worn pieces: body armor, shield, helmet, and boots.
+
+Work required:
+
+- Add `Helmet` and `Boots` variants to `ArmorClassification` in `src/domain/items/types.rs`.
+- Update `ArmorClassification::to_proficiency_id()` in `src/domain/items/types.rs` to map the new variants to appropriate proficiency IDs (likely reusing the existing light/heavy armor proficiency IDs, or adding dedicated ones if needed).
+- Update `has_slot_for_item()` in `src/domain/items/equipment_validation.rs` to route `Armor(ArmorClassification::Helmet)` to `equipment.helmet` and `Armor(ArmorClassification::Boots)` to `equipment.boots`.
+- Update `do_equip()` (once implemented in `src/domain/transactions.rs`) to use the classification directly for slot resolution instead of relying on item `tags`.
+- Update `data/items.ron` and `campaigns/tutorial/data/items.ron` to set `classification: Helmet` or `classification: Boots` on all helmet and boot items that currently use tags as a workaround.
+- Update AC calculation (wherever total armor class is computed from equipped items) to sum contributions from body armor slot, shield slot, helmet slot, and boots slot. Each slot should contribute its `ArmorData::ac_bonus` to the character's effective AC.
+- Update `src/sdk/validation.rs` to validate that items with `classification: Helmet` are only assigned to `equipment.helmet` and items with `classification: Boots` are only assigned to `equipment.boots`.
+- Update all tests in `src/domain/items/equipment_validation.rs` and `src/domain/items/types.rs` that reference `ArmorClassification` to cover the new variants.
+
+This change is not backward compatible with existing RON item data that uses `tags` for helmet and boot slot routing. All affected item definitions must be migrated at the same time.
+
+### Equipped Weapon Damage in Combat
+
+Currently `perform_attack_action_with_rng` in `src/game/systems/combat.rs` hardcodes `Attack::physical(DiceRoll::new(1, 4, 0))` for every player attack, regardless of what the character has equipped in `equipment.weapon`. Monster attacks correctly read from their `attacks` list, but player characters always deal 1d4 physical damage. This means a Fighter wielding a longsword (1d8+2) deals the same damage as an unarmed apprentice.
+
+The goal is to derive the player attack from the character's equipped weapon when one is present, and fall back to a defined unarmed attack when the weapon slot is empty.
+
+Work required:
+
+- Add a new function `get_character_attack` in `src/domain/combat/engine.rs` (or `src/domain/items/types.rs`) with the following logic:
+  - Accept `character: &Character` and `item_db: &ItemDatabase`.
+  - If `character.equipment.weapon` is `Some(item_id)`, look up the item in `item_db`. If the item is a `Weapon`, construct and return `Attack::physical(weapon_data.damage)` with `bonus` applied (add `weapon_data.bonus` to the `DiceRoll` bonus field or apply it as a flat damage modifier after the roll). If the item is not found or is not a weapon type, fall through to the unarmed default.
+  - If `character.equipment.weapon` is `None`, or the lookup fails, return the unarmed fallback: `Attack::physical(DiceRoll::new(1, 2, 0))` with `WeaponClassification::Unarmed`. The `"unarmed"` proficiency already exists in `data/proficiencies.ron`.
+- Update `perform_attack_action_with_rng` in `src/game/systems/combat.rs` to replace the hardcoded `DiceRoll::new(1, 4, 0)` line with a call to `get_character_attack(&character, item_db)`, where `item_db` is retrieved from the `ContentDatabase` already available via the `content: &GameContent` parameter.
+- Define a module-level constant `UNARMED_DAMAGE: DiceRoll = DiceRoll { count: 1, sides: 2, bonus: 0 }` in `src/domain/combat/engine.rs` so the fallback value is not a magic literal.
+- The `WeaponData::bonus` field (i16) should be added to the total damage after the dice roll, floored at 1. A negative bonus on a cursed weapon can reduce damage but never below 1.
+- Update `perform_monster_turn_with_rng` to remain unchanged — monsters already use `choose_monster_attack` which reads from `monster.attacks`.
+
+Testing requirements:
+
+- `test_player_attack_uses_equipped_weapon_damage` — equip a weapon with known `DiceRoll`, run `perform_attack_action_with_rng` with a seeded RNG, assert damage is within the weapon's range, not the old hardcoded 1d4 range.
+- `test_player_attack_unarmed_when_no_weapon_equipped` — character with `equipment.weapon = None`, run attack, assert damage is within 1d2 range (1–2 before might bonus).
+- `test_get_character_attack_returns_weapon_data` — unit test for `get_character_attack` directly: equip item_id 1 (a known weapon), assert returned `Attack.damage` matches the weapon's `WeaponData.damage`.
+- `test_get_character_attack_returns_unarmed_fallback` — unit test: `equipment.weapon = None`, assert returned `Attack.damage == UNARMED_DAMAGE`.
+- `test_get_character_attack_invalid_item_id_falls_back_to_unarmed` — equip a non-existent item_id (not in ItemDatabase), assert fallback to `UNARMED_DAMAGE` rather than panic.
+
+### Dropped Items World Persistence
+
+When a character drops an item (via `drop_item()` in `src/domain/transactions.rs`), the item is currently removed from the character's inventory and discarded. There is no mechanism to place it in the game world at the position where it was dropped, nor to represent it as a pickable entity on the map.
+
+The goal is to persist dropped items as world entities so that:
+
+- A dropped item appears at the tile position where it was dropped.
+- The player can walk over or interact with the tile to pick the item up.
+- Dropped items survive session save and load.
+- Dropped items are scoped to the map they were dropped on.
+
+Work required:
+
+- Add a `DroppedItem` event type to `src/domain/world/events.rs` (or a dedicated `src/domain/world/dropped_items.rs` module) with fields: `item_id: ItemId`, `charges: u8`, `position: Position`, `map_id: MapId`.
+- Add a `dropped_items: Vec<DroppedItem>` field to the `Map` struct in `src/domain/world/types.rs` so that dropped items are stored per-map and serialized with world state.
+- Update `drop_item()` in `src/domain/transactions.rs` to accept a `position: Position` and `map_id: MapId` and insert a `DroppedItem` record into the appropriate map.
+- Add a pickup operation `pickup_item()` in `src/domain/transactions.rs` that removes the `DroppedItem` record from the map and adds the item to a character's inventory (subject to the same `Inventory::MAX_ITEMS` capacity check as `buy_item`).
+- Add a `PickupItem` `EventResult` variant to `src/domain/world/events.rs` so that walking over a dropped item tile can trigger the pickup flow.
+- Spawn a visual marker entity (procedural mesh or sprite) in the game engine for each `DroppedItem` on the current map when the map loads.
+- Despawn the visual marker when the item is picked up.
+- Ensure `SaveGame` serialization captures `dropped_items` on each map as part of the world state round-trip.
+
+This item is tracked here for future planning. It does not need to be addressed in the current inventory system implementation plan.

@@ -613,7 +613,7 @@ mod asset_loading_tests {
     fn test_resolve_texture_path_prefers_campaign_assets() {
         // Preserve existing env var if present
         let prev = std::env::var("BEVY_ASSET_ROOT").ok();
-        std::env::set_var("BEVY_ASSET_ROOT", "campaigns/tutorial");
+        std::env::set_var("BEVY_ASSET_ROOT", "data/test_campaign");
 
         let sprite_assets = SpriteAssets::new();
         let resolved =

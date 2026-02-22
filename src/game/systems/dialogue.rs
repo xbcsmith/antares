@@ -351,6 +351,13 @@ fn handle_select_choice(
                         );
                     }
 
+                    // Some actions (for example recruitment) intentionally exit Dialogue mode.
+                    // If that happened, stop processing this choice to avoid advancing dialogue
+                    // state after the mode transition.
+                    if !matches!(global_state.0.mode, GameMode::Dialogue(_)) {
+                        continue;
+                    }
+
                     // Terminal choice: end dialogue
                     if choice.ends_dialogue || choice.target_node.is_none() {
                         global_state.0.return_to_exploration();
@@ -572,6 +579,154 @@ fn evaluate_conditions(
     true
 }
 
+/// Resolves a recruitable character ID from dialogue recruitment context.
+///
+/// Recruitable map events may carry NPC-prefixed IDs (e.g. `npc_old_gareth`)
+/// while character definitions are keyed by canonical IDs (e.g. `old_gareth`).
+/// This helper normalizes that mismatch and returns a valid character ID when
+/// one can be found in the character database.
+fn resolve_recruitment_character_id(
+    dialogue_state: Option<&crate::application::dialogue::DialogueState>,
+    game_state: &crate::application::GameState,
+    db: &crate::sdk::database::ContentDatabase,
+) -> Option<String> {
+    let context_character_id = dialogue_state
+        .and_then(|state| {
+            state
+                .recruitment_context
+                .as_ref()
+                .map(|ctx| ctx.character_id.clone())
+        })
+        .or_else(|| match &game_state.mode {
+            crate::application::GameMode::Dialogue(state) => state
+                .recruitment_context
+                .as_ref()
+                .map(|ctx| ctx.character_id.clone()),
+            _ => None,
+        })?;
+
+    let mut candidates = vec![context_character_id.clone()];
+    if let Some(stripped) = context_character_id.strip_prefix("npc_") {
+        candidates.push(stripped.to_string());
+    }
+
+    candidates
+        .into_iter()
+        .find(|candidate| db.characters.get_character(candidate).is_some())
+}
+
+/// Executes recruitment-to-party flow and handles map event cleanup/logging.
+fn execute_recruit_to_party(
+    character_id: &str,
+    game_state: &mut crate::application::GameState,
+    db: &crate::sdk::database::ContentDatabase,
+    dialogue_state: Option<&crate::application::dialogue::DialogueState>,
+    game_log: &mut Option<&mut crate::game::systems::ui::GameLog>,
+) {
+    match game_state.recruit_from_map(character_id, db) {
+        Ok(crate::application::RecruitResult::AddedToParty) => {
+            info!("Successfully recruited '{}' to active party", character_id);
+            if let Some(log) = game_log.as_deref_mut() {
+                if let Some(char_def) = db.characters.get_character(character_id) {
+                    log.add(format!("{} joins the party!", char_def.name));
+                } else {
+                    log.add(format!("{} joins the party!", character_id));
+                }
+            }
+
+            // Remove recruitment event from map
+            if let Some(dlg_state) = dialogue_state {
+                if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
+                    if let Some(current_map) = game_state.world.get_current_map_mut() {
+                        if let Some(_removed_event) =
+                            current_map.remove_event(recruitment_ctx.event_position)
+                        {
+                            info!(
+                                "Removed recruitment event at {:?}",
+                                recruitment_ctx.event_position
+                            );
+                        } else {
+                            warn!(
+                                "No event found at recruitment position {:?}",
+                                recruitment_ctx.event_position
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Close dialogue immediately after successful recruitment.
+            game_state.return_to_exploration();
+        }
+        Ok(crate::application::RecruitResult::Declined) => {
+            // Not currently used by recruit_from_map
+            info!("Recruitment declined for '{}'", character_id);
+        }
+        Ok(crate::application::RecruitResult::SentToInn(inn_id)) => {
+            info!("Party full - sent '{}' to inn '{}'", character_id, inn_id);
+            if let Some(log) = game_log.as_deref_mut() {
+                if let Some(char_def) = db.characters.get_character(character_id) {
+                    log.add(format!(
+                        "Party is full! {} will wait at the inn.",
+                        char_def.name
+                    ));
+                } else {
+                    log.add(format!("Party is full! {} sent to inn.", character_id));
+                }
+            }
+
+            // Remove recruitment event from map
+            if let Some(dlg_state) = dialogue_state {
+                if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
+                    if let Some(current_map) = game_state.world.get_current_map_mut() {
+                        if let Some(_removed_event) =
+                            current_map.remove_event(recruitment_ctx.event_position)
+                        {
+                            info!(
+                                "Removed recruitment event at {:?}",
+                                recruitment_ctx.event_position
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Close dialogue after routing recruit to inn.
+            game_state.return_to_exploration();
+        }
+        Err(crate::application::RecruitmentError::AlreadyEncountered(id)) => {
+            warn!("Cannot recruit '{}': already encountered", id);
+            if let Some(log) = game_log.as_deref_mut() {
+                log.add(format!("{} has already joined your adventure.", id));
+            }
+        }
+        Err(crate::application::RecruitmentError::CharacterNotFound(id)) => {
+            error!("Character definition '{}' not found in database", id);
+            if let Some(log) = game_log.as_deref_mut() {
+                log.add(format!("Error: Character '{}' not found.", id));
+            }
+        }
+        Err(crate::application::RecruitmentError::CharacterDefinition(err)) => {
+            error!("Character definition error for '{}': {}", character_id, err);
+            if let Some(log) = game_log.as_deref_mut() {
+                log.add(format!("Error loading character: {}", err));
+            }
+        }
+        Err(crate::application::RecruitmentError::CharacterError(err)) => {
+            error!("Character operation error for '{}': {}", character_id, err);
+            if let Some(log) = game_log.as_deref_mut() {
+                log.add(format!("Error: {}", err));
+            }
+        }
+        Err(crate::application::RecruitmentError::PartyManager(err)) => {
+            error!("Party management error for '{}': {}", character_id, err);
+            if let Some(log) = game_log.as_deref_mut() {
+                log.add(format!("Error: {}", err));
+            }
+        }
+    }
+}
+
 /// Execute a single `DialogueAction`.
 ///
 /// Supported actions:
@@ -688,6 +843,36 @@ fn execute_action(
                 }
             }
 
+            if event_name == "recruit_character_to_party" {
+                let resolved_character_id =
+                    resolve_recruitment_character_id(dialogue_state, game_state, db);
+
+                if let Some(character_id) = resolved_character_id {
+                    info!(
+                        "TriggerEvent '{}' resolved recruitment target '{}'",
+                        event_name, character_id
+                    );
+                    execute_recruit_to_party(
+                        &character_id,
+                        game_state,
+                        db,
+                        dialogue_state,
+                        &mut game_log,
+                    );
+                } else {
+                    warn!(
+                        "TriggerEvent '{}' fired without resolvable recruitment context",
+                        event_name
+                    );
+                    if let Some(log) = game_log.as_deref_mut() {
+                        log.add(
+                            "Error: Could not resolve recruitable character for this dialogue."
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+
             // Generic event logging (kept for visibility/audit)
             info!("Dialogue triggered event: {}", event_name);
             if let Some(ref mut log) = game_log {
@@ -704,104 +889,7 @@ fn execute_action(
                 "Executing RecruitToParty action for character '{}'",
                 character_id
             );
-
-            // Call core recruitment logic
-            match game_state.recruit_from_map(character_id, db) {
-                Ok(crate::application::RecruitResult::AddedToParty) => {
-                    info!("Successfully recruited '{}' to active party", character_id);
-                    if let Some(ref mut log) = game_log {
-                        if let Some(char_def) = db.characters.get_character(character_id) {
-                            log.add(format!("{} joins the party!", char_def.name));
-                        } else {
-                            log.add(format!("{} joins the party!", character_id));
-                        }
-                    }
-
-                    // Remove recruitment event from map
-                    if let Some(dlg_state) = dialogue_state {
-                        if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
-                            if let Some(current_map) = game_state.world.get_current_map_mut() {
-                                if let Some(_removed_event) =
-                                    current_map.remove_event(recruitment_ctx.event_position)
-                                {
-                                    info!(
-                                        "Removed recruitment event at {:?}",
-                                        recruitment_ctx.event_position
-                                    );
-                                } else {
-                                    warn!(
-                                        "No event found at recruitment position {:?}",
-                                        recruitment_ctx.event_position
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-                Ok(crate::application::RecruitResult::Declined) => {
-                    // Not currently used by recruit_from_map
-                    info!("Recruitment declined for '{}'", character_id);
-                }
-                Ok(crate::application::RecruitResult::SentToInn(inn_id)) => {
-                    info!("Party full - sent '{}' to inn '{}'", character_id, inn_id);
-                    if let Some(ref mut log) = game_log {
-                        if let Some(char_def) = db.characters.get_character(character_id) {
-                            log.add(format!(
-                                "Party is full! {} will wait at the inn.",
-                                char_def.name
-                            ));
-                        } else {
-                            log.add(format!("Party is full! {} sent to inn.", character_id));
-                        }
-                    }
-
-                    // Remove recruitment event from map
-                    if let Some(dlg_state) = dialogue_state {
-                        if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
-                            if let Some(current_map) = game_state.world.get_current_map_mut() {
-                                if let Some(_removed_event) =
-                                    current_map.remove_event(recruitment_ctx.event_position)
-                                {
-                                    info!(
-                                        "Removed recruitment event at {:?}",
-                                        recruitment_ctx.event_position
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(crate::application::RecruitmentError::AlreadyEncountered(id)) => {
-                    warn!("Cannot recruit '{}': already encountered", id);
-                    if let Some(ref mut log) = game_log {
-                        log.add(format!("{} has already joined your adventure.", id));
-                    }
-                }
-                Err(crate::application::RecruitmentError::CharacterNotFound(id)) => {
-                    error!("Character definition '{}' not found in database", id);
-                    if let Some(ref mut log) = game_log {
-                        log.add(format!("Error: Character '{}' not found.", id));
-                    }
-                }
-                Err(crate::application::RecruitmentError::CharacterDefinition(err)) => {
-                    error!("Character definition error for '{}': {}", character_id, err);
-                    if let Some(ref mut log) = game_log {
-                        log.add(format!("Error loading character: {}", err));
-                    }
-                }
-                Err(crate::application::RecruitmentError::CharacterError(err)) => {
-                    error!("Character operation error for '{}': {}", character_id, err);
-                    if let Some(ref mut log) = game_log {
-                        log.add(format!("Error: {}", err));
-                    }
-                }
-                Err(crate::application::RecruitmentError::PartyManager(err)) => {
-                    error!("Party management error for '{}': {}", character_id, err);
-                    if let Some(ref mut log) = game_log {
-                        log.add(format!("Error: {}", err));
-                    }
-                }
-            }
+            execute_recruit_to_party(character_id, game_state, db, dialogue_state, &mut game_log);
         }
         DialogueAction::RecruitToInn {
             character_id,
@@ -1717,6 +1805,104 @@ mod tests {
             }
             other => panic!("Expected GameMode::InnManagement, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_trigger_event_recruit_character_to_party_resolves_npc_prefixed_context() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+
+        // Arrange
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Add required class and race
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Character definition uses canonical ID without npc_ prefix.
+        let old_gareth = CharacterDefinition::new(
+            "old_gareth".to_string(),
+            "Old Gareth".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        db.characters.add_character(old_gareth).unwrap();
+
+        let mut dlg_state = crate::application::dialogue::DialogueState::start(
+            100,
+            1,
+            Some(crate::domain::types::Position::new(15, 7)),
+            Some("npc_old_gareth".to_string()),
+        );
+        dlg_state.recruitment_context = Some(crate::application::dialogue::RecruitmentContext {
+            character_id: "npc_old_gareth".to_string(),
+            event_position: crate::domain::types::Position::new(15, 7),
+        });
+
+        // Act
+        execute_action(
+            &crate::domain::dialogue::DialogueAction::TriggerEvent {
+                event_name: "recruit_character_to_party".to_string(),
+            },
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+        );
+
+        // Assert
+        assert_eq!(game_state.party.size(), 1);
+        assert_eq!(game_state.party.members[0].name, "Old Gareth");
+        assert!(game_state.encountered_characters.contains("old_gareth"));
+    }
+
+    #[test]
+    fn test_trigger_event_recruit_character_to_party_with_unresolvable_context_noops() {
+        // Arrange: no character definitions are available for the recruitment context.
+        let mut game_state = crate::application::GameState::new();
+        let db = crate::sdk::database::ContentDatabase::new();
+
+        let mut dlg_state = crate::application::dialogue::DialogueState::start(
+            100,
+            1,
+            Some(crate::domain::types::Position::new(15, 7)),
+            Some("npc_missing".to_string()),
+        );
+        dlg_state.recruitment_context = Some(crate::application::dialogue::RecruitmentContext {
+            character_id: "npc_missing".to_string(),
+            event_position: crate::domain::types::Position::new(15, 7),
+        });
+
+        // Act
+        execute_action(
+            &crate::domain::dialogue::DialogueAction::TriggerEvent {
+                event_name: "recruit_character_to_party".to_string(),
+            },
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+        );
+
+        // Assert
+        assert_eq!(game_state.party.size(), 0);
+        assert_eq!(game_state.roster.characters.len(), 0);
+        assert!(game_state.encountered_characters.is_empty());
     }
 
     #[test]

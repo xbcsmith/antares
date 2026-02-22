@@ -12,7 +12,7 @@ use tempfile::tempdir;
 
 /// Helper to load map file content
 fn load_map_content(map_num: u32) -> String {
-    let path = format!("campaigns/tutorial/data/maps/map_{}.ron", map_num);
+    let path = format!("data/test_campaign/data/maps/map_{}.ron", map_num);
     assert!(Path::new(&path).exists(), "Map file {} should exist", path);
     fs::read_to_string(&path).expect("Should be able to read map file")
 }
@@ -297,7 +297,7 @@ fn test_implementation_completed() {
 
     // Copy maps into temporary directory and report sizes
     for map_id in 1..=5 {
-        let src = format!("campaigns/tutorial/data/maps/map_{}.ron", map_id);
+        let src = format!("data/test_campaign/data/maps/map_{}.ron", map_id);
         let dst = tmpdir.path().join(format!("map_{}.ron", map_id));
         fs::copy(&src, &dst).unwrap_or_else(|e| {
             panic!(
