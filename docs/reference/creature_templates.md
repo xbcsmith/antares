@@ -472,5 +472,5 @@ Each example demonstrates different techniques and customizations.
 
 - [Creature Creation Quickstart](../tutorials/creature_creation_quickstart.md)
 - [How to Create Creatures](../how-to/create_creatures.md)
-- [Procedural Mesh Implementation Plan](../explanation/procedural_mesh_implementation_plan.md)
-- [Phase 8: Content Creation](../explanation/procedural_mesh_implementation_plan.md#phase-8-content-creation--templates)
+- [Procedural Mesh Implementation Plan](../explanation/finished/procedural_mesh_implementation_plan.md)
+- [Phase 8: Content Creation](../explanation/finished/procedural_mesh_implementation_plan.md#phase-8-content-creation--templates)
