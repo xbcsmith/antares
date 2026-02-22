@@ -41,8 +41,8 @@ build-macos: ; $(info $(M) running cargo build with target x86_64-apple-darwin..
 run: ; $(info $(M) running cargo run...) @ ## Runs a cargo run
 	$Q $(CARGO) run
 
-sdk: ; $(info $(M) running  cargo run --package campaign_builder --bin campaign-builder) @ ## Runs a cargo run --package campaign_builder --bin campaign-builder
-	$Q $(CARGO) run --package campaign_builder --bin campaign-builder
+sdk: ; $(info $(M) running  cargo run --package campaign_builder --bin campaign-builder -- --campaign campaigns/tutorial) @ ## Runs a cargo run --package campaign_builder --bin campaign-builder with the tutorial campaign
+	$Q $(CARGO) run --package campaign_builder --bin campaign-builder -- --campaign campaigns/tutorial
 
 # Run tests
 test: ; $(info $(M) running cargo test...) @ ## Runs a cargo test
