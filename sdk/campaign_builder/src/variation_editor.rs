@@ -19,11 +19,12 @@
 //!
 //! ```no_run
 //! use campaign_builder::variation_editor::VariationEditorState;
-//! use antares::domain::visual::{CreatureDefinition, CreatureVariation};
+//! use antares::domain::visual::creature_variations::CreatureVariation;
+//! use antares::domain::visual::CreatureDefinition;
 //!
 //! let mut state = VariationEditorState::new();
 //! let mut creature = CreatureDefinition::default();
-//! let variations = vec![];
+//! let variations: Vec<CreatureVariation> = vec![];
 //!
 //! // In your egui UI context:
 //! // state.show(ui, &mut creature, &variations);

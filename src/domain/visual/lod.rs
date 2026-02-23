@@ -21,9 +21,13 @@
 //! use antares::domain::visual::{MeshDefinition, lod::generate_lod_levels};
 //!
 //! let mesh = MeshDefinition {
+//!     name: None,
 //!     vertices: vec![
-//!         [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0],
-//!         [0.0, 1.0, 0.0], [0.5, 0.5, 0.5],
+//!         [0.0, 0.0, 0.0],
+//!         [1.0, 0.0, 0.0],
+//!         [1.0, 1.0, 0.0],
+//!         [0.0, 1.0, 0.0],
+//!         [0.5, 0.5, 0.5],
 //!     ],
 //!     indices: vec![0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4],
 //!     normals: None,
@@ -65,6 +69,7 @@ use std::collections::HashSet;
 /// use antares::domain::visual::{MeshDefinition, lod::generate_lod_levels};
 ///
 /// let mesh = MeshDefinition {
+///     name: None,
 ///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 ///     indices: vec![0, 1, 2],
 ///     normals: None,
@@ -107,7 +112,7 @@ pub fn generate_lod_levels(
         let target_count = (base_triangle_count as f32 * reduction_factor).max(1.0) as usize;
         let simplified = simplify_mesh(mesh, target_count);
 
-        // Distance threshold grows exponentially
+        // Distance threshold grows quadratically with level (heuristic)
         let distance = base_distance * (level as f32).powf(2.0);
 
         lod_levels.push(simplified);
@@ -137,6 +142,7 @@ pub fn generate_lod_levels(
 /// use antares::domain::visual::{MeshDefinition, lod::simplify_mesh};
 ///
 /// let mesh = MeshDefinition {
+///     name: None,
 ///     vertices: vec![
 ///         [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0],
 ///         [0.0, 1.0, 0.0], [0.5, 0.5, 0.5],

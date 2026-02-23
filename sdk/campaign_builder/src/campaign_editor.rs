@@ -351,7 +351,21 @@ impl CampaignMetadataEditorState {
     /// use antares::domain::world::npc::NpcDefinition;
     /// let mut state = CampaignMetadataEditorState::new();
     /// state.innkeeper_search = "mary".to_string();
-    /// let filtered = state.visible_innkeepers(&[NpcDefinition::innkeeper("inn_mary", "Mary", "p.png")]);
+    /// let npc = NpcDefinition {
+    ///     id: "inn_mary".to_string(),
+    ///     name: "Mary".to_string(),
+    ///     description: String::new(),
+    ///     portrait_id: "p.png".to_string(),
+    ///     dialogue_id: None,
+    ///     creature_id: None,
+    ///     sprite: None,
+    ///     quest_ids: Vec::new(),
+    ///     faction: None,
+    ///     is_merchant: false,
+    ///     is_innkeeper: true,
+    /// };
+    /// let npcs = [npc];
+    /// let filtered = state.visible_innkeepers(&npcs);
     /// assert_eq!(filtered.len(), 1);
     /// ```
     pub fn visible_innkeepers<'a>(&self, npcs: &'a [NpcDefinition]) -> Vec<&'a NpcDefinition> {

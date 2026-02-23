@@ -20,6 +20,7 @@
 //!
 //! // Create a simple cube mesh
 //! let cube = MeshDefinition {
+//!     name: None,
 //!     vertices: vec![
 //!         [-1.0, -1.0, -1.0], [1.0, -1.0, -1.0],
 //!         [1.0, 1.0, -1.0], [-1.0, 1.0, -1.0],
@@ -87,6 +88,7 @@ use crate::domain::types::CreatureId;
 ///
 /// // Triangle mesh
 /// let triangle = MeshDefinition {
+///     name: None,
 ///     vertices: vec![
 ///         [0.0, 1.0, 0.0],
 ///         [-1.0, -1.0, 0.0],
@@ -163,6 +165,23 @@ pub struct MeshDefinition {
     pub texture_path: Option<String>,
 }
 
+impl Default for MeshDefinition {
+    fn default() -> Self {
+        Self {
+            name: None,
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            normals: None,
+            uvs: None,
+            color: default_color(),
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        }
+    }
+}
+
 /// Material definition for physically-based rendering
 ///
 /// Defines the visual properties of a mesh surface using PBR parameters.
@@ -212,6 +231,18 @@ pub struct MaterialDefinition {
     /// Alpha blending mode
     #[serde(default)]
     pub alpha_mode: AlphaMode,
+}
+
+impl Default for MaterialDefinition {
+    fn default() -> Self {
+        Self {
+            base_color: default_color(),
+            metallic: 0.0,
+            roughness: default_roughness(),
+            emissive: None,
+            alpha_mode: AlphaMode::Opaque,
+        }
+    }
 }
 
 /// Alpha blending mode for materials
@@ -330,6 +361,7 @@ impl Default for MeshTransform {
 /// use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 ///
 /// let body = MeshDefinition {
+///     name: None,
 ///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 ///     indices: vec![0, 1, 2],
 ///     normals: None,
@@ -342,6 +374,7 @@ impl Default for MeshTransform {
 /// };
 ///
 /// let head = MeshDefinition {
+///     name: None,
 ///     vertices: vec![[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.25, 0.5, 0.0]],
 ///     indices: vec![0, 1, 2],
 ///     normals: None,
@@ -391,6 +424,19 @@ pub struct CreatureDefinition {
     pub color_tint: Option<[f32; 4]>,
 }
 
+impl Default for CreatureDefinition {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            name: "New Creature".to_string(),
+            meshes: Vec::new(),
+            mesh_transforms: Vec::new(),
+            scale: 1.0,
+            color_tint: None,
+        }
+    }
+}
+
 impl CreatureDefinition {
     /// Validates that the creature definition is well-formed
     ///
@@ -410,6 +456,7 @@ impl CreatureDefinition {
     /// use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
     ///
     /// let mesh = MeshDefinition {
+    ///     name: None,
     ///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
     ///     indices: vec![0, 1, 2],
     ///     normals: None,

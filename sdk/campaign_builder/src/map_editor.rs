@@ -1451,10 +1451,11 @@ impl MapEditorState {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::campaign_builder::MapEditorState;
-    /// use antares::domain::world::{Map, Position};
+    /// use campaign_builder::map_editor::MapEditorState;
+    /// use antares::domain::world::Map;
+    /// use antares::domain::types::Position;
     ///
-    /// let mut editor = MapEditorState::new(Map::new(10, 10));
+    /// let mut editor = MapEditorState::new(Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10));
     /// editor.selected_position = Some(Position::new(5, 5));
     /// editor.apply_terrain_state_to_selection();
     /// ```

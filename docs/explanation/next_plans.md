@@ -16,6 +16,8 @@ Specify the campaign file to open from command line.
 
 The Campaign Builder SDK should mimic the game engine with a `--campaign ./path/to/campaign` flag that automatically loads the `campaign.ron` file in the `./path/to/campaign`.
 
+✅ COMPLETED -
+
 ### Creatures Editor
 
 Campaign Builder --> Creatures Editor
@@ -393,3 +395,46 @@ Work required:
 - Ensure `SaveGame` serialization captures `dropped_items` on each map as part of the world state round-trip.
 
 This item is tracked here for future planning. It does not need to be addressed in the current inventory system implementation plan.
+
+
+## Creature Registry
+
+@creature_id_manager.rs specifies a range for creature ids.
+
+Category Ranges
+
+- Monsters: 1-50
+- NPCs: 51-100
+- Templates: 101-150
+- Variants: 151-200
+- Custom: 201+
+
+We need to refactor those ranges to scale better.
+
+Category Ranges
+
+- Monsters: 1-999
+- NPCs: 1000-1999
+- Templates: 2000-2999
+- Variants: 3000-3999
+- Custom: 4000+
+
+We also need to refactor the creature id manager to use those ranges. We also need to refactor the creature registry. Currently the creature registry uses a really strange method of storing creatures.
+
+```rust
+
+[
+    /*[0]*/ (
+        id: 1,
+        name: "Goblin",
+        filepath: "assets/creatures/goblin.ron",
+    ),
+    /*[1]*/ (
+        id: 2,
+        name: "Orc",
+        filepath: "assets/creatures/orc.ron",
+    )
+]
+```
+
+The creatures registry should be able to tie the npc, character, and monster to a creature mesh which has its own ID.
