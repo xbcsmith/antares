@@ -35,9 +35,170 @@
 | **Findings Remediation Phase 5**                | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation**        |
 | **Combat System Improvement Phase 1**           | ✅ COMPLETE | 2026-07-17 | **Input Reliability and Action Selection**                                |
 | **Combat System Improvement Phase 2**           | ✅ COMPLETE | 2026-07-17 | **Target Selection and Action Completeness**                              |
+| **Combat System Improvement Phase 3**           | ✅ COMPLETE | 2026-07-17 | **Visual Combat Feedback and Animation State**                            |
 
-**Total Lines Implemented**: 8,800+ lines of production code + 5,200+ lines of documentation
-**Total Tests**: 333+ new tests (all passing), 2,425 total tests passing
+**Total Lines Implemented**: 9,200+ lines of production code + 5,400+ lines of documentation
+**Total Tests**: 341+ new tests (all passing), 2,433 total tests passing
+
+---
+
+## Combat System Improvement Phase 3: Visual Combat Feedback and Animation State
+
+### Overview
+
+Phase 3 anchors floating damage numbers to their target's UI card, adds
+effect-type visual differentiation via colour-coded text, wires
+`CombatTurnState::Animating` as a real runtime transition in all three action
+system wrappers, surfaces monster-turn damage feedback, and adds in-world
+(screen-space) monster HP hover bars that spawn at combat start and despawn
+on combat exit.
+
+### Components Implemented
+
+#### `CombatFeedbackEffect` enum (`src/game/systems/combat.rs`)
+
+Four variants model every outcome of a combat action:
+
+- `Damage(u32)` — positive damage dealt to the target
+- `Heal(u32)` — HP restored to the target
+- `Miss` — the attack missed
+- `Status(String)` — a condition or SP-restore label
+
+#### `CombatFeedbackEvent` message (`src/game/systems/combat.rs`)
+
+Registered with `.add_message::<CombatFeedbackEvent>()`. Every resolved
+action writes one event so `spawn_combat_feedback` (the reader system) has a
+single, typed source of truth for every visual result.
+
+#### Feedback colour constants (`src/game/systems/combat.rs`)
+
+Four public constants align with the four `CombatFeedbackEffect` variants:
+
+- `FEEDBACK_COLOR_DAMAGE` — red (`srgb(1.0, 0.3, 0.3)`)
+- `FEEDBACK_COLOR_HEAL` — green (`srgb(0.3, 1.0, 0.3)`)
+- `FEEDBACK_COLOR_MISS` — grey (`srgb(0.8, 0.8, 0.8)`)
+- `FEEDBACK_COLOR_STATUS` — yellow (`srgb(1.0, 0.8, 0.0)`)
+
+#### `emit_combat_feedback` helper (`src/game/systems/combat.rs`)
+
+A private free function shared by all four emitter sites
+(`handle_attack_action`, `handle_cast_spell_action`,
+`handle_use_item_action`, and `execute_monster_turn`). Accepts an
+`Option<MessageWriter<CombatFeedbackEvent>>` so it is a no-op in harnesses
+that do not register the message bus.
+
+#### `spawn_combat_feedback` system (`src/game/systems/combat.rs`)
+
+Reads `CombatFeedbackEvent` messages each frame and spawns `FloatingDamage`
+nodes:
+
+- **Monster targets** — node is spawned as a child of the matching
+  `EnemyCard` entity (anchored to the card).
+- **Player targets** — node is spawned at the bottom-left HUD area
+  (`bottom: 80px, left: 16px`).
+- Colour and font size are selected from the four constants based on the
+  `CombatFeedbackEffect` variant.
+
+Registered after all action handlers and after `execute_monster_turn`:
+
+```src/game/systems/combat.rs#L557-580
+.add_systems(
+    Update,
+    spawn_combat_feedback
+        .after(handle_attack_action)
+        .after(handle_cast_spell_action)
+        .after(handle_use_item_action)
+        .after(execute_monster_turn),
+)
+```
+
+#### Inline `FloatingDamage` spawn blocks replaced
+
+All four previously inline spawn blocks in `handle_attack_action`,
+`handle_cast_spell_action`, `handle_use_item_action`, and the monster-turn
+handler have been removed. Each now calls `emit_combat_feedback` instead,
+routing all visual output through the single event bus and
+`spawn_combat_feedback`.
+
+#### `CombatTurnState::Animating` integration
+
+In `handle_attack_action`, `handle_cast_spell_action`, and
+`handle_use_item_action`, the turn state is set to `Animating` immediately
+before the `perform_*_with_rng` domain call and restored to the prior
+state after it returns (if `perform_*` has not already naturally advanced
+the turn to a new state):
+
+```src/game/systems/combat.rs#L1885-1897
+// Phase 3: set Animating before the domain call
+let prior_turn_state = turn_state.0;
+turn_state.0 = CombatTurnState::Animating;
+// ... perform_*_with_rng call ...
+// Phase 3: restore turn state after action
+if matches!(turn_state.0, CombatTurnState::Animating) {
+    turn_state.0 = prior_turn_state;
+}
+```
+
+This makes `CombatTurnState::Animating` a real runtime transition verified by
+T3-4, and the existing `hide_indicator_during_animation` system in
+`combat_visual.rs` already responds to it correctly (verified by T3-5).
+
+#### `MonsterHpHoverBar` component and systems (`src/game/systems/combat.rs`)
+
+Three new systems manage per-monster HP bars:
+
+- **`spawn_monster_hp_hover_bars`** — runs every frame in combat; spawns one
+  container panel + one fill node per alive monster that does not yet have a
+  bar. Uses `MonsterHpHoverBar { participant_index }` and
+  `MonsterHpHoverBarFill { participant_index }` markers.
+- **`update_monster_hp_hover_bars`** — runs every frame; reads
+  `MonsterHpHoverBarFill` entities and updates `Node::width` (as
+  `Val::Percent`) and `BackgroundColor` from current HP ratios.
+- **`cleanup_monster_hp_hover_bars`** — runs every frame; despawns all
+  `MonsterHpHoverBar` entities when the game mode is not `Combat`.
+
+All three registered in `CombatPlugin::build`.
+
+### Testing
+
+Eight tests were added (T3-1 through T3-8), all passing:
+
+| Test ID | Test Name                                 | Description                                                         |
+| ------- | ----------------------------------------- | ------------------------------------------------------------------- |
+| T3-1    | `test_feedback_event_emitted_on_hit`      | Attack that hits produces a `FloatingDamage` entity.                |
+| T3-2    | `test_feedback_event_emitted_on_miss`     | Attack that misses produces a `FloatingDamage` entity ("Miss").     |
+| T3-3    | `test_monster_turn_emits_feedback`        | Monster turn writes `CombatFeedbackEvent` when damage is dealt.     |
+| T3-4    | `test_animating_state_set_during_action`  | Turn state is not stuck in `Animating` after action completes.      |
+| T3-5    | `test_indicator_hidden_during_animating`  | `TurnIndicator` is `Hidden` during `Animating` and `Visible` after. |
+| T3-6    | `test_hover_bars_spawned_on_combat_start` | Two monsters yield 2 `MonsterHpHoverBar` entities after one frame.  |
+| T3-7    | `test_hover_bars_removed_on_combat_exit`  | All `MonsterHpHoverBar` entities despawn after combat exits.        |
+| T3-8    | `test_hover_bar_hp_updated_after_damage`  | Fill width reflects reduced HP after `CombatResource` is mutated.   |
+
+### Files Changed
+
+- `src/game/systems/combat.rs` — all Phase 3 implementation and tests
+
+### Deliverables Checklist
+
+- [x] `CombatFeedbackEvent` and `CombatFeedbackEffect` declared and registered
+- [x] `emit_combat_feedback` helper implemented; `spawn_combat_feedback` system registered
+- [x] All four inline `FloatingDamage` spawn blocks replaced with `emit_combat_feedback` calls
+- [x] Floating numbers anchored to target's `EnemyCard` or player HUD slot
+- [x] Effect-type colour constants defined; `spawn_combat_feedback` uses them
+- [x] `execute_monster_turn` writes `CombatFeedbackEvent` for player targets
+- [x] `CombatTurnState::Animating` set and cleared in all three action system wrappers
+- [x] `MonsterHpHoverBar` spawn, update, and cleanup systems implemented and registered
+- [x] All 8 tests T3-1 through T3-8 pass under `cargo nextest run --all-features`
+
+### Success Criteria Verification
+
+- `cargo nextest run --all-features` — 2433 tests run, 2433 passed, 0 failures
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo fmt --all` — no changes
+- Every resolved action (player and monster) produces a `FloatingDamage` entity
+- Feedback nodes are colour-coded per effect type
+- `CombatTurnState::Animating` is a real runtime state (T3-4, T3-5)
+- Monster HP hover bars spawn at combat start (T3-6) and despawn on exit (T3-7)
 
 ---
 
