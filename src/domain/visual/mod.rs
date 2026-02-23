@@ -20,6 +20,7 @@
 //!
 //! // Create a simple cube mesh
 //! let cube = MeshDefinition {
+//!     name: None,
 //!     vertices: vec![
 //!         [-1.0, -1.0, -1.0], [1.0, -1.0, -1.0],
 //!         [1.0, 1.0, -1.0], [-1.0, 1.0, -1.0],
@@ -87,6 +88,7 @@ use crate::domain::types::CreatureId;
 ///
 /// // Triangle mesh
 /// let triangle = MeshDefinition {
+///     name: None,
 ///     vertices: vec![
 ///         [0.0, 1.0, 0.0],
 ///         [-1.0, -1.0, 0.0],
@@ -359,6 +361,7 @@ impl Default for MeshTransform {
 /// use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 ///
 /// let body = MeshDefinition {
+///     name: None,
 ///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 ///     indices: vec![0, 1, 2],
 ///     normals: None,
@@ -371,6 +374,7 @@ impl Default for MeshTransform {
 /// };
 ///
 /// let head = MeshDefinition {
+///     name: None,
 ///     vertices: vec![[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.25, 0.5, 0.0]],
 ///     indices: vec![0, 1, 2],
 ///     normals: None,
@@ -452,6 +456,7 @@ impl CreatureDefinition {
     /// use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
     ///
     /// let mesh = MeshDefinition {
+    ///     name: None,
     ///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
     ///     indices: vec![0, 1, 2],
     ///     normals: None,

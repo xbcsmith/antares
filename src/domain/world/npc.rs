@@ -71,6 +71,7 @@ pub type NpcId = String;
 ///     portrait_id: "assets/portraits/merchant.png".to_string(),
 ///     sprite: None,
 ///     dialogue_id: Some(5),
+///     creature_id: None,
 ///     quest_ids: vec![],
 ///     faction: Some("Merchants Guild".to_string()),
 ///     is_merchant: true,

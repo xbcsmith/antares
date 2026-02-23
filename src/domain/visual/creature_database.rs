@@ -15,6 +15,7 @@
 //! let mut db = CreatureDatabase::new();
 //!
 //! let mesh = MeshDefinition {
+//!     name: None,
 //!     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 //!     indices: vec![0, 1, 2],
 //!     normals: None,
@@ -123,6 +124,7 @@ impl CreatureDatabase {
     /// let mut db = CreatureDatabase::new();
     ///
     /// let mesh = MeshDefinition {
+    ///     name: None,
     ///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
     ///     indices: vec![0, 1, 2],
     ///     normals: None,
@@ -212,6 +214,7 @@ impl CreatureDatabase {
     /// let mut db = CreatureDatabase::new();
     ///
     /// let mesh = MeshDefinition {
+    ///     name: None,
     ///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
     ///     indices: vec![0, 1, 2],
     ///     normals: None,

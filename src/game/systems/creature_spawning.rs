@@ -85,6 +85,7 @@ use bevy::prelude::*;
 ///         name: "Test Creature".to_string(),
 ///         meshes: vec![
 ///             MeshDefinition {
+///                 name: None,
 ///                 vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 ///                 indices: vec![0, 1, 2],
 ///                 normals: None,
