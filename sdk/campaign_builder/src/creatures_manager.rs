@@ -19,7 +19,7 @@
 //! # Examples
 //!
 //! ```no_run
-//! use antares::sdk::creatures_manager::{CreaturesManager, EditorError};
+//! use campaign_builder::creatures_manager::{CreaturesManager, EditorError};
 //! use std::path::PathBuf;
 //!
 //! # fn main() -> Result<(), EditorError> {
@@ -157,15 +157,15 @@ impl ValidationReport {
 /// Category for creature ID ranges
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreatureCategory {
-    /// Monster creatures (1-50)
+    /// Monster creatures (1-999)
     Monsters,
-    /// NPC creatures (51-100)
+    /// NPC creatures (1000-1999)
     Npcs,
-    /// Template creatures (101-150)
+    /// Template creatures (2000-2999)
     Templates,
-    /// Variant creatures (151-200)
+    /// Variant creatures (3000-3999)
     Variants,
-    /// Custom/campaign-specific (201+)
+    /// Custom/campaign-specific (4000+)
     Custom,
 }
 
@@ -173,11 +173,11 @@ impl CreatureCategory {
     /// Get the valid ID range for this category
     pub fn id_range(&self) -> std::ops::Range<u32> {
         match self {
-            CreatureCategory::Monsters => 1..51,
-            CreatureCategory::Npcs => 51..101,
-            CreatureCategory::Templates => 101..151,
-            CreatureCategory::Variants => 151..201,
-            CreatureCategory::Custom => 201..u32::MAX,
+            CreatureCategory::Monsters => 1..1000,
+            CreatureCategory::Npcs => 1000..2000,
+            CreatureCategory::Templates => 2000..3000,
+            CreatureCategory::Variants => 3000..4000,
+            CreatureCategory::Custom => 4000..u32::MAX,
         }
     }
 
@@ -195,10 +195,10 @@ impl CreatureCategory {
     /// Determine category from creature ID
     pub fn from_id(id: CreatureId) -> Self {
         match id {
-            1..=50 => CreatureCategory::Monsters,
-            51..=100 => CreatureCategory::Npcs,
-            101..=150 => CreatureCategory::Templates,
-            151..=200 => CreatureCategory::Variants,
+            1..=999 => CreatureCategory::Monsters,
+            1000..=1999 => CreatureCategory::Npcs,
+            2000..=2999 => CreatureCategory::Templates,
+            3000..=3999 => CreatureCategory::Variants,
             _ => CreatureCategory::Custom,
         }
     }
@@ -231,7 +231,7 @@ impl CreaturesManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creatures_manager::CreaturesManager;
+    /// use campaign_builder::creatures_manager::CreaturesManager;
     /// use std::path::PathBuf;
     ///
     /// let manager = CreaturesManager::new(PathBuf::from("creatures.ron"));
@@ -264,7 +264,7 @@ impl CreaturesManager {
     /// # Examples
     ///
     /// ```no_run
-    /// use antares::sdk::creatures_manager::CreaturesManager;
+    /// use campaign_builder::creatures_manager::CreaturesManager;
     /// use std::path::PathBuf;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -294,7 +294,7 @@ impl CreaturesManager {
     /// # Examples
     ///
     /// ```no_run
-    /// use antares::sdk::creatures_manager::CreaturesManager;
+    /// use campaign_builder::creatures_manager::CreaturesManager;
     /// use std::path::PathBuf;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -437,7 +437,7 @@ impl CreaturesManager {
     /// # Examples
     ///
     /// ```no_run
-    /// use antares::sdk::creatures_manager::CreaturesManager;
+    /// use campaign_builder::creatures_manager::CreaturesManager;
     /// use std::path::PathBuf;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -527,7 +527,7 @@ impl CreaturesManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creatures_manager::CreaturesManager;
+    /// use campaign_builder::creatures_manager::CreaturesManager;
     /// use antares::domain::visual::CreatureReference;
     /// use std::path::PathBuf;
     ///
@@ -573,7 +573,7 @@ impl CreaturesManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creatures_manager::{CreaturesManager, CreatureCategory};
+    /// use campaign_builder::creatures_manager::{CreaturesManager, CreatureCategory};
     /// use antares::domain::visual::CreatureReference;
     /// use std::path::PathBuf;
     ///
@@ -845,7 +845,7 @@ mod tests {
     fn test_find_by_category() {
         let mut manager = CreaturesManager::new(PathBuf::from("test.ron"));
 
-        // Add monsters (1-50)
+        // Add monsters (1-999)
         manager
             .add_creature(create_test_creature(1, "Goblin"))
             .unwrap();
@@ -853,9 +853,9 @@ mod tests {
             .add_creature(create_test_creature(2, "Orc"))
             .unwrap();
 
-        // Add NPCs (51-100)
+        // Add NPCs (1000-1999)
         manager
-            .add_creature(create_test_creature(51, "Innkeeper"))
+            .add_creature(create_test_creature(1000, "Innkeeper"))
             .unwrap();
 
         let monsters = manager.find_by_category(CreatureCategory::Monsters);
@@ -868,11 +868,15 @@ mod tests {
     #[test]
     fn test_creature_category_from_id() {
         assert_eq!(CreatureCategory::from_id(1), CreatureCategory::Monsters);
-        assert_eq!(CreatureCategory::from_id(50), CreatureCategory::Monsters);
-        assert_eq!(CreatureCategory::from_id(51), CreatureCategory::Npcs);
-        assert_eq!(CreatureCategory::from_id(101), CreatureCategory::Templates);
-        assert_eq!(CreatureCategory::from_id(151), CreatureCategory::Variants);
-        assert_eq!(CreatureCategory::from_id(201), CreatureCategory::Custom);
+        assert_eq!(CreatureCategory::from_id(999), CreatureCategory::Monsters);
+        assert_eq!(CreatureCategory::from_id(1000), CreatureCategory::Npcs);
+        assert_eq!(CreatureCategory::from_id(1999), CreatureCategory::Npcs);
+        assert_eq!(CreatureCategory::from_id(2000), CreatureCategory::Templates);
+        assert_eq!(CreatureCategory::from_id(2999), CreatureCategory::Templates);
+        assert_eq!(CreatureCategory::from_id(3000), CreatureCategory::Variants);
+        assert_eq!(CreatureCategory::from_id(3999), CreatureCategory::Variants);
+        assert_eq!(CreatureCategory::from_id(4000), CreatureCategory::Custom);
+        assert_eq!(CreatureCategory::from_id(9999), CreatureCategory::Custom);
     }
 
     #[test]
@@ -954,10 +958,27 @@ mod tests {
     fn test_creature_category_id_range() {
         let monsters = CreatureCategory::Monsters.id_range();
         assert_eq!(monsters.start, 1);
-        assert_eq!(monsters.end, 51);
+        assert_eq!(monsters.end, 1000);
+        assert!(monsters.contains(&1));
+        assert!(monsters.contains(&999));
+        assert!(!monsters.contains(&1000));
 
         let npcs = CreatureCategory::Npcs.id_range();
-        assert_eq!(npcs.start, 51);
-        assert_eq!(npcs.end, 101);
+        assert_eq!(npcs.start, 1000);
+        assert_eq!(npcs.end, 2000);
+        assert!(npcs.contains(&1000));
+        assert!(npcs.contains(&1999));
+        assert!(!npcs.contains(&2000));
+
+        let templates = CreatureCategory::Templates.id_range();
+        assert_eq!(templates.start, 2000);
+        assert_eq!(templates.end, 3000);
+
+        let variants = CreatureCategory::Variants.id_range();
+        assert_eq!(variants.start, 3000);
+        assert_eq!(variants.end, 4000);
+
+        let custom = CreatureCategory::Custom.id_range();
+        assert_eq!(custom.start, 4000);
     }
 }

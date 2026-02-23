@@ -9,16 +9,16 @@
 //!
 //! # Category Ranges
 //!
-//! - Monsters: 1-50
-//! - NPCs: 51-100
-//! - Templates: 101-150
-//! - Variants: 151-200
-//! - Custom: 201+
+//! - Monsters: 1-999
+//! - NPCs: 1000-1999
+//! - Templates: 2000-2999
+//! - Variants: 3000-3999
+//! - Custom: 4000+
 //!
 //! # Examples
 //!
 //! ```
-//! use antares::sdk::creature_id_manager::{CreatureIdManager, CreatureCategory};
+//! use campaign_builder::creature_id_manager::{CreatureIdManager, CreatureCategory};
 //! use antares::domain::visual::CreatureReference;
 //! use antares::domain::types::CreatureId;
 //!
@@ -55,15 +55,15 @@ use thiserror::Error;
 /// Category for creature ID ranges
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CreatureCategory {
-    /// Monster creatures (1-50)
+    /// Monster creatures (1-999)
     Monsters,
-    /// NPC creatures (51-100)
+    /// NPC creatures (1000-1999)
     Npcs,
-    /// Template creatures (101-150)
+    /// Template creatures (2000-2999)
     Templates,
-    /// Variant creatures (151-200)
+    /// Variant creatures (3000-3999)
     Variants,
-    /// Custom/campaign-specific (201+)
+    /// Custom/campaign-specific (4000+)
     Custom,
 }
 
@@ -77,21 +77,21 @@ impl CreatureCategory {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::CreatureCategory;
+    /// use campaign_builder::creature_id_manager::CreatureCategory;
     ///
     /// let range = CreatureCategory::Monsters.id_range();
-    /// assert_eq!(range, 1..51);
+    /// assert_eq!(range, 1..1000);
     /// assert!(range.contains(&1));
-    /// assert!(range.contains(&50));
-    /// assert!(!range.contains(&51));
+    /// assert!(range.contains(&999));
+    /// assert!(!range.contains(&1000));
     /// ```
     pub fn id_range(&self) -> std::ops::Range<CreatureId> {
         match self {
-            CreatureCategory::Monsters => 1..51,
-            CreatureCategory::Npcs => 51..101,
-            CreatureCategory::Templates => 101..151,
-            CreatureCategory::Variants => 151..201,
-            CreatureCategory::Custom => 201..u32::MAX,
+            CreatureCategory::Monsters => 1..1000,
+            CreatureCategory::Npcs => 1000..2000,
+            CreatureCategory::Templates => 2000..3000,
+            CreatureCategory::Variants => 3000..4000,
+            CreatureCategory::Custom => 4000..u32::MAX,
         }
     }
 
@@ -104,7 +104,7 @@ impl CreatureCategory {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::CreatureCategory;
+    /// use campaign_builder::creature_id_manager::CreatureCategory;
     ///
     /// assert_eq!(CreatureCategory::Monsters.display_name(), "Monsters");
     /// assert_eq!(CreatureCategory::Npcs.display_name(), "NPCs");
@@ -132,19 +132,19 @@ impl CreatureCategory {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::CreatureCategory;
+    /// use campaign_builder::creature_id_manager::CreatureCategory;
     ///
     /// assert_eq!(CreatureCategory::from_id(1), CreatureCategory::Monsters);
-    /// assert_eq!(CreatureCategory::from_id(50), CreatureCategory::Monsters);
-    /// assert_eq!(CreatureCategory::from_id(51), CreatureCategory::Npcs);
-    /// assert_eq!(CreatureCategory::from_id(250), CreatureCategory::Custom);
+    /// assert_eq!(CreatureCategory::from_id(999), CreatureCategory::Monsters);
+    /// assert_eq!(CreatureCategory::from_id(1000), CreatureCategory::Npcs);
+    /// assert_eq!(CreatureCategory::from_id(4500), CreatureCategory::Custom);
     /// ```
     pub fn from_id(id: CreatureId) -> Self {
         match id {
-            1..=50 => CreatureCategory::Monsters,
-            51..=100 => CreatureCategory::Npcs,
-            101..=150 => CreatureCategory::Templates,
-            151..=200 => CreatureCategory::Variants,
+            1..=999 => CreatureCategory::Monsters,
+            1000..=1999 => CreatureCategory::Npcs,
+            2000..=2999 => CreatureCategory::Templates,
+            3000..=3999 => CreatureCategory::Variants,
             _ => CreatureCategory::Custom,
         }
     }
@@ -158,7 +158,7 @@ impl CreatureCategory {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::CreatureCategory;
+    /// use campaign_builder::creature_id_manager::CreatureCategory;
     ///
     /// let color = CreatureCategory::Monsters.color();
     /// assert_eq!(color.len(), 3);
@@ -230,7 +230,7 @@ pub struct IdChange {
 /// # Examples
 ///
 /// ```
-/// use antares::sdk::creature_id_manager::{CreatureIdManager, CreatureCategory};
+/// use campaign_builder::creature_id_manager::{CreatureIdManager, CreatureCategory};
 /// use antares::domain::visual::CreatureReference;
 ///
 /// let mut manager = CreatureIdManager::new();
@@ -264,7 +264,7 @@ impl CreatureIdManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::CreatureIdManager;
+    /// use campaign_builder::creature_id_manager::CreatureIdManager;
     ///
     /// let manager = CreatureIdManager::new();
     /// assert_eq!(manager.used_id_count(), 0);
@@ -285,7 +285,7 @@ impl CreatureIdManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::CreatureIdManager;
+    /// use campaign_builder::creature_id_manager::CreatureIdManager;
     /// use antares::domain::visual::CreatureReference;
     ///
     /// let mut manager = CreatureIdManager::new();
@@ -327,7 +327,7 @@ impl CreatureIdManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::{CreatureIdManager, CreatureCategory};
+    /// use campaign_builder::creature_id_manager::{CreatureIdManager, CreatureCategory};
     /// use antares::domain::visual::CreatureReference;
     ///
     /// let mut manager = CreatureIdManager::new();
@@ -338,7 +338,7 @@ impl CreatureIdManager {
     /// manager.update_from_registry(&refs);
     ///
     /// assert_eq!(manager.suggest_next_id(CreatureCategory::Monsters), 3);
-    /// assert_eq!(manager.suggest_next_id(CreatureCategory::Npcs), 51);
+    /// assert_eq!(manager.suggest_next_id(CreatureCategory::Npcs), 1000);
     /// ```
     pub fn suggest_next_id(&self, category: CreatureCategory) -> CreatureId {
         let range = category.id_range();
@@ -373,7 +373,7 @@ impl CreatureIdManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::{CreatureIdManager, CreatureCategory};
+    /// use campaign_builder::creature_id_manager::{CreatureIdManager, CreatureCategory};
     /// use antares::domain::visual::CreatureReference;
     ///
     /// let mut manager = CreatureIdManager::new();
@@ -384,7 +384,7 @@ impl CreatureIdManager {
     ///
     /// assert!(manager.validate_id(2, CreatureCategory::Monsters).is_ok());
     /// assert!(manager.validate_id(1, CreatureCategory::Monsters).is_err()); // Duplicate
-    /// assert!(manager.validate_id(51, CreatureCategory::Monsters).is_err()); // Out of range
+    /// assert!(manager.validate_id(1000, CreatureCategory::Monsters).is_err()); // Out of range
     /// ```
     pub fn validate_id(&self, id: CreatureId, category: CreatureCategory) -> Result<(), IdError> {
         // Check if ID is already used
@@ -414,7 +414,7 @@ impl CreatureIdManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::CreatureIdManager;
+    /// use campaign_builder::creature_id_manager::CreatureIdManager;
     /// use antares::domain::visual::CreatureReference;
     ///
     /// let mut manager = CreatureIdManager::new();
@@ -460,16 +460,16 @@ impl CreatureIdManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::CreatureIdManager;
+    /// use campaign_builder::creature_id_manager::CreatureIdManager;
     /// use antares::domain::visual::CreatureReference;
     ///
     /// let mut manager = CreatureIdManager::new();
     /// let refs = vec![
-    ///     CreatureReference { id: 51, name: "Goblin".to_string(), filepath: "".to_string() },
+    ///     CreatureReference { id: 1000, name: "Goblin".to_string(), filepath: "".to_string() },
     /// ];
     /// manager.update_from_registry(&refs);
     ///
-    /// // Goblin ID 51 is in NPC range but should be in Monster range
+    /// // Goblin ID 1000 is in NPC range but should be in Monster range
     /// let changes = manager.auto_reassign_ids(&refs, None);
     /// // Note: This won't suggest changes for single items, only conflicts
     /// ```
@@ -533,7 +533,7 @@ impl CreatureIdManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::{CreatureIdManager, CreatureCategory};
+    /// use campaign_builder::creature_id_manager::{CreatureIdManager, CreatureCategory};
     /// use antares::domain::visual::CreatureReference;
     ///
     /// let mut manager = CreatureIdManager::new();
@@ -545,7 +545,7 @@ impl CreatureIdManager {
     ///
     /// let gaps = manager.find_gaps(CreatureCategory::Monsters);
     /// assert!(gaps.contains(&2));
-    /// assert_eq!(gaps.len(), 48); // 50 total - 2 used = 48 gaps
+    /// assert_eq!(gaps.len(), 997); // 999 total - 2 used = 997 gaps
     /// ```
     pub fn find_gaps(&self, category: CreatureCategory) -> Vec<CreatureId> {
         let range = category.id_range();
@@ -573,7 +573,7 @@ impl CreatureIdManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::CreatureIdManager;
+    /// use campaign_builder::creature_id_manager::CreatureIdManager;
     /// use antares::domain::visual::CreatureReference;
     ///
     /// let mut manager = CreatureIdManager::new();
@@ -598,7 +598,7 @@ impl CreatureIdManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::CreatureIdManager;
+    /// use campaign_builder::creature_id_manager::CreatureIdManager;
     /// use antares::domain::visual::CreatureReference;
     ///
     /// let mut manager = CreatureIdManager::new();
@@ -627,7 +627,7 @@ impl CreatureIdManager {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::creature_id_manager::{CreatureIdManager, CreatureCategory};
+    /// use campaign_builder::creature_id_manager::{CreatureIdManager, CreatureCategory};
     /// use antares::domain::visual::CreatureReference;
     ///
     /// let mut manager = CreatureIdManager::new();
@@ -638,7 +638,7 @@ impl CreatureIdManager {
     ///
     /// let (used, total, first_gap) = manager.category_stats(CreatureCategory::Monsters);
     /// assert_eq!(used, 1);
-    /// assert_eq!(total, 50);
+    /// assert_eq!(total, 999);
     /// assert_eq!(first_gap, Some(2));
     /// ```
     pub fn category_stats(&self, category: CreatureCategory) -> (usize, usize, Option<CreatureId>) {
@@ -689,25 +689,25 @@ mod tests {
 
     #[test]
     fn test_category_id_range() {
-        assert_eq!(CreatureCategory::Monsters.id_range(), 1..51);
-        assert_eq!(CreatureCategory::Npcs.id_range(), 51..101);
-        assert_eq!(CreatureCategory::Templates.id_range(), 101..151);
-        assert_eq!(CreatureCategory::Variants.id_range(), 151..201);
-        assert!(CreatureCategory::Custom.id_range().contains(&201));
+        assert_eq!(CreatureCategory::Monsters.id_range(), 1..1000);
+        assert_eq!(CreatureCategory::Npcs.id_range(), 1000..2000);
+        assert_eq!(CreatureCategory::Templates.id_range(), 2000..3000);
+        assert_eq!(CreatureCategory::Variants.id_range(), 3000..4000);
+        assert!(CreatureCategory::Custom.id_range().contains(&4000));
         assert!(CreatureCategory::Custom.id_range().contains(&10000));
     }
 
     #[test]
     fn test_category_from_id() {
         assert_eq!(CreatureCategory::from_id(1), CreatureCategory::Monsters);
-        assert_eq!(CreatureCategory::from_id(50), CreatureCategory::Monsters);
-        assert_eq!(CreatureCategory::from_id(51), CreatureCategory::Npcs);
-        assert_eq!(CreatureCategory::from_id(100), CreatureCategory::Npcs);
-        assert_eq!(CreatureCategory::from_id(101), CreatureCategory::Templates);
-        assert_eq!(CreatureCategory::from_id(150), CreatureCategory::Templates);
-        assert_eq!(CreatureCategory::from_id(151), CreatureCategory::Variants);
-        assert_eq!(CreatureCategory::from_id(200), CreatureCategory::Variants);
-        assert_eq!(CreatureCategory::from_id(201), CreatureCategory::Custom);
+        assert_eq!(CreatureCategory::from_id(999), CreatureCategory::Monsters);
+        assert_eq!(CreatureCategory::from_id(1000), CreatureCategory::Npcs);
+        assert_eq!(CreatureCategory::from_id(1999), CreatureCategory::Npcs);
+        assert_eq!(CreatureCategory::from_id(2000), CreatureCategory::Templates);
+        assert_eq!(CreatureCategory::from_id(2999), CreatureCategory::Templates);
+        assert_eq!(CreatureCategory::from_id(3000), CreatureCategory::Variants);
+        assert_eq!(CreatureCategory::from_id(3999), CreatureCategory::Variants);
+        assert_eq!(CreatureCategory::from_id(4000), CreatureCategory::Custom);
         assert_eq!(CreatureCategory::from_id(9999), CreatureCategory::Custom);
     }
 
@@ -742,7 +742,7 @@ mod tests {
         let refs = vec![
             create_test_reference(1, "Goblin"),
             create_test_reference(2, "Orc"),
-            create_test_reference(51, "Villager"),
+            create_test_reference(1000, "Villager"),
         ];
 
         manager.update_from_registry(&refs);
@@ -750,7 +750,7 @@ mod tests {
         assert_eq!(manager.used_id_count(), 3);
         assert!(manager.is_id_used(1));
         assert!(manager.is_id_used(2));
-        assert!(manager.is_id_used(51));
+        assert!(manager.is_id_used(1000));
         assert!(!manager.is_id_used(3));
     }
 
@@ -758,8 +758,8 @@ mod tests {
     fn test_suggest_next_id_empty() {
         let manager = CreatureIdManager::new();
         assert_eq!(manager.suggest_next_id(CreatureCategory::Monsters), 1);
-        assert_eq!(manager.suggest_next_id(CreatureCategory::Npcs), 51);
-        assert_eq!(manager.suggest_next_id(CreatureCategory::Templates), 101);
+        assert_eq!(manager.suggest_next_id(CreatureCategory::Npcs), 1000);
+        assert_eq!(manager.suggest_next_id(CreatureCategory::Templates), 2000);
     }
 
     #[test]
@@ -772,7 +772,7 @@ mod tests {
         manager.update_from_registry(&refs);
 
         assert_eq!(manager.suggest_next_id(CreatureCategory::Monsters), 3);
-        assert_eq!(manager.suggest_next_id(CreatureCategory::Npcs), 51);
+        assert_eq!(manager.suggest_next_id(CreatureCategory::Npcs), 1000);
     }
 
     #[test]
@@ -794,7 +794,7 @@ mod tests {
         manager.update_from_registry(&refs);
 
         assert!(manager.validate_id(2, CreatureCategory::Monsters).is_ok());
-        assert!(manager.validate_id(51, CreatureCategory::Npcs).is_ok());
+        assert!(manager.validate_id(1000, CreatureCategory::Npcs).is_ok());
     }
 
     #[test]
@@ -815,7 +815,7 @@ mod tests {
     fn test_validate_id_out_of_range() {
         let manager = CreatureIdManager::new();
 
-        let result = manager.validate_id(51, CreatureCategory::Monsters);
+        let result = manager.validate_id(1000, CreatureCategory::Monsters);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), IdError::OutOfRange { .. }));
     }
@@ -879,21 +879,21 @@ mod tests {
 
         let (used, total, first_gap) = manager.category_stats(CreatureCategory::Monsters);
         assert_eq!(used, 2);
-        assert_eq!(total, 50);
+        assert_eq!(total, 999);
         assert_eq!(first_gap, Some(3));
     }
 
     #[test]
     fn test_category_stats_no_gaps() {
         let mut manager = CreatureIdManager::new();
-        let refs: Vec<_> = (1..=50)
+        let refs: Vec<_> = (1..=999)
             .map(|i| create_test_reference(i, &format!("Creature{}", i)))
             .collect();
         manager.update_from_registry(&refs);
 
         let (used, total, first_gap) = manager.category_stats(CreatureCategory::Monsters);
-        assert_eq!(used, 50);
-        assert_eq!(total, 50);
+        assert_eq!(used, 999);
+        assert_eq!(total, 999);
         assert_eq!(first_gap, None);
     }
 

@@ -10617,7 +10617,7 @@ fn test_another() {}
             .clone();
 
         let mut full_registry = Vec::new();
-        for id in 1..=50 {
+        for id in 1..=999 {
             full_registry.push(
                 app.creature_template_registry
                     .generate(&template_id, &format!("Monster {id}"), id)
@@ -10633,7 +10633,7 @@ fn test_another() {}
             .expect_err("ID suggestion should fail when monster range is fully allocated");
 
         assert!(
-            error.contains("No available IDs in Monsters range (1-50)"),
+            error.contains("No available IDs in Monsters range (1-999)"),
             "unexpected error message: {error}"
         );
     }

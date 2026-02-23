@@ -17,24 +17,24 @@
 //!
 //! # Examples
 //!
-//! ```
-//! use antares::domain::visual::{MeshDefinition, mesh_validation};
-//!
-//! let valid_mesh = MeshDefinition {
-//!     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
-//!     indices: vec![0, 1, 2],
-//!     normals: None,
-//!     uvs: None,
-//!     color: [1.0, 1.0, 1.0, 1.0],
-//!     lod_levels: None,
-//!     lod_distances: None,
-//!     material: None,
-//!     texture_path: None,
-//! };
-//!
-//! assert!(mesh_validation::validate_mesh_definition(&valid_mesh).is_ok());
-//! ```
-
+/// ```
+/// use antares::domain::visual::{MeshDefinition, mesh_validation};
+///
+/// let valid_mesh = MeshDefinition {
+///     name: None,
+///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+///     indices: vec![0, 1, 2],
+///     normals: None,
+///     uvs: None,
+///     color: [1.0, 1.0, 1.0, 1.0],
+///     lod_levels: None,
+///     lod_distances: None,
+///     material: None,
+///     texture_path: None,
+/// };
+///
+/// assert!(mesh_validation::validate_mesh_definition(&valid_mesh).is_ok());
+/// ```
 use super::MeshDefinition;
 
 /// Validates a mesh definition for correctness
@@ -51,6 +51,7 @@ use super::MeshDefinition;
 /// use antares::domain::visual::{MeshDefinition, mesh_validation};
 ///
 /// let mesh = MeshDefinition {
+///     name: None,
 ///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 ///     indices: vec![0, 1, 2],
 ///     normals: None,

@@ -3565,10 +3565,8 @@ pub fn autocomplete_sprite_sheet_selector(
 /// use antares::domain::combat::database::MonsterDefinition;
 /// use campaign_builder::ui_helpers::extract_monster_candidates;
 ///
-/// use campaign_builder::ui_helpers::extract_monster_candidates;
-/// let monsters: Vec<antares::domain::combat::database::MonsterDefinition> = Vec::new();
+/// let monsters: Vec<MonsterDefinition> = Vec::new();
 /// let candidates = extract_monster_candidates(&monsters);
-/// assert_eq!(candidates, vec!["Goblin", "Orc"]);
 /// ```
 pub fn extract_monster_candidates(
     monsters: &[antares::domain::combat::database::MonsterDefinition],
@@ -3605,14 +3603,10 @@ pub fn extract_class_candidates(
 ///
 /// ```no_run
 /// use antares::domain::items::types::Item;
-/// use antares::domain::types::ItemId;
 /// use campaign_builder::ui_helpers::extract_item_candidates;
 ///
-/// use campaign_builder::ui_helpers::extract_item_candidates;
-/// let items: Vec<antares::domain::items::types::Item> = Vec::new();
+/// let items: Vec<Item> = Vec::new();
 /// let candidates = extract_item_candidates(&items);
-/// assert_eq!(candidates.len(), 2);
-/// assert_eq!(candidates[0].0, "Longsword (ID: 1)");
 /// ```
 pub fn extract_item_candidates(
     items: &[antares::domain::items::types::Item],
@@ -3638,7 +3632,8 @@ pub fn extract_item_candidates(
 /// # Examples
 ///
 /// ```
-/// use antares::domain::quest::{Quest, QuestId};
+/// use antares::domain::quest::Quest;
+/// use campaign_builder::ui_helpers::extract_quest_candidates;
 ///
 /// let quests = vec![
 ///     Quest {
@@ -3647,13 +3642,14 @@ pub fn extract_item_candidates(
 ///         description: "Help save the village from bandits".to_string(),
 ///         stages: vec![],
 ///         rewards: vec![],
-///         prerequisites: vec![],
-///         min_level: 1,
+///         required_quests: vec![],
+///         min_level: Some(1),
 ///         max_level: None,
 ///         repeatable: false,
 ///         is_main_quest: true,
 ///         quest_giver_npc: None,
-///         quest_giver_location: None,
+///         quest_giver_map: None,
+///         quest_giver_position: None,
 ///     },
 /// ];
 ///
@@ -3689,12 +3685,8 @@ pub fn extract_quest_candidates(
 /// use antares::domain::conditions::ConditionDefinition;
 /// use campaign_builder::ui_helpers::extract_condition_candidates;
 ///
-/// let conditions = vec![
-/// use campaign_builder::ui_helpers::extract_condition_candidates;
-/// let conditions: Vec<antares::domain::conditions::ConditionDefinition> = Vec::new();
+/// let conditions: Vec<ConditionDefinition> = Vec::new();
 /// let candidates = extract_condition_candidates(&conditions);
-/// assert_eq!(candidates.len(), 2);
-/// assert_eq!(candidates[0].0, "Poisoned");
 /// ```
 pub fn extract_condition_candidates(
     conditions: &[antares::domain::conditions::ConditionDefinition],
@@ -4181,6 +4173,188 @@ pub fn extract_sprite_sheet_candidates(campaign_dir: Option<&PathBuf>) -> Vec<St
     candidates
 }
 
+/// Extracts creature asset file path candidates from a campaign's `assets/creatures` directory.
+///
+/// Returns a vector of relative paths (e.g., `"assets/creatures/goblin.ron"`,
+/// `"assets/creatures/orc_warrior.ron"`) suitable for autocomplete widgets. Only
+/// `.ron` files are included.  If `campaign_dir` is `None`, the campaign directory
+/// does not exist, or there is no `assets/creatures` subdirectory, an empty vector
+/// is returned.
+///
+/// Results are sorted alphabetically and deduplicated for deterministic output.
+///
+/// # Arguments
+///
+/// * `campaign_dir` - Optional path to the campaign root directory
+///
+/// # Returns
+///
+/// A sorted, deduplicated vector of relative creature asset paths.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::PathBuf;
+/// use campaign_builder::ui_helpers::extract_creature_asset_candidates;
+///
+/// let campaign_dir = PathBuf::from("/path/to/campaign");
+/// let candidates = extract_creature_asset_candidates(Some(&campaign_dir));
+/// // Returns e.g. ["assets/creatures/goblin.ron", "assets/creatures/orc.ron"]
+/// ```
+pub fn extract_creature_asset_candidates(campaign_dir: Option<&PathBuf>) -> Vec<String> {
+    let Some(dir) = campaign_dir else {
+        return Vec::new();
+    };
+
+    let creatures_dir = dir.join("assets").join("creatures");
+
+    if !creatures_dir.exists() || !creatures_dir.is_dir() {
+        return Vec::new();
+    }
+
+    let Ok(entries) = std::fs::read_dir(&creatures_dir) else {
+        return Vec::new();
+    };
+
+    let mut candidates: Vec<String> = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext.to_string_lossy().to_lowercase() == "ron" {
+                    if let Ok(rel) = path.strip_prefix(dir) {
+                        if let Some(s) = rel.to_str() {
+                            candidates.push(s.replace('\\', "/"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    candidates.sort();
+    candidates.dedup();
+    candidates
+}
+
+/// Autocomplete selector for creature asset file paths.
+///
+/// Provides a text autocomplete for creature `.ron` asset paths discovered in
+/// the campaign's `assets/creatures/` directory.  The displayed candidate strings
+/// are the relative paths (relative to the campaign directory), e.g.
+/// `"assets/creatures/goblin.ron"`.
+///
+/// The widget follows the same persistent-buffer pattern used by
+/// [`autocomplete_portrait_selector`] and [`autocomplete_sprite_sheet_selector`]:
+/// the typed text survives across frames and is only committed to the output
+/// `selected_path` string when the user picks a value that exists in the
+/// candidate list.  A "Clear" button resets the selection.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI
+/// * `id_salt` - Salt for the autocomplete widget ID (must be unique in the scope)
+/// * `label` - Label shown to the left of the input
+/// * `selected_path` - Mutable reference to the currently selected relative path
+/// * `available_paths` - Candidate paths to suggest (from [`extract_creature_asset_candidates`])
+/// * `campaign_dir` - Optional campaign directory (used to show a hover tooltip
+///   indicating whether the selected file actually exists on disk)
+///
+/// # Returns
+///
+/// Returns `true` if the selection changed (a new path was selected or the field
+/// was cleared).
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::ui_helpers::{
+///     autocomplete_creature_asset_selector, extract_creature_asset_candidates,
+/// };
+/// use std::path::PathBuf;
+///
+/// fn show_register_dialog(
+///     ui: &mut egui::Ui,
+///     path: &mut String,
+///     campaign_dir: Option<&PathBuf>,
+/// ) {
+///     let candidates = extract_creature_asset_candidates(campaign_dir);
+///     if autocomplete_creature_asset_selector(
+///         ui,
+///         "register_asset_path",
+///         "Path:",
+///         path,
+///         &candidates,
+///         campaign_dir,
+///     ) {
+///         println!("Creature asset path changed to: {}", path);
+///     }
+/// }
+/// ```
+pub fn autocomplete_creature_asset_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_path: &mut String,
+    available_paths: &[String],
+    campaign_dir: Option<&PathBuf>,
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        ui.label(label);
+
+        let current_value = selected_path.clone();
+        let buffer_id = make_autocomplete_id(ui, "creature_asset", id_salt);
+        let candidates: Vec<String> = available_paths.to_vec();
+
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_value.clone());
+
+        let mut response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder("Start typing path, e.g. assets/creatures/goblin.ron")
+            .show(ui, &mut text_buffer);
+
+        // Tooltip: show whether the file exists, or a warning if not found
+        if !selected_path.is_empty() {
+            if let Some(dir) = campaign_dir {
+                let full_path = dir.join(selected_path.as_str());
+                if full_path.exists() {
+                    response =
+                        response.on_hover_text(format!("File found: {}", full_path.display()));
+                } else {
+                    response = response
+                        .on_hover_text(format!("⚠ File not found: {}", full_path.display()));
+                }
+            } else {
+                response =
+                    response.on_hover_text(format!("Asset path: {}", selected_path.as_str()));
+            }
+        }
+
+        // Only commit when the typed text matches a known candidate
+        if response.changed() && !text_buffer.is_empty() && text_buffer != current_value {
+            if candidates.contains(&text_buffer) {
+                *selected_path = text_buffer.clone();
+                changed = true;
+            }
+        }
+
+        if ui.button("Clear").clicked() && !selected_path.is_empty() {
+            selected_path.clear();
+            text_buffer.clear();
+            changed = true;
+        }
+
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+    });
+
+    changed
+}
+
 /// Resolves a portrait ID to its full file path.
 ///
 /// Attempts to find the portrait file in the campaign's assets/portraits directory.
@@ -4421,9 +4595,10 @@ impl AutocompleteCandidateCache {
 ///
 /// ```no_run
 /// use eframe::egui;
+/// use antares::domain::items::types::Item;
 /// use campaign_builder::ui_helpers::show_entity_validation_warning;
 ///
-/// fn example(ui: &mut egui::Ui, item_id: u32, items: &[Item]) {
+/// fn example(ui: &mut egui::Ui, item_id: antares::domain::types::ItemId, items: &[Item]) {
 ///     let exists = items.iter().any(|i| i.id == item_id);
 ///     show_entity_validation_warning(ui, "Item", item_id, exists);
 /// }
@@ -6722,5 +6897,113 @@ mod tests {
                 assert_eq!(portrait_id, "0");
             });
         });
+    }
+
+    // =========================================================================
+    // Creature Asset Discovery Tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_creature_asset_candidates_no_campaign_dir() {
+        let candidates = extract_creature_asset_candidates(None);
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn test_extract_creature_asset_candidates_nonexistent_directory() {
+        let campaign_dir = PathBuf::from("/nonexistent/path/to/campaign_creatures");
+        let candidates = extract_creature_asset_candidates(Some(&campaign_dir));
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn test_extract_creature_asset_candidates_empty_directory() {
+        let temp_dir = std::env::temp_dir().join("antares_test_creatures_empty");
+        let creatures_dir = temp_dir.join("assets").join("creatures");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&creatures_dir).expect("Failed to create test directories");
+
+        let candidates = extract_creature_asset_candidates(Some(&temp_dir));
+        assert!(candidates.is_empty());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_extract_creature_asset_candidates_returns_ron_files() {
+        let temp_dir = std::env::temp_dir().join("antares_test_creatures_ron");
+        let creatures_dir = temp_dir.join("assets").join("creatures");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&creatures_dir).expect("Failed to create test directories");
+
+        std::fs::write(creatures_dir.join("goblin.ron"), b"data")
+            .expect("Failed to create goblin.ron");
+        std::fs::write(creatures_dir.join("orc_warrior.ron"), b"data")
+            .expect("Failed to create orc_warrior.ron");
+
+        let candidates = extract_creature_asset_candidates(Some(&temp_dir));
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates.contains(&"assets/creatures/goblin.ron".to_string()));
+        assert!(candidates.contains(&"assets/creatures/orc_warrior.ron".to_string()));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_extract_creature_asset_candidates_ignores_non_ron_files() {
+        let temp_dir = std::env::temp_dir().join("antares_test_creatures_filter");
+        let creatures_dir = temp_dir.join("assets").join("creatures");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&creatures_dir).expect("Failed to create test directories");
+
+        std::fs::write(creatures_dir.join("goblin.ron"), b"data").expect("write failed");
+        // These should be ignored
+        std::fs::write(creatures_dir.join("notes.txt"), b"text").expect("write failed");
+        std::fs::write(creatures_dir.join("sprite.png"), b"img").expect("write failed");
+        std::fs::write(creatures_dir.join("data.json"), b"{}").expect("write failed");
+
+        let candidates = extract_creature_asset_candidates(Some(&temp_dir));
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0], "assets/creatures/goblin.ron");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_extract_creature_asset_candidates_sorted_alphabetically() {
+        let temp_dir = std::env::temp_dir().join("antares_test_creatures_sorted");
+        let creatures_dir = temp_dir.join("assets").join("creatures");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&creatures_dir).expect("Failed to create test directories");
+
+        std::fs::write(creatures_dir.join("zombie.ron"), b"data").expect("write failed");
+        std::fs::write(creatures_dir.join("goblin.ron"), b"data").expect("write failed");
+        std::fs::write(creatures_dir.join("dragon.ron"), b"data").expect("write failed");
+
+        let candidates = extract_creature_asset_candidates(Some(&temp_dir));
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates[0], "assets/creatures/dragon.ron");
+        assert_eq!(candidates[1], "assets/creatures/goblin.ron");
+        assert_eq!(candidates[2], "assets/creatures/zombie.ron");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_extract_creature_asset_candidates_uses_forward_slashes() {
+        let temp_dir = std::env::temp_dir().join("antares_test_creatures_slashes");
+        let creatures_dir = temp_dir.join("assets").join("creatures");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&creatures_dir).expect("Failed to create test directories");
+
+        std::fs::write(creatures_dir.join("goblin.ron"), b"data").expect("write failed");
+
+        let candidates = extract_creature_asset_candidates(Some(&temp_dir));
+        assert_eq!(candidates.len(), 1);
+        // Path must use forward slashes regardless of platform
+        assert!(!candidates[0].contains('\\'));
+        assert_eq!(candidates[0], "assets/creatures/goblin.ron");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

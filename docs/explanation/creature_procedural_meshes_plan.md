@@ -1,7 +1,7 @@
 # Creature Procedural Mesh Improvement Plan
 
 ## Overview
-The current iteration of procedural creature meshes (e.g. `wolf.ron`, `skeleton.ron`) relies heavily on primitive boxes (`box_mesh`), resulting in a "blocky" lower-fidelity appearance. We discovered that the and the game engine currently ignores `mesh_transforms`, causing multi-part high-fidelity models like `ancientwolf.ron` to render incorrectly. 
+The current iteration of procedural creature meshes (e.g. `wolf.ron`, `skeleton.ron`) relies heavily on primitive boxes (`box_mesh`), resulting in a "blocky" lower-fidelity appearance. We discovered that the and the game engine currently ignores `mesh_transforms`, causing multi-part high-fidelity models like `ancientwolf.ron` to render incorrectly.
 
 This plan addresses both the engine bugs and the transition of every creature asset to a high-fidelity procedural standard using ellipsoids and tapered cylinders.
 
@@ -15,7 +15,7 @@ This plan addresses both the engine bugs and the transition of every creature as
 ### Phase 1: Fix Core Rendering Bug
 **Goal:** Ensure multi-part procedural meshes like `AncientWolf` and `AncientSkeleton` render correctly by applying their defined part offsets.
 
-1. **Fix `spawn_creature` in `src/game/systems/creature_spawning.rs`:** 
+1. **Fix `spawn_creature` in `src/game/systems/creature_spawning.rs`:**
    - Currently, child entities are spawned with `Transform::default()`.
    - Update to read `creature_def.mesh_transforms[mesh_index]` and apply the translation, rotation, and scale to each part.
 

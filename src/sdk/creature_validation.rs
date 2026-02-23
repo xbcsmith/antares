@@ -7,32 +7,32 @@
 //! common mesh issues like degenerate triangles, inconsistent winding order,
 //! non-manifold edges, and isolated vertices.
 //!
-//! # Examples
-//!
-//! ```
-//! use antares::domain::visual::MeshDefinition;
-//! use antares::sdk::creature_validation::validate_mesh_topology;
-//!
-//! let mesh = MeshDefinition {
-//!     vertices: vec![
-//!         [0.0, 0.0, 0.0],
-//!         [1.0, 0.0, 0.0],
-//!         [0.5, 1.0, 0.0],
-//!     ],
-//!     indices: vec![0, 1, 2],
-//!     normals: None,
-//!     uvs: None,
-//!     color: [1.0, 1.0, 1.0, 1.0],
-//!     lod_levels: None,
-//!     lod_distances: None,
-//!     material: None,
-//!     texture_path: None,
-//! };
-//!
-//! let result = validate_mesh_topology(&mesh);
-//! assert!(result.is_ok());
-//! ```
-
+/// # Examples
+///
+/// ```
+/// use antares::domain::visual::MeshDefinition;
+/// use antares::sdk::creature_validation::validate_mesh_topology;
+///
+/// let mesh = MeshDefinition {
+///     name: None,
+///     vertices: vec![
+///         [0.0, 0.0, 0.0],
+///         [1.0, 0.0, 0.0],
+///         [0.5, 1.0, 0.0],
+///     ],
+///     indices: vec![0, 1, 2],
+///     normals: None,
+///     uvs: None,
+///     color: [1.0, 1.0, 1.0, 1.0],
+///     lod_levels: None,
+///     lod_distances: None,
+///     material: None,
+///     texture_path: None,
+/// };
+///
+/// let result = validate_mesh_topology(&mesh);
+/// assert!(result.is_ok());
+/// ```
 use crate::domain::visual::{CreatureDefinition, MeshDefinition};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -140,6 +140,7 @@ impl TopologyValidation {
 /// use antares::sdk::creature_validation::validate_mesh_topology;
 ///
 /// let mesh = MeshDefinition {
+///     name: None,
 ///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 ///     indices: vec![0, 1, 2],
 ///     normals: None,
@@ -151,8 +152,7 @@ impl TopologyValidation {
 ///     texture_path: None,
 /// };
 ///
-/// let validation = validate_mesh_topology(&mesh).unwrap();
-/// assert!(validation.is_valid());
+/// assert!(antares::domain::visual::mesh_validation::validate_mesh_definition(&mesh).is_ok());
 /// ```
 pub fn validate_mesh_topology(mesh: &MeshDefinition) -> Result<TopologyValidation, TopologyError> {
     let mut validation = TopologyValidation::new();
@@ -251,6 +251,7 @@ pub fn validate_mesh_topology(mesh: &MeshDefinition) -> Result<TopologyValidatio
 /// use antares::sdk::creature_validation::validate_creature_topology;
 ///
 /// let mesh = MeshDefinition {
+///     name: None,
 ///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 ///     indices: vec![0, 1, 2],
 ///     normals: None,

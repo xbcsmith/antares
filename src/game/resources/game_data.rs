@@ -110,7 +110,7 @@ impl GameDataResource {
     /// use antares::domain::types::CreatureId;
     ///
     /// let resource = GameDataResource::new(GameData::new());
-    /// let creature = resource.get_creature(CreatureId::from(1));
+    /// let creature = resource.get_creature(CreatureId::from(1u32));
     /// assert!(creature.is_none());
     /// ```
     pub fn get_creature(&self, id: CreatureId) -> Option<&CreatureDefinition> {
@@ -135,7 +135,7 @@ impl GameDataResource {
     /// use antares::domain::types::CreatureId;
     ///
     /// let resource = GameDataResource::new(GameData::new());
-    /// assert!(!resource.has_creature(CreatureId::from(1)));
+    /// assert!(!resource.has_creature(CreatureId::from(1u32)));
     /// ```
     pub fn has_creature(&self, id: CreatureId) -> bool {
         self.data.creatures.has_creature(id)

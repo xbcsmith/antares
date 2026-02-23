@@ -21,6 +21,7 @@
 //!     name: "Base Dragon".to_string(),
 //!     meshes: vec![
 //!         MeshDefinition {
+//!             name: None,
 //!             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 //!             indices: vec![0, 1, 2],
 //!             normals: None,
@@ -236,6 +237,7 @@ impl CreatureVariation {
     ///     id: 1,
     ///     name: "Test".to_string(),
     ///     meshes: vec![MeshDefinition {
+    ///         name: None,
     ///         vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
     ///         indices: vec![0, 1, 2],
     ///         normals: None,
@@ -328,6 +330,7 @@ impl CreatureVariation {
 ///     name: "Base".to_string(),
 ///     meshes: vec![
 ///         MeshDefinition {
+///             name: None,
 ///             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 ///             indices: vec![0, 1, 2],
 ///             normals: None,

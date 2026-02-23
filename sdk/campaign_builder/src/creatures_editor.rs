@@ -11,7 +11,10 @@ use crate::mesh_validation;
 use crate::preview_features::PreviewState;
 use crate::preview_features::PreviewStatistics;
 use crate::preview_renderer::PreviewRenderer;
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use crate::ui_helpers::{
+    autocomplete_creature_asset_selector, extract_creature_asset_candidates, ActionButtons,
+    EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout,
+};
 use antares::domain::types::CreatureId;
 use antares::domain::visual::{
     CreatureDefinition, CreatureReference, MeshDefinition, MeshTransform,
@@ -93,6 +96,12 @@ pub struct CreaturesEditorState {
     pub register_asset_validated_creature: Option<CreatureDefinition>,
     /// Error message from the last Validate attempt; `None` when validation succeeded.
     pub register_asset_error: Option<String>,
+    /// Cached list of `.ron` file paths found in `assets/creatures/`, used to
+    /// drive the path autocomplete in the Register Asset dialog.
+    pub available_creature_assets: Vec<String>,
+    /// Last campaign directory seen by the editor, used to detect when the
+    /// creature asset candidates cache should be refreshed.
+    pub last_campaign_dir: Option<PathBuf>,
 
     // Phase 2: Asset Editor UI
     pub show_primitive_dialog: bool,
@@ -162,6 +171,8 @@ enum RegistryPreviewAction {
     Duplicate,
     /// Delete the creature after two-step confirmation.
     Delete,
+    /// Open the Register Asset dialog.
+    RegisterAsset,
 }
 
 impl Default for CreaturesEditorState {
@@ -233,6 +244,8 @@ impl Default for CreaturesEditorState {
             register_asset_path_buffer: String::new(),
             register_asset_validated_creature: None,
             register_asset_error: None,
+            available_creature_assets: Vec::new(),
+            last_campaign_dir: None,
 
             // Phase 5: Workflow Integration & Polish
             workflow: CreatureWorkflowState::new(),
@@ -317,6 +330,13 @@ impl CreaturesEditorState {
             .collect();
         self.id_manager.update_from_registry(&references);
 
+        // Refresh creature asset candidates when campaign directory changes
+        if self.last_campaign_dir != *campaign_dir {
+            self.available_creature_assets =
+                extract_creature_asset_candidates(campaign_dir.as_ref());
+            self.last_campaign_dir = campaign_dir.clone();
+        }
+
         // Registry Overview Section
         if self.show_registry_stats {
             ui.horizontal(|ui| {
@@ -333,34 +353,35 @@ impl CreaturesEditorState {
             ui.separator();
         }
 
-        // Toolbar with filters
-        ui.horizontal(|ui| {
-            let toolbar_action = EditorToolbar::new("creatures_toolbar")
-                .with_search(&mut self.search_query)
-                .with_total_count(creatures.len())
-                .show(ui);
+        // ---- Toolbar row 1: EditorToolbar (search, New, Save, Load, Import, Export, Reload) ----
+        // Kept on its own row so it always fits at any window width.
+        let toolbar_action = EditorToolbar::new("creatures_toolbar")
+            .with_search(&mut self.search_query)
+            .with_total_count(creatures.len())
+            .show(ui);
 
-            match toolbar_action {
-                ToolbarAction::New => {
-                    self.mode = CreaturesEditorMode::Add;
-                    self.edit_buffer = Self::default_creature();
-                    let suggested_category =
-                        self.category_filter.unwrap_or(CreatureCategory::Monsters);
-                    self.edit_buffer.id = self.id_manager.suggest_next_id(suggested_category);
-                    *unsaved_changes = true;
-                }
-                ToolbarAction::Save
-                | ToolbarAction::Load
-                | ToolbarAction::Import
-                | ToolbarAction::Export
-                | ToolbarAction::Reload => {
-                    // Handled by parent
-                }
-                ToolbarAction::None => {}
+        match toolbar_action {
+            ToolbarAction::New => {
+                self.mode = CreaturesEditorMode::Add;
+                self.edit_buffer = Self::default_creature();
+                let suggested_category = self.category_filter.unwrap_or(CreatureCategory::Monsters);
+                self.edit_buffer.id = self.id_manager.suggest_next_id(suggested_category);
+                *unsaved_changes = true;
             }
+            ToolbarAction::Save
+            | ToolbarAction::Load
+            | ToolbarAction::Import
+            | ToolbarAction::Export
+            | ToolbarAction::Reload => {
+                // Handled by parent
+            }
+            ToolbarAction::None => {}
+        }
 
-            ui.separator();
-
+        // ---- Toolbar row 2: filters and registry actions ----
+        // `ui.horizontal_wrapped` lets widgets flow onto a second line rather
+        // than clipping off the right edge when the window is narrow.
+        ui.horizontal_wrapped(|ui| {
             // Category filter dropdown
             egui::ComboBox::from_id_salt("creatures_registry_category_filter")
                 .selected_text(
@@ -398,6 +419,8 @@ impl CreaturesEditorState {
                 });
             ui.label("Category");
 
+            ui.separator();
+
             // Sort dropdown
             egui::ComboBox::from_id_salt("creatures_registry_sort_by")
                 .selected_text(match self.registry_sort_by {
@@ -420,6 +443,8 @@ impl CreaturesEditorState {
                 });
             ui.label("Sort");
 
+            ui.separator();
+
             if ui.button("🔄 Revalidate").clicked() {
                 self.show_validation_panel = true;
                 result_message = Some("Validation complete".to_string());
@@ -436,15 +461,26 @@ impl CreaturesEditorState {
 
         ui.separator();
 
-        // ---- Phase 3: Two-column layout (list + preview side panel) ----
+        // ---- Phase 3: Two-column layout (list + preview) ----
         //
-        // Strategy: compute a fully-owned index list (no borrows into `creatures`)
-        // so that:
-        //   1. The right-side preview panel can borrow `creatures[sel]` immutably
-        //      while calling `&mut self` methods.
-        //   2. The left-side scroll area can borrow `creatures[i]` for display.
-        //   3. Deferred actions (Edit / Duplicate / Delete / double-click) are
-        //      applied AFTER all closures return, once every borrow is released.
+        // Uses TwoColumnLayout (the project-standard helper) instead of a raw
+        // SidePanel::right.  SidePanel is a layout reservation that egui
+        // allocates during the layout pass — before any widget closures run.
+        // When the panel is driven by same-frame click state (selected_registry_entry
+        // set inside the list's ScrollArea closure) the panel registration has
+        // already happened before the click was processed, so the content never
+        // renders until the *next* repaint.  TwoColumnLayout uses ui.horizontal +
+        // ui.vertical, which are evaluated in document order and always see the
+        // latest state.  See sdk/AGENTS.md Rule 6.
+        //
+        // Borrow-splitting strategy (unchanged from before):
+        //   1. Pre-compute a fully-owned filtered_indices Vec so no live borrows
+        //      into `creatures` exist when the closures capture `self`.
+        //   2. Collect deferred mutations in local Option variables set inside
+        //      the closures and applied after show_split returns.
+        //
+        // Loop rows are each wrapped in push_id(creature_id) per sdk/AGENTS.md
+        // Rule 1 to prevent widget-ID collisions between rows.
 
         // Build filtered + sorted index list (owned, no external borrows).
         let filtered_indices: Vec<usize> = {
@@ -478,145 +514,194 @@ impl CreaturesEditorState {
             pairs.into_iter().map(|(i, _, _)| i).collect()
         };
 
-        // Deferred actions collected inside UI closures; applied after they return.
+        // Snapshot the fields the left closure needs so we do not borrow `self`
+        // inside a closure that also needs `&mut self` later.
+        let selected_entry = self.selected_registry_entry;
+
+        // Pre-compute per-row validation results so the left closure never borrows
+        // `self.id_manager` — that would conflict with the right closure's `&mut self`
+        // capture for `show_registry_preview_panel`.  (Two closures passed to the same
+        // function cannot both capture `self`, even if the borrows are disjoint fields.)
+        // sdk/AGENTS.md Rule 6 / E0500 fix.
+        let row_valid: Vec<bool> = filtered_indices
+            .iter()
+            .map(|&idx| {
+                let c = &creatures[idx];
+                let cat = CreatureCategory::from_id(c.id);
+                self.id_manager.validate_id(c.id, cat).is_ok()
+            })
+            .collect();
+
+        // Deferred mutations collected inside closures; applied after show_split.
         let mut pending_edit: Option<(usize, String)> = None;
         let mut pending_preview_action: Option<RegistryPreviewAction> = None;
+        // Pending selection change: (new_idx, reset_delete_confirm)
+        let mut pending_selection: Option<usize> = None;
+        let mut pending_selection_reset_confirm = false;
 
-        // --- Right panel: preview (always present; shows placeholder when nothing selected) ---
-        //
-        // IMPORTANT: egui `SidePanel` must be registered unconditionally every frame so that
-        // egui reserves its space before laying out the central content.  If the panel is
-        // wrapped in `if selected.is_some()` it only appears on the *second* frame after a
-        // click (because the click fires inside the left-side scroll closure, which runs after
-        // the panel section has already been skipped for this frame).  Keeping the panel alive
-        // at all times also avoids the jarring layout jump when the panel first appears.
-        egui::SidePanel::right("registry_preview_panel")
-            .default_width(300.0)
-            .resizable(true)
-            .show_inside(ui, |ui| {
-                match self.selected_registry_entry {
-                    None => {
-                        // Placeholder — no creature selected yet.
-                        ui.centered_and_justified(|ui| {
-                            ui.label(
-                                egui::RichText::new("Select a creature to preview it here.")
-                                    .weak()
-                                    .italics(),
-                            );
+        // Snapshot fields needed by the right closure (preview).
+        // The right closure receives an immutable creature snapshot so we can
+        // call &mut self methods (show_registry_preview_panel) without a
+        // simultaneous borrow on `creatures`.
+        let preview_snapshot: Option<(usize, CreatureDefinition)> =
+            selected_entry.and_then(|idx| creatures.get(idx).map(|c| (idx, c.clone())));
+        // If the index is stale (creature deleted externally) clear the selection
+        // after show_split returns.
+        let preview_index_stale = selected_entry.is_some() && preview_snapshot.is_none();
+
+        let delete_confirm_pending = self.registry_delete_confirm_pending;
+
+        TwoColumnLayout::new("creatures_registry")
+            .with_inspector_min_width(300.0)
+            .show_split(
+                ui,
+                // ---- Left column: registry list ----
+                |left_ui| {
+                    if filtered_indices.is_empty() {
+                        left_ui.label("No creatures found. Click 'New' to create one.");
+                    } else {
+                        // Column header row
+                        left_ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("ID").strong());
+                            ui.separator();
+                            ui.label(egui::RichText::new("Name").strong());
+                            ui.separator();
+                            ui.label(egui::RichText::new("Status").strong());
+                            ui.separator();
+                            ui.label(egui::RichText::new("Category").strong());
                         });
+                        left_ui.separator();
+
+                        // Each row is wrapped in push_id(creature_id) so that
+                        // selectable_label, colored_label etc. get unique egui
+                        // IDs even when names or categories repeat.
+                        // sdk/AGENTS.md Rule 1.
+                        for (row_idx, &idx) in filtered_indices.iter().enumerate() {
+                            let creature_id = creatures[idx].id;
+                            let creature_name = creatures[idx].name.clone();
+                            let creature_mesh_count = creatures[idx].meshes.len();
+                            let is_selected = selected_entry == Some(idx);
+                            let category = CreatureCategory::from_id(creature_id);
+                            let color = category.color();
+
+                            left_ui.push_id(creature_id, |ui| {
+                                ui.horizontal(|ui| {
+                                    // ID badge with category color
+                                    let id_text = format!("{:03}", creature_id);
+                                    ui.colored_label(
+                                        egui::Color32::from_rgb(
+                                            (color[0] * 255.0) as u8,
+                                            (color[1] * 255.0) as u8,
+                                            (color[2] * 255.0) as u8,
+                                        ),
+                                        egui::RichText::new(id_text).strong(),
+                                    );
+
+                                    ui.separator();
+
+                                    // Creature name (selectable)
+                                    let label = format!(
+                                        "{} ({} mesh{})",
+                                        creature_name,
+                                        creature_mesh_count,
+                                        if creature_mesh_count == 1 { "" } else { "es" }
+                                    );
+                                    let response = ui.selectable_label(is_selected, label);
+
+                                    if response.clicked() {
+                                        // Collect as deferred so we mutate self
+                                        // after show_split returns.
+                                        if selected_entry != Some(idx) {
+                                            pending_selection_reset_confirm = true;
+                                        }
+                                        pending_selection = Some(idx);
+                                        // Rule 7: request repaint so the right
+                                        // column shows updated content next frame.
+                                        ui.ctx().request_repaint();
+                                    }
+
+                                    if response.double_clicked() {
+                                        let file_name = format!(
+                                            "assets/creatures/{}.ron",
+                                            creature_name.to_lowercase().replace(' ', "_")
+                                        );
+                                        pending_edit = Some((idx, file_name));
+                                    }
+
+                                    ui.separator();
+
+                                    // Validation status indicator (pre-computed above).
+                                    // `row_idx` is the position in filtered_indices,
+                                    // which aligns with `row_valid`.
+                                    let is_valid = row_valid.get(row_idx).copied().unwrap_or(false);
+                                    if is_valid {
+                                        ui.label("✓");
+                                    } else {
+                                        ui.colored_label(egui::Color32::YELLOW, "⚠");
+                                    }
+
+                                    ui.separator();
+
+                                    // Category badge
+                                    ui.label(
+                                        egui::RichText::new(category.display_name())
+                                            .small()
+                                            .background_color(egui::Color32::from_rgb(
+                                                (color[0] * 100.0) as u8,
+                                                (color[1] * 100.0) as u8,
+                                                (color[2] * 100.0) as u8,
+                                            )),
+                                    );
+                                });
+                            });
+                        }
                     }
-                    Some(sel_idx) => {
-                        if let Some(creature) = creatures.get(sel_idx) {
-                            // creature: &CreatureDefinition (immutable borrow from creatures)
-                            // show_registry_preview_panel takes &mut self — both borrows are
-                            // independent so the borrow checker is happy.
-                            let action = self.show_registry_preview_panel(ui, creature, sel_idx);
+                },
+                // ---- Right column: preview panel ----
+                |right_ui| {
+                    match preview_snapshot {
+                        None => {
+                            // No creature selected (or stale index handled below).
+                            right_ui.centered_and_justified(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Select a creature to preview it here.")
+                                        .weak()
+                                        .italics(),
+                                );
+                            });
+                        }
+                        Some((sel_idx, ref creature)) => {
+                            // `creature` is a clone so there is no live borrow on
+                            // `creatures` here — `&mut self` in
+                            // show_registry_preview_panel is unambiguous.
+                            let action = self.show_registry_preview_panel(
+                                right_ui,
+                                creature,
+                                sel_idx,
+                                delete_confirm_pending,
+                            );
                             if action.is_some() {
                                 pending_preview_action = action;
                             }
-                        } else {
-                            // Index out of bounds (creature was deleted externally).
-                            self.selected_registry_entry = None;
-                            ui.label("No creature selected.");
                         }
                     }
-                }
-            });
+                },
+            );
 
-        // --- Left area: registry list in a scroll area ---
-        egui::ScrollArea::vertical()
-            .id_salt("creatures_registry_list")
-            .show(ui, |ui| {
-                if filtered_indices.is_empty() {
-                    ui.label("No creatures found. Click 'New' to create one.");
-                } else {
-                    // Column header row
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("ID").strong());
-                        ui.separator();
-                        ui.label(egui::RichText::new("Name").strong());
-                        ui.separator();
-                        ui.label(egui::RichText::new("Status").strong());
-                        ui.separator();
-                        ui.label(egui::RichText::new("Category").strong());
-                    });
-                    ui.separator();
+        // --- Apply deferred mutations (all closures have returned) ---
 
-                    for &idx in &filtered_indices {
-                        let creature = &creatures[idx];
-                        let is_selected = self.selected_registry_entry == Some(idx);
-                        let category = CreatureCategory::from_id(creature.id);
-                        let color = category.color();
+        // Stale index: creature was deleted externally; clear the selection.
+        if preview_index_stale {
+            self.selected_registry_entry = None;
+        }
 
-                        ui.horizontal(|ui| {
-                            // ID badge with category color
-                            let id_text = format!("{:03}", creature.id);
-                            ui.colored_label(
-                                egui::Color32::from_rgb(
-                                    (color[0] * 255.0) as u8,
-                                    (color[1] * 255.0) as u8,
-                                    (color[2] * 255.0) as u8,
-                                ),
-                                egui::RichText::new(id_text).strong(),
-                            );
-
-                            ui.separator();
-
-                            // Creature name (selectable)
-                            let label = format!(
-                                "{} ({} mesh{})",
-                                creature.name,
-                                creature.meshes.len(),
-                                if creature.meshes.len() == 1 { "" } else { "es" }
-                            );
-                            let response = ui.selectable_label(is_selected, label);
-
-                            if response.clicked() {
-                                // Reset delete-confirm flag when switching selection.
-                                if self.selected_registry_entry != Some(idx) {
-                                    self.registry_delete_confirm_pending = false;
-                                }
-                                self.selected_registry_entry = Some(idx);
-                                // Request an immediate repaint so the right-panel preview
-                                // updates in the same visual frame as the click highlight.
-                                ui.ctx().request_repaint();
-                            }
-
-                            if response.double_clicked() {
-                                let file_name = format!(
-                                    "assets/creatures/{}.ron",
-                                    creature.name.to_lowercase().replace(' ', "_")
-                                );
-                                pending_edit = Some((idx, file_name));
-                            }
-
-                            ui.separator();
-
-                            // Validation status indicator
-                            let validation_result =
-                                self.id_manager.validate_id(creature.id, category);
-                            if validation_result.is_ok() {
-                                ui.label("✓");
-                            } else {
-                                ui.colored_label(egui::Color32::YELLOW, "⚠");
-                            }
-
-                            ui.separator();
-
-                            // Category badge
-                            ui.label(
-                                egui::RichText::new(category.display_name())
-                                    .small()
-                                    .background_color(egui::Color32::from_rgb(
-                                        (color[0] * 100.0) as u8,
-                                        (color[1] * 100.0) as u8,
-                                        (color[2] * 100.0) as u8,
-                                    )),
-                            );
-                        });
-                    }
-                }
-            });
+        // Selection change from left-column click.
+        if let Some(new_idx) = pending_selection {
+            if pending_selection_reset_confirm {
+                self.registry_delete_confirm_pending = false;
+            }
+            self.selected_registry_entry = Some(new_idx);
+        }
 
         // --- Apply deferred actions (all closures have returned; borrows released) ---
 
@@ -627,6 +712,9 @@ impl CreaturesEditorState {
 
         // Actions requested from the preview panel.
         match pending_preview_action {
+            Some(RegistryPreviewAction::RegisterAsset) => {
+                self.show_register_asset_dialog = true;
+            }
             Some(RegistryPreviewAction::Edit { file_name }) => {
                 if let Some(idx) = self.selected_registry_entry {
                     self.open_for_editing(creatures, idx, &file_name);
@@ -688,10 +776,12 @@ impl CreaturesEditorState {
         // Phase 4: Register Asset Dialog window
         if self.show_register_asset_dialog {
             let ctx = ui.ctx().clone();
+            let available_paths = self.available_creature_assets.clone();
             if let Some(msg) = self.show_register_asset_dialog_window(
                 &ctx,
                 creatures,
                 campaign_dir,
+                &available_paths,
                 unsaved_changes,
             ) {
                 result_message = Some(msg);
@@ -712,6 +802,8 @@ impl CreaturesEditorState {
     /// * `ctx` - The egui context used to render the floating window.
     /// * `creatures` - Mutable reference to the full creatures list.
     /// * `campaign_dir` - Optional campaign directory for resolving relative paths.
+    /// * `available_paths` - Candidate creature asset paths for the autocomplete widget
+    ///   (pre-scanned from `assets/creatures/` by the caller).
     /// * `unsaved_changes` - Set to `true` when a creature is successfully registered.
     ///
     /// # Returns
@@ -737,6 +829,7 @@ impl CreaturesEditorState {
         ctx: &egui::Context,
         creatures: &mut Vec<CreatureDefinition>,
         campaign_dir: &Option<PathBuf>,
+        available_paths: &[String],
         unsaved_changes: &mut bool,
     ) -> Option<String> {
         let mut result: Option<String> = None;
@@ -758,13 +851,14 @@ impl CreaturesEditorState {
                 ui.label("Paths must use forward slashes (/) and must not start with /.");
                 ui.separator();
 
-                ui.horizontal(|ui| {
-                    ui.label("Path:");
-                    ui.text_edit_singleline(&mut self.register_asset_path_buffer)
-                        .on_hover_text(
-                            "Relative path to the .ron file (e.g. assets/creatures/goblin.ron)",
-                        );
-                });
+                autocomplete_creature_asset_selector(
+                    ui,
+                    "register_asset_path",
+                    "Path:",
+                    &mut self.register_asset_path_buffer,
+                    available_paths,
+                    campaign_dir.as_ref(),
+                );
 
                 ui.separator();
 
@@ -976,11 +1070,26 @@ impl CreaturesEditorState {
     /// * `ui`      - The egui Ui region to render into.
     /// * `creature` - Read-only view of the creature to display.
     /// * `idx`     - Index of the creature in the backing `creatures` vec.
+    /// Renders the registry preview panel for the creature at `idx`.
+    ///
+    /// Accepts a pre-cloned `creature` snapshot (not a live borrow from the
+    /// `creatures` Vec) so that the caller can hold `&mut self` and pass the
+    /// snapshot simultaneously without a borrow conflict.
+    ///
+    /// The `delete_confirm_pending` flag is passed in as a snapshot of
+    /// `self.registry_delete_confirm_pending` taken before entering the
+    /// `TwoColumnLayout` closure, so that the closure's immutable capture of
+    /// that state matches what the buttons should show.  Mutations to the flag
+    /// are collected as the return value and applied by the caller after
+    /// `show_split` returns.
+    ///
+    /// Returns a `RegistryPreviewAction` when the user clicks an action button.
     fn show_registry_preview_panel(
         &mut self,
         ui: &mut egui::Ui,
         creature: &CreatureDefinition,
         idx: usize,
+        delete_confirm_pending: bool,
     ) -> Option<RegistryPreviewAction> {
         let mut action: Option<RegistryPreviewAction> = None;
 
@@ -1041,36 +1150,45 @@ impl CreaturesEditorState {
         });
 
         // --- Mesh count + collapsible list ---
+        // push_id(idx) scopes the CollapsingHeader ID so that two creatures
+        // with the same mesh count string do not share open/close state.
+        // sdk/AGENTS.md Rule 4.
         let mesh_count = creature.meshes.len();
-        ui.collapsing(
-            format!(
-                "Meshes: {} mesh{}",
-                mesh_count,
-                if mesh_count == 1 { "" } else { "es" }
-            ),
-            |ui| {
-                if mesh_count == 0 {
-                    ui.label("(no meshes)");
-                } else {
-                    for (i, mesh) in creature.meshes.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{}.", i + 1));
-                            let name = mesh.name.as_deref().unwrap_or("(unnamed)");
-                            ui.label(egui::RichText::new(name).monospace());
-                            ui.label(format!(
-                                "— {} vert{}",
-                                mesh.vertices.len(),
-                                if mesh.vertices.len() == 1 {
-                                    "ex"
-                                } else {
-                                    "ices"
-                                }
-                            ));
-                        });
+        ui.push_id(idx, |ui| {
+            ui.collapsing(
+                format!(
+                    "Meshes: {} mesh{}",
+                    mesh_count,
+                    if mesh_count == 1 { "" } else { "es" }
+                ),
+                |ui| {
+                    if mesh_count == 0 {
+                        ui.label("(no meshes)");
+                    } else {
+                        for (i, mesh) in creature.meshes.iter().enumerate() {
+                            // push_id on mesh index so repeated mesh names
+                            // don't cause ID collisions. sdk/AGENTS.md Rule 1.
+                            ui.push_id(i, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("{}.", i + 1));
+                                    let name = mesh.name.as_deref().unwrap_or("(unnamed)");
+                                    ui.label(egui::RichText::new(name).monospace());
+                                    ui.label(format!(
+                                        "— {} vert{}",
+                                        mesh.vertices.len(),
+                                        if mesh.vertices.len() == 1 {
+                                            "ex"
+                                        } else {
+                                            "ices"
+                                        }
+                                    ));
+                                });
+                            });
+                        }
                     }
-                }
-            },
-        );
+                },
+            );
+        });
 
         // --- Derived file path ---
         let slug = creature.name.to_lowercase().replace(' ', "_");
@@ -1084,16 +1202,26 @@ impl CreaturesEditorState {
 
         // --- Action buttons ---
 
-        // Primary action: Edit (opens the full asset editor)
-        if ui
-            .button(egui::RichText::new("✏ Edit").strong())
-            .on_hover_text("Open creature in the asset editor")
-            .clicked()
-        {
-            action = Some(RegistryPreviewAction::Edit {
-                file_name: file_path,
-            });
-        }
+        // Primary row: Edit + Register Asset (the two "file" actions).
+        ui.horizontal(|ui| {
+            if ui
+                .button(egui::RichText::new("✏ Edit").strong())
+                .on_hover_text("Open creature in the asset editor")
+                .clicked()
+            {
+                action = Some(RegistryPreviewAction::Edit {
+                    file_name: file_path,
+                });
+            }
+
+            if ui
+                .button("📥 Register Asset")
+                .on_hover_text("Register an existing .ron file into the creature list")
+                .clicked()
+            {
+                action = Some(RegistryPreviewAction::RegisterAsset);
+            }
+        });
 
         ui.horizontal(|ui| {
             // Duplicate
@@ -1105,8 +1233,11 @@ impl CreaturesEditorState {
                 action = Some(RegistryPreviewAction::Duplicate);
             }
 
-            // Delete — two-step confirmation
-            if self.registry_delete_confirm_pending {
+            // Delete — two-step confirmation.
+            // Uses the snapshot `delete_confirm_pending` (not self.) so the
+            // button label is consistent with the state captured before the
+            // closure ran.  The caller applies mutations after show_split.
+            if delete_confirm_pending {
                 // Second click executes the deletion.
                 if ui
                     .button(egui::RichText::new("⚠ Confirm Delete").color(egui::Color32::RED))
@@ -1115,7 +1246,8 @@ impl CreaturesEditorState {
                 {
                     action = Some(RegistryPreviewAction::Delete);
                 }
-                // Cancel button clears the flag without deleting.
+                // Cancel button: signal via a sentinel action variant so the
+                // caller can clear the flag after show_split returns.
                 if ui.button("Cancel").clicked() {
                     self.registry_delete_confirm_pending = false;
                 }
@@ -1228,9 +1360,10 @@ impl CreaturesEditorState {
             }
         }
 
-        // Save/Cancel buttons for edit mode
+        // Save/Cancel/action buttons for edit mode.
+        // `horizontal_wrapped` prevents clipping on narrow windows.
         if self.mode == CreaturesEditorMode::Edit || self.mode == CreaturesEditorMode::Add {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button("✓ Save").clicked() {
                     // Validate creature
                     if let Err(e) = self.edit_buffer.validate() {
@@ -1273,6 +1406,16 @@ impl CreaturesEditorState {
 
                 if ui.button("📋 Browse Templates").clicked() {
                     result_message = Some(OPEN_CREATURE_TEMPLATES_SENTINEL.to_string());
+                }
+
+                ui.separator();
+
+                if ui
+                    .button("📥 Register Asset")
+                    .on_hover_text("Register an existing .ron file into the creature list")
+                    .clicked()
+                {
+                    self.show_register_asset_dialog = true;
                 }
             });
         }
@@ -1328,6 +1471,21 @@ impl CreaturesEditorState {
             if let Some(msg) =
                 self.show_save_as_dialog_window(ui.ctx(), creatures, campaign_dir, unsaved_changes)
             {
+                result_message = Some(msg);
+            }
+        }
+
+        // Register Asset dialog is also reachable from edit mode (button in action row)
+        if self.show_register_asset_dialog {
+            let ctx = ui.ctx().clone();
+            let available_paths = self.available_creature_assets.clone();
+            if let Some(msg) = self.show_register_asset_dialog_window(
+                &ctx,
+                creatures,
+                campaign_dir,
+                &available_paths,
+                unsaved_changes,
+            ) {
                 result_message = Some(msg);
             }
         }
@@ -3041,6 +3199,171 @@ mod tests {
         assert!(state.register_asset_error.is_none());
     }
 
+    /// The creature asset candidates cache and last_campaign_dir tracker must
+    /// both start empty / None so the first call to show_registry_mode
+    /// unconditionally populates them.
+    #[test]
+    fn test_available_creature_assets_initial_state() {
+        let state = CreaturesEditorState::new();
+        assert!(state.available_creature_assets.is_empty());
+        assert!(state.last_campaign_dir.is_none());
+    }
+
+    /// When a campaign directory is supplied that has no `assets/creatures`
+    /// subdirectory the candidates list remains empty and the dir is still
+    /// recorded (so a second call with the same dir does not re-scan).
+    #[test]
+    fn test_available_creature_assets_empty_when_no_creatures_dir() {
+        let temp_dir = std::env::temp_dir().join("antares_test_editor_creatures_no_dir");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+
+        let campaign_dir = Some(temp_dir.clone());
+
+        let mut state = CreaturesEditorState::new();
+        let mut creatures: Vec<CreatureDefinition> = Vec::new();
+        let mut unsaved = false;
+
+        // Manually apply the same refresh logic used in show_registry_mode so we
+        // can test it without invoking the full egui frame.
+        if state.last_campaign_dir != campaign_dir {
+            state.available_creature_assets =
+                crate::ui_helpers::extract_creature_asset_candidates(campaign_dir.as_ref());
+            state.last_campaign_dir = campaign_dir.clone();
+        }
+
+        assert!(state.available_creature_assets.is_empty());
+        assert_eq!(state.last_campaign_dir, campaign_dir);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // Suppress unused-variable warnings from the intentionally-inert bindings above.
+        let _ = &mut creatures;
+        let _ = &mut unsaved;
+    }
+
+    /// When the campaign directory contains `.ron` files inside
+    /// `assets/creatures/`, the cache is populated with their relative paths.
+    #[test]
+    fn test_available_creature_assets_populated_from_campaign_dir() {
+        let temp_dir = std::env::temp_dir().join("antares_test_editor_creatures_scan");
+        let creatures_dir = temp_dir.join("assets").join("creatures");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&creatures_dir).expect("create creatures dir");
+
+        std::fs::write(creatures_dir.join("goblin.ron"), b"data").expect("write goblin.ron");
+        std::fs::write(creatures_dir.join("orc.ron"), b"data").expect("write orc.ron");
+        // Non-RON files must be ignored by the extractor
+        std::fs::write(creatures_dir.join("readme.txt"), b"text").expect("write readme.txt");
+
+        let campaign_dir = Some(temp_dir.clone());
+
+        let mut state = CreaturesEditorState::new();
+
+        if state.last_campaign_dir != campaign_dir {
+            state.available_creature_assets =
+                crate::ui_helpers::extract_creature_asset_candidates(campaign_dir.as_ref());
+            state.last_campaign_dir = campaign_dir.clone();
+        }
+
+        assert_eq!(state.available_creature_assets.len(), 2);
+        assert!(state
+            .available_creature_assets
+            .contains(&"assets/creatures/goblin.ron".to_string()));
+        assert!(state
+            .available_creature_assets
+            .contains(&"assets/creatures/orc.ron".to_string()));
+        // The cache records which dir was scanned
+        assert_eq!(state.last_campaign_dir, campaign_dir);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    /// The cache must NOT be refreshed when campaign_dir has not changed —
+    /// simulates the common case where show_registry_mode is called every frame.
+    #[test]
+    fn test_available_creature_assets_not_refreshed_when_dir_unchanged() {
+        let temp_dir = std::env::temp_dir().join("antares_test_editor_creatures_no_refresh");
+        let creatures_dir = temp_dir.join("assets").join("creatures");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&creatures_dir).expect("create creatures dir");
+        std::fs::write(creatures_dir.join("goblin.ron"), b"data").expect("write goblin.ron");
+
+        let campaign_dir = Some(temp_dir.clone());
+
+        let mut state = CreaturesEditorState::new();
+
+        // First scan
+        if state.last_campaign_dir != campaign_dir {
+            state.available_creature_assets =
+                crate::ui_helpers::extract_creature_asset_candidates(campaign_dir.as_ref());
+            state.last_campaign_dir = campaign_dir.clone();
+        }
+        assert_eq!(state.available_creature_assets.len(), 1);
+
+        // Add a new file to disk — the cache should NOT pick it up on the next
+        // call because last_campaign_dir has not changed.
+        std::fs::write(creatures_dir.join("orc.ron"), b"data").expect("write orc.ron");
+
+        if state.last_campaign_dir != campaign_dir {
+            state.available_creature_assets =
+                crate::ui_helpers::extract_creature_asset_candidates(campaign_dir.as_ref());
+            state.last_campaign_dir = campaign_dir.clone();
+        }
+
+        // Still 1 — the cache was not re-scanned
+        assert_eq!(state.available_creature_assets.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    /// When campaign_dir changes to a different directory the cache must be
+    /// refreshed with the new directory's contents.
+    #[test]
+    fn test_available_creature_assets_refreshed_when_dir_changes() {
+        let temp_dir1 = std::env::temp_dir().join("antares_test_editor_creatures_dir1");
+        let temp_dir2 = std::env::temp_dir().join("antares_test_editor_creatures_dir2");
+
+        for (d, name) in [(&temp_dir1, "goblin.ron"), (&temp_dir2, "dragon.ron")] {
+            let creatures_dir = d.join("assets").join("creatures");
+            let _ = std::fs::remove_dir_all(d);
+            std::fs::create_dir_all(&creatures_dir).expect("create dir");
+            std::fs::write(creatures_dir.join(name), b"data").expect("write file");
+        }
+
+        let campaign_dir1 = Some(temp_dir1.clone());
+        let campaign_dir2 = Some(temp_dir2.clone());
+
+        let mut state = CreaturesEditorState::new();
+
+        // Scan dir1
+        if state.last_campaign_dir != campaign_dir1 {
+            state.available_creature_assets =
+                crate::ui_helpers::extract_creature_asset_candidates(campaign_dir1.as_ref());
+            state.last_campaign_dir = campaign_dir1.clone();
+        }
+        assert_eq!(state.available_creature_assets.len(), 1);
+        assert_eq!(
+            state.available_creature_assets[0],
+            "assets/creatures/goblin.ron"
+        );
+
+        // Switch to dir2 — cache must be refreshed
+        if state.last_campaign_dir != campaign_dir2 {
+            state.available_creature_assets =
+                crate::ui_helpers::extract_creature_asset_candidates(campaign_dir2.as_ref());
+            state.last_campaign_dir = campaign_dir2.clone();
+        }
+        assert_eq!(state.available_creature_assets.len(), 1);
+        assert_eq!(
+            state.available_creature_assets[0],
+            "assets/creatures/dragon.ron"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir1);
+        let _ = std::fs::remove_dir_all(&temp_dir2);
+    }
+
     /// When a creature with the same ID already exists, `execute_register_asset_validation`
     /// must set `register_asset_error` and leave `register_asset_validated_creature` as `None`.
     #[test]
@@ -3244,7 +3567,7 @@ mod tests {
                 color_tint: None,
             },
             CreatureDefinition {
-                id: 51,
+                id: 1051,
                 name: "Villager".to_string(),
                 meshes: vec![],
                 mesh_transforms: vec![],
@@ -3834,6 +4157,9 @@ mod tests {
         state.selected_registry_entry = Some(0);
 
         // Simulate the Edit action produced by show_registry_preview_panel().
+        // show_registry_preview_panel now takes delete_confirm_pending as a
+        // parameter instead of reading self.registry_delete_confirm_pending
+        // directly, so we just pass the current value.
         let file_name = format!(
             "assets/creatures/{}.ron",
             creatures[0].name.to_lowercase().replace(' ', "_")

@@ -85,6 +85,7 @@ use bevy::prelude::*;
 ///         name: "Test Creature".to_string(),
 ///         meshes: vec![
 ///             MeshDefinition {
+///                 name: None,
 ///                 vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 ///                 indices: vec![0, 1, 2],
 ///                 normals: None,
@@ -183,7 +184,18 @@ pub fn spawn_creature(
             },
             Mesh3d(mesh_handle),
             MeshMaterial3d(material_handle),
-            Transform::default(),
+            if let Some(mesh_transform) = creature_def.mesh_transforms.get(mesh_index) {
+                Transform::from_translation(Vec3::from(mesh_transform.translation))
+                    .with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        mesh_transform.rotation[0],
+                        mesh_transform.rotation[1],
+                        mesh_transform.rotation[2],
+                    ))
+                    .with_scale(Vec3::from(mesh_transform.scale))
+            } else {
+                Transform::default()
+            },
             GlobalTransform::default(),
             Visibility::default(),
             InheritedVisibility::default(),

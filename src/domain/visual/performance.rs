@@ -78,6 +78,7 @@ pub struct LodGenerationResult {
 /// use antares::domain::visual::MeshDefinition;
 ///
 /// let base_mesh = MeshDefinition {
+///     name: None,
 ///     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
 ///     indices: vec![0, 1, 2],
 ///     normals: None,
@@ -256,6 +257,7 @@ pub struct MeshBatch {
 ///
 /// let meshes = vec![
 ///     MeshDefinition {
+///         name: None,
 ///         vertices: vec![[0.0, 0.0, 0.0]],
 ///         indices: vec![0],
 ///         normals: None,

@@ -19,15 +19,15 @@
 //!     version: "1.0.0".to_string(),
 //!     description: "A tutorial campaign for new players".to_string(),
 //!     author: "Antares Team".to_string(),
-//!     starting_map: MapId::from(1),
+//!     starting_map: MapId::from(1u16),
 //!     starting_position: Position { x: 0, y: 0 },
-///     starting_facing: antares::domain::types::Direction::North,
-///     starting_innkeeper: Some("innkeeper_1".to_string()),
-///     required_data_version: "1.0.0".to_string(),
-///     dependencies: vec![],
-///     content_overrides: HashMap::new(),
-/// };
-/// ```
+//!     starting_facing: antares::domain::types::Direction::North,
+//!     starting_innkeeper: Some("innkeeper_1".to_string()),
+//!     required_data_version: "1.0.0".to_string(),
+//!     dependencies: vec![],
+//!     content_overrides: HashMap::new(),
+//! };
+//! ```
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -51,7 +51,7 @@ use crate::domain::types::{Direction, MapId, Position};
 ///     version: "1.0.0".to_string(),
 ///     description: "Tutorial campaign".to_string(),
 ///     author: "Developer".to_string(),
-///     starting_map: MapId::from(1),
+///     starting_map: MapId::from(1u16),
 ///     starting_position: Position { x: 5, y: 5 },
 ///     starting_facing: antares::domain::types::Direction::North,
 ///     starting_innkeeper: None,

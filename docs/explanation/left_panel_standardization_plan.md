@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan standardizes the Campaign Builder UI by introducing a reusable `StandardListItem` component to ensure consistent presentation, metadata display, and context menu actions across all editor left panel lists. The standardization covers 8 editors: Items, Monsters, Spells, Classes, Conditions, Maps, Quests, and Dialogue.
+This plan standardizes the Campaign Builder UI by introducing a reusable `StandardListItem` component to ensure consistent presentation, metadata display, and context menu actions across all editor left panel lists. The standardization covers 14 editors: Items, Monsters, Spells, Classes, Conditions, Maps, Quests, Dialogue, Characters, Races, Proficiencies, NPCs, Creatures, and Campaign.
 
 ## Current State Analysis
 
@@ -18,11 +18,17 @@ This plan standardizes the Campaign Builder UI by introducing a reusable `Standa
 
 **Current Editor Implementations**:
 
-- All 8 editors use ad-hoc string formatting for list labels
+- All 14 editors use ad-hoc string formatting for list labels
 - Items editor (L363-550): Uses emoji appending ("✨", "💀", "📜") directly in labels
 - Monsters editor (L272-450): Uses inline emoji formatting with HP display
 - Spells editor (L297-450): Uses school icons and level prefix in string format
 - Classes, Conditions, Maps, Quests, Dialogue: Similar ad-hoc patterns
+- Characters editor (L1252+): Ad-hoc "⭐ Premade"/"📋 Template" horizontal badge rows
+- Races editor (L587+): Ad-hoc size/stat modifier inline badges with `RichText`
+- Proficiencies editor (L510+): Emoji-prefixed string labels ("⚔️", "🛡️", "✨") concatenated with ID
+- NPC editor (L353+): Ad-hoc merchant/innkeeper/quest horizontal badge rows with `RichText`
+- Creatures editor (L525+): Custom registry table layout with colored ID badges and category labels
+- Campaign editor (L558+): Section navigation list (Overview/Gameplay/Files/Advanced) without metadata
 - Context menus: Currently implemented via `ActionButtons` in right panel only
 
 ### Identified Issues
@@ -30,9 +36,10 @@ This plan standardizes the Campaign Builder UI by introducing a reusable `Standa
 1. **Inconsistent Label Formatting**: Each editor uses different string concatenation patterns
 2. **No Rich Metadata Display**: Badges/metadata are plain text or emojis, not styled components
 3. **Missing Context Menus**: Right-click functionality absent on list items
-4. **Code Duplication**: Selection logic and action handling repeated across 8 editors
+4. **Code Duplication**: Selection logic and action handling repeated across 14 editors
 5. **No ID Display**: Item IDs not consistently shown in metadata
 6. **Accessibility**: Emoji-based indicators lack proper semantic meaning
+7. **New Editors Not Covered**: Characters, Races, Proficiencies, NPC, Creatures, and Campaign editors added after original plan was written and all use divergent ad-hoc patterns
 
 ## Implementation Phases
 
@@ -1049,9 +1056,679 @@ let config = StandardListItemConfig::new(&quest.name)
 
 ---
 
-### Phase 10: Documentation and Final Integration
+### Phase 10: Characters Editor Standardization
 
-#### 10.1 Documentation Updates
+#### 10.1 Refactor Characters Editor List
+
+**File**: `antares/sdk/campaign_builder/src/characters_editor.rs`
+**Modify Function**: `show_list` (Lines 1252+)
+
+**Task 10.1.1**: Update imports
+
+**Location**: Top of file (after existing imports)
+
+Add `MetadataBadge`, `StandardListItemConfig`, `show_standard_list_item` to the `ui_helpers` import block.
+
+**Task 10.1.2**: Replace ad-hoc badge rows in left panel scroll area
+
+**Replace**: The `ui.horizontal` block inside the `ScrollArea` closure that renders `"⭐ Premade"` / `"📋 Template"` labels and the `"| {alignment} | ID: {id}"` weak label.
+
+**Old Code Pattern**:
+
+```rust
+let label = format!(
+    "{} ({} {})",
+    character.name, character.race_id, character.class_id
+);
+let response = ui.selectable_label(is_selected, label);
+if response.clicked() {
+    select_idx = Some(*original_idx);
+}
+// Show character type badge
+ui.horizontal(|ui| {
+    ui.add_space(20.0);
+    if character.is_premade {
+        ui.label(egui::RichText::new("⭐ Premade").small().color(egui::Color32::GOLD));
+    } else {
+        ui.label(egui::RichText::new("📋 Template").small().color(egui::Color32::LIGHT_BLUE));
+    }
+    ui.label(egui::RichText::new(format!("| {} | ID: {}", alignment_name(character.alignment), character.id)).small().weak());
+});
+ui.add_space(4.0);
+```
+
+**New Code**:
+
+```rust
+let mut badges = Vec::new();
+
+// Premade vs Template badge
+if character.is_premade {
+    badges.push(
+        MetadataBadge::new("Premade")
+            .with_color(egui::Color32::GOLD)
+            .with_tooltip("Premade character available at character creation"),
+    );
+} else {
+    badges.push(
+        MetadataBadge::new("Template")
+            .with_color(egui::Color32::LIGHT_BLUE)
+            .with_tooltip("Character template"),
+    );
+}
+
+// Alignment badge
+badges.push(
+    MetadataBadge::new(alignment_name(character.alignment))
+        .with_color(egui::Color32::GRAY)
+        .with_tooltip("Character alignment"),
+);
+
+// Race/Class summary badge
+badges.push(
+    MetadataBadge::new(format!("{} {}", character.race_id, character.class_id))
+        .with_color(egui::Color32::from_rgb(150, 180, 220))
+        .with_tooltip("Race and Class"),
+);
+
+let config = StandardListItemConfig::new(&character.name)
+    .with_badges(badges)
+    .selected(is_selected);
+
+let (clicked, ctx_action) = show_standard_list_item(left_ui, config);
+if clicked {
+    select_idx = Some(*original_idx);
+}
+if ctx_action != ItemAction::None {
+    action_idx = Some(*original_idx);
+    action_type = ctx_action;
+}
+```
+
+**Validation**: Run `cargo check --all-targets --all-features` after changes.
+
+#### 10.2 Testing Requirements
+
+- [ ] Characters list shows name as primary label
+- [ ] "Premade" (gold) or "Template" (blue) badge present on each entry
+- [ ] Alignment badge shows character alignment
+- [ ] Race/Class badge shows `race_id` and `class_id`
+- [ ] Right-click context menu shows Edit/Delete/Duplicate
+- [ ] Search/filter still narrows the list correctly
+- [ ] Selecting a character populates the right panel preview
+
+#### 10.3 Deliverables
+
+- [ ] Characters editor `show_list` refactored to use `StandardListItemConfig`
+- [ ] Ad-hoc `ui.horizontal` badge rows replaced with `show_standard_list_item`
+- [ ] Context menu wired for Edit/Delete/Duplicate actions
+- [ ] All quality gates pass
+
+#### 10.4 Success Criteria
+
+- [ ] Zero errors/warnings
+- [ ] Premade/Template, Alignment, and Race/Class badges display correctly
+- [ ] Context menu functional
+- [ ] All existing character editor functionality preserved
+
+---
+
+### Phase 11: Races Editor Standardization
+
+#### 11.1 Refactor Races Editor List
+
+**File**: `antares/sdk/campaign_builder/src/races_editor.rs`
+**Modify Location**: `TwoColumnLayout` left-panel closure inside `pub fn show` (Lines 587+)
+
+**Task 11.1.1**: Update imports
+
+Add `MetadataBadge`, `StandardListItemConfig`, `show_standard_list_item` to the `ui_helpers` import block.
+
+**Task 11.1.2**: Replace ad-hoc badge block in left panel scroll area
+
+**Replace**: The `ui.horizontal` block inside `ScrollArea` that builds size text, color, and stat modifier strings manually.
+
+**Old Code Pattern**:
+
+```rust
+let response = ui.selectable_label(is_selected, &race.name);
+if response.clicked() {
+    new_selection.set(Some(*idx));
+}
+// Sub-text with badges and metadata
+ui.horizontal(|ui| {
+    ui.add_space(20.0);
+    let (size_text, size_color) = match race.size { ... };
+    ui.label(egui::RichText::new(size_text).small().color(size_color));
+    // ... stat modifier string building ...
+});
+```
+
+**New Code**:
+
+```rust
+let mut badges = Vec::new();
+
+// Size badge
+let (size_text, size_color) = match race.size {
+    SizeCategory::Small  => ("Small",  egui::Color32::LIGHT_GRAY),
+    SizeCategory::Medium => ("Medium", egui::Color32::LIGHT_BLUE),
+    SizeCategory::Large  => ("Large",  egui::Color32::GOLD),
+};
+badges.push(
+    MetadataBadge::new(size_text)
+        .with_color(size_color)
+        .with_tooltip("Race size category"),
+);
+
+// Stat modifier summary badge (non-zero modifiers only)
+let stats = &race.stat_modifiers;
+let mods: Vec<String> = [
+    ("Mgt", stats.might),
+    ("Int", stats.intellect),
+    ("Per", stats.personality),
+    ("End", stats.endurance),
+    ("Spd", stats.speed),
+    ("Acc", stats.accuracy),
+    ("Lck", stats.luck),
+]
+.iter()
+.filter(|(_, v)| *v != 0)
+.map(|(name, v)| format!("{name}:{v:+}"))
+.collect();
+
+if !mods.is_empty() {
+    badges.push(
+        MetadataBadge::new(mods.join(" "))
+            .with_color(egui::Color32::from_rgb(180, 220, 180))
+            .with_tooltip("Racial stat modifiers"),
+    );
+}
+
+let config = StandardListItemConfig::new(&race.name)
+    .with_badges(badges)
+    .selected(is_selected);
+
+let (clicked, ctx_action) = show_standard_list_item(left_ui, config);
+if clicked {
+    new_selection.set(Some(*idx));
+}
+if ctx_action != ItemAction::None {
+    action_to_perform.set(Some((*idx, ctx_action)));
+}
+```
+
+**Validation**: Run `cargo check --all-targets --all-features` after changes.
+
+#### 11.2 Testing Requirements
+
+- [ ] Race list shows name as primary label
+- [ ] Size badge (Small/Medium/Large) with correct color on each entry
+- [ ] Non-zero stat modifiers shown as compact badge (e.g., "Mgt:+2 Lck:-1")
+- [ ] Right-click context menu shows Edit/Delete/Duplicate/Export
+- [ ] Search filter still narrows the list correctly
+
+#### 11.3 Deliverables
+
+- [ ] Races editor left-panel closure refactored to use `StandardListItemConfig`
+- [ ] Ad-hoc `ui.horizontal` size/stat badge block replaced
+- [ ] Context menu wired
+- [ ] All quality gates pass
+
+#### 11.4 Success Criteria
+
+- [ ] Zero errors/warnings
+- [ ] Size and stat-modifier badges display correctly
+- [ ] Context menu functional
+- [ ] All existing race editor functionality preserved
+
+---
+
+### Phase 12: Proficiencies Editor Standardization
+
+#### 12.1 Refactor Proficiencies Editor List
+
+**File**: `antares/sdk/campaign_builder/src/proficiencies_editor.rs`
+**Modify Function**: `show_list` (Lines 510+)
+
+**Task 12.1.1**: Update imports
+
+Add `MetadataBadge`, `StandardListItemConfig`, `show_standard_list_item` to the `ui_helpers` import block.
+
+**Task 12.1.2**: Replace emoji-prefixed string label generation
+
+**Replace**: The `.map` closure that builds `format!("{} {}: {}", emoji, prof.id, prof.name)` labels and the subsequent `selectable_label` call.
+
+**Old Code Pattern**:
+
+```rust
+.map(|(idx, prof)| {
+    let emoji = match prof.category {
+        ProficiencyCategory::Weapon    => "⚔️",
+        ProficiencyCategory::Armor     => "🛡️",
+        ProficiencyCategory::Shield    => "🛡️",
+        ProficiencyCategory::MagicItem => "✨",
+    };
+    let label = format!("{} {}: {}", emoji, prof.id, prof.name);
+    (idx, label, prof.clone())
+})
+// ...
+for (i, (idx, label, _prof)) in filtered_proficiencies.iter().enumerate() {
+    let is_selected = selected == Some(*idx);
+    if left_ui.selectable_label(is_selected, label).clicked() {
+        new_selection = Some(*idx);
+    }
+}
+```
+
+**New Code**:
+
+Simplify the `.map` closure to `(idx, prof.clone())`, then replace the render loop:
+
+```rust
+for (idx, prof) in &filtered_proficiencies {
+    let mut badges = Vec::new();
+
+    // Category badge with icon and color
+    let (cat_label, cat_color) = match prof.category {
+        ProficiencyCategory::Weapon    => ("Weapon",     egui::Color32::from_rgb(200, 80,  80)),
+        ProficiencyCategory::Armor     => ("Armor",      egui::Color32::from_rgb(80,  80,  200)),
+        ProficiencyCategory::Shield    => ("Shield",     egui::Color32::from_rgb(80,  150, 200)),
+        ProficiencyCategory::MagicItem => ("Magic Item", egui::Color32::from_rgb(180, 80,  220)),
+    };
+    badges.push(
+        MetadataBadge::new(cat_label)
+            .with_color(cat_color)
+            .with_tooltip("Proficiency category"),
+    );
+
+    let config = StandardListItemConfig::new(&prof.name)
+        .with_badges(badges)
+        .selected(selected == Some(*idx));
+
+    let (clicked, ctx_action) = show_standard_list_item(left_ui, config);
+    if clicked {
+        new_selection = Some(*idx);
+    }
+    if ctx_action != ItemAction::None {
+        action_requested = Some(ctx_action);
+    }
+}
+```
+
+**Validation**: Run `cargo check --all-targets --all-features` after changes.
+
+#### 12.2 Testing Requirements
+
+- [ ] Proficiency list shows name as primary label
+- [ ] Category badge (Weapon/Armor/Shield/Magic Item) with correct color
+- [ ] No more raw emoji-prefixed ID strings in labels
+- [ ] Right-click context menu shows Edit/Delete/Duplicate/Export
+- [ ] Category filter and search still work correctly
+
+#### 12.3 Deliverables
+
+- [ ] Proficiencies editor `show_list` refactored to use `StandardListItemConfig`
+- [ ] Emoji-prefix string labels replaced with `MetadataBadge` category badges
+- [ ] Context menu wired
+- [ ] All quality gates pass
+
+#### 12.4 Success Criteria
+
+- [ ] Zero errors/warnings
+- [ ] Category badges display with correct colors
+- [ ] Context menu functional
+- [ ] All existing proficiency editor functionality preserved
+
+---
+
+### Phase 13: NPC Editor Standardization
+
+#### 13.1 Refactor NPC Editor List
+
+**File**: `antares/sdk/campaign_builder/src/npc_editor.rs`
+**Modify Function**: `show_list_view` (Lines 353+)
+
+**Task 13.1.1**: Update imports
+
+Add `MetadataBadge`, `StandardListItemConfig`, `show_standard_list_item` to the `ui_helpers` import block.
+
+**Task 13.1.2**: Replace ad-hoc badge rows in left panel list
+
+**Replace**: The `left_ui.selectable_label` call and the subsequent `left_ui.horizontal` block that renders merchant/innkeeper/quest badges with inline `RichText`.
+
+**Old Code Pattern**:
+
+```rust
+let response = left_ui.selectable_label(is_selected, &npc.name);
+if response.clicked() {
+    new_selection = Some(*idx);
+}
+left_ui.horizontal(|ui| {
+    ui.add_space(20.0);
+    if npc.is_merchant {
+        ui.label(egui::RichText::new("🏪 Merchant").small().color(egui::Color32::GOLD));
+    }
+    if npc.is_innkeeper {
+        ui.label(egui::RichText::new("🛏️ Innkeeper").small().color(egui::Color32::LIGHT_BLUE));
+    }
+    if !npc.quest_ids.is_empty() {
+        ui.label(egui::RichText::new(format!("📜 Quests: {}", npc.quest_ids.len())).small().color(...));
+    }
+    // ... etc
+});
+```
+
+**New Code**:
+
+```rust
+let mut badges = Vec::new();
+
+if npc.is_merchant {
+    badges.push(
+        MetadataBadge::new("Merchant")
+            .with_color(egui::Color32::GOLD)
+            .with_tooltip("This NPC is a merchant"),
+    );
+}
+if npc.is_innkeeper {
+    badges.push(
+        MetadataBadge::new("Innkeeper")
+            .with_color(egui::Color32::LIGHT_BLUE)
+            .with_tooltip("This NPC is an innkeeper"),
+    );
+}
+if !npc.quest_ids.is_empty() {
+    badges.push(
+        MetadataBadge::new(format!("Quests:{}", npc.quest_ids.len()))
+            .with_color(egui::Color32::from_rgb(200, 180, 100))
+            .with_tooltip("Number of associated quests"),
+    );
+}
+if npc.dialogue_id.is_some() {
+    badges.push(
+        MetadataBadge::new("Dialogue")
+            .with_color(egui::Color32::from_rgb(100, 200, 180))
+            .with_tooltip("Has dialogue tree"),
+    );
+}
+
+let config = StandardListItemConfig::new(&npc.name)
+    .with_badges(badges)
+    .selected(is_selected);
+
+let (clicked, ctx_action) = show_standard_list_item(left_ui, config);
+if clicked {
+    new_selection = Some(*idx);
+}
+if ctx_action != ItemAction::None {
+    action_requested = Some(ctx_action);
+}
+```
+
+**Validation**: Run `cargo check --all-targets --all-features` after changes.
+
+#### 13.2 Testing Requirements
+
+- [ ] NPC list shows name as primary label
+- [ ] "Merchant" (gold) badge present when `npc.is_merchant` is true
+- [ ] "Innkeeper" (blue) badge present when `npc.is_innkeeper` is true
+- [ ] "Quests:N" badge present when NPC has associated quests
+- [ ] "Dialogue" badge present when NPC has a dialogue tree
+- [ ] Right-click context menu shows Edit/Delete/Duplicate/Export
+- [ ] Search and filters still narrow the list correctly
+
+#### 13.3 Deliverables
+
+- [ ] NPC editor `show_list_view` refactored to use `StandardListItemConfig`
+- [ ] Ad-hoc merchant/innkeeper/quest `ui.horizontal` rows replaced
+- [ ] Context menu wired
+- [ ] All quality gates pass
+
+#### 13.4 Success Criteria
+
+- [ ] Zero errors/warnings
+- [ ] Merchant, Innkeeper, Quests, and Dialogue badges display correctly
+- [ ] Context menu functional
+- [ ] All existing NPC editor functionality preserved
+
+---
+
+### Phase 14: Creatures Editor Standardization
+
+#### 14.1 Refactor Creatures Registry Left Panel
+
+**File**: `antares/sdk/campaign_builder/src/creatures_editor.rs`
+**Modify Function**: `show_registry_mode` (Lines 295+)
+**Target**: The `ScrollArea` block starting at approximately L525 labeled `creatures_registry_list`
+
+**Context**: The Creatures editor uses a custom registry table layout with a `ui.horizontal` row per creature showing a colored ID badge, name label, validation tick, and category label. This should be refactored to use `StandardListItemConfig` while preserving the colored ID prefix and category badge.
+
+**Task 14.1.1**: Update imports
+
+Add `MetadataBadge`, `StandardListItemConfig`, `show_standard_list_item` to the `ui_helpers` import block.
+
+**Task 14.1.2**: Replace per-row `ui.horizontal` in registry scroll area
+
+**Replace**: The `ui.horizontal` closure per creature entry (colored ID label + selectable name + validation tick + category badge) with a `StandardListItemConfig`-based call.
+
+**Old Code Pattern**:
+
+```rust
+ui.horizontal(|ui| {
+    let id_text = format!("{:03}", creature.id);
+    ui.colored_label(egui::Color32::from_rgb(...), egui::RichText::new(id_text).strong());
+    ui.separator();
+    let label = format!("{} ({} mesh{})", creature.name, creature.meshes.len(), ...);
+    let response = ui.selectable_label(is_selected, label);
+    if response.clicked() { ... }
+    if response.double_clicked() { ... }
+    ui.separator();
+    // Validation icon
+    if validation_result.is_ok() { ui.label("✓"); } else { ui.colored_label(YELLOW, "⚠"); }
+    ui.separator();
+    // Category badge
+    ui.label(egui::RichText::new(category.display_name()).small().background_color(...));
+});
+```
+
+**New Code**:
+
+```rust
+let mut badges = Vec::new();
+
+// Category badge with category color
+let color = category.color();
+let cat_color = egui::Color32::from_rgb(
+    (color[0] * 200.0) as u8,
+    (color[1] * 200.0) as u8,
+    (color[2] * 200.0) as u8,
+);
+badges.push(
+    MetadataBadge::new(category.display_name())
+        .with_color(cat_color)
+        .with_tooltip("Creature category"),
+);
+
+// Mesh count badge
+badges.push(
+    MetadataBadge::new(format!(
+        "{} mesh{}",
+        creature.meshes.len(),
+        if creature.meshes.len() == 1 { "" } else { "es" }
+    ))
+    .with_color(egui::Color32::from_rgb(150, 150, 200))
+    .with_tooltip("Number of meshes"),
+);
+
+// Validation badge (warning if invalid)
+let validation_result = self.id_manager.validate_id(creature.id, category);
+if validation_result.is_err() {
+    badges.push(
+        MetadataBadge::new("ID Warning")
+            .with_color(egui::Color32::YELLOW)
+            .with_tooltip("ID validation issue detected"),
+    );
+}
+
+// Use ID-prefixed label to preserve the numeric ID display
+let label = format!("{:03} {}", creature.id, creature.name);
+let config = StandardListItemConfig::new(label)
+    .with_badges(badges)
+    .selected(is_selected);
+
+let (clicked, ctx_action) = show_standard_list_item(ui, config);
+
+if clicked {
+    if self.selected_registry_entry != Some(idx) {
+        self.registry_delete_confirm_pending = false;
+    }
+    self.selected_registry_entry = Some(idx);
+    ui.ctx().request_repaint();
+}
+
+// Double-click is no longer available via StandardListItem; promote to
+// a single-click edit path or retain with a secondary button in the right panel.
+
+if ctx_action != ItemAction::None {
+    // Map context menu actions to registry actions
+    match ctx_action {
+        ItemAction::Edit => {
+            let file_name = format!(
+                "assets/creatures/{}.ron",
+                creature.name.to_lowercase().replace(' ', "_")
+            );
+            pending_edit = Some((idx, file_name));
+        }
+        ItemAction::Delete => { /* set pending delete */ }
+        ItemAction::Duplicate => { /* set pending duplicate */ }
+        _ => {}
+    }
+}
+```
+
+**Note**: The double-click-to-edit behavior should be preserved via the existing right-panel Edit button. Document this trade-off in code comments.
+
+**Validation**: Run `cargo check --all-targets --all-features` after changes.
+
+#### 14.2 Testing Requirements
+
+- [ ] Creature registry list shows `{ID:03} {name}` as primary label
+- [ ] Category badge with category-derived color on each entry
+- [ ] Mesh count badge shows number of meshes
+- [ ] "ID Warning" (yellow) badge shown when validation fails
+- [ ] Right-click context menu shows Edit/Delete/Duplicate
+- [ ] Category filter and search still narrow the list
+- [ ] Right-panel preview still activates on single click
+
+#### 14.3 Deliverables
+
+- [ ] Creatures editor registry `ui.horizontal` rows replaced with `StandardListItemConfig`
+- [ ] Category, mesh-count, and validation-warning badges implemented
+- [ ] Context menu wired to existing registry action handlers
+- [ ] All quality gates pass
+
+#### 14.4 Success Criteria
+
+- [ ] Zero errors/warnings
+- [ ] Category and mesh-count badges display correctly
+- [ ] ID Warning badge appears only on validation failures
+- [ ] Context menu functional
+- [ ] All existing creature editor functionality preserved (including double-click path via right panel)
+
+---
+
+### Phase 15: Campaign Editor Standardization
+
+#### 15.1 Refactor Campaign Section Navigation List
+
+**File**: `antares/sdk/campaign_builder/src/campaign_editor.rs`
+**Modify Function**: `render_ui` (Lines 558+)
+**Target**: The left-panel `selectable_label` block that renders Overview/Gameplay/Files/Advanced section links.
+
+**Context**: The Campaign editor's left panel is a simple section-navigation list (not a data list), so it does not need metadata badges or a context menu. The goal is to add icons and consistent indentation to match the visual rhythm of other standardized editors.
+
+**Task 15.1.1**: Replace plain `selectable_label` calls with icon-prefixed labels
+
+**Replace**: The four `selectable_label` calls with icon-prefixed versions using `StandardListItemConfig` with `context_menu_enabled: false`.
+
+**Old Code Pattern**:
+
+```rust
+left_ui.heading("Sections");
+left_ui.separator();
+let is_overview = new_selected.get() == CampaignSection::Overview;
+if left_ui.selectable_label(is_overview, "Overview").clicked() {
+    new_selected.set(CampaignSection::Overview);
+}
+let is_gameplay = new_selected.get() == CampaignSection::Gameplay;
+if left_ui.selectable_label(is_gameplay, "Gameplay").clicked() {
+    new_selected.set(CampaignSection::Gameplay);
+}
+let is_files = new_selected.get() == CampaignSection::Files;
+if left_ui.selectable_label(is_files, "Files").clicked() {
+    new_selected.set(CampaignSection::Files);
+}
+let is_advanced = new_selected.get() == CampaignSection::Advanced;
+if left_ui.selectable_label(is_advanced, "Advanced").clicked() {
+    new_selected.set(CampaignSection::Advanced);
+}
+```
+
+**New Code**:
+
+```rust
+left_ui.heading("Sections");
+left_ui.separator();
+
+let sections: &[(&str, &str, CampaignSection)] = &[
+    ("📋", "Overview",  CampaignSection::Overview),
+    ("⚔️",  "Gameplay",  CampaignSection::Gameplay),
+    ("📁", "Files",     CampaignSection::Files),
+    ("⚙️",  "Advanced",  CampaignSection::Advanced),
+];
+
+for (icon, label, section) in sections {
+    let is_selected = new_selected.get() == *section;
+    let config = StandardListItemConfig::new(*label)
+        .with_icon(icon)
+        .selected(is_selected)
+        .with_context_menu(false);
+    let (clicked, _) = show_standard_list_item(left_ui, config);
+    if clicked {
+        new_selected.set(*section);
+    }
+}
+```
+
+**Validation**: Run `cargo check --all-targets --all-features` after changes.
+
+#### 15.2 Testing Requirements
+
+- [ ] Section list shows icon + label for each of the four sections
+- [ ] Selected section is highlighted
+- [ ] Clicking a section switches the right panel content
+- [ ] No context menu appears on right-click (context menu disabled)
+
+#### 15.3 Deliverables
+
+- [ ] Campaign editor section navigation refactored to use `StandardListItemConfig`
+- [ ] Icons added to Overview/Gameplay/Files/Advanced entries
+- [ ] Context menu disabled (navigation list, not data list)
+- [ ] All quality gates pass
+
+#### 15.4 Success Criteria
+
+- [ ] Zero errors/warnings
+- [ ] Section icons display correctly
+- [ ] Section switching still works correctly
+- [ ] No regression in campaign metadata editing
+
+---
+
+### Phase 16: Documentation and Final Integration
+
+#### 16.1 Documentation Updates
 
 **File**: `antares/docs/explanation/implementations.md`
 
@@ -1060,15 +1737,17 @@ let config = StandardListItemConfig::new(&quest.name)
 **Content to Add**:
 
 ```markdown
-## Left Panel Standardization (Campaign Builder)
+## Left Panel Standardization (Campaign Builder) [UPDATED]
 
 **Date**: [Current Date]
 **Components Modified**: 8 editors, ui_helpers.rs
 **Scope**: UI standardization and context menu integration
 
-### Overview
+### Overview [Updated]
 
 Standardized left panel list items across all Campaign Builder editors using a reusable `StandardListItem` component pattern.
+
+Standardized left panel list items across all Campaign Builder editors using a reusable `StandardListItem` component pattern. Covers 14 editors total including 6 editors added after the original plan was written.
 
 ### Components Implemented
 
@@ -1125,22 +1804,56 @@ Standardized left panel list items across all Campaign Builder editors using a r
    - Badges: Quest Type, Repeatable, Level Range
 
 8. **Dialogue Editor** (`dialogue_editor.rs`)
+
    - Existing metadata preserved with new component structure
+
+9. **Characters Editor** (`characters_editor.rs`)
+
+   - Badges: Premade/Template, Alignment, Race+Class summary
+   - Replaces ad-hoc `ui.horizontal` badge rows
+
+10. **Races Editor** (`races_editor.rs`)
+
+    - Badges: Size category (Small/Medium/Large), non-zero stat modifier summary
+    - Replaces ad-hoc inline `RichText` size/stat block
+
+11. **Proficiencies Editor** (`proficiencies_editor.rs`)
+
+    - Badges: Category (Weapon/Armor/Shield/Magic Item) with color coding
+    - Replaces emoji-prefixed string label pattern
+
+12. **NPC Editor** (`npc_editor.rs`)
+
+    - Badges: Merchant, Innkeeper, Quest count, Dialogue presence
+    - Replaces ad-hoc `ui.horizontal` merchant/innkeeper badge rows
+
+13. **Creatures Editor** (`creatures_editor.rs`)
+
+    - Badges: Category (color-coded), Mesh count, ID Validation warning
+    - Preserves numeric ID prefix in primary label
+    - Replaces custom `ui.horizontal` registry table rows
+
+14. **Campaign Editor** (`campaign_editor.rs`)
+
+    - Icon-prefixed section navigation (Overview/Gameplay/Files/Advanced)
+    - Context menu disabled (navigation list, not data list)
+    - Replaces plain `selectable_label` section links
 
 ### Testing
 
 - All quality gates pass (fmt, check, clippy, test)
-- Manual UI testing completed for all 8 editors
-- Context menus functional on all editors
+- Manual UI testing completed for all 14 editors
+- Context menus functional on all data-list editors (disabled on Campaign section nav)
 - No regressions in search/filter functionality
 
 ### Benefits
 
-- **Consistency**: Uniform appearance across all editors
+- **Consistency**: Uniform appearance across all 14 editors
 - **Maintainability**: Single source of truth for list item rendering
 - **Accessibility**: Semantic badges with tooltips replace emoji indicators
 - **Usability**: Context menus reduce clicks for common actions
 - **Extensibility**: Easy to add new badge types or metadata fields
+- **Completeness**: All editors including the 6 added after the original plan are now covered
 ```
 
 **Task 10.1.2**: Update architecture documentation (if applicable)
@@ -1149,7 +1862,7 @@ Standardized left panel list items across all Campaign Builder editors using a r
 
 **Action**: Add reference to `StandardListItem` pattern in UI/SDK section
 
-#### 10.2 Final Quality Verification
+#### 16.2 Final Quality Verification
 
 **Command Sequence** (run from project root):
 
@@ -1172,20 +1885,26 @@ cargo nextest run --all-features --no-capture
 
 **Expected Results**: All commands pass with zero errors/warnings
 
-#### 10.3 Manual Testing Verification
+#### 16.3 Manual Testing Verification
 
 **Complete Testing Matrix**:
 
-| Editor     | List Display | Badges | ID Display | Context Menu | Search/Filter | Edit | Delete | Duplicate | Export |
-| ---------- | ------------ | ------ | ---------- | ------------ | ------------- | ---- | ------ | --------- | ------ |
-| Items      | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
-| Monsters   | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
-| Spells     | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
-| Classes    | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
-| Conditions | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
-| Maps       | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
-| Quests     | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
-| Dialogue   | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Editor        | List Display | Badges | ID Display | Context Menu | Search/Filter | Edit | Delete | Duplicate | Export |
+| ------------- | ------------ | ------ | ---------- | ------------ | ------------- | ---- | ------ | --------- | ------ |
+| Items         | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Monsters      | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Spells        | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Classes       | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Conditions    | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Maps          | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Quests        | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Dialogue      | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Characters    | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Races         | [ ]          | [ ]    | N/A        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Proficiencies | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| NPCs          | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Creatures     | [ ]          | [ ]    | [ ]        | [ ]          | [ ]           | [ ]  | [ ]    | [ ]       | [ ]    |
+| Campaign      | [ ]          | N/A    | N/A        | N/A          | N/A           | N/A  | N/A    | N/A       | N/A    |
 
 **Testing Instructions**:
 
@@ -1194,24 +1913,25 @@ cargo nextest run --all-features --no-capture
 3. Check box only if functionality works correctly
 4. Report any failures with specific steps to reproduce
 
-#### 10.4 Deliverables
+#### 16.4 Deliverables
 
 - [ ] Implementation summary added to `docs/explanation/implementations.md`
 - [ ] Architecture documentation updated (if applicable)
 - [ ] All quality gates pass across entire project
 - [ ] Manual testing matrix 100% complete
 - [ ] No regressions in existing functionality
-- [ ] All 8 editors standardized and functional
+- [ ] All 14 editors standardized and functional
 
-#### 10.5 Success Criteria
+#### 16.5 Success Criteria
 
 - [ ] All code compiles without errors
 - [ ] Zero clippy warnings
 - [ ] All tests pass (existing + new)
 - [ ] Manual testing matrix shows 100% pass rate
 - [ ] Documentation updated and accurate
-- [ ] Campaign Builder UI visually consistent across all editors
-- [ ] Context menus work on all editors
+- [ ] Campaign Builder UI visually consistent across all 14 editors
+- [ ] Context menus work on all data-list editors (Characters, Races, Proficiencies, NPCs, Creatures)
+- [ ] Campaign editor section navigation uses icon-prefixed labels, no context menu
 - [ ] No performance degradation
 
 ---
@@ -1229,13 +1949,22 @@ cargo nextest run --all-features --no-capture
 7. ✅ Phase 7: Map Editor Standardization
 8. ✅ Phase 8: Quest Editor Standardization
 9. ✅ Phase 9: Dialogue Editor Standardization
-10. ✅ Phase 10: Documentation and Final Integration - **END HERE**
+10. [ ] Phase 10: Characters Editor Standardization
+11. [ ] Phase 11: Races Editor Standardization
+12. [ ] Phase 12: Proficiencies Editor Standardization
+13. [ ] Phase 13: NPC Editor Standardization
+14. [ ] Phase 14: Creatures Editor Standardization
+15. [ ] Phase 15: Campaign Editor Standardization
+16. [ ] Phase 16: Documentation and Final Integration - **END HERE**
 
 **Rationale**:
 
 - Phase 1 provides foundation for all editors
-- Phases 2-9 can be executed sequentially (each editor is independent)
-- Phase 10 finalizes and documents the entire implementation
+- Phases 2-9 are complete (original 8 editors)
+- Phases 10-15 cover the 6 new editors added after the original plan; each is independent and can be executed sequentially or in parallel
+- Phase 14 (Creatures) is the most complex due to the custom registry table layout; do it before Phase 16
+- Phase 15 (Campaign) is the simplest change (navigation list, no badges/context menu); can be done at any point
+- Phase 16 finalizes and documents the entire implementation
 
 ---
 
@@ -1315,6 +2044,15 @@ If critical issues arise:
 6. Verify success criteria met
 7. Move to next phase
 
+**New Editor Notes (Phases 10-15)**:
+
+- Characters (Phase 10): `show_list` in `characters_editor.rs` - replace `ui.horizontal` badge block inside `ScrollArea`
+- Races (Phase 11): Left-panel closure inside `pub fn show` in `races_editor.rs` - replace `ui.horizontal` size/stat block
+- Proficiencies (Phase 12): `show_list` in `proficiencies_editor.rs` - simplify `.map` and replace `selectable_label` loop
+- NPCs (Phase 13): `show_list_view` in `npc_editor.rs` - replace merchant/innkeeper/quest `ui.horizontal` block
+- Creatures (Phase 14): `show_registry_mode` in `creatures_editor.rs` - replace `ui.horizontal` per-row table in `ScrollArea`; preserve colored ID prefix in primary label
+- Campaign (Phase 15): `render_ui` in `campaign_editor.rs` - replace four `selectable_label` section links with icon-prefixed `StandardListItemConfig` calls, context menu disabled
+
 **Critical Rules**:
 
 - Follow AGENTS.md rules for copyright headers (SPDX)
@@ -1349,6 +2087,9 @@ If critical issues arise:
 
 This plan provides comprehensive, step-by-step instructions for standardizing Campaign Builder left panel lists. Each phase is self-contained with explicit file paths, line numbers, code examples, validation steps, and success criteria. The phased approach ensures safe, incremental progress with full testing at each stage.
 
-**Total Estimated Implementation Time**: 8-12 hours across 10 phases
-**Risk Level**: Low (incremental, well-tested approach)
+The plan was updated to include 6 new editors (Characters, Races, Proficiencies, NPC, Creatures, Campaign) that were added after the original 8-editor plan was written. All 14 editors are now covered.
+
+**Total Estimated Implementation Time**: 12-16 hours across 16 phases (Phases 1-9 already complete)
+**Remaining Estimated Time**: 4-6 hours for Phases 10-16
+**Risk Level**: Low (incremental, well-tested approach; new editors follow the same proven pattern)
 **Impact**: High (consistency, maintainability, usability improvements across entire Campaign Builder)

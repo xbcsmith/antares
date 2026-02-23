@@ -2,36 +2,319 @@
 
 ## Implementation Status Overview
 
-| Phase                                   | Status      | Date       | Description                                              |
-| --------------------------------------- | ----------- | ---------- | -------------------------------------------------------- |
-| Phase 1                                 | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                                  |
-| Phase 2                                 | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                                    |
-| Phase 3                                 | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                           |
-| Phase 4                                 | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                             |
-| Phase 5                                 | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                               |
-| Phase 6                                 | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration            |
-| Phase 7                                 | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                                  |
-| Phase 8                                 | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                             |
-| Phase 9                                 | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                               |
-| Phase 10                                | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                               |
-| **Creature Editor Enhancement Phase 1** | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**                      |
-| **Creature Editor Enhancement Phase 2** | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                             |
-| **Creature Editor Enhancement Phase 3** | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)**           |
-| **Creature Editor Enhancement Phase 4** | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                          |
-| **Creature Editor Enhancement Phase 5** | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**                        |
-| **Creature Editor UX Fixes Phase 1**    | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry**           |
-| **Creature Editor UX Fixes Phase 2**    | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**                |
-| **Creature Editor UX Fixes Phase 3**    | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**                  |
-| **Creature Editor UX Fixes Phase 4**    | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**           |
-| **Creature Editor UX Fixes Phase 5**    | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder** |
-| **Findings Remediation Phase 1**         | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**  |
-| **Findings Remediation Phase 2**         | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)** |
-| **Findings Remediation Phase 3**         | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard** |
-| **Findings Remediation Phase 4**         | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI** |
-| **Findings Remediation Phase 5**         | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation** |
+| Phase                                           | Status      | Date       | Description                                                               |
+| ----------------------------------------------- | ----------- | ---------- | ------------------------------------------------------------------------- |
+| Phase 1                                         | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                                                   |
+| Phase 2                                         | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                                                     |
+| Phase 3                                         | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                                            |
+| Phase 4                                         | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                                              |
+| Phase 5                                         | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                                                |
+| Phase 6                                         | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration                             |
+| Phase 7                                         | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                                                   |
+| Phase 8                                         | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                                              |
+| Phase 9                                         | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                                                |
+| Phase 10                                        | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                                                |
+| **Creature Editor Enhancement Phase 1**         | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**                                       |
+| **Creature Editor Enhancement Phase 2**         | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                                              |
+| **Creature Editor Enhancement Phase 3**         | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)**                            |
+| **Creature Editor Enhancement Phase 4**         | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                                           |
+| **Creature Editor Enhancement Phase 5**         | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**                                         |
+| **Creature Editor UX Fixes Phase 1**            | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry**                            |
+| **Creature Editor UX Fixes Phase 2**            | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**                                 |
+| **Creature Editor UX Fixes Phase 3**            | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**                                   |
+| **Creature Editor UX Fixes Phase 4**            | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**                            |
+| **Creature Editor UX Fixes Remediation**        | ✅ COMPLETE | 2026-07-16 | **Fix stale ID-range tests in creatures_manager**                         |
+| **Creature Editor UX Fixes Phase 3/4 UI Fix**   | ✅ COMPLETE | 2026-07-16 | **Replace SidePanel with TwoColumnLayout; add push_id per row**           |
+| **Creature Editor UX Fixes Toolbar Fix**        | ✅ COMPLETE | 2026-07-16 | **Fix toolbar overflow; surface Register Asset in preview + edit**        |
+| **Creature Editor Register Asset Autocomplete** | ✅ COMPLETE | 2026-07-16 | **Add path autocomplete to Register Asset dialog from assets/creatures/** |
+| **Creature Editor UX Fixes Phase 5**            | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder**                  |
+| **Findings Remediation Phase 1**                | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**                   |
+| **Findings Remediation Phase 2**                | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)**         |
+| **Findings Remediation Phase 3**                | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard**        |
+| **Findings Remediation Phase 4**                | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI**            |
+| **Findings Remediation Phase 5**                | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation**        |
 
 **Total Lines Implemented**: 8,500+ lines of production code + 5,100+ lines of documentation
-**Total Tests**: 298+ new tests (all passing), 1,776 campaign_builder tests passing
+**Total Tests**: 318+ new tests (all passing), 2,410 campaign_builder tests passing
+
+---
+
+## Creature Editor Register Asset Autocomplete
+
+### Overview
+
+The "Register Creature Asset" dialog previously used a raw `text_edit_singleline`
+for the asset path field — the only text input in any Campaign Builder editor
+that did not offer autocomplete suggestions. Users had to type the exact relative
+path (`assets/creatures/goblin.ron`) from memory with no feedback about what
+files actually exist on disk.
+
+This change brings the dialog into parity with all other path inputs by replacing
+the plain text field with an autocomplete widget backed by a live scan of the
+campaign's `assets/creatures/` directory.
+
+### Root Cause
+
+The dialog was implemented before the `autocomplete_creature_asset_selector`
+helper and `extract_creature_asset_candidates` scanner existed. The portrait and
+sprite-sheet selectors were added later as separate helpers, but the creature
+asset path field was never upgraded.
+
+### Changes
+
+**`sdk/campaign_builder/src/ui_helpers.rs`**
+
+- Added `extract_creature_asset_candidates(campaign_dir: Option<&PathBuf>) -> Vec<String>`:
+  scans `<campaign_dir>/assets/creatures/*.ron`, returns sorted, deduplicated
+  relative paths using forward slashes on all platforms.
+- Added `autocomplete_creature_asset_selector(...)`: follows the identical
+  persistent-buffer + candidate-list pattern used by `autocomplete_portrait_selector`
+  and `autocomplete_sprite_sheet_selector`. Includes a hover tooltip that shows
+  whether the selected file exists on disk, and a "Clear" button.
+- Added 6 unit tests covering: no campaign dir, nonexistent dir, empty dir, `.ron`
+  files returned, non-`.ron` files ignored, alphabetical sort, and forward-slash
+  normalization.
+
+**`sdk/campaign_builder/src/creatures_editor.rs`**
+
+- Added `available_creature_assets: Vec<String>` and `last_campaign_dir: Option<PathBuf>`
+  fields to `CreaturesEditorState` (mirroring the `available_portraits` /
+  `last_campaign_dir` pattern used by `CharactersEditorState` and `NpcEditorState`).
+- Both fields initialize to empty / `None` so the first call to `show_registry_mode`
+  unconditionally populates the cache.
+- Added cache-refresh logic at the top of `show_registry_mode`: when
+  `last_campaign_dir != campaign_dir` the candidates are re-scanned and the
+  recorded directory is updated.
+- Updated `show_register_asset_dialog_window` signature to accept
+  `available_paths: &[String]` and replaced `ui.text_edit_singleline` with
+  `autocomplete_creature_asset_selector`.
+- Updated both call sites (in `show_registry_mode` and `show_edit_mode`) to
+  clone the candidates into an owned `Vec<String>` before passing into the
+  dialog (avoids borrow conflicts with the `&mut self` receiver).
+- Added 5 unit tests: initial state empty, empty when no creatures dir, populated
+  from real temp files, cache not refreshed when dir unchanged, cache refreshed
+  when dir changes.
+
+### Behaviour Details
+
+- Candidates are scanned once per campaign-directory change (not every frame),
+  matching the same lazy-refresh pattern used by the portrait and sprite-sheet
+  selectors in the Characters and NPC editors.
+- Only `.ron` files directly inside `assets/creatures/` are offered as
+  suggestions; subdirectories and non-RON files are ignored.
+- The typed text persists across frames (egui memory). A path is committed to
+  `register_asset_path_buffer` only when it exactly matches a candidate, keeping
+  the Validate button's precondition intact.
+- A hover tooltip shows the resolved absolute path and whether the file was found
+  on disk, giving the user immediate confirmation before clicking Validate.
+
+### Validation
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — 2410 passed, 8 skipped
+
+---
+
+## Creature Editor Toolbar Overflow Fix and Register Asset Placement
+
+### Overview
+
+Two usability problems were identified from screenshots of the running Campaign
+Builder:
+
+1. **Toolbar overflow** — the registry-mode toolbar placed the `EditorToolbar`
+   widget, two `ComboBox` filters, and three action buttons ("Revalidate",
+   "Register Asset", "Browse Templates") all inside a single `ui.horizontal`
+   block. At a standard window width (~1000 px) the last two buttons were
+   clipped off the right edge with no overflow indicator, scroll bar, or error.
+   Users had to widen the window past ~1400 px to see them.
+
+2. **Register Asset inaccessible from normal workflows** — the "Register Asset"
+   button existed only in the now-invisible overflow zone of the toolbar. It was
+   absent from both the right-column preview panel (where Edit / Duplicate /
+   Delete live) and the edit-mode Save/Cancel row, so there was no reachable
+   path to it at a standard window size.
+
+### Root Cause (sdk/AGENTS.md Rule 12)
+
+`ui.horizontal` clips silently. There is no compiler warning, no clippy lint,
+and no visible overflow indicator. A toolbar that fits at development resolution
+becomes unusable at a smaller window size. The fix is `ui.horizontal_wrapped`,
+which reflows widgets onto a second line rather than clipping them.
+
+Additionally, a contextual action that exists in the toolbar must also exist in
+every panel where the user is likely to need it (preview panel, edit-mode row).
+Placing it only in the toolbar — especially one that can overflow — means it is
+effectively hidden.
+
+### Changes
+
+**`sdk/campaign_builder/src/creatures_editor.rs`**
+
+- Separated the registry-mode toolbar into two rows:
+  - Row 1: `EditorToolbar::new(...).show(ui)` alone — the toolbar widget manages
+    its own width and always fits.
+  - Row 2: `ui.horizontal_wrapped(...)` containing the two `ComboBox` filters,
+    `ui.separator()` calls between groups, and the three action buttons
+    ("Revalidate", "Register Asset", "Browse Templates").
+- Added `RegistryPreviewAction::RegisterAsset` variant to the preview-action
+  enum so the preview panel can signal "open Register Asset dialog" back to the
+  caller via the deferred-action pattern.
+- Added "📥 Register Asset" button to the right-column **preview panel** (next
+  to "✏ Edit"), in the same `ui.horizontal` row.
+- Added "📥 Register Asset" button to the **edit-mode** Save/Cancel row
+  (`ui.horizontal_wrapped`), after "Browse Templates", so it is reachable while
+  editing a creature.
+- Changed the edit-mode Save/Cancel row from `ui.horizontal` to
+  `ui.horizontal_wrapped` so it also reflows on narrow windows.
+
+**`sdk/AGENTS.md`**
+
+- Added Rule 12: "Never Put a Growing Button Row in `ui.horizontal`; Use
+  `ui.horizontal_wrapped`", with wrong/right examples and the decision rules for
+  when each is appropriate.
+- Added toolbar-layout checklist items to the egui ID Audit Checklist, the
+  SDK-Specific Workflow Steps, and the SDK-Specific Validation Checklist.
+- Recorded the new bug in the Living Document table.
+
+### Validation
+
+- `cargo fmt --all` — no output
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -p campaign_builder --all-features` — 1790/1790 passed, 0 failed
+
+---
+
+## Creature Editor Phase 3/4 UI Fix: TwoColumnLayout + push_id
+
+### Overview
+
+The Creature Editor registry list showed an empty right panel even after a
+creature was selected. The root cause was two violations of the sdk/AGENTS.md
+egui rules introduced when Phase 3 was implemented:
+
+**Violation 1 — Rule 6: `SidePanel` bypasses `TwoColumnLayout`**
+
+The Phase 3 implementation used `egui::SidePanel::right("registry_preview_panel").show_inside(ui, ...)` instead of the project-standard `TwoColumnLayout` helper from `ui_helpers.rs`. `SidePanel` is a layout reservation that egui allocates during the layout pass — before any widget closures run. When the panel content is driven by `selected_registry_entry`, which is set inside the list's `ScrollArea` closure (running after the panel registration), the panel renders with stale `None` state on the first click frame. `TwoColumnLayout` uses `ui.horizontal + ui.vertical`, evaluated in document order, so it always sees current state.
+
+**Violation 2 — Rule 1: Registry list loop rows missing `push_id`**
+
+Every row in the registry list rendered `selectable_label`, `colored_label`, and other widgets without wrapping the row body in `ui.push_id(creature_id, ...)`. This caused egui widget-ID collisions between rows.
+
+**Compiler conflict unmasked by the fix**
+
+Moving to `TwoColumnLayout::show_split` (which takes two simultaneous `FnOnce` closures) exposed a borrow-checker conflict: the left closure borrowed `self.id_manager` for `validate_id`, and the right closure needed `&mut self` for `show_registry_preview_panel`. Both closures were passed to the same function, so the borrow checker rejected the double capture of `self` (E0500).
+
+The fix pre-computes a `row_valid: Vec<bool>` from `self.id_manager` before calling `show_split`, so the left closure only captures the pre-computed `Vec` (no `self` borrow) and the right closure retains exclusive `&mut self`.
+
+### Changes
+
+- `sdk/campaign_builder/src/creatures_editor.rs`
+  - Replaced `SidePanel::right.show_inside` + bare `ScrollArea` with `TwoColumnLayout::new("creatures_registry").show_split(...)`
+  - Added `ui.push_id(creature_id, ...)` around every row body in the registry list loop
+  - Added `push_id(idx, ...)` around the `CollapsingHeader` in `show_registry_preview_panel` and `push_id(i, ...)` around each mesh row inside it
+  - Pre-computed `row_valid: Vec<bool>` from `self.id_manager` before `show_split` to eliminate E0500 borrow conflict
+  - Moved `selected_registry_entry` mutation (click handler) to a deferred pattern — collected as `pending_selection` inside the left closure, applied after `show_split` returns
+  - Snapshot `delete_confirm_pending` from `self` before `show_split`; added it as an explicit parameter to `show_registry_preview_panel` so the right closure does not read `self.registry_delete_confirm_pending` during the closure call
+  - Snapshot `preview_snapshot: Option<(usize, CreatureDefinition)>` (a clone) before `show_split` so the right closure has no live borrow on `creatures` when calling `&mut self` methods
+- `sdk/AGENTS.md` — new bug record added to the living document table
+
+### Validation
+
+- `cargo fmt --all` — no output
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -p campaign_builder --all-features` — 1790/1790 passed, 0 failed
+
+---
+
+## Creature Editor UX Fixes Remediation: creatures_manager Stale ID-Range Tests
+
+### Overview
+
+Three tests in `sdk/campaign_builder/src/creatures_manager.rs` were asserting
+against an **old, narrow ID-range scheme** (Monsters 1–50, NPCs 51–100, etc.)
+that was superseded when the ranges were expanded to 1000-wide bands
+(Monsters 1–999, NPCs 1000–1999, Templates 2000–2999, Variants 3000–3999,
+Custom 4000+). The production `CreatureCategory::id_range()` and `from_id()`
+implementations in `creatures_manager.rs` already used the correct wide ranges,
+as did the parallel `creature_id_manager.rs` implementation. Only the tests
+were stale.
+
+This caused Phase 3 and Phase 4 of the Creature Editor UX Fixes plan to appear
+broken at the test-suite level even though the implementation was correct.
+
+### Root Cause
+
+The `creatures_manager::CreatureCategory` range definitions were updated from
+the old 50-wide-band scheme to the current 1000-wide-band scheme at some point
+after the tests were written, but the tests were never updated to match.
+
+Specifically, the three failing tests were:
+
+- `test_creature_category_id_range` — asserted `monsters.end == 51`; actual is `1000`.
+- `test_creature_category_from_id` — asserted `from_id(51) == Npcs`; actual is `Monsters`
+  (ID 51 is well inside the 1–999 Monsters range).
+- `test_find_by_category` — used ID 51 to create a test "NPC" entry; that ID
+  now belongs to Monsters, so `find_by_category(Npcs)` returned 0, not 1.
+
+### Fix
+
+Updated the three failing tests in `creatures_manager.rs` to use the current
+1000-wide range boundaries:
+
+- `test_creature_category_id_range`: added boundary assertions for all five
+  categories (Monsters 1..1000, NPCs 1000..2000, Templates 2000..3000,
+  Variants 3000..4000, Custom 4000..).
+- `test_creature_category_from_id`: replaced the old boundary IDs (50, 51,
+  101, 151, 201) with the correct boundary IDs (999, 1000, 1999, 2000, 2999,
+  3000, 3999, 4000, 9999).
+- `test_find_by_category`: changed the test NPC from ID 51 to ID 1000.
+
+No production code was changed. No data structures were modified. Only the
+test expectations were updated to match the already-correct implementation.
+
+### Files Changed
+
+- `sdk/campaign_builder/src/creatures_manager.rs` — three tests updated
+
+### Validation
+
+All quality gates pass after the fix:
+
+- `cargo fmt --all` — no output (already formatted)
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -p campaign_builder --all-features` — 1790/1790 passed, 0 failed
+
+---
+
+## Consolidate Creature Mesh Python Tooling (Phase 2)
+
+### Overview
+
+Addressed Phase 2 of `docs/explanation/creature_procedural_meshes_plan.md` to consolidate the scattered 4 Python generation scripts (`gen_monsters2.py`, `gen_dire_wolves.py`, `gen_detailed_meshes.py`, and `generate_characters.py`) into a single maintainable entry point for procedural meshes.
+
+### Components Updated
+
+- `examples/generate_all_meshes.py` (Unified Python Generator)
+- `campaigns/tutorial/assets/creatures/*.ron` (55 artifact meshes generated or updated)
+
+### Key Changes
+
+- Merged the 4 disparate Python scripts into the consolidated `examples/generate_all_meshes.py` script.
+- Centralized the advanced geometry mathematical primitives (`ellipsoid`, `tapered_cylinder`, and `sphere_section`) making them globally available for all generator functions.
+- Refactored output directory assignments to write exactly into `campaigns/tutorial/assets/creatures` avoiding intermediary staging directories.
+- Refactored legacy `write_ron` usages emitting `CreatureDefinition(...)` records into calling proper `write_creature` outputs carrying the `(id: ..., mesh_transforms: ...)` format, leveraging runtime mapping and extraction scripts to avoid regressions.
+- All generators successfully produced 55 creature assets without data loss, retaining backward compatibility for game IDs.
+
+### Validation
+
+- Python script outputs 55 validated RON format meshes directly into campaign asset directories without errors.
+- Tests passed: `cargo fmt`, `cargo check`, `cargo clippy`, and `cargo nextest run`.
 
 ---
 

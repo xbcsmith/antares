@@ -1970,6 +1970,7 @@ impl ResolvedNpc {
     ///     portrait_id: "guard.png".to_string(),
     ///     sprite: None,
     ///     dialogue_id: Some(10),
+    ///     creature_id: None,
     ///     quest_ids: vec![],
     ///     faction: Some("City Watch".to_string()),
     ///     is_merchant: false,

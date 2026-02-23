@@ -505,6 +505,24 @@ impl MonstersEditorState {
                     ui.label(format!("  🛡️ AC: {}", monster.ac.base));
                     ui.label(format!("  ⚡ Attacks: {}", monster.attacks.len()));
 
+                    // Detailed attacks listing
+                    for (i, attack) in monster.attacks.iter().enumerate() {
+                        // Show damage roll and attack type
+                        ui.label(format!(
+                            "  Attack {}: {}d{}+{} ({:?})",
+                            i + 1,
+                            attack.damage.count,
+                            attack.damage.sides,
+                            attack.damage.bonus,
+                            attack.attack_type
+                        ));
+
+                        // Show special effect if present
+                        if let Some(ref effect) = attack.special_effect {
+                            ui.label(format!("    Special: {:?}", effect));
+                        }
+                    }
+
                     if monster.magic_resistance > 0 {
                         ui.label(format!(
                             "  🔮 Magic Resistance: {}%",
@@ -522,6 +540,75 @@ impl MonstersEditorState {
                     ui.label(format!("  Speed: {}", monster.stats.speed.base));
                     ui.label(format!("  Accuracy: {}", monster.stats.accuracy.base));
                     ui.label(format!("  Luck: {}", monster.stats.luck.base));
+
+                    ui.separator();
+
+                    // Resistances display: show the current values for all resistances
+                    ui.label("🛡️ Resistances:");
+                    ui.label(format!(
+                        "  Physical: {}",
+                        if monster.resistances.physical {
+                            "Yes"
+                        } else {
+                            "No"
+                        }
+                    ));
+                    ui.label(format!(
+                        "  Fire: {}",
+                        if monster.resistances.fire {
+                            "Yes"
+                        } else {
+                            "No"
+                        }
+                    ));
+                    ui.label(format!(
+                        "  Cold: {}",
+                        if monster.resistances.cold {
+                            "Yes"
+                        } else {
+                            "No"
+                        }
+                    ));
+                    ui.label(format!(
+                        "  Electricity: {}",
+                        if monster.resistances.electricity {
+                            "Yes"
+                        } else {
+                            "No"
+                        }
+                    ));
+                    ui.label(format!(
+                        "  Energy: {}",
+                        if monster.resistances.energy {
+                            "Yes"
+                        } else {
+                            "No"
+                        }
+                    ));
+                    ui.label(format!(
+                        "  Paralysis: {}",
+                        if monster.resistances.paralysis {
+                            "Yes"
+                        } else {
+                            "No"
+                        }
+                    ));
+                    ui.label(format!(
+                        "  Fear: {}",
+                        if monster.resistances.fear {
+                            "Yes"
+                        } else {
+                            "No"
+                        }
+                    ));
+                    ui.label(format!(
+                        "  Sleep: {}",
+                        if monster.resistances.sleep {
+                            "Yes"
+                        } else {
+                            "No"
+                        }
+                    ));
 
                     ui.separator();
 
@@ -746,6 +833,36 @@ impl MonstersEditorState {
                     AttributePairInput::new("Luck", &mut self.edit_buffer.stats.luck)
                         .with_id_salt("monster_luck")
                         .show(ui);
+                });
+
+                ui.add_space(10.0);
+
+                ui.group(|ui| {
+                    ui.heading("Resistances");
+
+                    // Provide checkboxes for all boolean resistance flags on the monster.
+                    // Arrange into rows so the UI remains compact.
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.edit_buffer.resistances.physical, "Physical");
+                        ui.add_space(8.0);
+                        ui.checkbox(&mut self.edit_buffer.resistances.fire, "Fire");
+                        ui.add_space(8.0);
+                        ui.checkbox(&mut self.edit_buffer.resistances.cold, "Cold");
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.edit_buffer.resistances.electricity, "Electricity");
+                        ui.add_space(8.0);
+                        ui.checkbox(&mut self.edit_buffer.resistances.energy, "Energy");
+                        ui.add_space(8.0);
+                        ui.checkbox(&mut self.edit_buffer.resistances.paralysis, "Paralysis");
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.edit_buffer.resistances.fear, "Fear");
+                        ui.add_space(8.0);
+                        ui.checkbox(&mut self.edit_buffer.resistances.sleep, "Sleep");
+                    });
                 });
 
                 ui.add_space(10.0);
