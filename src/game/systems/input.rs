@@ -464,6 +464,12 @@ fn handle_input(
         return;
     }
 
+    // Block all movement/interaction input when in Combat mode.
+    // Combat action input is handled exclusively by combat_input_system.
+    if matches!(game_state.mode, crate::application::GameMode::Combat(_)) {
+        return;
+    }
+
     let world = &mut game_state.world;
     let mut moved = false;
 
@@ -1232,5 +1238,68 @@ mod interaction_tests {
             assert_eq!(character_id, "hero_01");
             assert_eq!(name, "TestRecruit");
         }
+    }
+}
+
+/// T1-8: Verify that `handle_input` silently ignores all movement input when
+/// `GameMode::Combat` is active.  The party position must remain unchanged after
+/// pressing the forward-movement key.
+#[cfg(test)]
+mod combat_guard_tests {
+    use super::*;
+    use bevy::prelude::{App, ButtonInput, KeyCode, Update};
+
+    #[test]
+    fn test_movement_blocked_in_combat_mode() {
+        let mut app = App::new();
+
+        // Minimal resources required by handle_input.
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        let cfg = ControlsConfig::default();
+        let key_map = KeyMap::from_controls_config(&cfg);
+        app.insert_resource(InputConfigResource {
+            controls: cfg,
+            key_map,
+        });
+
+        // Build a game state in Combat mode.
+        let mut gs = crate::application::GameState::new();
+        let hero = crate::domain::character::Character::new(
+            "Guard Test Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        // enter_combat sets GameMode::Combat so the guard in handle_input fires.
+        gs.enter_combat();
+        let original_position = gs.world.party_position;
+
+        app.insert_resource(GlobalState(gs));
+        app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
+        app.insert_resource(PendingRecruitmentContext::default());
+
+        // Register message channels that handle_input depends on.
+        app.add_message::<DoorOpenedEvent>();
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<StartDialogue>();
+
+        // Register the system under test.
+        app.add_systems(Update, handle_input);
+
+        // Press MoveForward (W key per default config).
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::KeyW);
+        }
+        app.update();
+
+        let gs_after = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs_after.0.world.party_position, original_position,
+            "Party must not move while GameMode::Combat is active"
+        );
     }
 }

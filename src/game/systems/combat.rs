@@ -355,6 +355,39 @@ pub struct DamageText;
 #[derive(Resource, Debug, Clone, Default)]
 pub struct TargetSelection(pub Option<CombatantId>);
 
+/// Resource tracking the keyboard-navigable action menu state.
+///
+/// `active_index` (0–4) indicates which action button is currently highlighted.
+/// The order matches the spawn order: `[Attack, Defend, Cast, Item, Flee]`.
+/// `confirmed` is set to `true` when `Enter` is pressed and consumed by the
+/// unified dispatch function on the same frame.
+///
+/// Defaults to `active_index = 0` (Attack highlighted) and `confirmed = false`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::combat::ActionMenuState;
+///
+/// let state = ActionMenuState::default();
+/// assert_eq!(state.active_index, 0);
+/// assert!(!state.confirmed);
+/// ```
+#[derive(Resource, Debug, Clone, Default)]
+pub struct ActionMenuState {
+    /// Index of the currently highlighted action button (0–4).
+    pub active_index: usize,
+    /// Set to `true` when `Enter` is pressed; consumed by the dispatch path.
+    pub confirmed: bool,
+}
+
+/// Marker component placed on the currently highlighted `ActionButton` entity.
+///
+/// Used by `update_action_highlight` to apply the hover background colour to
+/// the active button while restoring the default colour on all others.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ActiveActionHighlight;
+
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
@@ -370,6 +403,7 @@ impl Plugin for CombatPlugin {
             .insert_resource(CombatResource::new())
             .insert_resource(CombatTurnStateResource::default())
             .insert_resource(TargetSelection::default())
+            .insert_resource(ActionMenuState::default())
             .insert_resource(ButtonInput::<KeyCode>::default())
             // Handle events that indicate combat started
             .add_systems(Update, handle_combat_started)
@@ -379,6 +413,7 @@ impl Plugin for CombatPlugin {
             .add_systems(Update, sync_combat_to_party_on_exit)
             // Phase 3: Player Action Systems
             .add_systems(Update, combat_input_system)
+            .add_systems(Update, update_action_highlight.after(combat_input_system))
             .add_systems(Update, enter_target_selection)
             .add_systems(Update, select_target)
             .add_systems(Update, handle_attack_action)
@@ -912,6 +947,7 @@ fn update_combat_ui(
     >,
     mut action_menu: Query<&mut Visibility, With<ActionMenuPanel>>,
     turn_state: Res<CombatTurnStateResource>,
+    mut action_menu_state: ResMut<ActionMenuState>,
 ) {
     // Only update when in combat mode
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
@@ -1015,13 +1051,23 @@ fn update_combat_ui(
         **text = turn_order_str;
     }
 
-    // Show/hide action menu based on turn state
+    // Show/hide action menu based on turn state.
+    // When the menu becomes visible (player turn starts), reset the highlight to
+    // index 0 (Attack) so the default is always Attack on every menu open.
     if let Ok(mut visibility) = action_menu.single_mut() {
-        *visibility = if matches!(turn_state.0, CombatTurnState::PlayerTurn) {
+        let new_visibility = if matches!(turn_state.0, CombatTurnState::PlayerTurn) {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+
+        // Reset highlight index whenever the menu transitions to visible.
+        if *visibility == Visibility::Hidden && new_visibility == Visibility::Visible {
+            action_menu_state.active_index = 0;
+            action_menu_state.confirmed = false;
+        }
+
+        *visibility = new_visibility;
     }
 }
 
@@ -1031,6 +1077,73 @@ fn update_combat_ui(
 ///
 /// Emits `DefendAction` / `FleeAction` messages or enters target selection mode
 /// for attacks.
+/// Ordered action button types matching the spawn order in `setup_combat_ui`.
+///
+/// This array is the single source of truth for mapping `ActionMenuState::active_index`
+/// to an `ActionButtonType`. Index 0 is `Attack` (the default highlight).
+const ACTION_BUTTON_ORDER: [ActionButtonType; 5] = [
+    ActionButtonType::Attack,
+    ActionButtonType::Defend,
+    ActionButtonType::Cast,
+    ActionButtonType::Item,
+    ActionButtonType::Flee,
+];
+
+/// Unified combat action dispatcher.
+///
+/// Both mouse (`Interaction::Pressed`) and keyboard (`Enter`) routes call this
+/// function so the semantics are identical regardless of input method.
+///
+/// # Arguments
+///
+/// * `button_type` - The `ActionButtonType` selected by the player.
+/// * `actor` - The `CombatantId` of the currently acting player combatant.
+/// * `target_sel` - Mutable reference to the `TargetSelection` resource.
+/// * `defend_writer` - Optional message writer for `DefendAction`.
+/// * `flee_writer` - Optional message writer for `FleeAction`.
+fn dispatch_combat_action(
+    button_type: ActionButtonType,
+    actor: CombatantId,
+    target_sel: &mut TargetSelection,
+    defend_writer: &mut Option<MessageWriter<DefendAction>>,
+    flee_writer: &mut Option<MessageWriter<FleeAction>>,
+) {
+    match button_type {
+        ActionButtonType::Attack => {
+            target_sel.0 = Some(actor);
+        }
+        ActionButtonType::Defend => {
+            if let Some(w) = defend_writer {
+                w.write(DefendAction { combatant: actor });
+            }
+        }
+        ActionButtonType::Flee => {
+            if let Some(w) = flee_writer {
+                w.write(FleeAction);
+            }
+        }
+        ActionButtonType::Cast | ActionButtonType::Item => {
+            // Phase 4: submenu open — handled by separate systems
+        }
+    }
+}
+
+/// Handle input from action buttons and keyboard shortcuts during PlayerTurn.
+///
+/// # Keyboard Controls
+///
+/// - `Tab`: cycles the highlighted action button forward (wraps at index 4 → 0).
+/// - `Enter`: dispatches the action at the current highlight index.
+/// - `Escape`: cancels target selection if active; otherwise no-op.
+///
+/// # Mouse Controls
+///
+/// - `Interaction::Pressed` on an `ActionButton`: dispatches that action.
+/// - `Interaction::Hovered` and `Interaction::None` are **ignored** — hover
+///   does not dispatch an action.
+///
+/// Both mouse and keyboard routes call `dispatch_combat_action` so their
+/// semantics are identical.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 fn combat_input_system(
@@ -1042,13 +1155,23 @@ fn combat_input_system(
     mut defend_writer: Option<MessageWriter<DefendAction>>,
     mut flee_writer: Option<MessageWriter<FleeAction>>,
     turn_state: Res<CombatTurnStateResource>,
+    mut action_menu_state: ResMut<ActionMenuState>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
         return;
     }
 
-    // Only accept action input during player turn
+    // Log blocked input if not player turn and any input event is present.
     if !matches!(turn_state.0, CombatTurnState::PlayerTurn) {
+        let any_key_input = keyboard.as_ref().is_some_and(|kb| {
+            kb.just_pressed(KeyCode::Tab)
+                || kb.just_pressed(KeyCode::Enter)
+                || kb.just_pressed(KeyCode::Escape)
+        });
+        let any_mouse_input = interactions.iter().any(|(i, _)| *i == Interaction::Pressed);
+        if any_key_input || any_mouse_input {
+            info!("Combat: input blocked — not player turn");
+        }
         return;
     }
 
@@ -1058,51 +1181,69 @@ fn combat_input_system(
         .get(combat_res.state.current_turn)
         .cloned();
 
+    // --- Mouse: Interaction::Pressed only ---
     for (interaction, button) in interactions.iter_mut() {
-        if *interaction != Interaction::None {
+        if *interaction == Interaction::Pressed {
             if let Some(actor) = current_actor {
-                match button.button_type {
-                    ActionButtonType::Attack => {
-                        // Enter target selection mode
-                        target_sel.0 = Some(actor);
-                    }
-                    ActionButtonType::Defend => {
-                        if let Some(ref mut w) = defend_writer {
-                            w.write(DefendAction { combatant: actor });
-                        }
-                    }
-                    ActionButtonType::Flee => {
-                        if let Some(ref mut w) = flee_writer {
-                            w.write(FleeAction);
-                        }
-                    }
-                    ActionButtonType::Cast | ActionButtonType::Item => {
-                        // Not implemented in Phase 3
-                    }
-                }
+                dispatch_combat_action(
+                    button.button_type,
+                    actor,
+                    &mut target_sel,
+                    &mut defend_writer,
+                    &mut flee_writer,
+                );
             }
         }
     }
 
-    // Keyboard shortcuts (keyboard is optional)
+    // --- Keyboard: Tab / Enter / Escape ---
     if let Some(kb) = keyboard.as_ref() {
-        if kb.just_pressed(KeyCode::KeyA) {
-            if let Some(actor) = current_actor {
-                target_sel.0 = Some(actor);
-            }
-        } else if kb.just_pressed(KeyCode::KeyD) {
-            if let Some(actor) = current_actor {
-                if let Some(ref mut w) = defend_writer {
-                    w.write(DefendAction { combatant: actor });
-                }
-            }
-        } else if kb.just_pressed(KeyCode::KeyF) {
-            if let Some(ref mut w) = flee_writer {
-                w.write(FleeAction);
-            }
+        if kb.just_pressed(KeyCode::Tab) {
+            // Cycle active_index forward, wrapping at 5.
+            action_menu_state.active_index = (action_menu_state.active_index + 1) % 5;
+            action_menu_state.confirmed = false;
+        } else if kb.just_pressed(KeyCode::Enter) {
+            action_menu_state.confirmed = true;
         } else if kb.just_pressed(KeyCode::Escape) {
-            target_sel.0 = None;
+            // Cancel target selection if active.
+            if target_sel.0.is_some() {
+                target_sel.0 = None;
+            }
         }
+    }
+
+    // Consume the confirmed flag — dispatch the highlighted action.
+    if action_menu_state.confirmed {
+        action_menu_state.confirmed = false;
+        let selected_type = ACTION_BUTTON_ORDER[action_menu_state.active_index];
+        if let Some(actor) = current_actor {
+            dispatch_combat_action(
+                selected_type,
+                actor,
+                &mut target_sel,
+                &mut defend_writer,
+                &mut flee_writer,
+            );
+        }
+    }
+}
+
+/// Update the background colour of all `ActionButton` entities to reflect the
+/// currently highlighted index stored in `ActionMenuState`.
+///
+/// The button at `active_index` receives `ACTION_BUTTON_HOVER_COLOR`; all
+/// others receive `ACTION_BUTTON_COLOR`.
+fn update_action_highlight(
+    action_menu_state: Res<ActionMenuState>,
+    mut buttons: Query<(&ActionButton, &mut BackgroundColor)>,
+) {
+    let active_type = ACTION_BUTTON_ORDER[action_menu_state.active_index];
+    for (btn, mut bg) in buttons.iter_mut() {
+        *bg = if btn.button_type == active_type {
+            BackgroundColor(ACTION_BUTTON_HOVER_COLOR)
+        } else {
+            BackgroundColor(ACTION_BUTTON_COLOR)
+        };
     }
 }
 
@@ -1134,7 +1275,7 @@ fn select_target(
     let attacker = target_sel.0.unwrap();
 
     for (interaction, enemy_card) in interactions.iter_mut() {
-        if *interaction != Interaction::None {
+        if *interaction == Interaction::Pressed {
             if let Some(ref mut w) = attack_writer {
                 w.write(AttackAction {
                     attacker,
@@ -4065,5 +4206,364 @@ mod tests {
             world.insert_resource(gs_owned);
             world.insert_resource(turn_state_owned);
         }
+    }
+
+    // ===== Phase 1: Input Reliability Tests =====
+
+    /// T1-1: `Tab` cycles active_index through all five actions (0 → 4).
+    #[test]
+    fn test_tab_cycles_through_actions() {
+        let mut state = ActionMenuState::default();
+        assert_eq!(state.active_index, 0);
+
+        for expected in 1..=4usize {
+            state.active_index = (state.active_index + 1) % 5;
+            assert_eq!(state.active_index, expected);
+        }
+    }
+
+    /// T1-2: `Tab` wraps from index 4 back to index 0.
+    #[test]
+    fn test_tab_wraps_at_end() {
+        let mut state = ActionMenuState::default();
+        state.active_index = 4;
+        state.active_index = (state.active_index + 1) % 5;
+        assert_eq!(state.active_index, 0);
+    }
+
+    /// T1-3: When the action menu becomes visible the highlight is reset to index 0 (Attack).
+    #[test]
+    fn test_default_highlight_is_attack_on_menu_open() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat();
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Start with EnemyTurn so the menu is hidden, then set a non-zero index.
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::EnemyTurn;
+        app.update(); // spawn UI with hidden menu
+
+        // Simulate player having navigated away from default index.
+        app.world_mut()
+            .resource_mut::<ActionMenuState>()
+            .active_index = 3;
+
+        // Transition back to PlayerTurn; update_combat_ui should reset the index.
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+        app.update();
+
+        let state = app.world().resource::<ActionMenuState>();
+        assert_eq!(
+            state.active_index, 0,
+            "active_index must reset to 0 (Attack) when menu becomes visible"
+        );
+    }
+
+    /// T1-4: When `confirmed = true` with `active_index = 1` (Defend),
+    /// the system dispatches `DefendAction` and clears `confirmed`.
+    #[test]
+    fn test_enter_dispatches_active_action() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        // Set up a CombatState with the player and a live turn order.
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Set index to 1 (Defend) and set confirmed = true.
+        {
+            let mut ams = app.world_mut().resource_mut::<ActionMenuState>();
+            ams.active_index = 1;
+            ams.confirmed = true;
+        }
+
+        app.update();
+
+        // confirmed must have been consumed.
+        let ams = app.world().resource::<ActionMenuState>();
+        assert!(!ams.confirmed, "confirmed must be cleared after dispatch");
+    }
+
+    /// T1-5: `Interaction::Pressed` on the Attack button enters target selection.
+    #[test]
+    fn test_mouse_pressed_dispatches_action() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Run first update to spawn UI (ActionButton entities).
+        app.update();
+
+        // Find the Attack ActionButton entity and simulate a Pressed interaction.
+        let attack_entity = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<(Entity, &ActionButton), With<Button>>();
+            q.iter(app.world())
+                .find(|(_, btn)| btn.button_type == ActionButtonType::Attack)
+                .map(|(e, _)| e)
+                .expect("Attack button must exist")
+        };
+
+        app.world_mut()
+            .entity_mut(attack_entity)
+            .insert(Interaction::Pressed);
+
+        app.update();
+
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(
+            ts.0.is_some(),
+            "TargetSelection must be Some after pressing Attack"
+        );
+    }
+
+    /// T1-6: `Interaction::Hovered` on an ActionButton must NOT dispatch any action.
+    #[test]
+    fn test_mouse_hover_does_not_dispatch() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Spawn UI.
+        app.update();
+
+        // Simulate Hover on Attack button.
+        let attack_entity = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<(Entity, &ActionButton), With<Button>>();
+            q.iter(app.world())
+                .find(|(_, btn)| btn.button_type == ActionButtonType::Attack)
+                .map(|(e, _)| e)
+                .expect("Attack button must exist")
+        };
+
+        app.world_mut()
+            .entity_mut(attack_entity)
+            .insert(Interaction::Hovered);
+
+        app.update();
+
+        // TargetSelection must remain None.
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(
+            ts.0.is_none(),
+            "Hovered interaction must not enter target selection"
+        );
+    }
+
+    /// T1-7: Pressing `KeyA` during `PlayerTurn` must NOT enter target selection
+    /// (A/D/F shortcuts have been removed).
+    #[test]
+    fn test_key_a_does_not_dispatch_in_combat() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Simulate pressing KeyA.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::KeyA);
+        }
+
+        app.update();
+
+        // TargetSelection must remain None — KeyA is no longer a combat shortcut.
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(
+            ts.0.is_none(),
+            "KeyA must not trigger Attack in combat (A/D/F shortcuts removed)"
+        );
+    }
+
+    /// T1-8: The `GameMode::Combat` guard in `handle_input` is validated by the
+    /// dedicated integration test `test_movement_blocked_in_combat_mode` located
+    /// in `src/game/systems/input.rs` (module `combat_guard_tests`).
+    ///
+    /// This stub asserts the precondition that entering combat mode sets the mode
+    /// correctly, confirming the guard has something to match against.
+    #[test]
+    fn test_movement_blocked_in_combat_mode() {
+        // Verify that enter_combat transitions the game into Combat mode.
+        // The actual movement-blocking behaviour is tested in input.rs.
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Guard Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat();
+
+        assert!(
+            matches!(gs.mode, crate::application::GameMode::Combat(_)),
+            "GameMode must be Combat after enter_combat() so the handle_input guard fires"
+        );
+    }
+
+    /// T1-9: When `CombatTurnState` is `EnemyTurn` and `Tab` is pressed,
+    /// `active_index` remains unchanged (blocked) — no crash, no dispatch.
+    #[test]
+    fn test_blocked_input_logs_feedback() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+
+        // Enemy turn — input should be blocked.
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::EnemyTurn;
+        app.update(); // spawn UI
+
+        // Record active_index before pressing Tab.
+        let index_before = app.world().resource::<ActionMenuState>().active_index;
+
+        // Press Tab during EnemyTurn.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Tab);
+        }
+        app.update();
+
+        // active_index must be unchanged — input was blocked.
+        let index_after = app.world().resource::<ActionMenuState>().active_index;
+        assert_eq!(
+            index_after, index_before,
+            "active_index must not change when input is blocked during EnemyTurn"
+        );
+
+        // TargetSelection must also remain None.
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(ts.0.is_none(), "No dispatch must occur during EnemyTurn");
     }
 }

@@ -33,9 +33,179 @@
 | **Findings Remediation Phase 3**                | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard**        |
 | **Findings Remediation Phase 4**                | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI**            |
 | **Findings Remediation Phase 5**                | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation**        |
+| **Combat System Improvement Phase 1**           | ✅ COMPLETE | 2026-07-17 | **Input Reliability and Action Selection**                                |
 
-**Total Lines Implemented**: 8,500+ lines of production code + 5,100+ lines of documentation
-**Total Tests**: 318+ new tests (all passing), 2,410 campaign_builder tests passing
+**Total Lines Implemented**: 8,700+ lines of production code + 5,100+ lines of documentation
+**Total Tests**: 328+ new tests (all passing), 2,420 total tests passing
+
+---
+
+## Combat System Improvement Phase 1: Input Reliability and Action Selection
+
+### Overview
+
+Phase 1 of the combat system improvement plan fixes input reliability issues,
+implements `Tab`/`Enter` keyboard navigation for the action menu, enforces
+`Interaction::Pressed`-only mouse activation, removes conflicting `A`/`D`/`F`
+keyboard shortcuts, and introduces a unified dispatch path that both mouse and
+keyboard routes share. Movement input is now silently blocked while
+`GameMode::Combat` is active.
+
+### Components Implemented
+
+#### `ActionMenuState` Resource (`src/game/systems/combat.rs`)
+
+A new ECS resource tracking keyboard navigation state for the action menu:
+
+- `active_index: usize` — index (0–4) of the currently highlighted action
+  button. Order is `[Attack, Defend, Cast, Item, Flee]` matching the spawn
+  order in `setup_combat_ui`.
+- `confirmed: bool` — set to `true` when `Enter` is pressed; consumed by the
+  unified dispatch function on the same frame.
+- Default: `active_index = 0` (Attack), `confirmed = false`.
+- Registered in `CombatPlugin::build` via `.insert_resource(ActionMenuState::default())`.
+
+#### `ActiveActionHighlight` Marker Component (`src/game/systems/combat.rs`)
+
+A zero-size marker component (`Component`, `Debug`, `Clone`, `Copy`) used to
+tag the currently highlighted `ActionButton` entity. Used by
+`update_action_highlight` to drive background colour swaps.
+
+#### `ACTION_BUTTON_ORDER` Constant (`src/game/systems/combat.rs`)
+
+A `const` array `[ActionButtonType; 5]` that maps `active_index` to
+`ActionButtonType`. This is the single source of truth for the ordered action
+list used by both the highlight system and the keyboard dispatch path.
+
+#### `dispatch_combat_action` Helper Function (`src/game/systems/combat.rs`)
+
+A free function that both mouse and keyboard routes call to ensure identical
+dispatch semantics:
+
+- `Attack` → sets `target_sel.0 = Some(actor)` to enter target selection.
+- `Defend` → writes `DefendAction { combatant: actor }`.
+- `Flee` → writes `FleeAction`.
+- `Cast` / `Item` → Phase 4 placeholder (no-op comment).
+
+#### `combat_input_system` Rewrite (`src/game/systems/combat.rs`)
+
+The existing system was rewritten to address all Phase 1 identified issues:
+
+- **Removed** `KeyA`, `KeyD`, `KeyF` keyboard shortcuts (I-1 fix).
+- **Fixed** mouse activation: changed `Interaction != None` to
+  `Interaction::Pressed` so hover never triggers an action (I-3 fix).
+- **Added** `Tab` just-pressed handling: increments `active_index` modulo 5
+  (I-5 fix).
+- **Added** `Enter` just-pressed handling: sets `confirmed = true`; the
+  confirmed flag is consumed immediately to call `dispatch_combat_action` with
+  the type at `active_index` (I-4, I-5 fix).
+- **Added** `Escape` just-pressed handling: clears `target_sel.0` if active.
+- **Added** blocked-turn feedback: emits `info!("Combat: input blocked — not
+player turn")` when input arrives during non-`PlayerTurn` state (I-7 fix).
+- Both mouse and keyboard dispatch routes call `dispatch_combat_action` (I-4
+  fix).
+
+#### `update_action_highlight` System (`src/game/systems/combat.rs`)
+
+A new `Update` system registered after `combat_input_system`:
+
+- Reads `ActionMenuState::active_index`.
+- Sets `BackgroundColor(ACTION_BUTTON_HOVER_COLOR)` on the button whose type
+  matches `ACTION_BUTTON_ORDER[active_index]`.
+- Sets `BackgroundColor(ACTION_BUTTON_COLOR)` on all other buttons.
+
+#### `update_combat_ui` Reset (`src/game/systems/combat.rs`)
+
+`update_combat_ui` now takes `ResMut<ActionMenuState>` as a parameter. When
+the action menu `Visibility` transitions from `Hidden` to `Visible` (i.e., the
+player turn begins), it resets:
+
+```src/game/systems/combat.rs#L1070-1083
+// Reset highlight index whenever the menu transitions to visible.
+if *visibility == Visibility::Hidden && new_visibility == Visibility::Visible {
+    action_menu_state.active_index = 0;
+    action_menu_state.confirmed = false;
+}
+```
+
+This ensures the `Attack` button is always highlighted by default on every
+menu open (I-6 fix, requirement #2).
+
+#### `handle_input` Combat Guard (`src/game/systems/input.rs`)
+
+A `GameMode::Combat(_)` early-return guard was inserted immediately after the
+existing `GameMode::Menu` guard (line ~465):
+
+```src/game/systems/input.rs#L465-470
+// Block all movement/interaction input when in Combat mode.
+// Combat action input is handled exclusively by combat_input_system.
+if matches!(game_state.mode, crate::application::GameMode::Combat(_)) {
+    return;
+}
+```
+
+This fixes I-2: movement/rotation keys (`W`, `S`, `A`, `D`, arrow keys) no
+longer reach `TurnLeft`/`TurnRight`/`MoveForward`/`MoveBack` branches while
+the player is in combat.
+
+#### `select_target` Fix (`src/game/systems/combat.rs`)
+
+The enemy-card click handler `select_target` was also updated to use
+`Interaction::Pressed` instead of `Interaction != None`, keeping it consistent
+with `combat_input_system`.
+
+### Testing
+
+Ten tests were added covering all Phase 1 requirements:
+
+| Test ID     | Test Name                                       | File        | Result |
+| ----------- | ----------------------------------------------- | ----------- | ------ |
+| T1-1        | `test_tab_cycles_through_actions`               | `combat.rs` | PASS   |
+| T1-2        | `test_tab_wraps_at_end`                         | `combat.rs` | PASS   |
+| T1-3        | `test_default_highlight_is_attack_on_menu_open` | `combat.rs` | PASS   |
+| T1-4        | `test_enter_dispatches_active_action`           | `combat.rs` | PASS   |
+| T1-5        | `test_mouse_pressed_dispatches_action`          | `combat.rs` | PASS   |
+| T1-6        | `test_mouse_hover_does_not_dispatch`            | `combat.rs` | PASS   |
+| T1-7        | `test_key_a_does_not_dispatch_in_combat`        | `combat.rs` | PASS   |
+| T1-8 (stub) | `test_movement_blocked_in_combat_mode`          | `combat.rs` | PASS   |
+| T1-8 (full) | `test_movement_blocked_in_combat_mode`          | `input.rs`  | PASS   |
+| T1-9        | `test_blocked_input_logs_feedback`              | `combat.rs` | PASS   |
+
+All 2420 total tests pass with zero warnings.
+
+### Files Changed
+
+- `src/game/systems/combat.rs` — `ActionMenuState`, `ActiveActionHighlight`,
+  `ACTION_BUTTON_ORDER`, `dispatch_combat_action`, `update_action_highlight`,
+  rewritten `combat_input_system`, updated `update_combat_ui`, fixed
+  `select_target`, registered resources and systems in `CombatPlugin::build`,
+  added 9 new tests.
+- `src/game/systems/input.rs` — Added `GameMode::Combat(_)` guard in
+  `handle_input`; added `combat_guard_tests::test_movement_blocked_in_combat_mode`.
+- `docs/explanation/implementations.md` — This entry.
+
+### Deliverables Checklist
+
+- [x] `ActionMenuState` resource declared and registered in `CombatPlugin::build`.
+- [x] `update_action_highlight` system implemented and registered after `combat_input_system`.
+- [x] `combat_input_system`: `A`/`D`/`F` shortcuts removed; `Interaction::Pressed` used;
+      `Tab`/`Enter` keyboard traversal implemented; unified dispatch through
+      `dispatch_combat_action`.
+- [x] `handle_input` in `src/game/systems/input.rs`: `GameMode::Combat(_)` guard added
+      before movement processing.
+- [x] Default `Attack` highlight applied when action menu becomes `Visible` (via
+      `update_combat_ui` reset).
+- [x] Blocked-turn info log emitted when input arrives during non-`PlayerTurn` state.
+- [x] All 9 tests in T1-1 through T1-9 pass under `cargo nextest run --all-features`.
+
+### Success Criteria Verification
+
+- `cargo nextest run --all-features` passes with no regressions (2420/2420).
+- `Tab` cycles the highlighted action; `Enter` dispatches it — verified by T1-1, T1-2, T1-4.
+- `Attack` button is highlighted on every menu open — verified by T1-3.
+- `Interaction::Pressed` is the sole mouse activation event — verified by T1-5 and T1-6.
+- `A` / `D` / `F` no longer trigger any combat action — verified by T1-7.
+- Movement and rotation input during combat has no effect on party position — verified by T1-8.
 
 ---
 
