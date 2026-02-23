@@ -403,6 +403,7 @@ fn toggle_menu_state(game_state: &mut crate::application::GameState) {
 /// applies movement cooldown, and updates game state accordingly.
 #[allow(clippy::too_many_arguments)]
 fn handle_input(
+    mut commands: Commands,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     input_config: Res<InputConfigResource>,
     mut global_state: ResMut<GlobalState>,
@@ -412,6 +413,7 @@ fn handle_input(
     mut recruitment_context: ResMut<PendingRecruitmentContext>,
     time: Res<Time>,
     mut last_move_time: Local<f32>,
+    victory_roots: Query<Entity, With<crate::game::systems::combat::VictorySummaryRoot>>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
     dialogue_query: Query<&NpcDialogue>,
 ) {
@@ -645,6 +647,14 @@ fn handle_input(
             info!("Movement detected during dialogue - cancelling dialogue");
             // Switch back to exploration mode
             game_state.mode = crate::application::GameMode::Exploration;
+        }
+
+        // Dismiss post-combat victory overlay once normal movement controls are
+        // used again in exploration flow.
+        if moved {
+            for entity in victory_roots.iter() {
+                commands.entity(entity).despawn();
+            }
         }
 
         // TODO: Check for events at new position (Phase 4)
@@ -1300,6 +1310,65 @@ mod combat_guard_tests {
         assert_eq!(
             gs_after.0.world.party_position, original_position,
             "Party must not move while GameMode::Combat is active"
+        );
+    }
+
+    #[test]
+    fn test_victory_overlay_dismissed_after_party_moves() {
+        let mut app = App::new();
+
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        let cfg = ControlsConfig {
+            movement_cooldown: 0.0,
+            ..ControlsConfig::default()
+        };
+        let turn_left_key =
+            parse_key_code(&cfg.turn_left[0]).expect("invalid default turn_left key");
+        let key_map = KeyMap::from_controls_config(&cfg);
+        app.insert_resource(InputConfigResource {
+            controls: cfg,
+            key_map,
+        });
+
+        // Build an exploration game state.
+        let gs = crate::application::GameState::new();
+        let original_facing = gs.world.party_facing;
+
+        app.insert_resource(GlobalState(gs));
+        app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
+        app.insert_resource(PendingRecruitmentContext::default());
+
+        app.add_message::<DoorOpenedEvent>();
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<StartDialogue>();
+
+        // Spawn a victory overlay marker to verify cleanup behavior.
+        app.world_mut()
+            .spawn(crate::game::systems::combat::VictorySummaryRoot);
+
+        app.add_systems(Update, handle_input);
+
+        // Turn left (movement control) to trigger post-combat overlay dismissal.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(turn_left_key);
+        }
+        app.update();
+
+        let gs_after = app.world().resource::<GlobalState>();
+        assert_ne!(
+            gs_after.0.world.party_facing, original_facing,
+            "Party facing should change after turn input"
+        );
+
+        let mut overlay_query = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::game::systems::combat::VictorySummaryRoot>>();
+        assert_eq!(
+            overlay_query.iter(app.world()).count(),
+            0,
+            "Victory overlay must be dismissed after movement"
         );
     }
 }

@@ -37,9 +37,127 @@
 | **Combat System Improvement Phase 2**           | ✅ COMPLETE | 2026-07-17 | **Target Selection and Action Completeness**                              |
 | **Combat System Improvement Phase 3**           | ✅ COMPLETE | 2026-07-17 | **Visual Combat Feedback and Animation State**                            |
 | **Combat System Improvement Phase 4**           | ✅ COMPLETE | 2026-07-17 | **Defeated Monster World-Mesh Removal**                                   |
+| **Combat System Improvement Phase 5 Remediation** | ✅ COMPLETE | 2026-02-23 | **Dismiss victory splash when movement controls resume post-combat**      |
+| **Combat Input Enter UX Remediation**           | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback** |
 
 **Total Lines Implemented**: 9,300+ lines of production code + 5,400+ lines of documentation
 **Total Tests**: 346+ new tests (all passing), 2,438 total tests passing
+
+---
+
+## Combat Input Enter UX Remediation
+
+### Overview
+
+Combat action activation via keyboard now uses an explicit two-step Enter
+workflow with visible feedback:
+
+1. First `Enter` arms the currently highlighted action.
+2. Second `Enter` confirms and dispatches that action.
+
+This removes the implicit same-frame dispatch and gives clear visual state
+before action execution.
+
+Combat action activation via mouse now has an additional fallback path so clicks
+remain reliable even when `Interaction::Pressed` transitions are missed.
+
+### Components Implemented
+
+#### Two-step Enter handling (`src/game/systems/combat.rs`)
+
+`combat_input_system` now tracks a local execution flag and separates:
+
+- **Arm**: first Enter sets `ActionMenuState.confirmed = true`.
+- **Execute**: second Enter dispatches selected action and clears `confirmed`.
+
+Mouse `Interaction::Pressed` action dispatch remains immediate and clears any
+armed keyboard state to avoid mixed-mode ambiguity.
+
+#### Armed-state visual feedback (`src/game/systems/combat.rs`)
+
+Added:
+
+- `ACTION_BUTTON_CONFIRMED_COLOR`
+
+Updated `update_action_highlight` so the active button uses:
+
+- `ACTION_BUTTON_HOVER_COLOR` when merely highlighted
+- `ACTION_BUTTON_CONFIRMED_COLOR` when Enter-armed (`confirmed == true`)
+
+#### Mouse click fallback (`src/game/systems/combat.rs`)
+
+Updated `combat_input_system` and `select_target` to accept either:
+
+- `Interaction::Pressed` transition, or
+- left mouse `just_pressed` while the button/card is `Interaction::Hovered`
+
+This prevents missed activation in combat action and target selection flows.
+
+### Tests Added/Updated
+
+- `test_enter_dispatches_active_action` updated to validate first-Enter arm and
+  second-Enter dispatch behavior.
+- `test_first_enter_applies_confirmed_highlight_color` added to verify visual
+  feedback for armed state.
+- `test_mouse_left_click_on_hover_dispatches_action` added to verify fallback
+  mouse activation on hovered action buttons.
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+- `cargo clippy --all-targets --all-features -- -D warnings` — pass
+- `cargo nextest run --all-features` — pass (`2441 passed`, `8 skipped`)
+
+---
+
+## Combat System Improvement Phase 5 Remediation: Victory Splash Dismiss on Movement
+
+### Overview
+
+The victory summary overlay (`VictorySummaryRoot`) persisted indefinitely after
+combat because no teardown path existed once control returned to exploration.
+This remediation dismisses that overlay as soon as the player resumes movement
+controls after combat.
+
+### Components Implemented
+
+#### Input-system dismissal hook (`src/game/systems/input.rs`)
+
+`handle_input` now takes:
+
+- `Commands` to despawn UI entities
+- `Query<Entity, With<VictorySummaryRoot>>` to find active victory overlays
+
+When a movement control is successfully applied (`moved == true`), the system
+despawns all `VictorySummaryRoot` entities.
+
+This keeps combat reward visibility intact while the player is idle and removes
+the overlay at the first normal movement action after combat.
+
+#### Regression test (`src/game/systems/input.rs`)
+
+Added:
+
+- `test_victory_overlay_dismissed_after_party_moves`
+
+The test seeds a victory overlay marker, simulates movement control input, runs
+`handle_input`, and asserts that:
+
+1. Movement control was applied (`party_facing` changes)
+2. No `VictorySummaryRoot` entities remain
+
+### Files Changed
+
+- `src/game/systems/input.rs` — movement-triggered victory overlay cleanup in
+  `handle_input`, plus new regression test.
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+- `cargo clippy --all-targets --all-features -- -D warnings` — pass
+- `cargo nextest run --all-features` — pass (`2439 passed`, `8 skipped`)
 
 ---
 

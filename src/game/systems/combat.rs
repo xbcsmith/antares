@@ -188,6 +188,9 @@ pub const ACTION_BUTTON_COLOR: Color = Color::srgb(0.3, 0.3, 0.4);
 /// Color for action button hover
 pub const ACTION_BUTTON_HOVER_COLOR: Color = Color::srgb(0.4, 0.4, 0.5);
 
+/// Color for action button when keyboard selection is armed (Enter pressed once)
+pub const ACTION_BUTTON_CONFIRMED_COLOR: Color = Color::srgb(0.65, 0.55, 0.25);
+
 /// Color for action button disabled
 pub const ACTION_BUTTON_DISABLED_COLOR: Color = Color::srgb(0.2, 0.2, 0.2);
 
@@ -1365,8 +1368,10 @@ fn confirm_attack_target(
 /// # Mouse Controls
 ///
 /// - `Interaction::Pressed` on an `ActionButton`: dispatches that action.
-/// - `Interaction::Hovered` and `Interaction::None` are **ignored** — hover
-///   does not dispatch an action.
+/// - Left mouse `just_pressed` while `Interaction::Hovered` over an
+///   `ActionButton` is also treated as activation (robust fallback for
+///   platforms/timings where `Pressed` transition is missed).
+/// - Plain hover without a click does not dispatch.
 ///
 /// Both mouse and keyboard routes call `dispatch_combat_action` /
 /// `confirm_attack_target` so their semantics are identical.
@@ -1374,7 +1379,8 @@ fn confirm_attack_target(
 #[allow(clippy::type_complexity)]
 fn combat_input_system(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
-    mut interactions: Query<(&Interaction, &ActionButton), (Changed<Interaction>, With<Button>)>,
+    mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
+    mut interactions: Query<(&Interaction, Ref<Interaction>, &ActionButton), With<Button>>,
     global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     mut target_sel: ResMut<TargetSelection>,
@@ -1395,7 +1401,13 @@ fn combat_input_system(
                 || kb.just_pressed(KeyCode::Enter)
                 || kb.just_pressed(KeyCode::Escape)
         });
-        let any_mouse_input = interactions.iter().any(|(i, _)| *i == Interaction::Pressed);
+        let mouse_just_pressed = mouse_buttons
+            .as_ref()
+            .is_some_and(|m| m.just_pressed(MouseButton::Left));
+        let any_mouse_input = mouse_just_pressed
+            || interactions
+                .iter()
+                .any(|(i, i_ref, _)| *i == Interaction::Pressed && i_ref.is_changed());
         if any_key_input || any_mouse_input {
             info!("Combat: input blocked — not player turn");
         }
@@ -1407,10 +1419,21 @@ fn combat_input_system(
         .turn_order
         .get(combat_res.state.current_turn)
         .cloned();
+    let mut execute_selected_action = false;
 
-    // --- Mouse: Interaction::Pressed only ---
-    for (interaction, button) in interactions.iter_mut() {
-        if *interaction == Interaction::Pressed {
+    // --- Mouse: robust click handling ---
+    let mouse_just_pressed = mouse_buttons
+        .as_ref()
+        .is_some_and(|m| m.just_pressed(MouseButton::Left));
+    let mut mouse_dispatched = false;
+
+    for (interaction, interaction_ref, button) in interactions.iter_mut() {
+        let changed_pressed = *interaction == Interaction::Pressed && interaction_ref.is_changed();
+        // Fallback path: if left mouse was just pressed while hovering,
+        // treat that as a click for reliability across platforms.
+        let hovered_click = mouse_just_pressed && *interaction == Interaction::Hovered;
+
+        if changed_pressed || hovered_click {
             if let Some(actor) = current_actor {
                 dispatch_combat_action(
                     button.button_type,
@@ -1420,8 +1443,18 @@ fn combat_input_system(
                     &mut defend_writer,
                     &mut flee_writer,
                 );
+                // Mouse activation is immediate and clears any prior keyboard
+                // armed state.
+                action_menu_state.confirmed = false;
+                mouse_dispatched = true;
+                break;
             }
         }
+    }
+
+    // Avoid mixing mouse and keyboard dispatch in the same frame.
+    if mouse_dispatched {
+        return;
     }
 
     // Count alive monster participants for target cycling.
@@ -1475,16 +1508,23 @@ fn combat_input_system(
                     (action_menu_state.active_index + 1) % COMBAT_ACTION_COUNT;
                 action_menu_state.confirmed = false;
             } else if kb.just_pressed(KeyCode::Enter) {
-                action_menu_state.confirmed = true;
+                // Two-step keyboard flow:
+                // 1st Enter arms the currently highlighted action.
+                // 2nd Enter executes that same action.
+                if action_menu_state.confirmed {
+                    execute_selected_action = true;
+                    action_menu_state.confirmed = false;
+                } else {
+                    action_menu_state.confirmed = true;
+                }
             } else if kb.just_pressed(KeyCode::Escape) {
                 // No-op: no target selection is active.
             }
         }
     }
 
-    // Consume the confirmed flag — dispatch the highlighted action.
-    if action_menu_state.confirmed {
-        action_menu_state.confirmed = false;
+    // Execute the armed action only on the second Enter press.
+    if execute_selected_action {
         let selected_type = ACTION_BUTTON_ORDER[action_menu_state.active_index];
         if let Some(actor) = current_actor {
             dispatch_combat_action(
@@ -1528,8 +1568,10 @@ fn resolve_alive_monster_participant_index(
 /// Update the background colour of all `ActionButton` entities to reflect the
 /// currently highlighted index stored in `ActionMenuState`.
 ///
-/// The button at `active_index` receives `ACTION_BUTTON_HOVER_COLOR`; all
-/// others receive `ACTION_BUTTON_COLOR`.
+/// The button at `active_index` receives `ACTION_BUTTON_HOVER_COLOR` by
+/// default. If `ActionMenuState::confirmed` is `true` (keyboard-armed state),
+/// the active button receives `ACTION_BUTTON_CONFIRMED_COLOR`. All other
+/// buttons receive `ACTION_BUTTON_COLOR`.
 ///
 /// References `COMBAT_ACTION_ORDER` and `COMBAT_ACTION_COUNT` so the order is
 /// always consistent with the spawn order in `setup_combat_ui`.
@@ -1540,7 +1582,11 @@ fn update_action_highlight(
     let active_type = COMBAT_ACTION_ORDER[action_menu_state.active_index % COMBAT_ACTION_COUNT];
     for (btn, mut bg) in buttons.iter_mut() {
         *bg = if btn.button_type == active_type {
-            BackgroundColor(ACTION_BUTTON_HOVER_COLOR)
+            if action_menu_state.confirmed {
+                BackgroundColor(ACTION_BUTTON_CONFIRMED_COLOR)
+            } else {
+                BackgroundColor(ACTION_BUTTON_HOVER_COLOR)
+            }
         } else {
             BackgroundColor(ACTION_BUTTON_COLOR)
         };
@@ -1606,7 +1652,8 @@ fn update_target_highlight(
 /// Handle clicks on enemy cards during target selection and emit `AttackAction`.
 #[allow(clippy::type_complexity)]
 fn select_target(
-    mut interactions: Query<(&Interaction, &EnemyCard), (Changed<Interaction>, With<Button>)>,
+    mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
+    mut interactions: Query<(&Interaction, Ref<Interaction>, &EnemyCard), With<Button>>,
     mut target_sel: ResMut<TargetSelection>,
     mut action_menu_state: ResMut<ActionMenuState>,
     mut attack_writer: Option<MessageWriter<AttackAction>>,
@@ -1617,8 +1664,15 @@ fn select_target(
 
     let attacker = target_sel.0.unwrap();
 
-    for (interaction, enemy_card) in interactions.iter_mut() {
-        if *interaction == Interaction::Pressed {
+    let mouse_just_pressed = mouse_buttons
+        .as_ref()
+        .is_some_and(|m| m.just_pressed(MouseButton::Left));
+
+    for (interaction, interaction_ref, enemy_card) in interactions.iter_mut() {
+        let changed_pressed = *interaction == Interaction::Pressed && interaction_ref.is_changed();
+        let hovered_click = mouse_just_pressed && *interaction == Interaction::Hovered;
+
+        if changed_pressed || hovered_click {
             confirm_attack_target(
                 attacker,
                 enemy_card.participant_index,
@@ -1626,6 +1680,7 @@ fn select_target(
                 &mut action_menu_state,
                 &mut attack_writer,
             );
+            break;
         }
     }
 }
@@ -5241,8 +5296,7 @@ mod tests {
         );
     }
 
-    /// T1-4: When `confirmed = true` with `active_index = 1` (Defend),
-    /// the system dispatches `DefendAction` and clears `confirmed`.
+    /// T1-4: Enter uses a two-step flow: first press arms, second press dispatches.
     #[test]
     fn test_enter_dispatches_active_action() {
         let mut app = App::new();
@@ -5274,18 +5328,112 @@ mod tests {
         }
         app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
 
-        // Set index to 1 (Defend) and set confirmed = true.
+        // Spawn combat UI and select Attack at index 0 for this test.
+        app.update();
+        app.world_mut()
+            .resource_mut::<ActionMenuState>()
+            .active_index = 0;
+
+        // First Enter should arm only (no dispatch yet).
         {
-            let mut ams = app.world_mut().resource_mut::<ActionMenuState>();
-            ams.active_index = 1;
-            ams.confirmed = true;
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Enter);
+        }
+        app.update();
+
+        let ts_after_first_enter = app.world().resource::<TargetSelection>();
+        let ams_after_first_enter = app.world().resource::<ActionMenuState>();
+        assert!(
+            ts_after_first_enter.0.is_none(),
+            "First Enter should arm selection only, not dispatch"
+        );
+        assert!(
+            ams_after_first_enter.confirmed,
+            "First Enter should set confirmed=true (armed state)"
+        );
+
+        // Release Enter so the next press is detected as just_pressed.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.release(KeyCode::Enter);
+        }
+        app.update();
+
+        // Second Enter should dispatch Attack and clear confirmed.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Enter);
         }
 
         app.update();
 
-        // confirmed must have been consumed.
-        let ams = app.world().resource::<ActionMenuState>();
-        assert!(!ams.confirmed, "confirmed must be cleared after dispatch");
+        let ts_after_second_enter = app.world().resource::<TargetSelection>();
+        let ams_after_second_enter = app.world().resource::<ActionMenuState>();
+        assert!(
+            ts_after_second_enter.0.is_some(),
+            "Second Enter should dispatch Attack and enter target selection"
+        );
+        assert!(
+            !ams_after_second_enter.confirmed,
+            "Second Enter should clear confirmed after dispatch"
+        );
+    }
+
+    /// First Enter puts the active action into an armed state that has distinct
+    /// visual feedback via `ACTION_BUTTON_CONFIRMED_COLOR`.
+    #[test]
+    fn test_first_enter_applies_confirmed_highlight_color() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Spawn UI and arm Enter once.
+        app.update();
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Enter);
+        }
+        app.update();
+
+        // Active action is Attack by default and should now be in confirmed color.
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(&ActionButton, &BackgroundColor), With<Button>>();
+        let attack_bg = q
+            .iter(app.world())
+            .find(|(btn, _)| btn.button_type == ActionButtonType::Attack)
+            .map(|(_, bg)| *bg)
+            .expect("Attack button must exist");
+
+        assert_eq!(
+            attack_bg,
+            BackgroundColor(ACTION_BUTTON_CONFIRMED_COLOR),
+            "Armed action should use confirmed highlight color"
+        );
     }
 
     /// T1-5: `Interaction::Pressed` on the Attack button enters target selection.
@@ -5343,6 +5491,72 @@ mod tests {
         assert!(
             ts.0.is_some(),
             "TargetSelection must be Some after pressing Attack"
+        );
+    }
+
+    /// Left mouse `just_pressed` while hovering an action button should also
+    /// dispatch, even if the `Interaction::Pressed` transition is not observed.
+    #[test]
+    fn test_mouse_left_click_on_hover_dispatches_action() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Ensure mouse input resource exists for just_pressed checks.
+        app.insert_resource(ButtonInput::<MouseButton>::default());
+
+        // Spawn UI.
+        app.update();
+
+        let attack_entity = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<(Entity, &ActionButton), With<Button>>();
+            q.iter(app.world())
+                .find(|(_, btn)| btn.button_type == ActionButtonType::Attack)
+                .map(|(e, _)| e)
+                .expect("Attack button must exist")
+        };
+
+        // Simulate hover plus left-click this frame.
+        app.world_mut()
+            .entity_mut(attack_entity)
+            .insert(Interaction::Hovered);
+        {
+            let mut mouse = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+            mouse.press(MouseButton::Left);
+        }
+
+        app.update();
+
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(
+            ts.0.is_some(),
+            "Left click while hovered should dispatch Attack"
         );
     }
 

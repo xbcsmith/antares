@@ -438,3 +438,22 @@ We also need to refactor the creature id manager to use those ranges. We also ne
 ```
 
 The creatures registry should be able to tie the npc, character, and monster to a creature mesh which has its own ID.
+
+
+## Combat Feedback
+
+We have missed deliverables from Phase 5 of #file:combat_system_improvement_implementation.md  The victory spash screen never goes away. It should go away when the party moves after combat. 
+
+I have to double click Enter to select combat options. We should be able to select combat options with a single click of the Enter key. The first press of the Enter key should select the option and the second press should confirm the selection. There is no visual feedback that I clicked the option. We should have visual feedback that the option is selected when I click it with the Enter key.
+
+
+Mouse is not working to select combat options. We should be able to click on the combat options with the mouse to select them. In gerneal the mouse does not work in the game engine other than the Main Menu. We should have mouse support in the game engine for all UI interactions. InnKeeper Party Management is another place where mouse does not work.
+
+
+As part of phase 3 we added UI Cards for damage are only a small number in the upper left corner of the screen. They are inpossible to see and fade fast. Implement a Dialog Bubble that appears in the right top side of the screen that shows the damage dealt and received in combat. A combat log that remains visible until combat is over. The bubble should also have a typewriter effect that makes the text appear one character at a time.
+
+As part of Phase 3 we were supposed to  add in-world monster HP hover bars we have none. We should have HP bars that appear above monsters in the world that show their current HP. The HP bars should update in real time as the monster takes damage. We should be able to toggle the HP bars on and off in the game settings.
+
+## Rest System
+
+We need a party rest system to heal characters. 
