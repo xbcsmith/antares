@@ -67,8 +67,18 @@ use crate::game::systems::combat_visual::{
 /// Message emitted when combat has started.
 ///
 /// Other systems can listen to this to set up UI or audio.
+/// The `encounter_position` and `encounter_map_id` fields carry the world tile
+/// that triggered the encounter so `handle_combat_started` can store them in
+/// `CombatResource` for later use by `handle_combat_victory` (Phase 4).
 #[derive(Message)]
-pub struct CombatStarted;
+pub struct CombatStarted {
+    /// Tile position of the `MapEvent::Encounter` that started this combat.
+    /// `None` when combat is started programmatically rather than by a map event.
+    pub encounter_position: Option<crate::domain::types::Position>,
+    /// Map ID of the map that contains the encounter tile.
+    /// `None` when `encounter_position` is `None`.
+    pub encounter_map_id: Option<crate::domain::types::MapId>,
+}
 
 /// Player-initiated attack message (registered by the plugin)
 #[derive(Message)]
@@ -228,6 +238,13 @@ pub struct CombatResource {
     pub player_orig_indices: Vec<Option<usize>>,
     /// Whether the combat resolution (victory/defeat) has been handled.
     pub resolution_handled: bool,
+    /// World position of the encounter tile that started this combat.
+    /// Set by the event handler when a `MapEvent::Encounter` triggers combat;
+    /// cleared after victory so a subsequent combat is unaffected.
+    pub encounter_position: Option<crate::domain::types::Position>,
+    /// Map ID of the map containing the encounter tile.
+    /// Set alongside `encounter_position`; cleared after victory.
+    pub encounter_map_id: Option<crate::domain::types::MapId>,
 }
 
 impl CombatResource {
@@ -237,6 +254,8 @@ impl CombatResource {
             state: CombatState::new(Handicap::Even),
             player_orig_indices: Vec::new(),
             resolution_handled: false,
+            encounter_position: None,
+            encounter_map_id: None,
         }
     }
 
@@ -245,6 +264,8 @@ impl CombatResource {
         self.state = CombatState::new(Handicap::Even);
         self.player_orig_indices.clear();
         self.resolution_handled = false;
+        self.encounter_position = None;
+        self.encounter_map_id = None;
     }
 }
 
@@ -656,7 +677,7 @@ fn handle_combat_started(
     global_state: Res<GlobalState>,
     mut music_writer: Option<MessageWriter<crate::game::systems::audio::PlayMusic>>,
 ) {
-    for _ in reader.read() {
+    for msg in reader.read() {
         // Only proceed if the global state is actually in combat mode
         if let GameMode::Combat(ref cs) = global_state.0.mode {
             combat_res.state = cs.clone();
@@ -675,6 +696,17 @@ fn handle_combat_started(
                 }
             }
             combat_res.player_orig_indices = mapping;
+
+            // Store encounter position so handle_combat_victory can remove
+            // the MapEvent::Encounter from the map on victory (Phase 4).
+            combat_res.encounter_position = msg.encounter_position;
+            combat_res.encounter_map_id = msg.encounter_map_id;
+            if let (Some(pos), Some(map_id)) = (msg.encounter_position, msg.encounter_map_id) {
+                info!(
+                    "Stored encounter position {:?} on map {} in CombatResource",
+                    pos, map_id
+                );
+            }
 
             // Request combat music transition (if audio plugin is registered)
             if let Some(ref mut w) = music_writer {
@@ -3004,6 +3036,19 @@ fn handle_combat_victory(
     for _ in reader.read() {
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
         let mut rng = rand::rng();
+
+        // Remove the encounter event from the map so the tile no longer re-triggers.
+        if let (Some(pos), Some(map_id)) =
+            (combat_res.encounter_position, combat_res.encounter_map_id)
+        {
+            if let Some(map) = global_state.0.world.get_map_mut(map_id) {
+                map.remove_event(pos);
+                info!("Removed encounter event at {:?} on map {}", pos, map_id);
+            }
+        }
+        // Clear stored position so it doesn't accidentally affect a later combat.
+        combat_res.encounter_position = None;
+        combat_res.encounter_map_id = None;
 
         if let Ok(summary) = process_combat_victory_with_rng(
             &mut combat_res,
@@ -6126,6 +6171,186 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ===== Phase 4: Defeated Monster World-Mesh Removal =====
+
+    /// T4-E1: After a `MapEvent::Encounter` triggers combat, `combat_res.encounter_position`
+    /// and `combat_res.encounter_map_id` must be set to the tile position and map id.
+    #[test]
+    fn test_encounter_position_stored_on_combat_start() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut combat_res = CombatResource::new();
+        assert!(combat_res.encounter_position.is_none());
+        assert!(combat_res.encounter_map_id.is_none());
+
+        // Simulate what events.rs does after start_encounter succeeds.
+        let tile_pos = Position::new(3, 7);
+        let map_id: crate::domain::types::MapId = 2;
+        combat_res.encounter_position = Some(tile_pos);
+        combat_res.encounter_map_id = Some(map_id);
+
+        assert_eq!(combat_res.encounter_position, Some(tile_pos));
+        assert_eq!(combat_res.encounter_map_id, Some(map_id));
+
+        // Verify clear() resets both fields.
+        combat_res.clear();
+        assert!(combat_res.encounter_position.is_none());
+        assert!(combat_res.encounter_map_id.is_none());
+
+        // Verify a freshly added encounter event exists on the map.
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            tile_pos,
+            MapEvent::Encounter {
+                name: "Goblins".to_string(),
+                description: "A band of goblins".to_string(),
+                monster_group: vec![1],
+            },
+        );
+        assert!(map.get_event(tile_pos).is_some());
+    }
+
+    /// T4-E2: After `handle_combat_victory` processes a victory, the backing
+    /// `MapEvent::Encounter` must be removed from the map data.
+    #[test]
+    fn test_encounter_event_removed_on_victory() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::combat::engine::CombatState;
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Build a game state with a live party member.
+        let mut gs = crate::application::GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        // Place an encounter event on a map.
+        let map_id: crate::domain::types::MapId = 1;
+        let encounter_pos = Position::new(5, 5);
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            encounter_pos,
+            MapEvent::Encounter {
+                name: "Goblins".to_string(),
+                description: "A band of goblins".to_string(),
+                monster_group: vec![1],
+            },
+        );
+        gs.world.add_map(map);
+        gs.world.set_current_map(map_id);
+
+        // Enter combat so exit_combat() has a valid state to exit.
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+            cr.encounter_position = Some(encounter_pos);
+            cr.encounter_map_id = Some(map_id);
+        }
+
+        // Send the CombatVictory message.
+        {
+            let mut writer = app.world_mut().resource_mut::<Messages<CombatVictory>>();
+            writer.write(CombatVictory {});
+        }
+        app.update();
+
+        // The encounter event must be gone from the map.
+        let gs = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        let map = gs.0.world.get_map(map_id).expect("map should exist");
+        assert!(
+            map.get_event(encounter_pos).is_none(),
+            "Encounter event should have been removed on victory"
+        );
+    }
+
+    /// T4-E3: After victory the `encounter_position` and `encounter_map_id`
+    /// fields of `CombatResource` must be `None`.
+    #[test]
+    fn test_encounter_position_cleared_after_victory() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::combat::engine::CombatState;
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = crate::application::GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let map_id: crate::domain::types::MapId = 1;
+        let encounter_pos = Position::new(2, 2);
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            encounter_pos,
+            MapEvent::Encounter {
+                name: "Goblins".to_string(),
+                description: "Goblins".to_string(),
+                monster_group: vec![1],
+            },
+        );
+        gs.world.add_map(map);
+        gs.world.set_current_map(map_id);
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+            cr.encounter_position = Some(encounter_pos);
+            cr.encounter_map_id = Some(map_id);
+        }
+
+        {
+            let mut writer = app.world_mut().resource_mut::<Messages<CombatVictory>>();
+            writer.write(CombatVictory {});
+        }
+        app.update();
+
+        let cr = app.world().resource::<CombatResource>();
+        assert!(
+            cr.encounter_position.is_none(),
+            "encounter_position must be None after victory"
+        );
+        assert!(
+            cr.encounter_map_id.is_none(),
+            "encounter_map_id must be None after victory"
+        );
     }
 
     /// T1-9: When `CombatTurnState` is `EnemyTurn` and `Tab` is pressed,

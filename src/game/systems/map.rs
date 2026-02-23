@@ -57,6 +57,18 @@ pub struct RecruitableVisualMarker {
     pub character_id: String,
 }
 
+/// Component tagging an entity as a visual marker for a map encounter.
+///
+/// Despawned by `cleanup_encounter_visuals` when the backing `MapEvent::Encounter`
+/// is removed from the map data (e.g. after the party wins combat against it).
+#[derive(bevy::prelude::Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncounterVisualMarker {
+    /// Map ID this entity belongs to.
+    pub map_id: types::MapId,
+    /// Tile position of the originating `MapEvent::Encounter`.
+    pub position: types::Position,
+}
+
 /// Event trigger component - attached to entities that represent in-world event triggers
 #[derive(bevy::prelude::Component, Debug, Clone)]
 pub struct EventTrigger {
@@ -118,8 +130,37 @@ impl Plugin for MapManagerPlugin {
                     handle_door_opened,
                     spawn_map_markers,
                     cleanup_recruitable_visuals,
+                    cleanup_encounter_visuals,
                 ),
             );
+    }
+}
+
+/// Despawns encounter visual entities when their backing `MapEvent::Encounter` is no longer
+/// present on the map (e.g. after the party defeats the monsters in that encounter).
+///
+/// Mirrors the pattern used by `cleanup_recruitable_visuals`.
+fn cleanup_encounter_visuals(
+    mut commands: Commands,
+    global_state: Res<GlobalState>,
+    query: Query<(Entity, &EncounterVisualMarker)>,
+) {
+    let game_state = &global_state.0;
+    for (entity, marker) in query.iter() {
+        let Some(map) = game_state.world.get_map(marker.map_id) else {
+            // Map no longer loaded — despawn the visual.
+            commands.entity(entity).despawn();
+            continue;
+        };
+
+        // Despawn if the backing encounter event is gone.
+        let event_present = matches!(
+            map.get_event(marker.position),
+            Some(world::MapEvent::Encounter { .. })
+        );
+        if !event_present {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -1133,6 +1174,10 @@ fn spawn_map(
                                 },
                                 MapEntity(map.id),
                                 TileCoord(*position),
+                                EncounterVisualMarker {
+                                    map_id: map.id,
+                                    position: *position,
+                                },
                                 Visibility::default(),
                             ));
 
@@ -2133,6 +2178,139 @@ mod tests {
         let mut query = world_ref.query::<&RecruitableVisualMarker>();
         let results: Vec<_> = query.iter(&*world_ref).collect();
         assert_eq!(results.len(), 0);
+    }
+
+    /// T4-E4: Spawn an `EncounterVisualMarker` entity, remove the backing event,
+    /// run `cleanup_encounter_visuals`, and assert the entity no longer exists.
+    #[test]
+    fn test_encounter_visual_despawned_when_event_removed() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        // Register MapManagerPlugin so cleanup_encounter_visuals is scheduled.
+        // spawn_map_markers (also registered by the plugin) requires these resources.
+        app.add_plugins(MapManagerPlugin);
+
+        let map_id: crate::domain::types::MapId = 1;
+        let encounter_pos = Position::new(3, 4);
+
+        // Build a map with a live encounter event.
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            encounter_pos,
+            MapEvent::Encounter {
+                name: "Goblins".to_string(),
+                description: "Goblins lurk here".to_string(),
+                monster_group: vec![1],
+            },
+        );
+
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(map_id);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+
+        // Required resources for spawn_map_markers (called each frame by MapManagerPlugin).
+        app.insert_resource(crate::application::resources::GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(crate::game::resources::GrassQualitySettings::default());
+
+        // Spawn an EncounterVisualMarker entity manually to simulate what spawn_map does.
+        let marker_entity = app
+            .world_mut()
+            .spawn(EncounterVisualMarker {
+                map_id,
+                position: encounter_pos,
+            })
+            .id();
+
+        // First frame: event is present — entity should survive.
+        app.update();
+        assert!(
+            app.world().get_entity(marker_entity).is_ok(),
+            "Entity should still exist while the encounter event is present"
+        );
+
+        // Remove the encounter event from the map (simulating victory removal).
+        {
+            let mut gs = app
+                .world_mut()
+                .resource_mut::<crate::game::resources::GlobalState>();
+            let map = gs.0.world.get_map_mut(map_id).expect("map must exist");
+            map.remove_event(encounter_pos);
+        }
+
+        // Next frame: cleanup system should despawn the visual.
+        app.update();
+        assert!(
+            app.world().get_entity(marker_entity).is_err(),
+            "Entity must be despawned after the backing encounter event is removed"
+        );
+    }
+
+    /// T4-E5: Spawn an `EncounterVisualMarker` entity, leave the backing event
+    /// intact, run `cleanup_encounter_visuals`, and assert the entity still exists.
+    #[test]
+    fn test_encounter_visual_kept_when_event_present() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapManagerPlugin);
+
+        let map_id: crate::domain::types::MapId = 1;
+        let encounter_pos = Position::new(6, 2);
+
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            encounter_pos,
+            MapEvent::Encounter {
+                name: "Trolls".to_string(),
+                description: "Trolls guard this tile".to_string(),
+                monster_group: vec![2],
+            },
+        );
+
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(map_id);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+
+        // Required resources for spawn_map_markers.
+        app.insert_resource(crate::application::resources::GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(crate::game::resources::GrassQualitySettings::default());
+
+        // Spawn an EncounterVisualMarker entity — backing event is still present.
+        let marker_entity = app
+            .world_mut()
+            .spawn(EncounterVisualMarker {
+                map_id,
+                position: encounter_pos,
+            })
+            .id();
+
+        // Run cleanup: entity must NOT be despawned.
+        app.update();
+        assert!(
+            app.world().get_entity(marker_entity).is_ok(),
+            "Entity must remain when the backing encounter event is still present"
+        );
     }
 
     #[test]

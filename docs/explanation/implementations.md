@@ -36,9 +36,155 @@
 | **Combat System Improvement Phase 1**           | ✅ COMPLETE | 2026-07-17 | **Input Reliability and Action Selection**                                |
 | **Combat System Improvement Phase 2**           | ✅ COMPLETE | 2026-07-17 | **Target Selection and Action Completeness**                              |
 | **Combat System Improvement Phase 3**           | ✅ COMPLETE | 2026-07-17 | **Visual Combat Feedback and Animation State**                            |
+| **Combat System Improvement Phase 4**           | ✅ COMPLETE | 2026-07-17 | **Defeated Monster World-Mesh Removal**                                   |
 
-**Total Lines Implemented**: 9,200+ lines of production code + 5,400+ lines of documentation
-**Total Tests**: 341+ new tests (all passing), 2,433 total tests passing
+**Total Lines Implemented**: 9,300+ lines of production code + 5,400+ lines of documentation
+**Total Tests**: 346+ new tests (all passing), 2,438 total tests passing
+
+---
+
+## Combat System Improvement Phase 4: Defeated Monster World-Mesh Removal
+
+### Overview
+
+Phase 4 ensures that when the party wins combat the monster's 3D mesh
+disappears from the world and the `MapEvent::Encounter` entry is removed from
+the map data, so the player cannot re-trigger the same fight by walking back
+over the tile.
+
+Before this phase the victory handler called `exit_combat()` but left both the
+creature entity and the map event intact. Walking back to the tile immediately
+restarted the encounter.
+
+### Components Implemented
+
+#### `encounter_position` and `encounter_map_id` fields on `CombatResource` (`src/game/systems/combat.rs`)
+
+Two new optional fields were added to `CombatResource`:
+
+- `pub encounter_position: Option<crate::domain::types::Position>` — tile that
+  triggered the encounter.
+- `pub encounter_map_id: Option<crate::domain::types::MapId>` — map that owns
+  the tile.
+
+Both `CombatResource::new()` and `CombatResource::clear()` initialise/reset
+the fields to `None`.
+
+#### `CombatStarted` message extended (`src/game/systems/combat.rs`)
+
+`CombatStarted` was previously a unit struct. Two optional fields were added:
+
+- `pub encounter_position: Option<crate::domain::types::Position>`
+- `pub encounter_map_id: Option<crate::domain::types::MapId>`
+
+`None` values are used for programmatically started combats that are not tied
+to a map tile.
+
+#### `handle_events` populates the message (`src/game/systems/events.rs`)
+
+The `MapEvent::Encounter` branch of `handle_events` now passes the trigger
+position and current map id into the `CombatStarted` message rather than
+through a direct resource write (which would have pushed the system over
+Bevy's parameter-count limit).
+
+#### `handle_combat_started` stores position in `CombatResource` (`src/game/systems/combat.rs`)
+
+`handle_combat_started` now reads `msg.encounter_position` and
+`msg.encounter_map_id` from the incoming message and writes them to
+`CombatResource` so `handle_combat_victory` can consume them later.
+
+#### `handle_combat_victory` removes the map event and clears position (`src/game/systems/combat.rs`)
+
+Before calling `process_combat_victory_with_rng`, `handle_combat_victory` now:
+
+1. Reads `combat_res.encounter_position` and `combat_res.encounter_map_id`.
+2. Calls `global_state.0.world.get_map_mut(map_id)?.remove_event(pos)` to
+   delete the `MapEvent::Encounter` from the domain map, preventing
+   re-triggering.
+3. Resets both fields to `None` so a subsequent combat on a different tile
+   is unaffected.
+
+#### `EncounterVisualMarker` component (`src/game/systems/map.rs`)
+
+A new `Copy` component was added:
+
+```src/game/systems/map.rs#L60-71
+/// Component tagging an entity as a visual marker for a map encounter.
+///
+/// Despawned by `cleanup_encounter_visuals` when the backing `MapEvent::Encounter`
+/// is removed from the map data (e.g. after the party wins combat against it).
+#[derive(bevy::prelude::Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncounterVisualMarker {
+    /// Map ID this entity belongs to.
+    pub map_id: types::MapId,
+    /// Tile position of the originating `MapEvent::Encounter`.
+    pub position: types::Position,
+}
+```
+
+#### `EncounterVisualMarker` attached in `spawn_map` (`src/game/systems/map.rs`)
+
+The `world::MapEvent::Encounter` branch of `spawn_map` now inserts
+`EncounterVisualMarker { map_id: map.id, position: *position }` into the
+spawned creature entity alongside the existing `CreatureVisual`, `MapEntity`,
+`TileCoord`, and `Visibility` components.
+
+#### `cleanup_encounter_visuals` system (`src/game/systems/map.rs`)
+
+A new system mirrors `cleanup_recruitable_visuals`:
+
+- Iterates all `EncounterVisualMarker` entities.
+- If the map is no longer loaded, despawns the entity.
+- If the backing `MapEvent::Encounter` is absent from the map, despawns the
+  entity.
+- Otherwise leaves the entity intact.
+
+The system is registered in `MapManagerPlugin::build` alongside the four
+existing cleanup/spawn systems.
+
+### Testing
+
+| Test ID | Test Name                                            | File        | Result |
+| ------- | ---------------------------------------------------- | ----------- | ------ |
+| T4-E1   | `test_encounter_position_stored_on_combat_start`     | `combat.rs` | PASS   |
+| T4-E2   | `test_encounter_event_removed_on_victory`            | `combat.rs` | PASS   |
+| T4-E3   | `test_encounter_position_cleared_after_victory`      | `combat.rs` | PASS   |
+| T4-E4   | `test_encounter_visual_despawned_when_event_removed` | `map.rs`    | PASS   |
+| T4-E5   | `test_encounter_visual_kept_when_event_present`      | `map.rs`    | PASS   |
+
+### Files Changed
+
+- `src/game/systems/combat.rs` — `CombatResource` fields, `CombatStarted`
+  message fields, `handle_combat_started` consumer, `handle_combat_victory`
+  removal logic, three T4 tests.
+- `src/game/systems/events.rs` — `MapEvent::Encounter` branch writes position
+  into the `CombatStarted` message.
+- `src/game/systems/map.rs` — `EncounterVisualMarker` declaration,
+  `spawn_map` attachment, `cleanup_encounter_visuals` system, plugin
+  registration, two T4 tests.
+
+### Deliverables Checklist
+
+- [x] `encounter_position` and `encounter_map_id` fields added to `CombatResource`; `new()` and `clear()` updated.
+- [x] `CombatStarted` message carries `encounter_position` and `encounter_map_id`.
+- [x] `handle_combat_started` stores both fields into `CombatResource`.
+- [x] `handle_combat_victory` removes `MapEvent::Encounter` from map data and clears stored position.
+- [x] `EncounterVisualMarker` component declared in `src/game/systems/map.rs` and attached during `spawn_map`.
+- [x] `cleanup_encounter_visuals` system implemented and registered in `MapManagerPlugin`.
+- [x] All 5 tests T4-E1 through T4-E5 pass under `cargo nextest run --all-features`.
+
+### Success Criteria Verification
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — 0 errors.
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
+- `cargo nextest run --all-features` — 2438 tests, 2438 passed, 0 failed.
+- After winning combat the monster mesh disappears from the world on the next
+  frame — verified by T4-E4.
+- Walking back to the encounter tile after victory does not restart combat —
+  verified by T4-E2.
+- `CombatResource` encounter fields are reset cleanly so a subsequent combat
+  on a different tile is unaffected — verified by T4-E3.
 
 ---
 

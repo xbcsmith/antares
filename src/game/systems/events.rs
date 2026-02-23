@@ -189,7 +189,10 @@ fn handle_events(
 
                         // Notify other systems that combat has started (if CombatPlugin is registered)
                         if let Some(ref mut writer) = combat_started_writer {
-                            writer.write(crate::game::systems::combat::CombatStarted {});
+                            writer.write(crate::game::systems::combat::CombatStarted {
+                                encounter_position: Some(trigger.position),
+                                encounter_map_id: Some(global_state.0.world.current_map),
+                            });
                         }
                     }
                     Err(e) => {
