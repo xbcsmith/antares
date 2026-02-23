@@ -442,7 +442,7 @@ The creatures registry should be able to tie the npc, character, and monster to 
 
 ## Combat Feedback
 
-We have missed deliverables from Phase 5 of #file:combat_system_improvement_implementation.md  The victory spash screen never goes away. It should go away when the party moves after combat. 
+We have missed deliverables from Phase 5 of #file:combat_system_improvement_implementation.md  The victory spash screen never goes away. It should go away when the party moves after combat.
 
 I have to double click Enter to select combat options. We should be able to select combat options with a single click of the Enter key. The first press of the Enter key should select the option and the second press should confirm the selection. There is no visual feedback that I clicked the option. We should have visual feedback that the option is selected when I click it with the Enter key.
 
@@ -456,4 +456,4 @@ As part of Phase 3 we were supposed to  add in-world monster HP hover bars we ha
 
 ## Rest System
 
-We need a party rest system to heal characters. 
+We need a party rest system to heal characters.

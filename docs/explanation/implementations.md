@@ -45,6 +45,61 @@
 
 ---
 
+## Combat Log Bubble Remediation
+
+### Overview
+
+Combat feedback numbers were hard to read in practice because they were small,
+transient, and spatially disconnected from the player's attention. A persistent
+combat log bubble is now rendered at the top-right of the combat HUD and stays
+visible for the full encounter.
+
+The bubble records incoming `CombatFeedbackEvent` results (damage, healing,
+misses, and status text) and reveals each new line with a typewriter effect.
+
+### Components Implemented
+
+#### Persistent combat log UI (`src/game/systems/combat.rs`)
+
+Added a dedicated bubble panel in `setup_combat_ui`:
+
+- Marker components: `CombatLogBubbleRoot`, `CombatLogBubbleText`
+- Layout: absolute top-right, rounded, semi-opaque background
+- Lifetime: visible throughout combat; removed with combat HUD cleanup
+
+#### Typewriter-backed combat log state (`src/game/systems/combat.rs`)
+
+Added `CombatLogState` resource with:
+
+- rolling `lines` buffer
+- `active_line_visible_chars` for per-character reveal
+- `reveal_accumulator` for frame-rate-independent animation
+
+Added constants:
+
+- `COMBAT_LOG_BUBBLE_WIDTH`
+- `COMBAT_LOG_BUBBLE_MIN_HEIGHT`
+- `COMBAT_LOG_MAX_LINES`
+- `COMBAT_LOG_TYPEWRITER_CHARS_PER_SEC`
+
+#### Event-to-log pipeline (`src/game/systems/combat.rs`)
+
+Added systems:
+
+- `collect_combat_feedback_log_lines` — converts `CombatFeedbackEvent` into
+  readable lines ("<target> takes N damage.", etc.)
+- `update_combat_log_typewriter` — reveals newest line one character at a time
+- `update_combat_log_bubble_text` — syncs visible text to `CombatLogBubbleText`
+- `reset_combat_log_on_exit` — clears the log after combat ends
+
+These systems are registered in `CombatPlugin` and ordered after combat action
+handlers so the log updates in the same frame feedback events are produced.
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+
 ## Combat Input Enter UX Remediation
 
 ### Overview

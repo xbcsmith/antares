@@ -197,6 +197,18 @@ pub const ACTION_BUTTON_DISABLED_COLOR: Color = Color::srgb(0.2, 0.2, 0.2);
 /// Color for enemy card highlight when in target selection mode
 pub const ENEMY_CARD_HIGHLIGHT_COLOR: Color = Color::srgba(0.35, 0.25, 0.25, 0.95);
 
+/// Width of the persistent combat log bubble in the top-right corner.
+pub const COMBAT_LOG_BUBBLE_WIDTH: Val = Val::Px(360.0);
+
+/// Minimum height of the persistent combat log bubble.
+pub const COMBAT_LOG_BUBBLE_MIN_HEIGHT: Val = Val::Px(180.0);
+
+/// Maximum number of log lines kept in the on-screen combat bubble.
+pub const COMBAT_LOG_MAX_LINES: usize = 14;
+
+/// Typewriter speed for combat log reveal (characters per second).
+pub const COMBAT_LOG_TYPEWRITER_CHARS_PER_SEC: f32 = 52.0;
+
 // ===== Phase 3: Visual Feedback Color Constants =====
 
 /// Colour for damage floating numbers (red)
@@ -490,6 +502,14 @@ pub struct MonsterHpHoverBarFill {
     pub participant_index: usize,
 }
 
+/// Marker component for the persistent combat log bubble root UI node.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CombatLogBubbleRoot;
+
+/// Marker component for the text node inside the combat log bubble.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CombatLogBubbleText;
+
 /// Resource representing the current target selection state.
 ///
 /// When set to `Some(attacker)` the player is selecting a target for that attacker.
@@ -533,6 +553,68 @@ pub struct ActionMenuState {
     pub active_target_index: Option<usize>,
 }
 
+/// Resource storing persistent combat log lines and typewriter animation state.
+#[derive(Resource, Debug, Clone)]
+pub struct CombatLogState {
+    /// Rolling set of lines shown in the combat log bubble.
+    pub lines: Vec<String>,
+    /// Number of characters currently revealed for the newest line.
+    pub active_line_visible_chars: usize,
+    /// Sub-character accumulator used by the typewriter effect.
+    pub reveal_accumulator: f32,
+}
+
+impl Default for CombatLogState {
+    fn default() -> Self {
+        Self {
+            lines: Vec::new(),
+            active_line_visible_chars: 0,
+            reveal_accumulator: 0.0,
+        }
+    }
+}
+
+impl CombatLogState {
+    /// Append a new combat log line and reset typewriter progress for it.
+    fn push_line(&mut self, line: String) {
+        if line.is_empty() {
+            return;
+        }
+        self.lines.push(line);
+        while self.lines.len() > COMBAT_LOG_MAX_LINES {
+            self.lines.remove(0);
+        }
+        self.active_line_visible_chars = 0;
+        self.reveal_accumulator = 0.0;
+    }
+
+    /// Build the currently visible multi-line text, applying typewriter clipping
+    /// only to the newest line.
+    fn visible_text(&self) -> String {
+        if self.lines.is_empty() {
+            return "Combat Log\nWaiting for actions...".to_string();
+        }
+
+        let last_idx = self.lines.len() - 1;
+        let mut output = String::from("Combat Log\n");
+        for (idx, line) in self.lines.iter().enumerate() {
+            if idx > 0 {
+                output.push('\n');
+            }
+            if idx == last_idx {
+                let shown = line
+                    .chars()
+                    .take(self.active_line_visible_chars)
+                    .collect::<String>();
+                output.push_str(&shown);
+            } else {
+                output.push_str(line);
+            }
+        }
+        output
+    }
+}
+
 /// Marker component placed on the currently highlighted `ActionButton` entity.
 ///
 /// Used by `update_action_highlight` to apply the hover background colour to
@@ -558,6 +640,7 @@ impl Plugin for CombatPlugin {
             .insert_resource(CombatTurnStateResource::default())
             .insert_resource(TargetSelection::default())
             .insert_resource(ActionMenuState::default())
+            .insert_resource(CombatLogState::default())
             .insert_resource(ButtonInput::<KeyCode>::default())
             // Handle events that indicate combat started
             .add_systems(Update, handle_combat_started)
@@ -590,6 +673,23 @@ impl Plugin for CombatPlugin {
                     .after(handle_use_item_action)
                     .after(execute_monster_turn),
             )
+            .add_systems(
+                Update,
+                collect_combat_feedback_log_lines
+                    .after(handle_attack_action)
+                    .after(handle_cast_spell_action)
+                    .after(handle_use_item_action)
+                    .after(execute_monster_turn),
+            )
+            .add_systems(
+                Update,
+                update_combat_log_typewriter.after(collect_combat_feedback_log_lines),
+            )
+            .add_systems(
+                Update,
+                update_combat_log_bubble_text.after(update_combat_log_typewriter),
+            )
+            .add_systems(Update, reset_combat_log_on_exit)
             // Phase 3: Monster HP hover bars
             .add_systems(Update, spawn_monster_hp_hover_bars.after(setup_combat_ui))
             .add_systems(
@@ -1075,6 +1175,36 @@ fn setup_combat_ui(
                                 ));
                             });
                     }
+                });
+
+            // Persistent combat log bubble in the top-right corner.
+            parent
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        right: Val::Px(12.0),
+                        top: Val::Px(12.0),
+                        width: COMBAT_LOG_BUBBLE_WIDTH,
+                        min_height: COMBAT_LOG_BUBBLE_MIN_HEIGHT,
+                        max_height: Val::Px(300.0),
+                        padding: UiRect::all(Val::Px(10.0)),
+                        overflow: Overflow::clip_y(),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.06, 0.09, 0.13, 0.92)),
+                    BorderRadius::all(Val::Px(12.0)),
+                    CombatLogBubbleRoot,
+                ))
+                .with_children(|bubble| {
+                    bubble.spawn((
+                        Text::new("Combat Log\nWaiting for actions..."),
+                        TextFont {
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.92, 0.96, 1.0)),
+                        CombatLogBubbleText,
+                    ));
                 });
         });
 }
@@ -3276,6 +3406,113 @@ fn emit_combat_feedback(
 ) {
     if let Some(ref mut w) = writer {
         w.write(CombatFeedbackEvent { target, effect });
+    }
+}
+
+/// Format `CombatFeedbackEvent` as readable combat log text lines.
+fn format_combat_log_line(combat_res: &CombatResource, event: &CombatFeedbackEvent) -> String {
+    let target_name = match event.target {
+        CombatantId::Player(idx) => combat_res
+            .state
+            .participants
+            .get(idx)
+            .and_then(|p| match p {
+                Combatant::Player(pc) => Some(pc.name.as_str()),
+                _ => None,
+            })
+            .unwrap_or("Player"),
+        CombatantId::Monster(idx) => combat_res
+            .state
+            .participants
+            .get(idx)
+            .and_then(|p| match p {
+                Combatant::Monster(mon) => Some(mon.name.as_str()),
+                _ => None,
+            })
+            .unwrap_or("Monster"),
+    };
+
+    match &event.effect {
+        CombatFeedbackEffect::Damage(n) => format!("{} takes {} damage.", target_name, n),
+        CombatFeedbackEffect::Heal(n) => format!("{} recovers {} HP.", target_name, n),
+        CombatFeedbackEffect::Miss => format!("Attack misses {}.", target_name),
+        CombatFeedbackEffect::Status(s) => format!("{}: {}", target_name, s),
+    }
+}
+
+/// Consume combat feedback events and append them to the persistent combat log.
+fn collect_combat_feedback_log_lines(
+    mut reader: MessageReader<CombatFeedbackEvent>,
+    global_state: Res<GlobalState>,
+    combat_res: Res<CombatResource>,
+    mut combat_log_state: ResMut<CombatLogState>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    for event in reader.read() {
+        combat_log_state.push_line(format_combat_log_line(&combat_res, event));
+    }
+}
+
+/// Advance typewriter reveal for the newest combat log line.
+fn update_combat_log_typewriter(
+    time: Res<Time>,
+    global_state: Res<GlobalState>,
+    mut combat_log_state: ResMut<CombatLogState>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    let Some(latest) = combat_log_state.lines.last() else {
+        return;
+    };
+
+    let total_chars = latest.chars().count();
+    if combat_log_state.active_line_visible_chars >= total_chars {
+        return;
+    }
+
+    combat_log_state.reveal_accumulator += time.delta_secs() * COMBAT_LOG_TYPEWRITER_CHARS_PER_SEC;
+    while combat_log_state.reveal_accumulator >= 1.0
+        && combat_log_state.active_line_visible_chars < total_chars
+    {
+        combat_log_state.active_line_visible_chars += 1;
+        combat_log_state.reveal_accumulator -= 1.0;
+    }
+}
+
+/// Sync the combat log bubble text from `CombatLogState`.
+fn update_combat_log_bubble_text(
+    combat_log_state: Res<CombatLogState>,
+    mut log_text_query: Query<&mut Text, With<CombatLogBubbleText>>,
+) {
+    if !combat_log_state.is_changed() {
+        return;
+    }
+
+    let visible = combat_log_state.visible_text();
+    for mut text in log_text_query.iter_mut() {
+        **text = visible.clone();
+    }
+}
+
+/// Clear the persistent combat log when combat ends so the next encounter starts fresh.
+fn reset_combat_log_on_exit(
+    global_state: Res<GlobalState>,
+    mut combat_log_state: ResMut<CombatLogState>,
+) {
+    if matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    if !combat_log_state.lines.is_empty()
+        || combat_log_state.active_line_visible_chars != 0
+        || combat_log_state.reveal_accumulator != 0.0
+    {
+        *combat_log_state = CombatLogState::default();
     }
 }
 
