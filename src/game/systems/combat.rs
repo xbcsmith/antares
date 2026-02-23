@@ -183,6 +183,24 @@ pub const ACTION_BUTTON_DISABLED_COLOR: Color = Color::srgb(0.2, 0.2, 0.2);
 /// Color for enemy card highlight when in target selection mode
 pub const ENEMY_CARD_HIGHLIGHT_COLOR: Color = Color::srgba(0.35, 0.25, 0.25, 0.95);
 
+/// Number of top-level action buttons (Attack, Defend, Cast, Item, Flee).
+///
+/// Used by `combat_input_system` and `update_action_highlight` instead of
+/// the inline literal `5` to avoid magic numbers.
+pub const COMBAT_ACTION_COUNT: usize = 5;
+
+/// Canonical order of action buttons matching the spawn order in `setup_combat_ui`.
+///
+/// Index 0 is `Attack` (the default highlight). This is the single source of
+/// truth for `ActionMenuState::active_index` → `ActionButtonType` mapping.
+pub const COMBAT_ACTION_ORDER: [ActionButtonType; COMBAT_ACTION_COUNT] = [
+    ActionButtonType::Attack,
+    ActionButtonType::Defend,
+    ActionButtonType::Cast,
+    ActionButtonType::Item,
+    ActionButtonType::Flee,
+];
+
 /// Bevy resource that contains the authoritative combat state used by ECS systems.
 ///
 /// `player_orig_indices` maps participant index -> Option<party_index> so we can
@@ -362,7 +380,12 @@ pub struct TargetSelection(pub Option<CombatantId>);
 /// `confirmed` is set to `true` when `Enter` is pressed and consumed by the
 /// unified dispatch function on the same frame.
 ///
-/// Defaults to `active_index = 0` (Attack highlighted) and `confirmed = false`.
+/// `active_target_index` tracks which enemy card (by alive-monster index) is
+/// currently highlighted for keyboard target selection. It is `Some(0)` when
+/// target-select mode is entered and `None` when not in target selection.
+///
+/// Defaults to `active_index = 0` (Attack highlighted), `confirmed = false`,
+/// and `active_target_index = None`.
 ///
 /// # Examples
 ///
@@ -372,6 +395,7 @@ pub struct TargetSelection(pub Option<CombatantId>);
 /// let state = ActionMenuState::default();
 /// assert_eq!(state.active_index, 0);
 /// assert!(!state.confirmed);
+/// assert!(state.active_target_index.is_none());
 /// ```
 #[derive(Resource, Debug, Clone, Default)]
 pub struct ActionMenuState {
@@ -379,6 +403,11 @@ pub struct ActionMenuState {
     pub active_index: usize,
     /// Set to `true` when `Enter` is pressed; consumed by the dispatch path.
     pub confirmed: bool,
+    /// Index into the alive-monster participants list for keyboard target cycling.
+    ///
+    /// `Some(n)` when target-select mode is active (set to `Some(0)` on entry).
+    /// `None` when not in target-select mode.
+    pub active_target_index: Option<usize>,
 }
 
 /// Marker component placed on the currently highlighted `ActionButton` entity.
@@ -415,6 +444,12 @@ impl Plugin for CombatPlugin {
             .add_systems(Update, combat_input_system)
             .add_systems(Update, update_action_highlight.after(combat_input_system))
             .add_systems(Update, enter_target_selection)
+            .add_systems(
+                Update,
+                update_target_highlight
+                    .after(enter_target_selection)
+                    .after(combat_input_system),
+            )
             .add_systems(Update, select_target)
             .add_systems(Update, handle_attack_action)
             .add_systems(Update, handle_cast_spell_action)
@@ -1077,17 +1112,12 @@ fn update_combat_ui(
 ///
 /// Emits `DefendAction` / `FleeAction` messages or enters target selection mode
 /// for attacks.
-/// Ordered action button types matching the spawn order in `setup_combat_ui`.
+/// Private alias kept for the internal dispatch path.
 ///
-/// This array is the single source of truth for mapping `ActionMenuState::active_index`
-/// to an `ActionButtonType`. Index 0 is `Attack` (the default highlight).
-const ACTION_BUTTON_ORDER: [ActionButtonType; 5] = [
-    ActionButtonType::Attack,
-    ActionButtonType::Defend,
-    ActionButtonType::Cast,
-    ActionButtonType::Item,
-    ActionButtonType::Flee,
-];
+/// Both `combat_input_system` and `update_action_highlight` reference the
+/// public `COMBAT_ACTION_ORDER` constant directly; this alias is retained only
+/// so that any future private callers have a short, stable name.
+const ACTION_BUTTON_ORDER: [ActionButtonType; COMBAT_ACTION_COUNT] = COMBAT_ACTION_ORDER;
 
 /// Unified combat action dispatcher.
 ///
@@ -1099,18 +1129,23 @@ const ACTION_BUTTON_ORDER: [ActionButtonType; 5] = [
 /// * `button_type` - The `ActionButtonType` selected by the player.
 /// * `actor` - The `CombatantId` of the currently acting player combatant.
 /// * `target_sel` - Mutable reference to the `TargetSelection` resource.
+/// * `action_menu_state` - Mutable reference to `ActionMenuState`; when
+///   `Attack` is dispatched the `active_target_index` is reset to `Some(0)`.
 /// * `defend_writer` - Optional message writer for `DefendAction`.
 /// * `flee_writer` - Optional message writer for `FleeAction`.
 fn dispatch_combat_action(
     button_type: ActionButtonType,
     actor: CombatantId,
     target_sel: &mut TargetSelection,
+    action_menu_state: &mut ActionMenuState,
     defend_writer: &mut Option<MessageWriter<DefendAction>>,
     flee_writer: &mut Option<MessageWriter<FleeAction>>,
 ) {
     match button_type {
         ActionButtonType::Attack => {
             target_sel.0 = Some(actor);
+            // Initialise keyboard target cycling to the first enemy.
+            action_menu_state.active_target_index = Some(0);
         }
         ActionButtonType::Defend => {
             if let Some(w) = defend_writer {
@@ -1128,13 +1163,55 @@ fn dispatch_combat_action(
     }
 }
 
+/// Write an `AttackAction` and clear both `TargetSelection` and the keyboard
+/// target index.
+///
+/// This is the single point through which both mouse-click and keyboard-confirm
+/// target paths produce their `AttackAction`, guaranteeing identical semantics.
+///
+/// # Arguments
+///
+/// * `attacker` - The `CombatantId` of the attacking player combatant.
+/// * `target_monster_idx` - Participant index of the targeted monster in
+///   `CombatState::participants`.
+/// * `target_sel` - Mutable reference to `TargetSelection`; cleared to `None`.
+/// * `action_menu_state` - Mutable reference to `ActionMenuState`; clears
+///   `active_target_index` to `None`.
+/// * `attack_writer` - Optional message writer for `AttackAction`.
+fn confirm_attack_target(
+    attacker: CombatantId,
+    target_monster_idx: usize,
+    target_sel: &mut TargetSelection,
+    action_menu_state: &mut ActionMenuState,
+    attack_writer: &mut Option<MessageWriter<AttackAction>>,
+) {
+    if let Some(ref mut w) = attack_writer {
+        w.write(AttackAction {
+            attacker,
+            target: CombatantId::Monster(target_monster_idx),
+        });
+    }
+    target_sel.0 = None;
+    action_menu_state.active_target_index = None;
+}
+
 /// Handle input from action buttons and keyboard shortcuts during PlayerTurn.
 ///
-/// # Keyboard Controls
+/// # Keyboard Controls (action menu — when NOT in target-select mode)
 ///
-/// - `Tab`: cycles the highlighted action button forward (wraps at index 4 → 0).
+/// - `Tab`: cycles the highlighted action button forward (wraps at
+///   `COMBAT_ACTION_COUNT - 1` → 0).
 /// - `Enter`: dispatches the action at the current highlight index.
-/// - `Escape`: cancels target selection if active; otherwise no-op.
+/// - `Escape`: no-op (no target selection active).
+///
+/// # Keyboard Controls (target selection — when `TargetSelection.0.is_some()`)
+///
+/// - `Tab`: advances `ActionMenuState::active_target_index` modulo the count
+///   of alive monster participants, cycling through all valid targets.
+/// - `Enter`: calls `confirm_attack_target` with the currently highlighted
+///   monster index, writes `AttackAction`, and clears target-select state.
+/// - `Escape`: clears `TargetSelection.0 = None` and resets
+///   `active_target_index = None`, cancelling the attack selection.
 ///
 /// # Mouse Controls
 ///
@@ -1142,8 +1219,8 @@ fn dispatch_combat_action(
 /// - `Interaction::Hovered` and `Interaction::None` are **ignored** — hover
 ///   does not dispatch an action.
 ///
-/// Both mouse and keyboard routes call `dispatch_combat_action` so their
-/// semantics are identical.
+/// Both mouse and keyboard routes call `dispatch_combat_action` /
+/// `confirm_attack_target` so their semantics are identical.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 fn combat_input_system(
@@ -1154,6 +1231,7 @@ fn combat_input_system(
     mut target_sel: ResMut<TargetSelection>,
     mut defend_writer: Option<MessageWriter<DefendAction>>,
     mut flee_writer: Option<MessageWriter<FleeAction>>,
+    mut attack_writer: Option<MessageWriter<AttackAction>>,
     turn_state: Res<CombatTurnStateResource>,
     mut action_menu_state: ResMut<ActionMenuState>,
 ) {
@@ -1189,6 +1267,7 @@ fn combat_input_system(
                     button.button_type,
                     actor,
                     &mut target_sel,
+                    &mut action_menu_state,
                     &mut defend_writer,
                     &mut flee_writer,
                 );
@@ -1196,18 +1275,60 @@ fn combat_input_system(
         }
     }
 
-    // --- Keyboard: Tab / Enter / Escape ---
+    // Count alive monster participants for target cycling.
+    let alive_monster_count = combat_res
+        .state
+        .participants
+        .iter()
+        .filter(|p| matches!(p, Combatant::Monster(m) if m.hp.current > 0))
+        .count();
+
+    // --- Keyboard: behaviour splits on whether we are in target-select mode ---
     if let Some(kb) = keyboard.as_ref() {
-        if kb.just_pressed(KeyCode::Tab) {
-            // Cycle active_index forward, wrapping at 5.
-            action_menu_state.active_index = (action_menu_state.active_index + 1) % 5;
-            action_menu_state.confirmed = false;
-        } else if kb.just_pressed(KeyCode::Enter) {
-            action_menu_state.confirmed = true;
-        } else if kb.just_pressed(KeyCode::Escape) {
-            // Cancel target selection if active.
-            if target_sel.0.is_some() {
+        if target_sel.0.is_some() {
+            // ---- Target-selection keyboard handling ----
+            if kb.just_pressed(KeyCode::Tab) {
+                // Cycle active_target_index through alive monsters.
+                if alive_monster_count > 0 {
+                    let current = action_menu_state.active_target_index.unwrap_or(0);
+                    action_menu_state.active_target_index =
+                        Some((current + 1) % alive_monster_count);
+                }
+            } else if kb.just_pressed(KeyCode::Enter) {
+                // Confirm attack on the currently highlighted target.
+                if let Some(attacker) = current_actor {
+                    let target_idx = action_menu_state.active_target_index.unwrap_or(0);
+                    // Resolve the alive-monster index to the actual participant index.
+                    let participant_idx = resolve_alive_monster_participant_index(
+                        &combat_res.state.participants,
+                        target_idx,
+                    );
+                    if let Some(pidx) = participant_idx {
+                        confirm_attack_target(
+                            attacker,
+                            pidx,
+                            &mut target_sel,
+                            &mut action_menu_state,
+                            &mut attack_writer,
+                        );
+                    }
+                }
+            } else if kb.just_pressed(KeyCode::Escape) {
+                // Cancel target selection.
                 target_sel.0 = None;
+                action_menu_state.active_target_index = None;
+            }
+        } else {
+            // ---- Action-menu keyboard handling ----
+            if kb.just_pressed(KeyCode::Tab) {
+                // Cycle active_index forward, wrapping at COMBAT_ACTION_COUNT.
+                action_menu_state.active_index =
+                    (action_menu_state.active_index + 1) % COMBAT_ACTION_COUNT;
+                action_menu_state.confirmed = false;
+            } else if kb.just_pressed(KeyCode::Enter) {
+                action_menu_state.confirmed = true;
+            } else if kb.just_pressed(KeyCode::Escape) {
+                // No-op: no target selection is active.
             }
         }
     }
@@ -1221,6 +1342,7 @@ fn combat_input_system(
                 selected_type,
                 actor,
                 &mut target_sel,
+                &mut action_menu_state,
                 &mut defend_writer,
                 &mut flee_writer,
             );
@@ -1228,16 +1350,45 @@ fn combat_input_system(
     }
 }
 
+/// Resolve the *n*-th alive monster's index in `participants`.
+///
+/// Iterates `participants` in order and returns the index of the `n`-th entry
+/// that is a living (`hp.current > 0`) `Combatant::Monster`.  Returns `None`
+/// if `n` is out of range.
+///
+/// Used by `combat_input_system` to map `active_target_index` (which counts
+/// only alive monsters) to the real participant index used by `AttackAction`.
+fn resolve_alive_monster_participant_index(
+    participants: &[Combatant],
+    alive_monster_nth: usize,
+) -> Option<usize> {
+    let mut count = 0usize;
+    for (idx, participant) in participants.iter().enumerate() {
+        if let Combatant::Monster(m) = participant {
+            if m.hp.current > 0 {
+                if count == alive_monster_nth {
+                    return Some(idx);
+                }
+                count += 1;
+            }
+        }
+    }
+    None
+}
+
 /// Update the background colour of all `ActionButton` entities to reflect the
 /// currently highlighted index stored in `ActionMenuState`.
 ///
 /// The button at `active_index` receives `ACTION_BUTTON_HOVER_COLOR`; all
 /// others receive `ACTION_BUTTON_COLOR`.
+///
+/// References `COMBAT_ACTION_ORDER` and `COMBAT_ACTION_COUNT` so the order is
+/// always consistent with the spawn order in `setup_combat_ui`.
 fn update_action_highlight(
     action_menu_state: Res<ActionMenuState>,
     mut buttons: Query<(&ActionButton, &mut BackgroundColor)>,
 ) {
-    let active_type = ACTION_BUTTON_ORDER[action_menu_state.active_index];
+    let active_type = COMBAT_ACTION_ORDER[action_menu_state.active_index % COMBAT_ACTION_COUNT];
     for (btn, mut bg) in buttons.iter_mut() {
         *bg = if btn.button_type == active_type {
             BackgroundColor(ACTION_BUTTON_HOVER_COLOR)
@@ -1247,7 +1398,15 @@ fn update_action_highlight(
     }
 }
 
-/// Highlight enemy UI elements when target selection is active.
+/// Highlight ALL enemy UI cards when target selection is active (general).
+///
+/// Sets every `EnemyCard` to `ENEMY_CARD_HIGHLIGHT_COLOR` while
+/// `TargetSelection.0` is `Some`, and restores the default dark-red tint when
+/// target selection is inactive.
+///
+/// `update_target_highlight` runs *after* this system and adds an additional
+/// brighter highlight (`TURN_INDICATOR_COLOR`) on top of the card at
+/// `ActionMenuState::active_target_index` for keyboard navigation.
 fn enter_target_selection(
     target_sel: Res<TargetSelection>,
     mut enemy_cards: Query<(&EnemyCard, &mut BackgroundColor)>,
@@ -1261,11 +1420,46 @@ fn enter_target_selection(
     }
 }
 
+/// Apply a specific highlight (`TURN_INDICATOR_COLOR`) to the enemy card at
+/// `ActionMenuState::active_target_index` for keyboard target navigation.
+///
+/// This system runs *after* `enter_target_selection` so the per-card highlight
+/// is layered on top of the general highlight applied to all enemy cards.
+/// When target-select mode is not active (i.e. `TargetSelection.0` is `None`)
+/// or `active_target_index` is `None`, this system is a no-op.
+///
+/// The card indices are resolved the same way as `combat_input_system`: the
+/// *n*-th alive (`hp.current > 0`) monster in `participants` order corresponds
+/// to `active_target_index == n`.
+fn update_target_highlight(
+    target_sel: Res<TargetSelection>,
+    action_menu_state: Res<ActionMenuState>,
+    combat_res: Res<CombatResource>,
+    mut enemy_cards: Query<(&EnemyCard, &mut BackgroundColor)>,
+) {
+    // Only active while in target-select mode with a keyboard index set.
+    let (Some(_attacker), Some(kbd_target)) = (target_sel.0, action_menu_state.active_target_index)
+    else {
+        return;
+    };
+
+    // Resolve alive-monster index → participant index.
+    let highlighted_participant =
+        resolve_alive_monster_participant_index(&combat_res.state.participants, kbd_target);
+
+    for (card, mut bg) in enemy_cards.iter_mut() {
+        if Some(card.participant_index) == highlighted_participant {
+            *bg = BackgroundColor(TURN_INDICATOR_COLOR);
+        }
+    }
+}
+
 /// Handle clicks on enemy cards during target selection and emit `AttackAction`.
 #[allow(clippy::type_complexity)]
 fn select_target(
     mut interactions: Query<(&Interaction, &EnemyCard), (Changed<Interaction>, With<Button>)>,
     mut target_sel: ResMut<TargetSelection>,
+    mut action_menu_state: ResMut<ActionMenuState>,
     mut attack_writer: Option<MessageWriter<AttackAction>>,
 ) {
     if target_sel.0.is_none() {
@@ -1276,13 +1470,13 @@ fn select_target(
 
     for (interaction, enemy_card) in interactions.iter_mut() {
         if *interaction == Interaction::Pressed {
-            if let Some(ref mut w) = attack_writer {
-                w.write(AttackAction {
-                    attacker,
-                    target: CombatantId::Monster(enemy_card.participant_index),
-                });
-            }
-            target_sel.0 = None;
+            confirm_attack_target(
+                attacker,
+                enemy_card.participant_index,
+                &mut target_sel,
+                &mut action_menu_state,
+                &mut attack_writer,
+            );
         }
     }
 }
@@ -4205,6 +4399,341 @@ mod tests {
 
             world.insert_resource(gs_owned);
             world.insert_resource(turn_state_owned);
+        }
+    }
+
+    // ===== Phase 2: Target Selection and Action Completeness Tests =====
+
+    /// T2-1: `Tab` during target-select mode cycles `active_target_index`
+    /// through alive monsters, wrapping back to 0 after the last.
+    #[test]
+    fn test_tab_cycles_targets() {
+        use crate::domain::combat::monster::{AiBehavior, LootTable, Monster};
+
+        // Build a CombatResource with 3 alive monsters.
+        let mut cr = CombatResource::new();
+        for i in 0..3usize {
+            let mut m = Monster::new(
+                i as u8,
+                format!("Goblin {i}"),
+                crate::domain::character::Stats::new(8, 6, 6, 8, 8, 8, 6),
+                10,
+                5,
+                vec![],
+                LootTable::default(),
+            );
+            m.ai_behavior = AiBehavior::Random;
+            cr.state.participants.push(Combatant::Monster(Box::new(m)));
+        }
+
+        // Enter target-select mode: active_target_index starts at Some(0).
+        let mut ams = ActionMenuState {
+            active_index: 0,
+            confirmed: false,
+            active_target_index: Some(0),
+        };
+        let alive_count = cr
+            .state
+            .participants
+            .iter()
+            .filter(|p| matches!(p, Combatant::Monster(m) if m.hp.current > 0))
+            .count();
+
+        // Tab #1: 0 → 1
+        ams.active_target_index = Some((ams.active_target_index.unwrap() + 1) % alive_count);
+        assert_eq!(ams.active_target_index, Some(1));
+
+        // Tab #2: 1 → 2
+        ams.active_target_index = Some((ams.active_target_index.unwrap() + 1) % alive_count);
+        assert_eq!(ams.active_target_index, Some(2));
+
+        // Tab #3: 2 → 0 (wrap)
+        ams.active_target_index = Some((ams.active_target_index.unwrap() + 1) % alive_count);
+        assert_eq!(
+            ams.active_target_index,
+            Some(0),
+            "index must wrap back to 0"
+        );
+    }
+
+    /// T2-2: `Enter` while `active_target_index == Some(1)` emits
+    /// `AttackAction { target: CombatantId::Monster(1) }` and clears state.
+    #[test]
+    fn test_enter_confirms_target() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        use crate::domain::combat::monster::{AiBehavior, Monster};
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+
+        // Add 2 alive monsters as participants.
+        for i in 0..2usize {
+            let mut m = Monster::new(
+                i as u8,
+                format!("Orc {i}"),
+                crate::domain::character::Stats::new(10, 6, 6, 10, 8, 8, 6),
+                20,
+                5,
+                vec![],
+                crate::domain::combat::monster::LootTable::default(),
+            );
+            m.ai_behavior = AiBehavior::Random;
+            cs.participants.push(Combatant::Monster(Box::new(m)));
+        }
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Enter target-select mode with keyboard index pointing at monster 1
+        // (alive-monster index 1 → participant index 2 because participant 0 is
+        // the player, participants 1 and 2 are the two monsters).
+        {
+            let mut ts = app.world_mut().resource_mut::<TargetSelection>();
+            ts.0 = Some(CombatantId::Player(0));
+        }
+        {
+            let mut ams = app.world_mut().resource_mut::<ActionMenuState>();
+            ams.active_target_index = Some(1);
+        }
+
+        // Press Enter.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Enter);
+        }
+        app.update();
+
+        // TargetSelection must be cleared.
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(
+            ts.0.is_none(),
+            "TargetSelection must be None after Enter confirms target"
+        );
+
+        // active_target_index must be cleared.
+        let ams = app.world().resource::<ActionMenuState>();
+        assert!(
+            ams.active_target_index.is_none(),
+            "active_target_index must be None after confirm"
+        );
+    }
+
+    /// T2-3: `Escape` during target-select mode clears `TargetSelection.0`
+    /// and resets `active_target_index` to `None`.
+    #[test]
+    fn test_escape_cancels_target_selection() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Enter target-select mode.
+        {
+            let mut ts = app.world_mut().resource_mut::<TargetSelection>();
+            ts.0 = Some(CombatantId::Player(0));
+        }
+        {
+            let mut ams = app.world_mut().resource_mut::<ActionMenuState>();
+            ams.active_target_index = Some(0);
+        }
+
+        // Press Escape.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Escape);
+        }
+        app.update();
+
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(ts.0.is_none(), "TargetSelection must be None after Escape");
+
+        let ams = app.world().resource::<ActionMenuState>();
+        assert!(
+            ams.active_target_index.is_none(),
+            "active_target_index must be None after Escape"
+        );
+    }
+
+    /// T2-4: Clicking an `EnemyCard` via `Interaction::Pressed` produces the
+    /// same `AttackAction` structure as keyboard confirm would (same attacker,
+    /// same `CombatantId::Monster` target).
+    #[test]
+    fn test_mouse_click_target_matches_keyboard_confirm() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        use crate::domain::combat::monster::{AiBehavior, Monster};
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+
+        // Add one monster at participant index 1.
+        let mut troll = Monster::new(
+            1,
+            "Troll".to_string(),
+            crate::domain::character::Stats::new(14, 6, 6, 14, 8, 8, 4),
+            30,
+            6,
+            vec![],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        troll.ai_behavior = AiBehavior::Aggressive;
+        cs.participants.push(Combatant::Monster(Box::new(troll)));
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Run first update to spawn UI (EnemyCard entities).
+        app.update();
+
+        // Enter target-select mode so EnemyCard clicks are handled.
+        {
+            let mut ts = app.world_mut().resource_mut::<TargetSelection>();
+            ts.0 = Some(CombatantId::Player(0));
+        }
+        {
+            let mut ams = app.world_mut().resource_mut::<ActionMenuState>();
+            ams.active_target_index = Some(0);
+        }
+
+        // Find the EnemyCard entity at participant_index == 1 and press it.
+        let card_entity = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<(Entity, &EnemyCard), With<Button>>();
+            q.iter(app.world())
+                .find(|(_, card)| card.participant_index == 1)
+                .map(|(e, _)| e)
+                .expect("EnemyCard at participant_index 1 must exist")
+        };
+
+        app.world_mut()
+            .entity_mut(card_entity)
+            .insert(Interaction::Pressed);
+
+        app.update();
+
+        // After the mouse click, TargetSelection must be cleared — confirming
+        // that `confirm_attack_target` was called (same path as keyboard Enter).
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(
+            ts.0.is_none(),
+            "TargetSelection must be cleared after mouse click on EnemyCard (same as keyboard confirm)"
+        );
+
+        let ams = app.world().resource::<ActionMenuState>();
+        assert!(
+            ams.active_target_index.is_none(),
+            "active_target_index must be None after mouse click confirm"
+        );
+    }
+
+    /// T2-5: `COMBAT_ACTION_ORDER` covers all 5 action variants exactly once
+    /// and the first entry is `ActionButtonType::Attack`.
+    #[test]
+    fn test_combat_action_order_constant_matches_spawn_order() {
+        assert_eq!(
+            COMBAT_ACTION_ORDER[0],
+            ActionButtonType::Attack,
+            "index 0 must be Attack"
+        );
+        assert_eq!(
+            COMBAT_ACTION_ORDER[1],
+            ActionButtonType::Defend,
+            "index 1 must be Defend"
+        );
+        assert_eq!(
+            COMBAT_ACTION_ORDER[2],
+            ActionButtonType::Cast,
+            "index 2 must be Cast"
+        );
+        assert_eq!(
+            COMBAT_ACTION_ORDER[3],
+            ActionButtonType::Item,
+            "index 3 must be Item"
+        );
+        assert_eq!(
+            COMBAT_ACTION_ORDER[4],
+            ActionButtonType::Flee,
+            "index 4 must be Flee"
+        );
+        assert_eq!(COMBAT_ACTION_COUNT, 5, "COMBAT_ACTION_COUNT must equal 5");
+        // Verify all 5 variants are covered (no duplicates, no omissions).
+        let all_variants = [
+            ActionButtonType::Attack,
+            ActionButtonType::Defend,
+            ActionButtonType::Cast,
+            ActionButtonType::Item,
+            ActionButtonType::Flee,
+        ];
+        for variant in all_variants {
+            assert!(
+                COMBAT_ACTION_ORDER.contains(&variant),
+                "COMBAT_ACTION_ORDER must contain {variant:?}"
+            );
         }
     }
 

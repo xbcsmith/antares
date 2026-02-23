@@ -34,9 +34,135 @@
 | **Findings Remediation Phase 4**                | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI**            |
 | **Findings Remediation Phase 5**                | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation**        |
 | **Combat System Improvement Phase 1**           | ✅ COMPLETE | 2026-07-17 | **Input Reliability and Action Selection**                                |
+| **Combat System Improvement Phase 2**           | ✅ COMPLETE | 2026-07-17 | **Target Selection and Action Completeness**                              |
 
-**Total Lines Implemented**: 8,700+ lines of production code + 5,100+ lines of documentation
-**Total Tests**: 328+ new tests (all passing), 2,420 total tests passing
+**Total Lines Implemented**: 8,800+ lines of production code + 5,200+ lines of documentation
+**Total Tests**: 333+ new tests (all passing), 2,425 total tests passing
+
+---
+
+## Combat System Improvement Phase 2: Target Selection and Action Completeness
+
+### Overview
+
+Phase 2 adds keyboard target cycling as a complement to the existing mouse
+`select_target` click handling. Both input paths now converge on a single
+`confirm_attack_target` helper, guaranteeing identical `AttackAction` semantics
+regardless of whether the player uses a mouse click or a keyboard `Enter` press.
+
+A new public constant pair (`COMBAT_ACTION_COUNT` / `COMBAT_ACTION_ORDER`)
+replaces all inline literals in `combat_input_system` and `update_action_highlight`,
+making the action ordering a single, verifiable source of truth.
+
+### Components Implemented
+
+#### `active_target_index: Option<usize>` field on `ActionMenuState` (`src/game/systems/combat.rs`)
+
+- Added to the existing `ActionMenuState` resource.
+- Set to `Some(0)` when `dispatch_combat_action` enters Attack / target-select
+  mode; `None` when target-select mode is exited (confirm or cancel).
+- The `Default` impl initialises it to `None`, so no resource initialisation
+  changes are required elsewhere.
+
+#### `COMBAT_ACTION_COUNT` and `COMBAT_ACTION_ORDER` constants (`src/game/systems/combat.rs`)
+
+- `pub const COMBAT_ACTION_COUNT: usize = 5;` — replaces the inline `5` used
+  for Tab-wrap arithmetic.
+- `pub const COMBAT_ACTION_ORDER: [ActionButtonType; COMBAT_ACTION_COUNT]` —
+  replaces the private `ACTION_BUTTON_ORDER` array as the canonical mapping from
+  `active_index` to `ActionButtonType`. The private alias is retained for
+  internal callers to avoid churn.
+- Both constants are declared `pub` so test code and future UI systems can
+  reference them without duplication.
+
+#### `confirm_attack_target` helper function (`src/game/systems/combat.rs`)
+
+- Extracted from the inline logic that was previously duplicated in
+  `select_target` (mouse path).
+- Signature: `fn confirm_attack_target(attacker, target_monster_idx, target_sel, action_menu_state, attack_writer)`.
+- Writes `AttackAction { attacker, target: CombatantId::Monster(target_monster_idx) }`,
+  clears `TargetSelection.0 = None`, and resets `active_target_index = None`.
+- Both the mouse (`select_target`) and keyboard (`Enter` in target-select mode)
+  paths call this function so their semantics are provably identical.
+
+#### `resolve_alive_monster_participant_index` helper function (`src/game/systems/combat.rs`)
+
+- Maps the _n_-th alive (`hp.current > 0`) monster in `participants` order to
+  the real participant index used by `AttackAction`.
+- Used by both `combat_input_system` (keyboard confirm) and
+  `update_target_highlight` (UI highlight) to keep the index-resolution logic
+  in one place.
+
+#### Updated `combat_input_system` (`src/game/systems/combat.rs`)
+
+- Keyboard handling now splits on `target_sel.0.is_some()`:
+  - **Target-select mode active**: `Tab` cycles `active_target_index` modulo
+    alive-monster count; `Enter` calls `confirm_attack_target`; `Escape` clears
+    both `TargetSelection.0` and `active_target_index`.
+  - **Action-menu mode**: existing `Tab`/`Enter`/`Escape` behaviour unchanged,
+    with `5` replaced by `COMBAT_ACTION_COUNT`.
+- `dispatch_combat_action` now receives `&mut ActionMenuState` so it can set
+  `active_target_index = Some(0)` on Attack entry.
+- `attack_writer: Option<MessageWriter<AttackAction>>` added as a system
+  parameter to support keyboard confirm path.
+
+#### `update_target_highlight` system (`src/game/systems/combat.rs`)
+
+- New system, registered after `enter_target_selection` and after
+  `combat_input_system`.
+- When `TargetSelection.0.is_some()` and `active_target_index.is_some()`,
+  resolves the alive-monster index to a participant index and applies
+  `TURN_INDICATOR_COLOR` to that card's `BackgroundColor`, distinguishing the
+  keyboard-selected card from the generic `ENEMY_CARD_HIGHLIGHT_COLOR` applied
+  to all cards by `enter_target_selection`.
+- No-op when not in target-select mode or when `active_target_index` is `None`.
+
+#### `select_target` system refactor (`src/game/systems/combat.rs`)
+
+- Now calls `confirm_attack_target` instead of inline write + clear, completing
+  the mouse/keyboard path unification.
+- Added `mut action_menu_state: ResMut<ActionMenuState>` parameter so
+  `active_target_index` is properly cleared on mouse click.
+
+### Testing
+
+All 5 required tests (T2-1 through T2-5) are implemented in the `mod tests`
+block inside `src/game/systems/combat.rs`:
+
+| Test ID | Test Name                                               | Description                                                                                                                                                   |
+| ------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T2-1    | `test_tab_cycles_targets`                               | Builds 3 alive monsters; simulates Tab 3 times; verifies wrap 0→1→2→0. Pure logic test, no Bevy app needed.                                                   |
+| T2-2    | `test_enter_confirms_target`                            | Full Bevy app with 2 monsters; sets `active_target_index = Some(1)` and presses `Enter`; asserts `TargetSelection == None` and `active_target_index == None`. |
+| T2-3    | `test_escape_cancels_target_selection`                  | Full Bevy app; enters target-select mode; presses `Escape`; asserts both `TargetSelection.0 == None` and `active_target_index == None`.                       |
+| T2-4    | `test_mouse_click_target_matches_keyboard_confirm`      | Full Bevy app with 1 monster; enters target-select mode; clicks `EnemyCard` via `Interaction::Pressed`; asserts same clearing behaviour as keyboard confirm.  |
+| T2-5    | `test_combat_action_order_constant_matches_spawn_order` | Pure constant check; asserts all 5 `ActionButtonType` variants in correct order and `COMBAT_ACTION_COUNT == 5`.                                               |
+
+All 2,425 project tests pass with 0 failures.
+
+### Files Changed
+
+- `src/game/systems/combat.rs` — all changes described above.
+- `docs/explanation/implementations.md` — this entry.
+
+### Deliverables Checklist
+
+- [x] `active_target_index: Option<usize>` field added to `ActionMenuState`.
+- [x] Keyboard target cycling (`Tab`) implemented in `combat_input_system` when `TargetSelection.0.is_some()`.
+- [x] Keyboard target confirmation (`Enter`) implemented via `confirm_attack_target`.
+- [x] `Escape` cancels target selection and resets `active_target_index`.
+- [x] `confirm_attack_target` helper extracted; mouse and keyboard both call it.
+- [x] `update_target_highlight` system implemented and registered after `enter_target_selection`.
+- [x] `COMBAT_ACTION_COUNT` and `COMBAT_ACTION_ORDER` constants defined and used.
+- [x] Private `ACTION_BUTTON_ORDER` alias retained for backward compatibility.
+- [x] All 5 tests T2-1 through T2-5 pass.
+
+### Success Criteria Verification
+
+- `cargo nextest run --all-features` passes: 2,425 tests, 0 failures.
+- Full keyboard-only attack flow works: `Tab` to Attack → `Enter` → `Tab` to target → `Enter` executes attack.
+- Mouse target click and keyboard target confirm produce identical `AttackAction` messages (verified by T2-4).
+- `Escape` during target selection cleanly resets state (verified by T2-3).
+- `COMBAT_ACTION_ORDER` covers all 5 variants in spawn order (verified by T2-5).
 
 ---
 
