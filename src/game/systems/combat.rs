@@ -1322,26 +1322,15 @@ fn setup_combat_ui(
                             CombatLogBubbleViewport,
                         ))
                         .with_children(|viewport| {
-                            viewport
-                                .spawn((
-                                    Node {
-                                        width: Val::Percent(100.0),
-                                        flex_direction: FlexDirection::Column,
-                                        row_gap: Val::Px(4.0),
-                                        ..default()
-                                    },
-                                    CombatLogLineList,
-                                ))
-                                .with_children(|list| {
-                                    list.spawn((
-                                        Text::new("Waiting for actions..."),
-                                        TextFont {
-                                            font_size: 13.0,
-                                            ..default()
-                                        },
-                                        TextColor(Color::srgb(0.72, 0.80, 0.90)),
-                                    ));
-                                });
+                            viewport.spawn((
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Column,
+                                    row_gap: Val::Px(4.0),
+                                    ..default()
+                                },
+                                CombatLogLineList,
+                            ));
                         });
                 });
         });
@@ -1776,33 +1765,54 @@ fn combat_input_system(
                     (action_menu_state.active_index + 1) % COMBAT_ACTION_COUNT;
                 action_menu_state.confirmed = false;
             } else if kb.just_pressed(KeyCode::Enter) {
-                // Two-step keyboard flow:
-                // 1st Enter arms the currently highlighted action.
-                // 2nd Enter executes that same action.
-                if action_menu_state.confirmed {
-                    execute_selected_action = true;
-                    action_menu_state.confirmed = false;
-                } else {
-                    action_menu_state.confirmed = true;
-                }
+                // Single-step keyboard flow: Enter immediately executes the
+                // currently highlighted action.
+                execute_selected_action = true;
+                action_menu_state.confirmed = false;
             } else if kb.just_pressed(KeyCode::Escape) {
                 // No-op: no target selection is active.
             }
         }
     }
 
-    // Execute the armed action only on the second Enter press.
+    // Execute selected action on Enter.
     if execute_selected_action {
         let selected_type = ACTION_BUTTON_ORDER[action_menu_state.active_index];
         if let Some(actor) = current_actor {
-            dispatch_combat_action(
-                selected_type,
-                actor,
-                &mut target_sel,
-                &mut action_menu_state,
-                &mut defend_writer,
-                &mut flee_writer,
-            );
+            if selected_type == ActionButtonType::Attack {
+                // Quick keyboard attack: immediately attack first alive target
+                // so one Enter performs a full attack action.
+                if let Some(pidx) =
+                    resolve_alive_monster_participant_index(&combat_res.state.participants, 0)
+                {
+                    confirm_attack_target(
+                        actor,
+                        pidx,
+                        &mut target_sel,
+                        &mut action_menu_state,
+                        &mut attack_writer,
+                    );
+                } else {
+                    // No valid monster target; fall back to normal selection flow.
+                    dispatch_combat_action(
+                        selected_type,
+                        actor,
+                        &mut target_sel,
+                        &mut action_menu_state,
+                        &mut defend_writer,
+                        &mut flee_writer,
+                    );
+                }
+            } else {
+                dispatch_combat_action(
+                    selected_type,
+                    actor,
+                    &mut target_sel,
+                    &mut action_menu_state,
+                    &mut defend_writer,
+                    &mut flee_writer,
+                );
+            }
         }
     }
 }
@@ -3789,16 +3799,6 @@ fn update_combat_log_bubble_text(
     }
 
     if combat_log_state.lines.is_empty() {
-        commands.entity(line_list_entity).with_children(|list| {
-            list.spawn((
-                Text::new("Waiting for actions..."),
-                TextFont {
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.72, 0.80, 0.90)),
-            ));
-        });
         return;
     }
 
@@ -4142,6 +4142,7 @@ fn spawn_monster_hp_hover_bars(
                     },
                     BackgroundColor(Color::srgba(0.08, 0.10, 0.12, 0.92)),
                     BorderRadius::all(Val::Px(4.0)),
+                    ZIndex(i32::MAX),
                     MonsterHpHoverBar {
                         participant_index: idx,
                         stack_order: bar_stack_order,
@@ -6107,12 +6108,14 @@ mod tests {
         );
     }
 
-    /// T1-4: Enter uses a two-step flow: first press arms, second press dispatches.
+    /// T1-4: Enter uses a single-step flow and dispatches immediately.
     #[test]
     fn test_enter_dispatches_active_action() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CombatPlugin);
+
+        use crate::domain::combat::monster::{AiBehavior, Monster};
 
         let mut gs = GameState::new();
         let hero = Character::new(
@@ -6127,6 +6130,17 @@ mod tests {
         // Set up a CombatState with the player and a live turn order.
         let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
         cs.add_player(hero.clone());
+        let mut goblin = Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 6, 6, 8, 8, 8, 6),
+            10,
+            5,
+            vec![],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        goblin.ai_behavior = AiBehavior::Aggressive;
+        cs.add_monster(goblin);
         cs.turn_order = vec![CombatantId::Player(0)];
         cs.current_turn = 0;
         gs.enter_combat_with_state(cs.clone());
@@ -6145,7 +6159,7 @@ mod tests {
             .resource_mut::<ActionMenuState>()
             .active_index = 0;
 
-        // First Enter should arm only (no dispatch yet).
+        // Single Enter should execute attack immediately.
         {
             let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
             kb.press(KeyCode::Enter);
@@ -6156,44 +6170,17 @@ mod tests {
         let ams_after_first_enter = app.world().resource::<ActionMenuState>();
         assert!(
             ts_after_first_enter.0.is_none(),
-            "First Enter should arm selection only, not dispatch"
+            "Enter should execute attack without entering target-selection mode"
         );
         assert!(
-            ams_after_first_enter.confirmed,
-            "First Enter should set confirmed=true (armed state)"
-        );
-
-        // Release Enter so the next press is detected as just_pressed.
-        {
-            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-            kb.release(KeyCode::Enter);
-        }
-        app.update();
-
-        // Second Enter should dispatch Attack and clear confirmed.
-        {
-            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-            kb.press(KeyCode::Enter);
-        }
-
-        app.update();
-
-        let ts_after_second_enter = app.world().resource::<TargetSelection>();
-        let ams_after_second_enter = app.world().resource::<ActionMenuState>();
-        assert!(
-            ts_after_second_enter.0.is_some(),
-            "Second Enter should dispatch Attack and enter target selection"
-        );
-        assert!(
-            !ams_after_second_enter.confirmed,
-            "Second Enter should clear confirmed after dispatch"
+            !ams_after_first_enter.confirmed,
+            "Single-step Enter should not leave confirmed armed state"
         );
     }
 
-    /// First Enter puts the active action into an armed state that has distinct
-    /// visual feedback via `ACTION_BUTTON_CONFIRMED_COLOR`.
+    /// Enter does not arm a second-step state; active action remains hover-highlighted.
     #[test]
-    fn test_first_enter_applies_confirmed_highlight_color() {
+    fn test_enter_keeps_hover_highlight_color() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CombatPlugin);
@@ -6222,7 +6209,7 @@ mod tests {
         }
         app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
 
-        // Spawn UI and arm Enter once.
+        // Spawn UI and press Enter once.
         app.update();
         {
             let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
@@ -6230,7 +6217,7 @@ mod tests {
         }
         app.update();
 
-        // Active action is Attack by default and should now be in confirmed color.
+        // Active action is Attack by default and should stay hover-highlighted.
         let mut q = app
             .world_mut()
             .query_filtered::<(&ActionButton, &BackgroundColor), With<Button>>();
@@ -6242,8 +6229,84 @@ mod tests {
 
         assert_eq!(
             attack_bg,
-            BackgroundColor(ACTION_BUTTON_CONFIRMED_COLOR),
-            "Armed action should use confirmed highlight color"
+            BackgroundColor(ACTION_BUTTON_HOVER_COLOR),
+            "Single-step Enter should keep hover highlight color"
+        );
+    }
+
+    /// Regression guard: one Enter on default Attack should execute immediately
+    /// and advance turn flow without entering target-selection mode.
+    #[test]
+    fn test_single_enter_attack_executes_and_advances_turn() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        use crate::domain::combat::monster::{AiBehavior, Monster};
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        let mut goblin = Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 6, 6, 8, 8, 8, 6),
+            10,
+            5,
+            vec![],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        goblin.ai_behavior = AiBehavior::Aggressive;
+        cs.add_monster(goblin);
+        // Player first, then monster.
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Spawn combat UI and keep default action index at 0 (Attack).
+        app.update();
+
+        // One Enter should execute attack immediately.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Enter);
+        }
+        app.update();
+
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(
+            ts.0.is_none(),
+            "single Enter attack should not enter target-selection mode"
+        );
+
+        // Turn should advance away from player's turn after executing attack.
+        let turn_state = app.world().resource::<CombatTurnStateResource>();
+        assert!(
+            !matches!(turn_state.0, CombatTurnState::PlayerTurn),
+            "single Enter attack should advance turn state"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        assert_eq!(
+            cr.state.current_turn, 1,
+            "single Enter attack should advance current_turn to next combatant"
         );
     }
 

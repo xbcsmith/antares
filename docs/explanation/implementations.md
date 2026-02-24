@@ -145,6 +145,19 @@ at runtime from the in-game Settings menu.
 - Combat HUD root layout was adjusted from `SpaceBetween` to `FlexStart` so the
   action menu remains directly below the turn-order panel and no longer overlaps
   party HP bars near the bottom HUD.
+- Combat input regression fix: keyboard Enter was restored to single-step action
+  execution (removed two-step arm/confirm flow). For default `Attack`, Enter
+  now performs a quick attack against the first alive monster target, reducing
+  per-character keypress count and restoring expected flow.
+- Added regression guard test `test_single_enter_attack_executes_and_advances_turn`
+  to ensure one Enter on default Attack executes immediately, does not enter
+  target-selection mode, and advances turn flow.
+- Combat hover HP cards are now forced to the foreground layer (`ZIndex`) so
+  health colours render in front of shaded HUD regions instead of appearing
+  muted/greyed by background overlays.
+- Removed the persistent `"Waiting for actions..."` placeholder from the combat
+  log panel (both initial spawn and empty-state refresh) so the log clears when
+  no entries are present, matching the expected transient-message behavior.
 
 ### Validation
 

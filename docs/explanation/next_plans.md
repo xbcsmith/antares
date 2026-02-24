@@ -467,15 +467,54 @@ Colors for Characters should be consistent throughout the Game. Monster colors c
 Combat log should have a scroll bar when it gets long enough.
 
 
+✅ COMPLETED -
 
-## Rest System
+### Game-Wide Mouse Input Support
+
+Mouse input currently does not work reliably across the game engine (combat,
+inn management, menus, and in-world UI interactions). We need a full engine-
+wide mouse input pass, not one-off fixes per screen.
+
+Work required:
+
+- Audit every gameplay mode and UI surface for mouse interaction support:
+    `Exploration`, `Combat`, `Menu`, `Dialogue`, `InnManagement`, and editor-like
+    in-game panels.
+- Define a unified click/hover/press interaction model so mouse behavior is
+    consistent across all systems.
+- Ensure Bevy `Interaction` handling (`Pressed`, `Hovered`, `None`) is wired
+    consistently and does not depend on keyboard-first assumptions.
+- Add a shared input utility layer for mouse activation detection to avoid
+    duplicated ad-hoc patterns across systems.
+- Validate mouse support for all combat actions and target selection paths.
+- Validate mouse support for game menu navigation, save/load dialogs, and
+    settings controls.
+- Validate mouse support for innkeeper party management and recruitment-related
+    UI flows.
+- Add regression tests for mouse input in each major mode to prevent future
+    breakage.
+
+## Future Features
+
+### Rest System
 
 We need a party rest system to heal characters.
 
-## Game Log
+### Game Log
 
-We need a Game Log...
+We need a Game Log. It should be a log that shows all the important events that happen in the game. It should show things like when the player picks up an item, when they talk to an NPC, when they enter a new area, when they take damage, etc. The game log should be visible in the UI and should have a scroll bar so that the player can see past events. The game log should also have a filter so that the player can filter the log by event type (e.g. combat events, dialogue events, item events, etc).
 
-## Procedural Meshes
+### Procedural Meshes Direction Control
 
 There is no way to control what direction a creature procedural mesh is facing. We should be able to control the direction a creature is facing in the map.ron files. We should expand the event system to allow for signs and creatures (NPC, Recruitable CHracters, Monsters) to have a facing direction that can be set in the map.ron file and changed by events in the game. This would allow for things like a sign that changes the direction of an NPC when interacted with or a monster that turns to face the player when they get close.
+
+
+### Combat
+
+We need types of combat events. The party should not always be able to see the monster. We should have different types of combat events. For example, an ambush event where the monster is hidden and the party does not know it is there until it attacks. We should have different types of combat events that can be triggered by different conditions. For example, an ambush event that is triggered when the party enters a certain tile or a certain monster is nearby. The ambush event would cause the monster to attack the party without being visible on the map until it attacks.
+
+Normal Combat - Party sees the monster and can choose to attack or flee. Combat proceeds as normal.
+Ambush Combat - Party does not see the monster until it attacks. Party misses the first round because they do not see the monster. After the first round the monster becomes visible and combat proceeds as normal.
+Ranged Combat - Party sees the monster and can choose to attack or flee. The monster can attack from a distance and the party can choose to attack from a distance if they have a ranged weapon. Combat proceeds as normal but with the option for ranged attacks.
+Magic Combat - Party sees the monster and can choose to attack or flee. The monster can attack with magic and the party can choose to attack with magic if they have a spell equipped. Combat proceeds as normal but with the option for magic attacks.
+Boss Combat - Party sees the monster and can choose to attack or flee. The monster is a boss and has special abilities and mechanics. Combat proceeds as normal but with the added complexity of the boss mechanics.
