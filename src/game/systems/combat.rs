@@ -60,9 +60,11 @@ use crate::domain::combat::engine::{
 use crate::domain::combat::types::{Attack, CombatStatus, CombatantId, Handicap, SpecialEffect};
 use crate::domain::types::{DiceRoll, ItemId};
 use crate::game::resources::GlobalState;
+use crate::game::systems::camera::MainCamera;
 use crate::game::systems::combat_visual::{
     hide_indicator_during_animation, spawn_turn_indicator, update_turn_indicator,
 };
+use crate::game::systems::map::EncounterVisualMarker;
 
 /// Message emitted when combat has started.
 ///
@@ -209,6 +211,30 @@ pub const COMBAT_LOG_MAX_LINES: usize = 14;
 /// Typewriter speed for combat log reveal (characters per second).
 pub const COMBAT_LOG_TYPEWRITER_CHARS_PER_SEC: f32 = 52.0;
 
+/// Fixed palette used to assign stable character-name colours in combat log.
+pub const COMBAT_LOG_CHARACTER_PALETTE: [Color; 8] = [
+    Color::srgb(0.95, 0.85, 0.30),
+    Color::srgb(0.45, 0.85, 1.00),
+    Color::srgb(0.65, 0.95, 0.50),
+    Color::srgb(0.95, 0.55, 0.55),
+    Color::srgb(0.95, 0.75, 0.45),
+    Color::srgb(0.75, 0.70, 1.00),
+    Color::srgb(1.00, 0.60, 0.85),
+    Color::srgb(0.60, 0.95, 0.90),
+];
+
+/// Predefined palettes used to randomly assign each monster a combat-log colour.
+pub const COMBAT_LOG_MONSTER_PALETTE: [Color; 8] = [
+    Color::srgb(1.00, 0.45, 0.45),
+    Color::srgb(1.00, 0.62, 0.38),
+    Color::srgb(0.96, 0.42, 0.62),
+    Color::srgb(0.86, 0.52, 1.00),
+    Color::srgb(0.45, 0.75, 1.00),
+    Color::srgb(0.45, 0.95, 0.55),
+    Color::srgb(0.92, 0.90, 0.45),
+    Color::srgb(0.70, 0.95, 0.95),
+];
+
 // ===== Phase 3: Visual Feedback Color Constants =====
 
 /// Colour for damage floating numbers (red)
@@ -222,6 +248,12 @@ pub const FEEDBACK_COLOR_MISS: Color = Color::srgb(0.8, 0.8, 0.8);
 
 /// Colour for status/condition floating text (yellow)
 pub const FEEDBACK_COLOR_STATUS: Color = Color::srgb(1.0, 0.8, 0.0);
+
+/// Width of the world-projected monster HP hover bars.
+pub const MONSTER_HP_HOVER_BAR_WIDTH: Val = Val::Px(120.0);
+
+/// Height of the world-projected monster HP hover bars.
+pub const MONSTER_HP_HOVER_BAR_HEIGHT: Val = Val::Px(10.0);
 
 /// Number of top-level action buttons (Attack, Defend, Cast, Item, Flee).
 ///
@@ -460,6 +492,7 @@ pub enum CombatFeedbackEffect {
 /// use antares::domain::combat::types::CombatantId;
 ///
 /// let ev = CombatFeedbackEvent {
+///     source: Some(CombatantId::Player(0)),
 ///     target: CombatantId::Monster(0),
 ///     effect: CombatFeedbackEffect::Damage(12),
 /// };
@@ -467,6 +500,8 @@ pub enum CombatFeedbackEffect {
 /// ```
 #[derive(Message, Debug, Clone)]
 pub struct CombatFeedbackEvent {
+    /// The combatant that performed the action, if known.
+    pub source: Option<CombatantId>,
     /// The combatant that was affected.
     pub target: CombatantId,
     /// What happened to that combatant.
@@ -486,13 +521,18 @@ pub struct CombatFeedbackEvent {
 /// ```
 /// use antares::game::systems::combat::MonsterHpHoverBar;
 ///
-/// let bar = MonsterHpHoverBar { participant_index: 2 };
+/// let bar = MonsterHpHoverBar {
+///     participant_index: 2,
+///     stack_order: 0,
+/// };
 /// assert_eq!(bar.participant_index, 2);
 /// ```
 #[derive(Component, Debug, Clone, Copy)]
 pub struct MonsterHpHoverBar {
     /// Index into `CombatResource::state.participants` for the monster this bar tracks.
     pub participant_index: usize,
+    /// Stable vertical stack order for bars attached to the same encounter marker.
+    pub stack_order: usize,
 }
 
 /// Marker component on the fill node inside a `MonsterHpHoverBar` panel.
@@ -502,13 +542,31 @@ pub struct MonsterHpHoverBarFill {
     pub participant_index: usize,
 }
 
+/// Marker component for the monster name text inside a hover bar card.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct MonsterHpHoverBarNameText {
+    /// Index into `CombatResource::state.participants`.
+    pub participant_index: usize,
+}
+
+/// Marker component for the HP text inside a hover bar card.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct MonsterHpHoverBarHpText {
+    /// Index into `CombatResource::state.participants`.
+    pub participant_index: usize,
+}
+
 /// Marker component for the persistent combat log bubble root UI node.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct CombatLogBubbleRoot;
 
-/// Marker component for the text node inside the combat log bubble.
+/// Marker component for the scrollable viewport inside the combat log bubble.
 #[derive(Component, Debug, Clone, Copy)]
-pub struct CombatLogBubbleText;
+pub struct CombatLogBubbleViewport;
+
+/// Marker component for the line-list container inside the combat log bubble.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CombatLogLineList;
 
 /// Resource representing the current target selection state.
 ///
@@ -553,11 +611,74 @@ pub struct ActionMenuState {
     pub active_target_index: Option<usize>,
 }
 
+/// One coloured text segment inside a combat log line.
+#[derive(Debug, Clone)]
+pub struct CombatLogSegment {
+    pub text: String,
+    pub color: Color,
+}
+
+/// One structured combat log line rendered as multiple coloured segments.
+#[derive(Debug, Clone)]
+pub struct CombatLogLine {
+    pub segments: Vec<CombatLogSegment>,
+}
+
+impl CombatLogLine {
+    /// Total visible character count across all segments.
+    fn char_count(&self) -> usize {
+        self.segments.iter().map(|s| s.text.chars().count()).sum()
+    }
+
+    /// Return segments clipped to the first `visible_chars` characters.
+    fn clipped_segments(&self, visible_chars: usize) -> Vec<CombatLogSegment> {
+        if visible_chars == 0 {
+            return Vec::new();
+        }
+
+        let mut remaining = visible_chars;
+        let mut out: Vec<CombatLogSegment> = Vec::new();
+
+        for segment in &self.segments {
+            if remaining == 0 {
+                break;
+            }
+
+            let seg_chars = segment.text.chars().count();
+            if remaining >= seg_chars {
+                out.push(segment.clone());
+                remaining -= seg_chars;
+            } else {
+                let clipped = segment.text.chars().take(remaining).collect::<String>();
+                out.push(CombatLogSegment {
+                    text: clipped,
+                    color: segment.color,
+                });
+                break;
+            }
+        }
+
+        out
+    }
+
+    /// Return this structured line as plain text by concatenating all segments.
+    fn plain_text(&self) -> String {
+        self.segments.iter().map(|s| s.text.as_str()).collect()
+    }
+}
+
+/// Resource storing stable colour assignments for combat log names.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct CombatLogColorState {
+    /// Stable monster colour by participant index for the current combat.
+    pub monster_colors: std::collections::HashMap<usize, Color>,
+}
+
 /// Resource storing persistent combat log lines and typewriter animation state.
 #[derive(Resource, Debug, Clone)]
 pub struct CombatLogState {
     /// Rolling set of lines shown in the combat log bubble.
-    pub lines: Vec<String>,
+    pub lines: Vec<CombatLogLine>,
     /// Number of characters currently revealed for the newest line.
     pub active_line_visible_chars: usize,
     /// Sub-character accumulator used by the typewriter effect.
@@ -576,8 +697,8 @@ impl Default for CombatLogState {
 
 impl CombatLogState {
     /// Append a new combat log line and reset typewriter progress for it.
-    fn push_line(&mut self, line: String) {
-        if line.is_empty() {
+    fn push_line(&mut self, line: CombatLogLine) {
+        if line.char_count() == 0 {
             return;
         }
         self.lines.push(line);
@@ -586,32 +707,6 @@ impl CombatLogState {
         }
         self.active_line_visible_chars = 0;
         self.reveal_accumulator = 0.0;
-    }
-
-    /// Build the currently visible multi-line text, applying typewriter clipping
-    /// only to the newest line.
-    fn visible_text(&self) -> String {
-        if self.lines.is_empty() {
-            return "Combat Log\nWaiting for actions...".to_string();
-        }
-
-        let last_idx = self.lines.len() - 1;
-        let mut output = String::from("Combat Log\n");
-        for (idx, line) in self.lines.iter().enumerate() {
-            if idx > 0 {
-                output.push('\n');
-            }
-            if idx == last_idx {
-                let shown = line
-                    .chars()
-                    .take(self.active_line_visible_chars)
-                    .collect::<String>();
-                output.push_str(&shown);
-            } else {
-                output.push_str(line);
-            }
-        }
-        output
     }
 }
 
@@ -641,6 +736,7 @@ impl Plugin for CombatPlugin {
             .insert_resource(TargetSelection::default())
             .insert_resource(ActionMenuState::default())
             .insert_resource(CombatLogState::default())
+            .insert_resource(CombatLogColorState::default())
             .insert_resource(ButtonInput::<KeyCode>::default())
             // Handle events that indicate combat started
             .add_systems(Update, handle_combat_started)
@@ -689,7 +785,12 @@ impl Plugin for CombatPlugin {
                 Update,
                 update_combat_log_bubble_text.after(update_combat_log_typewriter),
             )
+            .add_systems(
+                Update,
+                auto_scroll_combat_log_viewport.after(update_combat_log_bubble_text),
+            )
             .add_systems(Update, reset_combat_log_on_exit)
+            .add_systems(Update, reset_combat_log_colors_on_exit)
             // Phase 3: Monster HP hover bars
             .add_systems(Update, spawn_monster_hp_hover_bars.after(setup_combat_ui))
             .add_systems(
@@ -984,7 +1085,8 @@ fn setup_combat_ui(
                 top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
                 flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::SpaceBetween,
+                justify_content: JustifyContent::FlexStart,
+                row_gap: Val::Px(4.0),
                 ..default()
             },
             BackgroundColor(Color::NONE),
@@ -1187,8 +1289,9 @@ fn setup_combat_ui(
                         width: COMBAT_LOG_BUBBLE_WIDTH,
                         min_height: COMBAT_LOG_BUBBLE_MIN_HEIGHT,
                         max_height: Val::Px(300.0),
+                        flex_direction: FlexDirection::Column,
                         padding: UiRect::all(Val::Px(10.0)),
-                        overflow: Overflow::clip_y(),
+                        row_gap: Val::Px(8.0),
                         ..default()
                     },
                     BackgroundColor(Color::srgba(0.06, 0.09, 0.13, 0.92)),
@@ -1197,14 +1300,49 @@ fn setup_combat_ui(
                 ))
                 .with_children(|bubble| {
                     bubble.spawn((
-                        Text::new("Combat Log\nWaiting for actions..."),
+                        Text::new("Combat Log"),
                         TextFont {
-                            font_size: 14.0,
+                            font_size: 15.0,
                             ..default()
                         },
                         TextColor(Color::srgb(0.92, 0.96, 1.0)),
-                        CombatLogBubbleText,
                     ));
+
+                    bubble
+                        .spawn((
+                            Node {
+                                width: Val::Percent(100.0),
+                                flex_grow: 1.0,
+                                overflow: Overflow::scroll_y(),
+                                padding: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.03, 0.05, 0.08, 0.35)),
+                            BorderRadius::all(Val::Px(6.0)),
+                            CombatLogBubbleViewport,
+                        ))
+                        .with_children(|viewport| {
+                            viewport
+                                .spawn((
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        flex_direction: FlexDirection::Column,
+                                        row_gap: Val::Px(4.0),
+                                        ..default()
+                                    },
+                                    CombatLogLineList,
+                                ))
+                                .with_children(|list| {
+                                    list.spawn((
+                                        Text::new("Waiting for actions..."),
+                                        TextFont {
+                                            font_size: 13.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.72, 0.80, 0.90)),
+                                    ));
+                                });
+                        });
                 });
         });
 }
@@ -2147,7 +2285,12 @@ fn handle_attack_action(
         } else {
             CombatFeedbackEffect::Miss
         };
-        emit_combat_feedback(action.target, effect, &mut feedback_writer);
+        emit_combat_feedback(
+            Some(action.attacker),
+            action.target,
+            effect,
+            &mut feedback_writer,
+        );
 
         // Phase 3: restore turn state after action (perform_* may have already updated it)
         // Only restore if perform_* left it as Animating (meaning it didn't naturally advance)
@@ -2257,6 +2400,7 @@ fn handle_use_item_action(
         if hp_delta < 0 {
             let dmg = (-hp_delta) as u32;
             emit_combat_feedback(
+                Some(action.user),
                 action.target,
                 CombatFeedbackEffect::Damage(dmg),
                 &mut feedback_writer,
@@ -2269,6 +2413,7 @@ fn handle_use_item_action(
         } else if hp_delta > 0 {
             let healed = hp_delta as u32;
             emit_combat_feedback(
+                Some(action.user),
                 action.target,
                 CombatFeedbackEffect::Heal(healed),
                 &mut feedback_writer,
@@ -2281,6 +2426,7 @@ fn handle_use_item_action(
         } else if sp_delta > 0 {
             let label = format!("+{} SP", sp_delta as u32);
             emit_combat_feedback(
+                Some(action.user),
                 action.target,
                 CombatFeedbackEffect::Status(label),
                 &mut feedback_writer,
@@ -2292,6 +2438,7 @@ fn handle_use_item_action(
             }
         } else {
             emit_combat_feedback(
+                Some(action.user),
                 action.target,
                 CombatFeedbackEffect::Miss,
                 &mut feedback_writer,
@@ -2480,7 +2627,12 @@ fn handle_cast_spell_action(
         } else {
             CombatFeedbackEffect::Miss
         };
-        emit_combat_feedback(action.target, effect, &mut feedback_writer);
+        emit_combat_feedback(
+            Some(action.caster),
+            action.target,
+            effect,
+            &mut feedback_writer,
+        );
 
         // Phase 3: restore turn state after action
         if matches!(turn_state.0, CombatTurnState::Animating) {
@@ -2781,7 +2933,7 @@ pub fn perform_monster_turn_with_rng(
     global_state: &mut GlobalState,
     turn_state: &mut CombatTurnStateResource,
     rng: &mut impl rand::Rng,
-) -> Result<(), crate::domain::combat::engine::CombatError> {
+) -> Result<Option<(CombatantId, CombatantId, u32)>, crate::domain::combat::engine::CombatError> {
     use crate::domain::combat::engine::CombatError;
 
     // Determine current actor
@@ -2791,13 +2943,13 @@ pub fn perform_monster_turn_with_rng(
         .get(combat_res.state.current_turn)
     {
         Some(a) => *a,
-        None => return Ok(()),
+        None => return Ok(None),
     };
 
     // Only handle monster turns
     let monster_idx = match attacker {
         CombatantId::Monster(idx) => idx,
-        _ => return Ok(()),
+        _ => return Ok(None),
     };
 
     // Ensure monster exists and can act (use a short-lived immutable borrow)
@@ -2805,7 +2957,7 @@ pub fn perform_monster_turn_with_rng(
         if let Some(Combatant::Monster(mon)) = combat_res.state.participants.get(monster_idx) {
             if !mon.can_act() {
                 // Monster cannot act (paralyzed, dead, or already acted)
-                return Ok(());
+                return Ok(None);
             }
         } else {
             return Err(CombatError::CombatantNotFound(attacker));
@@ -2826,7 +2978,7 @@ pub fn perform_monster_turn_with_rng(
         None => {
             // No valid targets; check for end of combat
             combat_res.state.check_combat_end();
-            return Ok(());
+            return Ok(None);
         }
     };
 
@@ -2891,7 +3043,7 @@ pub fn perform_monster_turn_with_rng(
 
     if combat_res.state.status == CombatStatus::Fled {
         global_state.0.exit_combat();
-        return Ok(());
+        return Ok(Some((attacker, target, damage as u32)));
     }
 
     // Advance turn and apply round start effects if needed
@@ -2917,7 +3069,7 @@ pub fn perform_monster_turn_with_rng(
         };
     }
 
-    Ok(())
+    Ok(Some((attacker, target, damage as u32)))
 }
 
 /// System: Execute monster turns automatically when it is EnemyTurn.
@@ -2952,40 +3104,8 @@ fn execute_monster_turn(
         let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
-        // Determine the monster's target before the domain call so we can emit
-        // a feedback event based on HP delta.
-        let target_before: Option<(CombatantId, u16)> = {
-            // Peek at what target the AI would pick — we re-run the selection
-            // after the fact by comparing pre/post HP of all players.
-            // Collect player HPs before the turn.
-            let player_hps: Vec<(CombatantId, u16)> = combat_res
-                .state
-                .participants
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, p)| match p {
-                    Combatant::Player(pc) => Some((CombatantId::Player(idx), pc.hp.current)),
-                    _ => None,
-                })
-                .collect();
-            player_hps.into_iter().next()
-        };
-        let _ = target_before;
-
-        // Snapshot all player HPs before the turn
-        let pre_player_hps: Vec<(CombatantId, u16)> = combat_res
-            .state
-            .participants
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, p)| match p {
-                Combatant::Player(pc) => Some((CombatantId::Player(idx), pc.hp.current)),
-                _ => None,
-            })
-            .collect();
-
         let mut rng = rand::rng();
-        let _ = perform_monster_turn_with_rng(
+        let outcome = perform_monster_turn_with_rng(
             &mut combat_res,
             content_ref,
             &mut global_state,
@@ -2993,28 +3113,13 @@ fn execute_monster_turn(
             &mut rng,
         );
 
-        // Phase 3: find which player took damage and emit feedback
-        for (target_id, pre_hp) in &pre_player_hps {
-            let post_hp: u16 = match *target_id {
-                CombatantId::Player(idx) => combat_res
-                    .state
-                    .participants
-                    .get(idx)
-                    .and_then(|p| match p {
-                        Combatant::Player(pc) => Some(pc.hp.current),
-                        _ => None,
-                    })
-                    .unwrap_or(*pre_hp),
-                _ => *pre_hp,
+        if let Ok(Some((attacker, target, damage))) = outcome {
+            let effect = if damage > 0 {
+                CombatFeedbackEffect::Damage(damage)
+            } else {
+                CombatFeedbackEffect::Miss
             };
-            let dmg = (*pre_hp as i32 - post_hp as i32).max(0) as u32;
-            if dmg > 0 {
-                emit_combat_feedback(
-                    *target_id,
-                    CombatFeedbackEffect::Damage(dmg),
-                    &mut feedback_writer,
-                );
-            }
+            emit_combat_feedback(Some(attacker), target, effect, &mut feedback_writer);
         }
     }
 }
@@ -3400,43 +3505,216 @@ fn handle_combat_defeat(
 /// // No writer → no-op; compiles fine.
 /// ```
 fn emit_combat_feedback(
+    source: Option<CombatantId>,
     target: CombatantId,
     effect: CombatFeedbackEffect,
     writer: &mut Option<MessageWriter<CombatFeedbackEvent>>,
 ) {
     if let Some(ref mut w) = writer {
-        w.write(CombatFeedbackEvent { target, effect });
+        w.write(CombatFeedbackEvent {
+            source,
+            target,
+            effect,
+        });
     }
 }
 
-/// Format `CombatFeedbackEvent` as readable combat log text lines.
-fn format_combat_log_line(combat_res: &CombatResource, event: &CombatFeedbackEvent) -> String {
-    let target_name = match event.target {
+/// Resolve a combatant display name from participant state.
+fn combatant_display_name(combat_res: &CombatResource, id: CombatantId) -> String {
+    match id {
         CombatantId::Player(idx) => combat_res
             .state
             .participants
             .get(idx)
             .and_then(|p| match p {
-                Combatant::Player(pc) => Some(pc.name.as_str()),
+                Combatant::Player(pc) => Some(pc.name.clone()),
                 _ => None,
             })
-            .unwrap_or("Player"),
+            .unwrap_or_else(|| "Player".to_string()),
         CombatantId::Monster(idx) => combat_res
             .state
             .participants
             .get(idx)
             .and_then(|p| match p {
-                Combatant::Monster(mon) => Some(mon.name.as_str()),
+                Combatant::Monster(mon) => Some(mon.name.clone()),
                 _ => None,
             })
-            .unwrap_or("Monster"),
-    };
+            .unwrap_or_else(|| "Monster".to_string()),
+    }
+}
 
+/// Deterministically assign a character-name colour from a fixed palette.
+fn character_name_color(name: &str) -> Color {
+    // Use a stable hash so the same character name always renders in the same colour.
+    let hash = name
+        .bytes()
+        .fold(0u64, |acc, b| acc.wrapping_mul(131).wrapping_add(b as u64));
+    let idx = (hash as usize) % COMBAT_LOG_CHARACTER_PALETTE.len();
+    COMBAT_LOG_CHARACTER_PALETTE[idx]
+}
+
+/// Resolve the display colour for a combatant name.
+fn combatant_name_color(
+    id: CombatantId,
+    color_state: &mut CombatLogColorState,
+    rng: &mut impl rand::Rng,
+    character_name: Option<&str>,
+) -> Color {
+    match id {
+        CombatantId::Player(_) => character_name
+            .map(character_name_color)
+            .unwrap_or(Color::WHITE),
+        CombatantId::Monster(idx) => {
+            if let Some(existing) = color_state.monster_colors.get(&idx) {
+                *existing
+            } else {
+                let palette_idx = rng.random_range(0..COMBAT_LOG_MONSTER_PALETTE.len());
+                let color = COMBAT_LOG_MONSTER_PALETTE[palette_idx];
+                color_state.monster_colors.insert(idx, color);
+                color
+            }
+        }
+    }
+}
+
+/// Format `CombatFeedbackEvent` into structured coloured segments.
+fn format_combat_log_line(
+    combat_res: &CombatResource,
+    event: &CombatFeedbackEvent,
+    color_state: &mut CombatLogColorState,
+    rng: &mut impl rand::Rng,
+) -> CombatLogLine {
+    let target_name = combatant_display_name(combat_res, event.target);
+    let target_color = combatant_name_color(event.target, color_state, rng, Some(&target_name));
+
+    if let Some(source) = event.source {
+        let source_name = combatant_display_name(combat_res, source);
+        let source_color = combatant_name_color(source, color_state, rng, Some(&source_name));
+
+        match &event.effect {
+            CombatFeedbackEffect::Damage(n) => {
+                return CombatLogLine {
+                    segments: vec![
+                        CombatLogSegment {
+                            text: source_name,
+                            color: source_color,
+                        },
+                        CombatLogSegment {
+                            text: ": Attacks ".to_string(),
+                            color: Color::WHITE,
+                        },
+                        CombatLogSegment {
+                            text: target_name,
+                            color: target_color,
+                        },
+                        CombatLogSegment {
+                            text: format!(" for [{}] damage", n),
+                            color: Color::WHITE,
+                        },
+                    ],
+                };
+            }
+            CombatFeedbackEffect::Miss => {
+                return CombatLogLine {
+                    segments: vec![
+                        CombatLogSegment {
+                            text: source_name,
+                            color: source_color,
+                        },
+                        CombatLogSegment {
+                            text: ": Misses ".to_string(),
+                            color: Color::WHITE,
+                        },
+                        CombatLogSegment {
+                            text: target_name,
+                            color: target_color,
+                        },
+                    ],
+                };
+            }
+            CombatFeedbackEffect::Heal(n) => {
+                return CombatLogLine {
+                    segments: vec![
+                        CombatLogSegment {
+                            text: source_name,
+                            color: source_color,
+                        },
+                        CombatLogSegment {
+                            text: ": Heals ".to_string(),
+                            color: Color::WHITE,
+                        },
+                        CombatLogSegment {
+                            text: target_name,
+                            color: target_color,
+                        },
+                        CombatLogSegment {
+                            text: format!(" for [{}] HP", n),
+                            color: Color::WHITE,
+                        },
+                    ],
+                };
+            }
+            CombatFeedbackEffect::Status(s) => {
+                return CombatLogLine {
+                    segments: vec![
+                        CombatLogSegment {
+                            text: source_name,
+                            color: source_color,
+                        },
+                        CombatLogSegment {
+                            text: format!(": {}", s),
+                            color: FEEDBACK_COLOR_STATUS,
+                        },
+                    ],
+                };
+            }
+        }
+    }
+
+    // Fallback formatting for effects without an explicit source.
     match &event.effect {
-        CombatFeedbackEffect::Damage(n) => format!("{} takes {} damage.", target_name, n),
-        CombatFeedbackEffect::Heal(n) => format!("{} recovers {} HP.", target_name, n),
-        CombatFeedbackEffect::Miss => format!("Attack misses {}.", target_name),
-        CombatFeedbackEffect::Status(s) => format!("{}: {}", target_name, s),
+        CombatFeedbackEffect::Damage(n) => CombatLogLine {
+            segments: vec![
+                CombatLogSegment {
+                    text: target_name,
+                    color: target_color,
+                },
+                CombatLogSegment {
+                    text: format!(": takes [{}] damage", n),
+                    color: Color::WHITE,
+                },
+            ],
+        },
+        CombatFeedbackEffect::Heal(n) => CombatLogLine {
+            segments: vec![
+                CombatLogSegment {
+                    text: target_name,
+                    color: target_color,
+                },
+                CombatLogSegment {
+                    text: format!(": recovers [{}] HP", n),
+                    color: Color::WHITE,
+                },
+            ],
+        },
+        CombatFeedbackEffect::Miss => CombatLogLine {
+            segments: vec![CombatLogSegment {
+                text: format!("Misses {}", target_name),
+                color: FEEDBACK_COLOR_MISS,
+            }],
+        },
+        CombatFeedbackEffect::Status(s) => CombatLogLine {
+            segments: vec![
+                CombatLogSegment {
+                    text: target_name,
+                    color: target_color,
+                },
+                CombatLogSegment {
+                    text: format!(": {}", s),
+                    color: FEEDBACK_COLOR_STATUS,
+                },
+            ],
+        },
     }
 }
 
@@ -3446,13 +3724,19 @@ fn collect_combat_feedback_log_lines(
     global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     mut combat_log_state: ResMut<CombatLogState>,
+    mut color_state: ResMut<CombatLogColorState>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
         return;
     }
 
+    let mut rng = rand::rng();
     for event in reader.read() {
-        combat_log_state.push_line(format_combat_log_line(&combat_res, event));
+        let line = format_combat_log_line(&combat_res, event, &mut color_state, &mut rng);
+        let plain_text = line.plain_text();
+        debug!("CombatLog: {}", plain_text);
+        info!("Combat: {}", plain_text);
+        combat_log_state.push_line(line);
     }
 }
 
@@ -3470,7 +3754,7 @@ fn update_combat_log_typewriter(
         return;
     };
 
-    let total_chars = latest.chars().count();
+    let total_chars = latest.char_count();
     if combat_log_state.active_line_visible_chars >= total_chars {
         return;
     }
@@ -3484,18 +3768,174 @@ fn update_combat_log_typewriter(
     }
 }
 
-/// Sync the combat log bubble text from `CombatLogState`.
+/// Sync the combat log bubble rows from `CombatLogState`.
 fn update_combat_log_bubble_text(
+    mut commands: Commands,
     combat_log_state: Res<CombatLogState>,
-    mut log_text_query: Query<&mut Text, With<CombatLogBubbleText>>,
+    line_list_query: Query<(Entity, Option<&Children>), With<CombatLogLineList>>,
 ) {
     if !combat_log_state.is_changed() {
         return;
     }
 
-    let visible = combat_log_state.visible_text();
-    for mut text in log_text_query.iter_mut() {
-        **text = visible.clone();
+    let Ok((line_list_entity, children)) = line_list_query.single() else {
+        return;
+    };
+
+    if let Some(children) = children {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
+    }
+
+    if combat_log_state.lines.is_empty() {
+        commands.entity(line_list_entity).with_children(|list| {
+            list.spawn((
+                Text::new("Waiting for actions..."),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.72, 0.80, 0.90)),
+            ));
+        });
+        return;
+    }
+
+    let latest_idx = combat_log_state.lines.len() - 1;
+
+    commands.entity(line_list_entity).with_children(|list| {
+        for (idx, line) in combat_log_state.lines.iter().enumerate() {
+            let segments = if idx == latest_idx {
+                line.clipped_segments(combat_log_state.active_line_visible_chars)
+            } else {
+                line.segments.clone()
+            };
+
+            if segments.is_empty() {
+                continue;
+            }
+
+            list.spawn((Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                ..default()
+            },))
+                .with_children(|row| {
+                    for segment in segments {
+                        row.spawn((
+                            Text::new(segment.text),
+                            TextFont {
+                                font_size: 13.0,
+                                ..default()
+                            },
+                            TextColor(segment.color),
+                        ));
+                    }
+                });
+        }
+    });
+}
+
+/// Auto-scroll the combat log viewport to the newest line when log state changes.
+fn auto_scroll_combat_log_viewport(
+    combat_log_state: Res<CombatLogState>,
+    mut viewports: Query<&mut ScrollPosition, With<CombatLogBubbleViewport>>,
+) {
+    if !combat_log_state.is_changed() {
+        return;
+    }
+
+    for mut pos in viewports.iter_mut() {
+        // Scroll downward to reveal latest entries; layout clamps to valid range.
+        pos.0.y = f32::MAX;
+    }
+}
+
+/// Keep monster colour assignments encounter-local and reset them when combat ends.
+fn reset_combat_log_colors_on_exit(
+    global_state: Res<GlobalState>,
+    mut color_state: ResMut<CombatLogColorState>,
+) {
+    if matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    if !color_state.monster_colors.is_empty() {
+        color_state.monster_colors.clear();
+    }
+}
+
+#[cfg(test)]
+mod combat_log_format_tests {
+    use super::*;
+    use crate::domain::character::{Alignment, Character, Sex};
+    use crate::domain::combat::monster::Monster;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    fn make_combat_resource_for_log() -> CombatResource {
+        let mut cr = CombatResource::new();
+        let player = Character::new(
+            "Ariadne".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        let monster = Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 8, 8, 8, 8, 8, 8),
+            10,
+            5,
+            vec![crate::domain::combat::types::Attack::physical(
+                DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+
+        cr.state.add_player(player);
+        cr.state.add_monster(monster);
+        cr
+    }
+
+    #[test]
+    fn test_character_name_color_is_stable() {
+        let c1 = character_name_color("Ariadne");
+        let c2 = character_name_color("Ariadne");
+        assert_eq!(c1, c2);
+    }
+
+    #[test]
+    fn test_monster_color_is_stable_per_participant() {
+        let mut state = CombatLogColorState::default();
+        let mut rng = StdRng::seed_from_u64(11);
+        let c1 = combatant_name_color(CombatantId::Monster(1), &mut state, &mut rng, None);
+        let c2 = combatant_name_color(CombatantId::Monster(1), &mut state, &mut rng, None);
+        assert_eq!(c1, c2);
+    }
+
+    #[test]
+    fn test_damage_line_matches_structured_format() {
+        let cr = make_combat_resource_for_log();
+        let mut colors = CombatLogColorState::default();
+        let mut rng = StdRng::seed_from_u64(7);
+        let event = CombatFeedbackEvent {
+            source: Some(CombatantId::Player(0)),
+            target: CombatantId::Monster(1),
+            effect: CombatFeedbackEffect::Damage(9),
+        };
+
+        let line = format_combat_log_line(&cr, &event, &mut colors, &mut rng);
+        let joined = line
+            .segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect::<String>();
+
+        assert!(joined.contains("Ariadne: Attacks Goblin for [9] damage"));
     }
 }
 
@@ -3651,17 +4091,24 @@ fn spawn_monster_hp_hover_bars(
         return;
     }
 
+    // Respect runtime graphics setting.
+    if !global_state.0.config.graphics.show_combat_monster_hp_bars {
+        return;
+    }
+
     // Collect which participant indices already have a bar
     let existing_indices: std::collections::HashSet<usize> =
         existing_bars.iter().map(|b| b.participant_index).collect();
 
     // Spawn a bar for each alive monster that doesn't have one yet
+    let mut stack_order = 0usize;
     for (idx, participant) in combat_res.state.participants.iter().enumerate() {
         if let Combatant::Monster(mon) = participant {
             if mon.hp.current == 0 {
                 continue;
             }
             if existing_indices.contains(&idx) {
+                stack_order += 1;
                 continue;
             }
 
@@ -3679,51 +4126,167 @@ fn spawn_monster_hp_hover_bars(
 
             // Spawn container panel
             let fill_idx = idx;
+            let bar_stack_order = stack_order;
             commands
                 .spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        width: Val::Px(120.0),
-                        height: Val::Px(10.0),
-                        // Positioned in top-left area as a simple screen-space bar.
-                        // In a full implementation these would be world-space billboards.
-                        top: Val::Px(10.0 + (idx as f32) * 18.0),
-                        right: Val::Px(8.0),
+                        width: MONSTER_HP_HOVER_BAR_WIDTH,
+                        height: Val::Px(38.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(3.0),
+                        padding: UiRect::all(Val::Px(4.0)),
+                        left: Val::Px(0.0),
+                        top: Val::Px(0.0),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                    BackgroundColor(Color::srgba(0.08, 0.10, 0.12, 0.92)),
+                    BorderRadius::all(Val::Px(4.0)),
                     MonsterHpHoverBar {
                         participant_index: idx,
+                        stack_order: bar_stack_order,
                     },
                 ))
                 .with_children(|parent| {
-                    parent.spawn((
-                        Node {
-                            width: Val::Percent(fill_pct * 100.0),
-                            height: Val::Percent(100.0),
+                    parent
+                        .spawn((Node {
+                            width: Val::Percent(100.0),
+                            justify_content: JustifyContent::SpaceBetween,
+                            align_items: AlignItems::Center,
                             ..default()
-                        },
-                        BackgroundColor(bar_color),
-                        MonsterHpHoverBarFill {
-                            participant_index: fill_idx,
-                        },
-                    ));
+                        },))
+                        .with_children(|header| {
+                            header.spawn((
+                                Text::new(mon.name.clone()),
+                                TextFont {
+                                    font_size: 10.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                                MonsterHpHoverBarNameText {
+                                    participant_index: fill_idx,
+                                },
+                            ));
+
+                            header.spawn((
+                                Text::new(format!("{}/{}", mon.hp.base, mon.hp.current)),
+                                TextFont {
+                                    font_size: 10.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.86, 0.92, 0.98)),
+                                MonsterHpHoverBarHpText {
+                                    participant_index: fill_idx,
+                                },
+                            ));
+                        });
+
+                    parent
+                        .spawn((
+                            Node {
+                                width: Val::Percent(100.0),
+                                height: MONSTER_HP_HOVER_BAR_HEIGHT,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                            BorderRadius::all(Val::Px(2.0)),
+                        ))
+                        .with_children(|bar_bg| {
+                            bar_bg.spawn((
+                                Node {
+                                    width: Val::Percent(fill_pct * 100.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                BackgroundColor(bar_color),
+                                BorderRadius::all(Val::Px(2.0)),
+                                MonsterHpHoverBarFill {
+                                    participant_index: fill_idx,
+                                },
+                            ));
+                        });
                 });
+            stack_order += 1;
         }
     }
 }
 
 /// System: update `MonsterHpHoverBar` fill widths each frame from `CombatResource`.
+#[allow(clippy::type_complexity)]
 fn update_monster_hp_hover_bars(
     combat_res: Res<CombatResource>,
     global_state: Res<GlobalState>,
-    mut fill_query: Query<(&MonsterHpHoverBarFill, &mut Node, &mut BackgroundColor)>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    primary_window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    encounter_visual_query: Query<(&EncounterVisualMarker, &GlobalTransform)>,
+    mut hp_text_query: Query<(&MonsterHpHoverBarHpText, &mut Text)>,
+    mut hover_bar_queries: ParamSet<(
+        Query<(&MonsterHpHoverBar, &mut Node)>,
+        Query<(&MonsterHpHoverBarFill, &mut Node, &mut BackgroundColor)>,
+    )>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
         return;
     }
 
-    for (fill, mut node, mut bg) in fill_query.iter_mut() {
+    let bars_enabled = global_state.0.config.graphics.show_combat_monster_hp_bars;
+
+    // Keep the bars world-projected above the active encounter marker while combat is active.
+    if bars_enabled {
+        let camera_and_transform = camera_query.single().ok();
+        let anchor = if let (Some(map_id), Some(pos)) =
+            (combat_res.encounter_map_id, combat_res.encounter_position)
+        {
+            encounter_visual_query
+                .iter()
+                .find(|(marker, _)| marker.map_id == map_id && marker.position == pos)
+                .map(|(_, tf)| tf.translation())
+        } else {
+            None
+        };
+
+        let mut used_world_projection = false;
+
+        if let (Some((camera, camera_tf)), Some(anchor_pos)) = (camera_and_transform, anchor) {
+            for (bar, mut node) in hover_bar_queries.p0().iter_mut() {
+                let world_bar_pos =
+                    anchor_pos + Vec3::new(0.0, 2.2 + (bar.stack_order as f32) * 0.28, 0.0);
+                if let Ok(screen_pos) = camera.world_to_viewport(camera_tf, world_bar_pos) {
+                    node.left = Val::Px(screen_pos.x - 60.0);
+                    node.top = Val::Px(screen_pos.y - 12.0 - (bar.stack_order as f32) * 12.0);
+                    used_world_projection = true;
+                }
+            }
+        }
+
+        // Fallback: if no anchor/projection is available, align bars with the
+        // enemy-card row so HUD composition stays close to the original layout.
+        if !used_world_projection {
+            let bar_count = hover_bar_queries.p0().iter().count();
+            let window_width = primary_window.single().ok().map(|w| w.width());
+            let card_width = match ENEMY_CARD_WIDTH {
+                Val::Px(v) => v,
+                _ => 150.0,
+            };
+            let card_gap = 16.0;
+            let total_cards_width = if bar_count == 0 {
+                0.0
+            } else {
+                (bar_count as f32 * card_width) + ((bar_count - 1) as f32 * card_gap)
+            };
+            let start_x = window_width
+                .map(|w| ((w - total_cards_width) * 0.5).max(8.0))
+                .unwrap_or(24.0);
+
+            for (bar, mut node) in hover_bar_queries.p0().iter_mut() {
+                let card_left = start_x + (bar.stack_order as f32) * (card_width + card_gap);
+                node.left = Val::Px(card_left + 14.0);
+                node.top = Val::Px(54.0);
+            }
+        }
+    }
+
+    for (fill, mut node, mut bg) in hover_bar_queries.p1().iter_mut() {
         if let Some(Combatant::Monster(mon)) =
             combat_res.state.participants.get(fill.participant_index)
         {
@@ -3742,6 +4305,15 @@ fn update_monster_hp_hover_bars(
             });
         }
     }
+
+    // Update hover-card HP text as Original/Current (base/current).
+    for (hp_text, mut text) in hp_text_query.iter_mut() {
+        if let Some(Combatant::Monster(mon)) =
+            combat_res.state.participants.get(hp_text.participant_index)
+        {
+            **text = format!("{}/{}", mon.hp.base, mon.hp.current);
+        }
+    }
 }
 
 /// System: despawn all `MonsterHpHoverBar` entities when combat ends.
@@ -3750,8 +4322,10 @@ fn cleanup_monster_hp_hover_bars(
     global_state: Res<GlobalState>,
     bars: Query<Entity, With<MonsterHpHoverBar>>,
 ) {
-    // Leave bars in place while in combat
-    if matches!(global_state.0.mode, GameMode::Combat(_)) {
+    // Leave bars in place only while in combat and setting is enabled.
+    if matches!(global_state.0.mode, GameMode::Combat(_))
+        && global_state.0.config.graphics.show_combat_monster_hp_bars
+    {
         return;
     }
 

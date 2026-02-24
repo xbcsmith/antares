@@ -454,6 +454,28 @@ As part of phase 3 we added UI Cards for damage are only a small number in the u
 
 As part of Phase 3 we were supposed to  add in-world monster HP hover bars we have none. We should have HP bars that appear above monsters in the world that show their current HP. The HP bars should update in real time as the monster takes damage. We should be able to toggle the HP bars on and off in the game settings.
 
+Implement more structured logging for Combat Log.
+
+Combat Log Format:
+{color<Character Name>}: Attacks {color<Monster Name>} for [X] damage
+{color<Character Name>}: Misses {color<Monster Name>}
+{color<Monster Name>}: Attacks {color<Character Name>} for [X] Damage
+{color<Monster Name>}: Misses {color<Character Name>}
+
+Colors for Characters should be consistent throughout the Game. Monster colors can be random from a set of pre-defined color pallets.
+
+Combat log should have a scroll bar when it gets long enough.
+
+
+
 ## Rest System
 
 We need a party rest system to heal characters.
+
+## Game Log
+
+We need a Game Log...
+
+## Procedural Meshes
+
+There is no way to control what direction a creature procedural mesh is facing. We should be able to control the direction a creature is facing in the map.ron files. We should expand the event system to allow for signs and creatures (NPC, Recruitable CHracters, Monsters) to have a facing direction that can be set in the map.ron file and changed by events in the game. This would allow for things like a sign that changes the direction of an NPC when interacted with or a monster that turns to face the player when they get close.

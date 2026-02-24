@@ -100,6 +100,59 @@ handlers so the log updates in the same frame feedback events are produced.
 - `cargo fmt --all` — pass
 - `cargo check --all-targets --all-features` — pass
 
+## Combat Monster HP Hover Bars Remediation
+
+### Overview
+
+Phase 3 now includes true in-world combat monster HP hover bars. Bars are
+projected above encounter monster visuals using the active 3D camera instead of
+being rendered as fixed top-left screen strips.
+
+A graphics setting toggle was also added so players can turn these bars on/off
+at runtime from the in-game Settings menu.
+
+### Components Implemented
+
+#### World-projected HP bar placement (`src/game/systems/combat.rs`)
+
+- `update_monster_hp_hover_bars` now projects bar positions from world space
+  to viewport space using `MainCamera` and `world_to_viewport`.
+- Bars anchor to the active encounter visual via `EncounterVisualMarker` and
+  `CombatResource` encounter map/position context.
+- Multiple monster bars stack vertically above the anchor.
+
+#### Runtime graphics toggle (`src/sdk/game_config.rs`, `src/game/systems/menu.rs`, `src/game/components/menu.rs`)
+
+- Added `GraphicsConfig.show_combat_monster_hp_bars` with default `true`.
+- Added Settings menu action `MenuButton::ToggleCombatMonsterHpBars`.
+- Settings panel now includes a button showing `ON/OFF` for combat monster HP bars.
+
+#### Spawn/update/cleanup integration (`src/game/systems/combat.rs`)
+
+- `spawn_monster_hp_hover_bars` respects the graphics toggle.
+- `cleanup_monster_hp_hover_bars` now despawns bars when setting is off or when
+  combat ends.
+- HP values continue updating in real time from `CombatResource` damage state.
+- `update_monster_hp_hover_bars` now includes a fallback screen-space layout
+  when world-anchor projection is unavailable, preventing bars from becoming
+  invisible during combat if encounter marker lookup fails.
+- Fallback placement was further refined to align with the enemy-card row
+  rather than a mid-screen stack, restoring the prior HUD composition while
+  keeping bars visible when projection is unavailable.
+- Monster hover bars were restored as boxed mini-cards containing monster name,
+  an `original/current` HP label, and the inner HP fill bar. HP text now
+  updates each frame from combat state so the numeric label matches bar state.
+- Combat HUD root layout was adjusted from `SpaceBetween` to `FlexStart` so the
+  action menu remains directly below the turn-order panel and no longer overlaps
+  party HP bars near the bottom HUD.
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+- `cargo clippy --all-targets --all-features -- -D warnings` — pass
+- `cargo nextest run --all-features` — pass (`2442 passed`, `8 skipped`)
+
 ## Combat Input Enter UX Remediation
 
 ### Overview
@@ -163,6 +216,77 @@ This prevents missed activation in combat action and target selection flows.
 - `cargo check --all-targets --all-features` — pass
 - `cargo clippy --all-targets --all-features -- -D warnings` — pass
 - `cargo nextest run --all-features` — pass (`2441 passed`, `8 skipped`)
+
+## Combat Log Structured Formatting Remediation
+
+### Overview
+
+Combat log entries now use a structured attacker/target format and coloured
+name segments instead of plain single-colour strings. The combat log panel is
+also now scrollable so long encounters remain readable.
+
+Implemented format:
+
+- `{Character}: Attacks {Monster} for [X] damage`
+- `{Character}: Misses {Monster}`
+- `{Monster}: Attacks {Character} for [X] damage`
+- `{Monster}: Misses {Character}`
+
+### Components Implemented
+
+#### Source-aware feedback events (`src/game/systems/combat.rs`)
+
+- Extended `CombatFeedbackEvent` with `source: Option<CombatantId>`.
+- Updated all `emit_combat_feedback` call sites (player attack/cast/item and
+  monster turns) to include the attacker when known.
+- Updated monster-turn flow to emit explicit miss feedback (damage `0`) so
+  miss lines are logged with the proper monster->character pairing.
+- Added plain-text projection of structured lines and log emission to the
+  engine logger (`debug!` + `info!`) so combat events appear in the debug
+  console as well as the on-screen combat log.
+
+#### Structured log model + colour assignment (`src/game/systems/combat.rs`)
+
+- Replaced flat `Vec<String>` lines with structured `CombatLogLine` and
+  `CombatLogSegment` entries.
+- Added `CombatLogColorState` resource for encounter-local monster colour
+  assignments.
+- Added fixed character palette (`COMBAT_LOG_CHARACTER_PALETTE`) with stable
+  deterministic assignment by character name.
+- Added predefined monster palette (`COMBAT_LOG_MONSTER_PALETTE`) with random
+  per-monster assignment from that palette (stable for the full encounter).
+
+#### Scrollable combat log UI (`src/game/systems/combat.rs`)
+
+- Replaced single text node rendering with:
+  - `CombatLogBubbleRoot`
+  - `CombatLogBubbleViewport` (`Overflow::scroll_y()`)
+  - `CombatLogLineList` (dynamic line rows)
+- Updated `update_combat_log_bubble_text` to render each line as a row of
+  coloured text segments.
+- Preserved typewriter reveal by clipping only the newest line across segments.
+- Added `auto_scroll_combat_log_viewport` to keep the viewport pinned to the
+  newest log entries as new lines are appended.
+
+#### Exit cleanup (`src/game/systems/combat.rs`)
+
+- Added `reset_combat_log_colors_on_exit` to clear monster colour mappings when
+  combat ends, preventing cross-encounter colour leakage.
+
+### Tests Added
+
+- `game::systems::combat::combat_log_format_tests::test_character_name_color_is_stable`
+- `game::systems::combat::combat_log_format_tests::test_monster_color_is_stable_per_participant`
+- `game::systems::combat::combat_log_format_tests::test_damage_line_matches_structured_format`
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+- `cargo clippy --all-targets --all-features -- -D warnings` — pass
+- `cargo nextest run --all-features combat_log_format_tests` — pass (`3 passed`)
+- `cargo nextest run --all-features` — one unrelated pre-existing failure in
+  `tests/campaign_integration_tests.rs` (`test_creature_database_load_performance` timing threshold)
 
 ---
 
