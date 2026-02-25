@@ -532,11 +532,30 @@ fn handle_input(
             return;
         }
 
-        // Check for sign/teleport/recruitable character (and other events) in any adjacent tile
+        // Support explicit encounter interaction at current tile as a fallback.
+        // This helps recover from legacy maps/positions where the party may already
+        // stand on an encounter tile.
+        if let Some(event) = map.get_event(party_position) {
+            if let MapEvent::Encounter { .. } = event {
+                info!(
+                    "Interacting with encounter at current position {:?}",
+                    party_position
+                );
+                map_event_messages.write(MapEventTriggered {
+                    event: event.clone(),
+                    position: party_position,
+                });
+                return;
+            }
+        }
+
+        // Check for interaction-driven map events in any adjacent tile.
         for position in adjacent_tiles {
             if let Some(event) = map.get_event(position) {
                 match event {
-                    MapEvent::Sign { .. } | MapEvent::Teleport { .. } => {
+                    MapEvent::Sign { .. }
+                    | MapEvent::Teleport { .. }
+                    | MapEvent::Encounter { .. } => {
                         info!("Interacting with event at {:?}", position);
                         map_event_messages.write(MapEventTriggered {
                             event: event.clone(),
@@ -1248,6 +1267,32 @@ mod interaction_tests {
             assert_eq!(character_id, "hero_01");
             assert_eq!(name, "TestRecruit");
         }
+    }
+
+    /// Test that encounter events are properly stored and retrievable.
+    /// Validates that encounter interaction can resolve map event data.
+    #[test]
+    fn test_encounter_event_storage() {
+        // Arrange
+        let mut map =
+            crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
+
+        let encounter_pos = Position::new(5, 4);
+        map.add_event(
+            encounter_pos,
+            MapEvent::Encounter {
+                name: "Skeleton".to_string(),
+                description: "A rattling skeleton".to_string(),
+                monster_group: vec![1],
+            },
+        );
+
+        // Act
+        let event = map.get_event(encounter_pos);
+
+        // Assert
+        assert!(event.is_some());
+        assert!(matches!(event, Some(MapEvent::Encounter { .. })));
     }
 }
 

@@ -220,6 +220,44 @@ This prevents missed activation in combat action and target selection flows.
   second-Enter dispatch behavior.
 - `test_first_enter_applies_confirmed_highlight_color` added to verify visual
   feedback for armed state.
+
+## Encounter Visibility Remediation (Skeleton)
+
+### Overview
+
+Encounter visuals could be hidden by party overlap because encounters auto-triggered
+when stepping onto the same tile as the marker mesh. This made skeleton encounters
+hard to read before combat transition.
+
+### Components Implemented
+
+#### Hybrid encounter triggering (`src/game/systems/events.rs`, `src/game/systems/input.rs`)
+
+- Encounter events now support both auto-trigger on step-on and explicit
+  interaction paths.
+- `check_for_events` auto-triggers `MapEvent::Encounter` when the party steps
+  onto an encounter tile.
+- `handle_input` still allows Interact key activation of adjacent encounter
+  tiles.
+- Current-tile interact fallback for encounters remains in place for robustness.
+
+#### Encounter mesh readability lift (`src/game/systems/map.rs`)
+
+- Added `ENCOUNTER_VISUAL_Y_OFFSET` and applied it to encounter marker spawning.
+- Encounter procedural creature visuals now spawn slightly above the floor plane
+  to reduce occlusion and improve pre-combat readability.
+
+### Tests Added/Updated
+
+- `src/game/systems/events.rs`: `test_encounter_auto_triggers_when_stepping_on_tile`
+- `src/game/systems/input.rs`: `test_encounter_event_storage`
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+- `cargo clippy --all-targets --all-features -- -D warnings` — pass
+- `cargo nextest run --all-features` — pass
 - `test_mouse_left_click_on_hover_dispatches_action` added to verify fallback
   mouse activation on hovered action buttons.
 

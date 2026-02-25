@@ -469,6 +469,17 @@ Combat log should have a scroll bar when it gets long enough.
 
 ✅ COMPLETED -
 
+### Encounter Visibility Follow-up (Skeleton)
+
+Applied now:
+
+1. Encounter trigger flow now supports both behaviors: auto-combat when stepping on an encounter tile, and explicit interaction from adjacent tiles.
+2. Encounter marker visual lifted slightly above tile geometry to improve readability and reduce floor occlusion.
+
+Add this as next follow-up:
+
+3. Optional portrait fallback in the combat skeleton HP box when mesh readability is still poor from camera angle or scene clutter.
+
 ### Game-Wide Mouse Input Support
 
 Mouse input currently does not work reliably across the game engine (combat,
