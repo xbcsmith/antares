@@ -9210,3 +9210,194 @@ egui::ComboBox::from_id_salt("creatures_registry_sort_by")
 - `cargo nextest run --all-features` — 2401 passed, 8 skipped
 
 ---
+
+## Inventory System Phase 2: NPC Runtime State and Transaction Operations
+
+### Overview
+
+Phase 2 adds the mutable per-session NPC state layer and the pure domain-layer
+transaction functions that enforce all commerce and service business rules.
+Unlike the static `NpcDefinition` data from Phase 1, these types track changes
+during a play session (stock quantities decreasing, services being consumed)
+and are fully serializable so save/load cycles preserve the runtime state.
+
+### Components Implemented
+
+#### `src/domain/world/npc_runtime.rs` (new file)
+
+Four new types that form the runtime state layer for NPCs:
+
+- `TemplateStockEntry` — a single entry in an immutable stock template (item ID,
+  initial quantity, optional price override). Derives `Debug, Clone, PartialEq,
+Eq, Serialize, Deserialize`.
+
+- `MerchantStockTemplate` — an immutable template keyed by string ID that matches
+  `NpcDefinition::stock_template`. Provides `to_runtime_stock()` which copies
+  template quantities into a mutable `MerchantStock` without touching the original.
+
+- `NpcRuntimeState` — per-NPC mutable state holding:
+
+  - `npc_id: NpcId` — which NPC this belongs to
+  - `stock: Option<MerchantStock>` — `None` for non-merchants, initialised from
+    a template at session start
+  - `services_consumed: Vec<String>` — service IDs used this session
+  - Constructors: `new(npc_id)` and `initialize_stock_from_template(npc_id, template)`
+
+- `NpcRuntimeStore` — session-wide `HashMap<NpcId, NpcRuntimeState>` with `get`,
+  `get_mut`, `insert`, `initialize_merchant`, `len`, `is_empty`. The
+  `initialize_merchant` method looks up the NPC's `stock_template` in the
+  database and seeds stock quantities, or inserts a bare state if no template
+  exists (non-merchants, priests, etc.).
+
+- `MerchantStockTemplateDatabase` — indexes templates by ID, supports
+  `add`, `get`, `load_from_file`, `load_from_string`, `len`, `is_empty`.
+  Enforces duplicate-ID detection on load.
+
+- `MerchantStockTemplateDatabaseError` — `thiserror`-derived error enum with
+  `ReadError`, `ParseError`, `DuplicateId` variants.
+
+#### `src/domain/world/mod.rs` (modified)
+
+- Registered `pub mod npc_runtime;`
+- Re-exported `MerchantStockTemplate`, `MerchantStockTemplateDatabase`,
+  `NpcRuntimeState`, `NpcRuntimeStore` from the world crate root.
+
+#### `src/domain/transactions.rs` (new file)
+
+Pure domain-layer transaction functions that operate only on domain types
+(no Bevy, no I/O). All return `Result<T, TransactionError>`.
+
+- `TransactionError` — `thiserror`-derived, `Clone + PartialEq + Eq`, with variants:
+  `InsufficientGold { have, need }`, `InsufficientGems { have, need }`,
+  `InventoryFull { character_id }`, `ItemNotInStock { item_id }`,
+  `OutOfStock { item_id }`, `ItemNotInInventory { item_id, character_id }`,
+  `NpcNotFound { npc_id }`, `ServiceNotFound { service_id }`,
+  `CharacterNotFound { character_id }`, `InvalidQuantity`.
+
+- `ServiceOutcome` — result of `consume_service`, reporting `service_id`,
+  `gold_paid`, `gems_paid`, `characters_affected: Vec<CharacterId>`.
+
+- `pub fn buy_item(party, character, character_id, npc_runtime, npc_def, item_id, item_db)`
+  — Enforces preconditions in spec order: item in DB, item in NPC stock, quantity > 0,
+  gold check (applying `npc_def.economy.sell_rate`), inventory space check. On success:
+  deducts gold, decrements NPC stock, adds item (with `max_charges` clamped to `u8::MAX`)
+  to character inventory, returns the `InventorySlot`.
+
+- `pub fn sell_item(party, character, character_id, npc_runtime, npc_def, item_id, item_db)`
+  — Finds item in character inventory, computes sell price (`sell_cost` if non-zero
+  else `base_cost / 2`, multiplied by `economy.buy_rate` defaulting to 0.5, floored,
+  minimum 1 gold), removes item, adds gold to party (clamped via `saturating_add`),
+  optionally increments NPC stock entry if one already exists.
+
+- `pub fn consume_service(party, targets, npc_runtime, service_catalog, service_id)`
+  — Validates service exists, checks gold and gem costs, deducts both, applies
+  service effect to every character in `targets` (heal, restore SP, cure conditions,
+  resurrect, rest, or no-op for unrecognised IDs), records consumed service,
+  returns `ServiceOutcome`.
+
+- Private helper `apply_service_effect(character, service_id)` — handles all
+  known service IDs against the `Condition` bitmask API and `AttributePair16`.
+
+#### `src/domain/mod.rs` (modified)
+
+- Registered `pub mod transactions;`
+- Re-exported `ServiceOutcome` and `TransactionError`.
+
+#### `src/application/mod.rs` (modified)
+
+- Added `use crate::domain::world::npc_runtime::NpcRuntimeStore;`
+- Added `pub npc_runtime: NpcRuntimeStore` field to `GameState` with
+  `#[serde(default)]` so legacy saves deserialize without the field.
+- Updated `GameState::new()` and `GameState::new_game()` to initialize
+  `npc_runtime: NpcRuntimeStore::new()`.
+
+#### `src/application/save_game.rs` (modified)
+
+- Fixed `test_save_migration_from_old_format` field-removal logic: the old
+  `find("},")` approach became brittle once `npc_runtime` follows
+  `encountered_characters`. Replaced with a `find('\n')`-based line-removal
+  that correctly strips a single `encountered_characters: {},` line without
+  clipping into adjacent fields.
+
+### Tests Added
+
+#### `src/domain/world/npc_runtime.rs` (19 new unit tests)
+
+| Test                                                                        | What it covers                                           |
+| --------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `test_npc_runtime_state_new`                                                | npc_id set, stock None, consumed empty                   |
+| `test_npc_runtime_state_initialize_stock_from_template`                     | quantities and price overrides copied from template      |
+| `test_npc_runtime_state_stock_independent_of_template`                      | mutating runtime stock does not affect original template |
+| `test_npc_runtime_state_serialization_roundtrip`                            | serde round-trip for NpcRuntimeState                     |
+| `test_npc_runtime_store_insert_and_get`                                     | insert then retrieve by npc_id                           |
+| `test_npc_runtime_store_get_absent`                                         | returns None for unknown ID                              |
+| `test_npc_runtime_store_get_mut`                                            | mutation via get_mut persists                            |
+| `test_npc_runtime_store_insert_replaces_existing`                           | insert overwrites old state                              |
+| `test_npc_runtime_store_len_and_is_empty`                                   | length tracking                                          |
+| `test_npc_runtime_store_initialize_merchant_with_template`                  | stock seeded from template                               |
+| `test_npc_runtime_store_initialize_merchant_missing_template`               | state inserted but stock None when template absent       |
+| `test_npc_runtime_store_initialize_merchant_no_stock_template`              | priests/NPCs get bare state                              |
+| `test_merchant_stock_template_database_new_is_empty`                        | empty on construction                                    |
+| `test_merchant_stock_template_database_add_and_get`                         | add then get                                             |
+| `test_merchant_stock_template_database_load_from_string_success`            | RON parse with multiple templates                        |
+| `test_merchant_stock_template_database_load_from_string_duplicate_id_error` | DuplicateId error                                        |
+| `test_merchant_stock_template_database_load_from_string_invalid_ron_error`  | ParseError                                               |
+| `test_merchant_stock_template_to_runtime_stock`                             | all fields copied correctly                              |
+| `test_npc_runtime_store_serialization_roundtrip`                            | full store serde round-trip                              |
+
+#### `src/domain/transactions.rs` (24 new unit tests)
+
+| Test                                                     | What it covers                                                                |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `test_buy_item_success`                                  | gold decremented, item in inventory, stock decremented, correct slot returned |
+| `test_buy_item_insufficient_gold`                        | InsufficientGold; party gold, inventory, stock unchanged                      |
+| `test_buy_item_inventory_full`                           | InventoryFull at MAX_ITEMS; party gold and stock unchanged                    |
+| `test_buy_item_out_of_stock`                             | OutOfStock when quantity == 0                                                 |
+| `test_buy_item_not_in_stock`                             | ItemNotInStock when item not in NPC stock                                     |
+| `test_buy_item_charges_set_from_item_max_charges`        | charges field populated from item definition                                  |
+| `test_sell_item_success`                                 | item removed from inventory, gold added, returned amount matches              |
+| `test_sell_item_not_in_inventory`                        | ItemNotInInventory                                                            |
+| `test_sell_item_minimum_price`                           | sell price >= 1 even for base_cost == 1, sell_cost == 0                       |
+| `test_sell_item_uses_sell_cost_when_nonzero`             | sell_cost takes priority over base_cost                                       |
+| `test_sell_item_uses_base_cost_when_sell_cost_zero`      | base_cost / 2 \* buy_rate floor                                               |
+| `test_sell_item_increments_npc_stock_if_entry_exists`    | sold item returned to NPC stock                                               |
+| `test_sell_item_does_not_add_stock_if_no_existing_entry` | no phantom stock entries created                                              |
+| `test_consume_service_heal_all_success`                  | gold deducted, HP restored, outcome fields correct, service recorded          |
+| `test_consume_service_insufficient_gold`                 | InsufficientGold; party and HP unchanged                                      |
+| `test_consume_service_not_found`                         | ServiceNotFound for empty catalog                                             |
+| `test_consume_service_resurrect`                         | conditions cleared, HP set to 1, gold deducted                                |
+| `test_consume_service_restore_sp`                        | SP restored to base                                                           |
+| `test_consume_service_cure_poison`                       | POISONED condition flag removed                                               |
+| `test_consume_service_insufficient_gems`                 | InsufficientGems; gold and gems unchanged                                     |
+| `test_consume_service_rest`                              | HP, SP restored and conditions cleared                                        |
+| `test_consume_service_unknown_id_no_op`                  | character unaffected but gold still deducted                                  |
+| `test_consume_service_multiple_targets`                  | all targets affected, gold deducted once                                      |
+| `test_consume_service_records_service_id`                | multiple service IDs appended in order                                        |
+
+### Deliverables Checklist
+
+- [x] `src/domain/world/npc_runtime.rs` created with `NpcRuntimeState`,
+      `NpcRuntimeStore`, `MerchantStockTemplate`, `MerchantStockTemplateDatabase`
+- [x] `src/domain/world/mod.rs` updated with `pub mod npc_runtime;` and re-exports
+- [x] `src/domain/transactions.rs` created with `TransactionError`,
+      `buy_item`, `sell_item`, `consume_service`, `ServiceOutcome`
+- [x] `src/domain/mod.rs` updated with `pub mod transactions;` and re-exports
+- [x] `src/application/mod.rs` updated: `GameState` has `npc_runtime` field,
+      initialized in `new()` and `new_game()`
+- [x] `src/application/save_game.rs` migration test fixed for new field ordering
+- [x] All 43 unit tests from Section 2.4 passing
+
+### Success Criteria
+
+- `cargo fmt --all` — passed
+- `cargo check --all-targets --all-features` — passed (0 errors)
+- `cargo clippy --all-targets --all-features -- -D warnings` — passed (0 warnings)
+- `cargo nextest run --all-features` — 2535 passed, 8 skipped (no regressions)
+- `test_buy_item_success` confirms party gold decrements and item appears in
+  character inventory
+- `test_consume_service_heal_all_success` confirms HP is restored after gold
+  is deducted
+- Existing `test_save_and_load` in `src/application/save_game.rs` still passes;
+  `GameState` serializes and deserializes with the new `npc_runtime` field
+
+---

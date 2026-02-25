@@ -788,11 +788,20 @@ mod tests {
         let save_path = manager.save_path("migration_test");
         let mut ron_content = std::fs::read_to_string(&save_path).unwrap();
 
-        // Remove encountered_characters field to simulate old format
-        // This simulates a save file created before encountered_characters existed
-        if let Some(start) = ron_content.find("encountered_characters:") {
-            if let Some(end) = ron_content[start..].find("},") {
-                let full_end = start + end + 2;
+        // Remove encountered_characters field to simulate old format.
+        // This simulates a save file created before encountered_characters existed.
+        //
+        // encountered_characters serializes as a set literal: `{}` (empty) or
+        // `{"val1", "val2"}`. The field always ends with a `,` because other
+        // serde(default) fields (npc_runtime, etc.) follow it.
+        // We match the whole line, including the trailing newline, so we don't
+        // accidentally clip into adjacent fields.
+        let field_marker = "encountered_characters:";
+        if let Some(start) = ron_content.find(field_marker) {
+            // Find the newline that terminates this field's line.
+            // The field value is always on a single line for HashSet<String>.
+            if let Some(nl) = ron_content[start..].find('\n') {
+                let full_end = start + nl + 1; // include the newline
                 ron_content.replace_range(start..full_end, "");
             }
         }

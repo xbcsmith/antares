@@ -21,6 +21,7 @@ use crate::application::menu::MenuState;
 use crate::domain::character::{Party, Roster};
 use crate::domain::party_manager::{PartyManagementError, PartyManager};
 use crate::domain::types::{GameTime, InnkeeperId};
+use crate::domain::world::npc_runtime::NpcRuntimeStore;
 use crate::domain::world::World;
 use crate::sdk::campaign_loader::{Campaign, CampaignError};
 use crate::sdk::database::ContentDatabase;
@@ -336,6 +337,13 @@ pub struct GameState {
     /// Tracks which characters have been encountered on maps (prevents re-recruiting)
     #[serde(default)]
     pub encountered_characters: std::collections::HashSet<String>,
+    /// Per-NPC mutable runtime state (merchant stock, consumed services).
+    ///
+    /// Serialised into save data so stock levels persist across save/load cycles.
+    /// Initialised via `NpcRuntimeStore::initialize_merchant` for each NPC that
+    /// has a `stock_template` when a new game session begins.
+    #[serde(default)]
+    pub npc_runtime: NpcRuntimeStore,
 }
 
 /// Errors returned by `GameState::initialize_roster`.
@@ -422,6 +430,7 @@ impl GameState {
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
             quests: QuestLog::new(),
             encountered_characters: std::collections::HashSet::new(),
+            npc_runtime: NpcRuntimeStore::new(),
         }
     }
 
@@ -495,6 +504,7 @@ impl GameState {
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
             quests: QuestLog::new(),
             encountered_characters: std::collections::HashSet::new(),
+            npc_runtime: NpcRuntimeStore::new(),
         };
 
         // Phase 2: Initialize roster from content database (premade characters)

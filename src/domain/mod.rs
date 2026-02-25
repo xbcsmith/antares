@@ -35,6 +35,7 @@ pub mod progression;
 pub mod quest;
 pub mod races;
 pub mod resources;
+pub mod transactions;
 pub mod types;
 pub mod visual;
 pub mod world;
@@ -49,6 +50,7 @@ pub use inventory::{
     InventoryOwner, MerchantStock, NpcEconomySettings, ServiceCatalog, ServiceEntry, StockEntry,
 };
 pub use quest::QuestId;
+pub use transactions::{ServiceOutcome, TransactionError};
 pub use types::{
     CharacterId, CreatureId, EventId, InnkeeperId, ItemId, MapId, MeshId, MonsterId, RaceId,
     SpellId,
