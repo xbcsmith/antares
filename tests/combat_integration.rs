@@ -30,11 +30,11 @@ fn create_test_character(name: &str, class_id: &str, hp: u16) -> Character {
     character
 }
 
-/// Integration test: stepping on an Encounter tile should start combat mode.
+/// Integration test: explicit interaction with an Encounter event starts combat mode.
 ///
-/// This test creates a small map with an `Encounter` MapEvent (using an empty
-/// monster_group so no DB dependency) and verifies that running the EventPlugin
-/// causes the global `GameState` to transition to `GameMode::Combat`.
+/// Encounters are interaction-driven and should not auto-trigger on step-on.
+/// This test simulates the interact path by writing `MapEventTriggered` and
+/// verifies the global `GameState` transitions to `GameMode::Combat`.
 #[test]
 fn test_map_event_encounter_triggers_combat() {
     // Build a minimal app with the event and combat plugins registered
@@ -75,7 +75,21 @@ fn test_map_event_encounter_triggers_combat() {
     ));
     app.insert_resource(antares::game::resources::GlobalState(gs));
 
-    // Run one frame to process the event trigger and handler
+    // Simulate explicit interaction with the encounter tile.
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<
+            antares::game::systems::events::MapEventTriggered,
+        >>()
+        .write(antares::game::systems::events::MapEventTriggered {
+            event: antares::domain::world::MapEvent::Encounter {
+                name: "Ambush".to_string(),
+                description: "A surprise encounter".to_string(),
+                monster_group: vec![],
+            },
+            position: event_pos,
+        });
+
+    // Run one frame to process the event handler
     app.update();
 
     // Verify the game mode switched to Combat

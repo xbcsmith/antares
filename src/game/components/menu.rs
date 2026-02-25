@@ -92,6 +92,8 @@ pub enum MenuButton {
     ToggleVSync,
     /// Cycle through shadow quality levels
     CycleShadowQuality,
+    /// Toggle visibility of combat monster HP hover bars
+    ToggleCombatMonsterHpBars,
 }
 
 /// Volume slider identifiers.

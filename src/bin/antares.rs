@@ -364,6 +364,7 @@ mod tests {
             vsync: false,
             msaa_samples: 8,
             shadow_quality: ShadowQuality::Ultra,
+            show_combat_monster_hp_bars: true,
         };
 
         let resource = GraphicsConfigResource {
@@ -384,6 +385,7 @@ mod tests {
             vsync: true,
             msaa_samples: 4,
             shadow_quality: ShadowQuality::Medium,
+            show_combat_monster_hp_bars: true,
         };
 
         let campaign = create_test_campaign(graphics.clone());

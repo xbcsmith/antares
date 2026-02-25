@@ -43,9 +43,12 @@ fn check_for_events(
 
         if let Some(map) = game_state.world.get_current_map() {
             if let Some(event) = map.get_event(current_pos) {
-                // Do not auto-trigger recruitable characters or signs when the party steps on
-                // their tile. These events must be explicitly interacted with by the player
-                // (press the Interact key) to start dialogues and to avoid unexpected auto-triggering.
+                // Do not auto-trigger interaction-driven utility/dialogue events when
+                // the party steps on their tile. These events must be explicitly
+                // interacted with by the player (press the Interact key).
+                //
+                // Encounters are intentionally excluded from this list: stepping on
+                // an encounter tile should immediately trigger combat.
                 match event {
                     MapEvent::RecruitableCharacter { .. } => {
                         info!(
@@ -189,7 +192,10 @@ fn handle_events(
 
                         // Notify other systems that combat has started (if CombatPlugin is registered)
                         if let Some(ref mut writer) = combat_started_writer {
-                            writer.write(crate::game::systems::combat::CombatStarted {});
+                            writer.write(crate::game::systems::combat::CombatStarted {
+                                encounter_position: Some(trigger.position),
+                                encounter_map_id: Some(global_state.0.world.current_map),
+                            });
                         }
                     }
                     Err(e) => {
@@ -641,6 +647,55 @@ mod tests {
         assert!(
             triggered_events.is_empty(),
             "Expected no events to be triggered for RecruitableCharacter when stepping on the tile"
+        );
+    }
+
+    #[test]
+    fn test_encounter_auto_triggers_when_stepping_on_tile() {
+        use crate::application::resources::GameContent;
+        use crate::domain::types::Position;
+        use crate::domain::world::MapEvent;
+        use crate::game::resources::GlobalState;
+        use crate::sdk::database::ContentDatabase;
+        use bevy::prelude::*;
+
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(EventPlugin);
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let event_pos = Position::new(5, 5);
+        map.add_event(
+            event_pos,
+            MapEvent::Encounter {
+                name: "Skeleton Ambush".to_string(),
+                description: "A skeleton blocks the path".to_string(),
+                monster_group: vec![1],
+            },
+        );
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(ContentDatabase::new()));
+
+        // Act - encounter should auto-trigger on step-on
+        app.update();
+
+        // Assert - MapEventTriggered should contain the encounter trigger
+        let events = app.world().resource::<Messages<MapEventTriggered>>();
+        let mut reader = events.get_cursor();
+        let triggered_events: Vec<_> = reader.read(events).collect();
+        assert!(
+            !triggered_events.is_empty(),
+            "Expected encounter event to auto-trigger when stepping on the tile"
         );
     }
 

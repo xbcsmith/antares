@@ -904,6 +904,39 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                             },
                             BackgroundColor(BUTTON_NORMAL_COLOR),
                             BorderRadius::all(Val::Px(4.0)),
+                            MenuButton::ToggleCombatMonsterHpBars,
+                        ))
+                        .with_children(|button| {
+                            button.spawn((
+                                Text::new(format!(
+                                    "Combat Monster HP Bars: {}",
+                                    if graphics.show_combat_monster_hp_bars {
+                                        "ON"
+                                    } else {
+                                        "OFF"
+                                    }
+                                )),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+
+                    panel
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Px(BUTTON_WIDTH - 60.0),
+                                height: Val::Px(30.0),
+                                margin: UiRect::vertical(Val::Px(5.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(BUTTON_NORMAL_COLOR),
+                            BorderRadius::all(Val::Px(4.0)),
                             MenuButton::ToggleVSync,
                         ))
                         .with_children(|button| {
@@ -1379,6 +1412,14 @@ fn handle_button_press(
             debug!(
                 "Shadow quality cycled: {:?}",
                 global_state.0.config.graphics.shadow_quality
+            );
+        }
+        MenuButton::ToggleCombatMonsterHpBars => {
+            global_state.0.config.graphics.show_combat_monster_hp_bars =
+                !global_state.0.config.graphics.show_combat_monster_hp_bars;
+            debug!(
+                "Combat monster HP bars toggled: {}",
+                global_state.0.config.graphics.show_combat_monster_hp_bars
             );
         }
         MenuButton::Cancel => {
