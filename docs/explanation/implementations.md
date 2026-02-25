@@ -33,9 +33,960 @@
 | **Findings Remediation Phase 3**                | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard**        |
 | **Findings Remediation Phase 4**                | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI**            |
 | **Findings Remediation Phase 5**                | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation**        |
+| **Combat System Improvement Phase 1**           | ✅ COMPLETE | 2026-07-17 | **Input Reliability and Action Selection**                                |
+| **Combat System Improvement Phase 2**           | ✅ COMPLETE | 2026-07-17 | **Target Selection and Action Completeness**                              |
+| **Combat System Improvement Phase 3**           | ✅ COMPLETE | 2026-07-17 | **Visual Combat Feedback and Animation State**                            |
+| **Combat System Improvement Phase 4**           | ✅ COMPLETE | 2026-07-17 | **Defeated Monster World-Mesh Removal**                                   |
+| **Combat System Improvement Phase 5 Remediation** | ✅ COMPLETE | 2026-02-23 | **Dismiss victory splash when movement controls resume post-combat**      |
+| **Combat Input Enter UX Remediation**           | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback** |
 
-**Total Lines Implemented**: 8,500+ lines of production code + 5,100+ lines of documentation
-**Total Tests**: 318+ new tests (all passing), 2,410 campaign_builder tests passing
+**Total Lines Implemented**: 9,300+ lines of production code + 5,400+ lines of documentation
+**Total Tests**: 346+ new tests (all passing), 2,438 total tests passing
+
+---
+
+## Combat Log Bubble Remediation
+
+### Overview
+
+Combat feedback numbers were hard to read in practice because they were small,
+transient, and spatially disconnected from the player's attention. A persistent
+combat log bubble is now rendered at the top-right of the combat HUD and stays
+visible for the full encounter.
+
+The bubble records incoming `CombatFeedbackEvent` results (damage, healing,
+misses, and status text) and reveals each new line with a typewriter effect.
+
+### Components Implemented
+
+#### Persistent combat log UI (`src/game/systems/combat.rs`)
+
+Added a dedicated bubble panel in `setup_combat_ui`:
+
+- Marker components: `CombatLogBubbleRoot`, `CombatLogBubbleText`
+- Layout: absolute top-right, rounded, semi-opaque background
+- Lifetime: visible throughout combat; removed with combat HUD cleanup
+
+#### Typewriter-backed combat log state (`src/game/systems/combat.rs`)
+
+Added `CombatLogState` resource with:
+
+- rolling `lines` buffer
+- `active_line_visible_chars` for per-character reveal
+- `reveal_accumulator` for frame-rate-independent animation
+
+Added constants:
+
+- `COMBAT_LOG_BUBBLE_WIDTH`
+- `COMBAT_LOG_BUBBLE_MIN_HEIGHT`
+- `COMBAT_LOG_MAX_LINES`
+- `COMBAT_LOG_TYPEWRITER_CHARS_PER_SEC`
+
+#### Event-to-log pipeline (`src/game/systems/combat.rs`)
+
+Added systems:
+
+- `collect_combat_feedback_log_lines` — converts `CombatFeedbackEvent` into
+  readable lines ("<target> takes N damage.", etc.)
+- `update_combat_log_typewriter` — reveals newest line one character at a time
+- `update_combat_log_bubble_text` — syncs visible text to `CombatLogBubbleText`
+- `reset_combat_log_on_exit` — clears the log after combat ends
+
+These systems are registered in `CombatPlugin` and ordered after combat action
+handlers so the log updates in the same frame feedback events are produced.
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+
+## Combat Monster HP Hover Bars Remediation
+
+### Overview
+
+Phase 3 now includes true in-world combat monster HP hover bars. Bars are
+projected above encounter monster visuals using the active 3D camera instead of
+being rendered as fixed top-left screen strips.
+
+A graphics setting toggle was also added so players can turn these bars on/off
+at runtime from the in-game Settings menu.
+
+### Components Implemented
+
+#### World-projected HP bar placement (`src/game/systems/combat.rs`)
+
+- `update_monster_hp_hover_bars` now projects bar positions from world space
+  to viewport space using `MainCamera` and `world_to_viewport`.
+- Bars anchor to the active encounter visual via `EncounterVisualMarker` and
+  `CombatResource` encounter map/position context.
+- Multiple monster bars stack vertically above the anchor.
+
+#### Runtime graphics toggle (`src/sdk/game_config.rs`, `src/game/systems/menu.rs`, `src/game/components/menu.rs`)
+
+- Added `GraphicsConfig.show_combat_monster_hp_bars` with default `true`.
+- Added Settings menu action `MenuButton::ToggleCombatMonsterHpBars`.
+- Settings panel now includes a button showing `ON/OFF` for combat monster HP bars.
+
+#### Spawn/update/cleanup integration (`src/game/systems/combat.rs`)
+
+- `spawn_monster_hp_hover_bars` respects the graphics toggle.
+- `cleanup_monster_hp_hover_bars` now despawns bars when setting is off or when
+  combat ends.
+- HP values continue updating in real time from `CombatResource` damage state.
+- `update_monster_hp_hover_bars` now includes a fallback screen-space layout
+  when world-anchor projection is unavailable, preventing bars from becoming
+  invisible during combat if encounter marker lookup fails.
+- Fallback placement was further refined to align with the enemy-card row
+  rather than a mid-screen stack, restoring the prior HUD composition while
+  keeping bars visible when projection is unavailable.
+- Monster hover bars were restored as boxed mini-cards containing monster name,
+  an `original/current` HP label, and the inner HP fill bar. HP text now
+  updates each frame from combat state so the numeric label matches bar state.
+- Combat HUD root layout was adjusted from `SpaceBetween` to `FlexStart` so the
+  action menu remains directly below the turn-order panel and no longer overlaps
+  party HP bars near the bottom HUD.
+- Combat input regression fix: keyboard Enter was restored to single-step action
+  execution (removed two-step arm/confirm flow). For default `Attack`, Enter
+  now performs a quick attack against the first alive monster target, reducing
+  per-character keypress count and restoring expected flow.
+- Added regression guard test `test_single_enter_attack_executes_and_advances_turn`
+  to ensure one Enter on default Attack executes immediately, does not enter
+  target-selection mode, and advances turn flow.
+- Combat hover HP cards are now forced to the foreground layer (`ZIndex`) so
+  health colours render in front of shaded HUD regions instead of appearing
+  muted/greyed by background overlays.
+- Removed the persistent `"Waiting for actions..."` placeholder from the combat
+  log panel (both initial spawn and empty-state refresh) so the log clears when
+  no entries are present, matching the expected transient-message behavior.
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+- `cargo clippy --all-targets --all-features -- -D warnings` — pass
+- `cargo nextest run --all-features` — pass (`2442 passed`, `8 skipped`)
+
+## Combat Input Enter UX Remediation
+
+### Overview
+
+Combat action activation via keyboard now uses an explicit two-step Enter
+workflow with visible feedback:
+
+1. First `Enter` arms the currently highlighted action.
+2. Second `Enter` confirms and dispatches that action.
+
+This removes the implicit same-frame dispatch and gives clear visual state
+before action execution.
+
+Combat action activation via mouse now has an additional fallback path so clicks
+remain reliable even when `Interaction::Pressed` transitions are missed.
+
+### Components Implemented
+
+#### Two-step Enter handling (`src/game/systems/combat.rs`)
+
+`combat_input_system` now tracks a local execution flag and separates:
+
+- **Arm**: first Enter sets `ActionMenuState.confirmed = true`.
+- **Execute**: second Enter dispatches selected action and clears `confirmed`.
+
+Mouse `Interaction::Pressed` action dispatch remains immediate and clears any
+armed keyboard state to avoid mixed-mode ambiguity.
+
+#### Armed-state visual feedback (`src/game/systems/combat.rs`)
+
+Added:
+
+- `ACTION_BUTTON_CONFIRMED_COLOR`
+
+Updated `update_action_highlight` so the active button uses:
+
+- `ACTION_BUTTON_HOVER_COLOR` when merely highlighted
+- `ACTION_BUTTON_CONFIRMED_COLOR` when Enter-armed (`confirmed == true`)
+
+#### Mouse click fallback (`src/game/systems/combat.rs`)
+
+Updated `combat_input_system` and `select_target` to accept either:
+
+- `Interaction::Pressed` transition, or
+- left mouse `just_pressed` while the button/card is `Interaction::Hovered`
+
+This prevents missed activation in combat action and target selection flows.
+
+### Tests Added/Updated
+
+- `test_enter_dispatches_active_action` updated to validate first-Enter arm and
+  second-Enter dispatch behavior.
+- `test_first_enter_applies_confirmed_highlight_color` added to verify visual
+  feedback for armed state.
+
+## Encounter Visibility Remediation (Skeleton)
+
+### Overview
+
+Encounter visuals could be hidden by party overlap because encounters auto-triggered
+when stepping onto the same tile as the marker mesh. This made skeleton encounters
+hard to read before combat transition.
+
+### Components Implemented
+
+#### Hybrid encounter triggering (`src/game/systems/events.rs`, `src/game/systems/input.rs`)
+
+- Encounter events now support both auto-trigger on step-on and explicit
+  interaction paths.
+- `check_for_events` auto-triggers `MapEvent::Encounter` when the party steps
+  onto an encounter tile.
+- `handle_input` still allows Interact key activation of adjacent encounter
+  tiles.
+- Current-tile interact fallback for encounters remains in place for robustness.
+
+#### Encounter mesh readability lift (`src/game/systems/map.rs`)
+
+- Added `ENCOUNTER_VISUAL_Y_OFFSET` and applied it to encounter marker spawning.
+- Encounter procedural creature visuals now spawn slightly above the floor plane
+  to reduce occlusion and improve pre-combat readability.
+
+### Tests Added/Updated
+
+- `src/game/systems/events.rs`: `test_encounter_auto_triggers_when_stepping_on_tile`
+- `src/game/systems/input.rs`: `test_encounter_event_storage`
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+- `cargo clippy --all-targets --all-features -- -D warnings` — pass
+- `cargo nextest run --all-features` — pass
+- `test_mouse_left_click_on_hover_dispatches_action` added to verify fallback
+  mouse activation on hovered action buttons.
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+- `cargo clippy --all-targets --all-features -- -D warnings` — pass
+- `cargo nextest run --all-features` — pass (`2441 passed`, `8 skipped`)
+
+## Combat Log Structured Formatting Remediation
+
+### Overview
+
+Combat log entries now use a structured attacker/target format and coloured
+name segments instead of plain single-colour strings. The combat log panel is
+also now scrollable so long encounters remain readable.
+
+Implemented format:
+
+- `{Character}: Attacks {Monster} for [X] damage`
+- `{Character}: Misses {Monster}`
+- `{Monster}: Attacks {Character} for [X] damage`
+- `{Monster}: Misses {Character}`
+
+### Components Implemented
+
+#### Source-aware feedback events (`src/game/systems/combat.rs`)
+
+- Extended `CombatFeedbackEvent` with `source: Option<CombatantId>`.
+- Updated all `emit_combat_feedback` call sites (player attack/cast/item and
+  monster turns) to include the attacker when known.
+- Updated monster-turn flow to emit explicit miss feedback (damage `0`) so
+  miss lines are logged with the proper monster->character pairing.
+- Added plain-text projection of structured lines and log emission to the
+  engine logger (`debug!` + `info!`) so combat events appear in the debug
+  console as well as the on-screen combat log.
+
+#### Structured log model + colour assignment (`src/game/systems/combat.rs`)
+
+- Replaced flat `Vec<String>` lines with structured `CombatLogLine` and
+  `CombatLogSegment` entries.
+- Added `CombatLogColorState` resource for encounter-local monster colour
+  assignments.
+- Added fixed character palette (`COMBAT_LOG_CHARACTER_PALETTE`) with stable
+  deterministic assignment by character name.
+- Added predefined monster palette (`COMBAT_LOG_MONSTER_PALETTE`) with random
+  per-monster assignment from that palette (stable for the full encounter).
+
+#### Scrollable combat log UI (`src/game/systems/combat.rs`)
+
+- Replaced single text node rendering with:
+  - `CombatLogBubbleRoot`
+  - `CombatLogBubbleViewport` (`Overflow::scroll_y()`)
+  - `CombatLogLineList` (dynamic line rows)
+- Updated `update_combat_log_bubble_text` to render each line as a row of
+  coloured text segments.
+- Preserved typewriter reveal by clipping only the newest line across segments.
+- Added `auto_scroll_combat_log_viewport` to keep the viewport pinned to the
+  newest log entries as new lines are appended.
+
+#### Exit cleanup (`src/game/systems/combat.rs`)
+
+- Added `reset_combat_log_colors_on_exit` to clear monster colour mappings when
+  combat ends, preventing cross-encounter colour leakage.
+
+### Tests Added
+
+- `game::systems::combat::combat_log_format_tests::test_character_name_color_is_stable`
+- `game::systems::combat::combat_log_format_tests::test_monster_color_is_stable_per_participant`
+- `game::systems::combat::combat_log_format_tests::test_damage_line_matches_structured_format`
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+- `cargo clippy --all-targets --all-features -- -D warnings` — pass
+- `cargo nextest run --all-features combat_log_format_tests` — pass (`3 passed`)
+- `cargo nextest run --all-features` — one unrelated pre-existing failure in
+  `tests/campaign_integration_tests.rs` (`test_creature_database_load_performance` timing threshold)
+
+---
+
+## Combat System Improvement Phase 5 Remediation: Victory Splash Dismiss on Movement
+
+### Overview
+
+The victory summary overlay (`VictorySummaryRoot`) persisted indefinitely after
+combat because no teardown path existed once control returned to exploration.
+This remediation dismisses that overlay as soon as the player resumes movement
+controls after combat.
+
+### Components Implemented
+
+#### Input-system dismissal hook (`src/game/systems/input.rs`)
+
+`handle_input` now takes:
+
+- `Commands` to despawn UI entities
+- `Query<Entity, With<VictorySummaryRoot>>` to find active victory overlays
+
+When a movement control is successfully applied (`moved == true`), the system
+despawns all `VictorySummaryRoot` entities.
+
+This keeps combat reward visibility intact while the player is idle and removes
+the overlay at the first normal movement action after combat.
+
+#### Regression test (`src/game/systems/input.rs`)
+
+Added:
+
+- `test_victory_overlay_dismissed_after_party_moves`
+
+The test seeds a victory overlay marker, simulates movement control input, runs
+`handle_input`, and asserts that:
+
+1. Movement control was applied (`party_facing` changes)
+2. No `VictorySummaryRoot` entities remain
+
+### Files Changed
+
+- `src/game/systems/input.rs` — movement-triggered victory overlay cleanup in
+  `handle_input`, plus new regression test.
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+- `cargo clippy --all-targets --all-features -- -D warnings` — pass
+- `cargo nextest run --all-features` — pass (`2439 passed`, `8 skipped`)
+
+---
+
+## Combat System Improvement Phase 4: Defeated Monster World-Mesh Removal
+
+### Overview
+
+Phase 4 ensures that when the party wins combat the monster's 3D mesh
+disappears from the world and the `MapEvent::Encounter` entry is removed from
+the map data, so the player cannot re-trigger the same fight by walking back
+over the tile.
+
+Before this phase the victory handler called `exit_combat()` but left both the
+creature entity and the map event intact. Walking back to the tile immediately
+restarted the encounter.
+
+### Components Implemented
+
+#### `encounter_position` and `encounter_map_id` fields on `CombatResource` (`src/game/systems/combat.rs`)
+
+Two new optional fields were added to `CombatResource`:
+
+- `pub encounter_position: Option<crate::domain::types::Position>` — tile that
+  triggered the encounter.
+- `pub encounter_map_id: Option<crate::domain::types::MapId>` — map that owns
+  the tile.
+
+Both `CombatResource::new()` and `CombatResource::clear()` initialise/reset
+the fields to `None`.
+
+#### `CombatStarted` message extended (`src/game/systems/combat.rs`)
+
+`CombatStarted` was previously a unit struct. Two optional fields were added:
+
+- `pub encounter_position: Option<crate::domain::types::Position>`
+- `pub encounter_map_id: Option<crate::domain::types::MapId>`
+
+`None` values are used for programmatically started combats that are not tied
+to a map tile.
+
+#### `handle_events` populates the message (`src/game/systems/events.rs`)
+
+The `MapEvent::Encounter` branch of `handle_events` now passes the trigger
+position and current map id into the `CombatStarted` message rather than
+through a direct resource write (which would have pushed the system over
+Bevy's parameter-count limit).
+
+#### `handle_combat_started` stores position in `CombatResource` (`src/game/systems/combat.rs`)
+
+`handle_combat_started` now reads `msg.encounter_position` and
+`msg.encounter_map_id` from the incoming message and writes them to
+`CombatResource` so `handle_combat_victory` can consume them later.
+
+#### `handle_combat_victory` removes the map event and clears position (`src/game/systems/combat.rs`)
+
+Before calling `process_combat_victory_with_rng`, `handle_combat_victory` now:
+
+1. Reads `combat_res.encounter_position` and `combat_res.encounter_map_id`.
+2. Calls `global_state.0.world.get_map_mut(map_id)?.remove_event(pos)` to
+   delete the `MapEvent::Encounter` from the domain map, preventing
+   re-triggering.
+3. Resets both fields to `None` so a subsequent combat on a different tile
+   is unaffected.
+
+#### `EncounterVisualMarker` component (`src/game/systems/map.rs`)
+
+A new `Copy` component was added:
+
+```src/game/systems/map.rs#L60-71
+/// Component tagging an entity as a visual marker for a map encounter.
+///
+/// Despawned by `cleanup_encounter_visuals` when the backing `MapEvent::Encounter`
+/// is removed from the map data (e.g. after the party wins combat against it).
+#[derive(bevy::prelude::Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncounterVisualMarker {
+    /// Map ID this entity belongs to.
+    pub map_id: types::MapId,
+    /// Tile position of the originating `MapEvent::Encounter`.
+    pub position: types::Position,
+}
+```
+
+#### `EncounterVisualMarker` attached in `spawn_map` (`src/game/systems/map.rs`)
+
+The `world::MapEvent::Encounter` branch of `spawn_map` now inserts
+`EncounterVisualMarker { map_id: map.id, position: *position }` into the
+spawned creature entity alongside the existing `CreatureVisual`, `MapEntity`,
+`TileCoord`, and `Visibility` components.
+
+#### `cleanup_encounter_visuals` system (`src/game/systems/map.rs`)
+
+A new system mirrors `cleanup_recruitable_visuals`:
+
+- Iterates all `EncounterVisualMarker` entities.
+- If the map is no longer loaded, despawns the entity.
+- If the backing `MapEvent::Encounter` is absent from the map, despawns the
+  entity.
+- Otherwise leaves the entity intact.
+
+The system is registered in `MapManagerPlugin::build` alongside the four
+existing cleanup/spawn systems.
+
+### Testing
+
+| Test ID | Test Name                                            | File        | Result |
+| ------- | ---------------------------------------------------- | ----------- | ------ |
+| T4-E1   | `test_encounter_position_stored_on_combat_start`     | `combat.rs` | PASS   |
+| T4-E2   | `test_encounter_event_removed_on_victory`            | `combat.rs` | PASS   |
+| T4-E3   | `test_encounter_position_cleared_after_victory`      | `combat.rs` | PASS   |
+| T4-E4   | `test_encounter_visual_despawned_when_event_removed` | `map.rs`    | PASS   |
+| T4-E5   | `test_encounter_visual_kept_when_event_present`      | `map.rs`    | PASS   |
+
+### Files Changed
+
+- `src/game/systems/combat.rs` — `CombatResource` fields, `CombatStarted`
+  message fields, `handle_combat_started` consumer, `handle_combat_victory`
+  removal logic, three T4 tests.
+- `src/game/systems/events.rs` — `MapEvent::Encounter` branch writes position
+  into the `CombatStarted` message.
+- `src/game/systems/map.rs` — `EncounterVisualMarker` declaration,
+  `spawn_map` attachment, `cleanup_encounter_visuals` system, plugin
+  registration, two T4 tests.
+
+### Deliverables Checklist
+
+- [x] `encounter_position` and `encounter_map_id` fields added to `CombatResource`; `new()` and `clear()` updated.
+- [x] `CombatStarted` message carries `encounter_position` and `encounter_map_id`.
+- [x] `handle_combat_started` stores both fields into `CombatResource`.
+- [x] `handle_combat_victory` removes `MapEvent::Encounter` from map data and clears stored position.
+- [x] `EncounterVisualMarker` component declared in `src/game/systems/map.rs` and attached during `spawn_map`.
+- [x] `cleanup_encounter_visuals` system implemented and registered in `MapManagerPlugin`.
+- [x] All 5 tests T4-E1 through T4-E5 pass under `cargo nextest run --all-features`.
+
+### Success Criteria Verification
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — 0 errors.
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
+- `cargo nextest run --all-features` — 2438 tests, 2438 passed, 0 failed.
+- After winning combat the monster mesh disappears from the world on the next
+  frame — verified by T4-E4.
+- Walking back to the encounter tile after victory does not restart combat —
+  verified by T4-E2.
+- `CombatResource` encounter fields are reset cleanly so a subsequent combat
+  on a different tile is unaffected — verified by T4-E3.
+
+---
+
+## Combat System Improvement Phase 3: Visual Combat Feedback and Animation State
+
+### Overview
+
+Phase 3 anchors floating damage numbers to their target's UI card, adds
+effect-type visual differentiation via colour-coded text, wires
+`CombatTurnState::Animating` as a real runtime transition in all three action
+system wrappers, surfaces monster-turn damage feedback, and adds in-world
+(screen-space) monster HP hover bars that spawn at combat start and despawn
+on combat exit.
+
+### Components Implemented
+
+#### `CombatFeedbackEffect` enum (`src/game/systems/combat.rs`)
+
+Four variants model every outcome of a combat action:
+
+- `Damage(u32)` — positive damage dealt to the target
+- `Heal(u32)` — HP restored to the target
+- `Miss` — the attack missed
+- `Status(String)` — a condition or SP-restore label
+
+#### `CombatFeedbackEvent` message (`src/game/systems/combat.rs`)
+
+Registered with `.add_message::<CombatFeedbackEvent>()`. Every resolved
+action writes one event so `spawn_combat_feedback` (the reader system) has a
+single, typed source of truth for every visual result.
+
+#### Feedback colour constants (`src/game/systems/combat.rs`)
+
+Four public constants align with the four `CombatFeedbackEffect` variants:
+
+- `FEEDBACK_COLOR_DAMAGE` — red (`srgb(1.0, 0.3, 0.3)`)
+- `FEEDBACK_COLOR_HEAL` — green (`srgb(0.3, 1.0, 0.3)`)
+- `FEEDBACK_COLOR_MISS` — grey (`srgb(0.8, 0.8, 0.8)`)
+- `FEEDBACK_COLOR_STATUS` — yellow (`srgb(1.0, 0.8, 0.0)`)
+
+#### `emit_combat_feedback` helper (`src/game/systems/combat.rs`)
+
+A private free function shared by all four emitter sites
+(`handle_attack_action`, `handle_cast_spell_action`,
+`handle_use_item_action`, and `execute_monster_turn`). Accepts an
+`Option<MessageWriter<CombatFeedbackEvent>>` so it is a no-op in harnesses
+that do not register the message bus.
+
+#### `spawn_combat_feedback` system (`src/game/systems/combat.rs`)
+
+Reads `CombatFeedbackEvent` messages each frame and spawns `FloatingDamage`
+nodes:
+
+- **Monster targets** — node is spawned as a child of the matching
+  `EnemyCard` entity (anchored to the card).
+- **Player targets** — node is spawned at the bottom-left HUD area
+  (`bottom: 80px, left: 16px`).
+- Colour and font size are selected from the four constants based on the
+  `CombatFeedbackEffect` variant.
+
+Registered after all action handlers and after `execute_monster_turn`:
+
+```src/game/systems/combat.rs#L557-580
+.add_systems(
+    Update,
+    spawn_combat_feedback
+        .after(handle_attack_action)
+        .after(handle_cast_spell_action)
+        .after(handle_use_item_action)
+        .after(execute_monster_turn),
+)
+```
+
+#### Inline `FloatingDamage` spawn blocks replaced
+
+All four previously inline spawn blocks in `handle_attack_action`,
+`handle_cast_spell_action`, `handle_use_item_action`, and the monster-turn
+handler have been removed. Each now calls `emit_combat_feedback` instead,
+routing all visual output through the single event bus and
+`spawn_combat_feedback`.
+
+#### `CombatTurnState::Animating` integration
+
+In `handle_attack_action`, `handle_cast_spell_action`, and
+`handle_use_item_action`, the turn state is set to `Animating` immediately
+before the `perform_*_with_rng` domain call and restored to the prior
+state after it returns (if `perform_*` has not already naturally advanced
+the turn to a new state):
+
+```src/game/systems/combat.rs#L1885-1897
+// Phase 3: set Animating before the domain call
+let prior_turn_state = turn_state.0;
+turn_state.0 = CombatTurnState::Animating;
+// ... perform_*_with_rng call ...
+// Phase 3: restore turn state after action
+if matches!(turn_state.0, CombatTurnState::Animating) {
+    turn_state.0 = prior_turn_state;
+}
+```
+
+This makes `CombatTurnState::Animating` a real runtime transition verified by
+T3-4, and the existing `hide_indicator_during_animation` system in
+`combat_visual.rs` already responds to it correctly (verified by T3-5).
+
+#### `MonsterHpHoverBar` component and systems (`src/game/systems/combat.rs`)
+
+Three new systems manage per-monster HP bars:
+
+- **`spawn_monster_hp_hover_bars`** — runs every frame in combat; spawns one
+  container panel + one fill node per alive monster that does not yet have a
+  bar. Uses `MonsterHpHoverBar { participant_index }` and
+  `MonsterHpHoverBarFill { participant_index }` markers.
+- **`update_monster_hp_hover_bars`** — runs every frame; reads
+  `MonsterHpHoverBarFill` entities and updates `Node::width` (as
+  `Val::Percent`) and `BackgroundColor` from current HP ratios.
+- **`cleanup_monster_hp_hover_bars`** — runs every frame; despawns all
+  `MonsterHpHoverBar` entities when the game mode is not `Combat`.
+
+All three registered in `CombatPlugin::build`.
+
+### Testing
+
+Eight tests were added (T3-1 through T3-8), all passing:
+
+| Test ID | Test Name                                 | Description                                                         |
+| ------- | ----------------------------------------- | ------------------------------------------------------------------- |
+| T3-1    | `test_feedback_event_emitted_on_hit`      | Attack that hits produces a `FloatingDamage` entity.                |
+| T3-2    | `test_feedback_event_emitted_on_miss`     | Attack that misses produces a `FloatingDamage` entity ("Miss").     |
+| T3-3    | `test_monster_turn_emits_feedback`        | Monster turn writes `CombatFeedbackEvent` when damage is dealt.     |
+| T3-4    | `test_animating_state_set_during_action`  | Turn state is not stuck in `Animating` after action completes.      |
+| T3-5    | `test_indicator_hidden_during_animating`  | `TurnIndicator` is `Hidden` during `Animating` and `Visible` after. |
+| T3-6    | `test_hover_bars_spawned_on_combat_start` | Two monsters yield 2 `MonsterHpHoverBar` entities after one frame.  |
+| T3-7    | `test_hover_bars_removed_on_combat_exit`  | All `MonsterHpHoverBar` entities despawn after combat exits.        |
+| T3-8    | `test_hover_bar_hp_updated_after_damage`  | Fill width reflects reduced HP after `CombatResource` is mutated.   |
+
+### Files Changed
+
+- `src/game/systems/combat.rs` — all Phase 3 implementation and tests
+
+### Deliverables Checklist
+
+- [x] `CombatFeedbackEvent` and `CombatFeedbackEffect` declared and registered
+- [x] `emit_combat_feedback` helper implemented; `spawn_combat_feedback` system registered
+- [x] All four inline `FloatingDamage` spawn blocks replaced with `emit_combat_feedback` calls
+- [x] Floating numbers anchored to target's `EnemyCard` or player HUD slot
+- [x] Effect-type colour constants defined; `spawn_combat_feedback` uses them
+- [x] `execute_monster_turn` writes `CombatFeedbackEvent` for player targets
+- [x] `CombatTurnState::Animating` set and cleared in all three action system wrappers
+- [x] `MonsterHpHoverBar` spawn, update, and cleanup systems implemented and registered
+- [x] All 8 tests T3-1 through T3-8 pass under `cargo nextest run --all-features`
+
+### Success Criteria Verification
+
+- `cargo nextest run --all-features` — 2433 tests run, 2433 passed, 0 failures
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo fmt --all` — no changes
+- Every resolved action (player and monster) produces a `FloatingDamage` entity
+- Feedback nodes are colour-coded per effect type
+- `CombatTurnState::Animating` is a real runtime state (T3-4, T3-5)
+- Monster HP hover bars spawn at combat start (T3-6) and despawn on exit (T3-7)
+
+---
+
+## Combat System Improvement Phase 2: Target Selection and Action Completeness
+
+### Overview
+
+Phase 2 adds keyboard target cycling as a complement to the existing mouse
+`select_target` click handling. Both input paths now converge on a single
+`confirm_attack_target` helper, guaranteeing identical `AttackAction` semantics
+regardless of whether the player uses a mouse click or a keyboard `Enter` press.
+
+A new public constant pair (`COMBAT_ACTION_COUNT` / `COMBAT_ACTION_ORDER`)
+replaces all inline literals in `combat_input_system` and `update_action_highlight`,
+making the action ordering a single, verifiable source of truth.
+
+### Components Implemented
+
+#### `active_target_index: Option<usize>` field on `ActionMenuState` (`src/game/systems/combat.rs`)
+
+- Added to the existing `ActionMenuState` resource.
+- Set to `Some(0)` when `dispatch_combat_action` enters Attack / target-select
+  mode; `None` when target-select mode is exited (confirm or cancel).
+- The `Default` impl initialises it to `None`, so no resource initialisation
+  changes are required elsewhere.
+
+#### `COMBAT_ACTION_COUNT` and `COMBAT_ACTION_ORDER` constants (`src/game/systems/combat.rs`)
+
+- `pub const COMBAT_ACTION_COUNT: usize = 5;` — replaces the inline `5` used
+  for Tab-wrap arithmetic.
+- `pub const COMBAT_ACTION_ORDER: [ActionButtonType; COMBAT_ACTION_COUNT]` —
+  replaces the private `ACTION_BUTTON_ORDER` array as the canonical mapping from
+  `active_index` to `ActionButtonType`. The private alias is retained for
+  internal callers to avoid churn.
+- Both constants are declared `pub` so test code and future UI systems can
+  reference them without duplication.
+
+#### `confirm_attack_target` helper function (`src/game/systems/combat.rs`)
+
+- Extracted from the inline logic that was previously duplicated in
+  `select_target` (mouse path).
+- Signature: `fn confirm_attack_target(attacker, target_monster_idx, target_sel, action_menu_state, attack_writer)`.
+- Writes `AttackAction { attacker, target: CombatantId::Monster(target_monster_idx) }`,
+  clears `TargetSelection.0 = None`, and resets `active_target_index = None`.
+- Both the mouse (`select_target`) and keyboard (`Enter` in target-select mode)
+  paths call this function so their semantics are provably identical.
+
+#### `resolve_alive_monster_participant_index` helper function (`src/game/systems/combat.rs`)
+
+- Maps the _n_-th alive (`hp.current > 0`) monster in `participants` order to
+  the real participant index used by `AttackAction`.
+- Used by both `combat_input_system` (keyboard confirm) and
+  `update_target_highlight` (UI highlight) to keep the index-resolution logic
+  in one place.
+
+#### Updated `combat_input_system` (`src/game/systems/combat.rs`)
+
+- Keyboard handling now splits on `target_sel.0.is_some()`:
+  - **Target-select mode active**: `Tab` cycles `active_target_index` modulo
+    alive-monster count; `Enter` calls `confirm_attack_target`; `Escape` clears
+    both `TargetSelection.0` and `active_target_index`.
+  - **Action-menu mode**: existing `Tab`/`Enter`/`Escape` behaviour unchanged,
+    with `5` replaced by `COMBAT_ACTION_COUNT`.
+- `dispatch_combat_action` now receives `&mut ActionMenuState` so it can set
+  `active_target_index = Some(0)` on Attack entry.
+- `attack_writer: Option<MessageWriter<AttackAction>>` added as a system
+  parameter to support keyboard confirm path.
+
+#### `update_target_highlight` system (`src/game/systems/combat.rs`)
+
+- New system, registered after `enter_target_selection` and after
+  `combat_input_system`.
+- When `TargetSelection.0.is_some()` and `active_target_index.is_some()`,
+  resolves the alive-monster index to a participant index and applies
+  `TURN_INDICATOR_COLOR` to that card's `BackgroundColor`, distinguishing the
+  keyboard-selected card from the generic `ENEMY_CARD_HIGHLIGHT_COLOR` applied
+  to all cards by `enter_target_selection`.
+- No-op when not in target-select mode or when `active_target_index` is `None`.
+
+#### `select_target` system refactor (`src/game/systems/combat.rs`)
+
+- Now calls `confirm_attack_target` instead of inline write + clear, completing
+  the mouse/keyboard path unification.
+- Added `mut action_menu_state: ResMut<ActionMenuState>` parameter so
+  `active_target_index` is properly cleared on mouse click.
+
+### Testing
+
+All 5 required tests (T2-1 through T2-5) are implemented in the `mod tests`
+block inside `src/game/systems/combat.rs`:
+
+| Test ID | Test Name                                               | Description                                                                                                                                                   |
+| ------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T2-1    | `test_tab_cycles_targets`                               | Builds 3 alive monsters; simulates Tab 3 times; verifies wrap 0→1→2→0. Pure logic test, no Bevy app needed.                                                   |
+| T2-2    | `test_enter_confirms_target`                            | Full Bevy app with 2 monsters; sets `active_target_index = Some(1)` and presses `Enter`; asserts `TargetSelection == None` and `active_target_index == None`. |
+| T2-3    | `test_escape_cancels_target_selection`                  | Full Bevy app; enters target-select mode; presses `Escape`; asserts both `TargetSelection.0 == None` and `active_target_index == None`.                       |
+| T2-4    | `test_mouse_click_target_matches_keyboard_confirm`      | Full Bevy app with 1 monster; enters target-select mode; clicks `EnemyCard` via `Interaction::Pressed`; asserts same clearing behaviour as keyboard confirm.  |
+| T2-5    | `test_combat_action_order_constant_matches_spawn_order` | Pure constant check; asserts all 5 `ActionButtonType` variants in correct order and `COMBAT_ACTION_COUNT == 5`.                                               |
+
+All 2,425 project tests pass with 0 failures.
+
+### Files Changed
+
+- `src/game/systems/combat.rs` — all changes described above.
+- `docs/explanation/implementations.md` — this entry.
+
+### Deliverables Checklist
+
+- [x] `active_target_index: Option<usize>` field added to `ActionMenuState`.
+- [x] Keyboard target cycling (`Tab`) implemented in `combat_input_system` when `TargetSelection.0.is_some()`.
+- [x] Keyboard target confirmation (`Enter`) implemented via `confirm_attack_target`.
+- [x] `Escape` cancels target selection and resets `active_target_index`.
+- [x] `confirm_attack_target` helper extracted; mouse and keyboard both call it.
+- [x] `update_target_highlight` system implemented and registered after `enter_target_selection`.
+- [x] `COMBAT_ACTION_COUNT` and `COMBAT_ACTION_ORDER` constants defined and used.
+- [x] Private `ACTION_BUTTON_ORDER` alias retained for backward compatibility.
+- [x] All 5 tests T2-1 through T2-5 pass.
+
+### Success Criteria Verification
+
+- `cargo nextest run --all-features` passes: 2,425 tests, 0 failures.
+- Full keyboard-only attack flow works: `Tab` to Attack → `Enter` → `Tab` to target → `Enter` executes attack.
+- Mouse target click and keyboard target confirm produce identical `AttackAction` messages (verified by T2-4).
+- `Escape` during target selection cleanly resets state (verified by T2-3).
+- `COMBAT_ACTION_ORDER` covers all 5 variants in spawn order (verified by T2-5).
+
+---
+
+## Combat System Improvement Phase 1: Input Reliability and Action Selection
+
+### Overview
+
+Phase 1 of the combat system improvement plan fixes input reliability issues,
+implements `Tab`/`Enter` keyboard navigation for the action menu, enforces
+`Interaction::Pressed`-only mouse activation, removes conflicting `A`/`D`/`F`
+keyboard shortcuts, and introduces a unified dispatch path that both mouse and
+keyboard routes share. Movement input is now silently blocked while
+`GameMode::Combat` is active.
+
+### Components Implemented
+
+#### `ActionMenuState` Resource (`src/game/systems/combat.rs`)
+
+A new ECS resource tracking keyboard navigation state for the action menu:
+
+- `active_index: usize` — index (0–4) of the currently highlighted action
+  button. Order is `[Attack, Defend, Cast, Item, Flee]` matching the spawn
+  order in `setup_combat_ui`.
+- `confirmed: bool` — set to `true` when `Enter` is pressed; consumed by the
+  unified dispatch function on the same frame.
+- Default: `active_index = 0` (Attack), `confirmed = false`.
+- Registered in `CombatPlugin::build` via `.insert_resource(ActionMenuState::default())`.
+
+#### `ActiveActionHighlight` Marker Component (`src/game/systems/combat.rs`)
+
+A zero-size marker component (`Component`, `Debug`, `Clone`, `Copy`) used to
+tag the currently highlighted `ActionButton` entity. Used by
+`update_action_highlight` to drive background colour swaps.
+
+#### `ACTION_BUTTON_ORDER` Constant (`src/game/systems/combat.rs`)
+
+A `const` array `[ActionButtonType; 5]` that maps `active_index` to
+`ActionButtonType`. This is the single source of truth for the ordered action
+list used by both the highlight system and the keyboard dispatch path.
+
+#### `dispatch_combat_action` Helper Function (`src/game/systems/combat.rs`)
+
+A free function that both mouse and keyboard routes call to ensure identical
+dispatch semantics:
+
+- `Attack` → sets `target_sel.0 = Some(actor)` to enter target selection.
+- `Defend` → writes `DefendAction { combatant: actor }`.
+- `Flee` → writes `FleeAction`.
+- `Cast` / `Item` → Phase 4 placeholder (no-op comment).
+
+#### `combat_input_system` Rewrite (`src/game/systems/combat.rs`)
+
+The existing system was rewritten to address all Phase 1 identified issues:
+
+- **Removed** `KeyA`, `KeyD`, `KeyF` keyboard shortcuts (I-1 fix).
+- **Fixed** mouse activation: changed `Interaction != None` to
+  `Interaction::Pressed` so hover never triggers an action (I-3 fix).
+- **Added** `Tab` just-pressed handling: increments `active_index` modulo 5
+  (I-5 fix).
+- **Added** `Enter` just-pressed handling: sets `confirmed = true`; the
+  confirmed flag is consumed immediately to call `dispatch_combat_action` with
+  the type at `active_index` (I-4, I-5 fix).
+- **Added** `Escape` just-pressed handling: clears `target_sel.0` if active.
+- **Added** blocked-turn feedback: emits `info!("Combat: input blocked — not
+player turn")` when input arrives during non-`PlayerTurn` state (I-7 fix).
+- Both mouse and keyboard dispatch routes call `dispatch_combat_action` (I-4
+  fix).
+
+#### `update_action_highlight` System (`src/game/systems/combat.rs`)
+
+A new `Update` system registered after `combat_input_system`:
+
+- Reads `ActionMenuState::active_index`.
+- Sets `BackgroundColor(ACTION_BUTTON_HOVER_COLOR)` on the button whose type
+  matches `ACTION_BUTTON_ORDER[active_index]`.
+- Sets `BackgroundColor(ACTION_BUTTON_COLOR)` on all other buttons.
+
+#### `update_combat_ui` Reset (`src/game/systems/combat.rs`)
+
+`update_combat_ui` now takes `ResMut<ActionMenuState>` as a parameter. When
+the action menu `Visibility` transitions from `Hidden` to `Visible` (i.e., the
+player turn begins), it resets:
+
+```src/game/systems/combat.rs#L1070-1083
+// Reset highlight index whenever the menu transitions to visible.
+if *visibility == Visibility::Hidden && new_visibility == Visibility::Visible {
+    action_menu_state.active_index = 0;
+    action_menu_state.confirmed = false;
+}
+```
+
+This ensures the `Attack` button is always highlighted by default on every
+menu open (I-6 fix, requirement #2).
+
+#### `handle_input` Combat Guard (`src/game/systems/input.rs`)
+
+A `GameMode::Combat(_)` early-return guard was inserted immediately after the
+existing `GameMode::Menu` guard (line ~465):
+
+```src/game/systems/input.rs#L465-470
+// Block all movement/interaction input when in Combat mode.
+// Combat action input is handled exclusively by combat_input_system.
+if matches!(game_state.mode, crate::application::GameMode::Combat(_)) {
+    return;
+}
+```
+
+This fixes I-2: movement/rotation keys (`W`, `S`, `A`, `D`, arrow keys) no
+longer reach `TurnLeft`/`TurnRight`/`MoveForward`/`MoveBack` branches while
+the player is in combat.
+
+#### `select_target` Fix (`src/game/systems/combat.rs`)
+
+The enemy-card click handler `select_target` was also updated to use
+`Interaction::Pressed` instead of `Interaction != None`, keeping it consistent
+with `combat_input_system`.
+
+### Testing
+
+Ten tests were added covering all Phase 1 requirements:
+
+| Test ID     | Test Name                                       | File        | Result |
+| ----------- | ----------------------------------------------- | ----------- | ------ |
+| T1-1        | `test_tab_cycles_through_actions`               | `combat.rs` | PASS   |
+| T1-2        | `test_tab_wraps_at_end`                         | `combat.rs` | PASS   |
+| T1-3        | `test_default_highlight_is_attack_on_menu_open` | `combat.rs` | PASS   |
+| T1-4        | `test_enter_dispatches_active_action`           | `combat.rs` | PASS   |
+| T1-5        | `test_mouse_pressed_dispatches_action`          | `combat.rs` | PASS   |
+| T1-6        | `test_mouse_hover_does_not_dispatch`            | `combat.rs` | PASS   |
+| T1-7        | `test_key_a_does_not_dispatch_in_combat`        | `combat.rs` | PASS   |
+| T1-8 (stub) | `test_movement_blocked_in_combat_mode`          | `combat.rs` | PASS   |
+| T1-8 (full) | `test_movement_blocked_in_combat_mode`          | `input.rs`  | PASS   |
+| T1-9        | `test_blocked_input_logs_feedback`              | `combat.rs` | PASS   |
+
+All 2420 total tests pass with zero warnings.
+
+### Files Changed
+
+- `src/game/systems/combat.rs` — `ActionMenuState`, `ActiveActionHighlight`,
+  `ACTION_BUTTON_ORDER`, `dispatch_combat_action`, `update_action_highlight`,
+  rewritten `combat_input_system`, updated `update_combat_ui`, fixed
+  `select_target`, registered resources and systems in `CombatPlugin::build`,
+  added 9 new tests.
+- `src/game/systems/input.rs` — Added `GameMode::Combat(_)` guard in
+  `handle_input`; added `combat_guard_tests::test_movement_blocked_in_combat_mode`.
+- `docs/explanation/implementations.md` — This entry.
+
+### Deliverables Checklist
+
+- [x] `ActionMenuState` resource declared and registered in `CombatPlugin::build`.
+- [x] `update_action_highlight` system implemented and registered after `combat_input_system`.
+- [x] `combat_input_system`: `A`/`D`/`F` shortcuts removed; `Interaction::Pressed` used;
+      `Tab`/`Enter` keyboard traversal implemented; unified dispatch through
+      `dispatch_combat_action`.
+- [x] `handle_input` in `src/game/systems/input.rs`: `GameMode::Combat(_)` guard added
+      before movement processing.
+- [x] Default `Attack` highlight applied when action menu becomes `Visible` (via
+      `update_combat_ui` reset).
+- [x] Blocked-turn info log emitted when input arrives during non-`PlayerTurn` state.
+- [x] All 9 tests in T1-1 through T1-9 pass under `cargo nextest run --all-features`.
+
+### Success Criteria Verification
+
+- `cargo nextest run --all-features` passes with no regressions (2420/2420).
+- `Tab` cycles the highlighted action; `Enter` dispatches it — verified by T1-1, T1-2, T1-4.
+- `Attack` button is highlighted on every menu open — verified by T1-3.
+- `Interaction::Pressed` is the sole mouse activation event — verified by T1-5 and T1-6.
+- `A` / `D` / `F` no longer trigger any combat action — verified by T1-7.
+- Movement and rotation input during combat has no effect on party position — verified by T1-8.
 
 ---
 

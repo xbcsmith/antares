@@ -222,6 +222,14 @@ pub struct GraphicsConfig {
 
     /// Shadow rendering quality
     pub shadow_quality: ShadowQuality,
+
+    /// Show combat monster HP hover bars projected above monster visuals.
+    #[serde(default = "default_show_combat_monster_hp_bars")]
+    pub show_combat_monster_hp_bars: bool,
+}
+
+fn default_show_combat_monster_hp_bars() -> bool {
+    true
 }
 
 impl Default for GraphicsConfig {
@@ -232,6 +240,7 @@ impl Default for GraphicsConfig {
             vsync: true,
             msaa_samples: 4,
             shadow_quality: ShadowQuality::Medium,
+            show_combat_monster_hp_bars: true,
         }
     }
 }
@@ -518,6 +527,7 @@ mod tests {
         assert!(config.graphics.vsync);
         assert_eq!(config.graphics.msaa_samples, 4);
         assert_eq!(config.graphics.shadow_quality, ShadowQuality::Medium);
+        assert!(config.graphics.show_combat_monster_hp_bars);
 
         // Verify audio defaults
         assert_eq!(config.audio.master_volume, 0.8);
@@ -758,6 +768,7 @@ mod tests {
                 vsync: false,
                 msaa_samples: 8,
                 shadow_quality: High,
+                show_combat_monster_hp_bars: false,
             ),
             audio: (
                 master_volume: 0.7,
@@ -798,8 +809,58 @@ mod tests {
 
         assert_eq!(config.graphics.resolution, (1920, 1080));
         assert!(config.graphics.fullscreen);
+        assert!(!config.graphics.show_combat_monster_hp_bars);
         assert_eq!(config.audio.master_volume, 0.7);
         assert_eq!(config.camera.fov, 80.0);
+    }
+
+    #[test]
+    fn test_load_valid_config_file_without_combat_hp_toggle_defaults_true() {
+        let ron_content = r#"(
+            graphics: (
+                resolution: (1024, 768),
+                fullscreen: false,
+                vsync: true,
+                msaa_samples: 4,
+                shadow_quality: Medium,
+            ),
+            audio: (
+                master_volume: 0.8,
+                music_volume: 0.6,
+                sfx_volume: 1.0,
+                ambient_volume: 0.5,
+                enable_audio: true,
+            ),
+            controls: (
+                move_forward: ["W"],
+                move_back: ["S"],
+                turn_left: ["A"],
+                turn_right: ["D"],
+                interact: ["E"],
+                menu: ["Escape"],
+                movement_cooldown: 0.2,
+            ),
+            camera: (
+                mode: FirstPerson,
+                eye_height: 0.6,
+                fov: 70.0,
+                near_clip: 0.1,
+                far_clip: 1000.0,
+                smooth_rotation: false,
+                rotation_speed: 180.0,
+                light_height: 5.0,
+                light_intensity: 2000000.0,
+                light_range: 60.0,
+                shadows_enabled: true,
+            ),
+        )"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(ron_content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config = GameConfig::load_or_default(temp_file.path()).unwrap();
+        assert!(config.graphics.show_combat_monster_hp_bars);
     }
 
     #[test]
