@@ -5195,9 +5195,6 @@ impl MapsEditorState {
     ) -> bool {
         let mut changed = false;
 
-        ui.heading("Terrain-Specific Settings");
-        ui.separator();
-
         match terrain_type {
             TerrainType::Grass => {
                 // Grass density dropdown

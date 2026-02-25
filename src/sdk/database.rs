@@ -919,6 +919,11 @@ impl NpcDatabase {
         self.npcs.values().filter(|n| n.is_innkeeper).collect()
     }
 
+    /// Returns all priest NPCs
+    pub fn priests(&self) -> Vec<&crate::domain::world::NpcDefinition> {
+        self.npcs.values().filter(|n| n.is_priest).collect()
+    }
+
     /// Returns NPCs that give quests
     pub fn quest_givers(&self) -> Vec<&crate::domain::world::NpcDefinition> {
         self.npcs.values().filter(|n| n.gives_quests()).collect()
@@ -2265,6 +2270,10 @@ mod tests {
             faction: Some("Village".to_string()),
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         db.add_npc(npc.clone()).expect("Failed to add NPC");
@@ -2335,6 +2344,28 @@ mod tests {
         let innkeepers = db.innkeepers();
         assert_eq!(innkeepers.len(), 1);
         assert_eq!(innkeepers[0].id, "inn_1");
+    }
+
+    #[test]
+    fn test_npc_database_priests() {
+        let mut db = NpcDatabase::new();
+
+        let priest =
+            crate::domain::world::NpcDefinition::priest("priest_1", "Father Alaric", "priest.png");
+
+        let merchant =
+            crate::domain::world::NpcDefinition::merchant("merchant_1", "Shop", "merchant.png");
+
+        let guard = crate::domain::world::NpcDefinition::new("guard_1", "City Guard", "guard.png");
+
+        db.add_npc(priest).expect("Failed to add priest");
+        db.add_npc(merchant).expect("Failed to add merchant");
+        db.add_npc(guard).expect("Failed to add guard");
+
+        let priests = db.priests();
+        assert_eq!(priests.len(), 1);
+        assert_eq!(priests[0].id, "priest_1");
+        assert!(priests[0].is_priest);
     }
 
     #[test]

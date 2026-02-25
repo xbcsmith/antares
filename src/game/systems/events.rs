@@ -831,6 +831,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -892,6 +896,10 @@ mod tests {
             faction: None,
             is_merchant: true,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -1091,6 +1099,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: true,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -1170,6 +1182,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: true,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -1247,6 +1263,10 @@ mod tests {
                 faction: None,
                 is_merchant: false,
                 is_innkeeper: true,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
             })
             .unwrap();
 

@@ -1948,6 +1948,14 @@ pub struct ResolvedNpc {
     pub is_merchant: bool,
     /// Whether NPC is an innkeeper
     pub is_innkeeper: bool,
+    /// Whether NPC is a priest offering healing/curing services
+    pub is_priest: bool,
+    /// Optional stock template ID for initializing merchant inventory
+    pub stock_template: Option<String>,
+    /// Optional inline service catalog for priest or innkeeper NPCs
+    pub service_catalog: Option<crate::domain::inventory::ServiceCatalog>,
+    /// Optional per-NPC economy settings overriding campaign defaults
+    pub economy: Option<crate::domain::inventory::NpcEconomySettings>,
 }
 
 impl ResolvedNpc {
@@ -1975,6 +1983,10 @@ impl ResolvedNpc {
     ///     faction: Some("City Watch".to_string()),
     ///     is_merchant: false,
     ///     is_innkeeper: false,
+    ///     is_priest: false,
+    ///     stock_template: None,
+    ///     service_catalog: None,
+    ///     economy: None,
     /// };
     ///
     /// let placement = NpcPlacement::new("guard", Position::new(5, 5));
@@ -2000,6 +2012,10 @@ impl ResolvedNpc {
             faction: definition.faction.clone(),
             is_merchant: definition.is_merchant,
             is_innkeeper: definition.is_innkeeper,
+            is_priest: definition.is_priest,
+            stock_template: definition.stock_template.clone(),
+            service_catalog: definition.service_catalog.clone(),
+            economy: definition.economy.clone(),
         }
     }
 }
@@ -2388,6 +2404,10 @@ mod map_npc_resolution_tests {
             faction: Some("City Watch".to_string()),
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         npc_db.add_npc(npc_def).unwrap();
 
@@ -2424,6 +2444,10 @@ mod map_npc_resolution_tests {
             faction: Some("Village".to_string()),
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         npc_db.add_npc(npc_def).unwrap();
 
@@ -2455,6 +2479,10 @@ mod map_npc_resolution_tests {
             faction: Some("Test Faction".to_string()),
             is_merchant: true,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         let placement = NpcPlacement {
@@ -2550,6 +2578,10 @@ mod map_npc_resolution_tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         let placement = NpcPlacement {

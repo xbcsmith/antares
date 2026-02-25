@@ -2,46 +2,196 @@
 
 ## Implementation Status Overview
 
-| Phase                                           | Status      | Date       | Description                                                               |
-| ----------------------------------------------- | ----------- | ---------- | ------------------------------------------------------------------------- |
-| Phase 1                                         | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                                                   |
-| Phase 2                                         | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                                                     |
-| Phase 3                                         | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                                            |
-| Phase 4                                         | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                                              |
-| Phase 5                                         | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                                                |
-| Phase 6                                         | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration                             |
-| Phase 7                                         | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                                                   |
-| Phase 8                                         | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                                              |
-| Phase 9                                         | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                                                |
-| Phase 10                                        | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                                                |
-| **Creature Editor Enhancement Phase 1**         | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**                                       |
-| **Creature Editor Enhancement Phase 2**         | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                                              |
-| **Creature Editor Enhancement Phase 3**         | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)**                            |
-| **Creature Editor Enhancement Phase 4**         | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                                           |
-| **Creature Editor Enhancement Phase 5**         | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**                                         |
-| **Creature Editor UX Fixes Phase 1**            | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry**                            |
-| **Creature Editor UX Fixes Phase 2**            | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**                                 |
-| **Creature Editor UX Fixes Phase 3**            | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**                                   |
-| **Creature Editor UX Fixes Phase 4**            | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**                            |
-| **Creature Editor UX Fixes Remediation**        | ✅ COMPLETE | 2026-07-16 | **Fix stale ID-range tests in creatures_manager**                         |
-| **Creature Editor UX Fixes Phase 3/4 UI Fix**   | ✅ COMPLETE | 2026-07-16 | **Replace SidePanel with TwoColumnLayout; add push_id per row**           |
-| **Creature Editor UX Fixes Toolbar Fix**        | ✅ COMPLETE | 2026-07-16 | **Fix toolbar overflow; surface Register Asset in preview + edit**        |
-| **Creature Editor Register Asset Autocomplete** | ✅ COMPLETE | 2026-07-16 | **Add path autocomplete to Register Asset dialog from assets/creatures/** |
-| **Creature Editor UX Fixes Phase 5**            | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder**                  |
-| **Findings Remediation Phase 1**                | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**                   |
-| **Findings Remediation Phase 2**                | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)**         |
-| **Findings Remediation Phase 3**                | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard**        |
-| **Findings Remediation Phase 4**                | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI**            |
-| **Findings Remediation Phase 5**                | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation**        |
-| **Combat System Improvement Phase 1**           | ✅ COMPLETE | 2026-07-17 | **Input Reliability and Action Selection**                                |
-| **Combat System Improvement Phase 2**           | ✅ COMPLETE | 2026-07-17 | **Target Selection and Action Completeness**                              |
-| **Combat System Improvement Phase 3**           | ✅ COMPLETE | 2026-07-17 | **Visual Combat Feedback and Animation State**                            |
-| **Combat System Improvement Phase 4**           | ✅ COMPLETE | 2026-07-17 | **Defeated Monster World-Mesh Removal**                                   |
-| **Combat System Improvement Phase 5 Remediation** | ✅ COMPLETE | 2026-02-23 | **Dismiss victory splash when movement controls resume post-combat**      |
-| **Combat Input Enter UX Remediation**           | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback** |
+| Phase                                             | Status      | Date       | Description                                                                |
+| ------------------------------------------------- | ----------- | ---------- | -------------------------------------------------------------------------- |
+| **Inventory System Phase 1**                      | ✅ COMPLETE | 2026-07-18 | **Shared Inventory Domain Model**                                          |
+| Phase 1                                           | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                                                    |
+| Phase 2                                           | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                                                      |
+| Phase 3                                           | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                                             |
+| Phase 4                                           | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                                               |
+| Phase 5                                           | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                                                 |
+| Phase 6                                           | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration                              |
+| Phase 7                                           | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                                                    |
+| Phase 8                                           | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                                               |
+| Phase 9                                           | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                                                 |
+| Phase 10                                          | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                                                 |
+| **Creature Editor Enhancement Phase 1**           | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**                                        |
+| **Creature Editor Enhancement Phase 2**           | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                                               |
+| **Creature Editor Enhancement Phase 3**           | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)**                             |
+| **Creature Editor Enhancement Phase 4**           | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                                            |
+| **Creature Editor Enhancement Phase 5**           | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**                                          |
+| **Creature Editor UX Fixes Phase 1**              | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry**                             |
+| **Creature Editor UX Fixes Phase 2**              | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**                                  |
+| **Creature Editor UX Fixes Phase 3**              | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**                                    |
+| **Creature Editor UX Fixes Phase 4**              | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**                             |
+| **Creature Editor UX Fixes Remediation**          | ✅ COMPLETE | 2026-07-16 | **Fix stale ID-range tests in creatures_manager**                          |
+| **Creature Editor UX Fixes Phase 3/4 UI Fix**     | ✅ COMPLETE | 2026-07-16 | **Replace SidePanel with TwoColumnLayout; add push_id per row**            |
+| **Creature Editor UX Fixes Toolbar Fix**          | ✅ COMPLETE | 2026-07-16 | **Fix toolbar overflow; surface Register Asset in preview + edit**         |
+| **Creature Editor Register Asset Autocomplete**   | ✅ COMPLETE | 2026-07-16 | **Add path autocomplete to Register Asset dialog from assets/creatures/**  |
+| **Creature Editor UX Fixes Phase 5**              | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder**                   |
+| **Findings Remediation Phase 1**                  | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**                    |
+| **Findings Remediation Phase 2**                  | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)**          |
+| **Findings Remediation Phase 3**                  | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard**         |
+| **Findings Remediation Phase 4**                  | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI**             |
+| **Findings Remediation Phase 5**                  | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation**         |
+| **Combat System Improvement Phase 1**             | ✅ COMPLETE | 2026-07-17 | **Input Reliability and Action Selection**                                 |
+| **Combat System Improvement Phase 2**             | ✅ COMPLETE | 2026-07-17 | **Target Selection and Action Completeness**                               |
+| **Combat System Improvement Phase 3**             | ✅ COMPLETE | 2026-07-17 | **Visual Combat Feedback and Animation State**                             |
+| **Combat System Improvement Phase 4**             | ✅ COMPLETE | 2026-07-17 | **Defeated Monster World-Mesh Removal**                                    |
+| **Combat System Improvement Phase 5 Remediation** | ✅ COMPLETE | 2026-02-23 | **Dismiss victory splash when movement controls resume post-combat**       |
+| **Combat Input Enter UX Remediation**             | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback** |
 
 **Total Lines Implemented**: 9,300+ lines of production code + 5,400+ lines of documentation
-**Total Tests**: 346+ new tests (all passing), 2,438 total tests passing
+**Total Tests**: 346+ new tests (all passing), 2,490 total tests passing
+
+---
+
+## Inventory System Phase 1: Shared Inventory Domain Model
+
+### Overview
+
+Phase 1 establishes the shared ownership primitives and static definition fields
+that both Characters and NPCs will compose when the full inventory system is
+built out in subsequent phases. All new types are placed in `src/domain/` and
+use the type aliases defined in `src/domain/types.rs`.
+
+### Components Implemented
+
+#### `src/domain/inventory.rs` (new file)
+
+Six new types define the shared inventory ownership model:
+
+- `InventoryOwner` - enum identifying who owns an inventory:
+  `Character(CharacterId)` or `Npc(NpcId)`
+- `StockEntry` - one item in a merchant's stock: `item_id`, `quantity`, and
+  optional `override_price`
+- `MerchantStock` - runtime merchant inventory: `Vec<StockEntry>` plus an
+  optional `restock_template` ID. Provides `get_entry`, `get_entry_mut`,
+  `decrement`, and `effective_price` methods
+- `ServiceEntry` - one service offered by a priest or innkeeper: `service_id`,
+  `cost`, `gem_cost`, and `description`
+- `ServiceCatalog` - collection of `ServiceEntry` values. Provides
+  `get_service` and `has_service` methods
+- `NpcEconomySettings` - per-NPC buy/sell rate multipliers with an optional
+  `max_buy_value` cap. Provides `npc_buy_price` and `npc_sell_price` helpers
+  and a standard default (buy 50%, sell 100%)
+
+All types derive `Debug, Clone, PartialEq, Serialize, Deserialize` and carry
+`///` doc comments on every public field and method.
+
+#### `src/domain/mod.rs` (modified)
+
+- Added `pub mod inventory;`
+- Re-exported `InventoryOwner`, `MerchantStock`, `NpcEconomySettings`,
+  `ServiceCatalog`, `ServiceEntry`, and `StockEntry` from the domain crate root
+
+#### `src/domain/world/npc.rs` (modified)
+
+Four new `#[serde(default)]` fields added to `NpcDefinition`:
+
+- `pub is_priest: bool` - flags NPC as a priest offering healing and curing
+  services
+- `pub stock_template: Option<String>` - references a `MerchantStockTemplate`
+  in campaign data for runtime inventory initialisation
+- `pub service_catalog: Option<ServiceCatalog>` - inline service definitions
+  for priest or innkeeper NPCs
+- `pub economy: Option<NpcEconomySettings>` - per-NPC buy/sell rate overrides
+
+New `priest()` constructor added following the same pattern as the existing
+`merchant()` and `innkeeper()` constructors. All three existing constructors
+updated to initialise the new fields to their defaults. The `merchant()` and
+`innkeeper()` doc comments updated to confirm `is_priest: false`.
+
+#### `src/domain/world/types.rs` (modified)
+
+`ResolvedNpc` - the runtime merge of `NpcDefinition` + `NpcPlacement` - mirrors
+all four new fields (`is_priest`, `stock_template`, `service_catalog`,
+`economy`). The `from_placement_and_definition` method copies them from the
+definition. Doc example updated to include the new fields.
+
+#### `src/sdk/database.rs` (modified)
+
+- Added `pub fn priests(&self) -> Vec<&NpcDefinition>` to `NpcDatabase`,
+  filtering on `is_priest` - parallel to the existing `merchants()` and
+  `innkeepers()` methods
+
+### Tests Added
+
+#### `src/domain/inventory.rs` (28 new unit tests)
+
+- `test_merchant_stock_decrement_success`
+- `test_merchant_stock_decrement_out_of_stock`
+- `test_merchant_stock_decrement_nonexistent_item`
+- `test_merchant_stock_decrement_reduces_to_zero`
+- `test_merchant_stock_effective_price_uses_override`
+- `test_merchant_stock_effective_price_uses_base_cost`
+- `test_merchant_stock_get_entry_present`
+- `test_merchant_stock_get_entry_absent`
+- `test_merchant_stock_get_entry_mut`
+- `test_merchant_stock_default`
+- `test_service_catalog_get_service_found`
+- `test_service_catalog_get_service_not_found`
+- `test_service_catalog_has_service`
+- `test_service_catalog_empty_has_no_services`
+- `test_service_catalog_serialization_roundtrip`
+- `test_npc_economy_settings_default`
+- `test_npc_economy_settings_npc_buy_price`
+- `test_npc_economy_settings_npc_buy_price_minimum_one`
+- `test_npc_economy_settings_npc_buy_price_with_cap`
+- `test_npc_economy_settings_npc_sell_price`
+- `test_npc_economy_settings_npc_sell_price_minimum_one`
+- `test_inventory_owner_character_variant`
+- `test_inventory_owner_npc_variant`
+- `test_inventory_owner_serialization_roundtrip`
+- `test_stock_entry_new` / `test_stock_entry_with_price` / `test_stock_entry_is_available` / `test_stock_entry_serialization_roundtrip`
+- `test_service_entry_new` / `test_service_entry_with_gem_cost` / `test_service_entry_serialization_roundtrip`
+
+#### `src/domain/world/npc.rs` (12 new unit tests)
+
+- `test_npc_definition_is_priest_defaults_false`
+- `test_npc_definition_priest_constructor`
+- `test_npc_definition_stock_template_defaults_none`
+- `test_npc_definition_service_catalog_defaults_none`
+- `test_npc_definition_economy_defaults_none`
+- `test_npc_definition_new_has_priest_false`
+- `test_npc_definition_merchant_has_priest_false`
+- `test_npc_definition_innkeeper_has_priest_false`
+- `test_npc_definition_priest_with_service_catalog_serialization`
+- `test_npc_definition_merchant_with_stock_template_and_economy_serialization`
+
+#### `src/sdk/database.rs` (1 new unit test)
+
+- `test_npc_database_priests`
+
+### Backward Compatibility
+
+All new `NpcDefinition` fields use `#[serde(default)]`. Existing RON data files
+(`data/npcs.ron`, `campaigns/tutorial/data/npcs.ron`) deserialise without any
+changes; missing fields default to `false` or `None`. Verified by
+`test_load_core_npcs_file` and `test_load_tutorial_npcs_file`.
+
+All existing struct literal initialisations of `NpcDefinition` and `ResolvedNpc`
+in tests and game systems were updated to include the new fields with their
+zero/None defaults.
+
+### Deliverables Checklist
+
+- [x] `src/domain/inventory.rs` created with all six types
+- [x] `src/domain/mod.rs` updated with `pub mod inventory;` and re-exports
+- [x] `src/domain/world/npc.rs` updated: `is_priest`, `stock_template`,
+      `service_catalog`, `economy` added to `NpcDefinition`; `NpcDefinition::priest()`
+      constructor added
+- [x] `src/domain/world/types.rs` updated: `ResolvedNpc` mirrors new fields
+- [x] `src/sdk/database.rs` updated: `NpcDatabase::priests()` added
+- [x] All unit tests from Section 1.4 of the implementation plan passing
+
+### Success Criteria
+
+- `cargo fmt --all` - no output (clean)
+- `cargo check --all-targets --all-features` - zero errors
+- `cargo clippy --all-targets --all-features -- -D warnings` - zero warnings
+- `cargo nextest run --all-features` - 2490 tests passed, 0 failed, 8 skipped
+- All existing NPC RON files deserialise without errors
 
 ---
 
@@ -259,6 +409,32 @@ hard to read before combat transition.
 - `cargo clippy --all-targets --all-features -- -D warnings` — pass
 - `cargo nextest run --all-features` — pass
 - `test_mouse_left_click_on_hover_dispatches_action` added to verify fallback
+
+## Campaign Builder Map Editor Terrain Header Remediation
+
+### Overview
+
+The tile inspector in Campaign Builder Map Editor was rendering the
+`Terrain-Specific Settings` heading twice in the right column during tile
+editing, causing stacked duplicate text above `Grass Density` controls.
+
+### Components Implemented
+
+#### Remove duplicate heading render (`sdk/campaign_builder/src/map_editor.rs`)
+
+- Kept the section heading in the parent tile-inspector group.
+- Removed the nested heading and separator from
+  `show_terrain_specific_controls` so the controls render directly under the
+  single section heading.
+- Result: `Terrain-Specific Settings` appears exactly once in the tile editor
+  right panel.
+
+### Validation
+
+- `cargo fmt --all` — pass
+- `cargo check --all-targets --all-features` — pass
+- `cargo clippy --all-targets --all-features -- -D warnings` — pass
+- `cargo nextest run --all-features` — pass (`2490 passed`, `8 skipped`)
   mouse activation on hovered action buttons.
 
 ### Validation
