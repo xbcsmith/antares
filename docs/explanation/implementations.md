@@ -9592,3 +9592,200 @@ borrowed.
   with the new merchant no-dialogue log message
 
 ---
+
+## Inventory System Phase 4: Data Schema and SDK Updates
+
+### Overview
+
+Phase 4 extends the RON data schemas, SDK content database, and SDK validator
+to support merchant stock templates, service catalogs, and NPC economy settings.
+It wires the domain types established in Phases 1-3 into the data layer so that
+content authors can define merchant inventories and NPC services in `.ron` files
+and have them automatically loaded and cross-reference-validated.
+
+### Components Implemented
+
+#### `data/npc_stock_templates.ron` (new file)
+
+Core merchant stock template data file defining three reusable templates:
+
+- `"blacksmith_basic"` - Club, Dagger, Short Sword, Mace, Leather Armor, Chain
+  Mail, Wooden Shield. Quantities 2-5. Designed for early-game adventurers.
+- `"general_store_basic"` - Healing Potion, Magic Potion, Cure Poison Potion,
+  Arrows, Crossbow Bolts. Quantities 5-10. Consumables and ammo.
+- `"alchemist_basic"` - Healing Potion, Magic Potion, Cure Poison Potion at
+  premium `override_price` values. Quantities 3-5.
+
+All `item_id` values reference items present in `data/items.ron`.
+
+#### `campaigns/tutorial/data/npc_stock_templates.ron` (new file)
+
+Tutorial-campaign-specific stock templates:
+
+- `"tutorial_merchant_stock"` - Curated subset (Club, Dagger, Short Sword,
+  Leather Armor, Wooden Shield, Healing Potion) with low quantities (1-3) to
+  enforce resource management for new players.
+- `"tutorial_blacksmith_stock"` - Slightly broader selection available at the
+  second town (Mountain Pass) once players have progressed.
+
+#### `data/npcs.ron` (modified)
+
+Updated the three base NPC archetypes:
+
+- `base_merchant` — added `stock_template: Some("blacksmith_basic")`,
+  `economy: Some((buy_rate: 0.5, sell_rate: 1.0, max_buy_value: None))`,
+  and `is_priest: false`.
+- `base_innkeeper` — added `service_catalog` with a single `"rest"` service
+  (cost 10 gold), and `is_priest: false`.
+- `base_priest` — added `is_priest: true` and `service_catalog` with four
+  services: `heal_all` (50g), `cure_poison` (25g), `cure_disease` (75g),
+  `resurrect` (200g + 1 gem).
+
+All other base NPCs received the explicit `is_priest: false` field to avoid
+deserialization ambiguity when loaded through the updated `NpcDefinition`.
+
+#### `campaigns/tutorial/data/npcs.ron` (modified)
+
+Applied equivalent updates to all tutorial NPCs:
+
+- `tutorial_merchant_town` and `tutorial_merchant_town2` — assigned
+  `"tutorial_merchant_stock"` and `"tutorial_blacksmith_stock"` stock templates
+  respectively, plus economy settings.
+- `tutorial_innkeeper_town` and `tutorial_innkeeper_town2` — assigned `"rest"`
+  service catalog.
+- `tutorial_priestess_town` and `tutorial_priest_town2` — set `is_priest: true`
+  and assigned the full four-service catalog.
+- All other tutorial NPCs received the explicit `is_priest: false` field.
+
+#### `src/sdk/database.rs` (modified)
+
+Four changes made to the SDK content database:
+
+1. **`DatabaseError::NpcStockTemplateLoadError`** — new error variant for
+   reporting failures when loading `npc_stock_templates.ron`.
+
+2. **`ContentDatabase::npc_stock_templates`** — new `pub` field of type
+   `MerchantStockTemplateDatabase` (re-exported from `domain::world::npc_runtime`).
+
+3. **`ContentDatabase::new()`** — initialises the new field with
+   `MerchantStockTemplateDatabase::new()`.
+
+4. **`ContentDatabase::load_core()`** — loads `npc_stock_templates.ron` from
+   the data directory if present; returns an empty database otherwise.
+
+5. **`ContentDatabase::load_campaign()`** — loads
+   `<campaign>/data/npc_stock_templates.ron` if present; returns an empty
+   database otherwise.
+
+6. **`ContentStats::npc_stock_template_count`** — new field tracking how many
+   templates are loaded. `stats()` and `total()` updated accordingly.
+
+#### `src/sdk/validation.rs` (modified)
+
+Four additions:
+
+1. **`ValidationError::MissingStockTemplateItem`** — error-severity variant
+   emitted when a `StockEntry` in a merchant template references an `item_id`
+   that does not exist in `ItemDatabase`.
+
+2. **`ValidationError::InvalidServiceId`** — warning-severity variant emitted
+   when a `ServiceEntry` in a service catalog uses an unrecognised service ID.
+   Warning (not error) intentionally allows custom service IDs for
+   forward-compatibility.
+
+3. **`Validator::validate_merchant_stock()`** — public method that iterates
+   every merchant NPC, resolves their `stock_template` against
+   `db.npc_stock_templates`, and validates each `item_id` in the template
+   against `db.items`. Emits `MissingItem` for a missing template and
+   `MissingStockTemplateItem` for each bad item reference.
+
+4. **`Validator::validate_service_catalogs()`** — public method that iterates
+   every NPC with a `service_catalog`, checks each `service_id` against the
+   built-in constant `KNOWN_SERVICE_IDS`, and emits `InvalidServiceId` warnings
+   for unrecognised IDs.
+
+5. **`Validator::validate_all()`** — updated to call both new methods and fold
+   their results into the returned `Vec<ValidationError>`.
+
+#### `src/sdk/error_formatter.rs` (modified)
+
+Added `get_suggestions()` match arms for both new `ValidationError` variants:
+
+- `MissingStockTemplateItem` — suggestions include adding the item to
+  `items.ron` or removing it from the template.
+- `InvalidServiceId` — suggestions list all known built-in service IDs and
+  explain that custom IDs are supported for extensibility.
+
+### Tests Added
+
+#### `src/sdk/database.rs` (8 new unit tests)
+
+- `test_merchant_stock_template_database_new` — asserts newly constructed
+  database is empty.
+- `test_merchant_stock_template_database_load_from_file` — loads
+  `data/npc_stock_templates.ron`, asserts count >= 3 and all three core
+  template IDs are present.
+- `test_content_database_includes_npc_stock_templates` — calls
+  `ContentDatabase::load_core("data")`, asserts `npc_stock_templates` is
+  non-empty and `ContentStats::npc_stock_template_count > 0`.
+- `test_base_merchant_has_stock_template` — loads `data/npcs.ron`, asserts
+  `base_merchant.stock_template == Some("blacksmith_basic")` and `economy`
+  is `Some`.
+- `test_base_priest_has_service_catalog` — loads `data/npcs.ron`, asserts
+  `base_priest.service_catalog` contains at least 4 entries including
+  `heal_all`, `cure_poison`, `cure_disease`, `resurrect`.
+- `test_base_innkeeper_has_service_catalog` — loads `data/npcs.ron`, asserts
+  `base_innkeeper.service_catalog` contains at least one entry and includes
+  `"rest"`.
+- `test_content_database_npc_stock_template_count_in_stats` — programmatically
+  adds a template and verifies `stats().npc_stock_template_count` reflects it.
+- `test_content_database_load_campaign_includes_npc_stock_templates` — loads
+  `campaigns/tutorial`, asserts `tutorial_merchant_stock` template is present.
+
+#### `src/sdk/validation.rs` (5 new unit tests)
+
+- `test_validate_merchant_stock_valid` — NPC with valid template referencing
+  valid items; asserts zero errors.
+- `test_validate_merchant_stock_missing_template` — NPC references
+  non-existent template; asserts at least one error.
+- `test_validate_merchant_stock_invalid_item` — template references item ID
+  200 (not in `ItemDatabase`); asserts `MissingStockTemplateItem` with the
+  correct NPC context and item ID.
+- `test_validate_service_catalogs_known_ids` — service catalog with all
+  known IDs; asserts zero warnings.
+- `test_validate_service_catalogs_unknown_id` — service catalog includes
+  `"transmute_gold"` (unknown ID); asserts exactly one `Warning`-severity
+  `InvalidServiceId` error for the correct NPC and service ID.
+
+### Deliverables Checklist
+
+- `data/npc_stock_templates.ron` created with 3 templates
+- `campaigns/tutorial/data/npc_stock_templates.ron` created with 2 templates
+- `data/npcs.ron` updated: `base_merchant`, `base_priest`, `base_innkeeper`
+  have appropriate new fields
+- `campaigns/tutorial/data/npcs.ron` updated equivalently for all tutorial NPCs
+- `src/sdk/database.rs` updated: `MerchantStockTemplateDatabase` field,
+  `NpcStockTemplateLoadError` variant, loading in `load_core()` and
+  `load_campaign()`, `ContentStats::npc_stock_template_count`
+- `src/sdk/validation.rs` updated: two new `ValidationError` variants, two new
+  validator methods, `validate_all()` updated
+- `src/sdk/error_formatter.rs` updated: suggestions for both new error variants
+- All unit tests from Section 4.6 passing
+
+### Success Criteria
+
+- `cargo fmt --all` — passed
+- `cargo check --all-targets --all-features` — passed (0 errors)
+- `cargo clippy --all-targets --all-features -- -D warnings` — passed (0 warnings)
+- `cargo nextest run --all-features` — 2562 passed, 8 skipped (no regressions)
+- `test_content_database_includes_npc_stock_templates` confirms RON files load
+  correctly via `ContentDatabase::load_core`
+- `test_validate_merchant_stock_invalid_item` confirms cross-reference
+  validation catches bad item IDs in stock templates
+- `test_load_core_npcs_file` (pre-existing) still passes with updated
+  `data/npcs.ron`
+- `test_base_merchant_has_stock_template`, `test_base_priest_has_service_catalog`,
+  and `test_base_innkeeper_has_service_catalog` confirm the updated RON data
+  round-trips correctly through `NpcDatabase::load_from_file`
+
+---

@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+//
+// npc_stock_templates.ron - Tutorial campaign merchant stock templates
+//
+// This file defines stock templates scoped to the tutorial campaign.
+// These templates are used instead of (or in addition to) the core
+// data/npc_stock_templates.ron templates for tutorial NPCs.
+//
+// Design intent for the tutorial:
+//   - Curated, limited inventory to teach resource management
+//   - Fewer items per slot to encourage careful spending
+//   - Only the most essential items available to new players
+//
+// Field reference:
+//   id            - Unique string identifier (referenced by NpcDefinition::stock_template)
+//   entries       - List of stock entries
+//     item_id       - References a valid item ID in items.ron or tutorial/data/items.ron
+//     quantity      - Initial available quantity (0 = sold out)
+//     override_price - Optional gold price override; None uses item base_cost * sell_rate
+
+[
+    // ===== Tutorial Merchant Stock =====
+    // A curated subset of items appropriate for a tutorial campaign.
+    // Low quantities enforce resource management decisions for new players.
+    // Only the most basic weapons, armor, and one healing consumable are stocked.
+    (
+        id: "tutorial_merchant_stock",
+        entries: [
+            // Basic weapons — just enough variety for a new party
+            (item_id: 1, quantity: 2, override_price: None),    // Club
+            (item_id: 2, quantity: 2, override_price: None),    // Dagger
+            (item_id: 3, quantity: 1, override_price: None),    // Short Sword
+            // Light armor only — heavy gear is unavailable in the tutorial
+            (item_id: 20, quantity: 2, override_price: None),   // Leather Armor
+            (item_id: 23, quantity: 2, override_price: None),   // Wooden Shield
+            // Single healing option to teach potion use without flooding supply
+            (item_id: 50, quantity: 3, override_price: None),   // Healing Potion
+        ],
+    ),
+
+    // ===== Tutorial Blacksmith Stock =====
+    // Slightly broader selection than the general tutorial merchant,
+    // available at the second town (Mountain Pass) once players have
+    // some gold and understand the economy.
+    (
+        id: "tutorial_blacksmith_stock",
+        entries: [
+            // Weapons
+            (item_id: 1, quantity: 3, override_price: None),    // Club
+            (item_id: 2, quantity: 3, override_price: None),    // Dagger
+            (item_id: 3, quantity: 2, override_price: None),    // Short Sword
+            (item_id: 5, quantity: 2, override_price: None),    // Mace
+            // Armor
+            (item_id: 20, quantity: 3, override_price: None),   // Leather Armor
+            (item_id: 21, quantity: 1, override_price: None),   // Chain Mail
+            // Shields
+            (item_id: 23, quantity: 2, override_price: None),   // Wooden Shield
+        ],
+    ),
+]
