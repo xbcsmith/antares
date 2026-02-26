@@ -7,6 +7,7 @@
 //! - `billboard` - Camera-facing sprite components
 //! - `sprite` - Tile and actor sprite components
 //! - `dialogue` - Dialogue system components
+//! - `inventory` - Inventory ECS identity components
 //! - `menu` - Menu system components
 
 pub mod billboard;
@@ -14,6 +15,7 @@ pub mod combat;
 pub mod creature;
 pub mod dialogue;
 pub mod furniture;
+pub mod inventory;
 pub mod menu;
 pub mod performance;
 pub mod sprite;
@@ -29,6 +31,7 @@ pub use dialogue::{
     DIALOGUE_TYPEWRITER_SPEED,
 };
 pub use furniture::{FurnitureEntity, Interactable, InteractionType};
+pub use inventory::{CharacterEntity, PartyEntities};
 pub use menu::*;
 pub use performance::{
     DistanceCulling, InstanceData, InstancedCreature, LodState, MeshStreaming, PerformanceCategory,

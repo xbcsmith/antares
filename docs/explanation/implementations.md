@@ -10384,3 +10384,111 @@ Phase 6 (the last code-producing phase) with the following results:
 - [x] `docs/reference/architecture.md` not modified
 
 ---
+
+## ECS Inventory View — Phase 1: ECS Foundation Component Wrappers and Entity Spawning
+
+### Overview
+
+Phase 1 establishes the minimum ECS surface area required by later inventory
+phases without altering any domain logic, field definitions, or existing tests.
+Three domain structs gain `Component` derives, a new `inventory` component
+module introduces `CharacterEntity` and `PartyEntities`, and a `HudPlugin`
+startup system spawns one pure-identity entity per party slot.
+
+### Components Implemented
+
+#### `src/domain/character.rs` (modified)
+
+Added `use bevy::prelude::Component;` import and `Component` to the derive list
+of three structs:
+
+- `InventorySlot` — `#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]`
+- `Inventory` — `#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]`
+- `Equipment` — `#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]`
+
+No field, method, or constant changes were made. All pre-existing tests
+continue to pass unchanged.
+
+#### `src/game/components/inventory.rs` (new file)
+
+Defines two public ECS types with full doc comments:
+
+- `CharacterEntity { party_index: usize }` — a `Component` that links a Bevy
+  entity to a party slot index. Derives `Component, Debug, Clone, Copy,
+PartialEq, Eq`.
+- `PartyEntities { entities: [Option<Entity>; PARTY_MAX_SIZE] }` — a `Resource`
+  holding one optional entity handle per party slot. Implements `Default`
+  (all-`None` array).
+
+`PARTY_MAX_SIZE` is imported from `crate::domain::character` so the slot count
+is never hardcoded.
+
+#### `src/game/components/mod.rs` (modified)
+
+- Added `pub mod inventory;` in alphabetical order (between `furniture` and
+  `menu`).
+- Added re-exports: `pub use inventory::{CharacterEntity, PartyEntities};`.
+- Updated module-level doc comment to mention the new `inventory` submodule.
+
+#### `src/game/systems/hud.rs` (modified)
+
+- Added import: `use crate::game::components::inventory::{CharacterEntity, PartyEntities};`.
+- Registered `setup_party_entities` alongside `setup_hud` in `HudPlugin::build`:
+  `.add_systems(Startup, (setup_hud, setup_party_entities))`.
+- Implemented `setup_party_entities(mut commands: Commands)`:
+  1. Iterates `0..PARTY_MAX_SIZE`.
+  2. Spawns a Bevy entity carrying `CharacterEntity { party_index }` for each
+     slot; entities carry no mesh, transform, or visibility.
+  3. Inserts the populated `PartyEntities` resource via
+     `commands.insert_resource(PartyEntities { entities: entity_array })`.
+
+### Tests Added
+
+#### `src/domain/character.rs` — `mod ecs_tests` (6 new tests)
+
+| Test                                         | Description                                                                              |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `test_inventory_component_derive`            | Spawn `Inventory::new()` in a `World`; query back; assert empty and has space            |
+| `test_inventory_component_with_items`        | Spawn `Inventory` with two items; verify item fields survive component round-trip        |
+| `test_inventory_slot_component_derive`       | Spawn `InventorySlot { item_id: 1, charges: 3 }`; query back; verify fields              |
+| `test_inventory_slot_component_zero_charges` | Verify zero-charge slot is preserved                                                     |
+| `test_equipment_component_derive`            | Spawn `Equipment::new()`; query back; assert all slots `None`                            |
+| `test_equipment_component_with_slots`        | Spawn `Equipment` with three slots populated; verify `equipped_count()` and field values |
+
+#### `src/game/components/inventory.rs` — `mod tests` (5 new tests)
+
+| Test                                               | Description                                                                        |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `test_character_entity_component`                  | Insert `CharacterEntity { party_index: 2 }` into `World`; query back; assert index |
+| `test_character_entity_component_multiple_indices` | Spawn all `PARTY_MAX_SIZE` entities; each reports its distinct index               |
+| `test_character_entity_copy_and_eq`                | Verify `Copy` and `PartialEq` behave correctly                                     |
+| `test_party_entities_resource_default`             | `PartyEntities::default()` has `PARTY_MAX_SIZE` slots all `None`                   |
+| `test_party_entities_resource_init`                | `app.init_resource::<PartyEntities>()` makes resource accessible with all `None`   |
+| `test_party_entities_slot_assignment`              | Manually populate slots; verify each `Option<Entity>` matches spawned entity       |
+| `test_party_entities_insert_resource`              | Insert resource into `World`; retrieve it without error                            |
+
+#### `src/game/systems/hud.rs` — `mod party_entity_tests` (3 new tests)
+
+| Test                                                   | Description                                                                      |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `test_setup_party_entities_spawns_correct_count`       | After `app.update()`, `PartyEntities` has `PARTY_MAX_SIZE` populated slots       |
+| `test_setup_party_entities_correct_indices`            | Each entity in `PartyEntities` carries the correct `CharacterEntity.party_index` |
+| `test_setup_party_entities_idempotent_resource_insert` | Two consecutive `update()` calls do not panic                                    |
+
+### Deliverables Checklist
+
+- [x] `Inventory`, `InventorySlot`, `Equipment` derive `Component` in `src/domain/character.rs`
+- [x] `src/game/components/inventory.rs` created with `CharacterEntity` and `PartyEntities` (SPDX header, doc comments, tests)
+- [x] `src/game/components/mod.rs` updated to declare and re-export the `inventory` submodule
+- [x] `setup_party_entities` startup system added to `HudPlugin`; inserts `PartyEntities` resource with one entity per party slot
+- [x] All Phase 1 unit tests passing
+
+### Success Criteria
+
+- [x] `cargo fmt --all` — no output (all files formatted)
+- [x] `cargo check --all-targets --all-features` — zero errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — zero warnings
+- [x] `cargo nextest run --all-features` — 2594 passed, 0 failed, 8 skipped
+- [x] `PartyEntities` resource accessible from any Bevy system via `Res<PartyEntities>`
+- [x] No domain struct field or method signatures changed
+- [x] `docs/reference/architecture.md` not modified
