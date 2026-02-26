@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::application::resources::GameContent;
+use crate::domain::world::EventResult;
 use crate::domain::world::{FurnitureType, MapEvent};
 use crate::game::resources::GlobalState;
 use crate::game::systems::dialogue::{SimpleDialogue, StartDialogue};
@@ -209,8 +210,26 @@ fn handle_events(
             MapEvent::NpcDialogue { npc_id, .. } => {
                 // Look up NPC in database
                 if let Some(npc_def) = content.db().npcs.get_npc(npc_id) {
-                    // Check if NPC has a dialogue tree
-                    if let Some(dialogue_id) = npc_def.dialogue_id {
+                    // If this NPC is a merchant, route through the EnterMerchant path so
+                    // the merchant entry handler drives the interaction. This produces an
+                    // EventResult::EnterMerchant and dispatches it through handle_event_result,
+                    // which fires StartDialogue (if a dialogue_id is configured) or a fallback
+                    // SimpleDialogue (if not).
+                    if npc_def.is_merchant {
+                        let event_result = EventResult::EnterMerchant {
+                            npc_id: npc_id.clone(),
+                        };
+                        handle_event_result(
+                            &event_result,
+                            &content,
+                            &mut dialogue_writer,
+                            &mut simple_dialogue_writer,
+                            &mut game_log,
+                            &npc_query,
+                            &trigger.position,
+                        );
+                    } else if let Some(dialogue_id) = npc_def.dialogue_id {
+                        // Check if NPC has a dialogue tree
                         // Find the NPC entity by its ID
                         let speaker_entity = npc_query
                             .iter()
@@ -362,6 +381,7 @@ fn handle_events(
                     );
                 }
             }
+
             MapEvent::EnterInn {
                 name,
                 description,
@@ -544,6 +564,97 @@ fn handle_events(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Handle an `EventResult::EnterMerchant` event.
+///
+/// Looks up the merchant NPC by ID in the content database. If the NPC has a
+/// `dialogue_id` configured, it fires a `StartDialogue` message (the same
+/// pattern used for `EventResult::NpcDialogue`). Otherwise it logs an info
+/// message indicating the merchant has no dialogue configured.
+///
+/// This function is called both from the `MapEvent::NpcDialogue` merchant guard
+/// arm in `handle_events` and can be called directly when a future
+/// `MapEvent::EnterMerchant` variant is added.
+///
+/// # Arguments
+///
+/// * `event_result` - The `EventResult::EnterMerchant` to process (other variants are ignored)
+/// * `content` - Game content database for NPC lookups
+/// * `dialogue_writer` - Writer for `StartDialogue` messages
+/// * `simple_dialogue_writer` - Writer for `SimpleDialogue` fallback messages
+/// * `game_log` - Optional mutable reference to the UI game log
+/// * `npc_query` - ECS query to resolve the NPC's world entity for speaker visuals
+/// * `trigger_position` - Map position of the triggering tile (used as fallback visual anchor)
+fn handle_event_result(
+    event_result: &EventResult,
+    content: &GameContent,
+    dialogue_writer: &mut MessageWriter<StartDialogue>,
+    simple_dialogue_writer: &mut MessageWriter<SimpleDialogue>,
+    game_log: &mut Option<ResMut<crate::game::systems::ui::GameLog>>,
+    npc_query: &Query<(Entity, &NpcMarker, &TileCoord)>,
+    trigger_position: &crate::domain::types::Position,
+) {
+    let EventResult::EnterMerchant { npc_id } = event_result else {
+        return;
+    };
+
+    if let Some(npc_def) = content.db().npcs.get_npc(npc_id) {
+        if let Some(dialogue_id) = npc_def.dialogue_id {
+            // Find the merchant entity in the world for optional speaker visuals
+            let speaker_entity = npc_query
+                .iter()
+                .find(|(_, marker, _)| marker.npc_id == *npc_id)
+                .map(|(entity, _, _)| entity);
+
+            if speaker_entity.is_none() {
+                let available: Vec<_> = npc_query.iter().map(|(_, m, _)| &m.npc_id).collect();
+                warn!(
+                    "Merchant speaker '{}' not found in world. Available: {:?}",
+                    npc_id, available
+                );
+            }
+
+            // Fire StartDialogue so the dialogue system drives the interaction
+            dialogue_writer.write(StartDialogue {
+                dialogue_id,
+                speaker_entity,
+                fallback_position: Some(*trigger_position),
+            });
+
+            let msg = format!("{} wants to trade.", npc_def.name);
+            println!("{}", msg);
+            if let Some(ref mut log) = game_log {
+                log.add(msg);
+            }
+        } else {
+            // Merchant has no dialogue configured
+            let msg = format!("Merchant {} has no dialogue configured", npc_id);
+            info!("{}", msg);
+            if let Some(ref mut log) = game_log {
+                log.add(msg);
+            }
+
+            // Show a simple fallback bubble so the player knows someone is there
+            let speaker_entity = npc_query
+                .iter()
+                .find(|(_, marker, _)| marker.npc_id == *npc_id)
+                .map(|(entity, _, _)| entity);
+
+            simple_dialogue_writer.write(SimpleDialogue {
+                text: format!("Welcome to my shop! I am {}.", npc_def.name),
+                speaker_name: npc_def.name.clone(),
+                speaker_entity,
+                fallback_position: Some(*trigger_position),
+            });
+        }
+    } else {
+        let msg = format!("Error: Merchant NPC '{}' not found in database", npc_id);
+        println!("{}", msg);
+        if let Some(ref mut log) = game_log {
+            log.add(msg);
         }
     }
 }
@@ -911,14 +1022,17 @@ mod tests {
         app.update(); // First update: check_for_events writes MapEventTriggered
         app.update(); // Second update: handle_events processes MapEventTriggered
 
-        // Assert - GameLog should contain fallback message
+        // Assert - GameLog should contain merchant-specific no-dialogue message
+        // (merchant NPCs without dialogue_id are handled by handle_event_result which
+        // logs "Merchant {npc_id} has no dialogue configured" and shows a SimpleDialogue
+        // fallback bubble - this is the new EnterMerchant path behaviour)
         let game_log = app.world().resource::<GameLog>();
         let entries = game_log.entries();
         assert!(
             entries
                 .iter()
-                .any(|e| e.contains("Town Merchant") && e.contains("Visual fallback triggered")),
-            "Expected fallback message in game log. Actual entries: {:?}",
+                .any(|e| e.contains("test_merchant") && e.contains("no dialogue configured")),
+            "Expected merchant no-dialogue message in game log. Actual entries: {:?}",
             entries
         );
     }

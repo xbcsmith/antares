@@ -63,6 +63,11 @@ pub enum EventResult {
         /// Innkeeper NPC identifier (NpcId string)
         innkeeper_id: crate::domain::world::NpcId,
     },
+    /// Enter a merchant shop
+    EnterMerchant {
+        /// Merchant NPC identifier (NpcId string)
+        npc_id: crate::domain::world::NpcId,
+    },
     /// Furniture or props event triggered
     Furniture {
         /// Type of furniture

@@ -426,6 +426,51 @@ pub enum DialogueAction {
 
     /// Open the inn party management interface
     OpenInnManagement { innkeeper_id: String },
+
+    /// Buy an item from a merchant NPC
+    ///
+    /// Triggers a purchase transaction using the domain transaction layer.
+    /// If `target_character_id` is `None`, the item is given to the first
+    /// available party member.
+    BuyItem {
+        /// The item to purchase
+        item_id: crate::domain::types::ItemId,
+        /// Character to receive the item (None = first available party member)
+        target_character_id: Option<crate::domain::types::CharacterId>,
+    },
+
+    /// Sell an item to a merchant NPC
+    ///
+    /// Triggers a sell transaction using the domain transaction layer.
+    /// If `source_character_id` is `None`, the first party member who has the
+    /// item in their inventory will be used as the source.
+    SellItem {
+        /// The item to sell
+        item_id: crate::domain::types::ItemId,
+        /// Character selling the item (None = search all party members)
+        source_character_id: Option<crate::domain::types::CharacterId>,
+    },
+
+    /// Open the merchant shop UI for an NPC
+    ///
+    /// Transitions the game into the shop interaction mode for the specified
+    /// merchant NPC. The shop UI is implemented in a later phase; this action
+    /// currently logs a placeholder message and returns without state change.
+    OpenMerchant {
+        /// NpcId of the merchant whose shop should be opened
+        npc_id: String,
+    },
+
+    /// Consume a service from a priest or innkeeper NPC
+    ///
+    /// Triggers a service transaction using the domain transaction layer. If
+    /// `target_character_ids` is empty, the service is applied to the whole party.
+    ConsumeService {
+        /// Identifier of the service to consume (e.g. "heal_all", "resurrect")
+        service_id: String,
+        /// Characters to apply the service to (empty = apply to whole party)
+        target_character_ids: Vec<crate::domain::types::CharacterId>,
+    },
 }
 
 impl DialogueAction {
@@ -468,6 +513,37 @@ impl DialogueAction {
             }
             DialogueAction::OpenInnManagement { innkeeper_id } => {
                 format!("Open party management at inn (keeper: {})", innkeeper_id)
+            }
+            DialogueAction::BuyItem {
+                item_id,
+                target_character_id,
+            } => match target_character_id {
+                Some(cid) => format!("Buy item {} for character {}", item_id, cid),
+                None => format!("Buy item {} for first available character", item_id),
+            },
+            DialogueAction::SellItem {
+                item_id,
+                source_character_id,
+            } => match source_character_id {
+                Some(cid) => format!("Sell item {} from character {}", item_id, cid),
+                None => format!("Sell item {} from first character with it", item_id),
+            },
+            DialogueAction::OpenMerchant { npc_id } => {
+                format!("Open merchant shop for '{}'", npc_id)
+            }
+            DialogueAction::ConsumeService {
+                service_id,
+                target_character_ids,
+            } => {
+                if target_character_ids.is_empty() {
+                    format!("Consume service '{}' for whole party", service_id)
+                } else {
+                    format!(
+                        "Consume service '{}' for {} character(s)",
+                        service_id,
+                        target_character_ids.len()
+                    )
+                }
             }
         }
     }
@@ -675,6 +751,85 @@ mod tests {
             action.description(),
             "Open party management at inn (keeper: innkeeper_town_01)"
         );
+    }
+
+    #[test]
+    fn test_dialogue_action_description_buy_item_no_target() {
+        let action = DialogueAction::BuyItem {
+            item_id: 1,
+            target_character_id: None,
+        };
+        let desc = action.description();
+        assert!(!desc.is_empty());
+        assert!(desc.contains("1"));
+    }
+
+    #[test]
+    fn test_dialogue_action_description_buy_item_with_target() {
+        let action = DialogueAction::BuyItem {
+            item_id: 42,
+            target_character_id: Some(2),
+        };
+        let desc = action.description();
+        assert!(!desc.is_empty());
+        assert!(desc.contains("42"));
+        assert!(desc.contains("2"));
+    }
+
+    #[test]
+    fn test_dialogue_action_description_sell_item_no_source() {
+        let action = DialogueAction::SellItem {
+            item_id: 7,
+            source_character_id: None,
+        };
+        let desc = action.description();
+        assert!(!desc.is_empty());
+        assert!(desc.contains("7"));
+    }
+
+    #[test]
+    fn test_dialogue_action_description_sell_item_with_source() {
+        let action = DialogueAction::SellItem {
+            item_id: 99,
+            source_character_id: Some(0),
+        };
+        let desc = action.description();
+        assert!(!desc.is_empty());
+        assert!(desc.contains("99"));
+    }
+
+    #[test]
+    fn test_dialogue_action_description_open_merchant() {
+        let action = DialogueAction::OpenMerchant {
+            npc_id: "merchant_tom".to_string(),
+        };
+        let desc = action.description();
+        assert!(!desc.is_empty());
+        assert!(desc.contains("merchant_tom"));
+    }
+
+    #[test]
+    fn test_dialogue_action_description_consume_service_whole_party() {
+        let action = DialogueAction::ConsumeService {
+            service_id: "heal_all".to_string(),
+            target_character_ids: vec![],
+        };
+        let desc = action.description();
+        assert!(!desc.is_empty());
+        assert!(desc.contains("heal_all"));
+        assert!(desc.contains("party"));
+    }
+
+    #[test]
+    fn test_dialogue_action_description_consume_service_targeted() {
+        let action = DialogueAction::ConsumeService {
+            service_id: "resurrect".to_string(),
+            target_character_ids: vec![0, 1],
+        };
+        let desc = action.description();
+        assert!(!desc.is_empty());
+        assert!(desc.contains("resurrect"));
+        assert!(desc.contains("2"));
     }
 
     #[test]

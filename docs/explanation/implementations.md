@@ -9401,3 +9401,194 @@ Pure domain-layer transaction functions that operate only on domain types
   `GameState` serializes and deserializes with the new `npc_runtime` field
 
 ---
+
+## Inventory System Phase 3: Dialogue Action and Application Integration
+
+### Overview
+
+Phase 3 wires the Phase 2 transaction domain functions (`buy_item`, `sell_item`,
+`consume_service`) into the dialogue execution path. Four new `DialogueAction`
+variants are added, `execute_action()` in the game-systems dialogue module is
+extended to call the domain transaction layer, and a new `EventResult::EnterMerchant`
+variant enables the event system to distinguish merchant NPC interactions from
+generic NPC dialogue.
+
+The `GameMode::Shopping` state and shop UI are explicitly deferred to Phase 4.
+The `OpenMerchant` action is implemented as a logged placeholder that returns
+without mutating state.
+
+### Components Implemented
+
+#### `src/domain/dialogue.rs` (modified)
+
+Four new variants added to `DialogueAction`:
+
+- `BuyItem { item_id: ItemId, target_character_id: Option<CharacterId> }` —
+  triggers a purchase transaction. If `target_character_id` is `None`, the
+  item is given to party member at index 0.
+- `SellItem { item_id: ItemId, source_character_id: Option<CharacterId> }` —
+  triggers a sell transaction. If `source_character_id` is `None`, the first
+  party member who holds the item is used.
+- `OpenMerchant { npc_id: String }` — placeholder that logs an info message
+  and returns without state change (shop UI deferred to Phase 4).
+- `ConsumeService { service_id: String, target_character_ids: Vec<CharacterId> }` —
+  triggers a service transaction. An empty `target_character_ids` applies the
+  service to the whole party.
+
+`DialogueAction::description()` extended with human-readable arms for all four
+new variants. Eight new unit tests added in `dialogue.rs` to cover each
+`description()` branch.
+
+#### `src/domain/world/events.rs` (modified)
+
+Added `EventResult::EnterMerchant { npc_id: NpcId }` variant to the `EventResult`
+enum. This variant is produced when the event system encounters a merchant NPC
+and routes the interaction through the dedicated `handle_event_result` handler.
+
+#### `src/game/systems/events.rs` (modified)
+
+Two changes:
+
+1. The existing `MapEvent::NpcDialogue` match arm is extended with a merchant
+   guard. When the NPC has `is_merchant = true`, the arm constructs an
+   `EventResult::EnterMerchant` and dispatches it to the new
+   `handle_event_result` function instead of the generic NPC dialogue path.
+
+2. New private function `handle_event_result` handles `EventResult::EnterMerchant`:
+
+   - If the merchant has a `dialogue_id`, fires `StartDialogue` (same pattern as
+     `NpcDialogue`).
+   - If the merchant has no `dialogue_id`, logs `"Merchant {npc_id} has no
+dialogue configured"` and shows a `SimpleDialogue` fallback bubble.
+   - If the merchant NPC is not found in the content DB, logs an error.
+
+   The existing test `test_npc_dialogue_event_logs_when_npc_has_no_dialogue_id`
+   was updated to assert the new merchant-specific log message rather than the
+   old generic fallback message.
+
+#### `src/game/systems/dialogue.rs` (modified)
+
+`execute_action()` extended with four new match arms:
+
+**`DialogueAction::BuyItem`**
+
+1. Resolves `speaker_npc_id` from the passed-in `DialogueState` (falls back to
+   `GameState::mode` if the caller passes `None`).
+2. Resolves target character index (defaults to 0).
+3. Looks up `NpcDefinition` from `db.npcs`.
+4. Ensures `NpcRuntimeState` exists via `npc_runtime.initialize_merchant`.
+5. Clones the `NpcRuntimeState` to avoid simultaneous mutable borrows on
+   `game_state.npc_runtime` and `game_state.party`.
+6. Builds a temporary `Party` carrying only the current gold value, calls
+   `domain::transactions::buy_item`, then writes gold back regardless of outcome
+   (the domain function is transactional — gold is only deducted on success).
+7. On `Ok`: commits the mutated `NpcRuntimeState` back to the store, logs info.
+8. On `Err`: discards the clone, logs warning.
+
+**`DialogueAction::SellItem`**
+
+Same NPC resolution and clone pattern as `BuyItem`. If `source_character_id`
+is `None`, iterates party members to find the first holder of the item. Calls
+`domain::transactions::sell_item` with the temporary-Party pattern.
+
+**`DialogueAction::OpenMerchant`**
+
+Logs `"OpenMerchant: {npc_id} - shop UI not yet implemented"` and returns
+without mutating state. This placeholder is replaced in Phase 4.
+
+**`DialogueAction::ConsumeService`**
+
+1. Resolves `speaker_npc_id` and `NpcDefinition`.
+2. Clones `ServiceCatalog` from the NPC definition (returns early if absent).
+3. Resolves target character indices (empty = whole party).
+4. Checks gold and gem balances against the service cost upfront; returns early
+   with a log message if insufficient.
+5. Deducts gold and gems from `game_state.party`.
+6. Applies the service effect to each target character via the private helper
+   `apply_service_effect_inline`.
+7. Records the consumed service in `NpcRuntimeState`.
+
+New private helper `apply_service_effect_inline` mirrors
+`domain::transactions::apply_service_effect` but operates directly on a
+`&mut Character` reference to avoid the borrow-checker complexity of
+constructing a `Vec<&mut Character>` while also holding `&mut party.gold`.
+
+### Borrow-Checker Architecture Note
+
+`buy_item` and `sell_item` in the domain layer take `&mut Party`, while
+`execute_action` holds `&mut GameState`. Because `game_state.npc_runtime` and
+`game_state.party` are disjoint fields, Rust's partial-borrow rules allow
+separate mutable references to each field. However, passing `&mut game_state.party`
+to a function that also needs `&mut NpcRuntimeState` (derived from
+`game_state.npc_runtime`) in the same call requires that both borrows be live
+simultaneously, which the borrow checker disallows.
+
+The solution: clone the `NpcRuntimeState` before the transaction call, pass
+`&mut clone` to the domain function, and on success write the modified clone
+back via `npc_runtime.insert(clone)`. The domain functions are fully
+transactional, so no partial mutation can escape on error paths.
+
+For gold specifically, a minimal temporary `Party` is constructed with only the
+current gold value, passed to the domain function, and gold is written back
+after the call. This avoids any issues with `party.members` being separately
+borrowed.
+
+### Tests Added
+
+#### `src/domain/dialogue.rs` (8 new unit tests)
+
+- `test_dialogue_action_description_buy_item_no_target`
+- `test_dialogue_action_description_buy_item_with_target`
+- `test_dialogue_action_description_sell_item_no_source`
+- `test_dialogue_action_description_sell_item_with_source`
+- `test_dialogue_action_description_open_merchant`
+- `test_dialogue_action_description_consume_service_whole_party`
+- `test_dialogue_action_description_consume_service_targeted`
+
+#### `src/game/systems/dialogue.rs` (6 new integration tests)
+
+- `test_buy_item_dialogue_action_deducts_gold` — sets up party with 100 gold,
+  merchant with item 1 in stock (cost 10). Fires `DialogueAction::BuyItem`.
+  Asserts party gold = 90 and item 1 in character inventory.
+- `test_buy_item_dialogue_action_insufficient_gold_no_mutation` — party has 5
+  gold, item costs 10. Asserts gold unchanged and inventory empty.
+- `test_consume_service_dialogue_action_heals_party` — priest with `heal_all`
+  service (cost 50). Party has 100 gold, hero has 5/30 HP. Asserts HP restored
+  to 30 and gold = 50.
+- `test_consume_service_dialogue_action_insufficient_gold_no_mutation` — same
+  setup but party has 0 gold. Asserts HP unchanged and gold unchanged.
+- `test_dialogue_action_description_buy_item` — asserts `description()` is
+  non-empty and contains the item ID string.
+- `test_open_merchant_dialogue_action_no_state_change` — asserts `GameMode`
+  discriminant is unchanged after `OpenMerchant`.
+- `test_sell_item_dialogue_action_adds_gold` — character has item 1, party has
+  0 gold. Fires `DialogueAction::SellItem`. Asserts item removed and gold > 0.
+
+### Deliverables Checklist
+
+- [x] `src/domain/dialogue.rs` updated: `BuyItem`, `SellItem`, `OpenMerchant`,
+      `ConsumeService` variants added to `DialogueAction`
+- [x] `src/domain/dialogue.rs` updated: `description()` covers all four new variants
+- [x] `src/domain/world/events.rs` updated: `EventResult::EnterMerchant` added
+- [x] `src/game/systems/events.rs` updated: merchant NPC detection in
+      `MapEvent::NpcDialogue` arm; `handle_event_result` function added
+- [x] `src/game/systems/dialogue.rs` updated: `execute_action()` handles all
+      four new variants
+- [x] `src/game/systems/dialogue.rs` updated: `apply_service_effect_inline`
+      private helper added
+- [x] All unit and integration tests from Section 3.4 passing
+
+### Success Criteria
+
+- `cargo fmt --all` — passed
+- `cargo check --all-targets --all-features` — passed (0 errors)
+- `cargo clippy --all-targets --all-features -- -D warnings` — passed (0 warnings)
+- `cargo nextest run --all-features` — 2549 passed, 8 skipped (no regressions)
+- `test_buy_item_dialogue_action_deducts_gold` confirms end-to-end transaction
+  through dialogue system (party gold decremented, item in inventory)
+- `test_dialogue_action_description_buy_item` confirms `description()` coverage
+- All pre-existing dialogue tests in `src/game/systems/dialogue.rs` still pass
+- `test_npc_dialogue_event_logs_when_npc_has_no_dialogue_id` updated and passing
+  with the new merchant no-dialogue log message
+
+---
