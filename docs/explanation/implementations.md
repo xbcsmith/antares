@@ -9926,3 +9926,117 @@ Two new tests added to the `#[cfg(test)]` module (Section 5.4):
 - `test_save_and_load` (pre-existing) still passes
 
 ---
+
+## Inventory System Phase 6: Integration Tests and End-to-End Verification
+
+### Overview
+
+Phase 6 adds three new integration test files covering the complete merchant,
+priest, and innkeeper transaction flows end-to-end. Each test exercises the
+full path from game state construction through domain-layer function call
+through save/load round-trip, ensuring data fidelity across all layers.
+
+### Files Created
+
+#### `tests/merchant_transaction_integration_test.rs` (new file, 5 tests)
+
+End-to-end tests for the merchant buy/sell flow:
+
+- `test_merchant_buy_flow_end_to_end` — Creates a `GameState`, sets party gold
+  to 100, calls `buy_item` with a valid item from a hand-constructed stock
+  template, asserts gold deducted and item present in inventory, then saves and
+  loads and confirms the loaded state (gold, inventory item, and NPC runtime
+  stock quantity) matches.
+- `test_merchant_sell_flow_end_to_end` — Manually inserts an item into a
+  character's inventory, calls `sell_item`, asserts the item is removed and
+  party gold increased by at least 1.
+- `test_merchant_buy_respects_inventory_limit` — Fills a character's inventory
+  to `Inventory::MAX_ITEMS`, attempts a purchase, asserts
+  `TransactionError::InventoryFull`, party gold unchanged, and NPC stock
+  unchanged.
+- `test_merchant_stock_depletes_after_buy` — Starts with a single unit in
+  stock, buys it (success), then attempts a second buy and asserts
+  `TransactionError::OutOfStock`.
+- `test_merchant_stock_persists_depletion_after_save_load` — Buys one item
+  from a stock of 5 (quantity becomes 4), inserts the runtime into `GameState`,
+  saves and loads, and confirms the loaded `NpcRuntimeState` still shows
+  quantity 4 for the purchased item.
+
+#### `tests/priest_service_integration_test.rs` (new file, 4 tests)
+
+End-to-end tests for the priest service flow:
+
+- `test_priest_heal_all_flow` — Character at partial HP (8/30), party has 100
+  gold, service costs 50. Calls `consume_service("heal_all")`, asserts HP
+  restored to 30, gold reduced to 50, and `services_consumed` contains
+  `"heal_all"`.
+- `test_priest_resurrect_flow` — Character has `Condition::DEAD` and 0 HP.
+  Calls `consume_service("resurrect")`, asserts all conditions cleared, HP
+  exactly 1, and gold deducted.
+- `test_priest_service_insufficient_gold` — Party gold (30) is less than
+  service cost (100). Asserts `TransactionError::InsufficientGold` with correct
+  `have`/`need` values, HP unchanged, gold unchanged, and
+  `services_consumed` empty.
+- `test_priest_service_save_load_preserves_state` — Consumes `"heal_all"`,
+  inserts runtime into `GameState`, saves and loads, confirms party gold and
+  character HP survive the round-trip, and `services_consumed` still contains
+  `"heal_all"`.
+
+#### `tests/innkeeper_service_integration_test.rs` (new file, 3 tests)
+
+End-to-end tests for the innkeeper rest service flow, with a regression guard:
+
+- `test_innkeeper_rest_service_heals_party` — Two party members at partial HP
+  and SP with sufficient gold. Calls `consume_service("rest")`, asserts both
+  members have HP and SP restored to base, gold deducted by service cost, and
+  `services_consumed` contains `"rest"`.
+- `test_innkeeper_rest_insufficient_gold` — Party gold is 0. Asserts
+  `TransactionError::InsufficientGold { have: 0, need: 50 }`, HP and SP
+  unchanged, gold unchanged.
+- `test_existing_inn_party_management_unaffected` — Regression guard that
+  re-runs the core scenario from `test_complete_inn_workflow` in
+  `innkeeper_party_management_integration_test.rs`. Creates a 3-member party,
+  enters Dialogue mode, transitions to InnManagement mode, removes one member,
+  returns to Exploration, and confirms party size is 2 with correct member
+  names. Then saves and loads and re-confirms all state, proving zero regression
+  in the pre-existing inn management flow.
+
+### Tests Added
+
+| File                                             | Tests  | Description                  |
+| ------------------------------------------------ | ------ | ---------------------------- |
+| `tests/merchant_transaction_integration_test.rs` | 5      | Merchant buy/sell end-to-end |
+| `tests/priest_service_integration_test.rs`       | 4      | Priest service end-to-end    |
+| `tests/innkeeper_service_integration_test.rs`    | 3      | Innkeeper rest + regression  |
+| **Total new**                                    | **12** |                              |
+
+### Test Results
+
+- `cargo fmt --all` — passed
+- `cargo check --all-targets --all-features` — passed (0 errors)
+- `cargo clippy --all-targets --all-features -- -D warnings` — passed (0 warnings)
+- `cargo nextest run --all-features` — 2578 passed, 8 skipped (12 new tests
+  added, zero regressions)
+
+### Deliverables Checklist
+
+- [x] `tests/merchant_transaction_integration_test.rs` created with 5 tests
+- [x] `tests/priest_service_integration_test.rs` created with 4 tests
+- [x] `tests/innkeeper_service_integration_test.rs` created with 3 tests
+- [x] All 12 new integration tests passing
+- [x] All pre-existing tests still passing (zero regressions)
+
+### Success Criteria
+
+- `cargo nextest run --all-features` passes ALL tests including pre-existing
+- Total test count increased from 2566 to 2578 (12 new tests)
+- `test_existing_inn_party_management_unaffected` explicitly confirms zero
+  regression in the existing inn party management flow
+- `test_merchant_stock_persists_depletion_after_save_load` confirms complete
+  data fidelity for the NPC runtime stock system through the save/load cycle
+- `test_priest_service_save_load_preserves_state` confirms `services_consumed`
+  and party HP/gold survive the save/load round-trip
+- All type aliases (`ItemId = u8`) used correctly throughout; no raw numeric
+  literals for IDs
+
+---
