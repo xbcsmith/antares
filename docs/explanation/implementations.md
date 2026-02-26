@@ -5,6 +5,7 @@
 | Phase                                             | Status      | Date       | Description                                                                |
 | ------------------------------------------------- | ----------- | ---------- | -------------------------------------------------------------------------- |
 | **Inventory System Phase 1**                      | ✅ COMPLETE | 2026-07-18 | **Shared Inventory Domain Model**                                          |
+| **Inventory System Phase 5**                      | ✅ COMPLETE | 2026-02-26 | **Save/Load Persistence for NPC Runtime State**                            |
 | Phase 1                                           | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                                                    |
 | Phase 2                                           | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                                                      |
 | Phase 3                                           | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                                             |
@@ -41,8 +42,8 @@
 | **Combat System Improvement Phase 5 Remediation** | ✅ COMPLETE | 2026-02-23 | **Dismiss victory splash when movement controls resume post-combat**       |
 | **Combat Input Enter UX Remediation**             | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback** |
 
-**Total Lines Implemented**: 9,300+ lines of production code + 5,400+ lines of documentation
-**Total Tests**: 346+ new tests (all passing), 2,490 total tests passing
+**Total Lines Implemented**: 9,350+ lines of production code + 5,450+ lines of documentation
+**Total Tests**: 350+ new tests (all passing), 2,566 total tests passing
 
 ---
 
@@ -9787,5 +9788,141 @@ Added `get_suggestions()` match arms for both new `ValidationError` variants:
 - `test_base_merchant_has_stock_template`, `test_base_priest_has_service_catalog`,
   and `test_base_innkeeper_has_service_catalog` confirm the updated RON data
   round-trips correctly through `NpcDatabase::load_from_file`
+
+---
+
+## Inventory System Phase 5: Save/Load Persistence
+
+### Overview
+
+Phase 5 extends the save/load system to correctly persist and restore NPC
+runtime state (merchant stock levels and consumed services) across save/load
+cycles. It also provides backward compatibility for legacy save files that
+pre-date the `npc_runtime` field, and adds an idempotent re-initialisation
+method that seeds merchant stock from templates when needed.
+
+The design spec is `docs/explanation/inventory_system_implementation.md`
+Phase 5 (Sections 5.1 – 5.6).
+
+### Components Implemented
+
+#### `src/domain/world/npc_runtime.rs` (verified, no structural change needed)
+
+Phase 2 already added the required derivations on every runtime type:
+
+- `NpcRuntimeStore` — `#[derive(Debug, Clone, Default, Serialize, Deserialize)]`
+- `NpcRuntimeState` — `#[derive(Debug, Clone, Serialize, Deserialize)]`
+
+Both implement `Serialize` and `Deserialize`, satisfying Section 5.1.
+`NpcRuntimeStore::Default` (derived) returns an empty store, satisfying the
+`impl Default` requirement from Section 5.2.
+
+#### `src/application/mod.rs` (modified)
+
+Two changes cover Sections 5.2 and 5.3:
+
+**`#[serde(default)]` on `GameState.npc_runtime`** — already present from Phase 2. Confirmed: if a legacy save file omits the `npc_runtime` field, serde falls
+back to `NpcRuntimeStore::default()` (empty store) rather than returning a
+parse error. No structural edit required.
+
+**`GameState::ensure_npc_runtime_initialized()`** — new public method added to
+the `impl GameState` block:
+
+```antares/src/application/mod.rs#L1043-1086
+pub fn ensure_npc_runtime_initialized(&mut self, content: &ContentDatabase) {
+    for npc_id in content.npcs.all_npcs() {
+        if self.npc_runtime.get(&npc_id).is_none() {
+            if let Some(npc) = content.npcs.get_npc(&npc_id) {
+                self.npc_runtime
+                    .initialize_merchant(npc, &content.npc_stock_templates);
+            }
+        }
+    }
+}
+```
+
+Logic matches Section 5.3 exactly:
+
+- Iterates all NPC IDs from the content database.
+- Skips any NPC that already has a runtime entry (idempotent).
+- For each un-initialised NPC, calls `NpcRuntimeStore::initialize_merchant`,
+  which seeds stock from the matching template or creates a bare state for
+  non-merchant NPCs.
+- Callers invoke this after loading campaign content to populate an empty
+  `npc_runtime` (new-game path) or to fill in an empty store after loading a
+  legacy save.
+
+#### `src/application/save_game.rs` (modified — tests only)
+
+Two new tests added to the `#[cfg(test)]` module (Section 5.4):
+
+- `test_save_load_preserves_npc_runtime_stock` — builds a `GameState` with one
+  merchant's runtime stock pre-populated, simulates a purchase (decrements item
+  10 from quantity 3 to 1), saves, loads, and asserts:
+
+  - Decremented quantity is 1 (not reset to original 3).
+  - Untouched quantity for item 20 is still 7.
+  - `override_price` for item 20 is preserved as `Some(150)`.
+  - `restock_template` name round-trips correctly.
+  - `services_consumed` vector round-trips correctly.
+
+- `test_save_load_legacy_format_empty_npc_runtime` — writes a normal save,
+  then surgically strips the multi-line `npc_runtime:` field from the raw RON
+  using paren-depth counting (because the field serialises as a multi-line
+  struct, not a single line). Asserts:
+  - Deserialization succeeds without error.
+  - Loaded `npc_runtime` is empty (defaulted via `#[serde(default)]`).
+  - Other state (roster, character name) is preserved.
+
+### Tests Added
+
+**`src/application/mod.rs`** — 2 new tests in the existing `mod tests` block:
+
+- `test_ensure_npc_runtime_initialized_populates_merchants` — creates a
+  `GameState` with an empty `npc_runtime`, calls
+  `ensure_npc_runtime_initialized()` with a `ContentDatabase` containing one
+  merchant NPC pointing at a "basic_goods" template (item 1, quantity 5).
+  Asserts the merchant's runtime state is present and stock entry has
+  quantity 5.
+
+- `test_ensure_npc_runtime_initialized_is_idempotent` — calls
+  `ensure_npc_runtime_initialized()` once, decrements item 1 to quantity 2,
+  then calls the method a second time. Asserts the quantity remains 2 (the
+  second call did not overwrite the existing runtime state).
+
+**`src/application/save_game.rs`** — 2 new tests (described above).
+
+### Test Results
+
+| Test                                                      | Result |
+| --------------------------------------------------------- | ------ |
+| `test_save_load_preserves_npc_runtime_stock`              | PASS   |
+| `test_save_load_legacy_format_empty_npc_runtime`          | PASS   |
+| `test_ensure_npc_runtime_initialized_populates_merchants` | PASS   |
+| `test_ensure_npc_runtime_initialized_is_idempotent`       | PASS   |
+| `test_save_and_load` (pre-existing)                       | PASS   |
+| All 2566 tests                                            | PASS   |
+
+### Deliverables Checklist
+
+- `src/domain/world/npc_runtime.rs` — `NpcRuntimeStore` and `NpcRuntimeState`
+  implement `Serialize`, `Deserialize`, `Default` (verified from Phase 2)
+- `src/application/mod.rs` — `GameState.npc_runtime` carries `#[serde(default)]`
+  (verified from Phase 2); `GameState::ensure_npc_runtime_initialized()`
+  implemented with full `///` doc comment and runnable example
+- `src/application/save_game.rs` — both unit tests from Section 5.4 passing
+- Zero new compiler errors or clippy warnings introduced
+
+### Success Criteria
+
+- `cargo fmt --all` — passed
+- `cargo check --all-targets --all-features` — passed (0 errors)
+- `cargo clippy --all-targets --all-features -- -D warnings` — passed (0 warnings)
+- `cargo nextest run --all-features` — 2566 passed, 8 skipped (no regressions,
+  4 new tests added)
+- `test_save_load_preserves_npc_runtime_stock` confirms round-trip fidelity
+- `test_save_load_legacy_format_empty_npc_runtime` confirms backward
+  compatibility with saves that pre-date the `npc_runtime` field
+- `test_save_and_load` (pre-existing) still passes
 
 ---

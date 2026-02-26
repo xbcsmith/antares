@@ -1095,4 +1095,218 @@ mod tests {
         );
         assert_eq!(loaded_state.party.members[1].name, "Char2");
     }
+
+    // ===== Phase 5: NPC Runtime Persistence Tests =====
+
+    /// Helper that builds a `GameState` pre-populated with one merchant NPC's
+    /// runtime stock so that save/load tests can verify round-trip fidelity.
+    fn make_game_state_with_merchant_runtime() -> GameState {
+        use crate::domain::inventory::{MerchantStock, StockEntry};
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        let mut state = GameState::new();
+
+        // Manually construct the runtime state that would normally be seeded from
+        // a template.  We do it by hand here so the test has no dependency on
+        // the tutorial campaign files being present.
+        let stock = MerchantStock {
+            entries: vec![
+                StockEntry {
+                    item_id: 10,
+                    quantity: 3,
+                    override_price: None,
+                },
+                StockEntry {
+                    item_id: 20,
+                    quantity: 7,
+                    override_price: Some(150),
+                },
+            ],
+            restock_template: Some("weapons_basic".to_string()),
+        };
+
+        let mut runtime = NpcRuntimeState::new("merchant_alice".to_string());
+        runtime.stock = Some(stock);
+        runtime.services_consumed.push("heal_all".to_string());
+
+        state.npc_runtime.insert(runtime);
+        state
+    }
+
+    #[test]
+    fn test_save_load_preserves_npc_runtime_stock() {
+        // Arrange: game state with a merchant that has been partially bought from
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut state = make_game_state_with_merchant_runtime();
+
+        // Simulate a buy: decrement item 10 from 3 → 1
+        {
+            let runtime = state
+                .npc_runtime
+                .get_mut(&"merchant_alice".to_string())
+                .unwrap();
+            runtime
+                .stock
+                .as_mut()
+                .unwrap()
+                .get_entry_mut(10)
+                .unwrap()
+                .quantity = 1;
+        }
+
+        // Act: save then load
+        manager.save("npc_runtime_test", &state).unwrap();
+        let loaded = manager.load("npc_runtime_test").unwrap();
+
+        // Assert: the decremented quantity is preserved (1, not original 3)
+        let runtime = loaded
+            .npc_runtime
+            .get(&"merchant_alice".to_string())
+            .expect("merchant_alice runtime state should be present after load");
+
+        assert!(
+            runtime.stock.is_some(),
+            "merchant stock should survive the round-trip"
+        );
+        let stock = runtime.stock.as_ref().unwrap();
+
+        assert_eq!(
+            stock.get_entry(10).unwrap().quantity,
+            1,
+            "decremented quantity must be preserved through save/load"
+        );
+        assert_eq!(
+            stock.get_entry(20).unwrap().quantity,
+            7,
+            "untouched quantity must be preserved through save/load"
+        );
+        assert_eq!(
+            stock.get_entry(20).unwrap().override_price,
+            Some(150),
+            "override_price must be preserved through save/load"
+        );
+        assert_eq!(
+            stock.restock_template,
+            Some("weapons_basic".to_string()),
+            "restock_template must be preserved through save/load"
+        );
+
+        // Services consumed should also round-trip
+        assert_eq!(
+            runtime.services_consumed,
+            vec!["heal_all".to_string()],
+            "services_consumed must be preserved through save/load"
+        );
+    }
+
+    #[test]
+    fn test_save_load_legacy_format_empty_npc_runtime() {
+        // Arrange: produce a save file, then strip the npc_runtime field to
+        // simulate a save file created before Phase 2 was implemented.
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut state = GameState::new();
+        // Add a character so the save has recognisable non-default content
+        state
+            .roster
+            .add_character(
+                create_test_character("LegacyChar"),
+                crate::domain::character::CharacterLocation::InParty,
+            )
+            .unwrap();
+
+        // Write a normal save first
+        manager.save("legacy_test", &state).unwrap();
+
+        // Read the raw RON, remove the npc_runtime field to simulate old format.
+        // The field serialises as a single line:
+        //   npc_runtime: (npcs: {}),
+        // We strip the entire line so the save parser falls back to Default.
+        let save_path = manager.save_path("legacy_test");
+        let ron_content = std::fs::read_to_string(&save_path).unwrap();
+
+        // Strip the npc_runtime field from the RON.  Because ron pretty-print
+        // renders the NpcRuntimeStore as a multi-line struct:
+        //
+        //   npc_runtime: (
+        //       npcs: {},
+        //   ),
+        //
+        // we cannot simply remove the first line; we must remove everything
+        // from "npc_runtime:" up to and including the closing ")," line.
+        //
+        // Strategy: find the marker line, then scan forward counting
+        // un-matched opening parens until they all close, then consume
+        // the trailing comma and newline.
+        let field_marker = "npc_runtime:";
+        let stripped = if let Some(start) = ron_content.find(field_marker) {
+            // Find the end of the field value by counting paren depth.
+            // We start scanning from the character after the marker.
+            let after_marker = start + field_marker.len();
+            let tail = &ron_content[after_marker..];
+
+            let mut depth: i32 = 0;
+            let mut found_open = false;
+            let mut field_end = after_marker; // position just past the closing ")"
+
+            for (offset, ch) in tail.char_indices() {
+                match ch {
+                    '(' => {
+                        depth += 1;
+                        found_open = true;
+                    }
+                    ')' => {
+                        depth -= 1;
+                        if found_open && depth == 0 {
+                            // offset points at ')'; advance past it
+                            field_end = after_marker + offset + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Consume optional trailing comma and newline after the closing ")"
+            let rest = &ron_content[field_end..];
+            let extra = rest
+                .chars()
+                .take_while(|c| *c == ',' || *c == '\n' || *c == '\r')
+                .map(|c| c.len_utf8())
+                .sum::<usize>();
+            let end = field_end + extra;
+
+            format!("{}{}", &ron_content[..start], &ron_content[end..])
+        } else {
+            // Field not found – the file already lacks it; no change needed
+            ron_content.clone()
+        };
+
+        std::fs::write(&save_path, &stripped).unwrap();
+
+        // Act: load the legacy-format save – must succeed without error
+        let loaded = manager
+            .load("legacy_test")
+            .expect("loading a legacy save without npc_runtime field must succeed");
+
+        // Assert: npc_runtime defaults to empty store
+        assert!(
+            loaded.npc_runtime.is_empty(),
+            "npc_runtime should default to empty when the field is absent in the save file"
+        );
+
+        // Assert: other state is preserved correctly
+        assert_eq!(
+            loaded.roster.characters.len(),
+            1,
+            "roster should be preserved from legacy save"
+        );
+        assert_eq!(
+            loaded.roster.characters[0].name, "LegacyChar",
+            "character name should be preserved from legacy save"
+        );
+    }
 }

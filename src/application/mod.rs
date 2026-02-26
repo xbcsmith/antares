@@ -1040,6 +1040,47 @@ impl GameState {
             self.active_spells.tick();
         }
     }
+
+    /// Ensures all merchant NPCs in the content database have runtime state initialised.
+    ///
+    /// This method is idempotent: if a runtime state already exists for an NPC it is
+    /// left unchanged. It is used in two scenarios:
+    ///
+    /// 1. **New game**: after `new_game` creates the state, merchant stock is seeded
+    ///    from templates.
+    /// 2. **Legacy save load**: a save file created before `npc_runtime` was added will
+    ///    deserialise to an empty `NpcRuntimeStore` (via `#[serde(default)]`). Calling
+    ///    this method after loading such a save re-creates the merchant stock from
+    ///    templates so the player can interact with merchants normally.
+    ///
+    /// # Arguments
+    ///
+    /// * `content` - The loaded content database that contains NPC definitions and
+    ///   stock templates.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    /// use antares::sdk::database::ContentDatabase;
+    ///
+    /// let mut state = GameState::new();
+    /// let content = ContentDatabase::new();
+    /// // With an empty content database this is a no-op.
+    /// state.ensure_npc_runtime_initialized(&content);
+    /// assert!(state.npc_runtime.is_empty());
+    /// ```
+    pub fn ensure_npc_runtime_initialized(&mut self, content: &ContentDatabase) {
+        for npc_id in content.npcs.all_npcs() {
+            // Only initialise NPCs that do not yet have a runtime state.
+            if self.npc_runtime.get(&npc_id).is_none() {
+                if let Some(npc) = content.npcs.get_npc(&npc_id) {
+                    self.npc_runtime
+                        .initialize_merchant(npc, &content.npc_stock_templates);
+                }
+            }
+        }
+    }
 }
 
 impl Default for GameState {
@@ -2630,5 +2671,114 @@ mod tests {
             })
             .collect();
         assert_eq!(in_party_indices.len(), state.party.size());
+    }
+
+    // ===== Phase 5: NPC Runtime Initialization Tests =====
+
+    /// Helper that builds a minimal `ContentDatabase` with one merchant NPC and a
+    /// matching stock template.  Used by the `ensure_npc_runtime_initialized` tests.
+    fn build_content_db_with_merchant() -> crate::sdk::database::ContentDatabase {
+        use crate::domain::world::npc::NpcDefinition;
+        use crate::domain::world::npc_runtime::{
+            MerchantStockTemplate, MerchantStockTemplateDatabase, TemplateStockEntry,
+        };
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Build a stock template
+        let mut templates = MerchantStockTemplateDatabase::new();
+        templates.add(MerchantStockTemplate {
+            id: "basic_goods".to_string(),
+            entries: vec![TemplateStockEntry {
+                item_id: 1,
+                quantity: 5,
+                override_price: None,
+            }],
+        });
+        db.npc_stock_templates = templates;
+
+        // Build an NPC database with one merchant referencing the template
+        let mut merchant = NpcDefinition::merchant("merchant_alice", "Alice", "alice.png");
+        merchant.stock_template = Some("basic_goods".to_string());
+        db.npcs.add_npc(merchant).expect("add_npc should succeed");
+
+        db
+    }
+
+    #[test]
+    fn test_ensure_npc_runtime_initialized_populates_merchants() {
+        // Arrange: empty npc_runtime in GameState
+        let mut state = GameState::new();
+        assert!(state.npc_runtime.is_empty());
+
+        let content = build_content_db_with_merchant();
+
+        // Act
+        state.ensure_npc_runtime_initialized(&content);
+
+        // Assert: merchant now has runtime state with stock
+        let runtime = state
+            .npc_runtime
+            .get(&"merchant_alice".to_string())
+            .expect("merchant_alice should have runtime state after initialization");
+
+        assert!(
+            runtime.stock.is_some(),
+            "merchant_alice should have stock initialized from template"
+        );
+        assert_eq!(
+            runtime
+                .stock
+                .as_ref()
+                .unwrap()
+                .get_entry(1)
+                .expect("item 1 should be in stock")
+                .quantity,
+            5
+        );
+    }
+
+    #[test]
+    fn test_ensure_npc_runtime_initialized_is_idempotent() {
+        // Arrange: initialize once
+        let mut state = GameState::new();
+        let content = build_content_db_with_merchant();
+
+        state.ensure_npc_runtime_initialized(&content);
+
+        // Simulate a buy: decrement the stock quantity
+        {
+            let runtime = state
+                .npc_runtime
+                .get_mut(&"merchant_alice".to_string())
+                .unwrap();
+            let entry = runtime
+                .stock
+                .as_mut()
+                .unwrap()
+                .get_entry_mut(1)
+                .expect("item 1 should be in stock");
+            entry.quantity = 2; // simulate two items bought
+        }
+
+        // Act: call again (second time should be a no-op for existing entries)
+        state.ensure_npc_runtime_initialized(&content);
+
+        // Assert: the decremented quantity is still 2 (not reset to 5)
+        let runtime = state
+            .npc_runtime
+            .get(&"merchant_alice".to_string())
+            .unwrap();
+        assert_eq!(
+            runtime
+                .stock
+                .as_ref()
+                .unwrap()
+                .get_entry(1)
+                .unwrap()
+                .quantity,
+            2,
+            "Second call to ensure_npc_runtime_initialized must not overwrite existing state"
+        );
     }
 }
