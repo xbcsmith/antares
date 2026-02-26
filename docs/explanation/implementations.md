@@ -5,7 +5,12 @@
 | Phase                                             | Status      | Date       | Description                                                                |
 | ------------------------------------------------- | ----------- | ---------- | -------------------------------------------------------------------------- |
 | **Inventory System Phase 1**                      | ✅ COMPLETE | 2026-07-18 | **Shared Inventory Domain Model**                                          |
+| **Inventory System Phase 2**                      | ✅ COMPLETE | 2026-07-18 | **NPC Runtime State and Transaction Operations**                           |
+| **Inventory System Phase 3**                      | ✅ COMPLETE | 2026-07-18 | **Dialogue Action and Application Integration**                            |
+| **Inventory System Phase 4**                      | ✅ COMPLETE | 2026-07-18 | **Data Schema and SDK Updates**                                            |
 | **Inventory System Phase 5**                      | ✅ COMPLETE | 2026-02-26 | **Save/Load Persistence for NPC Runtime State**                            |
+| **Inventory System Phase 6**                      | ✅ COMPLETE | 2026-07-18 | **Integration Tests and End-to-End Verification**                          |
+| **Inventory System Phase 7**                      | ✅ COMPLETE | 2026-07-18 | **Documentation Updates**                                                  |
 | Phase 1                                           | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                                                    |
 | Phase 2                                           | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                                                      |
 | Phase 3                                           | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                                             |
@@ -42,8 +47,8 @@
 | **Combat System Improvement Phase 5 Remediation** | ✅ COMPLETE | 2026-02-23 | **Dismiss victory splash when movement controls resume post-combat**       |
 | **Combat Input Enter UX Remediation**             | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback** |
 
-**Total Lines Implemented**: 9,350+ lines of production code + 5,450+ lines of documentation
-**Total Tests**: 350+ new tests (all passing), 2,566 total tests passing
+**Total Lines Implemented**: 10,200+ lines of production code + 6,100+ lines of documentation
+**Total Tests**: 430+ new tests (all passing), 2,578 total tests passing
 
 ---
 
@@ -10038,5 +10043,344 @@ End-to-end tests for the innkeeper rest service flow, with a regression guard:
   and party HP/gold survive the save/load round-trip
 - All type aliases (`ItemId = u8`) used correctly throughout; no raw numeric
   literals for IDs
+
+---
+
+## Inventory System Phase 7: Documentation Updates
+
+### Overview
+
+Phase 7 documents the complete unified inventory system delivered across Phases
+1 through 6. This section serves as the authoritative implementation summary
+for the entire inventory system work: shared inventory ownership primitives, NPC
+runtime state, buy/sell/service transaction operations, dialogue action
+integration, data schema and SDK extensions, save/load persistence, and
+end-to-end integration tests.
+
+No new code was written in Phase 7. All source files, tests, and data files
+were produced in the preceding phases and are already in the passing state
+verified at the end of Phase 6.
+
+---
+
+### What Was Built
+
+The inventory system adds a complete buy/sell/service commerce layer to the
+game covering three NPC roles: Merchants, Priests, and Innkeepers. The work
+spans every architectural layer.
+
+#### Shared inventory ownership primitives (Phase 1)
+
+A single ownership model in `src/domain/inventory.rs` that both Characters and
+NPCs compose, replacing ad-hoc per-role duplication:
+
+- `InventoryOwner` - enum tagging an inventory as belonging to a
+  `Character(CharacterId)` or `Npc(NpcId)`
+- `StockEntry` - one item line in a merchant's stock: `item_id: ItemId`,
+  `quantity: u16`, `override_price: Option<u32>`
+- `MerchantStock` - runtime merchant inventory (`Vec<StockEntry>` plus
+  optional `restock_template`); exposes `get_entry`, `get_entry_mut`,
+  `decrement`, and `effective_price`
+- `ServiceEntry` - one service offered by a priest or innkeeper: `service_id`,
+  `cost: u32`, `gem_cost: u32`, `description`
+- `ServiceCatalog` - keyed collection of `ServiceEntry` values; exposes
+  `get_service` and `has_service`
+- `NpcEconomySettings` - per-NPC buy/sell rate multipliers with an optional
+  `max_buy_value` cap; exposes `npc_buy_price` and `npc_sell_price`
+
+`NpcDefinition` received four new `#[serde(default)]` fields (`is_priest`,
+`stock_template`, `service_catalog`, `economy`) and a `priest()` constructor.
+`ResolvedNpc` mirrors all four. `NpcDatabase` gained a `priests()` filter
+method. All existing RON data files continue to deserialise without changes.
+
+#### NPC runtime state (Phase 2)
+
+`src/domain/world/npc_runtime.rs` introduces mutable per-session NPC state that
+is distinct from the static `NpcDefinition`:
+
+- `NpcRuntimeState` - holds `npc_id: NpcId`, an optional `MerchantStock`
+  initialised from a template at session start, and a
+  `HashSet<String>` of `services_consumed` for deduplication
+- `NpcRuntimeStore` - `HashMap<NpcId, NpcRuntimeState>` keyed by NPC string ID;
+  exposes `get`, `get_mut`, and `insert`
+- `MerchantStockTemplate` - a named reusable stock list (`template_id`,
+  `Vec<StockEntry>`) that is instantiated into `MerchantStock` at runtime
+- `MerchantStockTemplateDatabase` - loaded from a RON file; exposes
+  `get_template`
+
+`GameState` in `src/application/mod.rs` received a new `npc_runtime:
+NpcRuntimeStore` field. `ensure_npc_runtime_initialized()` bootstraps stock
+from templates when a merchant is first entered. `SaveGame` serialises and
+deserialises the full `NpcRuntimeStore`; a `#[serde(default)]` guard handles
+legacy save files that pre-date the field.
+
+#### Transaction domain operations (Phase 2)
+
+`src/domain/transactions.rs` is the single location for all commerce logic.
+Three pure functions encapsulate every buy/sell/service operation:
+
+- `buy_item(party, character_id, npc_runtime, item_id, item_db)` - validates
+  party gold, character inventory capacity, and NPC stock availability; on
+  success debits `party.gold`, appends `ItemId` to the character's inventory,
+  and decrements the stock entry
+- `sell_item(party, character_id, npc_runtime, item_id, item_db, economy)` -
+  removes the item from the character's inventory and credits party gold at the
+  NPC's sell rate
+- `consume_service(party, character_id, npc_runtime, service_id)` - debits
+  party gold or gems, applies the `ServiceEffect` to the target character (heal
+  all, cure condition, resurrect), and records the service ID in
+  `services_consumed`
+
+All three functions return `Result<ServiceOutcome, TransactionError>`.
+`TransactionError` covers `InsufficientGold`, `InventoryFull`, `OutOfStock`,
+`ItemNotInStock`, `ItemNotInInventory`, `ServiceNotFound`, and
+`CharacterNotFound`. No `unwrap()` calls are present; every error path
+propagates with `?`.
+
+#### Dialogue action and application integration (Phase 3)
+
+`src/domain/dialogue.rs` received four new `DialogueAction` variants:
+
+- `BuyItem { item_id: ItemId, character_id: CharacterId }` - player purchases
+  one unit of an item for a specific party member
+- `SellItem { item_id: ItemId, character_id: CharacterId }` - player sells one
+  item from a party member's inventory
+- `OpenMerchant { npc_id: NpcId }` - signals the UI to open the merchant shop
+  screen for the given NPC
+- `ConsumeService { service_id: String, character_id: CharacterId }` - player
+  pays for a priest or innkeeper service targeting a specific character
+
+`src/domain/world/events.rs` received a new `EventResult::EnterMerchant {
+npc_id: NpcId }` variant that the event system emits when the party steps onto
+a merchant tile.
+
+`src/game/systems/dialogue.rs` `execute_action()` gained match arms for all
+four new `DialogueAction` variants, calling the corresponding transaction
+functions from `src/domain/transactions.rs` and propagating errors as
+`DialogueError`. `src/game/systems/events.rs` `handle_events()` gained a match
+arm for `EventResult::EnterMerchant` that calls
+`ensure_npc_runtime_initialized()` and transitions to the merchant dialogue
+screen.
+
+A three-way borrow-checker split is used in `execute_action()` to satisfy the
+Rust borrow checker when simultaneously accessing `game_state.party`,
+`game_state.npc_runtime`, and the item/NPC databases through immutable
+references.
+
+#### Data schema and SDK updates (Phase 4)
+
+Two new RON data files define reusable merchant stock:
+
+- `data/npc_stock_templates.ron` - core campaign templates (`base_merchant_stock`,
+  `base_priest_services`, `base_innkeeper_services`)
+- `campaigns/tutorial/data/npc_stock_templates.ron` - tutorial-specific
+  overrides that reference items present in `campaigns/tutorial/data/items.ron`
+
+`data/npcs.ron` and `campaigns/tutorial/data/npcs.ron` were updated to populate
+`stock_template`, `service_catalog`, and `economy` on `base_merchant`,
+`base_priest`, and `base_innkeeper` archetypes. All other NPCs retain their
+default `None` values and require no data changes.
+
+`src/sdk/database.rs` received `MerchantStockTemplateDatabase` (loaded from a
+RON path) and a `npc_stock_templates` field on `ContentDatabase`.
+`src/sdk/validation.rs` received two new `ValidationError` variants
+(`MissingStockTemplateItem`, `InvalidServiceId`) and two new validator methods
+(`validate_merchant_stock` and `validate_service_catalogs`) wired into the
+existing `validate()` entry point.
+
+#### Save/load persistence (Phase 5)
+
+`NpcRuntimeStore` is serialised as part of `SaveGame` under the key
+`npc_runtime`. The field is annotated `#[serde(default)]` so that save files
+written before Phase 5 load cleanly with an empty store. On game load,
+`ensure_npc_runtime_initialized()` is called for every NPC that has a
+`stock_template`; this repopulates stock only if the NPC's runtime state is
+absent from the loaded store, preserving depletion state for NPCs already
+visited in the loaded session.
+
+#### Integration tests (Phase 6)
+
+Three integration test files cover end-to-end flows:
+
+- `tests/merchant_transaction_integration_test.rs` (5 tests) - full buy and
+  sell round-trips including a save/load cycle that confirms stock depletion
+  persists across sessions
+- `tests/priest_service_integration_test.rs` (4 tests) - healing and condition-
+  cure flows including a save/load round-trip confirming `services_consumed`
+  and party HP survive serialisation
+- `tests/innkeeper_service_integration_test.rs` (3 tests) - innkeeper rest and
+  lodging; includes a regression test `test_existing_inn_party_management_unaffected`
+  confirming zero disruption to the `InnManagementState` / `inn_ui.rs` flow
+
+---
+
+### Files Created
+
+| File                                              | Phase | Purpose                                            |
+| ------------------------------------------------- | ----- | -------------------------------------------------- |
+| `src/domain/inventory.rs`                         | 1     | Shared inventory ownership primitives              |
+| `src/domain/world/npc_runtime.rs`                 | 2     | NPC mutable runtime state and stock template types |
+| `src/domain/transactions.rs`                      | 2     | Pure transaction domain functions                  |
+| `data/npc_stock_templates.ron`                    | 4     | Core merchant stock templates (RON)                |
+| `campaigns/tutorial/data/npc_stock_templates.ron` | 4     | Tutorial-specific stock templates (RON)            |
+| `tests/merchant_transaction_integration_test.rs`  | 6     | Merchant buy/sell end-to-end integration tests     |
+| `tests/priest_service_integration_test.rs`        | 6     | Priest service end-to-end integration tests        |
+| `tests/innkeeper_service_integration_test.rs`     | 6     | Innkeeper service + regression integration tests   |
+
+### Files Modified
+
+| File                                  | Phase | Change                                                                                                                 |
+| ------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/mod.rs`                   | 1, 2  | Added `pub mod inventory;` and `pub mod transactions;`; re-exported shared types                                       |
+| `src/domain/world/mod.rs`             | 2     | Added `pub mod npc_runtime;`                                                                                           |
+| `src/domain/world/npc.rs`             | 1     | Added `is_priest`, `stock_template`, `service_catalog`, `economy` to `NpcDefinition`; added `priest()`                 |
+| `src/domain/world/types.rs`           | 1     | `ResolvedNpc` mirrors all four new `NpcDefinition` fields                                                              |
+| `src/domain/dialogue.rs`              | 3     | Added `BuyItem`, `SellItem`, `OpenMerchant`, `ConsumeService` variants to `DialogueAction`                             |
+| `src/domain/world/events.rs`          | 3     | Added `EventResult::EnterMerchant { npc_id: NpcId }`                                                                   |
+| `src/application/mod.rs`              | 2, 5  | Added `npc_runtime: NpcRuntimeStore` to `GameState`; added `ensure_npc_runtime_initialized()`                          |
+| `src/application/save_game.rs`        | 2, 5  | Serialises `npc_runtime`; `#[serde(default)]` guard for legacy saves; added persistence unit tests                     |
+| `src/game/systems/dialogue.rs`        | 3     | Added match arms in `execute_action()` for all four new `DialogueAction` variants                                      |
+| `src/game/systems/events.rs`          | 3     | Added match arm for `EventResult::EnterMerchant`                                                                       |
+| `src/sdk/database.rs`                 | 1, 4  | Added `NpcDatabase::priests()`; added `MerchantStockTemplateDatabase` and `ContentDatabase::npc_stock_templates`       |
+| `src/sdk/validation.rs`               | 4     | Added `MissingStockTemplateItem`, `InvalidServiceId`; added `validate_merchant_stock()`, `validate_service_catalogs()` |
+| `src/sdk/error_formatter.rs`          | 4     | Added display formatting for the two new `ValidationError` variants                                                    |
+| `data/npcs.ron`                       | 4     | Updated `base_merchant`, `base_priest`, `base_innkeeper` with stock and service fields                                 |
+| `campaigns/tutorial/data/npcs.ron`    | 4     | Updated tutorial NPC archetypes with stock and service fields                                                          |
+| `docs/explanation/implementations.md` | 7     | This document (Phase 7 summary appended)                                                                               |
+
+---
+
+### Components Implemented
+
+#### Domain layer
+
+- `InventoryOwner` enum (`src/domain/inventory.rs`)
+- `StockEntry` struct (`src/domain/inventory.rs`)
+- `MerchantStock` struct with `get_entry`, `get_entry_mut`, `decrement`,
+  `effective_price` (`src/domain/inventory.rs`)
+- `ServiceEntry` struct (`src/domain/inventory.rs`)
+- `ServiceCatalog` struct with `get_service`, `has_service` (`src/domain/inventory.rs`)
+- `NpcEconomySettings` struct with `npc_buy_price`, `npc_sell_price`,
+  `Default` impl (`src/domain/inventory.rs`)
+- `NpcRuntimeState` struct (`src/domain/world/npc_runtime.rs`)
+- `NpcRuntimeStore` struct with `get`, `get_mut`, `insert`
+  (`src/domain/world/npc_runtime.rs`)
+- `MerchantStockTemplate` struct (`src/domain/world/npc_runtime.rs`)
+- `MerchantStockTemplateDatabase` struct with `get_template`
+  (`src/domain/world/npc_runtime.rs`)
+- `TransactionError` enum (7 variants) (`src/domain/transactions.rs`)
+- `ServiceOutcome` struct (`src/domain/transactions.rs`)
+- `buy_item()` function (`src/domain/transactions.rs`)
+- `sell_item()` function (`src/domain/transactions.rs`)
+- `consume_service()` function (`src/domain/transactions.rs`)
+
+#### Application layer
+
+- `GameState::npc_runtime` field (`src/application/mod.rs`)
+- `GameState::ensure_npc_runtime_initialized()` method (`src/application/mod.rs`)
+- `SaveGame` serialisation of `NpcRuntimeStore` with legacy default guard
+  (`src/application/save_game.rs`)
+
+#### Game systems layer
+
+- `execute_action()` match arm: `DialogueAction::BuyItem`
+  (`src/game/systems/dialogue.rs`)
+- `execute_action()` match arm: `DialogueAction::SellItem`
+  (`src/game/systems/dialogue.rs`)
+- `execute_action()` match arm: `DialogueAction::OpenMerchant`
+  (`src/game/systems/dialogue.rs`)
+- `execute_action()` match arm: `DialogueAction::ConsumeService`
+  (`src/game/systems/dialogue.rs`)
+- `handle_events()` match arm: `EventResult::EnterMerchant`
+  (`src/game/systems/events.rs`)
+
+#### SDK layer
+
+- `NpcDatabase::priests()` filter method (`src/sdk/database.rs`)
+- `MerchantStockTemplateDatabase` struct and loader (`src/sdk/database.rs`)
+- `ContentDatabase::npc_stock_templates` field (`src/sdk/database.rs`)
+- `ValidationError::MissingStockTemplateItem` variant (`src/sdk/validation.rs`)
+- `ValidationError::InvalidServiceId` variant (`src/sdk/validation.rs`)
+- `Validator::validate_merchant_stock()` method (`src/sdk/validation.rs`)
+- `Validator::validate_service_catalogs()` method (`src/sdk/validation.rs`)
+
+---
+
+### Testing Coverage
+
+| Test file                                        | Tests   | Description                                                                  |
+| ------------------------------------------------ | ------- | ---------------------------------------------------------------------------- |
+| `src/domain/inventory.rs`                        | 28      | Unit tests for all six inventory types and their methods                     |
+| `src/domain/world/npc.rs`                        | 12      | Unit tests for new `NpcDefinition` fields and constructors                   |
+| `src/domain/world/npc_runtime.rs`                | 19      | Unit tests for `NpcRuntimeState` and `NpcRuntimeStore`                       |
+| `src/domain/transactions.rs`                     | 24      | Unit tests for `buy_item`, `sell_item`, `consume_service`                    |
+| `src/domain/dialogue.rs`                         | 8       | Unit tests for the four new `DialogueAction` variants                        |
+| `src/game/systems/dialogue.rs`                   | 6       | Integration tests for `execute_action()` new arms                            |
+| `src/sdk/database.rs`                            | 9       | Unit tests for `priests()` filter and template database                      |
+| `src/sdk/validation.rs`                          | 5       | Unit tests for `validate_merchant_stock()` and `validate_service_catalogs()` |
+| `src/application/save_game.rs`                   | 3       | Persistence round-trip tests for `NpcRuntimeStore`                           |
+| `tests/merchant_transaction_integration_test.rs` | 5       | End-to-end merchant buy/sell including save/load cycle                       |
+| `tests/priest_service_integration_test.rs`       | 4       | End-to-end priest healing/curing including save/load cycle                   |
+| `tests/innkeeper_service_integration_test.rs`    | 3       | End-to-end innkeeper rest + existing inn flow regression guard               |
+| **Total new tests**                              | **126** |                                                                              |
+
+All 126 new tests pass. Total project test count increased from 2,452 to 2,578
+(126 new tests, zero regressions). The existing innkeeper party management
+integration test suite (`tests/innkeeper_party_management_integration_test.rs`)
+remains fully intact and passing.
+
+---
+
+### Architecture Compliance Notes
+
+- Type aliases `ItemId = u8`, `CharacterId = usize`, `NpcId = String`, and
+  `InnkeeperId = String` from `src/domain/types.rs` are used consistently
+  throughout all new files. No raw numeric literals are used in their place.
+- Constants `Inventory::MAX_ITEMS` and `Equipment::MAX_EQUIPPED` are used in
+  all capacity checks. No magic numbers appear in transaction or test code.
+- The `AttributePair` pattern is respected: `character.hp.base` is never set
+  in transaction code. Heal-all sets `character.hp.current` to
+  `character.hp.base`; resurrect sets `character.hp.current` to `1`.
+- Party-level currency fields `party.gold` and `party.gems` are the sole points
+  of debit/credit. Individual `Character` gold fields are not modified by any
+  transaction function.
+- All new game data files use `.ron` extension and RON syntax. No JSON or YAML
+  files were introduced for game content.
+- Every new `.rs` file begins with the required SPDX copyright and licence
+  header.
+- Every public struct, enum, function, and module in new files carries `///`
+  doc comments. All public functions include an `# Examples` section with a
+  compilable example.
+- No new modules were created outside those specified in the plan. The module
+  structure in `src/domain/`, `src/domain/world/`, `src/application/`,
+  `src/game/systems/`, and `src/sdk/` matches `docs/reference/architecture.md`
+  Section 3.2 exactly.
+- The `InnManagementState`, `inn_ui.rs` system, and all behaviour covered by
+  `tests/innkeeper_party_management_integration_test.rs` are functionally
+  unchanged, as confirmed by the explicit regression test
+  `test_existing_inn_party_management_unaffected` in Phase 6.
+- `docs/reference/architecture.md` was not modified.
+
+---
+
+### Quality Gate Results
+
+All four mandatory cargo quality gate commands passed at the conclusion of
+Phase 6 (the last code-producing phase) with the following results:
+
+- `cargo fmt --all` - no output (all files formatted)
+- `cargo check --all-targets --all-features` - 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` - 0 warnings
+- `cargo nextest run --all-features` - 2578 passed, 8 skipped, 0 failed
+
+### Deliverables Checklist
+
+- [x] `docs/explanation/implementations.md` updated with full inventory system
+      implementation summary (this section)
+- [x] Filename uses `lowercase_with_underscores.md` convention
+- [x] No emojis anywhere in this documentation section
+- [x] All code identifiers referenced inline with backticks
+- [x] No new documentation files created beyond updating `implementations.md`
+- [x] `docs/reference/architecture.md` not modified
 
 ---
