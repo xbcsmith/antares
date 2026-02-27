@@ -10939,3 +10939,86 @@ plan plus two additional egui/variant tests):
 - [x] Every egui widget in the action row uses `push_id("actions", ...)` — no
       ID collisions
 - [x] `docs/reference/architecture.md` not modified
+
+## ECS Inventory View — Phase 5: Configuration, Data, and Documentation
+
+### Overview
+
+Phase 5 finalises the ECS Inventory View feature by making the `"I"` key
+binding explicit in every campaign RON config file, adding a template config
+entry for future campaigns, and capturing two new round-trip tests that confirm
+the `inventory` field survives serialisation and that the tutorial campaign file
+deserialises correctly. This phase produces no new `.rs` source files; all
+changes are to data files, test additions inside an existing file, and this
+documentation update.
+
+### Components Implemented
+
+| File                                  | Type of Change        | Description                                                                                                                                                 |
+| ------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `campaigns/tutorial/config.ron`       | Modified              | Added `inventory: ["I"]` to the `controls: ControlsConfig(...)` block, making the key binding explicit (previously relied on `#[serde(default)]`).          |
+| `campaigns/config.template.ron`       | Modified              | Added `inventory: ["I"]` with a descriptive comment to the controls section so new campaigns created from the template include the field.                   |
+| `src/sdk/game_config.rs`              | Modified (tests only) | Added `test_tutorial_config_deserializes_with_inventory_key` and `test_controls_config_ron_roundtrip_includes_inventory` to the existing `mod tests` block. |
+| `docs/explanation/implementations.md` | Modified              | Appended this `## ECS Inventory View — Phase 5` section.                                                                                                    |
+
+### Test Counts
+
+| File                     | New Tests | Test Names (brief)                                                                                              |
+| ------------------------ | --------- | --------------------------------------------------------------------------------------------------------------- |
+| `src/sdk/game_config.rs` | 2         | `test_tutorial_config_deserializes_with_inventory_key`, `test_controls_config_ron_roundtrip_includes_inventory` |
+
+#### Test Descriptions
+
+- `test_tutorial_config_deserializes_with_inventory_key` — loads the real
+  `campaigns/tutorial/config.ron` file via `GameConfig::load_or_default` using
+  `CARGO_MANIFEST_DIR` to resolve the path, then asserts
+  `config.controls.inventory == vec!["I".to_string()]`.
+- `test_controls_config_ron_roundtrip_includes_inventory` — constructs a
+  `ControlsConfig` with `inventory: vec!["I", "F1"]`, serialises to a RON
+  string via `ron::to_string`, deserialises back, and asserts round-trip
+  fidelity for the `inventory` field.
+
+### Architecture Compliance Notes
+
+- **Surface ECS only**: `Inventory`, `InventorySlot`, and `Equipment` gained
+  `#[derive(Component)]` in Phase 1 with no field changes; this phase touches
+  none of those types.
+- **`GameMode` extension**: `GameMode::Inventory(InventoryState)` was added in
+  Phase 2 following the existing `InnManagement(InnManagementState)` precedent;
+  unchanged in this phase.
+- **UI pattern**: `InventoryPlugin` uses `bevy_egui` matching the `InnUiPlugin`
+  pattern; no Bevy native UI nodes were introduced.
+- **`ControlsConfig.inventory` serde default**: The field carries
+  `#[serde(default = "default_inventory_keys")]` so any existing RON file that
+  omits `inventory` deserialises correctly without a migration step. The
+  explicit addition in Phase 5 is canonical documentation of the intent, not a
+  requirement for correctness.
+- **`transactions.rs` untouched**: Item drops in Phase 4 discard items without
+  domain-layer involvement; `transactions.rs` was not modified across any phase
+  of the ECS Inventory View work.
+- **No magic numbers**: All party-size and inventory-size limits reference
+  `PARTY_MAX_SIZE` and `Inventory::MAX_ITEMS` constants throughout.
+- **SPDX headers**: All new `.rs` files introduced in Phases 1–4 carry the
+  required `SPDX-FileCopyrightText` and `SPDX-License-Identifier: Apache-2.0`
+  headers as the first two lines.
+
+### Deliverables Checklist
+
+- [x] `campaigns/tutorial/config.ron` updated with `inventory: ["I"]`
+- [x] `campaigns/config.template.ron` updated with `inventory: ["I"]` and
+      explanatory comment
+- [x] `docs/explanation/implementations.md` has this `## ECS Inventory View —
+    Phase 5` section appended
+- [x] `test_tutorial_config_deserializes_with_inventory_key` added and passing
+- [x] `test_controls_config_ron_roundtrip_includes_inventory` added and passing
+
+### Success Criteria
+
+- [x] `cargo fmt --all` — no output
+- [x] `cargo check --all-targets --all-features` — zero errors, zero warnings
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — zero warnings
+- [x] `"I"` key is present in `campaigns/tutorial/config.ron`
+- [x] `"I"` key is present in `campaigns/config.template.ron`
+- [x] Both Phase 5 tests compile and pass
+- [x] All pre-existing tests unaffected
+- [x] `docs/reference/architecture.md` not modified

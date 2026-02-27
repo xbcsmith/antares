@@ -965,4 +965,28 @@ mod tests {
             assert!(config.validate().is_ok());
         }
     }
+
+    #[test]
+    fn test_tutorial_config_deserializes_with_inventory_key() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let config_path = std::path::Path::new(manifest_dir).join("campaigns/tutorial/config.ron");
+        let config = GameConfig::load_or_default(&config_path).unwrap();
+        assert_eq!(config.controls.inventory, vec!["I".to_string()]);
+    }
+
+    #[test]
+    fn test_controls_config_ron_roundtrip_includes_inventory() {
+        let original = ControlsConfig {
+            inventory: vec!["I".to_string(), "F1".to_string()],
+            ..Default::default()
+        };
+        let ron_string = ron::to_string(&original).expect("serialization must succeed");
+        let deserialized: ControlsConfig =
+            ron::from_str(&ron_string).expect("deserialization must succeed");
+        assert_eq!(
+            deserialized.inventory,
+            vec!["I".to_string(), "F1".to_string()],
+            "inventory field must survive a RON round-trip"
+        );
+    }
 }

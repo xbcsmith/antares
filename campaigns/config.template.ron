@@ -94,6 +94,10 @@ GameConfig(
         // Keys for opening menu/pausing game
         menu: ["Escape"],
 
+        // Keys for opening the inventory screen
+        // Default: "I" key
+        inventory: ["I"],
+
         // Movement cooldown in seconds
         // Prevents accidental double-moves or rapid movement
         // Range: 0.0+ (0.0 = no cooldown, instant movement)

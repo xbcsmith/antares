@@ -100,8 +100,10 @@ directly in the map-loading code path.
 
 #### 1.4 Wire Time to Combat Rounds
 
-In `src/game/systems/combat.rs`, at the end of `process_combat_round` (or equivalent),
-call `global_state.0.advance_time(TIME_COST_COMBAT_ROUND_MINUTES)`. This keeps
+In `src/game/systems/combat.rs`, at the **start** of `process_combat_round` (or
+equivalent), before any combatant acts, call
+`global_state.0.advance_time(TIME_COST_COMBAT_ROUND_MINUTES)`. Advancing at the start
+of the round means time passes even if the round ends early (flee, wipe). This keeps
 combat-round advancement in the game layer where combat itself lives.
 
 #### 1.5 Fix `rest_party()` to Use `GameState::advance_time()`
@@ -292,6 +294,8 @@ fn update_clock(
 Text color can optionally vary with `time_of_day()` (warmer during day, cooler at
 night) using `CLOCK_DAY_TEXT_COLOR` / `CLOCK_NIGHT_TEXT_COLOR` constants.
 
+The clock is hidden during combat, consistent with the rest of the exploration HUD.
+
 #### 3.4 Register the System in `HudPlugin`
 
 ```rust
@@ -420,16 +424,14 @@ function at the domain layer.
 
 ---
 
-## Open Questions
+## Decisions
 
-1. **Step time cost** — Should outdoor steps cost more (10 min) than dungeon steps (5
-   min) to reflect slower travel speeds in the field? Or should terrain type determine
-   the cost?
+1. **Step time cost** — Flat cost regardless of terrain or map type. All steps cost
+   `TIME_COST_STEP_MINUTES` (5 min) whether indoors or outdoors.
 
-2. **Combat time granularity** — Should each individual action within a round
-   (each character's turn) cost time, or a single flat cost per round? Flat-per-round
-   is simpler and consistent with classic MM1 pacing.
+2. **Combat time granularity** — Time advances once per full round, **at the start of
+   the round** (before any combatant acts). Use `TIME_COST_COMBAT_ROUND_MINUTES` (5 min).
 
-3. **Clock visibility in combat** — Should the clock be hidden during the combat HUD
-   (like the exploration HUD already is), or remain visible at all times? Recommend
-   always-visible so the day/night cycle is legible during long fights.
+3. **Clock visibility in combat** — The clock is hidden during combat mode, consistent
+   with the exploration HUD. `update_clock` runs under the existing `not_in_combat`
+   run condition.
