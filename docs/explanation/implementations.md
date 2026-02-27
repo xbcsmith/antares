@@ -10492,3 +10492,154 @@ is never hardcoded.
 - [x] `PartyEntities` resource accessible from any Bevy system via `Res<PartyEntities>`
 - [x] No domain struct field or method signatures changed
 - [x] `docs/reference/architecture.md` not modified
+
+## ECS Inventory View — Phase 2: Input and Mode Wiring
+
+### Overview
+
+Phase 2 wires up the `"I"` key to open and close a new `GameMode::Inventory`
+variant. It adds a config-driven key binding for the inventory action, a pure
+`InventoryState` data type that mirrors `MenuState`, transitions
+`GameMode::Inventory` into the application layer, and hooks `handle_input` to
+toggle the mode — with the same priority as the existing `Escape` menu toggle.
+
+### Components Implemented
+
+#### `src/sdk/game_config.rs` (modified)
+
+- Added `pub inventory: Vec<String>` field to `ControlsConfig` with
+  `#[serde(default = "default_inventory_keys")]` annotation; default value is
+  `["I"]`. Existing RON configs without the field deserialise without error.
+- Added private `fn default_inventory_keys() -> Vec<String>` helper.
+- Updated `Default for ControlsConfig` to set `inventory: default_inventory_keys()`.
+- Extended `ControlsConfig::validate()` to return
+  `Err(ConfigError::ValidationError(_))` when the `inventory` list is empty.
+- Added 3 new unit tests: `test_controls_config_inventory_default`,
+  `test_controls_config_validate_empty_inventory_keys`,
+  `test_controls_config_validate_non_empty_inventory_keys`.
+- Fixed 3 pre-existing test struct literals that now require the `inventory`
+  field.
+
+#### `src/application/inventory_state.rs` (new file)
+
+- SPDX header on lines 1–2.
+- `pub struct InventoryState` with fields `previous_mode: Box<GameMode>`,
+  `focused_index: usize`, `open_panels: Vec<usize>`,
+  `selected_slot: Option<usize>`. Boxed `previous_mode` breaks the recursive
+  size dependency with `GameMode::Inventory(InventoryState)`.
+- `pub fn new(previous_mode: GameMode) -> Self` — initialises
+  `focused_index = 0`, `open_panels = vec![0]`, `selected_slot = None`.
+- `pub fn get_resume_mode(&self) -> GameMode` — clones and returns
+  `*self.previous_mode`, matching `MenuState::get_resume_mode` exactly.
+- `pub fn tab_next(&mut self, party_size: usize)` — wrapping forward focus;
+  appends new index to `open_panels` up to `PARTY_MAX_SIZE`.
+- `pub fn tab_prev(&mut self, party_size: usize)` — wrapping backward focus;
+  same panel-open logic.
+- `pub fn close_focused_panel(&mut self)` — removes `focused_index` from
+  `open_panels`; re-adds `0` if the list would become empty.
+- `pub fn select_next_slot(&mut self, slot_count: usize)` — wrapping slot
+  selection forward.
+- `pub fn select_prev_slot(&mut self, slot_count: usize)` — wrapping slot
+  selection backward.
+- `impl Default for InventoryState` delegates to `Self::new(GameMode::Exploration)`.
+- 16 unit tests covering all methods and edge cases.
+
+#### `src/application/mod.rs` (modified)
+
+- Added `pub mod inventory_state;` declaration (between `dialogue` and `menu`).
+- Added `GameMode::Inventory(crate::application::inventory_state::InventoryState)`
+  variant between `InnManagement` and `Menu`.
+- Added `pub fn enter_inventory(&mut self)` to `impl GameState`: clones the
+  current mode, wraps it in `InventoryState::new`, and assigns
+  `GameMode::Inventory(...)`.
+- Added 3 new unit tests: `test_game_mode_inventory_variant_constructable`,
+  `test_enter_inventory_sets_mode`, `test_enter_inventory_stores_previous_mode`.
+
+#### `src/game/systems/input.rs` (modified)
+
+- Added `Inventory` variant to `pub enum GameAction`.
+- Added inventory key-mapping loop in `KeyMap::from_controls_config` (after the
+  menu loop), following the same `warn!` pattern.
+- Added inventory toggle block in `handle_input` immediately after the menu
+  toggle block. Uses `is_action_just_pressed(GameAction::Inventory, ...)`;
+  closes if in `GameMode::Inventory`, no-ops if in `Menu` or `Combat`, opens
+  otherwise.
+- Extended the movement-blocking guard to cover
+  `GameMode::Inventory(_)` in addition to `GameMode::Menu(_)`.
+- Added `build_input_app()` helper in `integration_tests` to DRY up test setup.
+- Added 7 new tests across `integration_tests` and `inventory_guard_tests`:
+  - `test_key_map_inventory_action`
+  - `test_handle_input_i_opens_inventory`
+  - `test_handle_input_i_closes_inventory`
+  - `test_handle_input_i_ignored_in_menu_mode`
+  - `test_movement_blocked_in_inventory_mode`
+  - `test_turn_blocked_in_inventory_mode`
+
+### Tests Added
+
+#### `src/sdk/game_config.rs` (3 new tests)
+
+- `test_controls_config_inventory_default` — asserts default `inventory == ["I"]`
+- `test_controls_config_validate_empty_inventory_keys` — asserts empty list returns `Err`
+- `test_controls_config_validate_non_empty_inventory_keys` — asserts default passes validation
+
+#### `src/application/inventory_state.rs` (16 new tests)
+
+- `test_inventory_state_new`
+- `test_inventory_state_get_resume_mode_returns_previous_mode`
+- `test_inventory_state_tab_next_opens_panels`
+- `test_inventory_state_tab_next_wraps`
+- `test_inventory_state_tab_next_noop_on_empty_party`
+- `test_inventory_state_tab_prev_wraps`
+- `test_inventory_state_tab_prev_noop_on_empty_party`
+- `test_inventory_state_tab_prev_decrements`
+- `test_inventory_state_close_focused_panel`
+- `test_inventory_state_close_last_panel_keeps_one`
+- `test_inventory_state_select_next_slot`
+- `test_inventory_state_select_next_slot_wraps`
+- `test_inventory_state_select_next_slot_noop_on_zero`
+- `test_inventory_state_select_prev_slot`
+- `test_inventory_state_select_prev_slot_decrements`
+- `test_inventory_state_select_prev_slot_noop_on_zero`
+- `test_inventory_state_default_matches_new_exploration`
+
+#### `src/application/mod.rs` (3 new tests)
+
+- `test_game_mode_inventory_variant_constructable`
+- `test_enter_inventory_sets_mode`
+- `test_enter_inventory_stores_previous_mode`
+
+#### `src/game/systems/input.rs` (6 new tests)
+
+- `test_key_map_inventory_action`
+- `test_handle_input_i_opens_inventory`
+- `test_handle_input_i_closes_inventory`
+- `test_handle_input_i_ignored_in_menu_mode`
+- `test_movement_blocked_in_inventory_mode`
+- `test_turn_blocked_in_inventory_mode`
+
+### Deliverables Checklist
+
+- [x] `inventory` field added to `ControlsConfig` with `#[serde(default)]` and default `["I"]`
+- [x] `ControlsConfig::validate()` rejects empty `inventory` list
+- [x] `GameAction::Inventory` added to enum in `src/game/systems/input.rs`
+- [x] `KeyMap::from_controls_config` maps inventory keys to `GameAction::Inventory`
+- [x] `src/application/inventory_state.rs` created with `InventoryState` and all navigation methods (SPDX header, doc comments, tests)
+- [x] `pub mod inventory_state;` declared in `src/application/mod.rs`
+- [x] `GameMode::Inventory(InventoryState)` variant added to `GameMode` enum
+- [x] `GameState::enter_inventory()` implemented in `src/application/mod.rs`
+- [x] `handle_input` opens/closes inventory on `GameAction::Inventory`
+- [x] Movement input blocked while in `GameMode::Inventory(_)`
+- [x] All tests passing (28 new + all pre-existing)
+
+### Success Criteria
+
+- [x] `cargo fmt --all` — no output
+- [x] `cargo check --all-targets --all-features` — zero errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — zero warnings
+- [x] `cargo nextest run --all-features` — 2623 passed, 0 failed, 8 skipped
+- [x] Pressing `"I"` transitions `GlobalState.0.mode` to `GameMode::Inventory(InventoryState { focused_index: 0, open_panels: [0], .. })`
+- [x] Pressing `"I"` again restores the previous mode
+- [x] All existing `test_escape_*` and `test_toggle_menu_state_*` tests still pass
+- [x] All existing `test_controls_config_*` tests still pass
+- [x] `docs/reference/architecture.md` not modified

@@ -119,6 +119,9 @@ pub enum GameAction {
 
     /// Open menu
     Menu,
+
+    /// Open or close the inventory screen
+    Inventory,
 }
 
 /// Key mapping structure for efficient input lookups
@@ -202,6 +205,15 @@ impl KeyMap {
                 bindings.insert(key_code, GameAction::Menu);
             } else {
                 warn!("Invalid key code in menu: {}", key_str);
+            }
+        }
+
+        // Map inventory keys
+        for key_str in &config.inventory {
+            if let Some(key_code) = parse_key_code(key_str) {
+                bindings.insert(key_code, GameAction::Inventory);
+            } else {
+                warn!("Invalid key code in inventory: {}", key_str);
             }
         }
 
@@ -432,6 +444,30 @@ fn handle_input(
         return; // Exit early after menu toggle
     }
 
+    // Check for inventory toggle ("I" key) — same priority as menu toggle.
+    if input_config
+        .key_map
+        .is_action_just_pressed(GameAction::Inventory, &keyboard_input)
+    {
+        let game_state = &mut global_state.0;
+        match &game_state.mode {
+            crate::application::GameMode::Inventory(inv_state) => {
+                // Close inventory: restore previous mode
+                let resume = inv_state.get_resume_mode();
+                info!("Inventory closed: restored mode = {:?}", resume);
+                game_state.mode = resume;
+            }
+            crate::application::GameMode::Menu(_) | crate::application::GameMode::Combat(_) => {
+                // Do not open inventory from menu or combat mode
+            }
+            _ => {
+                game_state.enter_inventory();
+                info!("Inventory opened: mode = {:?}", game_state.mode);
+            }
+        }
+        return; // Exit early after inventory toggle
+    }
+
     // Throttle movement input using cooldown. Only block when an actual movement
     // action is being attempted.
     let is_movement_attempt = input_config
@@ -460,9 +496,12 @@ fn handle_input(
 
     // Menu toggle handled above before movement cooldown checks.
 
-    // Block all movement/interaction input when in Menu mode
-    // The menu system (handle_menu_keyboard) handles its own input processing
-    if matches!(game_state.mode, crate::application::GameMode::Menu(_)) {
+    // Block all movement/interaction input when in Menu or Inventory mode.
+    // Each mode's own system handles its own input processing.
+    if matches!(
+        game_state.mode,
+        crate::application::GameMode::Menu(_) | crate::application::GameMode::Inventory(_)
+    ) {
         return;
     }
 
@@ -736,6 +775,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_key_map_inventory_action() {
+        let config = ControlsConfig::default();
+        let key_map = KeyMap::from_controls_config(&config);
+        assert_eq!(
+            key_map.get_action(KeyCode::KeyI),
+            Some(GameAction::Inventory),
+            "KeyCode::KeyI must map to GameAction::Inventory with default config"
+        );
+    }
+
+    #[test]
     fn test_parse_key_code_letters() {
         assert_eq!(parse_key_code("W"), Some(KeyCode::KeyW));
         assert_eq!(parse_key_code("A"), Some(KeyCode::KeyA));
@@ -869,6 +919,7 @@ mod tests {
             turn_right: vec!["L".to_string()],
             interact: vec!["U".to_string()],
             menu: vec!["P".to_string()],
+            inventory: vec!["F".to_string()],
             movement_cooldown: 0.1,
         };
 
@@ -910,6 +961,7 @@ mod tests {
             turn_right: vec!["D".to_string()],
             interact: vec!["Space".to_string()],
             menu: vec!["Escape".to_string()],
+            inventory: vec!["F".to_string()],
             movement_cooldown: 0.2,
         };
 
@@ -951,6 +1003,7 @@ mod tests {
             turn_right: vec!["D".to_string()],
             interact: vec!["Space".to_string()],
             menu: vec!["Escape".to_string()],
+            inventory: vec!["I".to_string()],
             movement_cooldown: -0.1,
         };
 
@@ -971,6 +1024,27 @@ mod tests {
 mod integration_tests {
     use super::*;
     use bevy::prelude::{App, ButtonInput, KeyCode, Time, Update};
+
+    /// Helper: build a minimal Bevy `App` wired up with all resources and
+    /// message channels that `handle_input` requires.
+    fn build_input_app() -> App {
+        let mut app = App::new();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        let cfg = ControlsConfig::default();
+        let km = KeyMap::from_controls_config(&cfg);
+        app.insert_resource(InputConfigResource {
+            controls: cfg,
+            key_map: km,
+        });
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.insert_resource::<Time>(Time::default());
+        app.insert_resource(PendingRecruitmentContext::default());
+        app.add_message::<DoorOpenedEvent>();
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<StartDialogue>();
+        app.add_systems(Update, handle_input);
+        app
+    }
 
     /// Integration-style test: simulate pressing ESC via `ButtonInput` and ensure the
     /// input system toggles the in-game menu open and closed.
@@ -1105,6 +1179,102 @@ mod integration_tests {
 
         let gs = app.world().resource::<GlobalState>();
         assert!(matches!(gs.0.mode, crate::application::GameMode::Menu(_)));
+    }
+
+    /// Pressing `KeyCode::KeyI` in `GameMode::Exploration` must transition the
+    /// mode to `GameMode::Inventory(_)`.
+    #[test]
+    fn test_handle_input_i_opens_inventory() {
+        let mut app = build_input_app();
+
+        // Press "I" – should open inventory
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyI);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Inventory(_)),
+            "pressing I in Exploration must open the inventory"
+        );
+    }
+
+    /// Pressing `KeyCode::KeyI` while already in `GameMode::Inventory` must
+    /// restore the previous mode (toggle off).
+    #[test]
+    fn test_handle_input_i_closes_inventory() {
+        let mut app = build_input_app();
+
+        // Frame 1: open inventory
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyI);
+        }
+        app.update();
+
+        {
+            let gs = app.world().resource::<GlobalState>();
+            assert!(
+                matches!(gs.0.mode, crate::application::GameMode::Inventory(_)),
+                "mode must be Inventory after first I press"
+            );
+        }
+
+        // Frame 2: release and press again to close
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.release(KeyCode::KeyI);
+            btn.press(KeyCode::KeyI);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Exploration),
+            "pressing I again must close the inventory and restore Exploration mode"
+        );
+    }
+
+    /// Pressing `KeyCode::KeyI` while in `GameMode::Menu` must NOT open the
+    /// inventory — the I key is ignored when the menu is active.
+    ///
+    /// This test manually sets the game mode to `Menu` without using the
+    /// keyboard so that no stale `just_pressed` state leaks between frames.
+    #[test]
+    fn test_handle_input_i_ignored_in_menu_mode() {
+        let mut app = build_input_app();
+
+        // Place the game state directly into Menu mode without pressing ESC,
+        // so there is no stale just_pressed(Escape) entry that would re-toggle
+        // the menu when update() runs.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.enter_menu();
+        }
+
+        // Verify we are in Menu mode before pressing I.
+        {
+            let gs = app.world().resource::<GlobalState>();
+            assert!(
+                matches!(gs.0.mode, crate::application::GameMode::Menu(_)),
+                "mode must be Menu before pressing I"
+            );
+        }
+
+        // Press I — must stay in Menu because inventory is blocked while in menu.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyI);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Menu(_)),
+            "pressing I while in Menu must not switch to Inventory"
+        );
     }
 }
 
@@ -1299,6 +1469,104 @@ mod interaction_tests {
 /// T1-8: Verify that `handle_input` silently ignores all movement input when
 /// `GameMode::Combat` is active.  The party position must remain unchanged after
 /// pressing the forward-movement key.
+#[cfg(test)]
+mod inventory_guard_tests {
+    use super::*;
+    use bevy::prelude::{App, ButtonInput, KeyCode, Update};
+
+    /// Movement keys must not alter the party position while
+    /// `GameMode::Inventory` is active.
+    #[test]
+    fn test_movement_blocked_in_inventory_mode() {
+        let mut app = App::new();
+
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        let cfg = ControlsConfig {
+            movement_cooldown: 0.0,
+            ..ControlsConfig::default()
+        };
+        let key_map = KeyMap::from_controls_config(&cfg);
+        app.insert_resource(InputConfigResource {
+            controls: cfg,
+            key_map,
+        });
+
+        // Build a game state and place it in Inventory mode.
+        let mut gs = crate::application::GameState::new();
+        gs.enter_inventory();
+        let original_position = gs.world.party_position;
+
+        app.insert_resource(GlobalState(gs));
+        app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
+        app.insert_resource(PendingRecruitmentContext::default());
+
+        app.add_message::<DoorOpenedEvent>();
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<StartDialogue>();
+
+        app.add_systems(Update, handle_input);
+
+        // Press MoveForward (W key per default config).
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::KeyW);
+        }
+        app.update();
+
+        let gs_after = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs_after.0.world.party_position, original_position,
+            "Party must not move while GameMode::Inventory is active"
+        );
+    }
+
+    /// Turn-left input must not alter party facing while inventory is open.
+    #[test]
+    fn test_turn_blocked_in_inventory_mode() {
+        let mut app = App::new();
+
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        let cfg = ControlsConfig {
+            movement_cooldown: 0.0,
+            ..ControlsConfig::default()
+        };
+        let key_map = KeyMap::from_controls_config(&cfg);
+        app.insert_resource(InputConfigResource {
+            controls: cfg,
+            key_map,
+        });
+
+        let mut gs = crate::application::GameState::new();
+        let original_facing = gs.world.party_facing;
+        gs.enter_inventory();
+
+        app.insert_resource(GlobalState(gs));
+        app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
+        app.insert_resource(PendingRecruitmentContext::default());
+
+        app.add_message::<DoorOpenedEvent>();
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<StartDialogue>();
+
+        app.add_systems(Update, handle_input);
+
+        // Press TurnLeft (A key per default config).
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::KeyA);
+        }
+        app.update();
+
+        let gs_after = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs_after.0.world.party_facing, original_facing,
+            "Party facing must not change while GameMode::Inventory is active"
+        );
+    }
+}
+
 #[cfg(test)]
 mod combat_guard_tests {
     use super::*;

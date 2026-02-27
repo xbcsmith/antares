@@ -12,6 +12,7 @@
 //! See `docs/reference/architecture.md` Section 4.1 for complete specifications.
 
 pub mod dialogue;
+pub mod inventory_state;
 pub mod menu;
 pub mod quests;
 pub mod resources;
@@ -46,12 +47,14 @@ pub enum GameMode {
     Exploration,
     /// Turn-based tactical combat containing full combat state
     Combat(crate::domain::combat::engine::CombatState),
+    /// Inventory management screen
+    Inventory(crate::application::inventory_state::InventoryState),
+    /// Inn party management interface
+    InnManagement(InnManagementState),
     /// Menu system (character management, inventory)
     Menu(MenuState),
     /// NPC dialogue and interactions
     Dialogue(crate::application::dialogue::DialogueState),
-    /// Inn party management interface
-    InnManagement(InnManagementState),
 }
 
 /// State for inn party management mode
@@ -1011,6 +1014,24 @@ impl GameState {
         self.mode = GameMode::Exploration;
     }
 
+    /// Enters inventory mode, storing the current mode for resume on close.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_inventory();
+    /// assert!(matches!(state.mode, GameMode::Inventory(_)));
+    /// ```
+    pub fn enter_inventory(&mut self) {
+        let prev = self.mode.clone();
+        self.mode = GameMode::Inventory(crate::application::inventory_state::InventoryState::new(
+            prev,
+        ));
+    }
+
     /// Enters menu mode
     pub fn enter_menu(&mut self) {
         let prev = self.mode.clone();
@@ -1191,6 +1212,42 @@ mod tests {
 
         state.return_to_exploration();
         assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_game_mode_inventory_variant_constructable() {
+        use crate::application::inventory_state::InventoryState;
+        let mode = GameMode::Inventory(InventoryState::default());
+        assert!(
+            matches!(mode, GameMode::Inventory(_)),
+            "GameMode::Inventory variant must be constructable"
+        );
+    }
+
+    #[test]
+    fn test_enter_inventory_sets_mode() {
+        let mut state = GameState::new();
+        state.enter_inventory();
+        assert!(
+            matches!(state.mode, GameMode::Inventory(_)),
+            "enter_inventory must transition mode to GameMode::Inventory"
+        );
+    }
+
+    #[test]
+    fn test_enter_inventory_stores_previous_mode() {
+        let mut state = GameState::new();
+        // Start from Exploration (default)
+        assert!(matches!(state.mode, GameMode::Exploration));
+        state.enter_inventory();
+        if let GameMode::Inventory(inv) = &state.mode {
+            assert!(
+                matches!(inv.get_resume_mode(), GameMode::Exploration),
+                "enter_inventory must store the previous mode for resume"
+            );
+        } else {
+            panic!("mode must be Inventory after enter_inventory");
+        }
     }
 
     #[test]
