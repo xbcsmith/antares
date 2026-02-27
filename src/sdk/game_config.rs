@@ -969,7 +969,7 @@ mod tests {
     #[test]
     fn test_tutorial_config_deserializes_with_inventory_key() {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let config_path = std::path::Path::new(manifest_dir).join("campaigns/tutorial/config.ron");
+        let config_path = std::path::Path::new(manifest_dir).join("data/test_campaign/config.ron");
         let config = GameConfig::load_or_default(&config_path).unwrap();
         assert_eq!(config.controls.inventory, vec!["I".to_string()]);
     }

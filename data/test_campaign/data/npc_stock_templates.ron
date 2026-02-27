@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+//
+// npc_stock_templates.ron - Test campaign merchant stock templates
+//
+// This file defines stock templates scoped to the test campaign.
+// These templates are used by merchant NPCs during testing to verify
+// that npc_stock_templates load correctly from a campaign data directory.
+//
+// Field reference:
+//   id            - Unique string identifier (referenced by NpcDefinition::stock_template)
+//   entries       - List of stock entries
+//     item_id       - References a valid item ID in items.ron
+//     quantity      - Initial available quantity (0 = sold out)
+//     override_price - Optional gold price override; None uses item base_cost * sell_rate
+
+[
+    // ===== Tutorial Merchant Stock =====
+    // A curated subset of items appropriate for a tutorial campaign.
+    // Low quantities enforce resource management decisions for new players.
+    // Only the most basic weapons, armor, and one healing consumable are stocked.
+    (
+        id: "tutorial_merchant_stock",
+        entries: [
+            // Basic weapons
+            (item_id: 1, quantity: 2, override_price: None),    // Club
+            (item_id: 2, quantity: 2, override_price: None),    // Dagger
+            (item_id: 3, quantity: 1, override_price: None),    // Short Sword
+            // Light armor
+            (item_id: 20, quantity: 2, override_price: None),   // Leather Armor
+            (item_id: 23, quantity: 2, override_price: None),   // Wooden Shield
+            // Consumables
+            (item_id: 50, quantity: 3, override_price: None),   // Healing Potion
+        ],
+    ),
+
+    // ===== Test Blacksmith Stock =====
+    // Broader selection used to verify that multiple templates load correctly
+    // and that item quantities and price overrides are preserved round-trip.
+    (
+        id: "tutorial_blacksmith_stock",
+        entries: [
+            // Weapons
+            (item_id: 1, quantity: 3, override_price: None),    // Club
+            (item_id: 2, quantity: 3, override_price: None),    // Dagger
+            (item_id: 3, quantity: 2, override_price: None),    // Short Sword
+            (item_id: 5, quantity: 2, override_price: None),    // Mace
+            // Armor
+            (item_id: 20, quantity: 3, override_price: None),   // Leather Armor
+            (item_id: 21, quantity: 1, override_price: None),   // Chain Mail
+            // Shields
+            (item_id: 23, quantity: 2, override_price: None),   // Wooden Shield
+        ],
+    ),
+]

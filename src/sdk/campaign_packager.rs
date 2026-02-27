@@ -639,11 +639,11 @@ mod tests {
         use std::path::PathBuf;
         use tempfile::tempdir;
 
-        // Source: sample tutorial campaign provided in repo
-        let src_campaign = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("campaigns/tutorial");
+        // Source: test campaign provided in repo under data/test_campaign
+        let src_campaign = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/test_campaign");
         assert!(
             src_campaign.exists(),
-            "expected sample campaign to exist at {:?}",
+            "expected test campaign to exist at {:?}",
             src_campaign
         );
 

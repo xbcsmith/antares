@@ -416,8 +416,8 @@ fn test_combat_to_exploration_preserves_party_state() {
 **5. Boundary Tests for Game Limits**:
 
 - Max party size (6)
-- Max inventory (20 items per character)
-- Max equipped items (7 slots)
+- Max inventory (64 items per character — `Inventory::MAX_ITEMS`)
+- Max equipped items (7 slots — `Equipment::MAX_EQUIPPED`)
 - Stat ranges (0-255 for most)
 
 **Don't write generic tests. Write tests that exercise actual game mechanics.**
@@ -432,6 +432,104 @@ fn test_combat_to_exploration_preserves_party_state() {
 - Achieve >80% code coverage
 - Use descriptive test names: `test_{function}_{condition}_{expected}`
 - doctests are updated anytime the function signature or behavior changes
+
+---
+
+### Implementation Rule 5: Test Data Must Live in `data/`, Never in `campaigns/tutorial`
+
+**THIS IS THE THIRD MOST VIOLATED RULE**
+
+#### The Rule
+
+All test fixtures and test data files MUST be placed under `data/` (the
+stable, repo-managed test fixture directory). Tests MUST NOT reference
+`campaigns/tutorial` or any other path under `campaigns/`.
+
+`campaigns/tutorial` is the **live game campaign**. Its content changes as the
+game is developed. Tests that depend on it become brittle — they break whenever
+campaign data is edited, and they can introduce RON parse errors or missing
+files that silently skip or hard-fail entire test suites.
+
+#### Where Test Data Lives
+
+```text
+data/                         ← stable fixture root (immutable during tests)
+  characters.ron              ← shared character definitions used by unit tests
+  classes.ron
+  items.ron
+  ...
+  test_campaign/              ← self-contained campaign fixture for integration tests
+    campaign.ron
+    config.ron                ← must include ALL ControlsConfig keys (e.g. inventory)
+    data/
+      characters.ron
+      classes.ron
+      conditions.ron
+      creatures.ron
+      dialogues.ron
+      items.ron
+      monsters.ron
+      npc_stock_templates.ron ← MUST exist if any test loads npc stock from campaign
+      npcs.ron
+      proficiencies.ron
+      quests.ron
+      races.ron
+      spells.ron
+      maps/
+        map_1.ron ... map_N.ron
+```
+
+#### YOU MUST:
+
+- Point ALL tests that load campaign content at `data/test_campaign`
+- Use `CampaignLoader::new("data")` with id `"test_campaign"` in loader-based tests
+- Use `PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/test_campaign")` in
+  packager / path-based tests
+- Add any missing data files to `data/test_campaign/data/` rather than
+  borrowing them from `campaigns/tutorial`
+- Keep `data/test_campaign` fully self-contained: every file referenced by
+  `campaign.ron` MUST exist under `data/test_campaign/`
+
+#### NEVER:
+
+- ❌ Write a test that hard-codes `"campaigns/tutorial"` or any subpath of it
+- ❌ Write a test that uses `CampaignLoader::new("campaigns")` with id `"tutorial"`
+- ❌ Write a test that joins `env!("CARGO_MANIFEST_DIR")` with `"campaigns/tutorial"`
+- ❌ Copy a file from `campaigns/tutorial/` into a test instead of using the fixture
+- ❌ Skip a test with an early-return guard that checks whether `campaigns/tutorial`
+  exists (this hides failures on clean checkouts)
+
+#### The Only Legitimate Uses of `campaigns/tutorial` in Source Code
+
+| Location                                              | Reason                                          |
+| ----------------------------------------------------- | ----------------------------------------------- |
+| `src/bin/antares.rs` default branch                   | Runtime game binary default campaign            |
+| `src/game/systems/campaign_loading.rs` startup system | Bevy startup loads live campaign                |
+| `src/bin/update_tutorial_maps.rs`                     | Maintenance tool that operates on tutorial maps |
+| `docs/` and `sdk/` doc comments / examples            | Illustrative path strings, not file I/O         |
+
+Everything else MUST use `data/test_campaign`.
+
+**Examples:**
+
+```text
+✅ CORRECT — integration test:
+   let loader = CampaignLoader::new("data");
+   let campaign = loader.load_campaign("test_campaign")?;
+
+✅ CORRECT — path-based test:
+   let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/test_campaign");
+
+✅ CORRECT — config test:
+   let cfg = std::path::Path::new(manifest_dir).join("data/test_campaign/config.ron");
+
+❌ WRONG — any of the above with "campaigns/tutorial" instead
+```
+
+**Why This Matters**: A single typo in `campaigns/tutorial/data/characters.ron`
+(e.g. a trailing `.` instead of `,`) broke two previously-passing SDK tests
+and caused a confusing failure that had nothing to do with the code under test.
+Fixture data is reviewed and stable; live campaign data is not.
 
 ---
 
@@ -519,9 +617,6 @@ Is it a step-by-step tutorial?
    │     │        └─ YES → docs/reference/
 ```
 
-
-
-
 ## The Golden Workflow
 
 **FOLLOW THIS SEQUENCE FOR EVERY TASK:**
@@ -532,6 +627,8 @@ Is it a step-by-step tutorial?
 3.  Implement code with /// doc comments
 4.  Use type aliases (ItemId, SpellId, etc.) not raw types
 5.  Add tests (>80% coverage) with game-specific test cases
+      - All test data/fixtures use data/test_campaign, NOT campaigns/tutorial
+      - Add missing fixture files to data/test_campaign/data/ as needed
 5a. (SDK / Campaign Builder UI only) Run the egui ID audit in sdk/AGENTS.md:
       every loop uses push_id, every ScrollArea has id_salt,
       every ComboBox uses from_id_salt,
@@ -545,6 +642,8 @@ Is it a step-by-step tutorial?
 10. Update: docs/explanation/implementations.md
 11. Verify: No architectural deviations from architecture.md
 12. Verify: All checklist items above are checked
+      - [ ] No test references campaigns/tutorial (Implementation Rule 5)
+      - [ ] Any new campaign-level fixture data added to data/test_campaign/
 ```
 
 **IF YOU FOLLOW THIS WORKFLOW, YOUR CODE WILL BE ACCEPTED.**

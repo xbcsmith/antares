@@ -1027,9 +1027,16 @@ impl GameState {
     /// ```
     pub fn enter_inventory(&mut self) {
         let prev = self.mode.clone();
-        self.mode = GameMode::Inventory(crate::application::inventory_state::InventoryState::new(
-            prev,
-        ));
+        let party_size = self.party.members.len();
+        let mut inv_state = crate::application::inventory_state::InventoryState::new(prev);
+        // Open a panel for every current party member so the grid is fully
+        // populated on first open — the player should not have to Tab to see
+        // their own characters.
+        inv_state.open_panels = (0..party_size).collect();
+        if inv_state.open_panels.is_empty() {
+            inv_state.open_panels.push(0);
+        }
+        self.mode = GameMode::Inventory(inv_state);
     }
 
     /// Enters menu mode

@@ -530,11 +530,11 @@ impl Condition {
 
 /// Container for items (backpack or equipped)
 pub struct Inventory {
-    pub items: Vec<InventorySlot>,  // Max 6 items in backpack
+    pub items: Vec<InventorySlot>,  // Max 255 items in backpack
 }
 
 impl Inventory {
-    pub const MAX_ITEMS: usize = 6;
+    pub const MAX_ITEMS: usize = 64;
 
     pub fn is_full(&self) -> bool {
         self.items.len() >= Self::MAX_ITEMS
@@ -848,22 +848,6 @@ pub enum BonusAttribute {
     ResistPsychic,
 }
 
-/// DEPRECATED: Class and alignment restrictions (bitflags)
-/// Use classification and tags system instead
-#[derive(Debug, Clone, Copy)]
-pub struct Disablement(u8);
-
-impl Disablement {
-    pub const KNIGHT: u8 = 0b00100000;
-    pub const PALADIN: u8 = 0b00010000;
-    pub const ARCHER: u8 = 0b00001000;
-    pub const CLERIC: u8 = 0b00000100;
-    pub const SORCERER: u8 = 0b00000010;
-    pub const ROBBER: u8 = 0b00000001;
-    pub const GOOD: u8 = 0b10000000;
-    pub const EVIL: u8 = 0b01000000;
-    pub const NEUTRAL: u8 = Self::GOOD | Self::EVIL;
-}
 
 /// Consumable effect variants (parameterized)
 #[derive(Debug, Clone, PartialEq, Eq)]

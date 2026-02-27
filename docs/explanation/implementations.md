@@ -2,51 +2,52 @@
 
 ## Implementation Status Overview
 
-| Phase                                             | Status      | Date       | Description                                                                |
-| ------------------------------------------------- | ----------- | ---------- | -------------------------------------------------------------------------- |
-| **Architecture Reference Sync (Engine + SDK)**    | ✅ COMPLETE | 2026-02-27 | **Updated docs/reference/architecture.md to match current src/ and SDK layout** |
-| **Inventory System Phase 1**                      | ✅ COMPLETE | 2026-07-18 | **Shared Inventory Domain Model**                                          |
-| **Inventory System Phase 2**                      | ✅ COMPLETE | 2026-07-18 | **NPC Runtime State and Transaction Operations**                           |
-| **Inventory System Phase 3**                      | ✅ COMPLETE | 2026-07-18 | **Dialogue Action and Application Integration**                            |
-| **Inventory System Phase 4**                      | ✅ COMPLETE | 2026-07-18 | **Data Schema and SDK Updates**                                            |
-| **Inventory System Phase 5**                      | ✅ COMPLETE | 2026-02-26 | **Save/Load Persistence for NPC Runtime State**                            |
-| **Inventory System Phase 6**                      | ✅ COMPLETE | 2026-07-18 | **Integration Tests and End-to-End Verification**                          |
-| **Inventory System Phase 7**                      | ✅ COMPLETE | 2026-07-18 | **Documentation Updates**                                                  |
-| Phase 1                                           | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                                                    |
-| Phase 2                                           | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                                                      |
-| Phase 3                                           | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                                             |
-| Phase 4                                           | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                                               |
-| Phase 5                                           | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                                                 |
-| Phase 6                                           | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration                              |
-| Phase 7                                           | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                                                    |
-| Phase 8                                           | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                                               |
-| Phase 9                                           | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                                                 |
-| Phase 10                                          | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                                                 |
-| **Creature Editor Enhancement Phase 1**           | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**                                        |
-| **Creature Editor Enhancement Phase 2**           | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                                               |
-| **Creature Editor Enhancement Phase 3**           | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)**                             |
-| **Creature Editor Enhancement Phase 4**           | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                                            |
-| **Creature Editor Enhancement Phase 5**           | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**                                          |
-| **Creature Editor UX Fixes Phase 1**              | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry**                             |
-| **Creature Editor UX Fixes Phase 2**              | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**                                  |
-| **Creature Editor UX Fixes Phase 3**              | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**                                    |
-| **Creature Editor UX Fixes Phase 4**              | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**                             |
-| **Creature Editor UX Fixes Remediation**          | ✅ COMPLETE | 2026-07-16 | **Fix stale ID-range tests in creatures_manager**                          |
-| **Creature Editor UX Fixes Phase 3/4 UI Fix**     | ✅ COMPLETE | 2026-07-16 | **Replace SidePanel with TwoColumnLayout; add push_id per row**            |
-| **Creature Editor UX Fixes Toolbar Fix**          | ✅ COMPLETE | 2026-07-16 | **Fix toolbar overflow; surface Register Asset in preview + edit**         |
-| **Creature Editor Register Asset Autocomplete**   | ✅ COMPLETE | 2026-07-16 | **Add path autocomplete to Register Asset dialog from assets/creatures/**  |
-| **Creature Editor UX Fixes Phase 5**              | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder**                   |
-| **Findings Remediation Phase 1**                  | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**                    |
-| **Findings Remediation Phase 2**                  | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)**          |
-| **Findings Remediation Phase 3**                  | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard**         |
-| **Findings Remediation Phase 4**                  | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI**             |
-| **Findings Remediation Phase 5**                  | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation**         |
-| **Combat System Improvement Phase 1**             | ✅ COMPLETE | 2026-07-17 | **Input Reliability and Action Selection**                                 |
-| **Combat System Improvement Phase 2**             | ✅ COMPLETE | 2026-07-17 | **Target Selection and Action Completeness**                               |
-| **Combat System Improvement Phase 3**             | ✅ COMPLETE | 2026-07-17 | **Visual Combat Feedback and Animation State**                             |
-| **Combat System Improvement Phase 4**             | ✅ COMPLETE | 2026-07-17 | **Defeated Monster World-Mesh Removal**                                    |
-| **Combat System Improvement Phase 5 Remediation** | ✅ COMPLETE | 2026-02-23 | **Dismiss victory splash when movement controls resume post-combat**       |
-| **Combat Input Enter UX Remediation**             | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback** |
+| Phase                                             | Status      | Date       | Description                                                                                |
+| ------------------------------------------------- | ----------- | ---------- | ------------------------------------------------------------------------------------------ |
+| **Inventory MAX_ITEMS=64 + Test Decoupling**      | ✅ COMPLETE | 2026-02-27 | **Raised Inventory::MAX_ITEMS to 64; removed all test dependencies on campaigns/tutorial** |
+| **Architecture Reference Sync (Engine + SDK)**    | ✅ COMPLETE | 2026-02-27 | **Updated docs/reference/architecture.md to match current src/ and SDK layout**            |
+| **Inventory System Phase 1**                      | ✅ COMPLETE | 2026-07-18 | **Shared Inventory Domain Model**                                                          |
+| **Inventory System Phase 2**                      | ✅ COMPLETE | 2026-07-18 | **NPC Runtime State and Transaction Operations**                                           |
+| **Inventory System Phase 3**                      | ✅ COMPLETE | 2026-07-18 | **Dialogue Action and Application Integration**                                            |
+| **Inventory System Phase 4**                      | ✅ COMPLETE | 2026-07-18 | **Data Schema and SDK Updates**                                                            |
+| **Inventory System Phase 5**                      | ✅ COMPLETE | 2026-02-26 | **Save/Load Persistence for NPC Runtime State**                                            |
+| **Inventory System Phase 6**                      | ✅ COMPLETE | 2026-07-18 | **Integration Tests and End-to-End Verification**                                          |
+| **Inventory System Phase 7**                      | ✅ COMPLETE | 2026-07-18 | **Documentation Updates**                                                                  |
+| Phase 1                                           | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                                                                    |
+| Phase 2                                           | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                                                                      |
+| Phase 3                                           | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                                                             |
+| Phase 4                                           | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                                                               |
+| Phase 5                                           | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                                                                 |
+| Phase 6                                           | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration                                              |
+| Phase 7                                           | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                                                                    |
+| Phase 8                                           | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                                                               |
+| Phase 9                                           | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                                                                 |
+| Phase 10                                          | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                                                                 |
+| **Creature Editor Enhancement Phase 1**           | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**                                                        |
+| **Creature Editor Enhancement Phase 2**           | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                                                               |
+| **Creature Editor Enhancement Phase 3**           | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)**                                             |
+| **Creature Editor Enhancement Phase 4**           | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                                                            |
+| **Creature Editor Enhancement Phase 5**           | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**                                                          |
+| **Creature Editor UX Fixes Phase 1**              | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry**                                             |
+| **Creature Editor UX Fixes Phase 2**              | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**                                                  |
+| **Creature Editor UX Fixes Phase 3**              | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**                                                    |
+| **Creature Editor UX Fixes Phase 4**              | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**                                             |
+| **Creature Editor UX Fixes Remediation**          | ✅ COMPLETE | 2026-07-16 | **Fix stale ID-range tests in creatures_manager**                                          |
+| **Creature Editor UX Fixes Phase 3/4 UI Fix**     | ✅ COMPLETE | 2026-07-16 | **Replace SidePanel with TwoColumnLayout; add push_id per row**                            |
+| **Creature Editor UX Fixes Toolbar Fix**          | ✅ COMPLETE | 2026-07-16 | **Fix toolbar overflow; surface Register Asset in preview + edit**                         |
+| **Creature Editor Register Asset Autocomplete**   | ✅ COMPLETE | 2026-07-16 | **Add path autocomplete to Register Asset dialog from assets/creatures/**                  |
+| **Creature Editor UX Fixes Phase 5**              | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder**                                   |
+| **Findings Remediation Phase 1**                  | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**                                    |
+| **Findings Remediation Phase 2**                  | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)**                          |
+| **Findings Remediation Phase 3**                  | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard**                         |
+| **Findings Remediation Phase 4**                  | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI**                             |
+| **Findings Remediation Phase 5**                  | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation**                         |
+| **Combat System Improvement Phase 1**             | ✅ COMPLETE | 2026-07-17 | **Input Reliability and Action Selection**                                                 |
+| **Combat System Improvement Phase 2**             | ✅ COMPLETE | 2026-07-17 | **Target Selection and Action Completeness**                                               |
+| **Combat System Improvement Phase 3**             | ✅ COMPLETE | 2026-07-17 | **Visual Combat Feedback and Animation State**                                             |
+| **Combat System Improvement Phase 4**             | ✅ COMPLETE | 2026-07-17 | **Defeated Monster World-Mesh Removal**                                                    |
+| **Combat System Improvement Phase 5 Remediation** | ✅ COMPLETE | 2026-02-23 | **Dismiss victory splash when movement controls resume post-combat**                       |
+| **Combat Input Enter UX Remediation**             | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback**                 |
 
 **Total Lines Implemented**: 10,200+ lines of production code + 6,100+ lines of documentation
 **Total Tests**: 430+ new tests (all passing), 2,578 total tests passing
@@ -1616,6 +1617,44 @@ empty in game view.
   - `cargo check --all-targets --all-features`
   - `cargo clippy --all-targets --all-features -- -D warnings`
   - `cargo nextest run --all-features test_resolve_encounter_creature_id`
+
+## Inventory MAX_ITEMS=64 and Test Decoupling
+
+### Overview
+
+Raised `Inventory::MAX_ITEMS` from 40 to 64 to match the architecture
+specification in `docs/reference/architecture.md` Section 4.3. Updated all
+dependent UI constants and comments. Simultaneously completed the migration of
+the remaining three in-source tests that still hard-coded `campaigns/tutorial`
+paths — they now use the stable `data/test_campaign` fixture instead.
+
+### Components Updated
+
+- `src/domain/character.rs` — `Inventory::MAX_ITEMS` changed from `40` → `64`
+- `src/game/systems/inventory_ui.rs` — updated `SLOT_COLS` doc comment to reflect `8×8` grid; updated navigation comment from `5 rows` to `8 rows`
+- `src/sdk/database.rs` — `test_content_database_load_campaign_includes_npc_stock_templates` repointed from `campaigns/tutorial` to `data/test_campaign`
+- `src/sdk/campaign_packager.rs` — `test_package_and_install_preserves_vec_fields` repointed from `campaigns/tutorial` to `data/test_campaign`
+- `src/sdk/game_config.rs` — `test_tutorial_config_deserializes_with_inventory_key` repointed from `campaigns/tutorial/config.ron` to `data/test_campaign/config.ron`
+- `data/test_campaign/config.ron` — added `inventory: ["I"]` to `ControlsConfig` so the config test passes against the fixture
+- `data/test_campaign/data/npc_stock_templates.ron` — new file; provides `tutorial_merchant_stock` and `tutorial_blacksmith_stock` templates so the database test passes against the fixture
+- `docs/explanation/ecs_inventory_view_implementation_plan.md` — updated stale `MAX_ITEMS = 6` and `MAX_EQUIPPED = 6` references in the infrastructure table to `64` and `7`
+- `campaigns/tutorial/data/characters.ron` — fixed pre-existing RON parse error: trailing `.` instead of `,` after item ID `52` on line 301
+
+### Key Changes
+
+- `Inventory::MAX_ITEMS = 64` gives a clean **8 columns × 8 rows** grid in the inventory UI (`SLOT_COLS = 8` unchanged).
+- All tests that fill an inventory to capacity use `Inventory::MAX_ITEMS` symbolically; no literal `40` or `64` appears in any test loop.
+- The `data/test_campaign` fixture is now fully self-contained: it has `config.ron` with the inventory key, `data/npc_stock_templates.ron` with two templates, maps with encounter events for the packager round-trip test, and all other required data files.
+- `campaigns/tutorial` is still the correct default for the runtime binary (`src/bin/antares.rs`) and the game Bevy startup system (`campaign_loading.rs`); those were not changed.
+
+### Validation
+
+- `cargo fmt --all` — no output (clean)
+- `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
+- `cargo nextest run --all-features` — **2644 passed, 0 failed, 8 skipped**
+
+---
 
 ## Test Stability Update: Decouple Tests From `campaigns/tutorial`
 
@@ -11009,7 +11048,7 @@ documentation update.
 - [x] `campaigns/config.template.ron` updated with `inventory: ["I"]` and
       explanatory comment
 - [x] `docs/explanation/implementations.md` has this `## ECS Inventory View —
-    Phase 5` section appended
+Phase 5` section appended
 - [x] `test_tutorial_config_deserializes_with_inventory_key` added and passing
 - [x] `test_controls_config_ron_roundtrip_includes_inventory` added and passing
 
@@ -11023,3 +11062,77 @@ documentation update.
 - [x] Both Phase 5 tests compile and pass
 - [x] All pre-existing tests unaffected
 - [x] `docs/reference/architecture.md` not modified
+
+---
+
+## ECS Inventory View — Bug Fix: Inventory Opens and Immediately Closes
+
+### Overview
+
+After Phases 1–5 were complete the inventory screen was invisible in-game:
+pressing `"I"` produced no visible result. Talking to the Merchant and then
+pressing `"I"` likewise showed nothing. The bug was a same-frame open/close race
+between two systems that both consumed the `"I"` key press.
+
+### Root Cause
+
+Two independent systems each handled `GameAction::Inventory` / `KeyCode::KeyI`
+in the same `Update` schedule with **no ordering constraint** between them:
+
+| System                   | Plugin            | Responsibility as written                                |
+| ------------------------ | ----------------- | -------------------------------------------------------- |
+| `handle_input`           | `InputPlugin`     | Opens **or** closes inventory on `"I"`                   |
+| `inventory_input_system` | `InventoryPlugin` | Also closed inventory on `"I"` (duplicated toggle logic) |
+
+Because Bevy's `Update` schedule does not guarantee execution order between
+systems registered by different plugins, either ordering could occur on any
+given frame:
+
+- **`handle_input` first** → sets mode to `Inventory` → `inventory_input_system`
+  runs in the same frame → sees mode is `Inventory` → sees `just_pressed(KeyI)`
+  is still `true` (input state does not reset mid-frame) → **immediately closes**
+  the overlay. The inventory opens and closes in one frame; the player never
+  sees it.
+- **`inventory_input_system` first** → mode is not `Inventory`, returns early →
+  `handle_input` opens the overlay. This frame appears to work, but the very
+  next frame `inventory_input_system` would close it again if the key was held
+  for more than one frame.
+
+The `Dialogue` case (talking to the Merchant) hit the same race because
+`handle_input`'s `_` arm allows `enter_inventory()` from `Dialogue` mode.
+
+### Fix
+
+Removed the `"I"`-key (configured inventory toggle) close handler from
+`inventory_input_system`. That system now only handles:
+
+- `Escape` — close overlay (no conflict with `handle_input`, which does not
+  handle `Escape` for inventory).
+- `Tab` / `Shift+Tab` — cycle panels.
+- `ArrowUp` / `ArrowDown` — select slots.
+- `ArrowLeft` / `ArrowRight` — move keyboard focus between open panels.
+
+`handle_input` remains the sole owner of the open/close toggle for the
+configured inventory key. This matches the design of every other modal system
+in the project: `InnUiPlugin`'s `inn_input_system` never re-implements the key
+that opens the inn screen.
+
+The unused `InputConfigResource` import (previously used only to look up
+`GameAction::Inventory` inside `inventory_input_system`) was also removed.
+
+### Components Modified
+
+| File                               | Type of Change | Description                                                                                                                                                         |
+| ---------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/inventory_ui.rs` | Bug fix        | Removed duplicate `"I"`-key / `GameAction::Inventory` close handler from `inventory_input_system`; removed unused `InputConfigResource` system parameter and import |
+
+### Architecture Compliance Notes
+
+- Single responsibility maintained: `handle_input` owns mode-transition input;
+  `inventory_input_system` owns in-inventory navigation input.
+- No test changes were required: the integration tests
+  `test_handle_input_i_opens_inventory` and `test_handle_input_i_closes_inventory`
+  already cover the toggle through `handle_input`, and all inventory navigation
+  tests remain valid.
+- `cargo clippy --all-targets --all-features -- -D warnings` passes with zero
+  warnings after the unused import was removed.

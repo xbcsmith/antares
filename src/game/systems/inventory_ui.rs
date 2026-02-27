@@ -12,10 +12,37 @@
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
 use crate::domain::character::{Inventory, PARTY_MAX_SIZE};
+use crate::domain::items::types::ItemType;
 use crate::game::resources::GlobalState;
-use crate::game::systems::input::InputConfigResource;
+
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
+
+// ===== Layout constants =====
+
+/// Height of the character name header bar inside each panel.
+const PANEL_HEADER_H: f32 = 36.0;
+/// Height of the action button strip below the grid when a slot is selected.
+const PANEL_ACTION_H: f32 = 48.0;
+/// Number of slot columns in the grid inside each character panel.
+/// With MAX_ITEMS=64 and SLOT_COLS=8 the grid is 8×8.
+const SLOT_COLS: usize = 8;
+/// Grid line colour — faint white.
+const GRID_LINE_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(60, 60, 60, 255);
+/// Panel body background colour.
+const PANEL_BG_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(18, 18, 18, 255);
+/// Header background colour.
+const HEADER_BG_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(35, 35, 35, 255);
+/// Colour for item silhouettes.
+const ITEM_SILHOUETTE_COLOR: egui::Color32 =
+    egui::Color32::from_rgba_premultiplied(230, 230, 230, 255);
+/// Colour for the selection highlight ring.
+const SELECT_HIGHLIGHT_COLOR: egui::Color32 = egui::Color32::YELLOW;
+/// Focused panel border colour.
+const FOCUSED_BORDER_COLOR: egui::Color32 = egui::Color32::YELLOW;
+/// Unfocused panel border colour.
+const UNFOCUSED_BORDER_COLOR: egui::Color32 =
+    egui::Color32::from_rgba_premultiplied(80, 80, 80, 255);
 
 /// Plugin for inventory management UI
 pub struct InventoryPlugin;
@@ -186,46 +213,26 @@ fn inventory_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut global_state: ResMut<GlobalState>,
     mut nav_state: ResMut<InventoryNavigationState>,
-    input_config: Option<Res<InputConfigResource>>,
 ) {
-    // Extract inventory state — bail if not in inventory mode
-    let (party_size, slot_count, focused_panel_index) = {
-        let inv_state = match &global_state.0.mode {
-            GameMode::Inventory(s) => s,
-            _ => {
-                // Reset navigation state when not in inventory mode
-                *nav_state = InventoryNavigationState::default();
-                return;
-            }
-        };
-
-        let party_size = global_state.0.party.members.len().min(PARTY_MAX_SIZE);
-        let focused_party_index = inv_state.focused_index;
-        let slot_count = if focused_party_index < global_state.0.party.members.len() {
-            global_state.0.party.members[focused_party_index]
-                .inventory
-                .items
-                .len()
-        } else {
-            0
-        };
-        let focused_panel_index = nav_state.focus_on_panel;
-        (party_size, slot_count, focused_panel_index)
+    // Extract inventory state — bail if not in inventory mode.
+    // Also reset nav state whenever we leave inventory so it is clean on re-entry.
+    let party_size = match &global_state.0.mode {
+        GameMode::Inventory(_) => global_state.0.party.members.len().min(PARTY_MAX_SIZE),
+        _ => {
+            // Reset navigation state when not in inventory mode
+            *nav_state = InventoryNavigationState::default();
+            return;
+        }
     };
 
-    // Determine whether the configured inventory key was just pressed
-    let inventory_key_pressed = if let Some(ref cfg) = input_config {
-        cfg.key_map.is_action_just_pressed(
-            crate::game::systems::input::GameAction::Inventory,
-            &keyboard,
-        )
-    } else {
-        // Fallback: check default key "I"
-        keyboard.just_pressed(KeyCode::KeyI)
-    };
-
-    // Escape or inventory key closes the overlay
-    if keyboard.just_pressed(KeyCode::Escape) || inventory_key_pressed {
+    // Escape closes the overlay.
+    //
+    // NOTE: The configured inventory toggle key ("I" by default) is intentionally
+    // NOT handled here.  `handle_input` (InputPlugin) owns the open/close toggle
+    // for that key.  Duplicating it here would cause the inventory to open and
+    // close in the same frame because both systems run in Update with no ordering
+    // guarantee between them.
+    if keyboard.just_pressed(KeyCode::Escape) {
         let resume_mode = match &global_state.0.mode {
             GameMode::Inventory(s) => s.get_resume_mode(),
             _ => return,
@@ -235,89 +242,77 @@ fn inventory_input_system(
         return;
     }
 
-    // Tab (no modifier) — cycle to the next panel
-    if keyboard.just_pressed(KeyCode::Tab)
-        && !keyboard.pressed(KeyCode::ShiftLeft)
-        && !keyboard.pressed(KeyCode::ShiftRight)
-    {
-        let inv_state = match &mut global_state.0.mode {
-            GameMode::Inventory(s) => s,
-            _ => return,
-        };
-        inv_state.tab_next(party_size);
-        // Clamp focus_on_panel to the new open_panels length
-        let panels_len = inv_state.open_panels.len();
-        if nav_state.focus_on_panel >= panels_len {
-            nav_state.focus_on_panel = panels_len.saturating_sub(1);
-        }
-        nav_state.selected_slot_index = None;
-        return;
-    }
+    // ── Tab / Shift-Tab and Up/Down — cycle the yellow-border focus ────────
+    //
+    // Tab / Down move focus forward to the next character panel.
+    // Shift-Tab / Up move focus backward.
+    // Slot selection is cleared whenever focus changes.
+    let shift_held = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
 
-    // Shift+Tab — cycle to the previous panel
-    if keyboard.just_pressed(KeyCode::Tab)
-        && (keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight))
-    {
-        let inv_state = match &mut global_state.0.mode {
-            GameMode::Inventory(s) => s,
-            _ => return,
-        };
-        inv_state.tab_prev(party_size);
-        let panels_len = inv_state.open_panels.len();
-        if nav_state.focus_on_panel >= panels_len {
-            nav_state.focus_on_panel = panels_len.saturating_sub(1);
-        }
-        nav_state.selected_slot_index = None;
-        return;
-    }
+    let focus_next = keyboard.just_pressed(KeyCode::Tab) && !shift_held
+        || keyboard.just_pressed(KeyCode::ArrowDown);
+    let focus_prev = keyboard.just_pressed(KeyCode::Tab) && shift_held
+        || keyboard.just_pressed(KeyCode::ArrowUp);
 
-    // ArrowUp — select the previous slot in the focused panel
-    if keyboard.just_pressed(KeyCode::ArrowUp) {
-        let inv_state = match &mut global_state.0.mode {
-            GameMode::Inventory(s) => s,
-            _ => return,
-        };
-        inv_state.select_prev_slot(slot_count);
-        nav_state.selected_slot_index = inv_state.selected_slot;
-        return;
-    }
-
-    // ArrowDown — select the next slot in the focused panel
-    if keyboard.just_pressed(KeyCode::ArrowDown) {
-        let inv_state = match &mut global_state.0.mode {
-            GameMode::Inventory(s) => s,
-            _ => return,
-        };
-        inv_state.select_next_slot(slot_count);
-        nav_state.selected_slot_index = inv_state.selected_slot;
-        return;
-    }
-
-    // ArrowLeft / ArrowRight — move focus between visible panels
-    if keyboard.just_pressed(KeyCode::ArrowLeft) || keyboard.just_pressed(KeyCode::ArrowRight) {
-        let panels_len = match &global_state.0.mode {
-            GameMode::Inventory(s) => s.open_panels.len(),
-            _ => return,
-        };
-        if panels_len == 0 {
-            return;
-        }
-        if keyboard.just_pressed(KeyCode::ArrowRight) {
-            nav_state.focus_on_panel = (focused_panel_index + 1) % panels_len;
-        } else {
-            nav_state.focus_on_panel = if focused_panel_index == 0 {
-                panels_len - 1
-            } else {
-                focused_panel_index - 1
-            };
-        }
-        nav_state.selected_slot_index = None;
-        // Sync focused_index in InventoryState to the new panel
-        let new_panel_idx = nav_state.focus_on_panel;
+    if focus_next || focus_prev {
         if let GameMode::Inventory(inv_state) = &mut global_state.0.mode {
-            if new_panel_idx < inv_state.open_panels.len() {
-                inv_state.focused_index = inv_state.open_panels[new_panel_idx];
+            if focus_prev {
+                inv_state.focused_index = if inv_state.focused_index == 0 {
+                    party_size.saturating_sub(1)
+                } else {
+                    inv_state.focused_index - 1
+                };
+            } else {
+                inv_state.focused_index = if party_size == 0 {
+                    0
+                } else {
+                    (inv_state.focused_index + 1) % party_size
+                };
             }
+            inv_state.selected_slot = None;
+        }
+        nav_state.selected_slot_index = None;
+        return;
+    }
+
+    // ── Arrow keys — navigate the slot grid in the focused panel ──────────
+    //
+    // The grid is SLOT_COLS (8) columns × (MAX_ITEMS/SLOT_COLS = 8) rows.
+    // Left/Right move one column; Up/Down move one full row (SLOT_COLS slots).
+    // All movement wraps within 0..MAX_ITEMS.
+    // The first press with no selection starts at slot 0.
+    let max_slots = crate::domain::character::Inventory::MAX_ITEMS;
+
+    let any_arrow = keyboard.just_pressed(KeyCode::ArrowRight)
+        || keyboard.just_pressed(KeyCode::ArrowLeft)
+        || keyboard.just_pressed(KeyCode::ArrowDown)
+        || keyboard.just_pressed(KeyCode::ArrowUp);
+
+    if any_arrow {
+        if let GameMode::Inventory(inv_state) = &mut global_state.0.mode {
+            let current = inv_state.selected_slot.unwrap_or(0);
+            let next = if keyboard.just_pressed(KeyCode::ArrowRight) {
+                (current + 1) % max_slots
+            } else if keyboard.just_pressed(KeyCode::ArrowLeft) {
+                if current == 0 {
+                    max_slots - 1
+                } else {
+                    current - 1
+                }
+            } else if keyboard.just_pressed(KeyCode::ArrowDown) {
+                (current + SLOT_COLS) % max_slots
+            } else {
+                // ArrowUp — move one row up, wrapping from top to bottom same column
+                if current < SLOT_COLS {
+                    let last_row_start = (max_slots / SLOT_COLS).saturating_sub(1) * SLOT_COLS;
+                    let col = current % SLOT_COLS;
+                    (last_row_start + col).min(max_slots - 1)
+                } else {
+                    current - SLOT_COLS
+                }
+            };
+            inv_state.selected_slot = Some(next);
+            nav_state.selected_slot_index = Some(next);
         }
     }
 }
@@ -326,23 +321,19 @@ fn inventory_input_system(
 
 /// Renders the egui inventory overlay when in `GameMode::Inventory`.
 ///
-/// Uses `egui::CentralPanel` as the outer container so it occupies the full
-/// viewport.  The Bevy native HUD rendered in a separate pass is unaffected.
-///
-/// When a slot is selected and the focused character has an item at that slot,
-/// an action row with "Drop" and "Give to {name}" buttons is rendered beneath
-/// the slot listing.  Button clicks return a `PanelAction` from
-/// `render_character_panel` which is then dispatched as the appropriate message.
+/// The full `CentralPanel` is divided into equal-sized character panels laid
+/// out in a 3-column grid (2 rows for 4-6 characters, 1 row for 1-3).  Each
+/// panel has a dark header bar with the character name and a body filled with
+/// a painter-drawn slot grid showing item-type silhouettes — matching the
+/// target mockup style.
 #[allow(clippy::too_many_lines)]
 fn inventory_ui_system(
     mut contexts: EguiContexts,
     global_state: Res<GlobalState>,
-    nav_state: Res<InventoryNavigationState>,
     game_content: Option<Res<GameContent>>,
     mut drop_writer: MessageWriter<DropItemAction>,
     mut transfer_writer: MessageWriter<TransferItemAction>,
 ) {
-    // Only render when in Inventory mode
     let inv_state = match &global_state.0.mode {
         GameMode::Inventory(s) => s.clone(),
         _ => return,
@@ -353,13 +344,10 @@ fn inventory_ui_system(
         Err(_) => return,
     };
 
-    // Snapshot data needed for rendering before taking any mutable borrows
     let open_panels = inv_state.open_panels.clone();
     let focused_index = inv_state.focused_index;
     let selected_slot = inv_state.selected_slot;
 
-    // Collect the names of all open-panel characters for "Give to" labels.
-    // We snapshot these upfront to avoid re-borrowing inside the closure.
     let panel_names: Vec<(usize, String)> = open_panels
         .iter()
         .filter_map(|&pi| {
@@ -372,78 +360,105 @@ fn inventory_ui_system(
         })
         .collect();
 
-    // Accumulate any action requested inside the egui closure so we can write
-    // messages after the closure returns (closures cannot capture &mut writers).
     let mut pending_action: Option<PanelAction> = None;
 
     egui::CentralPanel::default().show(ctx, |ui| {
-        ui.heading("Inventory");
-        ui.label(
-            egui::RichText::new("[I] or [Esc] to close")
-                .italics()
-                .weak(),
-        );
-        ui.add_space(8.0);
-
-        // Lay out character panels side by side
+        // ── Top bar: title + close hint ──────────────────────────────────
         ui.horizontal(|ui| {
-            for (panel_pos, &party_index) in open_panels.iter().enumerate() {
-                let is_focused =
-                    party_index == focused_index && panel_pos == nav_state.focus_on_panel;
-                ui.push_id(format!("inv_panel_{}", party_index), |ui| {
-                    let action = render_character_panel(
-                        ui,
-                        party_index,
-                        is_focused,
-                        selected_slot,
-                        &global_state,
-                        game_content.as_deref(),
-                        &panel_names,
-                    );
-                    if action.is_some() {
-                        pending_action = action;
-                    }
-                });
-            }
+            ui.heading("Inventory");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new("[I] or [Esc] to close")
+                        .italics()
+                        .weak(),
+                );
+            });
         });
 
-        ui.add_space(8.0);
-        ui.separator();
-
-        // Footer: focused character name and selected item details
-        let party = &global_state.0.party;
-        if focused_index < party.members.len() {
-            let character = &party.members[focused_index];
-            let detail_text = match selected_slot {
-                Some(slot_idx) if slot_idx < character.inventory.items.len() => {
-                    let slot = &character.inventory.items[slot_idx];
-                    let item_name = game_content
-                        .as_deref()
-                        .and_then(|gc| gc.db().items.get_item(slot.item_id))
-                        .map(|item| item.name.clone())
-                        .unwrap_or_else(|| format!("Item #{}", slot.item_id));
-                    format!(
-                        "Focus: {} | Selected: {} (slot {})",
-                        character.name, item_name, slot_idx
-                    )
-                }
-                _ => format!("Focus: {}", character.name),
-            };
-            ui.label(egui::RichText::new(detail_text).strong());
-        } else {
-            ui.label("No party members.");
+        // ── Status line: focused character + selected item ───────────────
+        {
+            let party = &global_state.0.party;
+            if focused_index < party.members.len() {
+                let character = &party.members[focused_index];
+                let status = match selected_slot {
+                    Some(slot_idx) if slot_idx < character.inventory.items.len() => {
+                        let slot = &character.inventory.items[slot_idx];
+                        let item_name = game_content
+                            .as_deref()
+                            .and_then(|gc| gc.db().items.get_item(slot.item_id))
+                            .map(|item| item.name.clone())
+                            .unwrap_or_else(|| format!("Item #{}", slot.item_id));
+                        format!(
+                            "Focus: {}  |  Selected: {} (slot {})",
+                            character.name, item_name, slot_idx
+                        )
+                    }
+                    _ => format!("Focus: {}", character.name),
+                };
+                ui.label(egui::RichText::new(status).strong());
+            }
         }
-
-        // Keyboard hint for action buttons
-        ui.add_space(4.0);
         ui.label(
-            egui::RichText::new("Select a slot with Arrow keys, then use the action buttons above")
+            egui::RichText::new("Tab / ↑↓: cycle character   ←→: select slot   Esc / I: close")
                 .small()
                 .weak(),
         );
+        ui.separator();
+
+        // ── Panel layout ─────────────────────────────────────────────────
+        // 1–3 panels → 1 row of 3 columns.  4–6 panels → 2 rows of 3 columns.
+        let num_panels = open_panels.len().max(1);
+        let cols = num_panels.min(3);
+        let rows = num_panels.div_ceil(cols);
+
+        let available = ui.available_size();
+        // Divide remaining height evenly between rows; subtract inter-row gap.
+        let panel_h = ((available.y - (rows as f32 - 1.0) * 4.0) / rows as f32).max(80.0);
+        // Each column takes an equal share of the width minus inter-col gaps.
+        let panel_w = ((available.x - (cols as f32 - 1.0) * 4.0) / cols as f32).max(80.0);
+
+        // Lay panels out row by row using plain horizontal strips.
+        for row in 0..rows {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                for col in 0..cols {
+                    let panel_pos = row * cols + col;
+                    if panel_pos >= open_panels.len() {
+                        // Placeholder to keep columns aligned
+                        ui.allocate_exact_size(egui::vec2(panel_w, panel_h), egui::Sense::hover());
+                        continue;
+                    }
+                    let party_index = open_panels[panel_pos];
+                    let is_focused = party_index == focused_index;
+                    // Only pass selected_slot to the focused panel — every other
+                    // panel gets None so the highlight never appears on non-focused
+                    // characters.
+                    let panel_selected = if is_focused { selected_slot } else { None };
+
+                    // push_id mandatory per sdk/AGENTS.md
+                    ui.push_id(format!("inv_panel_{}", party_index), |ui| {
+                        let action = render_character_panel(
+                            ui,
+                            party_index,
+                            is_focused,
+                            panel_selected,
+                            egui::vec2(panel_w, panel_h),
+                            &global_state,
+                            game_content.as_deref(),
+                            &panel_names,
+                        );
+                        if action.is_some() {
+                            pending_action = action;
+                        }
+                    });
+                }
+            });
+            if row + 1 < rows {
+                ui.add_space(4.0);
+            }
+        }
     });
 
-    // Dispatch the action that was requested inside the egui closure.
     if let Some(action) = pending_action {
         match action {
             PanelAction::Drop {
@@ -470,23 +485,20 @@ fn inventory_ui_system(
     }
 }
 
-/// Renders a single character's inventory panel and returns any action the
-/// player requested via button click.
+/// Renders a single character panel at a fixed pixel size.
 ///
-/// # Arguments
+/// Layout (top to bottom):
+/// - Dark header bar (`PANEL_HEADER_H` px) — character name only.
+/// - Body — painter-drawn slot grid filling the remaining height.
+/// - Action strip (`PANEL_ACTION_H` px) — Drop / Give buttons, only when a
+///   filled slot is selected.
 ///
-/// * `ui` – The egui `Ui` to render into.
-/// * `party_index` – Zero-based index into `global_state.0.party.members`.
-/// * `is_focused` – Whether this panel currently has keyboard focus.
-/// * `selected_slot` – Highlighted slot index within this panel (if any).
-/// * `global_state` – Read-only reference to global game state.
-/// * `game_content` – Optional content database for item name lookups.
-/// * `panel_names` – Snapshot of `(party_index, name)` for every open panel,
-///   used to label "Give to {name}" transfer buttons.
+/// The slot grid is drawn entirely via `egui::Painter` so it looks like the
+/// mockup: dark background, faint grid lines, white item-type silhouettes.
 ///
 /// # Returns
 ///
-/// `Some(PanelAction)` when the player clicked Drop or a Give-to button;
+/// `Some(PanelAction)` when the player clicked a Drop or Give button;
 /// `None` otherwise.
 #[allow(clippy::too_many_arguments)]
 fn render_character_panel(
@@ -494,158 +506,374 @@ fn render_character_panel(
     party_index: usize,
     is_focused: bool,
     selected_slot: Option<usize>,
+    size: egui::Vec2,
     global_state: &GlobalState,
     game_content: Option<&GameContent>,
     panel_names: &[(usize, String)],
 ) -> Option<PanelAction> {
-    // Bounds-check: silently skip if party_index is out of range
     if party_index >= global_state.0.party.members.len() {
         return None;
     }
 
     let character = &global_state.0.party.members[party_index];
-    // Collect the result of any button click so we can return it after the
-    // closure chain completes.
+    let items = &character.inventory.items;
     let mut panel_action: Option<PanelAction> = None;
 
-    // Mandatory egui ID scope per sdk/AGENTS.md — every loop body uses push_id
-    ui.push_id(party_index, |ui| {
-        let border_color = if is_focused {
-            egui::Color32::YELLOW
-        } else {
-            egui::Color32::DARK_GRAY
-        };
+    // How much vertical space does the action strip need?
+    let has_action = selected_slot.map(|s| s < items.len()).unwrap_or(false);
+    let action_reserve = if has_action { PANEL_ACTION_H } else { 0.0 };
+    let body_h = (size.y - PANEL_HEADER_H - action_reserve).max(20.0);
 
-        let frame = egui::Frame::group(ui.style())
-            .stroke(egui::Stroke::new(2.0, border_color))
-            .inner_margin(egui::Margin::same(8));
+    // ── Outer border ─────────────────────────────────────────────────────
+    let border_color = if is_focused {
+        FOCUSED_BORDER_COLOR
+    } else {
+        UNFOCUSED_BORDER_COLOR
+    };
+    let (panel_rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect_stroke(
+        panel_rect,
+        2.0,
+        egui::Stroke::new(2.0, border_color),
+        egui::StrokeKind::Outside,
+    );
 
-        frame.show(ui, |ui| {
-            ui.set_min_width(160.0);
+    // ── Header ───────────────────────────────────────────────────────────
+    let header_rect = egui::Rect::from_min_size(panel_rect.min, egui::vec2(size.x, PANEL_HEADER_H));
+    painter.rect_filled(header_rect, 0.0, HEADER_BG_COLOR);
+    painter.text(
+        header_rect.left_center() + egui::vec2(8.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        &character.name,
+        egui::FontId::proportional(16.0),
+        egui::Color32::WHITE,
+    );
 
-            // Character name heading
-            ui.label(egui::RichText::new(&character.name).strong().size(14.0));
-            ui.label(format!("Gold: {}", character.gold));
-            ui.label(format!(
-                "HP: {}/{} | SP: {}/{}",
-                character.hp.current, character.hp.base, character.sp.current, character.sp.base
-            ));
-            ui.add_space(4.0);
+    // ── Body: slot grid ───────────────────────────────────────────────────
+    let body_rect = egui::Rect::from_min_size(
+        panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H),
+        egui::vec2(size.x, body_h),
+    );
+    painter.rect_filled(body_rect, 0.0, PANEL_BG_COLOR);
 
-            ui.label(
-                egui::RichText::new(format!(
-                    "Items ({}/{})",
-                    character.inventory.items.len(),
-                    Inventory::MAX_ITEMS
-                ))
-                .size(12.0)
-                .strong(),
+    // Compute cell size to fill the body exactly: SLOT_COLS wide, rows tall.
+    let slot_rows = Inventory::MAX_ITEMS.div_ceil(SLOT_COLS);
+    let cell_w = (body_rect.width() / SLOT_COLS as f32).floor();
+    let cell_h = (body_rect.height() / slot_rows as f32).floor();
+    let cell_size = cell_w.min(cell_h).max(8.0);
+
+    // Draw grid lines
+    for col in 0..=SLOT_COLS {
+        let x = body_rect.min.x + col as f32 * cell_w;
+        painter.line_segment(
+            [
+                egui::pos2(x, body_rect.min.y),
+                egui::pos2(x, body_rect.max.y),
+            ],
+            egui::Stroke::new(1.0, GRID_LINE_COLOR),
+        );
+    }
+    for row in 0..=slot_rows {
+        let y = body_rect.min.y + row as f32 * cell_h;
+        painter.line_segment(
+            [
+                egui::pos2(body_rect.min.x, y),
+                egui::pos2(body_rect.max.x, y),
+            ],
+            egui::Stroke::new(1.0, GRID_LINE_COLOR),
+        );
+    }
+
+    // Draw items and selection highlight in each cell.
+    // We also register a click-sense rect per cell for mouse selection, returned
+    // so the caller can update InventoryState — but that requires mutable state
+    // access the closure can't hold, so instead we check `ui.interact` on a
+    // child_ui allocated for each cell.
+    for slot_idx in 0..Inventory::MAX_ITEMS {
+        let col = slot_idx % SLOT_COLS;
+        let row = slot_idx / SLOT_COLS;
+        let cell_min = body_rect.min + egui::vec2(col as f32 * cell_w, row as f32 * cell_h);
+        let cell_rect = egui::Rect::from_min_size(cell_min, egui::vec2(cell_w, cell_h));
+
+        // Selection highlight
+        if selected_slot == Some(slot_idx) {
+            painter.rect_filled(
+                cell_rect.shrink(1.0),
+                0.0,
+                egui::Color32::from_rgba_premultiplied(180, 150, 0, 60),
             );
-            ui.separator();
+            painter.rect_stroke(
+                cell_rect.shrink(1.0),
+                0.0,
+                egui::Stroke::new(2.0, SELECT_HIGHLIGHT_COLOR),
+                egui::StrokeKind::Outside,
+            );
+        }
 
-            // Render each inventory slot (0..MAX_ITEMS)
-            for slot_idx in 0..Inventory::MAX_ITEMS {
-                // Mandatory per egui ID rules — unique ID for each slot widget
-                ui.push_id(format!("slot_{}", slot_idx), |ui| {
-                    let is_selected = selected_slot == Some(slot_idx);
+        // Item silhouette
+        if slot_idx < items.len() {
+            let item_type = game_content
+                .and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id))
+                .map(|it| &it.item_type);
+            paint_item_silhouette(
+                painter,
+                cell_rect,
+                cell_size,
+                item_type,
+                ITEM_SILHOUETTE_COLOR,
+            );
+        }
+    }
 
-                    if slot_idx < character.inventory.items.len() {
-                        let slot = &character.inventory.items[slot_idx];
-                        let item_label = game_content
-                            .and_then(|gc| gc.db().items.get_item(slot.item_id))
-                            .map(|item| item.name.clone())
-                            .unwrap_or_else(|| format!("Item #{}", slot.item_id));
+    // ── Action strip (egui widgets, below the painted body) ───────────────
+    if has_action {
+        if let Some(slot_idx) = selected_slot {
+            let action_rect = egui::Rect::from_min_size(
+                panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H + body_h),
+                egui::vec2(size.x, action_reserve),
+            );
+            painter.rect_filled(action_rect, 0.0, HEADER_BG_COLOR);
 
-                        if is_selected {
-                            // Highlight selected slot with yellow background
-                            let rich =
-                                egui::RichText::new(format!("[{}] {}", slot_idx, item_label))
-                                    .color(egui::Color32::BLACK)
-                                    .background_color(egui::Color32::YELLOW)
-                                    .monospace();
-                            ui.label(rich);
-                        } else {
-                            ui.label(format!("[{}] {}", slot_idx, item_label));
-                        }
-                    } else {
-                        // Empty slot — dimmed label
-                        let empty = egui::RichText::new(format!("[{}] [empty]", slot_idx))
-                            .weak()
-                            .italics();
-                        ui.label(empty);
-                    }
-                });
-            }
+            // Place an egui child UI inside the action strip for buttons.
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(action_rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            child.add_space(6.0);
 
-            // ── Action row ──────────────────────────────────────────────────
-            // Only rendered when a slot is selected AND it contains an item.
-            if let Some(slot_idx) = selected_slot {
-                if slot_idx < character.inventory.items.len() {
-                    ui.add_space(6.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-
-                    // Unique egui ID scope for the action row per AGENTS.md rules
-                    ui.push_id("actions", |ui| {
-                        ui.label(egui::RichText::new("Actions:").strong().small());
-
-                        // Drop button
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new("Drop")
-                                        .color(egui::Color32::from_rgb(220, 80, 80)),
-                                )
+            // push_id for the action row — mandatory per sdk/AGENTS.md
+            child.push_id("actions", |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add(egui::Button::new(
+                            egui::RichText::new("Drop")
+                                .color(egui::Color32::from_rgb(220, 80, 80))
                                 .small(),
+                        ))
+                        .on_hover_text("Discard this item permanently")
+                        .clicked()
+                    {
+                        panel_action = Some(PanelAction::Drop {
+                            party_index,
+                            slot_index: slot_idx,
+                        });
+                    }
+
+                    for &(other_index, ref other_name) in panel_names {
+                        if other_index == party_index {
+                            continue;
+                        }
+                        let target_full = global_state.0.party.members[other_index]
+                            .inventory
+                            .is_full();
+                        let label = format!("→ {}", other_name);
+                        if ui
+                            .add_enabled(
+                                !target_full,
+                                egui::Button::new(
+                                    egui::RichText::new(&label)
+                                        .color(egui::Color32::from_rgb(100, 200, 100))
+                                        .small(),
+                                ),
                             )
-                            .on_hover_text("Discard this item permanently")
+                            .on_hover_text(if target_full {
+                                format!("{}'s inventory is full", other_name)
+                            } else {
+                                format!("Give to {}", other_name)
+                            })
                             .clicked()
                         {
-                            panel_action = Some(PanelAction::Drop {
-                                party_index,
-                                slot_index: slot_idx,
+                            panel_action = Some(PanelAction::Transfer {
+                                from_party_index: party_index,
+                                from_slot_index: slot_idx,
+                                to_party_index: other_index,
                             });
                         }
-
-                        // "Give to {name}" buttons for every other open panel
-                        for &(other_index, ref other_name) in panel_names {
-                            if other_index == party_index {
-                                continue;
-                            }
-                            let give_label = format!("Give to {}", other_name);
-                            let target_full = global_state.0.party.members[other_index]
-                                .inventory
-                                .is_full();
-                            if ui
-                                .add_enabled(
-                                    !target_full,
-                                    egui::Button::new(
-                                        egui::RichText::new(&give_label)
-                                            .color(egui::Color32::from_rgb(100, 200, 100)),
-                                    )
-                                    .small(),
-                                )
-                                .on_hover_text(if target_full {
-                                    format!("{}'s inventory is full", other_name)
-                                } else {
-                                    format!("Transfer item to {}", other_name)
-                                })
-                                .clicked()
-                            {
-                                panel_action = Some(PanelAction::Transfer {
-                                    from_party_index: party_index,
-                                    from_slot_index: slot_idx,
-                                    to_party_index: other_index,
-                                });
-                            }
-                        }
-                    });
-                }
-            }
-        });
-    });
+                    }
+                });
+            });
+        }
+    }
 
     panel_action
+}
+
+/// Paints an item-type silhouette inside a slot cell using the egui `Painter`.
+///
+/// Each `ItemType` variant maps to a distinct geometric shape so the player
+/// can tell items apart at a glance without reading text labels.
+///
+/// | Type        | Shape                                          |
+/// |-------------|------------------------------------------------|
+/// | Weapon      | Thin cross (blade + crossguard)               |
+/// | Armor       | Rounded rectangle (breastplate outline)       |
+/// | Accessory   | Small circle (ring / amulet)                  |
+/// | Consumable  | Rounded tall rect (potion flask)              |
+/// | Ammo        | Small diamond                                  |
+/// | Quest       | Star-like octagon                             |
+/// | Unknown     | Simple question-mark placeholder rect         |
+fn paint_item_silhouette(
+    painter: &egui::Painter,
+    cell_rect: egui::Rect,
+    cell_size: f32,
+    item_type: Option<&ItemType>,
+    color: egui::Color32,
+) {
+    let c = cell_rect.center();
+    let s = cell_size * 0.5; // half-cell as scale reference
+
+    match item_type {
+        Some(ItemType::Weapon(_)) => {
+            // Blade: tall thin rect
+            let blade_w = (s * 0.15).max(2.0);
+            let blade_h = s * 0.80;
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    c + egui::vec2(0.0, -s * 0.10),
+                    egui::vec2(blade_w, blade_h),
+                ),
+                1.0,
+                color,
+            );
+            // Crossguard: wide thin rect
+            let guard_w = s * 0.55;
+            let guard_h = (s * 0.12).max(2.0);
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    c + egui::vec2(0.0, s * 0.25),
+                    egui::vec2(guard_w, guard_h),
+                ),
+                1.0,
+                color,
+            );
+            // Pommel: small square at bottom
+            let pommel = (s * 0.18).max(2.0);
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    c + egui::vec2(0.0, s * 0.58),
+                    egui::vec2(pommel, pommel),
+                ),
+                1.0,
+                color,
+            );
+        }
+        Some(ItemType::Armor(_)) => {
+            // Breastplate outline: tall rounded rect
+            let w = s * 0.65;
+            let h = s * 0.80;
+            painter.rect_stroke(
+                egui::Rect::from_center_size(c, egui::vec2(w, h)),
+                4.0,
+                egui::Stroke::new((s * 0.12).max(2.0), color),
+                egui::StrokeKind::Outside,
+            );
+            // Shoulder nubs
+            let nub_size = s * 0.20;
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    c + egui::vec2(-w * 0.5 - nub_size * 0.3, -h * 0.35),
+                    egui::vec2(nub_size, nub_size * 0.7),
+                ),
+                2.0,
+                color,
+            );
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    c + egui::vec2(w * 0.5 + nub_size * 0.3, -h * 0.35),
+                    egui::vec2(nub_size, nub_size * 0.7),
+                ),
+                2.0,
+                color,
+            );
+        }
+        Some(ItemType::Accessory(_)) => {
+            // Ring: circle outline
+            let r = s * 0.35;
+            let stroke_w = (s * 0.13).max(2.0);
+            painter.circle_stroke(c, r, egui::Stroke::new(stroke_w, color));
+            // Small gem on top
+            let gem = s * 0.14;
+            painter.circle_filled(c + egui::vec2(0.0, -r), gem, color);
+        }
+        Some(ItemType::Consumable(_)) => {
+            // Potion flask: rounded tall rectangle (body)
+            let flask_w = s * 0.38;
+            let flask_h = s * 0.55;
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    c + egui::vec2(0.0, s * 0.10),
+                    egui::vec2(flask_w, flask_h),
+                ),
+                3.0,
+                color,
+            );
+            // Neck
+            let neck_w = flask_w * 0.45;
+            let neck_h = s * 0.22;
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    c + egui::vec2(0.0, -s * 0.25),
+                    egui::vec2(neck_w, neck_h),
+                ),
+                1.0,
+                color,
+            );
+            // Cork
+            let cork_w = neck_w * 1.3;
+            let cork_h = s * 0.10;
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    c + egui::vec2(0.0, -s * 0.40),
+                    egui::vec2(cork_w, cork_h),
+                ),
+                1.0,
+                color,
+            );
+        }
+        Some(ItemType::Ammo(_)) => {
+            // Arrow shaft
+            let shaft_w = (s * 0.10).max(2.0);
+            let shaft_h = s * 0.72;
+            painter.rect_filled(
+                egui::Rect::from_center_size(c, egui::vec2(shaft_w, shaft_h)),
+                0.0,
+                color,
+            );
+            // Arrowhead: small triangle approximated by a rotated rect
+            let head = s * 0.20;
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    c + egui::vec2(0.0, -shaft_h * 0.5 - head),
+                    c + egui::vec2(-head * 0.55, -shaft_h * 0.5 + head * 0.2),
+                    c + egui::vec2(head * 0.55, -shaft_h * 0.5 + head * 0.2),
+                ],
+                color,
+                egui::Stroke::NONE,
+            ));
+        }
+        Some(ItemType::Quest(_)) => {
+            // Quest item: bordered square with a small circle inside
+            let sq = s * 0.55;
+            painter.rect_stroke(
+                egui::Rect::from_center_size(c, egui::vec2(sq, sq)),
+                2.0,
+                egui::Stroke::new((s * 0.10).max(2.0), color),
+                egui::StrokeKind::Outside,
+            );
+            painter.circle_filled(c, s * 0.18, color);
+        }
+        _ => {
+            // Unknown / fallback: small filled square
+            let sq = s * 0.35;
+            painter.rect_filled(
+                egui::Rect::from_center_size(c, egui::vec2(sq, sq)),
+                2.0,
+                egui::Color32::from_rgba_premultiplied(120, 120, 120, 180),
+            );
+        }
+    }
 }
 
 // ===== Action System =====
@@ -907,9 +1135,10 @@ mod tests {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_character_panel(
                     ui,
-                    0,    // party_index
-                    true, // is_focused
-                    None, // selected_slot
+                    0,                        // party_index
+                    true,                     // is_focused
+                    None,                     // selected_slot
+                    egui::vec2(300.0, 400.0), // size
                     &global_state,
                     None, // no GameContent needed
                     &[],  // no open panels for transfer buttons
@@ -961,9 +1190,10 @@ mod tests {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_character_panel(
                     ui,
-                    0,       // party_index
-                    false,   // not focused
-                    Some(0), // first slot selected
+                    0,                        // party_index
+                    false,                    // not focused
+                    Some(0),                  // first slot selected
+                    egui::vec2(300.0, 400.0), // size
                     &global_state,
                     None, // no GameContent
                     &[],  // no open panels for transfer buttons
@@ -992,6 +1222,7 @@ mod tests {
                     0, // out-of-bounds
                     true,
                     None,
+                    egui::vec2(300.0, 400.0), // size
                     &global_state,
                     None,
                     &[],
@@ -1571,9 +1802,10 @@ mod tests {
                 // No simulated click occurs in headless context; return value is None.
                 let action = render_character_panel(
                     ui,
-                    0,       // party_index
-                    true,    // is_focused
-                    Some(0), // slot 0 selected (has item)
+                    0,                        // party_index
+                    true,                     // is_focused
+                    Some(0),                  // slot 0 selected (has item)
+                    egui::vec2(300.0, 400.0), // size
                     &global_state,
                     None,
                     &panel_names,

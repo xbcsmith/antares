@@ -582,7 +582,7 @@ pub struct Inventory {
 
 impl Inventory {
     /// Maximum number of items in backpack
-    pub const MAX_ITEMS: usize = 6;
+    pub const MAX_ITEMS: usize = 64;
 
     /// Creates a new empty inventory
     pub fn new() -> Self {

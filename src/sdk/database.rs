@@ -2959,27 +2959,27 @@ mod tests {
 
     #[test]
     fn test_content_database_load_campaign_includes_npc_stock_templates() {
-        // Load the tutorial campaign and verify npc_stock_templates is populated
-        let campaign_path = "campaigns/tutorial";
+        // Load the test campaign and verify npc_stock_templates is populated
+        let campaign_path = "data/test_campaign";
 
         if !std::path::Path::new(campaign_path).exists()
-            || !std::path::Path::new("campaigns/tutorial/data/npc_stock_templates.ron").exists()
+            || !std::path::Path::new("data/test_campaign/data/npc_stock_templates.ron").exists()
         {
             return;
         }
 
         let db = ContentDatabase::load_campaign(campaign_path)
-            .expect("Failed to load tutorial campaign database");
+            .expect("Failed to load test campaign database");
 
         assert!(
             !db.npc_stock_templates.is_empty(),
-            "Tutorial campaign npc_stock_templates should be populated"
+            "Test campaign npc_stock_templates should be populated"
         );
         assert!(
             db.npc_stock_templates
                 .get("tutorial_merchant_stock")
                 .is_some(),
-            "tutorial_merchant_stock template not found in tutorial campaign"
+            "tutorial_merchant_stock template not found in test campaign"
         );
     }
 }

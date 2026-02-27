@@ -515,7 +515,7 @@ We need a time system in the game engine. The time system should keep track of t
 
 Write a plan with a phased approach to implementing a time system in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-[Time System Implementation Plan](./time_system_implementation_plan.md)
+✅ PLAN WRITTEN - [Time System Implementation Plan](./time_system_implementation_plan.md)
 
 ### Rest System
 
@@ -523,7 +523,7 @@ We need a party rest system to heal characters. Bind rest to the R key and make 
 
 Write a plan with a phased approach to implementing a rest system in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-[Rest System Implementation Plan](./rest_system_implementation_plan.md)
+✅ PLAN WRITTEN - [Rest System Implementation Plan](./rest_system_implementation_plan.md)
 
 ### Game Log
 
@@ -531,7 +531,7 @@ We need a Game Log. It should be a log that shows all the important events that 
 
 Write a plan with a phased approach to implementing a game log in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-[Game Log Implementation Plan](./game_log_implementation_plan.md)
+✅ PLAN WRITTEN - [Game Log Implementation Plan](./game_log_implementation_plan.md)
 
 ### Procedural Meshes Direction Control
 
@@ -539,11 +539,11 @@ There is no way to control what direction a creature procedural mesh is facing. 
 
 Write a plan with a phased approach to implementing directional control for procedural meshes in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-[Procedural Meshes Direction Control Implementation Plan](./procedural_meshes_direction_control_implementation_plan.md)
+✅ PLAN WRITTEN - [Procedural Meshes Direction Control Implementation Plan](./procedural_meshes_direction_control_implementation_plan.md)
 
 ### Combat
 
-We need types of combat events. The party should not always be able to see the monster. We should have different types of combat events. For example, an ambush event where the monster is hidden and the party does not know it is there until it attacks. We should have different types of combat events that can be triggered by different conditions. For example, an ambush event that is triggered when the party enters a certain tile or a certain monster is nearby. The ambush event would cause the monster to attack the party without being visible on the map until it attacks. Another example are ambushes where the party is resting and the monster attacks them while they are resting (occurance should be configurable at the map level).
+We need types of combat events. The party should not always be able to see the monster. We should have different types of combat events. For example, an ambush event where the monster is hidden and the party does not know it is there until it attacks. We should have different types of combat events that can be triggered by different conditions. For example, an ambush event that is triggered when the party enters a certain tile or a certain monster is nearby. The ambush event would cause the monster to attack the party without being visible on the map until it attacks. Another example are ambushes where the party is resting and the monster attacks them while they are resting (occurance should be configurable at the map level). The Capmaign Builder needs to support settign adn editing the combat event type for each encounter in the map.ron file.
 
 Normal Combat - Party sees the monster and can choose to attack or flee. Combat proceeds as normal.
 Ambush Combat - Party does not see the monster until it attacks. Party misses the first round because they do not see the monster. After the first round the monster becomes visible and combat proceeds as normal.
@@ -554,3 +554,29 @@ Boss Combat - Party sees the monster and can choose to attack or flee. The monst
 Write a plan with a phased approach to implementing different types of combat events in the game engine. THINK HARD and follow the rules in @PLAN.md
 
 [Combat Events Implementation Plan](./combat_events_implementation_plan.md)
+
+
+### Items Procedural Meshes
+
+We need to implement procedural meshes for items in the game. Currently there are no procedural meshes for items. We should have procedural meshes for weapons, armor, and other equippable items. We should also have procedural meshes for consumable items like potions and scrolls. The procedural meshes should be based on the item data in the item RON files. For example, a sword with a long blade should have a different mesh than a dagger with a short blade. A potion with a red liquid should have a different mesh than a potion with a blue liquid. We should use the same procedural mesh system that we use for creatures and furniture to generate the item meshes based on their data.
+
+Write a plan with a phased approach to implementing procedural meshes for items in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+[Items Procedural Meshes Implementation Plan](./items_procedural_meshes_implementation_plan.md)
+
+### Locked Objects and Keys
+
+We need to implement locked objects and keys in the game engine. Currently there are no locked objects or keys in the game. We should have locked doors, chests, and other containers that require a key to open. The keys should be items that can be found in the world or given as quest rewards. The locked objects should have a locked and unlocked state. When the player interacts with a locked object without the key, they should get a message saying it is locked. When they interact with it with the key, it should unlock and allow them to access whatever is behind it (e.g. a new area, loot, etc). We also need a lockpick skill and lockpicking mechanic that allows the player to attempt to pick the lock on a locked object if they do not have the key. The success of the lockpicking attempt should be based on the player's lockpicking skill and a random chance.
+
+Write a plan with a phased approach to implementing locked objects and keys in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+[Locked Objects and Keys Implementation Plan](./locked_objects_and_keys_implementation_plan.md)
+
+### Inventory Navigation
+
+We need to fix Inventory Navigation. This is how it should work.
+
+TAB - Cycles through Character Inventory Focus Highlighting Inventory with Yellow Box
+Up Down Side Arrows - Navigate the grid inside the inventory (does not affect character focus) Highlights Items Yellow
+Enter - Selects Item and Highlights the Options to Drop or Send Item to Another Character or Merchant
+Action Buttons - Once highlighted by selecting an item can be navigated with the Side Arrows. Enter executed the action and returns focus to the first item in the inventory. ESC returns focus to the selected item where user can navigate the Inventory or Change Character Focus.
