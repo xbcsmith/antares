@@ -135,6 +135,10 @@ pub struct NpcDefinition {
     ///     faction: None,
     ///     is_merchant: false,
     ///     is_innkeeper: false,
+    ///     is_priest: false,
+    ///     stock_template: None,
+    ///     service_catalog: None,
+    ///     economy: None,
     /// };
     /// ```
     #[serde(default)]
@@ -166,6 +170,10 @@ pub struct NpcDefinition {
     ///     faction: None,
     ///     is_merchant: false,
     ///     is_innkeeper: false,
+    ///     is_priest: false,
+    ///     stock_template: None,
+    ///     service_catalog: None,
+    ///     economy: None,
     /// };
     /// ```
     #[serde(default)]

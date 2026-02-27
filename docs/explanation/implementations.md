@@ -4,6 +4,7 @@
 
 | Phase                                             | Status      | Date       | Description                                                                |
 | ------------------------------------------------- | ----------- | ---------- | -------------------------------------------------------------------------- |
+| **Architecture Reference Sync (Engine + SDK)**    | ✅ COMPLETE | 2026-02-27 | **Updated docs/reference/architecture.md to match current src/ and SDK layout** |
 | **Inventory System Phase 1**                      | ✅ COMPLETE | 2026-07-18 | **Shared Inventory Domain Model**                                          |
 | **Inventory System Phase 2**                      | ✅ COMPLETE | 2026-07-18 | **NPC Runtime State and Transaction Operations**                           |
 | **Inventory System Phase 3**                      | ✅ COMPLETE | 2026-07-18 | **Dialogue Action and Application Integration**                            |

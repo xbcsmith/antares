@@ -9,65 +9,27 @@ Non-compliance will result in rejected code.
 
 ### BEFORE YOU START ANY TASK
 
-#### Step 1: Verify Tools Are Installed
-
-```bash
-rustup component add clippy rustfmt
-cargo install cargo-audit  # Optional but recommended
-cargo install nextest
-```
-
-#### Step 2: MANDATORY - Consult Architecture Document FIRST
-
-**Before writing ANY code, you MUST:**
-
 1. **Read** `docs/reference/architecture.md` sections relevant to your task
-2. **Verify** data structures match the architecture EXACTLY
-3. **Check** module placement (Section 3.2) - don't create new modules arbitrarily
-4. **Confirm** you're working in the correct Development Phase (Section 8)
-5. **Use** the exact type names, field names, and signatures defined in architecture
-6. **NEVER** modify core data structures (Section 4) without explicit approval
+2. **Verify** data structures, type names, and field names match architecture EXACTLY — no deviations
+3. **NEVER** modify core data structures (Section 4) without explicit approval
 
-**Rule**: If architecture.md defines it, YOU MUST USE IT EXACTLY AS DEFINED.
-Deviation = violation.
+**Rule**: If architecture.md defines it, USE IT EXACTLY AS DEFINED. Deviation = violation.
 **Rule**: BE CONSISTENT WITH NAMING CONVENTIONS AND STYLE GUIDELINES.
 **Rule**: WE DO NOT CARE ABOUT BACKWARDS COMPATIBILITY RIGHT NOW.
 
-#### Step 3: Plan Your Implementation
-
-- Identify which files need changes
-- Determine what tests are needed
-- Choose correct documentation category (Diataxis)
-
 ### AFTER YOU COMPLETE ANY TASK
 
-#### Step 1: Run Quality Checks (ALL MUST PASS)
-
-```bash
-cargo fmt --all
-cargo check --all-targets --all-features
-cargo clippy --all-targets --all-features -- -D warnings
-cargo nextest run --all-features
-```
-
-**Expected**: Zero errors, zero warnings, all tests pass.
-
-#### Step 2: Verify Architecture Compliance
-
-- [ ] Data structures match architecture.md Section 4 definitions **EXACTLY**
-- [ ] Module placement follows Section 3.2 structure
-- [ ] Type aliases used consistently (ItemId, SpellId, etc.)
-- [ ] Constants extracted, not hardcoded (MAX_ITEMS, condition flags, etc.)
-- [ ] AttributePair pattern used for modifiable stats
-- [ ] Game mode context respected (combat vs exploration logic)
-- [ ] RON format used for data files, not JSON/YAML
-- [ ] No architectural deviations without documentation
-
-#### Step 3: Final Verification
-
-1. **Re-read** relevant architecture.md sections
-2. **Confirm** no architectural drift introduced
-3. **Update** `docs/explanation/implementations.md`
+1. Run all four quality gates (see **Implementation Rule 3**). Zero errors, zero warnings.
+2. Verify architecture compliance:
+   - [ ] Data structures match architecture.md Section 4 **EXACTLY**
+   - [ ] Module placement follows Section 3.2
+   - [ ] Type aliases used consistently (ItemId, SpellId, etc.)
+   - [ ] Constants extracted, not hardcoded (MAX_ITEMS, condition flags, etc.)
+   - [ ] AttributePair pattern used for modifiable stats
+   - [ ] Game mode context respected (combat vs exploration logic)
+   - [ ] RON format used for data files, not JSON/YAML
+   - [ ] No architectural deviations without documentation
+3. Update `docs/explanation/implementations.md`
 
 **If you can't explain WHY your code differs from architecture.md, IT'S WRONG.**
 
@@ -77,7 +39,7 @@ cargo nextest run --all-features
 
 ## IMPLEMENTATION RULES - NEVER VIOLATE
 
-**Detailed rules for implementing code. See "Five Golden Rules" section at end for quick reference.**
+**Detailed rules for implementing code. See the Golden Workflow at the end of this document.**
 
 ### Implementation Rule 1: File Extensions (MOST VIOLATED)
 
@@ -358,157 +320,6 @@ Architecture defines many constants:
 
 **NEVER** hardcode these values. Reference the constants or extract them if missing.
 
-## Development Workflow
-
-### Step-by-Step Process (FOLLOW EXACTLY)
-
-#### Phase 1: Preparation
-
-1. **Understand the Task**
-
-   - Read requirements completely
-   - Identify which architecture layers are affected
-   - Check for existing similar code
-
-2. **Search Existing Code**
-
-   ```bash
-   # Find relevant files
-   rg "function_name" src/
-   find src/ -name "*feature*.rs"
-   ```
-
-3. **Plan Changes**
-   - List files to create/modify
-   - Identify tests needed
-   - Determine documentation category
-
-#### Phase 2: Implementation
-
-1. **Write Code**
-
-   ````rust
-   // Follow this pattern for ALL public items:
-
-   /// One-line description
-   ///
-   /// Longer explanation of behavior and purpose.
-   ///
-   /// # Arguments
-   ///
-   /// * `param` - Description
-   ///
-   /// # Returns
-   ///
-   /// Description of return value
-   ///
-   /// # Errors
-   ///
-   /// Returns `ErrorType` if condition
-   ///
-   /// # Examples
-   ///
-   /// ```
-   /// use antares::character::{Character, Class, Race};
-   /// use antares::items::{Item, ItemId};
-   ///
-   /// let character = Character::new("Hero", Race::Human, Class::Knight);
-   /// let item_id: ItemId = 42;
-   /// let result = can_use_item(&character, item_id);
-   /// assert!(result.is_ok());
-   /// ```
-   pub fn can_use_item(character: &Character, item_id: ItemId) -> Result<bool, GameError> {
-       // Implementation
-   }
-   ````
-
-2. **Write Tests (MANDATORY)**
-
-   ```rust
-   #[cfg(test)]
-   mod tests {
-       use super::*;
-       use crate::character::{Character, Class, Race};
-       use crate::items::{Item, ItemType, Disablement};
-
-       #[test]
-       fn test_knight_can_equip_sword() {
-           // Arrange
-           let knight = Character::new("Test Knight", Race::Human, Class::Knight);
-           let sword = Item::new_weapon("Longsword", WeaponData::default());
-
-           // Act
-           let result = can_equip_item(&knight, &sword);
-
-           // Assert
-           assert!(result.is_ok());
-           assert_eq!(result.unwrap(), true);
-       }
-
-       #[test]
-       fn test_sorcerer_cannot_equip_plate_armor() {
-           let sorcerer = Character::new("Mage", Race::Elf, Class::Sorcerer);
-           let plate = Item::new_armor("Plate Mail", ArmorData::heavy());
-
-           let result = can_equip_item(&sorcerer, &plate);
-           assert!(result.is_err());
-       }
-
-       #[test]
-       fn test_inventory_full_boundary() {
-           let mut character = Character::new("Test", Race::Human, Class::Knight);
-           // Fill inventory to MAX_ITEMS
-           for i in 0..Inventory::MAX_ITEMS {
-               character.inventory.add_item(ItemId::from(i)).unwrap();
-           }
-
-           // Attempt to add one more
-           let result = character.inventory.add_item(ItemId::from(99));
-           assert!(matches!(result, Err(InventoryError::Full)));
-       }
-   }
-   ```
-
-3. **Run Quality Checks Incrementally**
-
-   ```bash
-   # After writing code
-   cargo fmt --all
-   cargo clippy --all-targets --all-features -- -D warnings
-
-   # After writing tests
-   cargo nextest run --all-features
-
-   # Before committing - verify all checks pass
-   cargo fmt --all
-   cargo check --all-targets --all-features
-   cargo clippy --all-targets --all-features -- -D warnings
-   cargo nextest run --all-features
-   ```
-
-#### Phase 3: Documentation
-
-**ONLY UPDATE THIS FILE**
-
-- docs/explanation/implementations.md
-
-**NEVER modify architecture.md - it is the source of truth that you follow, not update.**
-
-### Phase 4: Validation (CRITICAL)
-
-**Run the quality checks from Implementation Rule 3 (see above) or "AFTER YOU COMPLETE" section.**
-
-All four cargo commands MUST pass:
-
-- `cargo fmt --all`
-- `cargo check --all-targets --all-features`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo nextest run --all-features`
-
-**THEN** verify the complete "Validation Checklist" section near the end of this document.
-
-**IF ANY VALIDATION FAILS: Stop and fix immediately.**
-
 ---
 
 ## Rust Coding Standards
@@ -620,55 +431,7 @@ fn test_combat_to_exploration_preserves_party_state() {
 - Test edge cases and boundaries
 - Achieve >80% code coverage
 - Use descriptive test names: `test_{function}_{condition}_{expected}`
-
-**Test Structure Template:**
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Success case
-    #[test]
-    fn test_parse_config_with_valid_yaml() {
-        let yaml = "key: value";
-        let result = parse_config(yaml);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().key, "value");
-    }
-
-    // Failure case
-    #[test]
-    fn test_parse_config_with_invalid_yaml() {
-        let yaml = "invalid: : yaml";
-        let result = parse_config(yaml);
-        assert!(result.is_err());
-    }
-
-    // Edge case
-    #[test]
-    fn test_parse_config_with_empty_string() {
-        let result = parse_config("");
-        assert!(result.is_err());
-    }
-
-    // Boundary condition
-    #[test]
-    fn test_parse_config_with_max_size() {
-        let yaml = "x".repeat(MAX_CONFIG_SIZE);
-        let result = parse_config(&yaml);
-        assert!(result.is_ok());
-    }
-
-    // Error propagation
-    #[test]
-    fn test_parse_config_propagates_validation_error() {
-        let yaml = "invalid_field: value";
-        let result = parse_config(yaml);
-        assert!(matches!(result, Err(ConfigError::ValidationError(_))));
-    }
-}
-```
+- doctests are updated anytime the function signature or behavior changes
 
 ---
 
@@ -756,381 +519,8 @@ Is it a step-by-step tutorial?
    │     │        └─ YES → docs/reference/
 ```
 
----
 
-## Common Violation Patterns (LEARN FROM PAST MISTAKES)
 
-### ❌ Anti-Pattern 1: Modifying Core Data Structures
-
-**WRONG**:
-
-```antares/examples/wrong_struct.rs#L1-5
-pub struct Character {
-    pub name: String,
-    pub level: u8,
-    pub experience: u32,
-    pub my_new_field: bool,  // ❌ UNAUTHORIZED CHANGE
-}
-```
-
-**RIGHT**: Core structs from architecture.md are **IMMUTABLE** without approval.
-
----
-
-### ❌ Anti-Pattern 2: Using Raw Types Instead of Aliases
-
-**WRONG**:
-
-```antares/examples/wrong_types.rs#L1-3
-pub fn get_item(id: u32) -> Option<Item> {  // ❌ Should use ItemId
-    // ...
-}
-```
-
-**RIGHT**:
-
-```antares/examples/right_types.rs#L1-3
-pub fn get_item(id: ItemId) -> Option<Item> {  // ✓ Uses type alias
-    // ...
-}
-```
-
----
-
-### ❌ Anti-Pattern 3: Hardcoding Constants
-
-**WRONG**:
-
-```antares/examples/wrong_constant.rs#L1-3
-if inventory.items.len() >= 20 {  // ❌ Magic number
-    return Err(InventoryError::Full);
-}
-```
-
-**RIGHT**:
-
-```antares/examples/right_constant.rs#L1-3
-if inventory.items.len() >= Inventory::MAX_ITEMS {  // ✓ Uses constant
-    return Err(InventoryError::Full);
-}
-```
-
----
-
-### ❌ Anti-Pattern 4: Direct Stat Modification
-
-**WRONG**:
-
-````antares/examples/wrong_stat.rs#L1-2
-character.stats.might.current = 25;  // ❌ Direct modification
-character.stats.might.base = 25;     // ❌ NEVER modify base directly
-```
-
-**RIGHT**:
-
-```antares/examples/right_stat.rs#L1-2
-character.stats.might.modify(5);  // ✓ Uses modifier system
-character.stats.might.reset();    // ✓ Resets current to base
-```
-
----
-
-### ❌ Anti-Pattern 5: Creating New Modules Without Justification
-
-**WRONG**: Creating `src/utils/`, `src/helpers/`, `src/common/` without checking Section 3.2.
-
-**RIGHT**: Follow the module structure in architecture.md. Propose new modules in discussion.
-
----
-
-### ❌ Anti-Pattern 6: Wrong Data Format
-
-**WRONG**: Creating `data/items.json`, `config.yaml`
-
-**RIGHT**: Use `.ron` format per Section 7.1 of architecture.md
-
----
-
-### ❌ Anti-Pattern 7: egui Widget ID Clashes (SDK / Campaign Builder)
-
-Widgets inside loops, multiple `ScrollArea`s in the same scope, and
-`ComboBox::from_label` all produce silent ID collisions in egui. Symptoms are
-subtle: wrong combo box selection, shared scroll state, clicks firing on the
-wrong row. The compiler and clippy cannot catch these.
-
-**Full rules, wrong/right examples, and an audit checklist are in
-`sdk/AGENTS.md`.**
-
-Quick summary of what is required for every campaign builder UI function:
-
-- Wrap every `for` loop body that renders widgets in `ui.push_id(unique_key, ...)`
-- Give every `ScrollArea` a distinct `.id_salt("unique_string")`
-- Use `ComboBox::from_id_salt("unique_string")` — never `from_label`
-- Give every `Grid`, `Plot`, and `CollapsingHeader` inside a loop a unique ID
-
----
-
-## Emergency Procedures
-
-### When Quality Checks Fail
-
-**SYSTEMATIC DEBUG PROCESS:**
-
-```bash
-# Step 1: Fix formatting (always do this first)
-cargo fmt --all
-
-# Step 2: Fix compilation errors
-cargo check --all-targets --all-features
-# Read each error message
-# Fix root cause, not symptoms
-# Re-run after each fix
-
-# Step 3: Fix clippy warnings (one at a time)
-cargo clippy --all-targets --all-features -- -D warnings
-# Fix first warning
-# Re-run clippy
-# Repeat until zero warnings
-
-# Step 4: Fix failing tests
-cargo nextest run --all-features -- --nocapture
-# Read test failure output
-# Fix failing tests or update expectations
-# Re-run tests
-
-# Step 5: Verify all checks pass
-cargo fmt --all
-cargo check --all-targets --all-features
-cargo clippy --all-targets --all-features -- -D warnings
-cargo nextest run --all-features
-````
-
-### When Tests Fail
-
-**DIAGNOSTIC COMMANDS:**
-
-```bash
-# Run with detailed output
-cargo nextest run -- --nocapture --test-threads=1
-
-# Run specific test
-cargo nextest run test_name -- --nocapture
-
-# Run tests in specific module
-cargo nextest run module::tests:: -- --nocapture
-
-# Show backtrace on panic
-RUST_BACKTRACE=1 cargo nextest run
-
-# Run with debug logging
-RUST_LOG=debug cargo nextest run
-```
-
-**DEBUGGING STRATEGY:**
-
-1. Read the test failure message carefully
-2. Understand what the test expects
-3. Add `println!` or `dbg!` to see actual values
-4. Fix the code or update the test
-5. Re-run until passing
-
-### When Clippy Reports Warnings
-
-**FIXING PROCESS:**
-
-```bash
-# List all warnings
-cargo clippy --all-targets --all-features 2>&1 | grep "warning:"
-
-# Fix warnings by category:
-
-# 1. Unused code
-#    - Remove if truly unused
-#    - Add #[allow(dead_code)] with justification if needed
-
-# 2. Complexity warnings
-#    - Refactor complex functions
-#    - Extract helper functions
-
-# 3. Style warnings
-#    - Follow clippy suggestions
-#    - Run cargo fix if available
-
-# 4. Correctness warnings
-#    - Fix immediately (these are bugs)
-
-# Re-run after each fix
-cargo clippy --all-targets --all-features -- -D warnings
-```
-
----
-
-## Validation Checklist
-
-**BEFORE CLAIMING TASK IS COMPLETE, VERIFY ALL:**
-
-### Code Quality
-
-- [ ] `cargo fmt --all` applied successfully
-- [ ] `cargo check --all-targets --all-features` passes with zero errors
-- [ ] `cargo clippy --all-targets --all-features -- -D warnings` shows zero
-      warnings
-- [ ] `cargo nextest run --all-features` passes with >80% coverage
-- [ ] No `unwrap()` or `expect()` without justification
-- [ ] All public items have doc comments with examples
-- [ ] All functions have at least 3 tests (success, failure, edge case)
-- [ ] (SDK only) egui ID audit passed — see `sdk/AGENTS.md` for the full
-      checklist: every loop uses `push_id`, every `ScrollArea` has `id_salt`,
-      every `ComboBox` uses `from_id_salt`, no `SidePanel`/`TopBottomPanel`/
-      `CentralPanel` is conditionally skipped by a same-frame boolean guard,
-      every layout-driving state mutation calls `request_repaint()`
-
-### Testing
-
-- [ ] Unit tests added for ALL new functions
-- [ ] Integration tests added if needed
-- [ ] Test count increased from before (verify with `cargo nextest run --lib`)
-- [ ] Both success and failure cases tested
-- [ ] Edge cases and boundaries covered
-- [ ] All tests use descriptive names: `test_{function}_{condition}_{expected}`
-- [ ] All doctest are updated when a public function's behavior changes
-
-### Documentation
-
-- [ ] Documentation files updated `docs/explanation/implementations.md`
-- [ ] Filename uses lowercase_with_underscores.md
-- [ ] README.md exception is ONLY uppercase filename
-- [ ] No emojis anywhere in documentation
-- [ ] All code blocks specify language (`rust, not`)
-- [ ] Documentation includes: Overview, Components, Details, Testing, Examples
-- [ ] Markdownlint passes (if configured)
-
-### Files and Structure
-
-- [ ] Rust files use `.rs` extension in `src/`
-- [ ] Game data files use `.ron` extension (NOT `.json` or `.yaml`)
-- [ ] Markdown files use `.md` extension in `docs/`
-- [ ] No uppercase in filenames except `README.md`
-- [ ] Files placed in correct architecture layer (Section 3.2)
-- [ ] Documentation in correct Diataxis category
-
-### Architecture
-
-- [ ] Data structures match architecture.md Section 4 definitions **EXACTLY**
-- [ ] Module placement follows Section 3.2 structure
-- [ ] Type aliases used consistently (ItemId, SpellId, MonsterId, etc.)
-- [ ] Constants extracted, not hardcoded (MAX_ITEMS, condition flags, etc.)
-- [ ] AttributePair pattern used for modifiable stats
-- [ ] Game mode context respected (combat vs exploration logic)
-- [ ] RON format used for data files, not JSON/YAML
-- [ ] No architectural deviations without documentation in `docs/explanation/`
-- [ ] Changes respect layer boundaries
-- [ ] Domain layer has no infrastructure dependencies
-- [ ] Proper separation of concerns maintained
-- [ ] No circular dependencies introduced
-
----
-
-## Quick Command Reference
-
-### Essential Cargo Commands
-
-```bash
-# Build and check
-cargo build                                      # Debug build
-cargo build --release                            # Optimized build
-cargo check --all-targets --all-features         # Fast compile check
-
-# Quality
-cargo fmt --all                                  # Format all code
-cargo fmt --all -- --check                       # Check formatting
-cargo clippy --all-targets --all-features -- -D warnings  # Lint
-
-# Testing
-cargo nextest run                                       # Run all tests
-cargo nextest run --lib                                 # Library tests only
-cargo nextest run --all-features                        # With all features
-cargo nextest run -- --nocapture                        # Show output
-cargo nextest run test_name                             # Specific test
-
-# Documentation
-cargo doc --open                                 # Generate and open docs
-cargo doc --no-deps --open                       # Without dependencies
-
-# Maintenance
-cargo clean                                      # Remove build artifacts
-cargo update                                     # Update dependencies
-cargo tree                                       # Show dependency tree
-cargo audit                                      # Security check
-```
-
-### Project-Specific Commands
-
-```bash
-# Quality validation workflow
-cargo fmt --all                                  # Format code
-cargo check --all-targets --all-features         # Check compilation
-cargo clippy --all-targets --all-features -- -D warnings  # Lint
-cargo nextest run --all-features                        # Run tests
-
-# Additional make commands (if available)
-make test                                        # Run tests
-make build                                       # Build project
-make clean                                       # Clean artifacts
-
-# Adding dependencies
-cargo add <crate_name>                           # Add to Cargo.toml
-cargo add <crate_name> --dev                     # Dev dependency
-cargo add <crate_name> --features=<feature>      # With feature
-```
-
----
-
-## THE FIVE GOLDEN RULES - QUICK REFERENCE
-
-**These supersede detailed rules above if there's any confusion. When in doubt, follow these five:**
-
-**IF YOU REMEMBER ONLY FIVE THINGS:**
-
-### Golden Rule 1: Consult Architecture First
-
-**BEFORE writing code:**
-
-- Read `docs/reference/architecture.md` relevant sections
-- Use EXACT data structures, type aliases, and constants as defined
-- NEVER modify core structs (Section 4) without approval
-
-### Golden Rule 2: File Extensions & Formats
-
-**For implementation:**
-
-- `.rs` for Rust code in `src/`
-- `.ron` for game data (items, spells, monsters, maps) - NOT .json or .yaml
-
-**For documentation:**
-
-- `.md` for all docs in `docs/`
-- Use `lowercase_with_underscores.md` (exception: `README.md`)
-
-### Golden Rule 3: Type System Adherence
-
-**Always use:**
-
-- Type aliases: `ItemId`, `SpellId`, `MonsterId`, `MapId`, etc. (not raw `u32`)
-- Constants: `Inventory::MAX_ITEMS`, `Equipment::MAX_EQUIPPED` (not magic numbers)
-- `AttributePair` pattern for modifiable stats (`base` + `current`)
-
-### Golden Rule 4: Quality Checks
-
-```text
-All four cargo commands MUST pass before claiming done:
-- cargo fmt --all
-- cargo check --all-targets --all-features
-- cargo clippy --all-targets --all-features -- -D warnings
-- cargo nextest run --all-features
-```
-
----
 
 ## The Golden Workflow
 
@@ -1139,24 +529,22 @@ All four cargo commands MUST pass before claiming done:
 ```text
 1.  Read architecture.md sections relevant to your task
 2.  Verify data structures, types, and constants match architecture
-3.  Create branch: pr-<feat>-<issue>
-4.  Implement code with /// doc comments
-5.  Use type aliases (ItemId, SpellId, etc.) not raw types
-6.  Add tests (>80% coverage) with game-specific test cases
-6a. (SDK / Campaign Builder UI only) Run the egui ID audit in sdk/AGENTS.md:
+3.  Implement code with /// doc comments
+4.  Use type aliases (ItemId, SpellId, etc.) not raw types
+5.  Add tests (>80% coverage) with game-specific test cases
+5a. (SDK / Campaign Builder UI only) Run the egui ID audit in sdk/AGENTS.md:
       every loop uses push_id, every ScrollArea has id_salt,
       every ComboBox uses from_id_salt,
       no SidePanel/TopBottomPanel/CentralPanel skipped by a same-frame guard
       (show a placeholder instead), every layout-driving state mutation calls
       request_repaint()
-7.  Run: cargo fmt --all
-8.  Run: cargo check --all-targets --all-features
-9.  Run: cargo clippy --all-targets --all-features -- -D warnings
-10. Run: cargo nextest run --all-features
-11. Update: docs/explanation/implementations.md
-12. Verify: No architectural deviations from architecture.md
-13. Commit with proper format: <type>(<scope>): <description> (JIRA-ISSUE)
-14. Verify: All checklist items above are checked
+6.  Run: cargo fmt --all
+7.  Run: cargo check --all-targets --all-features
+8.  Run: cargo clippy --all-targets --all-features -- -D warnings
+9.  Run: cargo nextest run --all-features
+10. Update: docs/explanation/implementations.md
+11. Verify: No architectural deviations from architecture.md
+12. Verify: All checklist items above are checked
 ```
 
 **IF YOU FOLLOW THIS WORKFLOW, YOUR CODE WILL BE ACCEPTED.**

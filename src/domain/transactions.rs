@@ -164,7 +164,7 @@ pub struct ServiceOutcome {
 ///
 /// ```
 /// use antares::domain::transactions::{buy_item, TransactionError};
-/// use antares::domain::character::{Character, Alignment, Party};
+/// use antares::domain::character::{Character, Alignment, Party, Sex};
 /// use antares::domain::world::npc::NpcDefinition;
 /// use antares::domain::world::npc_runtime::NpcRuntimeState;
 /// use antares::domain::inventory::{MerchantStock, StockEntry};
@@ -207,7 +207,13 @@ pub struct ServiceOutcome {
 /// let mut party = Party::new();
 /// party.gold = 100;
 ///
-/// let mut character = Character::new(0, 0);
+/// let mut character = Character::new(
+///     "Adventurer".to_string(),
+///     "human".to_string(),
+///     "knight".to_string(),
+///     Sex::Male,
+///     Alignment::Good,
+/// );
 ///
 /// let slot = buy_item(&mut party, &mut character, 0, &mut npc_runtime, &npc_def, 1, &item_db)
 ///     .expect("purchase must succeed");
@@ -330,7 +336,7 @@ pub fn buy_item(
 ///
 /// ```
 /// use antares::domain::transactions::{sell_item, TransactionError};
-/// use antares::domain::character::{Character, Party};
+/// use antares::domain::character::{Character, Party, Sex, Alignment};
 /// use antares::domain::world::npc::NpcDefinition;
 /// use antares::domain::world::npc_runtime::NpcRuntimeState;
 /// use antares::domain::items::{ItemDatabase, Item, ItemType, WeaponData, WeaponClassification};
@@ -365,7 +371,13 @@ pub fn buy_item(
 /// let mut party = Party::new();
 /// party.gold = 0;
 ///
-/// let mut character = Character::new(0, 0);
+/// let mut character = Character::new(
+///     "Adventurer".to_string(),
+///     "human".to_string(),
+///     "knight".to_string(),
+///     Sex::Male,
+///     Alignment::Good,
+/// );
 /// character.inventory.add_item(2, 0).unwrap();
 ///
 /// let gold_received = sell_item(&mut party, &mut character, 0, &mut npc_runtime, &npc_def, 2, &item_db)
@@ -480,14 +492,20 @@ pub fn sell_item(
 ///
 /// ```
 /// use antares::domain::transactions::consume_service;
-/// use antares::domain::character::{Character, Party};
+/// use antares::domain::character::{Character, Party, Sex, Alignment};
 /// use antares::domain::world::npc_runtime::NpcRuntimeState;
 /// use antares::domain::inventory::{ServiceCatalog, ServiceEntry};
 ///
 /// let mut party = Party::new();
 /// party.gold = 100;
 ///
-/// let mut character = Character::new(0, 0);
+/// let mut character = Character::new(
+///     "Adventurer".to_string(),
+///     "human".to_string(),
+///     "knight".to_string(),
+///     Sex::Male,
+///     Alignment::Good,
+/// );
 /// character.hp.base = 30;
 /// character.hp.current = 10;
 ///
