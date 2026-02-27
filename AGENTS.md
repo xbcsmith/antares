@@ -95,7 +95,7 @@ Add SPDX FileCopyrightText and License-Identifier as the first lines
 in ALL **Real implementation files**: `src/**/*.rs`
 
 ```rust
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 ```
@@ -374,7 +374,7 @@ Architecture defines many constants:
 
    ```bash
    # Find relevant files
-   grep -r "function_name" src/
+   rg "function_name" src/
    find src/ -name "*feature*.rs"
    ```
 

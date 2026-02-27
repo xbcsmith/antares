@@ -10643,3 +10643,139 @@ toggle the mode — with the same priority as the existing `Escape` menu toggle.
 - [x] All existing `test_escape_*` and `test_toggle_menu_state_*` tests still pass
 - [x] All existing `test_controls_config_*` tests still pass
 - [x] `docs/reference/architecture.md` not modified
+
+## ECS Inventory View — Phase 3: Inventory UI Panel Rendering
+
+### Overview
+
+Phase 3 implements the egui-based inventory overlay system. When the player
+presses the configured inventory key (default `I`), the game enters
+`GameMode::Inventory` and a `CentralPanel` is rendered showing each open
+character's name, gold, HP/SP, and all inventory slots. Focused panels receive
+a yellow border; unfocused panels receive a dark-gray border. Keyboard
+navigation (Tab, Shift+Tab, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Escape,
+and `I`) is fully handled by a dedicated input system. Stub message types for
+Phase 4 drop and transfer actions are registered with the plugin so they are
+ready to be extended.
+
+The implementation follows the `InnUiPlugin` pattern from
+`src/game/systems/inn_ui.rs` exactly, and satisfies all egui ID hygiene rules
+from `sdk/AGENTS.md`: every loop body that renders widgets is wrapped in
+`ui.push_id(...)`.
+
+### Components Implemented
+
+#### `src/game/systems/inventory_ui.rs` (new file)
+
+- **`InventoryPlugin`** — implements `bevy::prelude::Plugin`. Registers
+  `DropItemAction` and `TransferItemAction` as `Message` events, inserts
+  `InventoryNavigationState` as a resource, and chains
+  `inventory_input_system → inventory_ui_system → inventory_action_system` in
+  the `Update` schedule.
+- **`InventoryNavigationState`** (`Resource`, `Default`, `Debug`) — mirrors
+  `InnNavigationState`. Tracks `selected_slot_index: Option<usize>` and
+  `focus_on_panel: usize`.
+- **`DropItemAction`** (`Message`) — carries `party_index` and `slot_index`.
+  Stub implementation in `inventory_action_system` removes the item from the
+  party member's inventory.
+- **`TransferItemAction`** (`Message`) — carries `from_party_index`,
+  `from_slot_index`, and `to_party_index`. Stub implementation moves the
+  `InventorySlot` between two party members, guarded by bounds and capacity
+  checks.
+- **`inventory_input_system`** — reads `ButtonInput<KeyCode>` and the optional
+  `InputConfigResource`. Handles Tab / Shift+Tab (panel cycling via
+  `InventoryState::tab_next` / `tab_prev`), ArrowUp / ArrowDown (slot
+  selection via `select_prev_slot` / `select_next_slot`), ArrowLeft /
+  ArrowRight (panel focus column), and Escape or the configured inventory key
+  (closes overlay, restores previous mode via `get_resume_mode`). Resets
+  `InventoryNavigationState` when not in inventory mode.
+- **`inventory_ui_system`** — renders `egui::CentralPanel` with a heading, a
+  close hint, a horizontal row of `render_character_panel` calls (one per
+  `open_panels` entry), and a footer showing the focused character's name and
+  selected item details. Item names are resolved from the optional
+  `Res<GameContent>` resource; falls back to `"Item #{id}"` when content is
+  unavailable.
+- **`render_character_panel`** (private helper) — bounds-checks `party_index`,
+  wraps all widgets in `ui.push_id(party_index, ...)` (mandatory egui ID
+  scope), draws an `egui::Frame` with a `YELLOW` border when focused or
+  `DARK_GRAY` when unfocused, renders character name, gold, HP/SP, and item
+  count header. Iterates `0..Inventory::MAX_ITEMS`, using
+  `ui.push_id(format!("slot_{}", slot_idx), ...)` for each slot widget.
+  Filled slots show item name (or ID fallback); empty slots show `"[empty]"` in
+  a dimmed italic style. The selected slot is highlighted with a yellow
+  background.
+- **`inventory_action_system`** — stub for Phase 4. Processes `DropItemAction`
+  events (removes slot from inventory) and `TransferItemAction` events (moves
+  slot between party members) when `GameMode::Inventory(_)` is active.
+
+#### `src/game/systems/mod.rs` (modified)
+
+Added `pub mod inventory_ui;` in alphabetical order between `inn_ui` and
+`input`.
+
+#### `src/bin/antares.rs` (modified)
+
+Added `app.add_plugins(antares::game::systems::inventory_ui::InventoryPlugin);`
+in `AntaresPlugin::build`, placed after `InnUiPlugin` and before
+`RecruitmentDialogPlugin` (alphabetical / logical order).
+
+### Tests Added
+
+All tests live in `src/game/systems/inventory_ui.rs` under `mod tests`.
+
+#### Required tests from Section 3.4 (5 tests)
+
+- `test_inventory_ui_plugin_builds` — builds a minimal `App` with
+  `InventoryPlugin`; asserts no panic. Mirrors `test_inn_ui_plugin_builds`.
+- `test_inventory_navigation_state_default` — asserts
+  `InventoryNavigationState::default()` has `selected_slot_index = None` and
+  `focus_on_panel = 0`.
+- `test_inventory_action_button_variants` — constructs `DropItemAction` and
+  `TransferItemAction` and asserts field values.
+- `test_render_character_panel_does_not_panic_empty_inventory` — drives
+  `render_character_panel` with an empty inventory through a real
+  `egui::Context`; asserts no panic.
+- `test_render_character_panel_does_not_panic_full_inventory` — same as above
+  but with `Inventory::MAX_ITEMS` slots filled; also exercises the
+  `Some(0)` selected-slot path.
+
+#### Additional tests (4 tests)
+
+- `test_render_character_panel_out_of_bounds_party_index` — confirms that an
+  out-of-range `party_index` is silently ignored (no panic, no output).
+- `test_inventory_navigation_state_debug` — confirms that the `Debug` derive
+  works and formats non-default values correctly.
+- `test_inventory_action_system_drop_removes_slot` — uses a minimal `App` with
+  `MinimalPlugins`, inserts a party member with two items, sets
+  `GameMode::Inventory`, queues a `DropItemAction` via `write_message`, runs
+  one update, and asserts that the correct slot was removed.
+- `test_inventory_action_system_transfer_moves_item` — same setup with two
+  party members; queues a `TransferItemAction` and asserts the item moved from
+  the source to the destination inventory.
+
+### Deliverables Checklist
+
+- [x] `src/game/systems/inventory_ui.rs` created with SPDX header,
+      `InventoryPlugin`, `InventoryNavigationState`, `inventory_input_system`,
+      `inventory_ui_system`, `inventory_action_system` (stub for Phase 4), and
+      `render_character_panel`
+- [x] `src/game/systems/mod.rs` updated with `pub mod inventory_ui;`
+- [x] `src/bin/antares.rs` registers `InventoryPlugin`
+- [x] All five required tests from Section 3.4 present and passing
+- [x] Four additional tests added for extra coverage
+
+### Success Criteria
+
+- [x] `cargo fmt --all` — no output
+- [x] `cargo check --all-targets --all-features` — zero errors, zero warnings
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — zero warnings
+- [x] Pressing `"I"` during exploration renders a visible egui `CentralPanel`
+      showing character name, gold, HP/SP, and inventory slots for each open
+      panel
+- [x] Focused panel has a yellow border; unfocused panels have a dark gray border
+- [x] Tab cycles focus through party members and opens additional panels (up to
+      `PARTY_MAX_SIZE`)
+- [x] Escape or `"I"` closes the overlay and returns to the prior mode
+- [x] Every slot widget uses `push_id` scoped by `(party_index, slot_index)` —
+      no egui widget ID collisions
+- [x] `docs/reference/architecture.md` not modified
