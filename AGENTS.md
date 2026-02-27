@@ -993,6 +993,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [ ] Both success and failure cases tested
 - [ ] Edge cases and boundaries covered
 - [ ] All tests use descriptive names: `test_{function}_{condition}_{expected}`
+- [ ] All doctest are updated when a public function's behavior changes
 
 ### Documentation
 

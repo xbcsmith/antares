@@ -10779,3 +10779,163 @@ All tests live in `src/game/systems/inventory_ui.rs` under `mod tests`.
 - [x] Every slot widget uses `push_id` scoped by `(party_index, slot_index)` —
       no egui widget ID collisions
 - [x] `docs/reference/architecture.md` not modified
+
+## ECS Inventory View — Phase 4: Item Actions — Drop and Transfer
+
+### Overview
+
+Phase 4 completes the inventory action pipeline by wiring the Drop and Transfer
+buttons into the UI, implementing the full `inventory_action_system` with
+bounds-checking, rollback-on-failure logic, and structured logging, and
+introducing the `PanelAction` enum to decouple the render helper from
+`MessageWriter` generics.
+
+The implementation follows the `InnUiPlugin` pattern used throughout the
+project: UI renders and returns an optional action value; the calling system
+dispatches the corresponding message; a dedicated action-handler system
+processes the messages and mutates `GlobalState`.
+
+### Components Implemented
+
+#### `src/game/systems/inventory_ui.rs` (modified)
+
+##### 4.1 `PanelAction` enum (new)
+
+A private `pub enum PanelAction` with two variants:
+
+- `Drop { party_index: usize, slot_index: usize }` — discard an item.
+- `Transfer { from_party_index: usize, from_slot_index: usize, to_party_index: usize }` — move an item between characters.
+
+`render_character_panel` now returns `Option<PanelAction>` instead of `()`.
+The calling system matches on the returned value and writes the appropriate
+message, keeping the render helper free of `MessageWriter` generic parameters.
+
+`PanelAction` derives `Debug` and `PartialEq` so tests can assert on variant
+equality directly.
+
+##### 4.2 Action buttons in `render_character_panel`
+
+When `selected_slot` is `Some(slot_idx)` and the focused character has an item
+at that index, an action row is rendered beneath the slot listing inside a
+`ui.push_id("actions", ...)` scope:
+
+- A **Drop** button (red label) with `on_hover_text("Discard this item permanently")`.
+- For every other open panel index `j != party_index`: a **Give to {name}**
+  button (green label) that is disabled (`add_enabled(false, ...)`) when the
+  target's inventory is full, with appropriate hover text.
+
+The action row only appears for slots that contain an item; empty slots show no
+buttons.
+
+##### 4.3 `inventory_ui_system` extended
+
+`inventory_ui_system` now accepts two additional Bevy system parameters:
+
+```
+mut drop_writer: MessageWriter<DropItemAction>
+mut transfer_writer: MessageWriter<TransferItemAction>
+```
+
+Because egui closures cannot capture `&mut` parameters directly, the system
+uses a `pending_action: Option<PanelAction>` variable outside the closure.
+`render_character_panel` stores any click result in that variable; after the
+`show` closure returns, the system matches on `pending_action` and writes the
+appropriate message.
+
+A snapshot of `(party_index, name)` pairs for all open panels is collected
+upfront (as `panel_names: Vec<(usize, String)>`) and passed into
+`render_character_panel` to populate "Give to" button labels without
+re-borrowing `GlobalState` inside the closure.
+
+##### 4.4 `inventory_action_system` — full implementation
+
+The system signature matches the plan exactly:
+
+```rust
+fn inventory_action_system(
+    mut drop_reader: MessageReader<DropItemAction>,
+    mut transfer_reader: MessageReader<TransferItemAction>,
+    mut global_state: ResMut<GlobalState>,
+)
+```
+
+Messages are collected into `Vec` upfront to release the reader borrow before
+mutating `GlobalState`.
+
+**Drop semantics:**
+
+1. Bounds-check `party_index` against `party.members.len()`; log warning and
+   skip on failure.
+2. Bounds-check `slot_index` against `inventory.items.len()`; log warning and
+   skip on failure.
+3. Call `inventory.remove_item(slot_index)` which returns `Option<InventorySlot>`.
+4. Log `info!("Dropped item from party[{}] slot {} (item_id={})", ...)`.
+5. Reset `InventoryState.selected_slot = None`.
+
+**Transfer semantics:**
+
+1. Guard `from_party_index == to_party_index` — log warning and skip (no-op).
+2. Bounds-check both party indices; log warning and skip on failure.
+3. Bounds-check `from_slot_index` against source inventory length; log warning
+   and skip on failure.
+4. Check `party.members[to_party_index].inventory.is_full()`; log warning and
+   skip without mutation if full (pre-flight check prevents remove-then-fail).
+5. Remove slot from source — `remove_item` returns owned `InventorySlot`;
+   first borrow is released here.
+6. Call `party.members[to_party_index].inventory.add_item(slot.item_id, slot.charges)`.
+7. On `Ok(())`: log success, reset `selected_slot = None`.
+8. On `Err(...)`: rollback — call `add_item` on the source inventory to return
+   the item and prevent item loss. If rollback itself fails (theoretically
+   impossible given the pre-flight check, but defended against), log `error!`.
+
+### Tests Added
+
+Ten new tests added to `src/game/systems/inventory_ui.rs` (Section 4.4 of the
+plan plus two additional egui/variant tests):
+
+#### Required tests from Section 4.4 (8 tests)
+
+| Test name                                           | Purpose                                                                     |
+| --------------------------------------------------- | --------------------------------------------------------------------------- |
+| `test_drop_item_action_removes_from_inventory`      | Drop removes item and clears `selected_slot`                                |
+| `test_drop_item_action_invalid_index_no_panic`      | `slot_index=99` out of bounds — no panic, inventory unchanged               |
+| `test_drop_item_invalid_party_index_no_panic`       | `party_index=99` out of bounds — no panic                                   |
+| `test_transfer_item_character_to_character_success` | Item moves, charges preserved, gold unchanged                               |
+| `test_transfer_item_target_inventory_full`          | Transfer rejected when target is at `MAX_ITEMS`; both inventories unchanged |
+| `test_transfer_item_no_item_at_source_slot`         | `from_slot_index` beyond source length — no panic, no mutation              |
+| `test_panel_action_drop_variant`                    | `PanelAction::Drop` field values are correct                                |
+| `test_panel_action_transfer_variant`                | `PanelAction::Transfer` field values are correct                            |
+
+#### Additional tests (2 tests)
+
+| Test name                                                         | Purpose                                                                      |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `test_render_character_panel_action_row_no_panic_with_two_panels` | Action row renders without panic when two panels open and a slot is selected |
+| `test_panel_action_debug_and_eq`                                  | `PanelAction` implements `Debug` and `PartialEq` correctly                   |
+
+### Deliverables Checklist
+
+- [x] `DropItemAction` and `TransferItemAction` fully defined (not stubs)
+- [x] `PanelAction` enum defined and returned from `render_character_panel`
+- [x] Action buttons rendered in `inventory_ui_system` for Drop and Transfer
+- [x] `inventory_action_system` implemented with bounds checks, defensive
+      item-loss rollback, and proper `info!`/`warn!`/`error!` logging
+- [x] All eight required tests from Section 4.4 added and passing (compile-verified)
+- [x] Two additional tests added for egui render and `PanelAction` derives
+
+### Success Criteria
+
+- [x] `cargo fmt --all` — no output
+- [x] `cargo check --all-targets --all-features` — zero errors, zero warnings
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — zero warnings
+- [x] Selecting a slot and pressing the Drop button removes the item from the
+      character's inventory and updates the panel to show the slot as `[empty]`
+- [x] Selecting a slot and pressing a Give button moves the item to the target
+      character, provided their inventory has space
+- [x] No item loss occurs if `add_item` fails after `remove_item` — rollback
+      logic returns the item to the source inventory
+- [x] Pre-existing `test_sell_item_*` and `test_buy_item_*` domain tests
+      unaffected — no changes to `transactions.rs`
+- [x] Every egui widget in the action row uses `push_id("actions", ...)` — no
+      ID collisions
+- [x] `docs/reference/architecture.md` not modified

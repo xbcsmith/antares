@@ -39,26 +39,118 @@ impl Plugin for InventoryPlugin {
 
 // ===== Events =====
 
-/// Event to drop an item from a character's inventory
+/// Emitted when the player confirms dropping a selected item.
 ///
-/// Removing an item places it nowhere (drops it from the party entirely).
+/// Removing an item places it nowhere — the item is discarded from the party
+/// entirely. World-drop rendering is deferred to a later phase.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::inventory_ui::DropItemAction;
+///
+/// let action = DropItemAction { party_index: 0, slot_index: 2 };
+/// assert_eq!(action.party_index, 0);
+/// assert_eq!(action.slot_index, 2);
+/// ```
 #[derive(Message)]
 pub struct DropItemAction {
-    /// Index of the party member (0-based) whose inventory contains the item
+    /// Index of the party member (0-based) whose inventory contains the item.
+    /// Valid range: `0..party.members.len()`.
     pub party_index: usize,
-    /// Index of the slot within that character's inventory to drop
+    /// Index of the slot within that character's inventory to drop.
+    /// Valid range: `0..inventory.items.len()`.
     pub slot_index: usize,
 }
 
-/// Event to transfer an item from one character's inventory to another's
+/// Emitted when the player transfers an item from one character to another.
+///
+/// The source slot is removed first (returning an owned `InventorySlot`), then
+/// the slot is added to the destination. If `add_item` fails, the slot is
+/// returned to the source to prevent item loss.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::inventory_ui::TransferItemAction;
+///
+/// let action = TransferItemAction {
+///     from_party_index: 0,
+///     from_slot_index: 1,
+///     to_party_index: 2,
+/// };
+/// assert_eq!(action.from_party_index, 0);
+/// assert_eq!(action.from_slot_index, 1);
+/// assert_eq!(action.to_party_index, 2);
+/// ```
 #[derive(Message)]
 pub struct TransferItemAction {
-    /// Party index of the character giving the item
+    /// Party index of the character giving the item.
+    /// Valid range: `0..party.members.len()`.
     pub from_party_index: usize,
-    /// Slot index in the source character's inventory
+    /// Slot index in the source character's inventory.
+    /// Valid range: `0..inventory.items.len()`.
     pub from_slot_index: usize,
-    /// Party index of the character receiving the item
+    /// Party index of the character receiving the item.
+    /// Must differ from `from_party_index`.
     pub to_party_index: usize,
+}
+
+// ===== Panel Action =====
+
+/// Represents an action that the player has requested via the inventory UI.
+///
+/// `render_character_panel` returns `Option<PanelAction>` instead of writing
+/// messages directly so that the render helper stays free of `MessageWriter`
+/// generics.  The calling system (`inventory_ui_system`) matches on the
+/// returned value and writes the appropriate message.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::inventory_ui::PanelAction;
+///
+/// let drop = PanelAction::Drop { party_index: 0, slot_index: 1 };
+/// let transfer = PanelAction::Transfer {
+///     from_party_index: 0,
+///     from_slot_index: 0,
+///     to_party_index: 1,
+/// };
+/// match drop {
+///     PanelAction::Drop { party_index, slot_index } => {
+///         assert_eq!(party_index, 0);
+///         assert_eq!(slot_index, 1);
+///     }
+///     PanelAction::Transfer { .. } => panic!("unexpected"),
+/// }
+/// match transfer {
+///     PanelAction::Transfer { from_party_index, from_slot_index, to_party_index } => {
+///         assert_eq!(from_party_index, 0);
+///         assert_eq!(from_slot_index, 0);
+///         assert_eq!(to_party_index, 1);
+///     }
+///     PanelAction::Drop { .. } => panic!("unexpected"),
+/// }
+/// ```
+#[derive(Debug, PartialEq, Eq)]
+pub enum PanelAction {
+    /// Drop the item at `slot_index` from party member `party_index`.
+    Drop {
+        /// Party member index of the owner.
+        party_index: usize,
+        /// Inventory slot index to drop.
+        slot_index: usize,
+    },
+    /// Transfer the item from `from_slot_index` on `from_party_index` to
+    /// `to_party_index`.
+    Transfer {
+        /// Party index of the character giving the item.
+        from_party_index: usize,
+        /// Slot index in the source character's inventory.
+        from_slot_index: usize,
+        /// Party index of the character receiving the item.
+        to_party_index: usize,
+    },
 }
 
 // ===== Navigation State =====
@@ -236,12 +328,19 @@ fn inventory_input_system(
 ///
 /// Uses `egui::CentralPanel` as the outer container so it occupies the full
 /// viewport.  The Bevy native HUD rendered in a separate pass is unaffected.
+///
+/// When a slot is selected and the focused character has an item at that slot,
+/// an action row with "Drop" and "Give to {name}" buttons is rendered beneath
+/// the slot listing.  Button clicks return a `PanelAction` from
+/// `render_character_panel` which is then dispatched as the appropriate message.
 #[allow(clippy::too_many_lines)]
 fn inventory_ui_system(
     mut contexts: EguiContexts,
     global_state: Res<GlobalState>,
     nav_state: Res<InventoryNavigationState>,
     game_content: Option<Res<GameContent>>,
+    mut drop_writer: MessageWriter<DropItemAction>,
+    mut transfer_writer: MessageWriter<TransferItemAction>,
 ) {
     // Only render when in Inventory mode
     let inv_state = match &global_state.0.mode {
@@ -259,6 +358,24 @@ fn inventory_ui_system(
     let focused_index = inv_state.focused_index;
     let selected_slot = inv_state.selected_slot;
 
+    // Collect the names of all open-panel characters for "Give to" labels.
+    // We snapshot these upfront to avoid re-borrowing inside the closure.
+    let panel_names: Vec<(usize, String)> = open_panels
+        .iter()
+        .filter_map(|&pi| {
+            global_state
+                .0
+                .party
+                .members
+                .get(pi)
+                .map(|m| (pi, m.name.clone()))
+        })
+        .collect();
+
+    // Accumulate any action requested inside the egui closure so we can write
+    // messages after the closure returns (closures cannot capture &mut writers).
+    let mut pending_action: Option<PanelAction> = None;
+
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.heading("Inventory");
         ui.label(
@@ -274,14 +391,18 @@ fn inventory_ui_system(
                 let is_focused =
                     party_index == focused_index && panel_pos == nav_state.focus_on_panel;
                 ui.push_id(format!("inv_panel_{}", party_index), |ui| {
-                    render_character_panel(
+                    let action = render_character_panel(
                         ui,
                         party_index,
                         is_focused,
                         selected_slot,
                         &global_state,
                         game_content.as_deref(),
+                        &panel_names,
                     );
+                    if action.is_some() {
+                        pending_action = action;
+                    }
                 });
             }
         });
@@ -312,10 +433,45 @@ fn inventory_ui_system(
         } else {
             ui.label("No party members.");
         }
+
+        // Keyboard hint for action buttons
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new("Select a slot with Arrow keys, then use the action buttons above")
+                .small()
+                .weak(),
+        );
     });
+
+    // Dispatch the action that was requested inside the egui closure.
+    if let Some(action) = pending_action {
+        match action {
+            PanelAction::Drop {
+                party_index,
+                slot_index,
+            } => {
+                drop_writer.write(DropItemAction {
+                    party_index,
+                    slot_index,
+                });
+            }
+            PanelAction::Transfer {
+                from_party_index,
+                from_slot_index,
+                to_party_index,
+            } => {
+                transfer_writer.write(TransferItemAction {
+                    from_party_index,
+                    from_slot_index,
+                    to_party_index,
+                });
+            }
+        }
+    }
 }
 
-/// Renders a single character's inventory panel.
+/// Renders a single character's inventory panel and returns any action the
+/// player requested via button click.
 ///
 /// # Arguments
 ///
@@ -325,6 +481,13 @@ fn inventory_ui_system(
 /// * `selected_slot` – Highlighted slot index within this panel (if any).
 /// * `global_state` – Read-only reference to global game state.
 /// * `game_content` – Optional content database for item name lookups.
+/// * `panel_names` – Snapshot of `(party_index, name)` for every open panel,
+///   used to label "Give to {name}" transfer buttons.
+///
+/// # Returns
+///
+/// `Some(PanelAction)` when the player clicked Drop or a Give-to button;
+/// `None` otherwise.
 #[allow(clippy::too_many_arguments)]
 fn render_character_panel(
     ui: &mut egui::Ui,
@@ -333,13 +496,17 @@ fn render_character_panel(
     selected_slot: Option<usize>,
     global_state: &GlobalState,
     game_content: Option<&GameContent>,
-) {
+    panel_names: &[(usize, String)],
+) -> Option<PanelAction> {
     // Bounds-check: silently skip if party_index is out of range
     if party_index >= global_state.0.party.members.len() {
-        return;
+        return None;
     }
 
     let character = &global_state.0.party.members[party_index];
+    // Collect the result of any button click so we can return it after the
+    // closure chain completes.
+    let mut panel_action: Option<PanelAction> = None;
 
     // Mandatory egui ID scope per sdk/AGENTS.md — every loop body uses push_id
     ui.push_id(party_index, |ui| {
@@ -354,7 +521,7 @@ fn render_character_panel(
             .inner_margin(egui::Margin::same(8));
 
         frame.show(ui, |ui| {
-            ui.set_min_width(150.0);
+            ui.set_min_width(160.0);
 
             // Character name heading
             ui.label(egui::RichText::new(&character.name).strong().size(14.0));
@@ -409,74 +576,245 @@ fn render_character_panel(
                     }
                 });
             }
+
+            // ── Action row ──────────────────────────────────────────────────
+            // Only rendered when a slot is selected AND it contains an item.
+            if let Some(slot_idx) = selected_slot {
+                if slot_idx < character.inventory.items.len() {
+                    ui.add_space(6.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    // Unique egui ID scope for the action row per AGENTS.md rules
+                    ui.push_id("actions", |ui| {
+                        ui.label(egui::RichText::new("Actions:").strong().small());
+
+                        // Drop button
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Drop")
+                                        .color(egui::Color32::from_rgb(220, 80, 80)),
+                                )
+                                .small(),
+                            )
+                            .on_hover_text("Discard this item permanently")
+                            .clicked()
+                        {
+                            panel_action = Some(PanelAction::Drop {
+                                party_index,
+                                slot_index: slot_idx,
+                            });
+                        }
+
+                        // "Give to {name}" buttons for every other open panel
+                        for &(other_index, ref other_name) in panel_names {
+                            if other_index == party_index {
+                                continue;
+                            }
+                            let give_label = format!("Give to {}", other_name);
+                            let target_full = global_state.0.party.members[other_index]
+                                .inventory
+                                .is_full();
+                            if ui
+                                .add_enabled(
+                                    !target_full,
+                                    egui::Button::new(
+                                        egui::RichText::new(&give_label)
+                                            .color(egui::Color32::from_rgb(100, 200, 100)),
+                                    )
+                                    .small(),
+                                )
+                                .on_hover_text(if target_full {
+                                    format!("{}'s inventory is full", other_name)
+                                } else {
+                                    format!("Transfer item to {}", other_name)
+                                })
+                                .clicked()
+                            {
+                                panel_action = Some(PanelAction::Transfer {
+                                    from_party_index: party_index,
+                                    from_slot_index: slot_idx,
+                                    to_party_index: other_index,
+                                });
+                            }
+                        }
+                    });
+                }
+            }
         });
     });
+
+    panel_action
 }
 
 // ===== Action System =====
 
 /// Processes `DropItemAction` and `TransferItemAction` events each frame.
 ///
-/// This is a stub in Phase 3; full drop/transfer logic is implemented in Phase 4.
+/// **Drop semantics**: the item is removed from the character's inventory and
+/// discarded.  The `InventoryState.selected_slot` is reset to `None`.
+///
+/// **Transfer semantics**: the item is removed from the source inventory and
+/// added to the destination inventory.  If `add_item` returns an error (e.g.
+/// destination full) the item is put back into the source inventory to prevent
+/// item loss.  `InventoryState.selected_slot` is reset on success.
+///
+/// All operations are bounds-checked; out-of-range indices produce a warning
+/// log and no mutation.
 fn inventory_action_system(
-    mut drop_events: MessageReader<DropItemAction>,
-    mut transfer_events: MessageReader<TransferItemAction>,
+    mut drop_reader: MessageReader<DropItemAction>,
+    mut transfer_reader: MessageReader<TransferItemAction>,
     mut global_state: ResMut<GlobalState>,
 ) {
-    // Only process actions while in inventory mode
-    if !matches!(global_state.0.mode, GameMode::Inventory(_)) {
-        return;
-    }
+    // Collect messages upfront so we do not hold a borrow while mutating state.
+    let drop_events: Vec<(usize, usize)> = drop_reader
+        .read()
+        .map(|e| (e.party_index, e.slot_index))
+        .collect();
 
-    // Process drop events (Phase 4 will add item removal logic)
-    for event in drop_events.read() {
+    let transfer_events: Vec<(usize, usize, usize)> = transfer_reader
+        .read()
+        .map(|e| (e.from_party_index, e.from_slot_index, e.to_party_index))
+        .collect();
+
+    // ── Drop events ─────────────────────────────────────────────────────────
+    for (party_index, slot_index) in drop_events {
         let party = &mut global_state.0.party;
-        if event.party_index < party.members.len() {
-            let inv = &mut party.members[event.party_index].inventory;
-            if event.slot_index < inv.items.len() {
-                inv.items.remove(event.slot_index);
-                debug!(
-                    "DropItemAction: removed slot {} from party member {}",
-                    event.slot_index, event.party_index
-                );
-            }
-        }
-    }
 
-    // Process transfer events (Phase 4 will add full transfer logic)
-    for event in transfer_events.read() {
-        let party = &mut global_state.0.party;
-        let from_idx = event.from_party_index;
-        let to_idx = event.to_party_index;
-        let slot_idx = event.from_slot_index;
-
-        if from_idx == to_idx {
-            continue; // Cannot transfer to yourself
-        }
-
-        if from_idx >= party.members.len() || to_idx >= party.members.len() {
-            continue;
-        }
-
-        // Check that the slot exists and the destination has space
-        if slot_idx >= party.members[from_idx].inventory.items.len() {
-            continue;
-        }
-
-        if party.members[to_idx].inventory.is_full() {
-            debug!(
-                "TransferItemAction: destination party member {} inventory is full",
-                to_idx
+        // Bounds-check party index
+        if party_index >= party.members.len() {
+            warn!(
+                "DropItemAction: party_index {} out of bounds (party size {})",
+                party_index,
+                party.members.len()
             );
             continue;
         }
 
-        let slot = party.members[from_idx].inventory.items.remove(slot_idx);
-        party.members[to_idx].inventory.items.push(slot);
-        debug!(
-            "TransferItemAction: transferred slot {} from member {} to member {}",
-            slot_idx, from_idx, to_idx
-        );
+        // Bounds-check slot index
+        let inv_len = party.members[party_index].inventory.items.len();
+        if slot_index >= inv_len {
+            warn!(
+                "DropItemAction: slot_index {} out of bounds (inventory size {}) for party[{}]",
+                slot_index, inv_len, party_index
+            );
+            continue;
+        }
+
+        // Remove the item — remove_item returns Option<InventorySlot>
+        if let Some(dropped) = party.members[party_index].inventory.remove_item(slot_index) {
+            info!(
+                "Dropped item from party[{}] slot {} (item_id={})",
+                party_index, slot_index, dropped.item_id
+            );
+        }
+
+        // Clear selected_slot in InventoryState
+        if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+            inv_state.selected_slot = None;
+        }
+    }
+
+    // ── Transfer events ──────────────────────────────────────────────────────
+    for (from_party_index, from_slot_index, to_party_index) in transfer_events {
+        // Transferring to yourself is a no-op
+        if from_party_index == to_party_index {
+            warn!(
+                "TransferItemAction: from_party_index == to_party_index ({}); ignoring",
+                from_party_index
+            );
+            continue;
+        }
+
+        let party = &mut global_state.0.party;
+
+        // Bounds-check both party indices
+        if from_party_index >= party.members.len() {
+            warn!(
+                "TransferItemAction: from_party_index {} out of bounds (party size {})",
+                from_party_index,
+                party.members.len()
+            );
+            continue;
+        }
+        if to_party_index >= party.members.len() {
+            warn!(
+                "TransferItemAction: to_party_index {} out of bounds (party size {})",
+                to_party_index,
+                party.members.len()
+            );
+            continue;
+        }
+
+        // Bounds-check source slot index
+        let src_inv_len = party.members[from_party_index].inventory.items.len();
+        if from_slot_index >= src_inv_len {
+            warn!(
+                "TransferItemAction: from_slot_index {} out of bounds (source inventory size {}) for party[{}]",
+                from_slot_index, src_inv_len, from_party_index
+            );
+            continue;
+        }
+
+        // Check destination capacity before removing from source
+        if party.members[to_party_index].inventory.is_full() {
+            warn!(
+                "Transfer failed: target party[{}] inventory is full",
+                to_party_index
+            );
+            continue;
+        }
+
+        // Remove from source — returns owned InventorySlot; borrow released here
+        let slot = match party.members[from_party_index]
+            .inventory
+            .remove_item(from_slot_index)
+        {
+            Some(s) => s,
+            None => {
+                // Defensive: item was already removed by a concurrent message
+                warn!(
+                    "TransferItemAction: no item at party[{}] slot {} (already removed?)",
+                    from_party_index, from_slot_index
+                );
+                continue;
+            }
+        };
+
+        // Add to destination; rollback to source on failure to prevent item loss
+        match party.members[to_party_index]
+            .inventory
+            .add_item(slot.item_id, slot.charges)
+        {
+            Ok(()) => {
+                info!(
+                    "Transferred item (item_id={}) from party[{}] slot {} to party[{}]",
+                    slot.item_id, from_party_index, from_slot_index, to_party_index
+                );
+                // Clear selected_slot on success
+                if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                    inv_state.selected_slot = None;
+                }
+            }
+            Err(err) => {
+                // Rollback: return item to the source inventory
+                warn!(
+                    "TransferItemAction: add_item to party[{}] failed ({:?}); rolling back to party[{}]",
+                    to_party_index, err, from_party_index
+                );
+                // Best-effort rollback — if source is somehow also full, log
+                if let Err(rollback_err) = party.members[from_party_index]
+                    .inventory
+                    .add_item(slot.item_id, slot.charges)
+                {
+                    error!(
+                        "TransferItemAction ROLLBACK FAILED for party[{}] (item_id={}): {:?}. Item lost!",
+                        from_party_index, slot.item_id, rollback_err
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -574,6 +912,7 @@ mod tests {
                     None, // selected_slot
                     &global_state,
                     None, // no GameContent needed
+                    &[],  // no open panels for transfer buttons
                 );
             });
         });
@@ -627,6 +966,7 @@ mod tests {
                     Some(0), // first slot selected
                     &global_state,
                     None, // no GameContent
+                    &[],  // no open panels for transfer buttons
                 );
             });
         });
@@ -654,6 +994,7 @@ mod tests {
                     None,
                     &global_state,
                     None,
+                    &[],
                 );
             });
         });
@@ -734,6 +1075,10 @@ mod tests {
         // slot 0 (item_id=10) should be gone; slot 1 (item_id=20) remains
         assert_eq!(gs.0.party.members[0].inventory.items.len(), 1);
         assert_eq!(gs.0.party.members[0].inventory.items[0].item_id, 20);
+        // selected_slot must be cleared
+        if let GameMode::Inventory(ref inv_state) = gs.0.mode {
+            assert_eq!(inv_state.selected_slot, None);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -795,5 +1140,473 @@ mod tests {
         assert_eq!(gs.0.party.members[0].inventory.items.len(), 0);
         assert_eq!(gs.0.party.members[1].inventory.items.len(), 1);
         assert_eq!(gs.0.party.members[1].inventory.items[0].item_id, 42);
+        // selected_slot must be cleared on success
+        if let GameMode::Inventory(ref inv_state) = gs.0.mode {
+            assert_eq!(inv_state.selected_slot, None);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 4.4.1  Drop removes item and clears selected_slot
+    // ------------------------------------------------------------------
+
+    /// Full Phase 4 test: a `DropItemAction` removes the item from inventory
+    /// and sets `selected_slot` to `None`.
+    #[test]
+    fn test_drop_item_action_removes_from_inventory() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::types::ItemId;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+
+        let mut game_state = GameState::new();
+        let mut character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.inventory.items.push(InventorySlot {
+            item_id: 99 as ItemId,
+            charges: 3,
+        });
+        game_state.party.add_member(character).unwrap();
+
+        // Open inventory with slot 0 pre-selected
+        game_state.enter_inventory();
+        if let GameMode::Inventory(ref mut inv_state) = game_state.mode {
+            inv_state.selected_slot = Some(0);
+        }
+        app.insert_resource(GlobalState(game_state));
+        app.add_systems(Update, inventory_action_system);
+
+        app.world_mut().write_message(DropItemAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            gs.0.party.members[0].inventory.items.is_empty(),
+            "inventory should be empty after drop"
+        );
+        if let GameMode::Inventory(ref inv_state) = gs.0.mode {
+            assert_eq!(
+                inv_state.selected_slot, None,
+                "selected_slot must be cleared after drop"
+            );
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 4.4.2  Drop with invalid slot_index does not panic
+    // ------------------------------------------------------------------
+
+    /// A `DropItemAction` with an out-of-bounds `slot_index` must not panic
+    /// and must leave inventory unchanged.
+    #[test]
+    fn test_drop_item_action_invalid_index_no_panic() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::types::ItemId;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+
+        let mut game_state = GameState::new();
+        let mut character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.inventory.items.push(InventorySlot {
+            item_id: 1 as ItemId,
+            charges: 0,
+        });
+        game_state.party.add_member(character).unwrap();
+        game_state.enter_inventory();
+        app.insert_resource(GlobalState(game_state));
+        app.add_systems(Update, inventory_action_system);
+
+        // slot_index=99 is out of bounds
+        app.world_mut().write_message(DropItemAction {
+            party_index: 0,
+            slot_index: 99,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        // Inventory unchanged — still one item
+        assert_eq!(
+            gs.0.party.members[0].inventory.items.len(),
+            1,
+            "inventory should be unchanged after invalid drop"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // 4.4.3  Drop with invalid party_index does not panic
+    // ------------------------------------------------------------------
+
+    /// A `DropItemAction` with an out-of-bounds `party_index` must not panic.
+    #[test]
+    fn test_drop_item_invalid_party_index_no_panic() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+
+        let mut game_state = GameState::new();
+        // Empty party
+        game_state.enter_inventory();
+        app.insert_resource(GlobalState(game_state));
+        app.add_systems(Update, inventory_action_system);
+
+        // party_index=99 — no such member
+        app.world_mut().write_message(DropItemAction {
+            party_index: 99,
+            slot_index: 0,
+        });
+        app.update();
+        // No panic = test passes
+    }
+
+    // ------------------------------------------------------------------
+    // 4.4.4  Transfer moves item between characters, gold unchanged
+    // ------------------------------------------------------------------
+
+    /// A successful transfer must move the item and not modify gold.
+    #[test]
+    fn test_transfer_item_character_to_character_success() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::types::ItemId;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+
+        let mut game_state = GameState::new();
+
+        let mut src = Character::new(
+            "Source".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        src.gold = 100;
+        src.inventory.items.push(InventorySlot {
+            item_id: 7 as ItemId,
+            charges: 2,
+        });
+
+        let mut dst = Character::new(
+            "Destination".to_string(),
+            "elf".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        dst.gold = 50;
+
+        game_state.party.add_member(src).unwrap();
+        game_state.party.add_member(dst).unwrap();
+        game_state.enter_inventory();
+        app.insert_resource(GlobalState(game_state));
+        app.add_systems(Update, inventory_action_system);
+
+        app.world_mut().write_message(TransferItemAction {
+            from_party_index: 0,
+            from_slot_index: 0,
+            to_party_index: 1,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        // Source inventory empty
+        assert!(
+            gs.0.party.members[0].inventory.items.is_empty(),
+            "source inventory should be empty"
+        );
+        // Destination has the item with correct charges
+        assert_eq!(gs.0.party.members[1].inventory.items.len(), 1);
+        assert_eq!(gs.0.party.members[1].inventory.items[0].item_id, 7);
+        assert_eq!(gs.0.party.members[1].inventory.items[0].charges, 2);
+        // Gold unchanged
+        assert_eq!(
+            gs.0.party.members[0].gold, 100,
+            "source gold should be unchanged"
+        );
+        assert_eq!(
+            gs.0.party.members[1].gold, 50,
+            "destination gold should be unchanged"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // 4.4.5  Transfer fails when target inventory is full
+    // ------------------------------------------------------------------
+
+    /// When the target character's inventory is at `MAX_ITEMS`, the transfer
+    /// must be rejected and both inventories must remain unchanged.
+    #[test]
+    fn test_transfer_item_target_inventory_full() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::types::ItemId;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+
+        let mut game_state = GameState::new();
+
+        let mut src = Character::new(
+            "Source".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        src.inventory.items.push(InventorySlot {
+            item_id: 5 as ItemId,
+            charges: 0,
+        });
+
+        let mut dst = Character::new(
+            "FullDst".to_string(),
+            "dwarf".to_string(),
+            "robber".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        // Fill destination to capacity
+        for i in 0..Inventory::MAX_ITEMS {
+            dst.inventory.items.push(InventorySlot {
+                item_id: (100 + i) as ItemId,
+                charges: 0,
+            });
+        }
+        assert!(dst.inventory.is_full());
+
+        game_state.party.add_member(src).unwrap();
+        game_state.party.add_member(dst).unwrap();
+        game_state.enter_inventory();
+        app.insert_resource(GlobalState(game_state));
+        app.add_systems(Update, inventory_action_system);
+
+        app.world_mut().write_message(TransferItemAction {
+            from_party_index: 0,
+            from_slot_index: 0,
+            to_party_index: 1,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        // Source inventory unchanged (still has item_id=5)
+        assert_eq!(
+            gs.0.party.members[0].inventory.items.len(),
+            1,
+            "source inventory should be unchanged"
+        );
+        assert_eq!(gs.0.party.members[0].inventory.items[0].item_id, 5);
+        // Destination still full
+        assert_eq!(
+            gs.0.party.members[1].inventory.items.len(),
+            Inventory::MAX_ITEMS,
+            "destination inventory should still be full"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // 4.4.6  Transfer with out-of-bounds from_slot_index does not panic
+    // ------------------------------------------------------------------
+
+    /// A `TransferItemAction` with a `from_slot_index` beyond the source
+    /// inventory length must not panic and must not mutate any inventory.
+    #[test]
+    fn test_transfer_item_no_item_at_source_slot() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+
+        let mut game_state = GameState::new();
+
+        let src = Character::new(
+            "EmptySrc".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let dst = Character::new(
+            "Dst".to_string(),
+            "elf".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        game_state.party.add_member(src).unwrap();
+        game_state.party.add_member(dst).unwrap();
+        game_state.enter_inventory();
+        app.insert_resource(GlobalState(game_state));
+        app.add_systems(Update, inventory_action_system);
+
+        // from_slot_index=5 is beyond the empty source inventory
+        app.world_mut().write_message(TransferItemAction {
+            from_party_index: 0,
+            from_slot_index: 5,
+            to_party_index: 1,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(gs.0.party.members[0].inventory.items.is_empty());
+        assert!(gs.0.party.members[1].inventory.items.is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // 4.4.7  PanelAction::Drop variant field values
+    // ------------------------------------------------------------------
+
+    /// `PanelAction::Drop` must carry `party_index` and `slot_index` correctly.
+    #[test]
+    fn test_panel_action_drop_variant() {
+        let action = PanelAction::Drop {
+            party_index: 0,
+            slot_index: 1,
+        };
+        match action {
+            PanelAction::Drop {
+                party_index,
+                slot_index,
+            } => {
+                assert_eq!(party_index, 0, "party_index should be 0");
+                assert_eq!(slot_index, 1, "slot_index should be 1");
+            }
+            PanelAction::Transfer { .. } => panic!("expected Drop variant"),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 4.4.8  PanelAction::Transfer variant field values
+    // ------------------------------------------------------------------
+
+    /// `PanelAction::Transfer` must carry all three indices correctly.
+    #[test]
+    fn test_panel_action_transfer_variant() {
+        let action = PanelAction::Transfer {
+            from_party_index: 0,
+            from_slot_index: 0,
+            to_party_index: 1,
+        };
+        match action {
+            PanelAction::Transfer {
+                from_party_index,
+                from_slot_index,
+                to_party_index,
+            } => {
+                assert_eq!(from_party_index, 0, "from_party_index should be 0");
+                assert_eq!(from_slot_index, 0, "from_slot_index should be 0");
+                assert_eq!(to_party_index, 1, "to_party_index should be 1");
+            }
+            PanelAction::Drop { .. } => panic!("expected Transfer variant"),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Extra: render_character_panel renders action buttons when slot selected
+    // ------------------------------------------------------------------
+
+    /// When a slot with an item is selected and a second panel is open,
+    /// `render_character_panel` should not panic and should return `None` when
+    /// no button is clicked (no simulated click in headless egui context).
+    #[test]
+    fn test_render_character_panel_action_row_no_panic_with_two_panels() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::types::ItemId;
+
+        let mut global_state = GlobalState(GameState::new());
+
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.inventory.items.push(InventorySlot {
+            item_id: 1 as ItemId,
+            charges: 0,
+        });
+
+        let ally = Character::new(
+            "Ally".to_string(),
+            "elf".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+
+        global_state.0.party.add_member(hero).unwrap();
+        global_state.0.party.add_member(ally).unwrap();
+
+        let panel_names = vec![(0usize, "Hero".to_string()), (1usize, "Ally".to_string())];
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // No simulated click occurs in headless context; return value is None.
+                let action = render_character_panel(
+                    ui,
+                    0,       // party_index
+                    true,    // is_focused
+                    Some(0), // slot 0 selected (has item)
+                    &global_state,
+                    None,
+                    &panel_names,
+                );
+                assert!(action.is_none(), "no button clicked, should return None");
+            });
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // Extra: PanelAction implements Debug and PartialEq
+    // ------------------------------------------------------------------
+
+    /// `PanelAction` must implement `Debug` and `PartialEq` for test assertions.
+    #[test]
+    fn test_panel_action_debug_and_eq() {
+        let a = PanelAction::Drop {
+            party_index: 1,
+            slot_index: 2,
+        };
+        let b = PanelAction::Drop {
+            party_index: 1,
+            slot_index: 2,
+        };
+        assert_eq!(a, b);
+
+        let c = PanelAction::Transfer {
+            from_party_index: 0,
+            from_slot_index: 1,
+            to_party_index: 2,
+        };
+        let debug_str = format!("{:?}", c);
+        assert!(debug_str.contains("Transfer"));
+        assert!(debug_str.contains("from_party_index"));
     }
 }
