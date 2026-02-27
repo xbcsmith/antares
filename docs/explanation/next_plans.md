@@ -574,9 +574,15 @@ Write a plan with a phased approach to implementing locked objects and keys in t
 
 ### Inventory Navigation
 
-We need to fix Inventory Navigation. This is how it should work.
+We need to fix Inventory Navigation for Characters, Merchants (NPCs with Buy/Sell inventory), and Items (Chests, Containers, Wholes in the Wall, etc...).
+
+This is how it should work:
 
 TAB - Cycles through Character Inventory Focus Highlighting Inventory with Yellow Box
 Up Down Side Arrows - Navigate the grid inside the inventory (does not affect character focus) Highlights Items Yellow
 Enter - Selects Item and Highlights the Options to Drop or Send Item to Another Character or Merchant
 Action Buttons - Once highlighted by selecting an item can be navigated with the Side Arrows. Enter executed the action and returns focus to the first item in the inventory. ESC returns focus to the selected item where user can navigate the Inventory or Change Character Focus.
+
+### Buy and Selling
+
+How we handle Merchants (NPCs with Buy/Sell inventory), and Container Items (Chests, Containers, Wholes in the Wall, etc...) Inventory with the Characters. While in a Dialogue with an NPC press "I" while interacting with the NPC and have a split Window with the Lead Characters (only one character inventory) inventory on the Left and the NPC on the right. TAB would toggle focus between the Lead Character inventory and the NPC Inventory. The Action Buttons for the NPC would be Buy and the action button for the Character would be Sell. To change the characters inventory to another character the user would use hte number keys. numbers 1 == Character 1, number 2 == Character 2. Container Items would use the same format. The change would be "E" opens the split inventory window and the Action buttons for Items being "Take" and "Take All" where "Take" is only the selected item and "Take All" is the contents of the container. THe Character action button would be "Stash" which would move the highlighted item from Character inventory to the Container Inventory. Navigation inside the inventory remains the same.

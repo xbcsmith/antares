@@ -11136,3 +11136,178 @@ The unused `InputConfigResource` import (previously used only to look up
   tests remain valid.
 - `cargo clippy --all-targets --all-features -- -D warnings` passes with zero
   warnings after the unused import was removed.
+
+## Inventory Navigation Two-Phase Keyboard Model
+
+### Overview
+
+Rewrote the inventory keyboard navigation in `src/game/systems/inventory_ui.rs`
+to implement the two-phase model specified in `docs/explanation/next_plans.md`
+(Inventory Navigation section).
+
+The previous model conflated character-panel focus with slot-grid navigation
+and had no keyboard path to the action buttons (Drop / Give→) — those could
+only be activated by mouse click. The new model separates concerns cleanly
+into two phases with explicit Enter/Esc transitions between them.
+
+### Navigation Model
+
+#### Phase 1 — Slot Navigation
+
+| Key         | Effect                                                        |
+| ----------- | ------------------------------------------------------------- |
+| `Tab`       | Advance focus to the next character panel (yellow border)     |
+| `Shift+Tab` | Move focus to the previous character panel                    |
+| `←→↑↓`      | Navigate the slot grid inside the focused panel (yellow cell) |
+| `Enter`     | Enter **Action Navigation** for the highlighted slot          |
+| `Esc` / `I` | Close the inventory and resume the previous game mode         |
+
+**Key correction**: Previously `↑` and `↓` also cycled character-panel focus,
+which made independent slot-grid navigation impossible. They now navigate
+rows in the grid exclusively, as specified.
+
+#### Phase 2 — Action Navigation
+
+| Key     | Effect                                                            |
+| ------- | ----------------------------------------------------------------- |
+| `←→`    | Cycle between action buttons (Drop / Give→ …)                     |
+| `Enter` | Execute the focused action; return focus to slot 0 of the grid    |
+| `Esc`   | Cancel; return to Slot Navigation at the previously selected slot |
+
+### Components Implemented
+
+#### `NavigationPhase` enum (`src/game/systems/inventory_ui.rs`)
+
+New `pub enum NavigationPhase` with two variants:
+
+- `SlotNavigation` — default; arrows move the slot cursor, Enter enters actions.
+- `ActionNavigation` — Left/Right cycle action buttons; Enter executes.
+
+Derives `Debug`, `Clone`, `PartialEq`, `Eq`, `Default` (default = `SlotNavigation`).
+
+#### `InventoryNavigationState` resource — new fields
+
+Two fields added to the existing `Resource`:
+
+- `focused_action_index: usize` — which action button has keyboard focus
+  (`0` = Drop, `1..N` = Give→ buttons in open-panel order).
+- `phase: NavigationPhase` — current navigation phase.
+
+A `reset()` helper method zeroes the struct back to its default state.
+
+#### `build_action_list` helper function
+
+New `fn build_action_list(focused_party_index, panel_names) -> Vec<PanelAction>`
+constructs the ordered list of action descriptors in the same order the UI
+renders them — `Drop` first, then one `Transfer` per other open panel. This
+allows the input system to compute which action to execute without duplicating
+the rendering order logic.
+
+#### `inventory_input_system` — complete rewrite
+
+The system is now split into two clearly delimited branches:
+
+1. **ActionNavigation branch** — runs first. Handles `Esc` (cancel), `←`/`→`
+   (cycle `focused_action_index`), and `Enter` (write `DropItemAction` or
+   `TransferItemAction` directly, then return to slot 0 in `SlotNavigation`).
+   The input system now takes `MessageWriter<DropItemAction>` and
+   `MessageWriter<TransferItemAction>` parameters so it can fire actions from
+   the keyboard path without going through the UI render return value.
+
+2. **SlotNavigation branch** — runs only when `phase == SlotNavigation`.
+   `Tab`/`Shift+Tab` change `focused_index` only (no slot movement).
+   Arrow keys navigate the 8×8 slot grid as before.
+   `Enter` with a selected filled slot transitions to `ActionNavigation`.
+   `Enter` with no selection highlights slot 0.
+   `Esc` closes the inventory.
+
+#### `render_character_panel` — new `focused_action_index` parameter
+
+`fn render_character_panel` gains a `focused_action_index: Option<usize>`
+parameter. When `Some(n)`, the nth action button in the strip is rendered
+with a yellow border stroke and yellow label text to indicate keyboard focus.
+Mouse clicks continue to work independently of keyboard focus.
+
+A `action_btn_idx` counter tracks which button index is being rendered so
+each button can check `focused_action_index == Some(action_btn_idx)`.
+
+#### `inventory_ui_system` — hint text and parameter threading
+
+- The hint line at the top of the panel now reads differently depending on
+  `nav_state.phase`:
+  - Slot: `"Tab: cycle character   ←→↑↓: navigate slots   Enter: select item   Esc/I: close"`
+  - Action: `"←→: cycle actions   Enter: execute   Esc: cancel"`
+- `nav_state: Res<InventoryNavigationState>` added as a system parameter.
+- `panel_action_focus` computed per panel (only the focused panel in
+  ActionNavigation gets a non-None value) and threaded into
+  `render_character_panel`.
+
+#### `inventory_action_system` — nav state reset on completion
+
+After processing a `DropItemAction` or a successful `TransferItemAction`,
+the system now also resets `nav_state`:
+
+```src/game/systems/inventory_ui.rs#L1216-1224
+nav_state.selected_slot_index = None;
+nav_state.focused_action_index = 0;
+nav_state.phase = NavigationPhase::SlotNavigation;
+```
+
+This ensures that if an action is executed via mouse click while the keyboard
+is in `ActionNavigation` phase, the nav state is still cleaned up correctly.
+
+#### `ACTION_FOCUSED_COLOR` constant
+
+New `const ACTION_FOCUSED_COLOR: egui::Color32 = egui::Color32::YELLOW` to
+keep the action-button highlight colour consistent with the slot grid cursor.
+
+### Tests Added
+
+| Test name                                                    | What it verifies                                                             |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `test_navigation_phase_default_is_slot_navigation`           | `NavigationPhase::default()` is `SlotNavigation`                             |
+| `test_navigation_phase_equality`                             | Variants compare equal to themselves, not to each other                      |
+| `test_build_action_list_drop_only`                           | Single-panel → Drop only                                                     |
+| `test_build_action_list_drop_and_transfers`                  | Three panels → Drop + two Transfer actions in order                          |
+| `test_build_action_list_excludes_self`                       | Focused panel is not a Transfer target                                       |
+| `test_inventory_navigation_state_reset`                      | `reset()` returns struct to all defaults                                     |
+| `test_inventory_navigation_state_default`                    | Updated: now also checks `focused_action_index` and `phase`                  |
+| `test_inventory_navigation_state_debug`                      | Updated: now also asserts `"ActionNavigation"` appears in output             |
+| `test_render_character_panel_action_focus_drop_no_panic`     | Drop button highlighted; no panic; returns `None`                            |
+| `test_render_character_panel_action_focus_transfer_no_panic` | Transfer button highlighted; no panic; returns `None`                        |
+| `test_action_system_drop_resets_nav_phase_to_slot`           | Drop action resets nav phase from `ActionNavigation` to `SlotNavigation`     |
+| `test_action_system_transfer_resets_nav_phase_to_slot`       | Transfer action resets nav phase from `ActionNavigation` to `SlotNavigation` |
+
+All existing inventory tests updated where needed:
+
+- `app.init_resource::<InventoryNavigationState>()` added to Bevy app tests so
+  `inventory_action_system` (which now reads `nav_state`) has the resource.
+- Render-panel tests updated with the new `focused_action_index: None` argument.
+- Debug test updated to construct via struct literal to satisfy
+  `clippy::field_reassign_with_default`.
+
+### Files Modified
+
+- `src/game/systems/inventory_ui.rs` — all changes above
+
+### Quality Gate Results
+
+```
+cargo fmt --all               → no output (clean)
+cargo check --all-targets     → Finished 0 errors
+cargo clippy … -D warnings    → Finished 0 warnings
+cargo nextest run (inventory) → 108/108 passed
+```
+
+The pre-existing `test_creature_database_load_performance` timing failure is
+unrelated to this work (flaky 646ms vs 500ms threshold on a loaded CI machine).
+
+### Architecture Compliance
+
+- No data structures in `architecture.md` Section 4 were modified.
+- `InventoryNavigationState` is a Bevy `Resource` (not a `GameMode` sub-struct)
+  so it carries no serialization obligations and does not touch `GameState`.
+- `NavigationPhase` is local to the UI system — it does not leak into the
+  domain or application layers.
+- Module placement unchanged: `src/game/systems/inventory_ui.rs`.
+- All constants extracted (`ACTION_FOCUSED_COLOR`); no magic literals introduced.

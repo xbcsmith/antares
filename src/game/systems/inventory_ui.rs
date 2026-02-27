@@ -7,6 +7,26 @@
 //! when the game is in `GameMode::Inventory` mode. This system is active when
 //! the player presses the configured inventory key (default: `I`).
 //!
+//! ## Keyboard Navigation (two-phase model)
+//!
+//! ### Phase 1 — Slot Navigation
+//!
+//! | Key              | Effect                                                      |
+//! |------------------|-------------------------------------------------------------|
+//! | `Tab`            | Advance focus to the next character panel (yellow border)   |
+//! | `Shift+Tab`      | Move focus to the previous character panel                  |
+//! | `←` `→` `↑` `↓` | Navigate the slot grid inside the focused panel             |
+//! | `Enter`          | Enter **Action Navigation** for the highlighted slot        |
+//! | `Esc` / `I`      | Close the inventory and resume the previous game mode       |
+//!
+//! ### Phase 2 — Action Navigation
+//!
+//! | Key         | Effect                                                             |
+//! |-------------|--------------------------------------------------------------------|
+//! | `←` `→`     | Cycle between action buttons (Drop / Give→ …)                      |
+//! | `Enter`      | Execute the focused action; return focus to slot 0 of the grid     |
+//! | `Esc`        | Cancel; return to Slot Navigation at the previously selected slot   |
+//!
 //! Follows the `InnUiPlugin` pattern from `src/game/systems/inn_ui.rs` exactly.
 
 use crate::application::resources::GameContent;
@@ -36,13 +56,15 @@ const HEADER_BG_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(35
 /// Colour for item silhouettes.
 const ITEM_SILHOUETTE_COLOR: egui::Color32 =
     egui::Color32::from_rgba_premultiplied(230, 230, 230, 255);
-/// Colour for the selection highlight ring.
+/// Colour for the slot/action selection highlight ring.
 const SELECT_HIGHLIGHT_COLOR: egui::Color32 = egui::Color32::YELLOW;
 /// Focused panel border colour.
 const FOCUSED_BORDER_COLOR: egui::Color32 = egui::Color32::YELLOW;
 /// Unfocused panel border colour.
 const UNFOCUSED_BORDER_COLOR: egui::Color32 =
     egui::Color32::from_rgba_premultiplied(80, 80, 80, 255);
+/// Action button highlight colour when keyboard focus is on it.
+const ACTION_FOCUSED_COLOR: egui::Color32 = egui::Color32::YELLOW;
 
 /// Plugin for inventory management UI
 pub struct InventoryPlugin;
@@ -180,6 +202,32 @@ pub enum PanelAction {
     },
 }
 
+// ===== Navigation Phase =====
+
+/// The two phases of keyboard inventory navigation.
+///
+/// The player starts in `SlotNavigation`. Pressing Enter while a slot with an
+/// item is highlighted advances to `ActionNavigation`. Pressing Enter executes
+/// the focused action and returns to `SlotNavigation` at slot 0. Pressing Esc
+/// cancels and returns to `SlotNavigation` at the previously highlighted slot.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::inventory_ui::NavigationPhase;
+///
+/// let phase = NavigationPhase::default();
+/// assert!(matches!(phase, NavigationPhase::SlotNavigation));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum NavigationPhase {
+    /// Arrows navigate the slot grid; Enter enters action mode.
+    #[default]
+    SlotNavigation,
+    /// Left/Right arrows cycle action buttons; Enter executes; Esc cancels.
+    ActionNavigation,
+}
+
 // ===== Navigation State =====
 
 /// Tracks keyboard navigation state for the inventory overlay.
@@ -189,18 +237,66 @@ pub enum PanelAction {
 /// # Examples
 ///
 /// ```
-/// use antares::game::systems::inventory_ui::InventoryNavigationState;
+/// use antares::game::systems::inventory_ui::{InventoryNavigationState, NavigationPhase};
 ///
 /// let state = InventoryNavigationState::default();
 /// assert_eq!(state.selected_slot_index, None);
 /// assert_eq!(state.focus_on_panel, 0);
+/// assert_eq!(state.focused_action_index, 0);
+/// assert!(matches!(state.phase, NavigationPhase::SlotNavigation));
 /// ```
 #[derive(Resource, Default, Debug)]
 pub struct InventoryNavigationState {
-    /// Index of the selected slot within the focused panel (`None` = header focused).
+    /// Index of the selected slot within the focused panel (`None` = no slot highlighted).
     pub selected_slot_index: Option<usize>,
     /// Which panel column has keyboard focus (maps to `open_panels` index, not `party_index`).
     pub focus_on_panel: usize,
+    /// Which action button has keyboard focus when `phase == ActionNavigation`.
+    ///
+    /// `0` = Drop, `1..N` = Give→ buttons in panel order.
+    pub focused_action_index: usize,
+    /// Current navigation phase — slot grid or action button row.
+    pub phase: NavigationPhase,
+}
+
+impl InventoryNavigationState {
+    /// Reset to a clean default state.
+    fn reset(&mut self) {
+        *self = InventoryNavigationState::default();
+    }
+}
+
+// ===== Helpers =====
+
+/// Build the ordered list of action button descriptors for a focused panel.
+///
+/// Returns a `Vec<PanelAction>` in the same order the UI renders them:
+/// `Drop` first, then one `Transfer` per other open panel member.
+///
+/// `panel_names` contains `(party_index, name)` for every visible panel.
+/// `focused_party_index` is the panel whose actions are being computed.
+/// `party_members_len` is used for bounds checking only.
+fn build_action_list(
+    focused_party_index: usize,
+    panel_names: &[(usize, String)],
+) -> Vec<PanelAction> {
+    let mut actions = Vec::new();
+    // Drop is always action 0
+    actions.push(PanelAction::Drop {
+        party_index: focused_party_index,
+        slot_index: 0, // placeholder — filled in at execution time
+    });
+    // One Transfer per other visible panel, in panel order
+    for &(other_index, _) in panel_names {
+        if other_index != focused_party_index {
+            actions.push(PanelAction::Transfer {
+                from_party_index: focused_party_index,
+                from_slot_index: 0, // placeholder — filled in at execution time
+                to_party_index: other_index,
+            });
+        }
+    }
+    actions
 }
 
 // ===== Input System =====
@@ -209,50 +305,159 @@ pub struct InventoryNavigationState {
 ///
 /// Runs every frame; only processes input when
 /// `GlobalState.0.mode` is `GameMode::Inventory(_)`.
+///
+/// ## Key routing summary
+///
+/// | Phase             | Key              | Effect                                              |
+/// |-------------------|------------------|-----------------------------------------------------|
+/// | Either            | `Esc` (slot)     | Close inventory                                     |
+/// | Either            | `Esc` (action)   | Cancel action mode, return to selected slot         |
+/// | Either            | `Tab`            | Advance character panel focus (clears slot)         |
+/// | Either            | `Shift+Tab`      | Retreat character panel focus (clears slot)         |
+/// | SlotNavigation    | `←→↑↓`          | Navigate the slot grid                              |
+/// | SlotNavigation    | `Enter`          | Enter ActionNavigation for the highlighted slot     |
+/// | ActionNavigation  | `←→`            | Cycle action buttons                                |
+/// | ActionNavigation  | `Enter`          | Execute focused action; return to slot 0            |
+#[allow(clippy::too_many_lines)]
 fn inventory_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut global_state: ResMut<GlobalState>,
     mut nav_state: ResMut<InventoryNavigationState>,
+    mut drop_writer: MessageWriter<DropItemAction>,
+    mut transfer_writer: MessageWriter<TransferItemAction>,
 ) {
-    // Extract inventory state — bail if not in inventory mode.
-    // Also reset nav state whenever we leave inventory so it is clean on re-entry.
+    // Bail if not in inventory mode; reset nav state for next entry.
     let party_size = match &global_state.0.mode {
         GameMode::Inventory(_) => global_state.0.party.members.len().min(PARTY_MAX_SIZE),
         _ => {
-            // Reset navigation state when not in inventory mode
-            *nav_state = InventoryNavigationState::default();
+            nav_state.reset();
             return;
         }
     };
 
-    // Escape closes the overlay.
-    //
+    // ── Collect open panels and focused party index ────────────────────────
+    let (focused_party_index, open_panels_snapshot) = match &global_state.0.mode {
+        GameMode::Inventory(s) => (s.focused_index, s.open_panels.clone()),
+        _ => return,
+    };
+
+    // Build panel_names from open panels (same logic as inventory_ui_system)
+    let panel_names: Vec<(usize, String)> = open_panels_snapshot
+        .iter()
+        .filter_map(|&pi| {
+            global_state
+                .0
+                .party
+                .members
+                .get(pi)
+                .map(|m| (pi, m.name.clone()))
+        })
+        .collect();
+
+    // ── Phase: ActionNavigation ────────────────────────────────────────────
+    if nav_state.phase == NavigationPhase::ActionNavigation {
+        let slot_idx = match nav_state.selected_slot_index {
+            Some(s) => s,
+            None => {
+                // Guard: no slot selected; drop back to slot navigation
+                nav_state.phase = NavigationPhase::SlotNavigation;
+                return;
+            }
+        };
+
+        // Esc in action mode — cancel, return to slot navigation
+        if keyboard.just_pressed(KeyCode::Escape) {
+            nav_state.phase = NavigationPhase::SlotNavigation;
+            return;
+        }
+
+        // Build the action list for the focused panel
+        let actions = build_action_list(focused_party_index, &panel_names);
+        let action_count = actions.len();
+
+        if action_count == 0 {
+            nav_state.phase = NavigationPhase::SlotNavigation;
+            return;
+        }
+
+        // Left/Right — cycle action button focus
+        if keyboard.just_pressed(KeyCode::ArrowLeft) {
+            nav_state.focused_action_index = if nav_state.focused_action_index == 0 {
+                action_count - 1
+            } else {
+                nav_state.focused_action_index - 1
+            };
+            return;
+        }
+        if keyboard.just_pressed(KeyCode::ArrowRight) {
+            nav_state.focused_action_index = (nav_state.focused_action_index + 1) % action_count;
+            return;
+        }
+
+        // Enter — execute focused action then return to slot 0
+        if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
+            let action_idx = nav_state.focused_action_index.min(action_count - 1);
+            match &actions[action_idx] {
+                PanelAction::Drop { party_index, .. } => {
+                    drop_writer.write(DropItemAction {
+                        party_index: *party_index,
+                        slot_index: slot_idx,
+                    });
+                }
+                PanelAction::Transfer {
+                    from_party_index,
+                    to_party_index,
+                    ..
+                } => {
+                    transfer_writer.write(TransferItemAction {
+                        from_party_index: *from_party_index,
+                        from_slot_index: slot_idx,
+                        to_party_index: *to_party_index,
+                    });
+                }
+            }
+            // Return to slot 0 in slot-navigation phase
+            if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                inv_state.selected_slot = Some(0);
+            }
+            nav_state.selected_slot_index = Some(0);
+            nav_state.focused_action_index = 0;
+            nav_state.phase = NavigationPhase::SlotNavigation;
+            return;
+        }
+
+        // Any other key in action mode is ignored
+        return;
+    }
+
+    // ── Phase: SlotNavigation ──────────────────────────────────────────────
+
     // NOTE: The configured inventory toggle key ("I" by default) is intentionally
     // NOT handled here.  `handle_input` (InputPlugin) owns the open/close toggle
     // for that key.  Duplicating it here would cause the inventory to open and
     // close in the same frame because both systems run in Update with no ordering
     // guarantee between them.
+
+    // Esc in slot mode — close inventory
     if keyboard.just_pressed(KeyCode::Escape) {
         let resume_mode = match &global_state.0.mode {
             GameMode::Inventory(s) => s.get_resume_mode(),
             _ => return,
         };
         global_state.0.mode = resume_mode;
-        *nav_state = InventoryNavigationState::default();
+        nav_state.reset();
         return;
     }
 
-    // ── Tab / Shift-Tab and Up/Down — cycle the yellow-border focus ────────
+    // ── Tab / Shift-Tab — cycle the yellow-border panel focus ─────────────
     //
-    // Tab / Down move focus forward to the next character panel.
-    // Shift-Tab / Up move focus backward.
-    // Slot selection is cleared whenever focus changes.
+    // TAB only changes which character panel has focus. It does NOT affect
+    // the slot grid cursor. Slot selection is cleared whenever focus changes
+    // because the cursor position belongs to a specific character's panel.
     let shift_held = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
 
-    let focus_next = keyboard.just_pressed(KeyCode::Tab) && !shift_held
-        || keyboard.just_pressed(KeyCode::ArrowDown);
-    let focus_prev = keyboard.just_pressed(KeyCode::Tab) && shift_held
-        || keyboard.just_pressed(KeyCode::ArrowUp);
+    let focus_next = keyboard.just_pressed(KeyCode::Tab) && !shift_held;
+    let focus_prev = keyboard.just_pressed(KeyCode::Tab) && shift_held;
 
     if focus_next || focus_prev {
         if let GameMode::Inventory(inv_state) = &mut global_state.0.mode {
@@ -262,16 +467,55 @@ fn inventory_input_system(
                 } else {
                     inv_state.focused_index - 1
                 };
+                // Ensure newly focused panel is in open_panels
+                if !inv_state.open_panels.contains(&inv_state.focused_index)
+                    && inv_state.open_panels.len() < PARTY_MAX_SIZE
+                {
+                    inv_state.open_panels.push(inv_state.focused_index);
+                }
             } else {
                 inv_state.focused_index = if party_size == 0 {
                     0
                 } else {
                     (inv_state.focused_index + 1) % party_size
                 };
+                // Ensure newly focused panel is in open_panels
+                if !inv_state.open_panels.contains(&inv_state.focused_index)
+                    && inv_state.open_panels.len() < PARTY_MAX_SIZE
+                {
+                    inv_state.open_panels.push(inv_state.focused_index);
+                }
             }
+            // Clear slot selection — cursor stays at the new panel's grid
             inv_state.selected_slot = None;
         }
         nav_state.selected_slot_index = None;
+        nav_state.focused_action_index = 0;
+        return;
+    }
+
+    // ── Enter — confirm slot selection → enter ActionNavigation ───────────
+    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
+        if let Some(slot_idx) = nav_state.selected_slot_index {
+            // Only enter action mode if the slot actually contains an item
+            let has_item = global_state
+                .0
+                .party
+                .members
+                .get(focused_party_index)
+                .map(|ch| slot_idx < ch.inventory.items.len())
+                .unwrap_or(false);
+            if has_item {
+                nav_state.phase = NavigationPhase::ActionNavigation;
+                nav_state.focused_action_index = 0;
+            }
+        } else {
+            // No slot highlighted yet — Enter starts navigation at slot 0
+            if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                inv_state.selected_slot = Some(0);
+            }
+            nav_state.selected_slot_index = Some(0);
+        }
         return;
     }
 
@@ -281,7 +525,7 @@ fn inventory_input_system(
     // Left/Right move one column; Up/Down move one full row (SLOT_COLS slots).
     // All movement wraps within 0..MAX_ITEMS.
     // The first press with no selection starts at slot 0.
-    let max_slots = crate::domain::character::Inventory::MAX_ITEMS;
+    let max_slots = Inventory::MAX_ITEMS;
 
     let any_arrow = keyboard.just_pressed(KeyCode::ArrowRight)
         || keyboard.just_pressed(KeyCode::ArrowLeft)
@@ -331,6 +575,7 @@ fn inventory_ui_system(
     mut contexts: EguiContexts,
     global_state: Res<GlobalState>,
     game_content: Option<Res<GameContent>>,
+    nav_state: Res<InventoryNavigationState>,
     mut drop_writer: MessageWriter<DropItemAction>,
     mut transfer_writer: MessageWriter<TransferItemAction>,
 ) {
@@ -398,11 +643,15 @@ fn inventory_ui_system(
                 ui.label(egui::RichText::new(status).strong());
             }
         }
-        ui.label(
-            egui::RichText::new("Tab / ↑↓: cycle character   ←→: select slot   Esc / I: close")
-                .small()
-                .weak(),
-        );
+
+        // ── Hint line changes based on navigation phase ──────────────────
+        let hint = match nav_state.phase {
+            NavigationPhase::SlotNavigation => {
+                "Tab: cycle character   ←→↑↓: navigate slots   Enter: select item   Esc/I: close"
+            }
+            NavigationPhase::ActionNavigation => "←→: cycle actions   Enter: execute   Esc: cancel",
+        };
+        ui.label(egui::RichText::new(hint).small().weak());
         ui.separator();
 
         // ── Panel layout ─────────────────────────────────────────────────
@@ -430,10 +679,16 @@ fn inventory_ui_system(
                     }
                     let party_index = open_panels[panel_pos];
                     let is_focused = party_index == focused_index;
-                    // Only pass selected_slot to the focused panel — every other
-                    // panel gets None so the highlight never appears on non-focused
-                    // characters.
+                    // Only pass selected_slot and action focus to the focused panel —
+                    // every other panel gets None so highlights only appear on the
+                    // active character.
                     let panel_selected = if is_focused { selected_slot } else { None };
+                    let panel_action_focus =
+                        if is_focused && nav_state.phase == NavigationPhase::ActionNavigation {
+                            Some(nav_state.focused_action_index)
+                        } else {
+                            None
+                        };
 
                     // push_id mandatory per sdk/AGENTS.md
                     ui.push_id(format!("inv_panel_{}", party_index), |ui| {
@@ -442,6 +697,7 @@ fn inventory_ui_system(
                             party_index,
                             is_focused,
                             panel_selected,
+                            panel_action_focus,
                             egui::vec2(panel_w, panel_h),
                             &global_state,
                             game_content.as_deref(),
@@ -496,6 +752,12 @@ fn inventory_ui_system(
 /// The slot grid is drawn entirely via `egui::Painter` so it looks like the
 /// mockup: dark background, faint grid lines, white item-type silhouettes.
 ///
+/// ## Action strip keyboard highlight
+///
+/// When `focused_action_index` is `Some(n)`, the nth action button in the strip
+/// is rendered with a yellow border ring to indicate keyboard focus.  Mouse
+/// clicks are still processed normally regardless of keyboard focus.
+///
 /// # Returns
 ///
 /// `Some(PanelAction)` when the player clicked a Drop or Give button;
@@ -506,6 +768,7 @@ fn render_character_panel(
     party_index: usize,
     is_focused: bool,
     selected_slot: Option<usize>,
+    focused_action_index: Option<usize>,
     size: egui::Vec2,
     global_state: &GlobalState,
     game_content: Option<&GameContent>,
@@ -586,17 +849,13 @@ fn render_character_panel(
     }
 
     // Draw items and selection highlight in each cell.
-    // We also register a click-sense rect per cell for mouse selection, returned
-    // so the caller can update InventoryState — but that requires mutable state
-    // access the closure can't hold, so instead we check `ui.interact` on a
-    // child_ui allocated for each cell.
     for slot_idx in 0..Inventory::MAX_ITEMS {
         let col = slot_idx % SLOT_COLS;
         let row = slot_idx / SLOT_COLS;
         let cell_min = body_rect.min + egui::vec2(col as f32 * cell_w, row as f32 * cell_h);
         let cell_rect = egui::Rect::from_min_size(cell_min, egui::vec2(cell_w, cell_h));
 
-        // Selection highlight
+        // Selection highlight — yellow ring on the selected slot
         if selected_slot == Some(slot_idx) {
             painter.rect_filled(
                 cell_rect.shrink(1.0),
@@ -646,12 +905,21 @@ fn render_character_panel(
             // push_id for the action row — mandatory per sdk/AGENTS.md
             child.push_id("actions", |ui| {
                 ui.horizontal_wrapped(|ui| {
+                    // ── Action 0: Drop ────────────────────────────────────
+                    let drop_focused = focused_action_index == Some(0);
+                    let drop_label = egui::RichText::new("Drop")
+                        .color(if drop_focused {
+                            ACTION_FOCUSED_COLOR
+                        } else {
+                            egui::Color32::from_rgb(220, 80, 80)
+                        })
+                        .small();
+                    let mut drop_btn = egui::Button::new(drop_label);
+                    if drop_focused {
+                        drop_btn = drop_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                    }
                     if ui
-                        .add(egui::Button::new(
-                            egui::RichText::new("Drop")
-                                .color(egui::Color32::from_rgb(220, 80, 80))
-                                .small(),
-                        ))
+                        .add(drop_btn)
                         .on_hover_text("Discard this item permanently")
                         .clicked()
                     {
@@ -661,6 +929,8 @@ fn render_character_panel(
                         });
                     }
 
+                    // ── Actions 1..N: Transfer to other party members ─────
+                    let mut action_btn_idx: usize = 1;
                     for &(other_index, ref other_name) in panel_names {
                         if other_index == party_index {
                             continue;
@@ -668,16 +938,22 @@ fn render_character_panel(
                         let target_full = global_state.0.party.members[other_index]
                             .inventory
                             .is_full();
-                        let label = format!("→ {}", other_name);
+                        let transfer_focused = focused_action_index == Some(action_btn_idx);
+                        let label_text = format!("→ {}", other_name);
+                        let transfer_label = egui::RichText::new(&label_text)
+                            .color(if transfer_focused {
+                                ACTION_FOCUSED_COLOR
+                            } else {
+                                egui::Color32::from_rgb(100, 200, 100)
+                            })
+                            .small();
+                        let mut transfer_btn = egui::Button::new(transfer_label);
+                        if transfer_focused {
+                            transfer_btn =
+                                transfer_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                        }
                         if ui
-                            .add_enabled(
-                                !target_full,
-                                egui::Button::new(
-                                    egui::RichText::new(&label)
-                                        .color(egui::Color32::from_rgb(100, 200, 100))
-                                        .small(),
-                                ),
-                            )
+                            .add_enabled(!target_full, transfer_btn)
                             .on_hover_text(if target_full {
                                 format!("{}'s inventory is full", other_name)
                             } else {
@@ -691,6 +967,7 @@ fn render_character_panel(
                                 to_party_index: other_index,
                             });
                         }
+                        action_btn_idx += 1;
                     }
                 });
             });
@@ -894,6 +1171,7 @@ fn inventory_action_system(
     mut drop_reader: MessageReader<DropItemAction>,
     mut transfer_reader: MessageReader<TransferItemAction>,
     mut global_state: ResMut<GlobalState>,
+    mut nav_state: ResMut<InventoryNavigationState>,
 ) {
     // Collect messages upfront so we do not hold a borrow while mutating state.
     let drop_events: Vec<(usize, usize)> = drop_reader
@@ -938,10 +1216,13 @@ fn inventory_action_system(
             );
         }
 
-        // Clear selected_slot in InventoryState
+        // Clear selected_slot in InventoryState and reset nav phase
         if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
             inv_state.selected_slot = None;
         }
+        nav_state.selected_slot_index = None;
+        nav_state.focused_action_index = 0;
+        nav_state.phase = NavigationPhase::SlotNavigation;
     }
 
     // ── Transfer events ──────────────────────────────────────────────────────
@@ -1020,10 +1301,13 @@ fn inventory_action_system(
                     "Transferred item (item_id={}) from party[{}] slot {} to party[{}]",
                     slot.item_id, from_party_index, from_slot_index, to_party_index
                 );
-                // Clear selected_slot on success
+                // Clear selected_slot on success and reset nav phase
                 if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
                     inv_state.selected_slot = None;
                 }
+                nav_state.selected_slot_index = None;
+                nav_state.focused_action_index = 0;
+                nav_state.phase = NavigationPhase::SlotNavigation;
             }
             Err(err) => {
                 // Rollback: return item to the source inventory
@@ -1077,6 +1361,8 @@ mod tests {
         let state = InventoryNavigationState::default();
         assert_eq!(state.selected_slot_index, None);
         assert_eq!(state.focus_on_panel, 0);
+        assert_eq!(state.focused_action_index, 0);
+        assert!(matches!(state.phase, NavigationPhase::SlotNavigation));
     }
 
     // ------------------------------------------------------------------
@@ -1138,6 +1424,7 @@ mod tests {
                     0,                        // party_index
                     true,                     // is_focused
                     None,                     // selected_slot
+                    None,                     // focused_action_index
                     egui::vec2(300.0, 400.0), // size
                     &global_state,
                     None, // no GameContent needed
@@ -1193,6 +1480,7 @@ mod tests {
                     0,                        // party_index
                     false,                    // not focused
                     Some(0),                  // first slot selected
+                    None,                     // no keyboard action focus
                     egui::vec2(300.0, 400.0), // size
                     &global_state,
                     None, // no GameContent
@@ -1222,6 +1510,7 @@ mod tests {
                     0, // out-of-bounds
                     true,
                     None,
+                    None,
                     egui::vec2(300.0, 400.0), // size
                     &global_state,
                     None,
@@ -1242,10 +1531,13 @@ mod tests {
         let state = InventoryNavigationState {
             selected_slot_index: Some(3),
             focus_on_panel: 1,
+            focused_action_index: 2,
+            phase: NavigationPhase::ActionNavigation,
         };
         let debug_str = format!("{:?}", state);
         assert!(debug_str.contains("3"));
         assert!(debug_str.contains("1"));
+        assert!(debug_str.contains("ActionNavigation"));
     }
 
     // ------------------------------------------------------------------
@@ -1290,6 +1582,7 @@ mod tests {
         // Set mode to Inventory so the action system runs
         game_state.enter_inventory();
         app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
 
         // Add the action system
         app.add_systems(Update, inventory_action_system);
@@ -1310,6 +1603,10 @@ mod tests {
         if let GameMode::Inventory(ref inv_state) = gs.0.mode {
             assert_eq!(inv_state.selected_slot, None);
         }
+        // nav state must be reset to slot navigation
+        let nav = app.world().resource::<InventoryNavigationState>();
+        assert!(matches!(nav.phase, NavigationPhase::SlotNavigation));
+        assert_eq!(nav.selected_slot_index, None);
     }
 
     // ------------------------------------------------------------------
@@ -1356,6 +1653,7 @@ mod tests {
 
         game_state.enter_inventory();
         app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
 
         app.add_systems(Update, inventory_action_system);
 
@@ -1375,6 +1673,9 @@ mod tests {
         if let GameMode::Inventory(ref inv_state) = gs.0.mode {
             assert_eq!(inv_state.selected_slot, None);
         }
+        // nav state reset
+        let nav = app.world().resource::<InventoryNavigationState>();
+        assert!(matches!(nav.phase, NavigationPhase::SlotNavigation));
     }
 
     // ------------------------------------------------------------------
@@ -1413,6 +1714,7 @@ mod tests {
             inv_state.selected_slot = Some(0);
         }
         app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
         app.add_systems(Update, inventory_action_system);
 
         app.world_mut().write_message(DropItemAction {
@@ -1465,6 +1767,7 @@ mod tests {
         game_state.party.add_member(character).unwrap();
         game_state.enter_inventory();
         app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
         app.add_systems(Update, inventory_action_system);
 
         // slot_index=99 is out of bounds
@@ -1499,6 +1802,7 @@ mod tests {
         // Empty party
         game_state.enter_inventory();
         app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
         app.add_systems(Update, inventory_action_system);
 
         // party_index=99 — no such member
@@ -1553,6 +1857,7 @@ mod tests {
         game_state.party.add_member(dst).unwrap();
         game_state.enter_inventory();
         app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
         app.add_systems(Update, inventory_action_system);
 
         app.world_mut().write_message(TransferItemAction {
@@ -1633,6 +1938,7 @@ mod tests {
         game_state.party.add_member(dst).unwrap();
         game_state.enter_inventory();
         app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
         app.add_systems(Update, inventory_action_system);
 
         app.world_mut().write_message(TransferItemAction {
@@ -1693,6 +1999,7 @@ mod tests {
         game_state.party.add_member(dst).unwrap();
         game_state.enter_inventory();
         app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
         app.add_systems(Update, inventory_action_system);
 
         // from_slot_index=5 is beyond the empty source inventory
@@ -1805,12 +2112,123 @@ mod tests {
                     0,                        // party_index
                     true,                     // is_focused
                     Some(0),                  // slot 0 selected (has item)
+                    None,                     // no keyboard action focus
                     egui::vec2(300.0, 400.0), // size
                     &global_state,
                     None,
                     &panel_names,
                 );
                 assert!(action.is_none(), "no button clicked, should return None");
+            });
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // Extra: render_character_panel with keyboard action focus renders without panic
+    // ------------------------------------------------------------------
+
+    /// When `focused_action_index` is `Some(0)` the Drop button should be
+    /// highlighted. No click is simulated so the return value is still `None`.
+    #[test]
+    fn test_render_character_panel_action_focus_drop_no_panic() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::types::ItemId;
+
+        let mut global_state = GlobalState(GameState::new());
+
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.inventory.items.push(InventorySlot {
+            item_id: 5 as ItemId,
+            charges: 1,
+        });
+        let ally = Character::new(
+            "Ally".to_string(),
+            "elf".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        global_state.0.party.add_member(hero).unwrap();
+        global_state.0.party.add_member(ally).unwrap();
+
+        let panel_names = vec![(0usize, "Hero".to_string()), (1usize, "Ally".to_string())];
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let action = render_character_panel(
+                    ui,
+                    0,
+                    true,
+                    Some(0), // slot 0 is selected
+                    Some(0), // keyboard focus on Drop button (index 0)
+                    egui::vec2(300.0, 400.0),
+                    &global_state,
+                    None,
+                    &panel_names,
+                );
+                assert!(action.is_none());
+            });
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // Extra: render_character_panel with keyboard action focus on Transfer
+    // ------------------------------------------------------------------
+
+    /// When `focused_action_index` is `Some(1)` the first Transfer button
+    /// should be highlighted. No click simulated.
+    #[test]
+    fn test_render_character_panel_action_focus_transfer_no_panic() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::types::ItemId;
+
+        let mut global_state = GlobalState(GameState::new());
+
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.inventory.items.push(InventorySlot {
+            item_id: 7 as ItemId,
+            charges: 0,
+        });
+        let ally = Character::new(
+            "Ally".to_string(),
+            "elf".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        global_state.0.party.add_member(hero).unwrap();
+        global_state.0.party.add_member(ally).unwrap();
+
+        let panel_names = vec![(0usize, "Hero".to_string()), (1usize, "Ally".to_string())];
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let action = render_character_panel(
+                    ui,
+                    0,
+                    true,
+                    Some(0), // slot 0 selected
+                    Some(1), // keyboard focus on Transfer→Ally (index 1)
+                    egui::vec2(300.0, 400.0),
+                    &global_state,
+                    None,
+                    &panel_names,
+                );
+                assert!(action.is_none());
             });
         });
     }
@@ -1840,5 +2258,248 @@ mod tests {
         let debug_str = format!("{:?}", c);
         assert!(debug_str.contains("Transfer"));
         assert!(debug_str.contains("from_party_index"));
+    }
+
+    // ------------------------------------------------------------------
+    // Two-phase navigation: NavigationPhase enum
+    // ------------------------------------------------------------------
+
+    /// `NavigationPhase` must default to `SlotNavigation`.
+    #[test]
+    fn test_navigation_phase_default_is_slot_navigation() {
+        let phase = NavigationPhase::default();
+        assert!(matches!(phase, NavigationPhase::SlotNavigation));
+    }
+
+    /// `NavigationPhase` variants must be equal to themselves.
+    #[test]
+    fn test_navigation_phase_equality() {
+        assert_eq!(
+            NavigationPhase::SlotNavigation,
+            NavigationPhase::SlotNavigation
+        );
+        assert_eq!(
+            NavigationPhase::ActionNavigation,
+            NavigationPhase::ActionNavigation
+        );
+        assert_ne!(
+            NavigationPhase::SlotNavigation,
+            NavigationPhase::ActionNavigation
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // build_action_list helper
+    // ------------------------------------------------------------------
+
+    /// `build_action_list` with no other panels returns exactly one action: Drop.
+    #[test]
+    fn test_build_action_list_drop_only() {
+        let panel_names: Vec<(usize, String)> = vec![(0, "Hero".to_string())];
+        let actions = build_action_list(0, &panel_names);
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(
+            actions[0],
+            PanelAction::Drop { party_index: 0, .. }
+        ));
+    }
+
+    /// `build_action_list` with two other panels returns Drop + two Transfer actions.
+    #[test]
+    fn test_build_action_list_drop_and_transfers() {
+        let panel_names: Vec<(usize, String)> = vec![
+            (0, "Hero".to_string()),
+            (1, "Ally".to_string()),
+            (2, "Mage".to_string()),
+        ];
+        let actions = build_action_list(0, &panel_names);
+        // Drop + Transfer→1 + Transfer→2
+        assert_eq!(actions.len(), 3);
+        assert!(matches!(
+            actions[0],
+            PanelAction::Drop { party_index: 0, .. }
+        ));
+        assert!(matches!(
+            actions[1],
+            PanelAction::Transfer {
+                from_party_index: 0,
+                to_party_index: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
+            actions[2],
+            PanelAction::Transfer {
+                from_party_index: 0,
+                to_party_index: 2,
+                ..
+            }
+        ));
+    }
+
+    /// `build_action_list` excludes the focused panel itself from Transfer targets.
+    #[test]
+    fn test_build_action_list_excludes_self() {
+        let panel_names: Vec<(usize, String)> = vec![(0, "A".to_string()), (1, "B".to_string())];
+        let actions = build_action_list(1, &panel_names);
+        // Drop(1) + Transfer(1→0)
+        assert_eq!(actions.len(), 2);
+        assert!(matches!(
+            actions[0],
+            PanelAction::Drop { party_index: 1, .. }
+        ));
+        assert!(matches!(
+            actions[1],
+            PanelAction::Transfer {
+                from_party_index: 1,
+                to_party_index: 0,
+                ..
+            }
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // nav state reset helper
+    // ------------------------------------------------------------------
+
+    /// `InventoryNavigationState::reset` returns the struct to its default values.
+    #[test]
+    fn test_inventory_navigation_state_reset() {
+        let mut state = InventoryNavigationState {
+            selected_slot_index: Some(5),
+            focus_on_panel: 2,
+            focused_action_index: 1,
+            phase: NavigationPhase::ActionNavigation,
+        };
+        state.reset();
+        assert_eq!(state.selected_slot_index, None);
+        assert_eq!(state.focus_on_panel, 0);
+        assert_eq!(state.focused_action_index, 0);
+        assert!(matches!(state.phase, NavigationPhase::SlotNavigation));
+    }
+
+    // ------------------------------------------------------------------
+    // action system resets nav phase after drop
+    // ------------------------------------------------------------------
+
+    /// After a drop action the nav state phase must return to `SlotNavigation`
+    /// even if it was previously in `ActionNavigation`.
+    #[test]
+    fn test_action_system_drop_resets_nav_phase_to_slot() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::types::ItemId;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+
+        let mut game_state = GameState::new();
+        let mut character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.inventory.items.push(InventorySlot {
+            item_id: 11 as ItemId,
+            charges: 0,
+        });
+        game_state.party.add_member(character).unwrap();
+        game_state.enter_inventory();
+
+        // Pre-load nav state into ActionNavigation
+        let nav = InventoryNavigationState {
+            phase: NavigationPhase::ActionNavigation,
+            selected_slot_index: Some(0),
+            focused_action_index: 0,
+            ..Default::default()
+        };
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(nav);
+        app.add_systems(Update, inventory_action_system);
+
+        app.world_mut().write_message(DropItemAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let nav_after = app.world().resource::<InventoryNavigationState>();
+        assert!(
+            matches!(nav_after.phase, NavigationPhase::SlotNavigation),
+            "phase must be SlotNavigation after drop"
+        );
+        assert_eq!(nav_after.focused_action_index, 0);
+        assert_eq!(nav_after.selected_slot_index, None);
+    }
+
+    // ------------------------------------------------------------------
+    // action system resets nav phase after transfer
+    // ------------------------------------------------------------------
+
+    /// After a successful transfer the nav state phase must return to
+    /// `SlotNavigation`.
+    #[test]
+    fn test_action_system_transfer_resets_nav_phase_to_slot() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::types::ItemId;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+
+        let mut game_state = GameState::new();
+
+        let mut src = Character::new(
+            "Src".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        src.inventory.items.push(InventorySlot {
+            item_id: 99 as ItemId,
+            charges: 0,
+        });
+        let dst = Character::new(
+            "Dst".to_string(),
+            "elf".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        game_state.party.add_member(src).unwrap();
+        game_state.party.add_member(dst).unwrap();
+        game_state.enter_inventory();
+
+        let nav = InventoryNavigationState {
+            phase: NavigationPhase::ActionNavigation,
+            selected_slot_index: Some(0),
+            focused_action_index: 1,
+            ..Default::default()
+        };
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(nav);
+        app.add_systems(Update, inventory_action_system);
+
+        app.world_mut().write_message(TransferItemAction {
+            from_party_index: 0,
+            from_slot_index: 0,
+            to_party_index: 1,
+        });
+        app.update();
+
+        let nav_after = app.world().resource::<InventoryNavigationState>();
+        assert!(
+            matches!(nav_after.phase, NavigationPhase::SlotNavigation),
+            "phase must be SlotNavigation after successful transfer"
+        );
+        assert_eq!(nav_after.focused_action_index, 0);
+        assert_eq!(nav_after.selected_slot_index, None);
     }
 }
