@@ -11311,3 +11311,110 @@ unrelated to this work (flaky 646ms vs 500ms threshold on a loaded CI machine).
   domain or application layers.
 - Module placement unchanged: `src/game/systems/inventory_ui.rs`.
 - All constants extracted (`ACTION_FOCUSED_COLOR`); no magic literals introduced.
+
+## Buy and Sell — Phase 1: Wire `OpenMerchant` Dialogue Action and `I`-Key Entry Point
+
+### Overview
+
+Phase 1 closes the two missing entry points that allow the player to reach
+`GameMode::MerchantInventory`:
+
+1. **`DialogueAction::OpenMerchant` handler** — the dialogue action now calls
+   `game_state.enter_merchant_inventory()` instead of logging a stub message.
+2. **`I`-key handler in `GameMode::Dialogue`** — pressing `I` while speaking
+   to a merchant NPC transitions the game to `GameMode::MerchantInventory`.
+   Pressing `I` while speaking to a non-merchant NPC is silently ignored.
+
+All pre-existing infrastructure (`enter_merchant_inventory`,
+`ensure_npc_runtime_initialized`, `MerchantInventoryState`, `MerchantStock`,
+`MerchantInventoryPlugin`) was already present and is used without modification.
+
+### Components Implemented
+
+#### `src/game/systems/dialogue.rs` (modified)
+
+- **`execute_action` — `DialogueAction::OpenMerchant` arm**: replaced the
+  placeholder `info!` / `game_log.add` stub with:
+  1. NPC name lookup via `db.npcs.get_npc(npc_id)`.
+  2. Guard: if the NPC is not found or `is_merchant == false`, a warning is
+     logged and the action returns early (graceful degradation).
+  3. `game_state.ensure_npc_runtime_initialized(db)` to seed stock from
+     template on the first visit (idempotent on subsequent visits).
+  4. `game_state.enter_merchant_inventory(npc_id.clone(), npc_name)` to
+     perform the mode transition.
+
+#### `src/game/systems/input.rs` (modified)
+
+- **`handle_input` system signature**: added
+  `game_content: Option<Res<crate::application::resources::GameContent>>` as
+  an optional parameter so the system gracefully degrades when `GameContent`
+  has not been inserted (headless tests, early startup frames).
+- **`GameAction::Inventory` match block — new `GameMode::Dialogue(_)` arm**:
+  - Reads `speaker_npc_id` from the active `DialogueState` before any mutable
+    borrow.
+  - If `speaker_npc_id` is `Some` and the NPC `is_merchant == true`:
+    calls `ensure_npc_runtime_initialized` then `enter_merchant_inventory`.
+  - If the NPC is not a merchant: logs a debug message and falls through to
+    the `return` at the end of the inventory block (no mode change).
+  - If `speaker_npc_id` is `None`: no action taken (mode unchanged).
+  - The `return` statement at the end of the inventory branch consumes the
+    key press in all dialogue sub-cases so it never falls through to the
+    generic `enter_inventory()` path.
+- **`mod tests` missing `#[cfg(test)]`** — pre-existing omission fixed to
+  silence the `unused_imports` warning that was newly surfaced.
+
+### Tests Added / Updated
+
+#### `src/game/systems/dialogue.rs`
+
+| Test                                                           | Description                                                                                                                                                                                                                                          |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_open_merchant_dialogue_action_enters_merchant_inventory` | Replaces the old stub test. Asserts that `execute_action` with `OpenMerchant { npc_id: "merchant_tom" }` transitions game mode to `GameMode::MerchantInventory`. Uses the pre-existing `make_merchant_db` / `make_game_state_with_merchant` helpers. |
+| `test_open_merchant_dialogue_action_unknown_npc_no_panic`      | Asserts that `OpenMerchant` with an NPC ID absent from the content DB does not panic and does not change the game mode (graceful degradation).                                                                                                       |
+
+#### `src/game/systems/input.rs` — new `mod dialogue_inventory_tests`
+
+| Test                                                                        | Description                                                                                                          |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `test_handle_input_i_in_dialogue_with_merchant_opens_merchant_inventory`    | Full Bevy app test: game in `Dialogue` mode with a merchant NPC; press `I`; assert mode becomes `MerchantInventory`. |
+| `test_handle_input_i_in_dialogue_with_non_merchant_does_not_open_inventory` | Full Bevy app test: game in `Dialogue` with a non-merchant NPC; press `I`; assert mode stays `Dialogue`.             |
+| `test_handle_input_i_in_dialogue_with_no_npc_id_does_nothing`               | Full Bevy app test: `DialogueState` has `speaker_npc_id: None`; press `I`; assert mode stays `Dialogue`.             |
+
+### Files Modified
+
+| File                           | Change                                                                                                                                                          |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/dialogue.rs` | `OpenMerchant` arm calls `enter_merchant_inventory`; stub test replaced; unknown-NPC test added                                                                 |
+| `src/game/systems/input.rs`    | `GameMode::Dialogue` I-key branch added; `GameContent` optional param added; `#[cfg(test)]` on `mod tests` fixed; 3 new tests in `mod dialogue_inventory_tests` |
+
+### Quality Gate Results
+
+```
+cargo fmt --all                              → no output (clean)
+cargo check --all-targets --all-features     → Finished 0 errors, 0 warnings
+cargo clippy --all-targets --all-features    → Finished 0 warnings
+cargo nextest run --all-features             → 2730 passed, 0 failed, 8 skipped
+```
+
+### Deliverables Checklist
+
+- [x] `src/game/systems/dialogue.rs` — `OpenMerchant` arm calls `enter_merchant_inventory`
+- [x] `src/game/systems/input.rs` — `I` key in `Dialogue` mode opens merchant inventory only for merchant NPCs
+- [x] `src/application/dialogue.rs` — `DialogueState::speaker_npc_id` field already present; no change needed
+- [x] Stub test replaced; five new tests added and passing
+- [x] All four quality gates pass
+
+### Architecture Compliance
+
+- `DialogueAction::OpenMerchant` variant definition in `src/domain/dialogue.rs`
+  is unchanged (Section 4.8 compliant).
+- `DialogueState::speaker_npc_id: Option<String>` was already present in
+  `src/application/dialogue.rs`; no structural addition was required.
+- `enter_merchant_inventory` and `ensure_npc_runtime_initialized` on
+  `GameState` are used exactly as documented in `architecture.md` Section 12.7.
+- `GameMode::MerchantInventory(_)` variant used directly; no new variants added.
+- Type aliases (`NpcId` = `String`) used consistently; no raw `u32`/`usize` for
+  domain identity types.
+- All test data uses `data/test_campaign` fixtures via the pre-existing
+  `make_merchant_db` helpers; no references to `campaigns/tutorial`.
+- No RON data files created or modified in this phase.

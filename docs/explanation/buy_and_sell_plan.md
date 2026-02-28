@@ -27,45 +27,51 @@ This plan covers two related but distinct interaction systems:
 
 The following infrastructure already exists and **must not be re-implemented**:
 
-| Component | Location | Status |
-|-----------|----------|--------|
-| `buy_item()` transaction | `src/domain/transactions.rs` | ✅ Implemented and tested |
-| `sell_item()` transaction | `src/domain/transactions.rs` | ✅ Implemented and tested |
-| `MerchantStock`, `StockEntry`, `NpcEconomySettings` | `src/domain/inventory.rs` | ✅ Implemented and tested |
-| `MerchantInventoryState`, `MerchantFocus` | `src/application/merchant_inventory_state.rs` | ✅ Implemented and tested |
-| `ContainerInventoryState`, `ContainerFocus` | `src/application/container_inventory_state.rs` | ✅ Implemented and tested |
-| `GameMode::MerchantInventory(_)` | `src/application/mod.rs` | ✅ Variant exists |
-| `GameMode::ContainerInventory(_)` | `src/application/mod.rs` | ✅ Variant exists |
-| `GameState::enter_merchant_inventory()` | `src/application/mod.rs` | ✅ Implemented and tested |
-| `GameState::enter_container_inventory()` | `src/application/mod.rs` | ✅ Implemented and tested |
-| `MerchantInventoryPlugin` (UI + input + action systems) | `src/game/systems/merchant_inventory_ui.rs` | ✅ Implemented |
-| `ContainerInventoryPlugin` (UI + input + action systems) | `src/game/systems/container_inventory_ui.rs` | ✅ Implemented |
-| `NpcDefinition::is_merchant` flag | `src/domain/world/npc.rs` | ✅ Implemented |
-| `NpcRuntimeStore`, `NpcRuntimeState` | `src/domain/world/npc_runtime.rs` | ✅ Implemented |
-| `ensure_npc_runtime_initialized()` | `src/application/mod.rs` | ✅ Implemented |
-| `DialogueAction::OpenMerchant` | `src/domain/dialogue.rs` | ✅ Variant exists (stub) |
-| `EventResult::EnterMerchant` | `src/domain/world/events.rs` | ✅ Variant exists |
-| `handle_event_result` for `EnterMerchant` | `src/game/systems/events.rs` | ✅ Routes to dialogue |
-| Tutorial merchant NPCs and stock templates | `campaigns/tutorial/data/` | ✅ Data present |
-| Test campaign merchant NPCs and stock templates | `data/test_campaign/data/` | ✅ Data present |
+| Component                                                | Location                                       | Status                    |
+| -------------------------------------------------------- | ---------------------------------------------- | ------------------------- |
+| `buy_item()` transaction                                 | `src/domain/transactions.rs`                   | ✅ Implemented and tested |
+| `sell_item()` transaction                                | `src/domain/transactions.rs`                   | ✅ Implemented and tested |
+| `MerchantStock`, `StockEntry`, `NpcEconomySettings`      | `src/domain/inventory.rs`                      | ✅ Implemented and tested |
+| `MerchantInventoryState`, `MerchantFocus`                | `src/application/merchant_inventory_state.rs`  | ✅ Implemented and tested |
+| `ContainerInventoryState`, `ContainerFocus`              | `src/application/container_inventory_state.rs` | ✅ Implemented and tested |
+| `GameMode::MerchantInventory(_)`                         | `src/application/mod.rs`                       | ✅ Variant exists         |
+| `GameMode::ContainerInventory(_)`                        | `src/application/mod.rs`                       | ✅ Variant exists         |
+| `GameState::enter_merchant_inventory()`                  | `src/application/mod.rs`                       | ✅ Implemented and tested |
+| `GameState::enter_container_inventory()`                 | `src/application/mod.rs`                       | ✅ Implemented and tested |
+| `MerchantInventoryPlugin` (UI + input + action systems)  | `src/game/systems/merchant_inventory_ui.rs`    | ✅ Implemented            |
+| `ContainerInventoryPlugin` (UI + input + action systems) | `src/game/systems/container_inventory_ui.rs`   | ✅ Implemented            |
+| `NpcDefinition::is_merchant` flag                        | `src/domain/world/npc.rs`                      | ✅ Implemented            |
+| `NpcRuntimeStore`, `NpcRuntimeState`                     | `src/domain/world/npc_runtime.rs`              | ✅ Implemented            |
+| `ensure_npc_runtime_initialized()`                       | `src/application/mod.rs`                       | ✅ Implemented            |
+| `DialogueAction::OpenMerchant`                           | `src/domain/dialogue.rs`                       | ✅ Variant exists (stub)  |
+| `EventResult::EnterMerchant`                             | `src/domain/world/events.rs`                   | ✅ Variant exists         |
+| `handle_event_result` for `EnterMerchant`                | `src/game/systems/events.rs`                   | ✅ Routes to dialogue     |
+| Tutorial merchant NPCs and stock templates               | `campaigns/tutorial/data/`                     | ✅ Data present           |
+| Test campaign merchant NPCs and stock templates          | `data/test_campaign/data/`                     | ✅ Data present           |
 
 ### What Is Missing (Gaps This Plan Closes)
 
-| Gap | Phase |
-|-----|-------|
-| `DialogueAction::OpenMerchant` handler calls `enter_merchant_inventory()` instead of logging a stub | Phase 1 |
-| Pressing `I` while in `GameMode::Dialogue` with a merchant NPC opens `GameMode::MerchantInventory` | Phase 1 |
-| `I` key in non-merchant dialogue is ignored (no mode change) | Phase 1 |
+| Gap                                                                                                                   | Phase   |
+| --------------------------------------------------------------------------------------------------------------------- | ------- |
+| `DialogueAction::OpenMerchant` handler calls `enter_merchant_inventory()` instead of logging a stub                   | Phase 1 |
+| Pressing `I` while in `GameMode::Dialogue` with a merchant NPC opens `GameMode::MerchantInventory`                    | Phase 1 |
+| `I` key in non-merchant dialogue is ignored (no mode change)                                                          | Phase 1 |
 | Player feedback (game log message) when buy/sell fails (insufficient gold, inventory full, out of stock, cursed item) | Phase 2 |
-| Price display in merchant stock panel (shows item cost before confirming buy) | Phase 2 |
-| Party gold display in merchant UI header | Phase 2 |
-| Container interaction: `E` on a container map event enters `GameMode::ContainerInventory` | Phase 3 |
-| Container items persist after partial take (map event state written back on close) | Phase 3 |
-| Container empty state: panel shows "Empty" text when container has no items | Phase 3 |
-| Mouse click support for Buy, Sell, Take, Take All, Stash action buttons | Phase 4 |
-| Tutorial merchant dialogue node wires `OpenMerchant` action to open shop | Phase 5 |
-| `data/test_campaign` merchant dialogue mirrors tutorial wiring | Phase 5 |
-| `docs/explanation/implementations.md` updated | Phase 5 |
+| Price display in merchant stock panel (shows item cost before confirming buy)                                         | Phase 2 |
+| Party gold display in merchant UI header                                                                              | Phase 2 |
+| Container interaction: `E` on a container map event enters `GameMode::ContainerInventory`                             | Phase 3 |
+| Container items persist after partial take (map event state written back on close)                                    | Phase 3 |
+| Container empty state: panel shows "Empty" text when container has no items                                           | Phase 3 |
+| Mouse click support for Buy, Sell, Take, Take All, Stash action buttons                                               | Phase 4 |
+| Tutorial merchant dialogue node wires `OpenMerchant` action to open shop                                              | Phase 5 |
+| `data/test_campaign` merchant dialogue mirrors tutorial wiring                                                        | Phase 5 |
+| `docs/explanation/implementations.md` updated                                                                         | Phase 5 |
+| Merchant stock replenished to template quantities each in-game day                                                    | Phase 6 |
+| Sold-out items reappear at dawn after the player rests or advances time past midnight                                 | Phase 6 |
+| Each merchant carries a small rotating slot of random magic items refreshed every `magic_refresh_days`                | Phase 6 |
+| Magic item pool and rotation count defined per-template in `npc_stock_templates.ron`                                  | Phase 6 |
+| `GameState::advance_time` triggers restock check; no Bevy system clock dependency                                     | Phase 6 |
+| Restock and magic-slot state persists across save/load                                                                | Phase 6 |
 
 ---
 
@@ -260,11 +266,11 @@ All tests use `data/test_campaign`, not `campaigns/tutorial`.
 ### 1.4 Deliverables
 
 - [ ] `src/game/systems/dialogue.rs` — `OpenMerchant` arm calls
-  `enter_merchant_inventory`
+      `enter_merchant_inventory`
 - [ ] `src/game/systems/input.rs` — `I` key in `Dialogue` mode opens merchant
-  inventory only for merchant NPCs
+      inventory only for merchant NPCs
 - [ ] `src/application/dialogue.rs` — `DialogueState::npc_id` field added if
-  missing
+      missing
 - [ ] Stub test replaced / new tests added and passing
 - [ ] All four quality gates pass
 
@@ -345,13 +351,13 @@ The NPC definition is retrieved from `game_content.db().npcs.get_npc(npc_id)`.
 In `merchant_inventory_action_system`, the buy and sell handlers currently
 emit only `warn!` on failure. Add game log entries for every failure case:
 
-| Failure case | Log message |
-|---|---|
+| Failure case                      | Log message                                          |
+| --------------------------------- | ---------------------------------------------------- |
 | `InsufficientGold { have, need }` | `"Not enough gold. Need {need} gp, have {have} gp."` |
-| `InventoryFull { character_id }` | `"Inventory is full. Drop an item to make room."` |
-| `OutOfStock { item_id }` | `"The merchant is out of stock for that item."` |
-| `ItemNotInInventory` | `"You do not have that item."` |
-| Cursed item sell attempt | `"That item is cursed and cannot be sold."` |
+| `InventoryFull { character_id }`  | `"Inventory is full. Drop an item to make room."`    |
+| `OutOfStock { item_id }`          | `"The merchant is out of stock for that item."`      |
+| `ItemNotInInventory`              | `"You do not have that item."`                       |
+| Cursed item sell attempt          | `"That item is cursed and cannot be sold."`          |
 
 The `game_log` resource is already imported in other game systems. Add
 `Option<ResMut<GameLog>>` to `merchant_inventory_action_system`'s parameters.
@@ -407,9 +413,9 @@ implemented). The method checks all seven equipped slots.
 - [ ] `src/game/systems/merchant_inventory_ui.rs` — gold display in header
 - [ ] `src/game/systems/merchant_inventory_ui.rs` — price column in stock panel
 - [ ] `src/game/systems/merchant_inventory_ui.rs` — sell-value preview in
-  character panel
+      character panel
 - [ ] `src/game/systems/merchant_inventory_ui.rs` — game log feedback on
-  transaction failure
+      transaction failure
 - [ ] Cursed-item sell guard (with `Equipment::is_item_equipped` if needed)
 - [ ] All four quality gates pass
 
@@ -549,10 +555,10 @@ All tests use `data/test_campaign`.
 
 - [ ] `MapEvent::Container` variant verified/added
 - [ ] `src/game/systems/events.rs` — E key on container enters
-  `ContainerInventory` mode
+      `ContainerInventory` mode
 - [ ] `src/game/systems/container_inventory_ui.rs` — write-back on close
 - [ ] `src/game/systems/container_inventory_ui.rs` — empty container display
-  and disabled Take All
+      and disabled Take All
 - [ ] `data/test_campaign/data/maps/map_1.ron` — at least one test container
 - [ ] All four quality gates pass
 
@@ -650,9 +656,9 @@ are fired correctly.
 ### 4.5 Deliverables
 
 - [ ] `src/game/systems/merchant_inventory_ui.rs` — Buy/Sell buttons clickable;
-  stock rows and inventory cells clickable to set selection
+      stock rows and inventory cells clickable to set selection
 - [ ] `src/game/systems/container_inventory_ui.rs` — Take/Take All/Stash
-  buttons clickable; rows and cells clickable to set selection
+      buttons clickable; rows and cells clickable to set selection
 - [ ] All four quality gates pass
 
 ### 4.6 Success Criteria
@@ -737,9 +743,9 @@ Add a new section summarising the buy/sell implementation:
 ### 5.6 Deliverables
 
 - [ ] `campaigns/tutorial/data/dialogues.ron` — `OpenMerchant` action wired
-  for both tutorial merchants
+      for both tutorial merchants
 - [ ] `data/test_campaign/data/dialogues.ron` — `OpenMerchant` action wired
-  for test merchant
+      for test merchant
 - [ ] `src/application/save_game.rs` — stock persistence test added/verified
 - [ ] `docs/explanation/implementations.md` — updated with buy/sell summary
 - [ ] All four quality gates pass
@@ -765,21 +771,28 @@ None. All required modules already exist.
 
 ### Modified Files
 
-| File | Phase | Nature of Change |
-|------|-------|------------------|
-| `src/game/systems/dialogue.rs` | 1 | Wire `OpenMerchant` to `enter_merchant_inventory` |
-| `src/application/dialogue.rs` | 1 | Add `npc_id: Option<NpcId>` to `DialogueState` (if absent) |
-| `src/game/systems/input.rs` | 1 | `I` key in `Dialogue` mode opens merchant inventory for merchant NPCs |
-| `src/game/systems/merchant_inventory_ui.rs` | 2, 4 | Gold display, price display, error feedback, mouse support |
-| `src/domain/character/equipment.rs` | 2 | `is_item_equipped(item_id) -> bool` (if absent) |
-| `src/game/systems/container_inventory_ui.rs` | 3, 4 | Write-back on close, empty state, mouse support |
-| `src/domain/world/events.rs` | 3 | `MapEvent::Container` variant (if absent) |
-| `src/game/systems/events.rs` | 3 | Wire `E` on container to `enter_container_inventory` |
-| `data/test_campaign/data/maps/map_1.ron` | 3 | Add test container event |
-| `data/test_campaign/data/dialogues.ron` | 5 | Wire `OpenMerchant` action |
-| `campaigns/tutorial/data/dialogues.ron` | 5 | Wire `OpenMerchant` action for both tutorial merchants |
-| `src/application/save_game.rs` | 5 | Stock and container persistence tests |
-| `docs/explanation/implementations.md` | 5 | Implementation summary section |
+| File                                              | Phase | Nature of Change                                                                                                                                                                          |
+| ------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/dialogue.rs`                    | 1     | Wire `OpenMerchant` to `enter_merchant_inventory`                                                                                                                                         |
+| `src/application/dialogue.rs`                     | 1     | Add `npc_id: Option<NpcId>` to `DialogueState` (if absent)                                                                                                                                |
+| `src/game/systems/input.rs`                       | 1     | `I` key in `Dialogue` mode opens merchant inventory for merchant NPCs                                                                                                                     |
+| `src/game/systems/merchant_inventory_ui.rs`       | 2, 4  | Gold display, price display, error feedback, mouse support                                                                                                                                |
+| `src/domain/character/equipment.rs`               | 2     | `is_item_equipped(item_id) -> bool` (if absent)                                                                                                                                           |
+| `src/game/systems/container_inventory_ui.rs`      | 3, 4  | Write-back on close, empty state, mouse support                                                                                                                                           |
+| `src/domain/world/events.rs`                      | 3     | `MapEvent::Container` variant (if absent)                                                                                                                                                 |
+| `src/game/systems/events.rs`                      | 3     | Wire `E` on container to `enter_container_inventory`                                                                                                                                      |
+| `data/test_campaign/data/maps/map_1.ron`          | 3     | Add test container event                                                                                                                                                                  |
+| `data/test_campaign/data/dialogues.ron`           | 5     | Wire `OpenMerchant` action                                                                                                                                                                |
+| `campaigns/tutorial/data/dialogues.ron`           | 5     | Wire `OpenMerchant` action for both tutorial merchants                                                                                                                                    |
+| `src/application/save_game.rs`                    | 5     | Stock and container persistence tests                                                                                                                                                     |
+| `docs/explanation/implementations.md`             | 5     | Implementation summary section                                                                                                                                                            |
+| `src/domain/world/npc_runtime.rs`                 | 6     | `MerchantStockTemplate` gains `magic_item_pool` and `magic_refresh_days`; `NpcRuntimeState` gains `last_restock_day` and `magic_slots`; `restock_daily` and `restock_magic_slots` methods |
+| `src/domain/inventory.rs`                         | 6     | `MerchantStock` gains `restock_daily` helper                                                                                                                                              |
+| `src/application/mod.rs`                          | 6     | `advance_time` calls `npc_runtime.tick_restock`                                                                                                                                           |
+| `data/test_campaign/data/npc_stock_templates.ron` | 6     | Add `magic_item_pool` and `magic_refresh_days` to test templates                                                                                                                          |
+| `campaigns/tutorial/data/npc_stock_templates.ron` | 6     | Add `magic_item_pool` and `magic_refresh_days` to tutorial templates                                                                                                                      |
+| `src/application/save_game.rs`                    | 6     | Restock persistence tests                                                                                                                                                                 |
+| `docs/explanation/implementations.md`             | 6     | Phase 6 implementation summary                                                                                                                                                            |
 
 ---
 
@@ -805,17 +818,580 @@ Expected results:
 
 ---
 
+## Phase 6: Daily Restock and Magic Item Rotation
+
+**Goal:** Merchant NPCs replenish their regular stock once per in-game day and
+carry a small rotating slot of random magic items that refreshes on a
+configurable cadence (default: every 7 days). Both the restock day and the
+current magic-item slots are persisted in `NpcRuntimeState` so they survive
+save/load cycles. No new `GameMode` variant or Bevy system is introduced; all
+logic is pure-Rust domain code driven by the existing `advance_time` call.
+
+---
+
+### 6.1 Extend `MerchantStockTemplate` with Magic-Item Pool Fields
+
+**File:** `src/domain/world/npc_runtime.rs`
+
+Add two new `#[serde(default)]` fields to `MerchantStockTemplate` so that
+existing `.ron` files deserialise without change:
+
+```antares/src/domain/world/npc_runtime.rs#L85-95
+pub struct MerchantStockTemplate {
+    pub id: String,
+    pub entries: Vec<TemplateStockEntry>,
+
+    /// Pool of item IDs that may appear in the merchant's magic-item slots.
+    ///
+    /// At each magic refresh the engine picks `magic_slot_count` distinct
+    /// items at random from this list. Duplicates in the list act as
+    /// weighted entries (a doubled entry is twice as likely to be chosen).
+    /// If the pool is empty, no magic slots are generated.
+    #[serde(default)]
+    pub magic_item_pool: Vec<ItemId>,
+
+    /// How many random magic items appear in the shop at once.
+    ///
+    /// Defaults to 0 (no magic slots). Values above 0 activate the rotation.
+    #[serde(default)]
+    pub magic_slot_count: u8,
+
+    /// Number of in-game days between magic-item slot refreshes.
+    ///
+    /// Defaults to 7. Must be ≥ 1; values of 0 are treated as 1.
+    #[serde(default = "default_magic_refresh_days")]
+    pub magic_refresh_days: u32,
+}
+
+fn default_magic_refresh_days() -> u32 { 7 }
+```
+
+**Important:** `magic_item_pool` contains `ItemId` values (`u32` type alias).
+The pool is **definition data** (never mutated). The live magic items are held
+in `NpcRuntimeState::magic_slots` (see §6.2).
+
+---
+
+### 6.2 Extend `NpcRuntimeState` with Restock Tracking Fields
+
+**File:** `src/domain/world/npc_runtime.rs`
+
+Add three new `#[serde(default)]` fields to `NpcRuntimeState`:
+
+```antares/src/domain/world/npc_runtime.rs#L155-175
+pub struct NpcRuntimeState {
+    pub npc_id: NpcId,
+    pub stock: Option<MerchantStock>,
+    pub services_consumed: Vec<String>,
+
+    /// The in-game day on which `stock` was last fully restocked from its
+    /// template.  `0` means "never restocked this session" (forces an
+    /// immediate restock on the first `tick_restock` call, which is the
+    /// desired behaviour for a fresh or legacy-loaded save).
+    #[serde(default)]
+    pub last_restock_day: u32,
+
+    /// Current magic-item slots: item IDs chosen at the last magic refresh.
+    ///
+    /// Each entry represents one unit of that magic item available for
+    /// purchase. Entries are removed as items are bought (via the normal
+    /// `MerchantStock` path — magic slots are injected into `stock.entries`
+    /// at refresh time; see §6.3).
+    #[serde(default)]
+    pub magic_slots: Vec<ItemId>,
+
+    /// The in-game day on which `magic_slots` was last refreshed.
+    /// `0` means "never refreshed" (forces a refresh on first tick).
+    #[serde(default)]
+    pub last_magic_refresh_day: u32,
+}
+```
+
+All three fields default to `0` / empty so deserialising a pre-Phase-6 save
+produces the "never ticked" sentinel values, which cause an immediate restock
+on the next `advance_time` call — correct behaviour.
+
+---
+
+### 6.3 Add `restock_daily` and `refresh_magic_slots` to `NpcRuntimeState`
+
+**File:** `src/domain/world/npc_runtime.rs`
+
+#### 6.3.1 `restock_daily`
+
+````antares/src/domain/world/npc_runtime.rs#L1-1
+/// Replenishes all regular stock entries back to the quantities defined in
+/// `template`.
+///
+/// This method replaces each `StockEntry` quantity with the corresponding
+/// template entry quantity.  Any entry whose `item_id` is not present in the
+/// template (e.g. an item the player sold *to* the merchant) is left
+/// unchanged — the merchant keeps what they were given.
+///
+/// # Arguments
+///
+/// * `template` - The template this merchant was initialised from.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::npc_runtime::{
+///     NpcRuntimeState, MerchantStockTemplate, TemplateStockEntry,
+/// };
+///
+/// let template = MerchantStockTemplate {
+///     id: "basic".to_string(),
+///     entries: vec![TemplateStockEntry { item_id: 1, quantity: 5, override_price: None }],
+///     magic_item_pool: vec![],
+///     magic_slot_count: 0,
+///     magic_refresh_days: 7,
+/// };
+///
+/// let mut state = NpcRuntimeState::initialize_stock_from_template(
+///     "merchant_bob".to_string(), &template,
+/// );
+/// // Buy all stock
+/// state.stock.as_mut().unwrap().entries[0].quantity = 0;
+///
+/// state.restock_daily(&template);
+/// assert_eq!(state.stock.as_ref().unwrap().get_entry(1).unwrap().quantity, 5);
+/// ```
+pub fn restock_daily(&mut self, template: &MerchantStockTemplate) {
+    let Some(stock) = self.stock.as_mut() else { return };
+    for tmpl_entry in &template.entries {
+        match stock.get_entry_mut(tmpl_entry.item_id) {
+            Some(entry) => entry.quantity = tmpl_entry.quantity,
+            None => stock.entries.push(StockEntry {
+                item_id: tmpl_entry.item_id,
+                quantity: tmpl_entry.quantity,
+                override_price: tmpl_entry.override_price,
+            }),
+        }
+    }
+}
+````
+
+#### 6.3.2 `refresh_magic_slots`
+
+````antares/src/domain/world/npc_runtime.rs#L1-1
+/// Replaces the merchant's random magic-item slots with a freshly chosen
+/// selection drawn from `template.magic_item_pool`.
+///
+/// **Selection algorithm**
+///
+/// 1. Remove any existing magic-slot entries from `stock.entries` (identified
+///    by matching their `item_id` against the old `self.magic_slots` list).
+/// 2. Choose `template.magic_slot_count` item IDs at random from
+///    `template.magic_item_pool` without replacement within a single draw
+///    (but duplicates in the pool increase selection probability).
+/// 3. Add one `StockEntry` (quantity = 1, no price override) per chosen item
+///    to `stock.entries`.
+/// 4. Update `self.magic_slots` with the newly chosen item IDs.
+///
+/// A deterministic `seed` is accepted so tests can produce reproducible
+/// results without depending on OS randomness.
+///
+/// # Arguments
+///
+/// * `template` - The template defining the magic-item pool and slot count.
+/// * `seed`     - PRNG seed for reproducible selection (use `game_time.day`
+///   combined with a stable NPC-specific value in production).
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::npc_runtime::{
+///     NpcRuntimeState, MerchantStockTemplate, TemplateStockEntry,
+/// };
+///
+/// let template = MerchantStockTemplate {
+///     id: "wizard_shop".to_string(),
+///     entries: vec![],
+///     magic_item_pool: vec![100, 101, 102, 103, 104],
+///     magic_slot_count: 2,
+///     magic_refresh_days: 7,
+/// };
+///
+/// let mut state = NpcRuntimeState::new("wizard_zara".to_string());
+/// state.stock = Some(antares::domain::inventory::MerchantStock::new());
+/// state.refresh_magic_slots(&template, 42);
+///
+/// assert_eq!(state.magic_slots.len(), 2);
+/// assert_eq!(
+///     state.stock.as_ref().unwrap().entries.len(),
+///     2,
+///     "one stock entry per magic slot"
+/// );
+/// ```
+pub fn refresh_magic_slots(&mut self, template: &MerchantStockTemplate, seed: u64) {
+    let Some(stock) = self.stock.as_mut() else { return };
+
+    // Step 1 — remove stale magic-slot entries
+    let old_slots = std::mem::take(&mut self.magic_slots);
+    for old_id in &old_slots {
+        stock.entries.retain(|e| e.item_id != *old_id);
+    }
+
+    // Step 2 — pick new items from pool using a minimal LCG PRNG
+    let count = template.magic_slot_count as usize;
+    let pool = &template.magic_item_pool;
+    if count == 0 || pool.is_empty() {
+        return;
+    }
+
+    let mut rng = seed;
+    let mut chosen: Vec<ItemId> = Vec::with_capacity(count);
+    let mut available: Vec<ItemId> = pool.clone();
+
+    for _ in 0..count {
+        if available.is_empty() {
+            break;
+        }
+        // LCG step: constants from Knuth TAOCP Vol.2
+        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let idx = (rng >> 33) as usize % available.len();
+        chosen.push(available.remove(idx));
+    }
+
+    // Step 3 — add stock entries for chosen items
+    for &item_id in &chosen {
+        stock.entries.push(StockEntry {
+            item_id,
+            quantity: 1,
+            override_price: None,
+        });
+    }
+
+    // Step 4 — record new slots
+    self.magic_slots = chosen;
+}
+````
+
+**Why a hand-rolled LCG?** The project uses no external RNG crate and the
+selection does not need cryptographic quality. The LCG is seeded with
+`game_time.day ^ npc_id_hash` in production (see §6.4) so different merchants
+on different days produce distinct selections. Tests supply an explicit seed.
+
+---
+
+### 6.4 Add `tick_restock` to `NpcRuntimeStore`
+
+**File:** `src/domain/world/npc_runtime.rs`
+
+````antares/src/domain/world/npc_runtime.rs#L1-1
+/// Advances the restock clock for all merchants in the store.
+///
+/// Call this once per `advance_time` invocation, passing the **new**
+/// `GameTime` (after the time advance has been applied).
+///
+/// For each NPC that has an active `MerchantStock`:
+///
+/// 1. **Daily restock** — if `new_day > last_restock_day`, replenish all
+///    regular stock entries back to their template quantities.
+/// 2. **Magic-slot refresh** — if the number of days elapsed since
+///    `last_magic_refresh_day` meets or exceeds `template.magic_refresh_days`,
+///    replace the magic slots with a freshly seeded selection.
+///
+/// Both operations are skipped for NPCs without a `restock_template`
+/// or whose template cannot be found in `templates`.
+///
+/// # Arguments
+///
+/// * `new_time`  - The game time **after** the time advance.
+/// * `templates` - The loaded template database.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::GameTime;
+/// use antares::domain::world::npc_runtime::{
+///     NpcRuntimeStore, NpcRuntimeState, MerchantStockTemplate,
+///     MerchantStockTemplateDatabase, TemplateStockEntry,
+/// };
+/// use antares::domain::world::npc::NpcDefinition;
+///
+/// let mut templates = MerchantStockTemplateDatabase::new();
+/// templates.add(MerchantStockTemplate {
+///     id: "daily_shop".to_string(),
+///     entries: vec![TemplateStockEntry { item_id: 1, quantity: 3, override_price: None }],
+///     magic_item_pool: vec![],
+///     magic_slot_count: 0,
+///     magic_refresh_days: 7,
+/// });
+///
+/// let mut merchant = NpcDefinition::merchant("bob", "Bob", "bob.png");
+/// merchant.stock_template = Some("daily_shop".to_string());
+///
+/// let mut store = NpcRuntimeStore::new();
+/// store.initialize_merchant(&merchant, &templates);
+///
+/// // Deplete stock
+/// store.get_mut(&"bob".to_string()).unwrap()
+///     .stock.as_mut().unwrap().entries[0].quantity = 0;
+///
+/// // Advance to day 2
+/// let day2 = GameTime::new(2, 6, 0);
+/// store.tick_restock(&day2, &templates);
+///
+/// // Stock should be replenished
+/// assert_eq!(
+///     store.get(&"bob".to_string()).unwrap()
+///         .stock.as_ref().unwrap().get_entry(1).unwrap().quantity,
+///     3
+/// );
+/// ```
+pub fn tick_restock(
+    &mut self,
+    new_time: &crate::domain::types::GameTime,
+    templates: &MerchantStockTemplateDatabase,
+) {
+    let new_day = new_time.day;
+
+    // Collect NPC IDs to avoid borrowing self while iterating
+    let npc_ids: Vec<NpcId> = self.npcs.keys().cloned().collect();
+
+    for npc_id in npc_ids {
+        // Borrow as mutable for this NPC only
+        let state = match self.npcs.get_mut(&npc_id) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        // Only process NPCs that have stock
+        let template_id = match state.stock.as_ref().and_then(|s| s.restock_template.clone()) {
+            Some(id) => id,
+            None => continue,
+        };
+
+        let template = match templates.get(&template_id) {
+            Some(t) => t.clone(),
+            None => continue,
+        };
+
+        // --- Daily restock ---
+        if new_day > state.last_restock_day {
+            state.restock_daily(&template);
+            state.last_restock_day = new_day;
+        }
+
+        // --- Magic-slot refresh ---
+        if template.magic_slot_count > 0 && !template.magic_item_pool.is_empty() {
+            let refresh_interval = template.magic_refresh_days.max(1);
+            let days_since_refresh = new_day.saturating_sub(state.last_magic_refresh_day);
+            if days_since_refresh >= refresh_interval
+                || state.last_magic_refresh_day == 0
+            {
+                // Build a deterministic seed from the day and NPC ID
+                let npc_hash: u64 = npc_id
+                    .bytes()
+                    .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+                let seed = (new_day as u64).wrapping_mul(2654435761).wrapping_add(npc_hash);
+                state.refresh_magic_slots(&template, seed);
+                state.last_magic_refresh_day = new_day;
+            }
+        }
+    }
+}
+````
+
+---
+
+### 6.5 Wire `tick_restock` into `GameState::advance_time`
+
+**File:** `src/application/mod.rs`
+
+The existing `advance_time` method ticks active spell durations. Extend it to
+also call `npc_runtime.tick_restock` after the time advance. The
+`ContentDatabase` is needed for the template lookup; it is obtained from the
+`GameState::campaign` field's loaded content, but since `advance_time` does not
+currently take a content parameter the simplest correct design is to add an
+optional `templates` parameter:
+
+````antares/src/application/mod.rs#L1-1
+/// Advances game time by the specified number of minutes.
+///
+/// After advancing, active spell durations are ticked and merchant NPC stock
+/// is restocked / magic slots are rotated if a new in-game day has begun.
+///
+/// # Arguments
+///
+/// * `minutes`   - Number of in-game minutes to advance.
+/// * `templates` - Template database used to replenish merchant stock.
+///   Pass `None` in contexts where the content is not available (e.g.
+///   headless unit tests that do not load campaign data); restocking is
+///   silently skipped in that case.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::GameState;
+/// use antares::domain::world::npc_runtime::MerchantStockTemplateDatabase;
+///
+/// let mut state = GameState::new();
+/// let templates = MerchantStockTemplateDatabase::new();
+/// state.advance_time(60, Some(&templates));
+/// assert_eq!(state.time.minute, 0);
+/// assert_eq!(state.time.hour, 1);
+/// ```
+pub fn advance_time(
+    &mut self,
+    minutes: u32,
+    templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
+) {
+    self.time.advance_minutes(minutes);
+    for _ in 0..minutes {
+        self.active_spells.tick();
+    }
+    if let Some(tmpl) = templates {
+        self.npc_runtime.tick_restock(&self.time, tmpl);
+    }
+}
+````
+
+**Call-site audit:** Every call to `advance_time` in the codebase must be
+updated to pass `Some(&content.npc_stock_templates)` when a `GameContent`
+resource is available, or `None` where it is not (tests, headless tools). Use
+`grep -rn 'advance_time'` to find all call sites before submitting.
+
+---
+
+### 6.6 Update `npc_stock_templates.ron` Data Files
+
+#### 6.6.1 `data/test_campaign/data/npc_stock_templates.ron`
+
+Add `magic_item_pool`, `magic_slot_count`, and `magic_refresh_days` to the
+existing `"tutorial_merchant_stock"` template so the full rotation path is
+exercised by integration tests:
+
+```antares/data/test_campaign/data/npc_stock_templates.ron#L1-1
+(
+    id: "tutorial_merchant_stock",
+    entries: [
+        (item_id: 1, quantity: 2, override_price: None),
+        (item_id: 2, quantity: 2, override_price: None),
+        (item_id: 3, quantity: 1, override_price: None),
+        (item_id: 20, quantity: 2, override_price: None),
+        (item_id: 23, quantity: 2, override_price: None),
+        (item_id: 50, quantity: 3, override_price: None),
+    ],
+    magic_item_pool: [101, 102, 103, 104, 105],
+    magic_slot_count: 2,
+    magic_refresh_days: 7,
+),
+```
+
+The `"tutorial_blacksmith_stock"` template keeps `magic_slot_count: 0` (no
+magic items) to verify the disabled-rotation path.
+
+#### 6.6.2 `campaigns/tutorial/data/npc_stock_templates.ron`
+
+Apply the same field additions to the production tutorial templates. Use the
+same magic item IDs as the test campaign (they reference items that already
+exist in `campaigns/tutorial/data/items.ron`). `magic_slot_count` values must
+not exceed the size of `magic_item_pool`. Both fields default to `0`/`[]` via
+`#[serde(default)]` so no existing gameplay is affected until you explicitly
+set `magic_slot_count > 0`.
+
+**Verify** that the IDs in `magic_item_pool` resolve to items with
+`is_magical() == true` in the item database. Non-magical items in the pool are
+accepted by the engine but should be avoided by data authors (document this
+constraint in the RON file comments).
+
+---
+
+### 6.7 Testing Requirements for Phase 6
+
+All tests live in the files modified by this phase. All test data uses
+`data/test_campaign`, never `campaigns/tutorial`.
+
+#### `src/domain/world/npc_runtime.rs` — new unit tests
+
+| Test name                                                  | Verifies                                                                            |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `test_restock_daily_restores_depleted_quantities`          | After buying out an item, `restock_daily` brings quantities back to template values |
+| `test_restock_daily_preserves_non_template_items`          | Items sold _to_ the merchant (not in template) are not removed by `restock_daily`   |
+| `test_restock_daily_noop_on_no_stock`                      | Calling `restock_daily` on an NPC with `stock: None` does not panic                 |
+| `test_refresh_magic_slots_populates_correct_count`         | After `refresh_magic_slots`, `magic_slots.len() == magic_slot_count`                |
+| `test_refresh_magic_slots_entries_added_to_stock`          | `stock.entries` gains one entry per slot, each with `quantity == 1`                 |
+| `test_refresh_magic_slots_removes_old_slots`               | Calling `refresh_magic_slots` twice removes the first set before adding the second  |
+| `test_refresh_magic_slots_noop_when_pool_empty`            | `magic_slot_count > 0` but empty pool → no slots added, no panic                    |
+| `test_refresh_magic_slots_capped_by_pool_size`             | `magic_slot_count` larger than pool size → slots capped to pool length              |
+| `test_refresh_magic_slots_reproducible_with_same_seed`     | Same seed → same selection                                                          |
+| `test_refresh_magic_slots_different_seed_different_result` | Different seeds → different selections (probabilistic; use a pool of ≥5 items)      |
+| `test_tick_restock_triggers_on_new_day`                    | `tick_restock` on day 2 when `last_restock_day == 1` restocks quantities            |
+| `test_tick_restock_no_restock_same_day`                    | `tick_restock` on day 1 when `last_restock_day == 1` does not change quantities     |
+| `test_tick_restock_updates_last_restock_day`               | After `tick_restock`, `last_restock_day == new_time.day`                            |
+| `test_tick_restock_magic_refresh_on_interval`              | After `magic_refresh_days` days `tick_restock` calls `refresh_magic_slots`          |
+| `test_tick_restock_magic_no_refresh_before_interval`       | Before interval is reached magic slots are unchanged                                |
+| `test_tick_restock_initial_zero_day_forces_restock`        | `last_restock_day == 0` forces a restock even on day 1                              |
+| `test_tick_restock_skips_npc_without_template`             | NPCs with `stock: None` or no `restock_template` are silently skipped               |
+
+#### `src/application/mod.rs` — updated tests
+
+Update `test_advance_time_ticks_spells` to pass `None` for `templates` (the
+new parameter). Verify the test still passes.
+
+Add:
+
+| Test name                                        | Verifies                                                                        |
+| ------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `test_advance_time_triggers_restock`             | `advance_time` with a non-`None` templates arg and a day boundary calls restock |
+| `test_advance_time_no_restock_without_templates` | `advance_time(None)` does not panic and does not alter stock                    |
+
+#### `src/application/save_game.rs` — new test
+
+| Test name                                              | Verifies                                                                                                                                 |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_save_load_preserves_restock_day_and_magic_slots` | Serialise a `GameState` with `last_restock_day == 3` and `magic_slots: [101, 102]`; deserialise; assert both fields round-trip correctly |
+
+---
+
+### 6.8 Deliverables
+
+- [ ] `src/domain/world/npc_runtime.rs` — `MerchantStockTemplate` extended;
+      `NpcRuntimeState` extended; `restock_daily`, `refresh_magic_slots`, and
+      `tick_restock` implemented and documented
+- [ ] `src/application/mod.rs` — `advance_time` signature updated; all
+      existing call sites patched; new tests added
+- [ ] `data/test_campaign/data/npc_stock_templates.ron` — magic-item fields
+      added to `"tutorial_merchant_stock"` template
+- [ ] `campaigns/tutorial/data/npc_stock_templates.ron` — magic-item fields
+      added to production templates
+- [ ] All unit tests listed in §6.7 implemented and passing
+- [ ] All four quality gates pass
+
+---
+
+### 6.9 Success Criteria
+
+1. After the party rests overnight (or `advance_time` crosses a day boundary),
+   a merchant that had sold-out items now shows full stock again.
+2. A merchant configured with `magic_slot_count: 2` shows exactly 2 magic
+   items in their shop, chosen from the `magic_item_pool`.
+3. After `magic_refresh_days` in-game days have elapsed the magic items change
+   to a new selection drawn from the pool.
+4. Saving and loading preserves `last_restock_day`, `magic_slots`, and
+   `last_magic_refresh_day` so stock and magic slots do not reset unexpectedly
+   on load.
+5. A merchant with `magic_slot_count: 0` or an empty `magic_item_pool` shows
+   no magic items and no errors are logged.
+6. All existing tests (including Phases 1–5) continue to pass — the `None`
+   sentinel for `advance_time` templates preserves backward-compatible
+   behaviour.
+
+---
+
 ## Architecture Compliance Checklist
 
 - [ ] `ItemId`, `NpcId`, `CharacterId` type aliases used — no raw `u32`/`usize`
-  for domain identifiers
+      for domain identifiers
 - [ ] `Inventory::MAX_ITEMS` constant referenced — never hardcoded numeric limit
 - [ ] `Equipment::MAX_EQUIPPED` constant referenced — never hardcoded `7`
 - [ ] All test data in `data/test_campaign` — no test references
-  `campaigns/tutorial`
+      `campaigns/tutorial`
 - [ ] RON format for all data files — no JSON or YAML for game content
 - [ ] `///` doc comments on every new public function, struct, enum
 - [ ] `AttributePair` pattern used if any stat modification is added
 - [ ] `NpcRuntimeStore` serialised via existing `#[serde(default)]` — no
-  parallel serialisation path introduced
+      parallel serialisation path introduced
 - [ ] No architectural deviations from `docs/reference/architecture.md`

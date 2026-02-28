@@ -1265,12 +1265,42 @@ fn execute_action(
         }
 
         DialogueAction::OpenMerchant { npc_id } => {
-            // Phase 4 will add a dedicated GameMode::Shopping state and shop UI.
-            // For now, log the intent and return without mutating state.
-            info!("OpenMerchant: {} - shop UI not yet implemented", npc_id);
-            if let Some(ref mut log) = game_log {
-                log.add(format!("Merchant shop for '{}' coming soon.", npc_id));
+            // Look up the NPC display name from the content database.
+            let npc_name = db
+                .npcs
+                .get_npc(npc_id)
+                .map(|n| n.name.clone())
+                .unwrap_or_else(|| npc_id.clone());
+
+            // Guard: NPC must exist and be a merchant to open the shop.
+            let npc_is_merchant = db
+                .npcs
+                .get_npc(npc_id)
+                .map(|n| n.is_merchant)
+                .unwrap_or(false);
+
+            if !npc_is_merchant {
+                warn!(
+                    "OpenMerchant: NPC '{}' not found or is not a merchant; ignoring action",
+                    npc_id
+                );
+                if let Some(ref mut log) = game_log {
+                    log.add(format!("'{}' is not a merchant.", npc_name));
+                }
+                return;
             }
+
+            // Ensure the merchant's NpcRuntimeState (including stock) is
+            // initialised before entering the inventory screen.  This call is
+            // idempotent on subsequent visits.
+            game_state.ensure_npc_runtime_initialized(db);
+
+            // Transition game mode to MerchantInventory.
+            info!(
+                "OpenMerchant: entering merchant inventory for NPC '{}' ('{}')",
+                npc_id, npc_name
+            );
+            game_state.enter_merchant_inventory(npc_id.clone(), npc_name);
         }
 
         DialogueAction::ConsumeService {
@@ -2847,17 +2877,51 @@ mod tests {
         );
     }
 
+    /// `OpenMerchant` must transition game mode to `MerchantInventory` when
+    /// the NPC exists and has `is_merchant == true`.
     #[test]
-    fn test_open_merchant_dialogue_action_no_state_change() {
-        // Arrange
+    fn test_open_merchant_dialogue_action_enters_merchant_inventory() {
+        // Arrange: use the merchant DB fixture that has "merchant_tom"
+        let db = make_merchant_db();
+        let mut game_state = make_game_state_with_merchant(0);
+        game_state.mode = crate::application::GameMode::Dialogue(merchant_dialogue_state());
+
+        // Act
+        execute_action(
+            &DialogueAction::OpenMerchant {
+                npc_id: "merchant_tom".to_string(),
+            },
+            &mut game_state,
+            &db,
+            Some(&merchant_dialogue_state()),
+            None,
+            None,
+        );
+
+        // Assert: mode must be MerchantInventory
+        assert!(
+            matches!(
+                game_state.mode,
+                crate::application::GameMode::MerchantInventory(_)
+            ),
+            "OpenMerchant must transition mode to MerchantInventory, got {:?}",
+            game_state.mode
+        );
+    }
+
+    /// `OpenMerchant` with an unknown NPC ID must not panic and must not change
+    /// the game mode (graceful degradation).
+    #[test]
+    fn test_open_merchant_dialogue_action_unknown_npc_no_panic() {
+        // Arrange: empty content database — NPC "ghost_npc" does not exist
         let db = ContentDatabase::new();
         let mut game_state = crate::application::GameState::new();
         let mode_before = std::mem::discriminant(&game_state.mode);
 
-        // Act: OpenMerchant should be a no-op (shop UI not yet implemented)
+        // Act: must not panic
         execute_action(
             &DialogueAction::OpenMerchant {
-                npc_id: "merchant_tom".to_string(),
+                npc_id: "ghost_npc".to_string(),
             },
             &mut game_state,
             &db,
@@ -2866,11 +2930,11 @@ mod tests {
             None,
         );
 
-        // Assert: game mode unchanged
+        // Assert: game mode is unchanged (no transition on unknown NPC)
         assert_eq!(
             std::mem::discriminant(&game_state.mode),
             mode_before,
-            "OpenMerchant should not change game mode (shop UI not yet implemented)"
+            "OpenMerchant with unknown NPC must not change game mode"
         );
     }
 

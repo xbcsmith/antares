@@ -428,6 +428,7 @@ fn handle_input(
     victory_roots: Query<Entity, With<crate::game::systems::combat::VictorySummaryRoot>>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
     dialogue_query: Query<&NpcDialogue>,
+    game_content: Option<Res<crate::application::resources::GameContent>>,
 ) {
     let current_time = time.elapsed_secs();
     let cooldown = input_config.controls.movement_cooldown;
@@ -450,12 +451,47 @@ fn handle_input(
         .is_action_just_pressed(GameAction::Inventory, &keyboard_input)
     {
         let game_state = &mut global_state.0;
+
+        // Capture the npc_id from dialogue state before any mutable borrow.
+        let dialogue_npc_id: Option<String> =
+            if let crate::application::GameMode::Dialogue(ref ds) = game_state.mode {
+                ds.speaker_npc_id.clone()
+            } else {
+                None
+            };
+
         match &game_state.mode {
             crate::application::GameMode::Inventory(inv_state) => {
                 // Close inventory: restore previous mode
                 let resume = inv_state.get_resume_mode();
                 info!("Inventory closed: restored mode = {:?}", resume);
                 game_state.mode = resume;
+            }
+            crate::application::GameMode::Dialogue(_) => {
+                // In dialogue: only open merchant inventory when the NPC is a merchant.
+                if let Some(npc_id) = dialogue_npc_id {
+                    if let Some(content) = game_content.as_deref() {
+                        if let Some(npc_def) = content.db().npcs.get_npc(&npc_id) {
+                            if npc_def.is_merchant {
+                                game_state.ensure_npc_runtime_initialized(content.db());
+                                let npc_name = npc_def.name.clone();
+                                info!(
+                                    "I key in Dialogue: opening merchant inventory for '{}'",
+                                    npc_id
+                                );
+                                game_state.enter_merchant_inventory(npc_id, npc_name);
+                            } else {
+                                // Non-merchant NPC: silently ignore the I key press.
+                                info!(
+                                    "I key in Dialogue: NPC '{}' is not a merchant, ignoring",
+                                    npc_id
+                                );
+                            }
+                        }
+                    }
+                }
+                // Whether we opened the merchant inventory or not, consume the
+                // key press and return so it doesn't fall through to other branches.
             }
             crate::application::GameMode::Menu(_) | crate::application::GameMode::Combat(_) => {
                 // Do not open inventory from menu or combat mode
@@ -767,6 +803,137 @@ mod adjacent_tile_tests {
         let center = Position::new(5, 5);
         let adjacent = get_adjacent_positions(center);
         assert_eq!(adjacent[2], Position::new(6, 5)); // East
+    }
+}
+
+#[cfg(test)]
+mod dialogue_inventory_tests {
+    use super::*;
+    use crate::application::resources::GameContent;
+    use crate::domain::world::npc::NpcDefinition;
+    use crate::sdk::database::ContentDatabase;
+    use bevy::prelude::{App, ButtonInput, KeyCode, Time, Update};
+
+    /// Helper: build a minimal Bevy app for I-key-in-dialogue tests.
+    ///
+    /// Inserts a `GameContent` resource populated with the given `ContentDatabase`
+    /// so the `handle_input` system can resolve NPC definitions.
+    fn build_dialogue_input_app(
+        db: ContentDatabase,
+        initial_mode: crate::application::GameMode,
+    ) -> App {
+        let mut app = App::new();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        let cfg = crate::sdk::game_config::ControlsConfig::default();
+        let km = KeyMap::from_controls_config(&cfg);
+        app.insert_resource(InputConfigResource {
+            controls: cfg,
+            key_map: km,
+        });
+        let mut gs = crate::application::GameState::new();
+        gs.mode = initial_mode;
+        app.insert_resource(GlobalState(gs));
+        app.insert_resource::<Time>(Time::default());
+        app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(GameContent::new(db));
+        app.add_message::<DoorOpenedEvent>();
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<StartDialogue>();
+        app.add_systems(Update, handle_input);
+        app
+    }
+
+    /// Build a `ContentDatabase` with a single merchant NPC ("merchant_tom").
+    fn merchant_db() -> ContentDatabase {
+        let mut db = ContentDatabase::new();
+        let merchant = NpcDefinition::merchant("merchant_tom", "Tom the Merchant", "tom.png");
+        db.npcs.add_npc(merchant).unwrap();
+        db
+    }
+
+    /// Build a `ContentDatabase` with a single non-merchant NPC ("elder_bob").
+    fn non_merchant_db() -> ContentDatabase {
+        let mut db = ContentDatabase::new();
+        let elder = NpcDefinition::new("elder_bob", "Elder Bob", "bob.png");
+        db.npcs.add_npc(elder).unwrap();
+        db
+    }
+
+    /// Build a `DialogueState` with the given `speaker_npc_id`.
+    fn dialogue_state_for(npc_id: &str) -> crate::application::dialogue::DialogueState {
+        crate::application::dialogue::DialogueState::start(1, 1, None, Some(npc_id.to_string()))
+    }
+
+    /// Pressing `I` while in `GameMode::Dialogue` with a merchant NPC must
+    /// transition the game mode to `GameMode::MerchantInventory`.
+    #[test]
+    fn test_handle_input_i_in_dialogue_with_merchant_opens_merchant_inventory() {
+        let db = merchant_db();
+        let initial_mode =
+            crate::application::GameMode::Dialogue(dialogue_state_for("merchant_tom"));
+        let mut app = build_dialogue_input_app(db, initial_mode);
+
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyI);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(
+                gs.0.mode,
+                crate::application::GameMode::MerchantInventory(_)
+            ),
+            "pressing I in Dialogue with a merchant must open MerchantInventory, got {:?}",
+            gs.0.mode
+        );
+    }
+
+    /// Pressing `I` while in `GameMode::Dialogue` with a non-merchant NPC must
+    /// leave the mode unchanged (still `Dialogue`).
+    #[test]
+    fn test_handle_input_i_in_dialogue_with_non_merchant_does_not_open_inventory() {
+        let db = non_merchant_db();
+        let initial_mode = crate::application::GameMode::Dialogue(dialogue_state_for("elder_bob"));
+        let mut app = build_dialogue_input_app(db, initial_mode);
+
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyI);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Dialogue(_)),
+            "pressing I in Dialogue with a non-merchant must not change mode, got {:?}",
+            gs.0.mode
+        );
+    }
+
+    /// Pressing `I` while in `GameMode::Dialogue` with `npc_id: None` must
+    /// do nothing — mode stays `Dialogue`.
+    #[test]
+    fn test_handle_input_i_in_dialogue_with_no_npc_id_does_nothing() {
+        let db = ContentDatabase::new();
+        // DialogueState with speaker_npc_id = None
+        let dialogue_state = crate::application::dialogue::DialogueState::start(1, 1, None, None);
+        let initial_mode = crate::application::GameMode::Dialogue(dialogue_state);
+        let mut app = build_dialogue_input_app(db, initial_mode);
+
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyI);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Dialogue(_)),
+            "pressing I in Dialogue with no npc_id must not change mode, got {:?}",
+            gs.0.mode
+        );
     }
 }
 
