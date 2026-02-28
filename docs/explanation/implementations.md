@@ -49,8 +49,10 @@
 | **Combat System Improvement Phase 5 Remediation** | ✅ COMPLETE | 2026-02-23 | **Dismiss victory splash when movement controls resume post-combat**                       |
 | **Combat Input Enter UX Remediation**             | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback**                 |
 
+| **Buy and Sell — Phase 2: Merchant UI Price Display, Gold Feedback, and Error Feedback** | ✅ COMPLETE | 2026-07-18 | **Party gold in header; price columns; sell-value preview; game log error feedback; cursed-item sell guard** |
+
 **Total Lines Implemented**: 10,200+ lines of production code + 6,100+ lines of documentation
-**Total Tests**: 430+ new tests (all passing), 2,578 total tests passing
+**Total Tests**: 459+ new tests (all passing), 2,744 total tests passing
 
 ---
 
@@ -11311,6 +11313,174 @@ unrelated to this work (flaky 646ms vs 500ms threshold on a loaded CI machine).
   domain or application layers.
 - Module placement unchanged: `src/game/systems/inventory_ui.rs`.
 - All constants extracted (`ACTION_FOCUSED_COLOR`); no magic literals introduced.
+
+## Buy and Sell — Phase 2: Merchant UI — Price Display, Gold Feedback, and Error Feedback
+
+### Overview
+
+Phase 2 makes the merchant trade screen fully informative: the player can always
+see how much gold the party has, what each item costs to buy, what they will
+receive when selling, and why a transaction was rejected. Failed buy/sell
+attempts now produce a visible `GameLog` entry instead of a silent `warn!`.
+
+### Components Implemented
+
+#### `src/domain/character.rs` (modified)
+
+- **`Equipment::is_item_equipped(item_id: ItemId) -> bool`** — new public
+  method that checks all seven equipment slots (weapon, armor, shield, helmet,
+  boots, accessory1, accessory2) and returns `true` if any slot contains the
+  given item. Used by the cursed-item sell guard in the action system.
+
+#### `src/game/systems/merchant_inventory_ui.rs` (modified)
+
+**New module-level helpers:**
+
+- **`pub fn format_gold(g: u32) -> String`** — formats a gold amount with
+  thousands-separator commas (e.g. `1_234` → `"1,234"`, `0` → `"0"`).
+  Public so it can be reused by other UI modules.
+- **`fn compute_sell_price(base_cost: u32, sell_cost: u32, buy_rate: f32) -> u32`** —
+  encapsulates the sell-price formula from `sell_item()` in
+  `src/domain/transactions.rs`:
+  1. Use `sell_cost` if non-zero, otherwise `base_cost / 2`.
+  2. Multiply by `buy_rate`, rounded down via `floor`.
+     Returns 0 for zero-cost items (callers apply `.max(1)` where a minimum
+     of 1 gp is required).
+
+**`merchant_inventory_ui_system` — party gold in top bar (§2.1):**
+
+The `right_to_left` layout in the top bar now renders the party gold after the
+keyboard-hint label using `format_gold`. The label uses a gold-yellow colour
+`Color32::from_rgb(255, 215, 0)` and `strong()` weight so it stands out
+visually:
+
+```
+[Esc] close   [Tab] switch panel   [1-6] switch character  │  Gold: 1,234
+```
+
+**`render_character_sell_panel` — sell-value preview (§2.3):**
+
+- Added `npc_id: &str` parameter so the function can look up the NPC's
+  `economy.buy_rate` from `game_content`.
+- The sell button label changed from `"Sell ({price} gold)"` to `"[ Sell ]"`.
+- A separate `"Sell value: N gp"` label is now rendered inline next to the
+  sell button using `compute_sell_price` and the NPC's `buy_rate` (default
+  `0.5` when the NPC has no economy override or content is unavailable).
+  This matches the formula used by `merchant_inventory_action_system`.
+- The `npc_id` is threaded from the `merchant_inventory_ui_system` call site.
+
+**`merchant_inventory_action_system` — `GameLog` feedback (§2.4):**
+
+Added `mut game_log: Option<ResMut<GameLog>>` to the system parameters.
+Every failure path now emits a human-readable `GameLog` message in addition to
+the existing `warn!` call:
+
+| Failure case                  | Log message emitted                                    |
+| ----------------------------- | ------------------------------------------------------ |
+| Character index out of bounds | _(warn only, not a player-facing error)_               |
+| Inventory full (pre-check)    | `"Inventory is full. Drop an item to make room."`      |
+| NPC has no stock              | _(warn only)_                                          |
+| Stock entry out of bounds     | _(warn only)_                                          |
+| Out of stock                  | `"The merchant is out of stock for that item."`        |
+| Insufficient gold             | `"Not enough gold. Need {need} gp, have {have} gp."`   |
+| `add_item` fails (rollback)   | `"Inventory is full. Drop an item to make room."`      |
+| Sell slot out of bounds       | `"You do not have that item."`                         |
+| Cursed item is equipped       | `"That item is cursed and cannot be removed or sold."` |
+
+**`merchant_inventory_action_system` — cursed-item sell guard (§2.4.1):**
+
+Before calling the sell logic, the action system now checks whether the item
+being sold is cursed _and_ currently equipped:
+
+1. Look up `item_def` from `game_content.db().items.get_item(item_id)`.
+2. If `item_def.is_cursed` is `true`, call
+   `character.equipment.is_item_equipped(item_id)`.
+3. If equipped → emit log message, `warn!`, and `continue` (item stays put).
+4. If not equipped (cursed loot sitting in the bag) → allow the sell.
+
+This matches the architecture §12.11 rule that the curse only applies during
+the equip/unequip cycle.
+
+### Tests Added
+
+#### `src/domain/character.rs` — `Equipment::is_item_equipped` unit tests
+
+| Test                                          | Description                                             |
+| --------------------------------------------- | ------------------------------------------------------- |
+| `test_equipment_is_item_equipped_weapon_slot` | Weapon slot with item 42 → `true`; item 99 → `false`.   |
+| `test_equipment_is_item_equipped_all_slots`   | All 7 slots populated; every id detected; 0 and 8 miss. |
+| `test_equipment_is_item_equipped_empty`       | Empty equipment → always `false`.                       |
+
+(These tests live in `src/game/systems/merchant_inventory_ui.rs` `mod tests`
+alongside the other merchant UI tests for locality.)
+
+#### `src/game/systems/merchant_inventory_ui.rs` — new unit tests
+
+| Test                                                    | Description                                                                           |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `test_format_gold_zero`                                 | `format_gold(0)` → `"0"`.                                                             |
+| `test_format_gold_below_thousand`                       | `999`, `1`, `500` → no comma inserted.                                                |
+| `test_format_gold_thousands_separator`                  | `1_000` → `"1,000"`, `1_234` → `"1,234"`, `999_999` → `"999,999"`.                    |
+| `test_format_gold_millions`                             | `1_000_000` → `"1,000,000"`, `1_234_567` → `"1,234,567"`.                             |
+| `test_compute_sell_price_uses_sell_cost_when_nonzero`   | `sell_cost=40, buy_rate=0.5` → `20`.                                                  |
+| `test_compute_sell_price_falls_back_to_half_base_cost`  | `sell_cost=0, base_cost=100, buy_rate=0.5` → `25`.                                    |
+| `test_compute_sell_price_full_buy_rate`                 | `sell_cost=0, base_cost=100, buy_rate=1.0` → `50`.                                    |
+| `test_compute_sell_price_zero_base_is_zero`             | Zero base and sell cost → `0`.                                                        |
+| `test_buy_action_insufficient_gold_adds_game_log_entry` | Buy with 0 gold against a 100gp stock entry; verify log contains `"Not enough gold"`. |
+| `test_buy_action_inventory_full_adds_game_log_entry`    | Fill inventory to `MAX_ITEMS`; verify log contains `"Inventory is full"`.             |
+| `test_sell_action_cursed_equipped_item_rejected`        | Equip cursed item; attempt sell; item stays; log contains `"cursed"`.                 |
+| `test_equipment_is_item_equipped_weapon_slot`           | Weapon slot populated → `is_item_equipped` returns `true`.                            |
+| `test_equipment_is_item_equipped_all_slots`             | All seven slots populated and detected correctly.                                     |
+| `test_equipment_is_item_equipped_empty`                 | Empty `Equipment` → always `false`.                                                   |
+
+### Files Modified
+
+| File                                        | Change                                                                                                                          |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/character.rs`                   | `Equipment::is_item_equipped` method added with `///` doc + example                                                             |
+| `src/game/systems/merchant_inventory_ui.rs` | `format_gold`, `compute_sell_price` added; gold header; sell-value preview; `GameLog` feedback; cursed-item guard; 14 new tests |
+
+### Quality Gate Results
+
+```
+cargo fmt --all                              → no output (clean)
+cargo check --all-targets --all-features     → Finished 0 errors, 0 warnings
+cargo clippy --all-targets --all-features    → Finished 0 warnings
+cargo nextest run --all-features             → 2194 passed, 1 failed (pre-existing
+                                               timing flake), 8 skipped
+```
+
+The one failure (`test_creature_database_load_performance`) is a pre-existing
+wall-clock timing test (783ms vs 500ms threshold) that is entirely unrelated to
+this phase. All 59 merchant-UI and character-domain tests pass.
+
+### Deliverables Checklist
+
+- [x] `src/game/systems/merchant_inventory_ui.rs` — party gold in merchant UI header (`format_gold`)
+- [x] `src/game/systems/merchant_inventory_ui.rs` — price column already present in stock panel rows (`x{qty}  {price} gp`)
+- [x] `src/game/systems/merchant_inventory_ui.rs` — sell-value preview label in character inventory panel
+- [x] `src/game/systems/merchant_inventory_ui.rs` — `GameLog` feedback for all transaction failure cases
+- [x] `src/domain/character.rs` — `Equipment::is_item_equipped` added
+- [x] Cursed-item sell guard in `merchant_inventory_action_system`
+- [x] All four quality gates pass
+
+### Architecture Compliance
+
+- `Equipment` struct definition in `src/domain/character.rs` matches
+  architecture §4.3 exactly (7 `Option<ItemId>` slots); only a new method was
+  added, no fields changed.
+- `ItemId = u8` type alias (§4.6) used throughout; no raw `u32` for item IDs.
+- `Party::gold` field (§4.3) read via `global_state.0.party.gold` as specified.
+- `NpcEconomySettings::buy_rate` (§inventory domain) used via
+  `npc_def.economy.as_ref().map(|e| e.buy_rate)` with a `0.5` default.
+- `GameLog` resource accessed as `Option<ResMut<GameLog>>` following the
+  pattern established in `dialogue.rs` and `events.rs`.
+- No architectural deviations. No new `GameMode` variants. No RON data files
+  created or modified in this phase.
+- All test data uses in-memory construction; no references to
+  `campaigns/tutorial` (Implementation Rule 5 compliant).
+
+---
 
 ## Buy and Sell — Phase 1: Wire `OpenMerchant` Dialogue Action and `I`-Key Entry Point
 

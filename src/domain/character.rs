@@ -680,6 +680,36 @@ impl Equipment {
         .filter(|slot| slot.is_some())
         .count()
     }
+
+    /// Returns `true` if the given item is currently occupying any equipment slot.
+    ///
+    /// Checks all seven slots: weapon, armor, shield, helmet, boots, accessory1,
+    /// and accessory2. This is used by the merchant sell guard to prevent the
+    /// player from selling a cursed item that is currently equipped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::Equipment;
+    ///
+    /// let mut eq = Equipment::new();
+    /// eq.weapon = Some(42);
+    ///
+    /// assert!(eq.is_item_equipped(42));
+    /// assert!(!eq.is_item_equipped(99));
+    /// ```
+    pub fn is_item_equipped(&self, item_id: crate::domain::types::ItemId) -> bool {
+        [
+            self.weapon,
+            self.armor,
+            self.shield,
+            self.helmet,
+            self.boots,
+            self.accessory1,
+            self.accessory2,
+        ]
+        .contains(&Some(item_id))
+    }
 }
 
 impl Default for Equipment {
