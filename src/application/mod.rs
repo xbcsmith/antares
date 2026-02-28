@@ -1146,12 +1146,44 @@ impl GameState {
         }
     }
 
-    /// Advances game time by the specified number of minutes
-    pub fn advance_time(&mut self, minutes: u32) {
+    /// Advances game time by the specified number of minutes.
+    ///
+    /// After advancing, active spell durations are ticked and merchant NPC stock
+    /// is restocked / magic slots are rotated if a new in-game day has begun.
+    ///
+    /// # Arguments
+    ///
+    /// * `minutes`   - Number of in-game minutes to advance.
+    /// * `templates` - Template database used to replenish merchant stock.
+    ///   Pass `None` in contexts where the content is not available (e.g.
+    ///   headless unit tests that do not load campaign data); restocking is
+    ///   silently skipped in that case.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    /// use antares::domain::world::npc_runtime::MerchantStockTemplateDatabase;
+    ///
+    /// let mut state = GameState::new();
+    /// let templates = MerchantStockTemplateDatabase::new();
+    /// state.advance_time(60, Some(&templates));
+    /// assert_eq!(state.time.minute, 0);
+    /// assert_eq!(state.time.hour, 1);
+    /// ```
+    pub fn advance_time(
+        &mut self,
+        minutes: u32,
+        templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
+    ) {
         self.time.advance_minutes(minutes);
         // Tick active spell durations
         for _ in 0..minutes {
             self.active_spells.tick();
+        }
+        // Trigger daily restock and magic-slot rotation when templates are available.
+        if let Some(tmpl) = templates {
+            self.npc_runtime.tick_restock(&self.time, tmpl);
         }
     }
 
@@ -1386,9 +1418,113 @@ mod tests {
         let mut state = GameState::new();
         state.active_spells.light = 10;
 
-        state.advance_time(5);
+        state.advance_time(5, None);
         assert_eq!(state.active_spells.light, 5);
         assert_eq!(state.time.minute, 5);
+    }
+
+    #[test]
+    fn test_advance_time_no_restock_without_templates() {
+        use crate::domain::inventory::{MerchantStock, StockEntry};
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        let mut state = GameState::new();
+
+        // Insert a merchant with depleted stock.
+        let stock = MerchantStock {
+            entries: vec![StockEntry {
+                item_id: 1,
+                quantity: 0,
+                override_price: None,
+            }],
+            restock_template: Some("some_template".to_string()),
+        };
+        let mut runtime = NpcRuntimeState::new("merchant_alice".to_string());
+        runtime.stock = Some(stock);
+        state.npc_runtime.insert(runtime);
+
+        // Advance past a day boundary with None templates — must not panic and must
+        // not alter stock.
+        state.advance_time(1440, None); // 24 hours
+
+        let runtime = state
+            .npc_runtime
+            .get(&"merchant_alice".to_string())
+            .unwrap();
+        assert_eq!(
+            runtime
+                .stock
+                .as_ref()
+                .unwrap()
+                .get_entry(1)
+                .unwrap()
+                .quantity,
+            0,
+            "stock must be unchanged when templates is None"
+        );
+        assert_eq!(
+            runtime.last_restock_day, 0,
+            "last_restock_day must not be updated"
+        );
+    }
+
+    #[test]
+    fn test_advance_time_triggers_restock() {
+        use crate::domain::inventory::{MerchantStock, StockEntry};
+        use crate::domain::world::npc_runtime::{
+            MerchantStockTemplate, MerchantStockTemplateDatabase, NpcRuntimeState,
+            TemplateStockEntry,
+        };
+
+        let mut state = GameState::new();
+
+        // Build a template database with one template.
+        let mut templates = MerchantStockTemplateDatabase::new();
+        templates.add(MerchantStockTemplate {
+            id: "basic_shop".to_string(),
+            entries: vec![TemplateStockEntry {
+                item_id: 2,
+                quantity: 4,
+                override_price: None,
+            }],
+            magic_item_pool: vec![],
+            magic_slot_count: 0,
+            magic_refresh_days: 7,
+        });
+
+        // Insert a merchant with depleted stock referencing that template.
+        let stock = MerchantStock {
+            entries: vec![StockEntry {
+                item_id: 2,
+                quantity: 0,
+                override_price: None,
+            }],
+            restock_template: Some("basic_shop".to_string()),
+        };
+        let mut runtime = NpcRuntimeState::new("merchant_bob".to_string());
+        runtime.stock = Some(stock);
+        state.npc_runtime.insert(runtime);
+
+        // GameState starts at day 1, hour 0, minute 0.
+        // Advance 24 hours so a new day begins (day 2).
+        state.advance_time(1440, Some(&templates));
+
+        let runtime = state.npc_runtime.get(&"merchant_bob".to_string()).unwrap();
+        assert_eq!(
+            runtime
+                .stock
+                .as_ref()
+                .unwrap()
+                .get_entry(2)
+                .unwrap()
+                .quantity,
+            4,
+            "stock must be restocked after crossing a day boundary"
+        );
+        assert!(
+            runtime.last_restock_day > 0,
+            "last_restock_day must be updated"
+        );
     }
 
     #[test]
@@ -2844,6 +2980,9 @@ mod tests {
                 quantity: 5,
                 override_price: None,
             }],
+            magic_item_pool: vec![],
+            magic_slot_count: 0,
+            magic_refresh_days: 7,
         });
         db.npc_stock_templates = templates;
 

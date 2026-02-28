@@ -7,49 +7,77 @@
 // These templates are used by merchant NPCs during testing to verify
 // that npc_stock_templates load correctly from a campaign data directory.
 //
+// Phase 6 additions: magic_item_pool, magic_slot_count, and magic_refresh_days
+// are now present on each template.  The blacksmith template keeps
+// magic_slot_count: 0 to verify the disabled-rotation path in tests.
+//
+// NOTE: Item IDs listed in magic_item_pool should resolve to items where
+// is_magical() == true in the item database.  Non-magical items are accepted
+// by the engine but should be avoided by data authors.
+//
 // Field reference:
-//   id            - Unique string identifier (referenced by NpcDefinition::stock_template)
-//   entries       - List of stock entries
-//     item_id       - References a valid item ID in items.ron
-//     quantity      - Initial available quantity (0 = sold out)
-//     override_price - Optional gold price override; None uses item base_cost * sell_rate
+//   id                - Unique string identifier (referenced by NpcDefinition::stock_template)
+//   entries           - List of stock entries
+//     item_id           - References a valid item ID in items.ron
+//     quantity          - Initial available quantity (0 = sold out)
+//     override_price    - Optional gold price override; None uses item base_cost * sell_rate
+//   magic_item_pool   - Pool of item IDs eligible for random magic-item slots.
+//                       Duplicates act as weighted entries (higher probability).
+//                       Empty list disables magic-item rotation entirely.
+//   magic_slot_count  - How many random magic items appear in the shop at once.
+//                       0 = no magic items (rotation disabled).
+//   magic_refresh_days - Number of in-game days between magic-item slot refreshes.
+//                        Defaults to 7.  Values of 0 are treated as 1 at runtime.
 
 [
     // ===== Tutorial Merchant Stock =====
     // A curated subset of items appropriate for a tutorial campaign.
     // Low quantities enforce resource management decisions for new players.
     // Only the most basic weapons, armor, and one healing consumable are stocked.
+    //
+    // Magic rotation: 2 slots drawn from a pool of 5 magical items, refreshed
+    // every 7 in-game days.  Item IDs 101-105 are assumed to be magical items
+    // defined in data/test_campaign/data/items.ron.
     (
         id: "tutorial_merchant_stock",
         entries: [
             // Basic weapons
-            (item_id: 1, quantity: 2, override_price: None),    // Club
-            (item_id: 2, quantity: 2, override_price: None),    // Dagger
-            (item_id: 3, quantity: 1, override_price: None),    // Short Sword
+            (item_id: 1,  quantity: 2, override_price: None),    // Club
+            (item_id: 2,  quantity: 2, override_price: None),    // Dagger
+            (item_id: 3,  quantity: 1, override_price: None),    // Short Sword
             // Light armor
-            (item_id: 20, quantity: 2, override_price: None),   // Leather Armor
-            (item_id: 23, quantity: 2, override_price: None),   // Wooden Shield
+            (item_id: 20, quantity: 2, override_price: None),    // Leather Armor
+            (item_id: 23, quantity: 2, override_price: None),    // Wooden Shield
             // Consumables
-            (item_id: 50, quantity: 3, override_price: None),   // Healing Potion
+            (item_id: 50, quantity: 3, override_price: None),    // Healing Potion
         ],
+        magic_item_pool: [101, 102, 103, 104, 105],
+        magic_slot_count: 2,
+        magic_refresh_days: 7,
     ),
 
     // ===== Test Blacksmith Stock =====
     // Broader selection used to verify that multiple templates load correctly
     // and that item quantities and price overrides are preserved round-trip.
+    //
+    // Magic rotation: disabled (magic_slot_count: 0) to exercise the
+    // no-magic-item path in integration tests.
     (
         id: "tutorial_blacksmith_stock",
         entries: [
             // Weapons
-            (item_id: 1, quantity: 3, override_price: None),    // Club
-            (item_id: 2, quantity: 3, override_price: None),    // Dagger
-            (item_id: 3, quantity: 2, override_price: None),    // Short Sword
-            (item_id: 5, quantity: 2, override_price: None),    // Mace
+            (item_id: 1,  quantity: 3, override_price: None),    // Club
+            (item_id: 2,  quantity: 3, override_price: None),    // Dagger
+            (item_id: 3,  quantity: 2, override_price: None),    // Short Sword
+            (item_id: 5,  quantity: 2, override_price: None),    // Mace
             // Armor
-            (item_id: 20, quantity: 3, override_price: None),   // Leather Armor
-            (item_id: 21, quantity: 1, override_price: None),   // Chain Mail
+            (item_id: 20, quantity: 3, override_price: None),    // Leather Armor
+            (item_id: 21, quantity: 1, override_price: None),    // Chain Mail
             // Shields
-            (item_id: 23, quantity: 2, override_price: None),   // Wooden Shield
+            (item_id: 23, quantity: 2, override_price: None),    // Wooden Shield
         ],
+        magic_item_pool: [],
+        magic_slot_count: 0,
+        magic_refresh_days: 7,
     ),
 ]

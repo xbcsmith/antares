@@ -2951,6 +2951,9 @@ mod tests {
             .add(crate::domain::world::npc_runtime::MerchantStockTemplate {
                 id: "test_template".to_string(),
                 entries: vec![],
+                magic_item_pool: vec![],
+                magic_slot_count: 0,
+                magic_refresh_days: 7,
             });
 
         assert_eq!(db.stats().npc_stock_template_count, 1);

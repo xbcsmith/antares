@@ -1484,4 +1484,108 @@ mod tests {
             other => panic!("expected Container event, got {:?}", other),
         }
     }
+    /// Verifies that `last_restock_day`, `magic_slots`, and `last_magic_refresh_day`
+    /// survive a full save/load cycle.
+    ///
+    /// These Phase-6 fields are serialised as part of `NpcRuntimeState` inside
+    /// `GameState::npc_runtime`.  This test ensures they are not silently dropped
+    /// or reset to their default sentinel values during round-trip serialisation.
+    #[test]
+    fn test_save_load_preserves_restock_day_and_magic_slots() {
+        use crate::domain::inventory::{MerchantStock, StockEntry};
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut state = GameState::new();
+
+        // Build a runtime state that has been through a restock cycle:
+        //   - last_restock_day = 3  (restocked on day 3)
+        //   - magic_slots = [101, 102]  (two magic items currently in stock)
+        //   - last_magic_refresh_day = 1  (magic slots refreshed on day 1)
+        let stock = MerchantStock {
+            entries: vec![
+                StockEntry {
+                    item_id: 10,
+                    quantity: 2,
+                    override_price: None,
+                },
+                // Magic-slot entries mirroring magic_slots.
+                StockEntry {
+                    item_id: 101,
+                    quantity: 1,
+                    override_price: None,
+                },
+                StockEntry {
+                    item_id: 102,
+                    quantity: 1,
+                    override_price: None,
+                },
+            ],
+            restock_template: Some("tutorial_merchant_stock".to_string()),
+        };
+
+        let mut runtime = NpcRuntimeState::new("merchant_phase6".to_string());
+        runtime.stock = Some(stock);
+        runtime.last_restock_day = 3;
+        runtime.magic_slots = vec![101, 102];
+        runtime.last_magic_refresh_day = 1;
+
+        state.npc_runtime.insert(runtime);
+
+        // Save and reload.
+        manager
+            .save("phase6_restock_roundtrip", &state)
+            .expect("save must succeed");
+        let loaded = manager
+            .load("phase6_restock_roundtrip")
+            .expect("load must succeed");
+
+        let loaded_runtime = loaded
+            .npc_runtime
+            .get(&"merchant_phase6".to_string())
+            .expect("merchant_phase6 must be present after round-trip");
+
+        assert_eq!(
+            loaded_runtime.last_restock_day, 3,
+            "last_restock_day must survive save/load"
+        );
+        assert_eq!(
+            loaded_runtime.magic_slots,
+            vec![101, 102],
+            "magic_slots must survive save/load"
+        );
+        assert_eq!(
+            loaded_runtime.last_magic_refresh_day, 1,
+            "last_magic_refresh_day must survive save/load"
+        );
+
+        // Verify the magic-slot stock entries are also intact.
+        let loaded_stock = loaded_runtime
+            .stock
+            .as_ref()
+            .expect("stock must be Some after round-trip");
+        assert_eq!(
+            loaded_stock
+                .get_entry(101)
+                .expect("item 101 must exist")
+                .quantity,
+            1
+        );
+        assert_eq!(
+            loaded_stock
+                .get_entry(102)
+                .expect("item 102 must exist")
+                .quantity,
+            1
+        );
+        assert_eq!(
+            loaded_stock
+                .restock_template
+                .as_deref()
+                .expect("restock_template must be Some"),
+            "tutorial_merchant_stock"
+        );
+    }
 }

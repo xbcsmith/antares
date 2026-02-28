@@ -418,7 +418,7 @@ Category Ranges
 - Variants: 3000-3999
 - Custom: 4000+
 
-We also need to refactor the creature id manager to use those ranges. We also need to refactor the creature registry. Currently the creature registry uses a really strange method of storing creatures.
+We also need to refactor the creature id manager to use those ranges.
 
 ```rust
 
@@ -436,11 +436,7 @@ We also need to refactor the creature id manager to use those ranges. We also ne
 ]
 ```
 
-The creatures registry should be able to tie the npc, character, and monster to a creature mesh which has its own ID.
 
-Write a plan with a phased approach to implementing the new creature registry ranges features. THINK HARD and follow the rules in @PLAN.md
-
-[Creature Registry Refactor](./creature_registry_refactor_plan.md)
 
 ## Combat Feedback
 
