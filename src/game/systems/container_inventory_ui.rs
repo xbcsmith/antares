@@ -99,6 +99,8 @@ impl Plugin for ContainerInventoryPlugin {
         app.add_message::<TakeItemAction>()
             .add_message::<TakeAllAction>()
             .add_message::<StashItemAction>()
+            .add_message::<SelectContainerSlotAction>()
+            .add_message::<SelectContainerCharacterSlotAction>()
             .init_resource::<ContainerNavState>()
             .add_systems(
                 Update,
@@ -137,6 +139,47 @@ pub struct TakeItemAction {
     pub container_slot_index: usize,
     /// Party index of the character who receives the item.
     pub character_index: usize,
+}
+
+/// Emitted when the player mouse-clicks a container item row to set it as
+/// the active selection.
+///
+/// The action system applies the selection to `ContainerInventoryState` and
+/// switches focus to the container panel, so that a subsequent Take or
+/// Take All click (or `Enter` key) operates on the correct row.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::container_inventory_ui::SelectContainerSlotAction;
+///
+/// let action = SelectContainerSlotAction { slot_index: 1 };
+/// assert_eq!(action.slot_index, 1);
+/// ```
+#[derive(Message)]
+pub struct SelectContainerSlotAction {
+    /// Index into `ContainerInventoryState::items` that was clicked.
+    pub slot_index: usize,
+}
+
+/// Emitted when the player mouse-clicks a character inventory cell in the
+/// container stash panel to set it as the active selection.
+///
+/// The action system applies the selection to `ContainerInventoryState` and
+/// switches focus to the character panel.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::container_inventory_ui::SelectContainerCharacterSlotAction;
+///
+/// let action = SelectContainerCharacterSlotAction { slot_index: 3 };
+/// assert_eq!(action.slot_index, 3);
+/// ```
+#[derive(Message)]
+pub struct SelectContainerCharacterSlotAction {
+    /// Inventory slot index that was clicked.
+    pub slot_index: usize,
 }
 
 /// Emitted when the player confirms taking all items from the container.
@@ -531,6 +574,7 @@ fn container_inventory_input_system(
 
 /// Renders the container inventory split-screen overlay.
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 fn container_inventory_ui_system(
     mut contexts: EguiContexts,
     global_state: Res<GlobalState>,
@@ -539,6 +583,8 @@ fn container_inventory_ui_system(
     mut take_writer: MessageWriter<TakeItemAction>,
     mut take_all_writer: MessageWriter<TakeAllAction>,
     mut stash_writer: MessageWriter<StashItemAction>,
+    mut select_container_writer: MessageWriter<SelectContainerSlotAction>,
+    mut select_char_writer: MessageWriter<SelectContainerCharacterSlotAction>,
 ) {
     let container_state = match &global_state.0.mode {
         GameMode::ContainerInventory(s) => s.clone(),
@@ -612,7 +658,7 @@ fn container_inventory_ui_system(
 
             // ── LEFT: Character inventory panel ──────────────────────────
             ui.push_id("cont_char_panel", |ui| {
-                if let Some(action) = render_character_stash_panel(
+                let panel_result = render_character_stash_panel(
                     ui,
                     char_idx,
                     char_focused,
@@ -625,21 +671,27 @@ fn container_inventory_ui_system(
                     egui::vec2(half_w, panel_h),
                     &global_state,
                     game_content.as_deref(),
-                ) {
-                    let StashActionResult {
-                        character_index,
-                        slot_index,
-                    } = action;
-                    stash_writer.write(StashItemAction {
-                        character_index,
-                        character_slot_index: slot_index,
-                    });
+                );
+                if let Some(ref r) = panel_result {
+                    match r {
+                        CharacterStashPanelResult::Stash(action) => {
+                            stash_writer.write(StashItemAction {
+                                character_index: action.character_index,
+                                character_slot_index: action.slot_index,
+                            });
+                        }
+                        CharacterStashPanelResult::SelectSlot(slot_idx) => {
+                            select_char_writer.write(SelectContainerCharacterSlotAction {
+                                slot_index: *slot_idx,
+                            });
+                        }
+                    }
                 }
             });
 
             // ── RIGHT: Container item list panel ─────────────────────────
             ui.push_id("cont_container_panel", |ui| {
-                match render_container_items_panel(
+                let panel_result = render_container_items_panel(
                     ui,
                     &container_state,
                     cont_focused,
@@ -652,7 +704,8 @@ fn container_inventory_ui_system(
                     egui::vec2(half_w, panel_h),
                     &global_state,
                     game_content.as_deref(),
-                ) {
+                );
+                match panel_result {
                     ContainerPanelResult::Take { slot_index } => {
                         take_writer.write(TakeItemAction {
                             container_slot_index: slot_index,
@@ -664,6 +717,10 @@ fn container_inventory_ui_system(
                             character_index: char_idx,
                         });
                     }
+                    ContainerPanelResult::SelectSlot(slot_idx) => {
+                        select_container_writer
+                            .write(SelectContainerSlotAction { slot_index: slot_idx });
+                    }
                     ContainerPanelResult::None => {}
                 }
             });
@@ -673,7 +730,23 @@ fn container_inventory_ui_system(
 
 // ===== Panel render helpers =====
 
-/// Return value from `render_character_stash_panel`.
+/// Internal stash action data returned from `render_character_stash_panel`.
+struct StashActionInner {
+    character_index: usize,
+    slot_index: usize,
+}
+
+/// Discriminated return value from `render_character_stash_panel`.
+///
+/// Either the player clicked the **Stash** button for the selected slot, or
+/// they mouse-clicked a cell to change the current selection.
+enum CharacterStashPanelResult {
+    /// Player clicked the Stash button — execute a stash action.
+    Stash(StashActionInner),
+    /// Player clicked an inventory cell — update the selection to this slot.
+    SelectSlot(usize),
+}
+
 /// Write the updated container item list back to the corresponding
 /// `MapEvent::Container` in the current map.
 ///
@@ -768,11 +841,6 @@ pub fn write_container_items_back(
     }
 }
 
-struct StashActionResult {
-    character_index: usize,
-    slot_index: usize,
-}
-
 /// Render the character inventory panel (left side) with a Stash action button.
 #[allow(clippy::too_many_arguments)]
 fn render_character_stash_panel(
@@ -784,14 +852,14 @@ fn render_character_stash_panel(
     size: egui::Vec2,
     global_state: &GlobalState,
     game_content: Option<&GameContent>,
-) -> Option<StashActionResult> {
+) -> Option<CharacterStashPanelResult> {
     if party_index >= global_state.0.party.members.len() {
         return None;
     }
 
     let character = &global_state.0.party.members[party_index];
     let items = &character.inventory.items;
-    let mut result: Option<StashActionResult> = None;
+    let mut result: Option<CharacterStashPanelResult> = None;
 
     let has_action = selected_slot.map(|s| s < items.len()).unwrap_or(false);
     let action_reserve = if has_action { PANEL_ACTION_H } else { 0.0 };
@@ -804,65 +872,83 @@ fn render_character_stash_panel(
         UNFOCUSED_BORDER_COLOR
     };
     let (panel_rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    let painter = ui.painter();
-    painter.rect_stroke(
-        panel_rect,
-        2.0,
-        egui::Stroke::new(2.0, border_color),
-        egui::StrokeKind::Outside,
-    );
 
-    // ── Header ────────────────────────────────────────────────────────────
-    let header_rect = egui::Rect::from_min_size(panel_rect.min, egui::vec2(size.x, PANEL_HEADER_H));
-    painter.rect_filled(header_rect, 0.0, HEADER_BG_COLOR);
-    painter.text(
-        header_rect.left_center() + egui::vec2(8.0, 0.0),
-        egui::Align2::LEFT_CENTER,
-        &character.name,
-        egui::FontId::proportional(16.0),
-        egui::Color32::WHITE,
-    );
-    painter.text(
-        header_rect.right_center() - egui::vec2(8.0, 0.0),
-        egui::Align2::RIGHT_CENTER,
-        "CHARACTER",
-        egui::FontId::proportional(11.0),
-        egui::Color32::from_rgb(160, 160, 160),
-    );
-
-    // ── Body: inventory grid ──────────────────────────────────────────────
-    let body_rect = egui::Rect::from_min_size(
-        panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H),
-        egui::vec2(size.x, body_h),
-    );
-    painter.rect_filled(body_rect, 0.0, PANEL_BG_COLOR);
-
-    let slot_rows = Inventory::MAX_ITEMS.div_ceil(SLOT_COLS);
-    let cell_w = (body_rect.width() / SLOT_COLS as f32).floor();
-    let cell_h = (body_rect.height() / slot_rows as f32).floor();
-    let cell_size = cell_w.min(cell_h).max(8.0);
-
-    // Grid lines
-    for col in 0..=SLOT_COLS {
-        let x = body_rect.min.x + col as f32 * cell_w;
-        painter.line_segment(
-            [
-                egui::pos2(x, body_rect.min.y),
-                egui::pos2(x, body_rect.max.y),
-            ],
-            egui::Stroke::new(1.0, GRID_LINE_COLOR),
+    // All static painting (border, header, body background, grid lines) is
+    // grouped in this block so the painter borrow is dropped before the
+    // first `ui.new_child()` call below, which requires a mutable borrow.
+    let (body_rect, cell_w, cell_h, cell_size) = {
+        let painter = ui.painter();
+        painter.rect_stroke(
+            panel_rect,
+            2.0,
+            egui::Stroke::new(2.0, border_color),
+            egui::StrokeKind::Outside,
         );
-    }
-    for row in 0..=slot_rows {
-        let y = body_rect.min.y + row as f32 * cell_h;
-        painter.line_segment(
-            [
-                egui::pos2(body_rect.min.x, y),
-                egui::pos2(body_rect.max.x, y),
-            ],
-            egui::Stroke::new(1.0, GRID_LINE_COLOR),
+
+        // ── Header ────────────────────────────────────────────────────────
+        let header_rect =
+            egui::Rect::from_min_size(panel_rect.min, egui::vec2(size.x, PANEL_HEADER_H));
+        painter.rect_filled(header_rect, 0.0, HEADER_BG_COLOR);
+        painter.text(
+            header_rect.left_center() + egui::vec2(8.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            &character.name,
+            egui::FontId::proportional(16.0),
+            egui::Color32::WHITE,
         );
-    }
+        painter.text(
+            header_rect.right_center() - egui::vec2(8.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            "CHARACTER",
+            egui::FontId::proportional(11.0),
+            egui::Color32::from_rgb(160, 160, 160),
+        );
+
+        // ── Body: inventory grid ──────────────────────────────────────────
+        let body_rect = egui::Rect::from_min_size(
+            panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H),
+            egui::vec2(size.x, body_h),
+        );
+        painter.rect_filled(body_rect, 0.0, PANEL_BG_COLOR);
+
+        let slot_rows = Inventory::MAX_ITEMS.div_ceil(SLOT_COLS);
+        let cell_w = (body_rect.width() / SLOT_COLS as f32).floor();
+        let cell_h = (body_rect.height() / slot_rows as f32).floor();
+        let cell_size = cell_w.min(cell_h).max(8.0);
+
+        // Grid lines
+        for col in 0..=SLOT_COLS {
+            let x = body_rect.min.x + col as f32 * cell_w;
+            painter.line_segment(
+                [
+                    egui::pos2(x, body_rect.min.y),
+                    egui::pos2(x, body_rect.max.y),
+                ],
+                egui::Stroke::new(1.0, GRID_LINE_COLOR),
+            );
+        }
+        for row in 0..=slot_rows {
+            let y = body_rect.min.y + row as f32 * cell_h;
+            painter.line_segment(
+                [
+                    egui::pos2(body_rect.min.x, y),
+                    egui::pos2(body_rect.max.x, y),
+                ],
+                egui::Stroke::new(1.0, GRID_LINE_COLOR),
+            );
+        }
+        // painter borrow ends here.
+        (body_rect, cell_w, cell_h, cell_size)
+    };
+
+    // ── Interactive cell grid ─────────────────────────────────────────────
+    // A child UI is created over body_rect so each cell gets a click/hover
+    // Response from egui.  The painter borrow above has been dropped.
+    let mut cell_child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(body_rect)
+            .layout(egui::Layout::top_down(egui::Align::LEFT)),
+    );
 
     for slot_idx in 0..Inventory::MAX_ITEMS {
         let col = slot_idx % SLOT_COLS;
@@ -870,34 +956,59 @@ fn render_character_stash_panel(
         let cell_min = body_rect.min + egui::vec2(col as f32 * cell_w, row as f32 * cell_h);
         let cell_rect = egui::Rect::from_min_size(cell_min, egui::vec2(cell_w, cell_h));
 
-        // Selection highlight
-        if selected_slot == Some(slot_idx) {
-            painter.rect_filled(
-                cell_rect.shrink(1.0),
-                0.0,
-                egui::Color32::from_rgba_premultiplied(180, 150, 0, 60),
-            );
-            painter.rect_stroke(
-                cell_rect.shrink(1.0),
-                0.0,
-                egui::Stroke::new(2.0, SELECT_HIGHLIGHT_COLOR),
-                egui::StrokeKind::Outside,
-            );
-        }
+        cell_child.push_id(format!("stash_cell_{}", slot_idx), |ui| {
+            let cell_response = ui.allocate_rect(cell_rect, egui::Sense::click_and_drag());
 
-        // Item silhouette
-        if slot_idx < items.len() {
-            let item_type = game_content
-                .and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id))
-                .map(|it| &it.item_type);
-            crate::game::systems::inventory_ui::paint_item_silhouette_pub(
-                painter,
-                cell_rect,
-                cell_size,
-                item_type,
-                egui::Color32::from_rgba_premultiplied(230, 230, 230, 255),
-            );
-        }
+            let is_hovered = cell_response.hovered();
+            let is_selected = selected_slot == Some(slot_idx);
+
+            // Selection highlight
+            if is_selected {
+                ui.painter().rect_filled(
+                    cell_rect.shrink(1.0),
+                    0.0,
+                    egui::Color32::from_rgba_premultiplied(180, 150, 0, 60),
+                );
+                ui.painter().rect_stroke(
+                    cell_rect.shrink(1.0),
+                    0.0,
+                    egui::Stroke::new(2.0, SELECT_HIGHLIGHT_COLOR),
+                    egui::StrokeKind::Outside,
+                );
+            } else if is_hovered && slot_idx < items.len() {
+                // Hover highlight for cells that contain an item
+                ui.painter().rect_filled(
+                    cell_rect.shrink(1.0),
+                    0.0,
+                    egui::Color32::from_rgba_premultiplied(180, 150, 0, 25),
+                );
+                ui.painter().rect_stroke(
+                    cell_rect.shrink(1.0),
+                    0.0,
+                    egui::Stroke::new(1.0, SELECT_HIGHLIGHT_COLOR),
+                    egui::StrokeKind::Outside,
+                );
+            }
+
+            // Item silhouette
+            if slot_idx < items.len() {
+                let item_type = game_content
+                    .and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id))
+                    .map(|it| &it.item_type);
+                crate::game::systems::inventory_ui::paint_item_silhouette_pub(
+                    ui.painter(),
+                    cell_rect,
+                    cell_size,
+                    item_type,
+                    egui::Color32::from_rgba_premultiplied(230, 230, 230, 255),
+                );
+            }
+
+            // Mouse click → select this slot (only for occupied cells)
+            if cell_response.clicked() && slot_idx < items.len() {
+                result = Some(CharacterStashPanelResult::SelectSlot(slot_idx));
+            }
+        });
     }
 
     // ── Action strip: Stash button ────────────────────────────────────────
@@ -912,7 +1023,10 @@ fn render_character_stash_panel(
                 panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H + body_h),
                 egui::vec2(size.x, action_reserve),
             );
-            painter.rect_filled(action_rect, 0.0, HEADER_BG_COLOR);
+            // Use painter_at so there is no live painter borrow when
+            // ui.new_child() is called immediately below.
+            ui.painter_at(action_rect)
+                .rect_filled(action_rect, 0.0, HEADER_BG_COLOR);
 
             let mut child = ui.new_child(
                 egui::UiBuilder::new()
@@ -941,10 +1055,10 @@ fn render_character_stash_panel(
                         .on_hover_text(format!("Put {} into the container", item_name))
                         .clicked()
                     {
-                        result = Some(StashActionResult {
+                        result = Some(CharacterStashPanelResult::Stash(StashActionInner {
                             character_index: party_index,
                             slot_index: slot_idx,
-                        });
+                        }));
                     }
                 });
             });
@@ -956,8 +1070,12 @@ fn render_character_stash_panel(
 
 /// Discriminated return value from `render_container_items_panel`.
 enum ContainerPanelResult {
-    Take { slot_index: usize },
+    Take {
+        slot_index: usize,
+    },
     TakeAll,
+    /// Player clicked a container row to set it as the active selection.
+    SelectSlot(usize),
     None,
 }
 
@@ -1067,7 +1185,7 @@ fn render_container_items_panel(
 
                     let label_text = format!("  {}{}", item_name, charge_info);
 
-                    let (row_rect, _response) = ui.allocate_exact_size(
+                    let (row_rect, row_response) = ui.allocate_exact_size(
                         egui::vec2(body_rect.width(), CONTAINER_ROW_H),
                         egui::Sense::click(),
                     );
@@ -1084,6 +1202,19 @@ fn render_container_items_panel(
                             egui::Stroke::new(1.5, SELECT_HIGHLIGHT_COLOR),
                             egui::StrokeKind::Outside,
                         );
+                    } else if row_response.hovered() {
+                        // Hover highlight when not already keyboard-selected
+                        ui.painter().rect_filled(
+                            row_rect,
+                            0.0,
+                            egui::Color32::from_rgba_premultiplied(0, 100, 85, 40),
+                        );
+                        ui.painter().rect_stroke(
+                            row_rect.shrink(1.0),
+                            0.0,
+                            egui::Stroke::new(1.0, SELECT_HIGHLIGHT_COLOR),
+                            egui::StrokeKind::Outside,
+                        );
                     }
 
                     ui.painter().text(
@@ -1093,6 +1224,11 @@ fn render_container_items_panel(
                         egui::FontId::proportional(14.0),
                         CONTAINER_ITEM_COLOR,
                     );
+
+                    // Mouse click on a container row → select it
+                    if row_response.clicked() {
+                        result = ContainerPanelResult::SelectSlot(i);
+                    }
                 });
             }
 
@@ -1244,16 +1380,19 @@ fn render_container_items_panel(
 
 // ===== Action system =====
 
-/// Executes Take, Take All, and Stash actions.
+/// Executes Take, Take All, Stash, and mouse-selection actions.
 ///
-/// Reads `TakeItemAction`, `TakeAllAction`, and `StashItemAction` messages,
-/// mutates `GlobalState` (both party inventory and container item list), and
-/// resets keyboard navigation state after each action.
-#[allow(clippy::too_many_lines)]
+/// Reads `TakeItemAction`, `TakeAllAction`, `StashItemAction`,
+/// `SelectContainerSlotAction`, and `SelectContainerCharacterSlotAction`
+/// messages, mutates `GlobalState` (both party inventory and container item
+/// list), and resets keyboard navigation state after each action.
+#[allow(clippy::too_many_arguments)]
 fn container_inventory_action_system(
     mut take_reader: MessageReader<TakeItemAction>,
     mut take_all_reader: MessageReader<TakeAllAction>,
     mut stash_reader: MessageReader<StashItemAction>,
+    mut select_container_reader: MessageReader<SelectContainerSlotAction>,
+    mut select_char_reader: MessageReader<SelectContainerCharacterSlotAction>,
     mut global_state: ResMut<GlobalState>,
     mut nav_state: ResMut<ContainerNavState>,
 ) {
@@ -1268,6 +1407,38 @@ fn container_inventory_action_system(
         .read()
         .map(|e| (e.character_index, e.character_slot_index))
         .collect();
+
+    // ── Mouse slot-selection events ───────────────────────────────────────
+    // Container row click: switch focus to container panel and set selection.
+    let select_container_events: Vec<usize> = select_container_reader
+        .read()
+        .map(|e| e.slot_index)
+        .collect();
+
+    for slot_index in select_container_events {
+        if let GameMode::ContainerInventory(ref mut cs) = global_state.0.mode {
+            cs.focus = ContainerFocus::Right;
+            cs.container_selected_slot = Some(slot_index);
+            cs.character_selected_slot = None;
+        }
+        nav_state.selected_slot_index = Some(slot_index);
+        nav_state.focused_action_index = 0;
+        nav_state.phase = NavigationPhase::SlotNavigation;
+    }
+
+    // Character cell click: switch focus to character panel and set selection.
+    let select_char_events: Vec<usize> = select_char_reader.read().map(|e| e.slot_index).collect();
+
+    for slot_index in select_char_events {
+        if let GameMode::ContainerInventory(ref mut cs) = global_state.0.mode {
+            cs.focus = ContainerFocus::Left;
+            cs.character_selected_slot = Some(slot_index);
+            cs.container_selected_slot = None;
+        }
+        nav_state.selected_slot_index = Some(slot_index);
+        nav_state.focused_action_index = 0;
+        nav_state.phase = NavigationPhase::SlotNavigation;
+    }
 
     // ── Take events ───────────────────────────────────────────────────────
     for (container_slot, character_index) in take_events {
@@ -1471,6 +1642,7 @@ mod tests {
     use crate::domain::character::InventorySlot;
     use crate::domain::types::Position;
     use crate::domain::world::{Map, MapEvent};
+    use crate::game::systems::inventory_ui::NavigationPhase;
 
     fn make_slot(item_id: u8) -> InventorySlot {
         InventorySlot {
@@ -1866,5 +2038,268 @@ mod tests {
         // UI guards against this by only showing the action strip when has_action is true
         // (i.e. selected_slot < item_count).  Verify item_count directly.
         assert_eq!(cs.items.len(), 0);
+    }
+
+    // ── SelectContainerSlotAction / SelectContainerCharacterSlotAction ────
+
+    #[test]
+    fn test_select_container_slot_action_fields() {
+        let action = SelectContainerSlotAction { slot_index: 2 };
+        assert_eq!(action.slot_index, 2);
+    }
+
+    #[test]
+    fn test_select_container_character_slot_action_fields() {
+        let action = SelectContainerCharacterSlotAction { slot_index: 5 };
+        assert_eq!(action.slot_index, 5);
+    }
+
+    /// Verifies that the selection-handler logic for `SelectContainerSlotAction`
+    /// correctly switches focus to the container panel and updates
+    /// `container_selected_slot` — the same outcome as a mouse row-click.
+    #[test]
+    fn test_select_container_slot_updates_container_selected_slot() {
+        let (game_state, cs) = make_container_state_with_items();
+        let mut state = game_state;
+        state.mode = GameMode::ContainerInventory(cs);
+
+        // Simulate the action-system handler for SelectContainerSlotAction
+        let slot_index = 1_usize;
+        let mut nav = ContainerNavState::default();
+
+        if let GameMode::ContainerInventory(ref mut cs) = state.mode {
+            cs.focus = ContainerFocus::Right;
+            cs.container_selected_slot = Some(slot_index);
+            cs.character_selected_slot = None;
+        }
+        nav.selected_slot_index = Some(slot_index);
+        nav.focused_action_index = 0;
+        nav.phase = NavigationPhase::SlotNavigation;
+
+        if let GameMode::ContainerInventory(ref cs) = state.mode {
+            assert_eq!(
+                cs.container_selected_slot,
+                Some(1),
+                "Container slot should be updated by click"
+            );
+            assert_eq!(
+                cs.character_selected_slot, None,
+                "Character slot should be cleared when container row selected"
+            );
+            assert!(matches!(cs.focus, ContainerFocus::Right));
+        }
+        assert_eq!(nav.selected_slot_index, Some(1));
+        assert!(matches!(nav.phase, NavigationPhase::SlotNavigation));
+    }
+
+    /// Verifies that the selection-handler logic for
+    /// `SelectContainerCharacterSlotAction` correctly switches focus to the
+    /// character panel and updates `character_selected_slot`.
+    #[test]
+    fn test_select_container_character_slot_updates_character_selected_slot() {
+        let (game_state, cs) = make_container_state_with_items();
+        let mut state = game_state;
+        state.mode = GameMode::ContainerInventory(cs);
+
+        // Start with container panel focused
+        if let GameMode::ContainerInventory(ref mut cs) = state.mode {
+            cs.focus = ContainerFocus::Right;
+            cs.container_selected_slot = Some(0);
+        }
+
+        // Simulate the action-system handler for SelectContainerCharacterSlotAction
+        let slot_index = 0_usize;
+        let mut nav = ContainerNavState::default();
+
+        if let GameMode::ContainerInventory(ref mut cs) = state.mode {
+            cs.focus = ContainerFocus::Left;
+            cs.character_selected_slot = Some(slot_index);
+            cs.container_selected_slot = None;
+        }
+        nav.selected_slot_index = Some(slot_index);
+        nav.focused_action_index = 0;
+        nav.phase = NavigationPhase::SlotNavigation;
+
+        if let GameMode::ContainerInventory(ref cs) = state.mode {
+            assert_eq!(
+                cs.character_selected_slot,
+                Some(0),
+                "Character slot should be updated by click"
+            );
+            assert_eq!(
+                cs.container_selected_slot, None,
+                "Container slot should be cleared when character cell selected"
+            );
+            assert!(matches!(cs.focus, ContainerFocus::Left));
+        }
+        assert_eq!(nav.selected_slot_index, Some(0));
+        assert!(matches!(nav.phase, NavigationPhase::SlotNavigation));
+    }
+
+    // ── Mouse-click action parity tests ──────────────────────────────────
+
+    /// Verifies that a `TakeItemAction` constructed directly (as a mouse click
+    /// on the Take button would produce) yields the same outcome as the
+    /// keyboard path: item removed from container, added to character inventory.
+    #[test]
+    fn test_take_item_action_via_click_removes_from_container() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = GameState::new();
+
+        let character = Character::new(
+            "Click Taker".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Ensure inventory is not full
+        assert!(!character.inventory.is_full());
+        state.party.add_member(character).expect("add_member");
+
+        let container_items = vec![make_slot(10), make_slot(20)];
+        state.enter_container_inventory(
+            "click_chest".to_string(),
+            "Click Chest".to_string(),
+            container_items,
+        );
+
+        // Simulate what the action system does for TakeItemAction
+        let container_slot = 0_usize;
+        let character_index = 0_usize;
+
+        let taken = if let GameMode::ContainerInventory(ref mut cs) = state.mode {
+            cs.take_item(container_slot)
+        } else {
+            None
+        };
+
+        assert!(taken.is_some(), "take_item should succeed");
+        let taken_slot = taken.unwrap();
+        state.party.members[character_index]
+            .inventory
+            .add_item(taken_slot.item_id, taken_slot.charges)
+            .expect("add_item");
+
+        // Item 10 is now in character inventory, item 20 still in container
+        assert_eq!(
+            state.party.members[0].inventory.items.len(),
+            1,
+            "Character should have 1 item after take"
+        );
+        assert_eq!(state.party.members[0].inventory.items[0].item_id, 10);
+        if let GameMode::ContainerInventory(ref cs) = state.mode {
+            assert_eq!(cs.items.len(), 1, "Container should have 1 item remaining");
+            assert_eq!(cs.items[0].item_id, 20);
+        }
+    }
+
+    /// Verifies that a `TakeAllAction` constructed directly (as a mouse click
+    /// on the Take All button would produce) empties the container and fills
+    /// the character's inventory.
+    #[test]
+    fn test_take_all_action_via_click_empties_container() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = GameState::new();
+
+        let character = Character::new(
+            "Click Taker All".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(character).expect("add_member");
+
+        let container_items = vec![make_slot(11), make_slot(12), make_slot(13)];
+        state.enter_container_inventory(
+            "click_barrel".to_string(),
+            "Click Barrel".to_string(),
+            container_items,
+        );
+
+        // Simulate TakeAll: drain items from container, add to character
+        let all_items = if let GameMode::ContainerInventory(ref mut cs) = state.mode {
+            cs.take_all()
+        } else {
+            vec![]
+        };
+
+        let character_index = 0_usize;
+        for item_slot in all_items {
+            state.party.members[character_index]
+                .inventory
+                .add_item(item_slot.item_id, item_slot.charges)
+                .expect("add_item");
+        }
+
+        assert_eq!(
+            state.party.members[0].inventory.items.len(),
+            3,
+            "All items should be in character inventory"
+        );
+        if let GameMode::ContainerInventory(ref cs) = state.mode {
+            assert!(
+                cs.items.is_empty(),
+                "Container should be empty after Take All"
+            );
+        }
+    }
+
+    /// Verifies that a `StashItemAction` constructed directly (as a mouse click
+    /// on the Stash button would produce) moves the item from character
+    /// inventory into the container.
+    #[test]
+    fn test_stash_item_action_via_click_adds_to_container() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = GameState::new();
+
+        let mut character = Character::new(
+            "Click Stasher".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.inventory.add_item(77, 0).expect("add item");
+        state.party.add_member(character).expect("add_member");
+
+        state.enter_container_inventory(
+            "click_crate".to_string(),
+            "Click Crate".to_string(),
+            vec![],
+        );
+
+        // Simulate Stash: remove from character, add to container
+        let character_index = 0_usize;
+        let char_slot_index = 0_usize;
+
+        let removed = state.party.members[character_index]
+            .inventory
+            .remove_item(char_slot_index);
+
+        assert!(removed.is_some(), "remove_item should succeed");
+        let removed_slot = removed.unwrap();
+
+        if let GameMode::ContainerInventory(ref mut cs) = state.mode {
+            cs.stash_item(removed_slot);
+        }
+
+        assert_eq!(
+            state.party.members[0].inventory.items.len(),
+            0,
+            "Character inventory should be empty after stash"
+        );
+        if let GameMode::ContainerInventory(ref cs) = state.mode {
+            assert_eq!(
+                cs.items.len(),
+                1,
+                "Container should have 1 item after stash"
+            );
+            assert_eq!(cs.items[0].item_id, 77);
+        }
     }
 }

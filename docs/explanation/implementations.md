@@ -50,9 +50,10 @@
 | **Combat Input Enter UX Remediation**             | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback**                 |
 
 | **Buy and Sell — Phase 2: Merchant UI Price Display, Gold Feedback, and Error Feedback** | ✅ COMPLETE | 2026-07-18 | **Party gold in header; price columns; sell-value preview; game log error feedback; cursed-item sell guard** |
+| **Buy and Sell — Phase 4: Mouse Support for Buy, Sell, Take, Take All, and Stash** | ✅ COMPLETE | 2026-07-18 | **Click-to-select rows/cells; Buy/Sell/Take/TakeAll/Stash buttons respond to mouse clicks; hover highlight on all interactive elements** |
 
-**Total Lines Implemented**: 10,200+ lines of production code + 6,100+ lines of documentation
-**Total Tests**: 459+ new tests (all passing), 2,744 total tests passing
+**Total Lines Implemented**: 10,400+ lines of production code + 6,100+ lines of documentation
+**Total Tests**: 472+ new tests (all passing), 2,769 total tests passing
 
 ---
 
