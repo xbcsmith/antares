@@ -1309,4 +1309,179 @@ mod tests {
             "character name should be preserved from legacy save"
         );
     }
+
+    // ===== Buy and Sell Phase 5: Tutorial Data Wiring, Save Persistence =====
+
+    /// Verifies that buying an item from a merchant reduces the stock count and
+    /// that the reduction persists across a save/load cycle.
+    ///
+    /// Per Phase 5 spec (section 5.3): create a GameState with a merchant having
+    /// 3 units of item 1, buy 1 unit (stock → 2), serialise, deserialise, and
+    /// assert the loaded state shows 2 units.
+    #[test]
+    fn test_save_load_preserves_merchant_stock_after_buy() {
+        use crate::domain::inventory::{MerchantStock, StockEntry};
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        // 1. Create a GameState with a merchant that has 3 units of item 1.
+        let mut state = GameState::new();
+        let stock = MerchantStock {
+            entries: vec![StockEntry {
+                item_id: 1,
+                quantity: 3,
+                override_price: None,
+            }],
+            restock_template: Some("tutorial_merchant_stock".to_string()),
+        };
+        let mut runtime = NpcRuntimeState::new("tutorial_merchant_town".to_string());
+        runtime.stock = Some(stock);
+        state.npc_runtime.insert(runtime);
+
+        // 2. Buy 1 unit — reduces stock from 3 → 2.
+        {
+            let runtime = state
+                .npc_runtime
+                .get_mut(&"tutorial_merchant_town".to_string())
+                .unwrap();
+            runtime
+                .stock
+                .as_mut()
+                .unwrap()
+                .get_entry_mut(1)
+                .unwrap()
+                .quantity = 2;
+        }
+
+        // 3. Serialise to RON with save_game.
+        manager.save("phase5_buy_test", &state).unwrap();
+
+        // 4. Deserialise with load_game.
+        let loaded = manager.load("phase5_buy_test").unwrap();
+
+        // 5. Assert the loaded state has 2 units of item 1 in the merchant stock.
+        let loaded_runtime = loaded
+            .npc_runtime
+            .get(&"tutorial_merchant_town".to_string())
+            .expect("tutorial_merchant_town runtime must survive the round-trip");
+
+        assert!(
+            loaded_runtime.stock.is_some(),
+            "merchant stock must be present after round-trip"
+        );
+        let loaded_stock = loaded_runtime.stock.as_ref().unwrap();
+        assert_eq!(
+            loaded_stock.get_entry(1).unwrap().quantity,
+            2,
+            "stock quantity after buy (3→2) must be preserved through save/load"
+        );
+        assert_eq!(
+            loaded_stock.restock_template,
+            Some("tutorial_merchant_stock".to_string()),
+            "restock_template must be preserved through save/load"
+        );
+    }
+
+    /// Verifies that a partial container take (removing some but not all items)
+    /// survives a save/load cycle within the same map.
+    ///
+    /// Container state is stored in `MapEvent::Container { items, .. }` which is
+    /// serialised as part of `World` inside `GameState`. This test confirms the
+    /// write-back path is correctly round-tripped.
+    #[test]
+    fn test_save_load_preserves_container_items_after_partial_take() {
+        use crate::domain::character::InventorySlot;
+        use crate::domain::types::Position;
+        use crate::domain::world::MapEvent;
+        use crate::domain::world::{Map, World};
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        // Build a world with one map containing a container event that starts
+        // with 3 items (item_ids 10, 20, 30).
+        let mut state = GameState::new();
+        let mut map = Map::new(
+            1,
+            "Test Map".to_string(),
+            "A map with a container".to_string(),
+            10,
+            10,
+        );
+        let container_pos = Position::new(5, 5);
+        map.add_event(
+            container_pos,
+            MapEvent::Container {
+                id: "chest_room1".to_string(),
+                name: "Old Chest".to_string(),
+                description: "A battered chest".to_string(),
+                items: vec![
+                    InventorySlot {
+                        item_id: 10,
+                        charges: 0,
+                    },
+                    InventorySlot {
+                        item_id: 20,
+                        charges: 0,
+                    },
+                    InventorySlot {
+                        item_id: 30,
+                        charges: 0,
+                    },
+                ],
+            },
+        );
+        let mut world = World::new();
+        world.add_map(map);
+        world.set_current_map(1);
+        state.world = world;
+
+        // Simulate a partial take: player takes item_id 20, leaving 10 and 30.
+        {
+            let map_mut = state.world.get_current_map_mut().unwrap();
+            if let Some(MapEvent::Container { items, .. }) = map_mut.events.get_mut(&container_pos)
+            {
+                items.retain(|slot| slot.item_id != 20);
+            }
+        }
+
+        // Save then load.
+        manager.save("phase5_container_test", &state).unwrap();
+        let loaded = manager.load("phase5_container_test").unwrap();
+
+        // Verify the container on the loaded map has exactly items 10 and 30.
+        let loaded_map = loaded
+            .world
+            .get_map(1)
+            .expect("map 1 must be present after round-trip");
+        let loaded_event = loaded_map
+            .get_event(container_pos)
+            .expect("container event must be present after round-trip");
+
+        match loaded_event {
+            MapEvent::Container { items, id, .. } => {
+                assert_eq!(id, "chest_room1", "container id must be preserved");
+                assert_eq!(
+                    items.len(),
+                    2,
+                    "container must have 2 items after partial take and round-trip"
+                );
+                assert!(
+                    items.iter().any(|s| s.item_id == 10),
+                    "item_id 10 must still be in the container"
+                );
+                assert!(
+                    items.iter().any(|s| s.item_id == 30),
+                    "item_id 30 must still be in the container"
+                );
+                assert!(
+                    !items.iter().any(|s| s.item_id == 20),
+                    "taken item_id 20 must NOT be in the container after round-trip"
+                );
+            }
+            other => panic!("expected Container event, got {:?}", other),
+        }
+    }
 }

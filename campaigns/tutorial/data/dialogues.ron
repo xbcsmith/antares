@@ -588,6 +588,13 @@
                         ends_dialogue: false,
                     ),
                     (
+                        text: "I\'d like to browse your wares.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
                         text: "Not interested.",
                         target_node: None,
                         conditions: [],
@@ -598,6 +605,19 @@
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+            ),
+            6: (
+                id: 6,
+                text: "Of course! Take a look at what I have.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    OpenMerchant(
+                        npc_id: "tutorial_merchant_town",
+                    ),
+                ],
+                is_terminal: true,
             ),
             2: (
                 id: 2,
@@ -1134,6 +1154,13 @@
                         ends_dialogue: false,
                     ),
                     (
+                        text: "I\'d like to buy something.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
                         text: "Just browsing.",
                         target_node: None,
                         conditions: [],
@@ -1144,6 +1171,19 @@
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+            ),
+            5: (
+                id: 5,
+                text: "Let me show you what I\'ve got. Hazard prices, but worth every coin!",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    OpenMerchant(
+                        npc_id: "tutorial_merchant_town2",
+                    ),
+                ],
+                is_terminal: true,
             ),
             3: (
                 id: 3,
