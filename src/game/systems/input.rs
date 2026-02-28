@@ -624,13 +624,30 @@ fn handle_input(
             }
         }
 
+        // Check for a Container event at the current tile first (party may
+        // already be standing on the container tile).
+        if let Some(event) = map.get_event(party_position) {
+            if let MapEvent::Container { id, name, .. } = event {
+                info!(
+                    "Interacting with container '{}' ({}) at current position {:?}",
+                    id, name, party_position
+                );
+                map_event_messages.write(MapEventTriggered {
+                    event: event.clone(),
+                    position: party_position,
+                });
+                return;
+            }
+        }
+
         // Check for interaction-driven map events in any adjacent tile.
         for position in adjacent_tiles {
             if let Some(event) = map.get_event(position) {
                 match event {
                     MapEvent::Sign { .. }
                     | MapEvent::Teleport { .. }
-                    | MapEvent::Encounter { .. } => {
+                    | MapEvent::Encounter { .. }
+                    | MapEvent::Container { .. } => {
                         info!("Interacting with event at {:?}", position);
                         map_event_messages.write(MapEventTriggered {
                             event: event.clone(),

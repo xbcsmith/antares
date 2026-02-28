@@ -69,6 +69,12 @@ fn check_for_events(
                             current_pos
                         );
                     }
+                    MapEvent::Container { .. } => {
+                        info!(
+                            "Party at {:?} is on a Container event; not auto-triggering (requires interact)",
+                            current_pos
+                        );
+                    }
                     _ => {
                         // Trigger other event types automatically (encounters, traps, etc.)
                         event_writer.write(MapEventTriggered {
@@ -564,6 +570,30 @@ fn handle_events(
                     }
                 }
             }
+            MapEvent::Container {
+                id,
+                name,
+                items,
+                description,
+            } => {
+                let msg = format!("Opening container: {} - {}", name, description);
+                info!("{}", msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
+
+                // Enter ContainerInventory mode with the current item contents.
+                // On close, the action system writes the updated item list back
+                // to this MapEvent::Container so partial takes persist.
+                global_state
+                    .0
+                    .enter_container_inventory(id.clone(), name.clone(), items.clone());
+                info!(
+                    "Entered ContainerInventory mode for container '{}' with {} item(s)",
+                    id,
+                    items.len()
+                );
+            }
         }
     }
 }
@@ -656,6 +686,213 @@ fn handle_event_result(
         if let Some(ref mut log) = game_log {
             log.add(msg);
         }
+    }
+}
+
+#[cfg(test)]
+mod container_event_tests {
+    use super::*;
+    use crate::application::{GameMode, GameState};
+    use crate::domain::character::InventorySlot;
+    use crate::domain::types::Position;
+    use crate::domain::world::Map;
+    use crate::game::systems::ui::GameLog;
+
+    fn make_slot(item_id: u8) -> InventorySlot {
+        InventorySlot {
+            item_id,
+            charges: 0,
+        }
+    }
+
+    /// Build a minimal Bevy app with just the EventPlugin wired up.
+    ///
+    /// Container events require an explicit `E`-key interact to fire — they are
+    /// NOT auto-triggered when the party steps on their tile.  Tests that verify
+    /// the `handle_events` → `GameMode::ContainerInventory` path must write a
+    /// `MapEventTriggered` message directly (simulating the input system) instead
+    /// of relying on `check_for_events`.
+    fn build_event_app(game_state: GameState) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
+        app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(EventPlugin);
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameLog::new());
+        // Minimal content DB — containers don't need NPC lookups
+        app.insert_resource(crate::application::resources::GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
+        app
+    }
+
+    /// Send a `MapEventTriggered` for the given `MapEvent`, simulating an E-key
+    /// interact from the input system.
+    fn fire_container_event(app: &mut App, event: MapEvent, position: Position) {
+        let mut messages = app
+            .world_mut()
+            .resource_mut::<Messages<MapEventTriggered>>();
+        messages.write(MapEventTriggered { event, position });
+    }
+
+    #[test]
+    fn test_container_map_event_enters_container_inventory_mode() {
+        // Arrange: map with a Container event at position (3, 3)
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let event_pos = Position::new(3, 3);
+        let container_event = MapEvent::Container {
+            id: "chest_001".to_string(),
+            name: "Old Chest".to_string(),
+            description: "A dusty chest".to_string(),
+            items: vec![make_slot(1), make_slot(2)],
+        };
+        map.add_event(event_pos, container_event.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+        game_state.mode = GameMode::Exploration;
+
+        let mut app = build_event_app(game_state);
+
+        // First update registers the plugin systems.
+        app.update();
+
+        // Simulate pressing E: fire MapEventTriggered directly (the input
+        // system is not present in this test app).
+        fire_container_event(&mut app, container_event, event_pos);
+
+        // handle_events processes the message and enters ContainerInventory.
+        app.update();
+
+        // Assert
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, GameMode::ContainerInventory(_)),
+            "Expected ContainerInventory mode after E-key on Container event, got {:?}",
+            gs.0.mode
+        );
+
+        if let GameMode::ContainerInventory(ref cs) = gs.0.mode {
+            assert_eq!(cs.container_event_id, "chest_001");
+            assert_eq!(cs.container_name, "Old Chest");
+            assert_eq!(cs.items.len(), 2);
+        }
+    }
+
+    #[test]
+    fn test_container_event_stores_items_in_state() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let event_pos = Position::new(5, 5);
+        let container_event = MapEvent::Container {
+            id: "barrel_01".to_string(),
+            name: "Barrel".to_string(),
+            description: "".to_string(),
+            items: vec![make_slot(10), make_slot(20), make_slot(30)],
+        };
+        map.add_event(event_pos, container_event.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+
+        let mut app = build_event_app(game_state);
+        app.update();
+
+        fire_container_event(&mut app, container_event, event_pos);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        if let GameMode::ContainerInventory(ref cs) = gs.0.mode {
+            assert_eq!(cs.items.len(), 3);
+            assert_eq!(cs.items[0].item_id, 10);
+            assert_eq!(cs.items[1].item_id, 20);
+            assert_eq!(cs.items[2].item_id, 30);
+        } else {
+            panic!("Expected ContainerInventory mode, got {:?}", gs.0.mode);
+        }
+    }
+
+    #[test]
+    fn test_empty_container_event_enters_container_inventory_mode() {
+        // An empty container must still open the UI (showing "(Empty)").
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let event_pos = Position::new(7, 7);
+        let container_event = MapEvent::Container {
+            id: "empty_crate".to_string(),
+            name: "Empty Crate".to_string(),
+            description: "".to_string(),
+            items: vec![],
+        };
+        map.add_event(event_pos, container_event.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+
+        let mut app = build_event_app(game_state);
+        app.update();
+
+        fire_container_event(&mut app, container_event, event_pos);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, GameMode::ContainerInventory(_)),
+            "Empty container must still enter ContainerInventory mode, got {:?}",
+            gs.0.mode
+        );
+        if let GameMode::ContainerInventory(ref cs) = gs.0.mode {
+            assert!(cs.is_empty(), "Container state must be empty");
+        }
+    }
+
+    #[test]
+    fn test_container_not_auto_triggered_when_party_steps_on_tile() {
+        // Container events must NOT enter ContainerInventory when the party
+        // simply walks onto the tile — they require an explicit E-key press.
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let event_pos = Position::new(4, 4);
+        map.add_event(
+            event_pos,
+            MapEvent::Container {
+                id: "no_auto_chest".to_string(),
+                name: "No Auto Chest".to_string(),
+                description: "".to_string(),
+                items: vec![make_slot(99)],
+            },
+        );
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        // Party starts away from the container
+        game_state.world.set_party_position(Position::new(0, 0));
+        game_state.mode = GameMode::Exploration;
+
+        let mut app = build_event_app(game_state);
+        app.update();
+
+        // Move party onto the container tile — check_for_events runs but must
+        // NOT auto-fire the container event.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.world.set_party_position(event_pos);
+        }
+        app.update(); // check_for_events sees the new position
+        app.update(); // handle_events processes any queued messages
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, GameMode::Exploration),
+            "Container must NOT auto-trigger on step; mode should remain Exploration, got {:?}",
+            gs.0.mode
+        );
     }
 }
 

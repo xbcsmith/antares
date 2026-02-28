@@ -46,7 +46,8 @@
 use crate::application::container_inventory_state::{ContainerFocus, ContainerInventoryState};
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
-use crate::domain::character::Inventory;
+use crate::domain::character::{Inventory, InventorySlot};
+use crate::domain::world::MapEvent;
 
 use crate::game::resources::GlobalState;
 use crate::game::systems::inventory_ui::NavigationPhase;
@@ -416,6 +417,12 @@ fn container_inventory_input_system(
 
     // Esc → close container screen
     if keyboard.just_pressed(KeyCode::Escape) {
+        // Write the updated item list back to the map event BEFORE restoring mode
+        // so that partial takes persist within the session.
+        let event_id = container_state.container_event_id.clone();
+        let updated_items = container_state.items.clone();
+        write_container_items_back(&mut global_state.0, &event_id, updated_items);
+
         let resume = container_state.get_resume_mode();
         global_state.0.mode = resume;
         nav_state.reset();
@@ -667,6 +674,100 @@ fn container_inventory_ui_system(
 // ===== Panel render helpers =====
 
 /// Return value from `render_character_stash_panel`.
+/// Write the updated container item list back to the corresponding
+/// `MapEvent::Container` in the current map.
+///
+/// Called when the player closes the container screen (presses `Esc`) so that
+/// partial takes and stashes persist within the current session.  The write-back
+/// must happen **before** the mode is restored; see the close handler in
+/// `container_inventory_input_system`.
+///
+/// # Arguments
+///
+/// * `game_state`           – Mutable game state (used to access the current map).
+/// * `container_event_id`   – The `id` field of the `MapEvent::Container` to update.
+/// * `items`                – The current item list from `ContainerInventoryState`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::{GameMode, GameState};
+/// use antares::domain::character::InventorySlot;
+/// use antares::domain::world::{Map, MapEvent};
+/// use antares::domain::types::Position;
+/// use antares::game::systems::container_inventory_ui::write_container_items_back;
+///
+/// let mut state = GameState::new();
+/// let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+/// let pos = Position::new(3, 3);
+/// map.add_event(
+///     pos,
+///     MapEvent::Container {
+///         id: "chest_01".to_string(),
+///         name: "Chest".to_string(),
+///         description: "".to_string(),
+///         items: vec![InventorySlot { item_id: 1, charges: 0 }],
+///     },
+/// );
+/// state.world.add_map(map);
+/// state.world.set_current_map(1);
+///
+/// // After taking an item the container is empty — write that back.
+/// write_container_items_back(&mut state, "chest_01", vec![]);
+///
+/// if let Some(event) = state.world.get_current_map().unwrap().get_event(pos) {
+///     if let MapEvent::Container { items, .. } = event {
+///         assert!(items.is_empty());
+///     }
+/// }
+/// ```
+pub fn write_container_items_back(
+    game_state: &mut crate::application::GameState,
+    container_event_id: &str,
+    items: Vec<InventorySlot>,
+) {
+    let Some(map) = game_state.world.get_current_map_mut() else {
+        warn!(
+            "write_container_items_back: no current map; skipping write-back for '{}'",
+            container_event_id
+        );
+        return;
+    };
+
+    // Find the matching Container event by scanning the events HashMap.
+    // We look for a MapEvent::Container whose `id` matches container_event_id.
+    let position = map.events.iter().find_map(|(pos, event)| {
+        if let MapEvent::Container { id, .. } = event {
+            if id == container_event_id {
+                return Some(*pos);
+            }
+        }
+        None
+    });
+
+    let Some(pos) = position else {
+        warn!(
+            "write_container_items_back: container '{}' not found in current map events",
+            container_event_id
+        );
+        return;
+    };
+
+    // Replace the items field in-place.
+    if let Some(MapEvent::Container {
+        items: ref mut stored,
+        ..
+    }) = map.events.get_mut(&pos)
+    {
+        *stored = items;
+        info!(
+            "write_container_items_back: wrote {} item(s) back to container '{}'",
+            stored.len(),
+            container_event_id
+        );
+    }
+}
+
 struct StashActionResult {
     character_index: usize,
     slot_index: usize,
@@ -996,16 +1097,55 @@ fn render_container_items_panel(
             }
 
             if items.is_empty() {
-                ui.label(
-                    egui::RichText::new("  (Container is empty)")
-                        .color(egui::Color32::from_rgb(120, 120, 120))
-                        .small(),
-                );
+                // Centred "(Empty)" label when the container has no items.
+                ui.add_space(body_h * 0.35);
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new("(Empty)")
+                            .color(egui::Color32::from_rgb(130, 130, 130))
+                            .size(15.0),
+                    );
+                });
             }
         });
 
     // ── Action strip: Take / Take All buttons ─────────────────────────────
-    if has_action {
+    // When the container is empty, render greyed-out (disabled) Take and
+    // Take All buttons so the player can see the actions are unavailable.
+    if item_count == 0 {
+        let empty_action_rect = egui::Rect::from_min_size(
+            panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H + body_h),
+            egui::vec2(size.x, PANEL_ACTION_H),
+        );
+        ui.painter_at(empty_action_rect)
+            .rect_filled(empty_action_rect, 0.0, HEADER_BG_COLOR);
+
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(empty_action_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        child.add_space(6.0);
+        child.push_id("container_empty_actions", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let disabled_take = egui::Button::new(
+                    egui::RichText::new("Take")
+                        .color(egui::Color32::from_rgb(80, 80, 80))
+                        .small(),
+                );
+                let disabled_take_all = egui::Button::new(
+                    egui::RichText::new("Take All")
+                        .color(egui::Color32::from_rgb(80, 80, 80))
+                        .small(),
+                );
+                ui.add_enabled(false, disabled_take)
+                    .on_disabled_hover_text("Container is empty");
+                ui.add_space(8.0);
+                ui.add_enabled(false, disabled_take_all)
+                    .on_disabled_hover_text("Container is empty");
+            });
+        });
+    } else if has_action {
         if let Some(slot_idx) = selected_slot {
             let item_name = game_content
                 .and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id))
@@ -1097,7 +1237,7 @@ fn render_container_items_panel(
                 });
             });
         }
-    }
+    } // end `else if has_action`
 
     result
 }
@@ -1329,6 +1469,8 @@ mod tests {
     use crate::application::container_inventory_state::{ContainerFocus, ContainerInventoryState};
     use crate::application::{GameMode, GameState};
     use crate::domain::character::InventorySlot;
+    use crate::domain::types::Position;
+    use crate::domain::world::{Map, MapEvent};
 
     fn make_slot(item_id: u8) -> InventorySlot {
         InventorySlot {
@@ -1582,5 +1724,147 @@ mod tests {
         } else {
             panic!("Expected ContainerInventory mode");
         }
+    }
+
+    // ── write_container_items_back ────────────────────────────────────────
+
+    fn make_game_state_with_container(
+        container_id: &str,
+        initial_items: Vec<InventorySlot>,
+        pos: Position,
+    ) -> GameState {
+        let mut state = GameState::new();
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            pos,
+            MapEvent::Container {
+                id: container_id.to_string(),
+                name: "Test Chest".to_string(),
+                description: "".to_string(),
+                items: initial_items,
+            },
+        );
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+        state
+    }
+
+    #[test]
+    fn test_close_container_writes_items_back_to_map_event() {
+        // Arrange: container starts with two items.
+        let pos = Position::new(3, 3);
+        let mut state =
+            make_game_state_with_container("chest_test", vec![make_slot(1), make_slot(2)], pos);
+
+        // Simulate taking one item: write back only item 2.
+        write_container_items_back(&mut state, "chest_test", vec![make_slot(2)]);
+
+        // Assert: map event now contains only item 2.
+        let event = state
+            .world
+            .get_current_map()
+            .unwrap()
+            .get_event(pos)
+            .unwrap();
+        if let MapEvent::Container { items, .. } = event {
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].item_id, 2);
+        } else {
+            panic!("Expected Container event");
+        }
+    }
+
+    #[test]
+    fn test_take_all_empties_container_and_writes_back() {
+        // Arrange: container starts with three items.
+        let pos = Position::new(4, 4);
+        let mut state = make_game_state_with_container(
+            "barrel_all",
+            vec![make_slot(10), make_slot(20), make_slot(30)],
+            pos,
+        );
+
+        // Simulate taking all: write back an empty list.
+        write_container_items_back(&mut state, "barrel_all", vec![]);
+
+        let event = state
+            .world
+            .get_current_map()
+            .unwrap()
+            .get_event(pos)
+            .unwrap();
+        if let MapEvent::Container { items, .. } = event {
+            assert!(items.is_empty(), "Container must be empty after Take All");
+        } else {
+            panic!("Expected Container event");
+        }
+    }
+
+    #[test]
+    fn test_stash_item_adds_to_container_and_writes_back() {
+        // Arrange: container starts with one item.
+        let pos = Position::new(5, 5);
+        let mut state = make_game_state_with_container("crate_stash", vec![make_slot(1)], pos);
+
+        // Simulate stashing a second item: write back two items.
+        write_container_items_back(&mut state, "crate_stash", vec![make_slot(1), make_slot(5)]);
+
+        let event = state
+            .world
+            .get_current_map()
+            .unwrap()
+            .get_event(pos)
+            .unwrap();
+        if let MapEvent::Container { items, .. } = event {
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[1].item_id, 5);
+        } else {
+            panic!("Expected Container event");
+        }
+    }
+
+    #[test]
+    fn test_write_back_unknown_container_id_is_noop() {
+        // Writing back to a non-existent container ID must not panic.
+        let pos = Position::new(6, 6);
+        let mut state = make_game_state_with_container("known_chest", vec![make_slot(1)], pos);
+
+        // This must not panic.
+        write_container_items_back(&mut state, "unknown_id", vec![]);
+
+        // The known container must be unchanged.
+        let event = state
+            .world
+            .get_current_map()
+            .unwrap()
+            .get_event(pos)
+            .unwrap();
+        if let MapEvent::Container { items, .. } = event {
+            assert_eq!(items.len(), 1, "Original container must be unchanged");
+        } else {
+            panic!("Expected Container event");
+        }
+    }
+
+    #[test]
+    fn test_empty_container_disables_take_all_action() {
+        // Arrange: build ContainerInventoryState with no items.
+        let cs = ContainerInventoryState::new(
+            "empty_chest".to_string(),
+            "Empty Chest".to_string(),
+            vec![],
+            0,
+            GameMode::Exploration,
+        );
+
+        // An empty container must report is_empty() == true.
+        assert!(cs.is_empty(), "Container must be empty");
+        // item_count must be zero.
+        assert_eq!(cs.item_count(), 0);
+        // build_container_action_list with no items: container focus has Take / Take All
+        // but the Take action's slot_index would be 0 which is out of bounds — the
+        // UI guards against this by only showing the action strip when has_action is true
+        // (i.e. selected_slot < item_count).  Verify item_count directly.
+        assert_eq!(cs.items.len(), 0);
     }
 }

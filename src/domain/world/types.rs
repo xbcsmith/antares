@@ -1866,6 +1866,32 @@ pub enum MapEvent {
         #[serde(default)]
         color_tint: Option<[f32; 3]>,
     },
+    /// An interactive container (chest, barrel, hole-in-the-wall, crate, etc.)
+    /// whose contents can be taken or stashed into by the party.
+    ///
+    /// Pressing `E` while facing this event tile opens `GameMode::ContainerInventory`.
+    /// On close, the updated item list is written back so partial takes persist
+    /// within a session.
+    Container {
+        /// Unique identifier for this container instance.
+        ///
+        /// Used as the `container_event_id` stored in `ContainerInventoryState`
+        /// and as the key to write the updated item list back to the map event
+        /// on close.
+        id: String,
+        /// Display name shown in the container inventory right-panel header.
+        #[serde(default)]
+        name: String,
+        /// Optional description (shown in game log when the container is opened).
+        #[serde(default)]
+        description: String,
+        /// Current items stored inside the container.
+        ///
+        /// Modified in-place when the player takes or stashes items so that
+        /// re-interacting within the same session shows the updated contents.
+        #[serde(default)]
+        items: Vec<crate::domain::character::InventorySlot>,
+    },
 }
 
 /// Default scale for furniture events (1.0x)

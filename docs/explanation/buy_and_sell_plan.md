@@ -767,32 +767,35 @@ Add a new section summarising the buy/sell implementation:
 
 ### New Files
 
-None. All required modules already exist.
+| File                                                 | Phase | Description                                                              |
+| ---------------------------------------------------- | ----- | ------------------------------------------------------------------------ |
+| `sdk/campaign_builder/src/stock_templates_editor.rs` | 7     | Full CRUD editor for `MerchantStockTemplate`; load/save to RON; 16 tests |
 
 ### Modified Files
 
-| File                                              | Phase | Nature of Change                                                                                                                                                                          |
-| ------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/game/systems/dialogue.rs`                    | 1     | Wire `OpenMerchant` to `enter_merchant_inventory`                                                                                                                                         |
-| `src/application/dialogue.rs`                     | 1     | Add `npc_id: Option<NpcId>` to `DialogueState` (if absent)                                                                                                                                |
-| `src/game/systems/input.rs`                       | 1     | `I` key in `Dialogue` mode opens merchant inventory for merchant NPCs                                                                                                                     |
-| `src/game/systems/merchant_inventory_ui.rs`       | 2, 4  | Gold display, price display, error feedback, mouse support                                                                                                                                |
-| `src/domain/character/equipment.rs`               | 2     | `is_item_equipped(item_id) -> bool` (if absent)                                                                                                                                           |
-| `src/game/systems/container_inventory_ui.rs`      | 3, 4  | Write-back on close, empty state, mouse support                                                                                                                                           |
-| `src/domain/world/events.rs`                      | 3     | `MapEvent::Container` variant (if absent)                                                                                                                                                 |
-| `src/game/systems/events.rs`                      | 3     | Wire `E` on container to `enter_container_inventory`                                                                                                                                      |
-| `data/test_campaign/data/maps/map_1.ron`          | 3     | Add test container event                                                                                                                                                                  |
-| `data/test_campaign/data/dialogues.ron`           | 5     | Wire `OpenMerchant` action                                                                                                                                                                |
-| `campaigns/tutorial/data/dialogues.ron`           | 5     | Wire `OpenMerchant` action for both tutorial merchants                                                                                                                                    |
-| `src/application/save_game.rs`                    | 5     | Stock and container persistence tests                                                                                                                                                     |
-| `docs/explanation/implementations.md`             | 5     | Implementation summary section                                                                                                                                                            |
-| `src/domain/world/npc_runtime.rs`                 | 6     | `MerchantStockTemplate` gains `magic_item_pool` and `magic_refresh_days`; `NpcRuntimeState` gains `last_restock_day` and `magic_slots`; `restock_daily` and `restock_magic_slots` methods |
-| `src/domain/inventory.rs`                         | 6     | `MerchantStock` gains `restock_daily` helper                                                                                                                                              |
-| `src/application/mod.rs`                          | 6     | `advance_time` calls `npc_runtime.tick_restock`                                                                                                                                           |
-| `data/test_campaign/data/npc_stock_templates.ron` | 6     | Add `magic_item_pool` and `magic_refresh_days` to test templates                                                                                                                          |
-| `campaigns/tutorial/data/npc_stock_templates.ron` | 6     | Add `magic_item_pool` and `magic_refresh_days` to tutorial templates                                                                                                                      |
-| `src/application/save_game.rs`                    | 6     | Restock persistence tests                                                                                                                                                                 |
-| `docs/explanation/implementations.md`             | 6     | Phase 6 implementation summary                                                                                                                                                            |
+| File                                              | Phase   | Nature of Change                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/dialogue.rs`                    | 1       | Wire `OpenMerchant` to `enter_merchant_inventory`                                                                                                                                                                                                                                                                                                                                                  |
+| `src/application/dialogue.rs`                     | 1       | Add `npc_id: Option<NpcId>` to `DialogueState` (if absent)                                                                                                                                                                                                                                                                                                                                         |
+| `src/game/systems/input.rs`                       | 1       | `I` key in `Dialogue` mode opens merchant inventory for merchant NPCs                                                                                                                                                                                                                                                                                                                              |
+| `src/game/systems/merchant_inventory_ui.rs`       | 2, 4    | Gold display, price display, error feedback, mouse support                                                                                                                                                                                                                                                                                                                                         |
+| `src/domain/character/equipment.rs`               | 2       | `is_item_equipped(item_id) -> bool` (if absent)                                                                                                                                                                                                                                                                                                                                                    |
+| `src/game/systems/container_inventory_ui.rs`      | 3, 4    | Write-back on close, empty state, mouse support                                                                                                                                                                                                                                                                                                                                                    |
+| `src/domain/world/events.rs`                      | 3, 7    | `MapEvent::Container` variant (Phase 3); used by SDK container event editor (Phase 7)                                                                                                                                                                                                                                                                                                              |
+| `src/game/systems/events.rs`                      | 3       | Wire `E` on container to `enter_container_inventory`                                                                                                                                                                                                                                                                                                                                               |
+| `data/test_campaign/data/maps/map_1.ron`          | 3       | Add test container event                                                                                                                                                                                                                                                                                                                                                                           |
+| `data/test_campaign/data/dialogues.ron`           | 5       | Wire `OpenMerchant` action                                                                                                                                                                                                                                                                                                                                                                         |
+| `campaigns/tutorial/data/dialogues.ron`           | 5       | Wire `OpenMerchant` action for both tutorial merchants                                                                                                                                                                                                                                                                                                                                             |
+| `src/application/save_game.rs`                    | 5, 6    | Stock and container persistence tests (Phase 5); restock persistence tests (Phase 6)                                                                                                                                                                                                                                                                                                               |
+| `docs/explanation/implementations.md`             | 5, 6, 7 | Implementation summary sections                                                                                                                                                                                                                                                                                                                                                                    |
+| `src/domain/world/npc_runtime.rs`                 | 6       | `MerchantStockTemplate` gains `magic_item_pool` and `magic_refresh_days`; `NpcRuntimeState` gains `last_restock_day` and `magic_slots`; `restock_daily` and `restock_magic_slots` methods                                                                                                                                                                                                          |
+| `src/domain/inventory.rs`                         | 6       | `MerchantStock` gains `restock_daily` helper                                                                                                                                                                                                                                                                                                                                                       |
+| `src/application/mod.rs`                          | 6       | `advance_time` calls `npc_runtime.tick_restock`                                                                                                                                                                                                                                                                                                                                                    |
+| `data/test_campaign/data/npc_stock_templates.ron` | 6       | Add `magic_item_pool` and `magic_refresh_days` to test templates                                                                                                                                                                                                                                                                                                                                   |
+| `campaigns/tutorial/data/npc_stock_templates.ron` | 6       | Add `magic_item_pool` and `magic_refresh_days` to tutorial templates                                                                                                                                                                                                                                                                                                                               |
+| `sdk/campaign_builder/src/lib.rs`                 | 7       | Add `pub mod stock_templates_editor`; add `StockTemplates` to `EditorTab`; add `stock_templates_editor_state`, `stock_templates`, `stock_templates_file` fields to `CampaignBuilderApp`; add `load_stock_templates`, `save_stock_templates_to_file`; render `StockTemplates` tab; extend `validate_npc_ids` and `validate_campaign`; add `stock_templates_file` to `CampaignMetadata`; 6 new tests |
+| `sdk/campaign_builder/src/npc_editor.rs`          | 7       | Add `stock_template` to `NpcEditBuffer`; add `available_stock_templates` and `requested_template_edit` to `NpcEditorState`; extend `show_edit_view` Merchant section with stock-template drop-down and cross-navigation; update `save_npc` and `start_edit_npc`; 5 new tests                                                                                                                       |
+| `sdk/campaign_builder/src/map_editor.rs`          | 7       | Add `Container` to `EventType`; add `EVENT_COLOR_CONTAINER` constant; add container fields to `EventEditorState`; wire `to_map_event` / `from_map_event`; render container item-list editor in `show_event_editor`; 8 new tests                                                                                                                                                                    |
 
 ---
 
@@ -1395,3 +1398,872 @@ Add:
 - [ ] `NpcRuntimeStore` serialised via existing `#[serde(default)]` — no
       parallel serialisation path introduced
 - [ ] No architectural deviations from `docs/reference/architecture.md`
+
+### Phase 7 — SDK-Specific Checklist
+
+- [ ] Every loop in new egui code uses `ui.push_id` with a stable unique key
+      (item ID string, template ID, or loop index combined with item ID)
+- [ ] Every `ScrollArea` in new egui code has a distinct `id_salt` string
+- [ ] Every `ComboBox` in new egui code uses `ComboBox::from_id_salt` (never
+      `from_label`)
+- [ ] No `SidePanel`, `TopBottomPanel`, or `CentralPanel` is gated by a
+      same-frame boolean guard — show a placeholder widget instead
+- [ ] Every layout-driving state mutation (mode switches, selection changes)
+      calls `ui.ctx().request_repaint()`
+- [ ] `stock_templates_editor.rs` follows the two-column list+preview layout
+      pattern established by `npc_editor.rs` and `items_editor.rs`
+- [ ] `NpcEditBuffer::stock_template` serialises to/from `NpcDefinition::stock_template`
+      without data loss (`None` ↔ empty string, `Some(id)` ↔ non-empty string)
+- [ ] `EventEditorState` container fields default to `vec![]` / `false` /
+      `String::new()` so existing non-container events are not affected
+- [ ] `EventType::Container` is included in `EventType::all()` so the event
+      type picker shows it in the Map Editor inspector
+- [ ] `validate_npc_ids` and `validate_campaign` cross-checks run as part of
+      the existing `validate_campaign` call path — no new validation entry
+      point introduced
+
+---
+
+## Phase 7: Campaign Builder — Stock Template and Container Item Editor
+
+**Goal:** The Campaign Builder SDK gains two new authoring surfaces:
+
+1. **Stock Template Editor** — a dedicated tab (`StockTemplates`) under
+   `sdk/campaign_builder` where content authors can create, edit, and delete
+   `MerchantStockTemplate` entries in `npc_stock_templates.ron`. The NPC editor
+   gains a stock-template assignment drop-down so authors can link a merchant
+   NPC to a template without hand-editing RON files.
+
+2. **Container Event Item Editor** — the Map Editor's `EventEditorState` gains
+   a `Container` event type. In the event inspector panel authors can compose
+   the container's initial item list by picking from the campaign item database.
+   The editor serialises to and from `MapEvent::Container` in
+   `src/domain/world/events.rs` (added by Phase 3).
+
+Both surfaces follow all SDK `AGENTS.md` egui rules: every loop uses
+`push_id`, every `ScrollArea` has a unique `id_salt`, and every `ComboBox`
+uses `from_id_salt`.
+
+---
+
+### 7.1 New File: `sdk/campaign_builder/src/stock_templates_editor.rs`
+
+**File:** `sdk/campaign_builder/src/stock_templates_editor.rs`
+
+This module owns all state and rendering for the stock-template authoring
+surface. It mirrors the structure and conventions of the existing
+`npc_editor.rs` — a `StockTemplatesEditorState` struct, a
+`StockTemplateEditBuffer` for form fields, a `StockTemplatesEditorMode` enum,
+and a `show()` entry point that returns `bool` (`true` = needs save).
+
+#### 7.1.1 `StockTemplatesEditorMode`
+
+```
+pub enum StockTemplatesEditorMode {
+    List,
+    Add,
+    Edit,
+}
+```
+
+#### 7.1.2 `StockTemplateEditBuffer`
+
+One buffer field per editable property of `MerchantStockTemplate`.
+All fields are `String` (parsed on save) except `entries` and
+`magic_item_pool`, which use structured sub-buffers:
+
+```
+pub struct StockTemplateEditBuffer {
+    /// Template ID (e.g. "blacksmith_basic_stock")
+    pub id: String,
+
+    /// Human-readable description shown in the editor list
+    pub description: String,
+
+    /// Editable list of regular stock entries
+    pub entries: Vec<TemplateEntryBuffer>,
+
+    /// Item IDs in the magic-item rotation pool (one per line in the UI)
+    pub magic_item_pool: Vec<String>,
+
+    /// Number of magic slots shown at once (stringified u8)
+    pub magic_slot_count: String,
+
+    /// Days between magic-slot refreshes (stringified u32)
+    pub magic_refresh_days: String,
+}
+
+pub struct TemplateEntryBuffer {
+    /// Item ID (stringified u8 / ItemId)
+    pub item_id: String,
+    /// Restock quantity (stringified u8)
+    pub quantity: String,
+    /// Optional price override (empty = use item base_cost)
+    pub override_price: String,
+}
+```
+
+Conversion helpers `StockTemplateEditBuffer::from_template` and
+`StockTemplateEditBuffer::to_template` handle parse/validate and produce
+descriptive `Vec<String>` error lists identical to the pattern in
+`npc_editor.rs` `validate_edit_buffer`.
+
+#### 7.1.3 `StockTemplatesEditorState`
+
+```
+pub struct StockTemplatesEditorState {
+    pub templates: Vec<MerchantStockTemplate>,
+    pub selected_template: Option<usize>,
+    pub mode: StockTemplatesEditorMode,
+    pub edit_buffer: StockTemplateEditBuffer,
+    pub search_filter: String,
+    pub has_unsaved_changes: bool,
+    pub validation_errors: Vec<String>,
+    pub last_campaign_dir: Option<PathBuf>,   // #[serde(skip)]
+    pub last_templates_file: Option<String>,  // #[serde(skip)]
+
+    /// Item database snapshot for item-name lookups in the entry list.
+    /// Refreshed from the caller on every `show()` call.
+    pub available_items: Vec<Item>,           // #[serde(skip)]
+}
+```
+
+#### 7.1.4 `StockTemplatesEditorState::show`
+
+Signature:
+
+```
+pub fn show(
+    &mut self,
+    ui: &mut egui::Ui,
+    available_items: &[Item],
+    campaign_dir: Option<&PathBuf>,
+    templates_file: &str,
+) -> bool
+```
+
+**List view** — a two-column layout. Left column: a `ScrollArea` with
+`id_salt("stock_tmpl_list_scroll")` listing each template as a
+`selectable_label`. Clicking a row selects it and populates a read-only
+preview in the right column. The toolbar (using `EditorToolbar::new`) provides
+**New**, **Edit** (opens the selected template in edit mode), **Delete** (with
+a confirmation), and **Export** buttons.
+
+**Edit / Add view** — a `ScrollArea` with `id_salt("stock_tmpl_edit_scroll")`
+containing three `ui.group` sections:
+
+1. **Identity** — `id` (`TextEdit` with `id_salt("stmpl_edit_id")`) and
+   `description` (`TextEdit` with `id_salt("stmpl_edit_description")`).
+
+2. **Regular Stock Entries** — a header row labelling the three columns
+   (`Item`, `Qty`, `Price Override`) followed by one row per entry rendered
+   inside a `ScrollArea` with `id_salt("stmpl_entries_scroll")`. Each row
+   is wrapped in `ui.push_id(format!("stmpl_entry_{}", i), ...)`. The `Item`
+   cell uses a `ComboBox::from_id_salt(format!("stmpl_item_sel_{}", i))`
+   populated from `available_items` (showing `id - name`). **Add Entry** and
+   per-row **✕** (remove) buttons mutate the buffer. An **↑** / **↓** pair
+   on each row allows reordering — both wrapped in
+   `push_id(format!("stmpl_move_{}", i), ...)`.
+
+3. **Magic Item Rotation** — three fields:
+   - `magic_slot_count` (`DragValue` clamped 0–255, `id_salt("stmpl_magic_count")`)
+   - `magic_refresh_days` (`DragValue` clamped 1–365, `id_salt("stmpl_magic_days")`)
+   - `magic_item_pool` — a `ScrollArea` with `id_salt("stmpl_magic_pool_scroll")`
+     listing pool entries. Each entry is a
+     `ComboBox::from_id_salt(format!("stmpl_pool_item_{}", i))` populated from
+     `available_items` filtered to `item.is_magical() == true`. An **Add to Pool**
+     button appends a blank entry; each row has a **✕** remove button. Both
+     the list and the buttons use `push_id(format!("stmpl_pool_{}", i), ...)`.
+
+Below the groups: a validation-error panel (same style as `npc_editor.rs`) and
+an action button strip — **⬅ Back**, **💾 Save**, **❌ Cancel** — where Save
+calls `validate_edit_buffer`, then on success persists to the RON file at
+`campaign_dir.join(templates_file)` using `ron::ser::to_string_pretty`.
+
+#### 7.1.5 Load / Save helpers
+
+```
+pub fn load_from_file(&mut self, path: &Path) -> Result<(), String>
+pub fn save_to_file(&self, path: &Path) -> Result<(), String>
+```
+
+Both use `ron` (de)serialisation over `Vec<MerchantStockTemplate>`. Errors
+produce `String` messages that the caller forwards to the status bar, matching
+the pattern in `CampaignBuilderApp::load_npcs` / `save_npcs_to_file`.
+
+#### 7.1.6 Validation rules
+
+| Field                       | Rule                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------ |
+| `id`                        | Non-empty; matches `[a-z0-9_]+`; unique among existing templates (in add mode) |
+| `entries[*].item_id`        | Parseable as `ItemId` (`u8`); non-zero                                         |
+| `entries[*].quantity`       | Parseable as `u8`; ≥ 1                                                         |
+| `entries[*].override_price` | Empty or parseable as `u32`                                                    |
+| `magic_slot_count`          | Parseable as `u8`                                                              |
+| `magic_refresh_days`        | Parseable as `u32`; ≥ 1 (treat 0 as 1 with a warning)                          |
+| `magic_item_pool[*]`        | Parseable as `ItemId`; warning if item not found in `available_items`          |
+| `magic_slot_count`          | Warning if `magic_slot_count > magic_item_pool.len()`                          |
+
+---
+
+### 7.2 Wire `StockTemplatesEditorState` into `CampaignBuilderApp`
+
+**File:** `sdk/campaign_builder/src/lib.rs`
+
+#### 7.2.1 Add `pub mod stock_templates_editor`
+
+Add to `lib.rs` module declarations (alphabetically after `spells_editor`):
+
+```
+pub mod stock_templates_editor;
+```
+
+#### 7.2.2 Add `StockTemplates` to `EditorTab`
+
+```
+enum EditorTab {
+    // … existing variants …
+    StockTemplates,   // ← new, placed between Proficiencies and Assets
+}
+```
+
+Update `EditorTab::name`:
+
+```
+EditorTab::StockTemplates => "Stock Templates",
+```
+
+#### 7.2.3 Add fields to `CampaignBuilderApp`
+
+```
+/// Stock template editor state (NPC restock definitions)
+stock_templates_editor_state: StockTemplatesEditorState,
+
+/// Loaded stock templates
+stock_templates: Vec<MerchantStockTemplate>,
+
+/// Filename for npc_stock_templates.ron relative to campaign data dir
+stock_templates_file: String,
+```
+
+Default values:
+
+```
+stock_templates_editor_state: StockTemplatesEditorState::default(),
+stock_templates: Vec::new(),
+stock_templates_file: "data/npc_stock_templates.ron".to_string(),
+```
+
+#### 7.2.4 Add `CampaignMetadata::stock_templates_file` field
+
+```
+/// Relative path to the NPC stock templates RON file
+#[serde(default = "default_stock_templates_file")]
+pub stock_templates_file: String,
+```
+
+```
+fn default_stock_templates_file() -> String {
+    "data/npc_stock_templates.ron".to_string()
+}
+```
+
+This mirrors the pattern of `default_proficiencies_file` and
+`default_creatures_file` already in `CampaignMetadata`.
+
+#### 7.2.5 Add `load_stock_templates` and `save_stock_templates_to_file`
+
+```
+fn load_stock_templates(&mut self) {
+    if let Some(dir) = &self.campaign_dir {
+        let path = dir.join(&self.campaign.stock_templates_file);
+        match self.stock_templates_editor_state.load_from_file(&path) {
+            Ok(()) => {
+                self.stock_templates =
+                    self.stock_templates_editor_state.templates.clone();
+                self.status_message =
+                    format!("Loaded {} stock templates", self.stock_templates.len());
+            }
+            Err(e) => {
+                self.status_message =
+                    format!("Warning: could not load stock templates: {}", e);
+            }
+        }
+    }
+}
+
+fn save_stock_templates_to_file(&mut self) {
+    if let Some(dir) = &self.campaign_dir {
+        let path = dir.join(&self.campaign.stock_templates_file);
+        match self.stock_templates_editor_state.save_to_file(&path) {
+            Ok(()) => {
+                self.status_message = "Stock templates saved.".to_string();
+                self.unsaved_changes = false;
+            }
+            Err(e) => {
+                self.status_message =
+                    format!("Error saving stock templates: {}", e);
+            }
+        }
+    }
+}
+```
+
+Call `load_stock_templates()` inside `do_open_campaign` after
+`load_npcs()` (the two files are typically loaded together).
+Call `save_stock_templates_to_file()` inside `do_save_campaign` after
+`save_npcs_to_file()`.
+
+#### 7.2.6 Render the `StockTemplates` tab in `eframe::App::update`
+
+Inside the `match self.active_tab` arm (which already dispatches to each
+editor panel), add:
+
+```
+EditorTab::StockTemplates => {
+    let needs_save = self.stock_templates_editor_state.show(
+        ui,
+        &self.items,
+        self.campaign_dir.as_ref(),
+        &self.campaign.stock_templates_file,
+    );
+    if needs_save {
+        self.stock_templates =
+            self.stock_templates_editor_state.templates.clone();
+        self.unsaved_changes = true;
+    }
+}
+```
+
+---
+
+### 7.3 Extend `NpcEditBuffer` with `stock_template` Field
+
+**File:** `sdk/campaign_builder/src/npc_editor.rs`
+
+#### 7.3.1 Add field to `NpcEditBuffer`
+
+```
+/// ID of the stock template this merchant uses (empty = no template)
+pub stock_template: String,
+```
+
+Default: `String::new()`.
+
+#### 7.3.2 Extend `show_edit_view` Merchant section
+
+In `show_edit_view`, the existing **Faction & Roles** group already renders
+`is_merchant` and `is_innkeeper` checkboxes. Immediately after the
+`is_merchant` checkbox, add a conditional block:
+
+```
+if self.edit_buffer.is_merchant {
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Stock Template:");
+        egui::ComboBox::from_id_salt("npc_edit_stock_template_select")
+            .selected_text(if self.edit_buffer.stock_template.is_empty() {
+                "None (no stock)".to_string()
+            } else {
+                self.edit_buffer.stock_template.clone()
+            })
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(
+                        self.edit_buffer.stock_template.is_empty(),
+                        "None (no stock)",
+                    )
+                    .clicked()
+                {
+                    self.edit_buffer.stock_template.clear();
+                }
+                for tmpl in &self.available_stock_templates {
+                    ui.push_id(&tmpl.id, |ui| {
+                        if ui
+                            .selectable_label(
+                                self.edit_buffer.stock_template == tmpl.id,
+                                &tmpl.id,
+                            )
+                            .on_hover_text(format!(
+                                "{} entries, {} magic slots",
+                                tmpl.entries.len(),
+                                tmpl.magic_slot_count
+                            ))
+                            .clicked()
+                        {
+                            self.edit_buffer.stock_template = tmpl.id.clone();
+                        }
+                    });
+                }
+            });
+        if !self.edit_buffer.stock_template.is_empty() {
+            if ui.small_button("✏ Edit template").clicked() {
+                // Signal the caller to navigate to the Stock Templates tab
+                // and open this template for editing.
+                self.requested_template_edit =
+                    Some(self.edit_buffer.stock_template.clone());
+            }
+        }
+    });
+}
+```
+
+#### 7.3.3 Add `available_stock_templates` and `requested_template_edit` to `NpcEditorState`
+
+```
+/// Stock templates available for merchant assignment (populated by caller)
+#[serde(skip)]
+pub available_stock_templates: Vec<MerchantStockTemplate>,
+
+/// Set by the UI when the user clicks "✏ Edit template"; consumed by
+/// `CampaignBuilderApp` to switch tab and open the named template.
+#[serde(skip)]
+pub requested_template_edit: Option<String>,
+```
+
+#### 7.3.4 Thread `available_stock_templates` from `CampaignBuilderApp`
+
+In `CampaignBuilderApp::update`, before calling
+`self.npc_editor_state.show(...)`, set:
+
+```
+self.npc_editor_state.available_stock_templates =
+    self.stock_templates.clone();
+```
+
+After `show()` returns, consume `requested_template_edit`:
+
+```
+if let Some(tmpl_id) =
+    self.npc_editor_state.requested_template_edit.take()
+{
+    self.active_tab = EditorTab::StockTemplates;
+    self.stock_templates_editor_state
+        .open_template_for_edit(&tmpl_id);
+}
+```
+
+Add the helper `open_template_for_edit` to `StockTemplatesEditorState`:
+
+```
+pub fn open_template_for_edit(&mut self, id: &str) {
+    if let Some(idx) = self.templates.iter().position(|t| t.id == id) {
+        self.selected_template = Some(idx);
+        self.edit_buffer =
+            StockTemplateEditBuffer::from_template(&self.templates[idx]);
+        self.mode = StockTemplatesEditorMode::Edit;
+    }
+}
+```
+
+#### 7.3.5 Persist `stock_template` through `save_npc` / `start_edit_npc`
+
+In `save_npc`, map `edit_buffer.stock_template` →
+`NpcDefinition::stock_template`:
+
+```
+npc.stock_template = if self.edit_buffer.stock_template.is_empty() {
+    None
+} else {
+    Some(self.edit_buffer.stock_template.clone())
+};
+```
+
+In `start_edit_npc`, populate `edit_buffer.stock_template`:
+
+```
+self.edit_buffer.stock_template =
+    npc.stock_template.clone().unwrap_or_default();
+```
+
+---
+
+### 7.4 Add `Container` Event Type to the Map Editor
+
+**File:** `sdk/campaign_builder/src/map_editor.rs`
+
+#### 7.4.1 Add `Container` variant to `EventType`
+
+```
+pub enum EventType {
+    Encounter,
+    Treasure,
+    Teleport,
+    Trap,
+    Sign,
+    NpcDialogue,
+    RecruitableCharacter,
+    EnterInn,
+    Furniture,
+    Container,   // ← new
+}
+```
+
+Update all `match` arms that are exhaustive over `EventType`:
+
+- `name()` → `"Container"`
+- `icon()` → `"📦"`
+- `color()` → a new constant `EVENT_COLOR_CONTAINER` (teal:
+  `Color32::from_rgb(0, 180, 160)`)
+- `all()` → append `EventType::Container`
+
+Add the new constant at module top alongside the existing colour constants:
+
+```
+const EVENT_COLOR_CONTAINER: egui::Color32 =
+    egui::Color32::from_rgb(0, 180, 160);
+```
+
+#### 7.4.2 Add container fields to `EventEditorState`
+
+```
+/// Items in the container's initial inventory (item IDs)
+pub container_items: Vec<ItemId>,
+
+/// Freeform input buffer for adding an item to the container list
+pub container_item_input: String,
+
+/// Whether the container starts locked
+pub container_locked: bool,
+
+/// Optional description override shown when the container is opened
+pub container_description: String,
+```
+
+Defaults: `container_items: vec![]`, `container_item_input: String::new()`,
+`container_locked: false`, `container_description: String::new()`.
+
+#### 7.4.3 Wire `Container` in `EventEditorState::to_map_event`
+
+```
+EventType::Container => {
+    Ok(MapEvent::Container {
+        name: self.name.clone(),
+        description: if self.container_description.is_empty() {
+            self.description.clone()
+        } else {
+            self.container_description.clone()
+        },
+        items: self.container_items.clone(),
+        locked: self.container_locked,
+    })
+}
+```
+
+#### 7.4.4 Wire `Container` in `EventEditorState::from_map_event`
+
+```
+MapEvent::Container { name, description, items, locked } => {
+    s.event_type = EventType::Container;
+    s.name = name.clone();
+    s.description = description.clone();
+    s.container_items = items.clone();
+    s.container_locked = *locked;
+}
+```
+
+#### 7.4.5 Render the Container fields in `show_event_editor`
+
+**File:** `sdk/campaign_builder/src/lib.rs`
+**Function:** `CampaignBuilderApp::show_event_editor`
+
+After the existing `EventType::Furniture` block, add a `Container` block:
+
+```
+EventType::Container => {
+    ui.separator();
+    ui.heading("📦 Container");
+
+    ui.checkbox(
+        &mut state.container_locked,
+        "🔒 Starts Locked",
+    );
+
+    ui.horizontal(|ui| {
+        ui.label("Description (optional override):");
+    });
+    ui.add(
+        egui::TextEdit::multiline(&mut state.container_description)
+            .desired_rows(2)
+            .id_salt("container_evt_desc"),
+    );
+
+    ui.separator();
+    ui.label("📦 Initial Items:");
+
+    // Item add row
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("container_evt_add_item")
+            .selected_text(if state.container_item_input.is_empty() {
+                "Select item…".to_string()
+            } else {
+                state.container_item_input.clone()
+            })
+            .show_ui(ui, |ui| {
+                for item in &self.items {
+                    ui.push_id(item.id, |ui| {
+                        let label = format!("{} - {}", item.id, item.name);
+                        if ui
+                            .selectable_label(
+                                state.container_item_input
+                                    == item.id.to_string(),
+                                &label,
+                            )
+                            .clicked()
+                        {
+                            state.container_item_input = item.id.to_string();
+                        }
+                    });
+                }
+            });
+
+        if ui.button("➕ Add").clicked() {
+            if let Ok(id) =
+                state.container_item_input.trim().parse::<ItemId>()
+            {
+                state.container_items.push(id);
+                state.container_item_input.clear();
+            }
+        }
+    });
+
+    // Item list
+    egui::ScrollArea::vertical()
+        .id_salt("container_evt_items_scroll")
+        .max_height(180.0)
+        .show(ui, |ui| {
+            let mut remove_idx: Option<usize> = None;
+            for (i, &item_id) in
+                state.container_items.iter().enumerate()
+            {
+                ui.push_id(format!("container_item_{}", i), |ui| {
+                    ui.horizontal(|ui| {
+                        let item_name = self
+                            .items
+                            .iter()
+                            .find(|it| it.id == item_id)
+                            .map(|it| it.name.as_str())
+                            .unwrap_or("(unknown)");
+                        ui.label(format!(
+                            "{}.  {} — {}",
+                            i + 1,
+                            item_id,
+                            item_name
+                        ));
+                        if ui
+                            .small_button("✕")
+                            .on_hover_text("Remove item")
+                            .clicked()
+                        {
+                            remove_idx = Some(i);
+                        }
+                    });
+                });
+            }
+            if let Some(idx) = remove_idx {
+                state.container_items.remove(idx);
+            }
+            if state.container_items.is_empty() {
+                ui.label(
+                    egui::RichText::new("  (empty — container starts with no items)")
+                        .weak(),
+                );
+            }
+        });
+}
+```
+
+`self.items` is the `Vec<Item>` already held by `CampaignBuilderApp`.
+
+---
+
+### 7.5 Validation: `validate_npc_ids` Extension
+
+**File:** `sdk/campaign_builder/src/lib.rs`
+
+Extend the existing `validate_npc_ids` function (or add a sibling
+`validate_stock_template_refs`) to cross-check every merchant NPC's
+`stock_template` field against the loaded `self.stock_templates` list:
+
+```
+// In validate_npc_ids (or validate_stock_template_refs):
+for npc in &self.npc_editor_state.npcs {
+    if let Some(ref tmpl_id) = npc.stock_template {
+        if !self.stock_templates.iter().any(|t| &t.id == tmpl_id) {
+            errors.push(ValidationResult {
+                severity: ValidationSeverity::Error,
+                category: "NPCs".to_string(),
+                asset_id: npc.id.clone(),
+                message: format!(
+                    "NPC '{}' references unknown stock template '{}'",
+                    npc.id, tmpl_id
+                ),
+            });
+        }
+    }
+}
+```
+
+Add a parallel check in `validate_campaign` that validates every template's
+item IDs against `self.items`:
+
+```
+for tmpl in &self.stock_templates {
+    for entry in &tmpl.entries {
+        if !self.items.iter().any(|it| it.id == entry.item_id) {
+            errors.push(ValidationResult {
+                severity: ValidationSeverity::Warning,
+                category: "StockTemplates".to_string(),
+                asset_id: tmpl.id.clone(),
+                message: format!(
+                    "Template '{}' references unknown item_id {}",
+                    tmpl.id, entry.item_id
+                ),
+            });
+        }
+    }
+    for &pool_id in &tmpl.magic_item_pool {
+        if !self.items.iter().any(|it| it.id == pool_id) {
+            errors.push(ValidationResult {
+                severity: ValidationSeverity::Warning,
+                category: "StockTemplates".to_string(),
+                asset_id: tmpl.id.clone(),
+                message: format!(
+                    "Template '{}' magic pool references unknown item_id {}",
+                    tmpl.id, pool_id
+                ),
+            });
+        }
+    }
+}
+```
+
+---
+
+### 7.6 Testing Requirements for Phase 7
+
+All tests live in the SDK crate test modules (`mod tests` inside each modified
+file). No Bevy app is needed; tests operate on plain structs.
+
+#### `sdk/campaign_builder/src/stock_templates_editor.rs` — unit tests
+
+| Test name                                                  | Verifies                                                                                      |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `test_stock_templates_editor_state_default`                | Default state has empty `templates`, `List` mode, no selection                                |
+| `test_stock_template_edit_buffer_default`                  | Default buffer has empty strings and empty vecs                                               |
+| `test_from_template_round_trips`                           | `from_template` → `to_template` produces an identical `MerchantStockTemplate`                 |
+| `test_to_template_validates_empty_id`                      | Empty `id` produces a non-empty `validation_errors` list                                      |
+| `test_to_template_validates_invalid_item_id`               | Non-numeric `item_id` in an entry produces a validation error                                 |
+| `test_to_template_validates_zero_quantity`                 | `quantity == "0"` produces a validation error                                                 |
+| `test_to_template_validates_invalid_override_price`        | Non-numeric non-empty `override_price` produces a validation error                            |
+| `test_to_template_validates_magic_slot_count_exceeds_pool` | `magic_slot_count` > pool length produces a warning string                                    |
+| `test_to_template_validates_magic_refresh_days_zero`       | `magic_refresh_days == "0"` is treated as `1` with a warning                                  |
+| `test_add_entry_appends_to_buffer`                         | Pushing a `TemplateEntryBuffer` to `edit_buffer.entries` is reflected in `to_template` output |
+| `test_remove_entry_shrinks_list`                           | Removing index 1 from a 3-entry buffer leaves 2 entries                                       |
+| `test_reorder_entry_up`                                    | Swapping index 1 with index 0 reverses the first two entries                                  |
+| `test_load_from_file_round_trip`                           | `save_to_file` then `load_from_file` on a temp path produces equal `templates`                |
+| `test_load_from_file_missing_path_returns_error`           | Loading a non-existent path returns `Err` without panic                                       |
+| `test_open_template_for_edit_sets_edit_mode`               | `open_template_for_edit("foo")` sets `mode = Edit` and `edit_buffer.id == "foo"`              |
+| `test_open_template_for_edit_unknown_id_noop`              | Calling with an unknown ID does not change `mode` or `selected_template`                      |
+
+#### `sdk/campaign_builder/src/npc_editor.rs` — updated tests
+
+| Test name                                           | Verifies                                                                                                                    |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `test_npc_edit_buffer_stock_template_default_empty` | Default `NpcEditBuffer` has `stock_template == ""`                                                                          |
+| `test_save_npc_merchant_with_stock_template`        | `save_npc` in add mode with `is_merchant=true, stock_template="blacksmith"` sets `npc.stock_template == Some("blacksmith")` |
+| `test_save_npc_merchant_no_template`                | `save_npc` with `is_merchant=true, stock_template=""` sets `npc.stock_template == None`                                     |
+| `test_start_edit_npc_populates_stock_template`      | `start_edit_npc` on an NPC with `stock_template: Some("wizard_shop")` sets `edit_buffer.stock_template == "wizard_shop"`    |
+| `test_requested_template_edit_set_on_click`         | Directly setting `requested_template_edit = Some("foo")` is `Some("foo")` (field is readable)                               |
+
+#### `sdk/campaign_builder/src/map_editor.rs` — updated tests
+
+| Test name                                                | Verifies                                                                                                          |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `test_event_type_container_name`                         | `EventType::Container.name() == "Container"`                                                                      |
+| `test_event_type_container_icon`                         | `EventType::Container.icon() == "📦"`                                                                             |
+| `test_event_type_all_includes_container`                 | `EventType::all()` slice contains `EventType::Container`                                                          |
+| `test_event_editor_state_to_container_empty_items`       | `to_map_event` with `Container` type and empty `container_items` produces `MapEvent::Container { items: [], .. }` |
+| `test_event_editor_state_to_container_with_items`        | `container_items: [1, 2, 3]` → `MapEvent::Container { items: [1, 2, 3], .. }`                                     |
+| `test_event_editor_state_to_container_locked`            | `container_locked: true` → `MapEvent::Container { locked: true, .. }`                                             |
+| `test_event_editor_state_from_container`                 | `from_map_event` on a `MapEvent::Container` round-trips all fields correctly                                      |
+| `test_event_editor_state_container_description_override` | Non-empty `container_description` is used as the event description; empty falls back to `description`             |
+
+#### `sdk/campaign_builder/src/lib.rs` — updated tests
+
+| Test name                                                 | Verifies                                                                                                                           |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `test_validate_npc_ids_detects_unknown_stock_template`    | An NPC with `stock_template: Some("nonexistent")` and no matching template in `stock_templates` produces an `Error` result         |
+| `test_validate_npc_ids_valid_stock_template_passes`       | An NPC with `stock_template: Some("basic_stock")` where `basic_stock` exists in `stock_templates` produces no error for that check |
+| `test_validate_campaign_warns_unknown_item_in_template`   | A template with `entry.item_id = 255` (not in `self.items`) produces a `Warning`                                                   |
+| `test_validate_campaign_warns_unknown_item_in_magic_pool` | A template with `magic_item_pool: [254]` (not in `self.items`) produces a `Warning`                                                |
+| `test_editor_tab_stock_templates_name`                    | `EditorTab::StockTemplates.name() == "Stock Templates"`                                                                            |
+| `test_campaign_metadata_default_stock_templates_file`     | `CampaignMetadata::default().stock_templates_file == "data/npc_stock_templates.ron"`                                               |
+
+---
+
+### 7.7 Candidate File Changes
+
+| File                                                 | Nature of Change                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sdk/campaign_builder/src/stock_templates_editor.rs` | **New file** — `StockTemplatesEditorState`, `StockTemplateEditBuffer`, `TemplateEntryBuffer`, full `show()` implementation, load/save helpers, unit tests                                                                                                                                                                                                                                              |
+| `sdk/campaign_builder/src/lib.rs`                    | Add `pub mod stock_templates_editor`; add `StockTemplates` to `EditorTab`; add `stock_templates_editor_state`, `stock_templates`, `stock_templates_file` fields to `CampaignBuilderApp`; add `load_stock_templates`, `save_stock_templates_to_file`; render `StockTemplates` tab; extend `validate_npc_ids` and `validate_campaign`; add `stock_templates_file` to `CampaignMetadata`; add 6 new tests |
+| `sdk/campaign_builder/src/npc_editor.rs`             | Add `stock_template` to `NpcEditBuffer`; add `available_stock_templates` and `requested_template_edit` to `NpcEditorState`; extend `show_edit_view` Merchant section; update `save_npc` and `start_edit_npc`; add 5 new tests                                                                                                                                                                          |
+| `sdk/campaign_builder/src/map_editor.rs`             | Add `Container` to `EventType`; add `EVENT_COLOR_CONTAINER` constant; add container fields to `EventEditorState`; wire `to_map_event` / `from_map_event`; add 8 new tests                                                                                                                                                                                                                              |
+
+---
+
+### 7.8 Deliverables
+
+- [ ] `sdk/campaign_builder/src/stock_templates_editor.rs` — new file; full
+      CRUD UI for `MerchantStockTemplate`; load/save to RON; all 16 unit tests
+      passing
+- [ ] `sdk/campaign_builder/src/lib.rs` — `StockTemplates` tab wired; metadata
+      field added; validation cross-checks added; `CampaignBuilderApp` fields
+      and helpers added; 6 new tests passing
+- [ ] `sdk/campaign_builder/src/npc_editor.rs` — `stock_template` field in
+      buffer; merchant stock-template drop-down in edit view; `✏ Edit template`
+      cross-navigation; 5 new tests passing
+- [ ] `sdk/campaign_builder/src/map_editor.rs` — `Container` event type with
+      item list editor; `EVENT_COLOR_CONTAINER`; 8 new tests passing
+- [ ] All four quality gates pass (including `sdk/` targets):
+      `cargo fmt --all`, `cargo check --all-targets --all-features`,
+      `cargo clippy --all-targets --all-features -- -D warnings`,
+      `cargo nextest run --all-features`
+- [ ] All egui ID rules from `sdk/AGENTS.md` satisfied: every loop
+      `push_id`, every `ScrollArea` has `id_salt`, every `ComboBox` uses
+      `from_id_salt`, no `SidePanel`/`CentralPanel` skipped by same-frame guard
+
+---
+
+### 7.9 Success Criteria
+
+1. A content author can open the Campaign Builder, navigate to the
+   **Stock Templates** tab, and create a new `MerchantStockTemplate` with
+   regular entries and a magic-item rotation pool without editing any RON file
+   by hand. The template is saved to `npc_stock_templates.ron` on **💾 Save**.
+
+2. In the **NPCs** tab, selecting `is_merchant` reveals a **Stock Template**
+   drop-down listing all templates from the current campaign. Selecting a
+   template and saving writes `stock_template: Some("template_id")` to
+   `npcs.ron`. Clicking **✏ Edit template** navigates directly to that template
+   in the **Stock Templates** tab.
+
+3. In the **Maps** tab, placing a **Container** (📦) event opens an inspector
+   panel where the author can pick items from the campaign item database to
+   populate the container's initial contents and toggle the locked flag. Saving
+   the map writes a correct `MapEvent::Container { … }` entry to the map's
+   RON file.
+
+4. The **Validation** panel reports an `Error` for any merchant NPC whose
+   `stock_template` references a template ID that does not exist in
+   `npc_stock_templates.ron`, and a `Warning` for any template that references
+   an item ID not present in `items.ron`.
+
+5. All new egui widgets use unique `id_salt` / `push_id` scopes; the Campaign
+   Builder produces no duplicate-ID misbehaviour (scroll areas do not share
+   position, combo boxes show correct selections).
+
+6. All existing tests (Phases 1–6 and all pre-existing SDK tests) continue to
+   pass — Phase 7 introduces no breaking changes to existing domain types or
+   existing SDK editor state structures.

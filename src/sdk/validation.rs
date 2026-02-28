@@ -1042,6 +1042,30 @@ impl<'a> Validator<'a> {
                 crate::domain::world::MapEvent::Furniture { .. } => {
                     // Furniture events are always valid - they spawn procedurally
                 }
+                crate::domain::world::MapEvent::Container { id, items, .. } => {
+                    // Validate that the container id is non-empty
+                    if id.trim().is_empty() {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Error,
+                            message: format!(
+                                "Map {} has Container event with empty id at ({}, {})",
+                                map.id, pos.x, pos.y
+                            ),
+                        });
+                    }
+                    // Validate each item id referenced in the container
+                    for slot in items {
+                        if !self.db.items.has_item(&(slot.item_id as ItemId)) {
+                            errors.push(ValidationError::MissingItem {
+                                context: format!(
+                                    "Map {} container '{}' at ({}, {})",
+                                    map.id, id, pos.x, pos.y
+                                ),
+                                item_id: slot.item_id as ItemId,
+                            });
+                        }
+                    }
+                }
             }
         }
 

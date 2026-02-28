@@ -11588,3 +11588,230 @@ cargo nextest run --all-features             → 2730 passed, 0 failed, 8 skippe
 - All test data uses `data/test_campaign` fixtures via the pre-existing
   `make_merchant_db` helpers; no references to `campaigns/tutorial`.
 - No RON data files created or modified in this phase.
+
+## Buy and Sell — Phase 3: Container Interaction — `E`-Key Entry and State Persistence
+
+### Overview
+
+Phase 3 delivers the full container interaction lifecycle: pressing `E` while
+facing a container tile event opens the existing split-screen
+`GameMode::ContainerInventory` UI, and closing the screen writes the updated
+item list back to the originating `MapEvent::Container` so that partial takes
+and stashes persist within a session.
+
+The four deliverables from the plan were all completed:
+
+1. `MapEvent::Container` variant added to the domain type system.
+2. `E`-key container interaction wired through `handle_events` and `handle_input`.
+3. Write-back on close implemented in `container_inventory_input_system`.
+4. Empty container display enhanced with a centred `"(Empty)"` label and
+   explicitly disabled greyed-out Take / Take All buttons.
+5. Test container event added to `data/test_campaign/data/maps/map_1.ron`.
+6. All required tests added; all four quality gates pass at zero errors / zero
+   warnings.
+
+### Components Implemented
+
+#### `src/domain/world/types.rs` (modified)
+
+Added `MapEvent::Container` variant:
+
+```src/domain/world/types.rs#L1875-1898
+Container {
+    id: String,
+    name: String,
+    description: String,
+    items: Vec<crate::domain::character::InventorySlot>,
+},
+```
+
+The `id` field is the `container_event_id` key used to write updated contents
+back to the map event on close. All fields carry `#[serde(default)]` so
+existing RON map files without a container event still deserialise without
+error.
+
+#### `src/domain/world/events.rs` (modified)
+
+- Added `EventResult::EnterContainer { container_event_id, container_name,
+items }` variant.
+- Wired the new `MapEvent::Container` arm in `trigger_event` — container events
+  are **repeatable** (not removed after triggering) so re-interacting within
+  the session sees the latest written-back contents.
+- Added 3 new unit tests:
+  - `test_container_event_returns_enter_container_result`
+  - `test_container_event_is_repeatable`
+  - `test_container_event_empty_items`
+
+#### `src/game/systems/events.rs` (modified)
+
+- Added `MapEvent::Container` to the non-auto-trigger guard in
+  `check_for_events`. Containers require an explicit `E`-key press and must
+  not open automatically when the party steps on their tile.
+- Added `MapEvent::Container` arm to `handle_events`: calls
+  `game_state.enter_container_inventory(id, name, items)`, mirroring the
+  pattern used for `EnterInn`.
+- Added `mod container_event_tests` with 4 integration tests:
+
+  - `test_container_map_event_enters_container_inventory_mode`
+  - `test_container_event_stores_items_in_state`
+  - `test_empty_container_event_enters_container_inventory_mode`
+  - `test_container_not_auto_triggered_when_party_steps_on_tile`
+
+  Tests fire `MapEventTriggered` directly (simulating the `E`-key input system)
+  rather than relying on `check_for_events` auto-triggering, which correctly
+  reflects the interaction model.
+
+#### `src/game/systems/input.rs` (modified)
+
+- Added a `MapEvent::Container` check at the **current tile** (party may be
+  standing on the container) before the adjacent-tile loop, mirroring the
+  encounter fallback pattern.
+- Added `MapEvent::Container { .. }` to the adjacent-tile interaction `match`
+  arm so pressing `E` while facing a container tile fires `MapEventTriggered`.
+
+#### `src/game/systems/container_inventory_ui.rs` (modified)
+
+**Write-back on close (`container_inventory_input_system`):**
+
+```src/game/systems/container_inventory_ui.rs#L417-423
+// Write the updated item list back to the map event BEFORE restoring mode
+let event_id = container_state.container_event_id.clone();
+let updated_items = container_state.items.clone();
+write_container_items_back(&mut global_state.0, &event_id, updated_items);
+```
+
+The write-back fires before `mode` is restored so the updated items are
+available immediately on re-interaction.
+
+**`write_container_items_back` helper (new public function):**
+
+Scans `map.events` for a `MapEvent::Container` whose `id` matches
+`container_event_id`, then replaces its `items` field in-place via
+`map.events.get_mut()`. Logs a warning if no matching event is found (handles
+the case where the party changed maps between open and close gracefully without
+panicking).
+
+**Empty container display (`render_container_items_panel`):**
+
+- Replaced the left-aligned greyed label with a centred `"(Empty)"` label
+  using `egui::Layout::top_down(egui::Align::Center)`.
+- When `item_count == 0`, the action strip now renders explicitly disabled
+  Take and Take All buttons (greyed out, hover-text `"Container is empty"`)
+  so the player can see the actions are unavailable without the buttons
+  disappearing entirely.
+
+#### `src/sdk/validation.rs` (modified)
+
+Added `MapEvent::Container` arm to `validate_map`:
+
+- Validates that `id` is non-empty (error).
+- Validates each `item_id` in `items` against the item database (produces
+  `ValidationError::MissingItem` for unknown IDs).
+
+#### `src/bin/validate_map.rs` (modified)
+
+Added `MapEvent::Container { .. }` to the event-type counter match to
+eliminate the non-exhaustive-patterns compile error.
+
+#### `data/test_campaign/data/maps/map_1.ron` (modified)
+
+Added one test container event at position `(3, 3)` with two items so
+integration tests can exercise take and stash operations without programmatic
+setup:
+
+```data/test_campaign/data/maps/map_1.ron#L8372-L8385
+(
+    x: 3,
+    y: 3,
+): Container(
+    id: "test_chest_001",
+    name: "Old Chest",
+    description: "A dusty old chest sitting in the corner.",
+    items: [
+        (item_id: 1, charges: 0),
+        (item_id: 2, charges: 0),
+    ],
+),
+```
+
+### Tests Added
+
+#### `src/domain/world/events.rs` — new unit tests (3)
+
+| Test                                                  | Asserts                                                                                                               |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `test_container_event_returns_enter_container_result` | `trigger_event` on a `MapEvent::Container` returns `EventResult::EnterContainer` with correct id, name, and item list |
+| `test_container_event_is_repeatable`                  | Triggering twice both return `EnterContainer` (event not removed)                                                     |
+| `test_container_event_empty_items`                    | Empty container still produces `EnterContainer` (not `None`)                                                          |
+
+#### `src/game/systems/events.rs` — new integration tests (4)
+
+| Test                                                         | Asserts                                                                                                              |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `test_container_map_event_enters_container_inventory_mode`   | Firing `MapEventTriggered(Container)` transitions mode to `ContainerInventory` with correct id, name, and item count |
+| `test_container_event_stores_items_in_state`                 | Item list in `ContainerInventoryState` matches the event's items                                                     |
+| `test_empty_container_event_enters_container_inventory_mode` | Empty container still opens `ContainerInventory` (is_empty() == true)                                                |
+| `test_container_not_auto_triggered_when_party_steps_on_tile` | Walking onto the container tile leaves mode as `Exploration`                                                         |
+
+#### `src/game/systems/container_inventory_ui.rs` — new unit tests (5)
+
+| Test                                                  | Asserts                                                                                      |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `test_close_container_writes_items_back_to_map_event` | After taking one item, write-back leaves one item in the map event                           |
+| `test_take_all_empties_container_and_writes_back`     | Writing back empty list empties the map event                                                |
+| `test_stash_item_adds_to_container_and_writes_back`   | Writing back two items from one updates the map event                                        |
+| `test_write_back_unknown_container_id_is_noop`        | Writing back to an unknown id does not panic and leaves known containers unchanged           |
+| `test_empty_container_disables_take_all_action`       | `ContainerInventoryState::is_empty()` is true and `item_count()` is 0 for an empty container |
+
+### Files Modified
+
+| File                                         | Change                                                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `src/domain/world/types.rs`                  | Added `MapEvent::Container` variant                                                                          |
+| `src/domain/world/events.rs`                 | Added `EventResult::EnterContainer`; wired `MapEvent::Container` in `trigger_event`; 3 new tests             |
+| `src/game/systems/events.rs`                 | Container not-auto-trigger guard; `handle_events` arm; `mod container_event_tests` with 4 tests              |
+| `src/game/systems/input.rs`                  | Current-tile container check; adjacent-tile `Container` arm                                                  |
+| `src/game/systems/container_inventory_ui.rs` | `write_container_items_back`; Esc close write-back; centred empty label; disabled empty buttons; 5 new tests |
+| `src/sdk/validation.rs`                      | `MapEvent::Container` arm in `validate_map`                                                                  |
+| `src/bin/validate_map.rs`                    | `MapEvent::Container` arm in event-type counter                                                              |
+| `data/test_campaign/data/maps/map_1.ron`     | Test container at (3, 3)                                                                                     |
+
+### Quality Gate Results
+
+```
+cargo fmt --all         → No output (all files formatted)
+cargo check             → Finished with 0 errors
+cargo clippy -D warnings → Finished with 0 warnings
+cargo nextest run       → 2756 passed; 0 failed; 8 skipped
+```
+
+### Deliverables Checklist
+
+- [x] `MapEvent::Container` variant added to `src/domain/world/types.rs`
+- [x] `EventResult::EnterContainer` added to `src/domain/world/events.rs`
+- [x] `src/game/systems/events.rs` — Container excluded from auto-trigger; `handle_events` arm enters `ContainerInventory` mode
+- [x] `src/game/systems/input.rs` — `E` key on container tile fires `MapEventTriggered`
+- [x] `src/game/systems/container_inventory_ui.rs` — `write_container_items_back` helper
+- [x] `src/game/systems/container_inventory_ui.rs` — write-back wired into Esc close handler
+- [x] `src/game/systems/container_inventory_ui.rs` — centred `"(Empty)"` label
+- [x] `src/game/systems/container_inventory_ui.rs` — disabled Take / Take All buttons when empty
+- [x] `data/test_campaign/data/maps/map_1.ron` — test container with two items at (3, 3)
+- [x] `src/sdk/validation.rs` — `MapEvent::Container` validated
+- [x] All four quality gates pass
+
+### Architecture Compliance
+
+- `MapEvent::Container` follows the established field naming convention
+  (`id`, `name`, `description`) used by all other `MapEvent` variants.
+- `EventResult::EnterContainer` mirrors the `EventResult::EnterInn` pattern
+  (repeatable event, carries identifying data needed by the mode transition).
+- `GameState::enter_container_inventory` is called exactly as documented; no
+  new methods were added to `GameState`.
+- `GameMode::ContainerInventory(_)` variant is used directly; no new game mode
+  variants were added.
+- `InventorySlot` type alias used consistently in container item lists.
+- `container_event_id: String` matches `ContainerInventoryState::container_event_id`
+  exactly (architecture Section 4 convention for event identity strings).
+- All test data uses `data/test_campaign`; no references to `campaigns/tutorial`.
+- RON data file `data/test_campaign/data/maps/map_1.ron` uses `.ron` extension
+  and RON format as required by Implementation Rule 1.
