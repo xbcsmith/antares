@@ -53,9 +53,10 @@
 | **Buy and Sell — Phase 4: Mouse Support for Buy, Sell, Take, Take All, and Stash** | ✅ COMPLETE | 2026-07-18 | **Click-to-select rows/cells; Buy/Sell/Take/TakeAll/Stash buttons respond to mouse clicks; hover highlight on all interactive elements** |
 | **Buy and Sell — Phase 6: Daily Restock and Magic Item Rotation** | ✅ COMPLETE | 2026-07-18 | **`MerchantStockTemplate` gains magic-item pool fields; `NpcRuntimeState` gains restock-tracking fields; `restock_daily`, `refresh_magic_slots`, `tick_restock` implemented; `advance_time` wired; RON data files updated; 27+ new tests** |
 | **Buy and Sell — Phase 7: Campaign Builder — Stock Template and Container Item Editor** | ✅ COMPLETE | 2026-07-18 | **New `StockTemplatesEditorState` tab; `Container` event type in map editor; NPC stock-template drop-down; cross-tab navigation; validation cross-checks; 35 new tests** |
+| **Combat Bug Fix: Monster-First Initiative + Incapacitated-Monster Turn Deadlock** | ✅ COMPLETE | 2026-07-18 | **`handle_combat_started` now initialises `CombatTurnStateResource` from the first actor in `turn_order`; `execute_monster_turn` advances the turn when `can_act()==false`; `execute_monster_turn` scheduled after `update_combat_ui`; 2 regression tests** |
 
 **Total Lines Implemented**: 10,600+ lines of production code + 6,200+ lines of documentation
-**Total Tests**: 534+ new tests (all passing), 2,795 total tests passing
+**Total Tests**: 536+ new tests (all passing), 2,797 total tests passing
 
 ---
 
@@ -12228,6 +12229,169 @@ cargo nextest run        → 2795 passed; 0 failed; 8 skipped
 - [x] `///` doc comments on every new public function with `# Examples`
       blocks
 - [x] SPDX header present in `npc_runtime.rs` (pre-existing)
+
+---
+
+## Combat Bug Fix: Monster-First Initiative + Incapacitated-Monster Turn Deadlock
+
+### Overview
+
+Two bugs combined to make combat completely unplayable when the Ancient Wolf
+(speed 14) was the first combatant in the turn order. The player was
+permanently locked out with the log spamming:
+
+```
+INFO antares::game::systems::combat: Combat: input blocked — not player turn
+```
+
+No action buttons appeared, the turn order display did not include the wolf,
+and there was no way to exit combat.
+
+---
+
+### Root Cause Analysis
+
+#### Bug 1 — `handle_combat_started` never initialised `CombatTurnStateResource`
+
+`CombatTurnStateResource` is a persistent Bevy `Resource` that defaults to
+`PlayerTurn` on first boot. `handle_combat_started` copied the `CombatState`
+into `CombatResource` but **never set `CombatTurnStateResource` based on who
+actually goes first in `turn_order`**.
+
+With `Handicap::Even` (the default) `calculate_turn_order` sorts combatants by
+speed descending. The Ancient Wolf has speed 14; all starting party members
+have speed 8–12. So the wolf appears first in `turn_order`.
+
+Because `handle_combat_started` left `CombatTurnStateResource` at `PlayerTurn`,
+the action buttons appeared immediately on frame 1, `combat_input_system` let
+the player "act" before the wolf had its turn, and the state machine was
+corrupted from the very first frame.
+
+#### Bug 2 — `execute_monster_turn` silently returned without advancing the turn when `can_act()` was false
+
+When a monster's `can_act()` returned `false` (already acted, paralyzed, or
+dead), `execute_monster_turn` returned `Ok(None)` immediately **without
+advancing `combat_res.state.current_turn` or updating `CombatTurnStateResource`**.
+
+This meant any frame where the current monster could not act resulted in the
+system doing nothing — `turn_state` stayed `EnemyTurn` forever, and the player
+was permanently locked out. Combined with Bug 1, the first frame left the
+wolf in a partial state that triggered this silent-return on every subsequent
+frame.
+
+#### Bug 3 — `execute_monster_turn` had no scheduling constraint relative to `update_combat_ui`
+
+Both systems were registered as plain `Update` systems with no ordering
+relationship. Bevy's scheduler could run them in either order. When
+`execute_monster_turn` ran _before_ `update_combat_ui`, the monster would act
+and flip `turn_state` back to `PlayerTurn` before the UI had a chance to hide
+the action menu, causing a one-frame flicker of the action buttons on monster
+turns.
+
+---
+
+### Files Modified
+
+| File                         | Change                           |
+| ---------------------------- | -------------------------------- |
+| `src/game/systems/combat.rs` | Three targeted fixes (see below) |
+
+---
+
+### Fix 1 — Initialise `CombatTurnStateResource` in `handle_combat_started`
+
+Added `mut turn_state: ResMut<CombatTurnStateResource>` to the system
+parameters and set it from the first entry in `turn_order` immediately after
+copying the combat state into `CombatResource`:
+
+```rust
+turn_state.0 = match combat_res.state.turn_order.first() {
+    Some(CombatantId::Monster(_)) => {
+        info!("Combat started: monster goes first — setting EnemyTurn");
+        CombatTurnState::EnemyTurn
+    }
+    _ => {
+        info!("Combat started: player goes first — setting PlayerTurn");
+        CombatTurnState::PlayerTurn
+    }
+};
+```
+
+This ensures `CombatTurnStateResource` always reflects the actual first actor,
+regardless of speed or handicap.
+
+### Fix 2 — Advance the turn when a monster cannot act
+
+In `execute_monster_turn`, before attempting the monster's action, check
+`can_act()` first. If the monster cannot act (already acted, dead, paralyzed),
+call `advance_turn` and update `turn_state` instead of returning silently:
+
+```rust
+if !can_act {
+    info!("Monster at participant index {} cannot act — advancing turn", monster_idx);
+    let _ = combat_res.state.advance_turn(&[]);
+    turn_state.0 = match combat_res.state.turn_order.get(combat_res.state.current_turn) {
+        Some(CombatantId::Player(_)) => CombatTurnState::PlayerTurn,
+        Some(CombatantId::Monster(_)) => CombatTurnState::EnemyTurn,
+        None => CombatTurnState::PlayerTurn,
+    };
+    return;
+}
+```
+
+Also added a guarded stale-state correction in the `else` branch: if
+`turn_state` is `EnemyTurn` but `turn_order` is non-empty and the current actor
+is a player, log a warning and correct to `PlayerTurn`. The
+`!turn_order.is_empty()` guard prevents this from firing during
+partially-initialised test states.
+
+### Fix 3 — Schedule `execute_monster_turn` after `update_combat_ui`
+
+Changed the plugin registration from:
+
+```rust
+.add_systems(Update, execute_monster_turn)
+```
+
+to:
+
+```rust
+.add_systems(Update, execute_monster_turn.after(update_combat_ui))
+```
+
+This guarantees `update_combat_ui` always sees the current `EnemyTurn` state
+and hides the action menu _before_ the monster acts and potentially advances
+`turn_state` back to `PlayerTurn` in the same frame.
+
+---
+
+### Tests Added
+
+Two regression tests were added to `mod tests` in `src/game/systems/combat.rs`:
+
+| Test                                                 | Verifies                                                                                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `test_monster_first_initiative_sets_enemy_turn`      | After `handle_combat_started` fires with a monster-first turn order, `CombatTurnStateResource` is `EnemyTurn`                       |
+| `test_incapacitated_monster_turn_advances_to_player` | When the current monster has `has_acted == true`, `execute_monster_turn` advances the turn and sets `PlayerTurn` instead of hanging |
+
+Three existing tests were updated to use consistent combat states (monster
+participant as the current actor when `EnemyTurn` is forced) so they exercise
+real production code paths rather than relying on inconsistent state:
+
+- `test_action_menu_visibility`
+- `test_blocked_input_logs_feedback`
+- `test_single_enter_attack_executes_and_advances_turn`
+
+---
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → No output (all files formatted)
+cargo check …            → Finished with 0 errors
+cargo clippy … -D warnings → Finished with 0 warnings
+cargo nextest run …      → 2797 tests run: 2797 passed, 8 skipped
+```
 
 ---
 
