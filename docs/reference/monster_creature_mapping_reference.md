@@ -1,6 +1,3 @@
-<!-- SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com> -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-
 # Monster-to-Creature Mapping Reference
 
 **Purpose**: Quick reference for all monster-to-creature visual mappings in the tutorial campaign.

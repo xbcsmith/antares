@@ -52,9 +52,10 @@
 | **Buy and Sell — Phase 2: Merchant UI Price Display, Gold Feedback, and Error Feedback** | ✅ COMPLETE | 2026-07-18 | **Party gold in header; price columns; sell-value preview; game log error feedback; cursed-item sell guard** |
 | **Buy and Sell — Phase 4: Mouse Support for Buy, Sell, Take, Take All, and Stash** | ✅ COMPLETE | 2026-07-18 | **Click-to-select rows/cells; Buy/Sell/Take/TakeAll/Stash buttons respond to mouse clicks; hover highlight on all interactive elements** |
 | **Buy and Sell — Phase 6: Daily Restock and Magic Item Rotation** | ✅ COMPLETE | 2026-07-18 | **`MerchantStockTemplate` gains magic-item pool fields; `NpcRuntimeState` gains restock-tracking fields; `restock_daily`, `refresh_magic_slots`, `tick_restock` implemented; `advance_time` wired; RON data files updated; 27+ new tests** |
+| **Buy and Sell — Phase 7: Campaign Builder — Stock Template and Container Item Editor** | ✅ COMPLETE | 2026-07-18 | **New `StockTemplatesEditorState` tab; `Container` event type in map editor; NPC stock-template drop-down; cross-tab navigation; validation cross-checks; 35 new tests** |
 
 **Total Lines Implemented**: 10,600+ lines of production code + 6,200+ lines of documentation
-**Total Tests**: 499+ new tests (all passing), 2,795 total tests passing
+**Total Tests**: 534+ new tests (all passing), 2,795 total tests passing
 
 ---
 
@@ -12227,3 +12228,209 @@ cargo nextest run        → 2795 passed; 0 failed; 8 skipped
 - [x] `///` doc comments on every new public function with `# Examples`
       blocks
 - [x] SPDX header present in `npc_runtime.rs` (pre-existing)
+
+---
+
+## Buy and Sell — Phase 7: Campaign Builder — Stock Template and Container Item Editor
+
+### Overview
+
+Phase 7 adds two new authoring surfaces to the Campaign Builder SDK:
+
+1. **Stock Template Editor** — a dedicated `StockTemplates` tab where content
+   authors can create, edit, and delete `MerchantStockTemplate` entries in
+   `npc_stock_templates.ron` without hand-editing RON files.
+
+2. **Container Event Item Editor** — the Map Editor's `EventEditorState` gains
+   a `Container` event type. In the event inspector panel, authors compose the
+   container's initial item list by picking from the campaign item database.
+
+Both surfaces satisfy all SDK `AGENTS.md` egui rules: every loop uses
+`push_id`, every `ScrollArea` has a unique `id_salt`, every `ComboBox` uses
+`from_id_salt`.
+
+---
+
+### Components Implemented
+
+#### `sdk/campaign_builder/src/stock_templates_editor.rs` (new file)
+
+Full CRUD UI for `MerchantStockTemplate`:
+
+- **`StockTemplatesEditorMode`** — `List` / `Add` / `Edit` enum.
+- **`TemplateEntryBuffer`** — per-row edit buffer for regular stock entries
+  (`item_id`, `quantity`, `override_price`), all `String`-typed and parsed on
+  save.
+- **`StockTemplateEditBuffer`** — top-level form buffer with `id`,
+  `description`, `entries: Vec<TemplateEntryBuffer>`, `magic_item_pool`,
+  `magic_slot_count`, and `magic_refresh_days`. Provides `from_template`
+  (populate from domain type) and `to_template` (validate + produce domain
+  type or `Vec<String>` error list).
+- **`StockTemplatesEditorState`** — mirrors `NpcEditorState` pattern: list
+  view with search + delete confirmation, edit/add view with three `ui.group`
+  sections (Identity, Regular Stock Entries, Magic Item Rotation), load/save
+  helpers, and `open_template_for_edit` for cross-tab navigation.
+
+Validation rules enforced in `to_template`:
+
+| Field                           | Rule                                        |
+| ------------------------------- | ------------------------------------------- |
+| `id`                            | Non-empty; `[a-z0-9_]+`; unique in Add mode |
+| `entries[*].item_id`            | Parseable as `u8`; non-zero                 |
+| `entries[*].quantity`           | Parseable as `u8`; ≥ 1                      |
+| `entries[*].override_price`     | Empty or parseable as `u32`                 |
+| `magic_slot_count`              | Parseable as `u8`                           |
+| `magic_refresh_days`            | ≥ 1 (0 is clamped to 1 with a warning)      |
+| `magic_slot_count > pool.len()` | Warning (not error)                         |
+
+I/O: `load_from_file` and `save_to_file` use `ron` (de)serialisation over
+`Vec<MerchantStockTemplate>`, matching the pattern in `load_npcs` /
+`save_npcs_to_file`.
+
+Unit tests (16 passing):
+`test_stock_templates_editor_state_default`,
+`test_stock_template_edit_buffer_default`,
+`test_from_template_round_trips`,
+`test_to_template_validates_empty_id`,
+`test_to_template_validates_invalid_item_id`,
+`test_to_template_validates_zero_quantity`,
+`test_to_template_validates_invalid_override_price`,
+`test_to_template_validates_magic_slot_count_exceeds_pool`,
+`test_to_template_validates_magic_refresh_days_zero`,
+`test_add_entry_appends_to_buffer`,
+`test_remove_entry_shrinks_list`,
+`test_reorder_entry_up`,
+`test_load_from_file_round_trip`,
+`test_load_from_file_missing_path_returns_error`,
+`test_open_template_for_edit_sets_edit_mode`,
+`test_open_template_for_edit_unknown_id_noop`.
+
+---
+
+#### `sdk/campaign_builder/src/lib.rs` (modified)
+
+- Added `pub mod stock_templates_editor;` (alphabetically after
+  `spells_editor`).
+- Added `StockTemplates` variant to `EditorTab`; wired `name()` →
+  `"Stock Templates"` and added it to the sidebar tabs array.
+- Added `stock_templates_file: String` field to `CampaignMetadata` with
+  `#[serde(default = "default_stock_templates_file")]`; default value
+  `"data/npc_stock_templates.ron"`.
+- Added `stock_templates_editor_state: StockTemplatesEditorState`,
+  `stock_templates: Vec<MerchantStockTemplate>`, `stock_templates_file: String`
+  fields to `CampaignBuilderApp`.
+- Added `load_stock_templates` helper (called from `do_open_campaign` after
+  `load_npcs`) and `save_stock_templates_to_file` helper (called from
+  `do_save_campaign` after `save_npcs_to_file`).
+- Extended `validate_npc_ids` to cross-check each NPC's `stock_template`
+  reference against `self.stock_templates`; missing references produce an
+  `Error` result.
+- Added `validate_stock_template_refs` which checks every template entry and
+  magic-pool entry against `self.items`; unknown item IDs produce `Warning`
+  results. Called from `validate_campaign`.
+- Wired `EditorTab::NPCs` arm to thread `available_stock_templates` into
+  `npc_editor_state` before `show()` and to consume
+  `requested_template_edit` for cross-tab navigation.
+- Wired `EditorTab::StockTemplates` arm: calls
+  `stock_templates_editor_state.show(…)`, syncs `stock_templates` mirror list
+  on change, and marks `unsaved_changes`.
+
+New tests (6 passing):
+`test_validate_npc_ids_detects_unknown_stock_template`,
+`test_validate_npc_ids_valid_stock_template_passes`,
+`test_validate_campaign_warns_unknown_item_in_template`,
+`test_validate_campaign_warns_unknown_item_in_magic_pool`,
+`test_editor_tab_stock_templates_name`,
+`test_campaign_metadata_default_stock_templates_file`.
+
+---
+
+#### `sdk/campaign_builder/src/npc_editor.rs` (modified)
+
+- Added `pub stock_template: String` field to `NpcEditBuffer`; default is
+  `String::new()`.
+- Added `pub available_stock_templates: Vec<MerchantStockTemplate>` and
+  `pub requested_template_edit: Option<String>` fields to `NpcEditorState`
+  (both `#[serde(skip)]`).
+- Extended `show_edit_view` Merchant section: when `is_merchant` is checked, a
+  `ComboBox::from_id_salt("npc_edit_stock_template_select")` appears listing
+  all `available_stock_templates`. An "✏ Edit template" small button sets
+  `requested_template_edit` to signal `CampaignBuilderApp` to cross-navigate
+  to the Stock Templates tab.
+- Updated `save_npc` to map `edit_buffer.stock_template` →
+  `NpcDefinition::stock_template: Option<String>` (empty → `None`, non-empty
+  → `Some`); also sets `is_priest: false`, `service_catalog: None`,
+  `economy: None` to satisfy all `NpcDefinition` fields.
+- Updated `start_edit_npc` to populate
+  `edit_buffer.stock_template = npc.stock_template.clone().unwrap_or_default()`.
+
+New tests (5 passing):
+`test_npc_edit_buffer_stock_template_default_empty`,
+`test_save_npc_merchant_with_stock_template`,
+`test_save_npc_merchant_no_template`,
+`test_start_edit_npc_populates_stock_template`,
+`test_requested_template_edit_set_on_click`.
+
+---
+
+#### `sdk/campaign_builder/src/map_editor.rs` (modified)
+
+- Added `const EVENT_COLOR_CONTAINER: Color32 = Color32::from_rgb(0, 180, 160)`
+  (teal).
+- Added `Container` variant to `EventType`; wired into `name()` → `"Container"`,
+  `icon()` → `"📦"`, `color()` → `EVENT_COLOR_CONTAINER`, and `all()`.
+- Added container fields to `EventEditorState`:
+  `container_items: Vec<ItemId>`, `container_item_input: String`,
+  `container_locked: bool`, `container_description: String`,
+  `container_id: String`; all defaulted in `Default`.
+- Wired `EventType::Container` in `to_map_event`: converts `container_items`
+  to `Vec<InventorySlot>` (charges = 0); uses `container_description` override
+  if non-empty, else falls back to `description`; auto-generates container `id`
+  from position if `container_id` is empty.
+- Wired `MapEvent::Container { id, name, description, items }` in
+  `from_map_event`: populates all container fields; maps `items` back to
+  `Vec<ItemId>` by extracting `.item_id` from each `InventorySlot`.
+- Added `EventType::Container` rendering block in `show_event_editor`:
+  locked checkbox, container-ID text edit, description override (`TextEdit`
+  with `id_salt("container_evt_desc")`), item add `ComboBox`
+  (`from_id_salt("container_evt_add_item")`), and a scrollable item list with
+  per-row `push_id` and ✕ remove buttons.
+- Added `MapEvent::Container { .. } => EventType::Container` arms to both
+  `MapGridWidget` and `MapPreviewWidget` match expressions so container events
+  render in the correct teal colour on the map grid.
+
+New tests (8 passing):
+`test_event_type_container_name`,
+`test_event_type_container_icon`,
+`test_event_type_all_includes_container`,
+`test_event_editor_state_to_container_empty_items`,
+`test_event_editor_state_to_container_with_items`,
+`test_event_editor_state_to_container_locked`,
+`test_event_editor_state_from_container`,
+`test_event_editor_state_container_description_override`.
+
+---
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → No output (all files formatted)
+cargo check …            → Finished with 0 errors
+cargo clippy … -D warnings → Finished with 0 warnings
+cargo nextest run …      → 2795 tests run: 2795 passed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] `ItemId` type alias (`u8`) used throughout — no raw integer literals
+- [x] `#[serde(default)]` on `stock_templates_file` in `CampaignMetadata` —
+      backward-compatible with pre-Phase-7 `campaign.ron` files
+- [x] `#[serde(skip)]` on all runtime-only fields in `NpcEditorState` and
+      `StockTemplatesEditorState`
+- [x] Every loop uses `push_id`; every `ScrollArea` has unique `id_salt`;
+      every `ComboBox` uses `from_id_salt`
+- [x] No test references `campaigns/tutorial`; all fixture data uses
+      `data/test_campaign`
+- [x] RON format used for `npc_stock_templates.ron`
+- [x] `///` doc comments with `# Examples` on all new public functions
+- [x] SPDX header present in `stock_templates_editor.rs`

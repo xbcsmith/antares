@@ -60,6 +60,7 @@ pub mod proficiencies_editor;
 pub mod quest_editor;
 pub mod races_editor;
 pub mod spells_editor;
+pub mod stock_templates_editor;
 pub mod template_browser;
 pub mod template_metadata;
 pub mod templates;
@@ -90,6 +91,7 @@ use antares::domain::proficiency::ProficiencyDefinition;
 use antares::domain::quest::{Quest, QuestId};
 use antares::domain::types::{CreatureId, DiceRoll, ItemId, MapId, MonsterId, SpellId};
 use antares::domain::visual::CreatureReference;
+use antares::domain::world::npc_runtime::MerchantStockTemplate;
 use antares::domain::world::Map;
 use conditions_editor::ConditionsEditorState;
 use dialogue_editor::DialogueEditorState;
@@ -102,6 +104,7 @@ use serde::{Deserialize, Serialize};
 use spells_editor::SpellsEditorState;
 use std::fs;
 use std::path::PathBuf;
+use stock_templates_editor::StockTemplatesEditorState;
 use thiserror::Error;
 
 const STARTING_GOLD_MAX: u32 = 100_000;
@@ -363,6 +366,9 @@ pub struct CampaignMetadata {
     proficiencies_file: String,
     #[serde(default = "default_creatures_file")]
     creatures_file: String,
+    /// Relative path to the NPC stock templates RON file
+    #[serde(default = "default_stock_templates_file")]
+    pub stock_templates_file: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -406,6 +412,10 @@ fn default_creatures_file() -> String {
     "data/creatures.ron".to_string()
 }
 
+fn default_stock_templates_file() -> String {
+    "data/npc_stock_templates.ron".to_string()
+}
+
 impl Default for CampaignMetadata {
     fn default() -> Self {
         Self {
@@ -443,6 +453,7 @@ impl Default for CampaignMetadata {
             npcs_file: "data/npcs.ron".to_string(),
             proficiencies_file: "data/proficiencies.ron".to_string(),
             creatures_file: "data/creatures.ron".to_string(),
+            stock_templates_file: "data/npc_stock_templates.ron".to_string(),
         }
     }
 }
@@ -465,6 +476,7 @@ enum EditorTab {
     Dialogues,
     NPCs,
     Proficiencies,
+    StockTemplates,
     Assets,
     Validation,
 }
@@ -495,6 +507,7 @@ impl EditorTab {
             EditorTab::Dialogues => "Dialogues",
             EditorTab::NPCs => "NPCs",
             EditorTab::Proficiencies => "Proficiencies",
+            EditorTab::StockTemplates => "Stock Templates",
             EditorTab::Assets => "Assets",
             EditorTab::Validation => "Validation",
         }
@@ -653,6 +666,15 @@ struct CampaignBuilderApp {
     // NPC editor state
     npc_editor_state: npc_editor::NpcEditorState,
 
+    // Stock templates editor state (NPC restock definitions)
+    stock_templates_editor_state: StockTemplatesEditorState,
+
+    /// Loaded stock templates (synced from editor state after saves)
+    stock_templates: Vec<MerchantStockTemplate>,
+
+    /// Filename for npc_stock_templates.ron relative to campaign data dir
+    stock_templates_file: String,
+
     // Classes editor state
     classes_editor_state: classes_editor::ClassesEditorState,
 
@@ -772,6 +794,10 @@ impl Default for CampaignBuilderApp {
             dialogue_editor_state: DialogueEditorState::default(),
 
             npc_editor_state: npc_editor::NpcEditorState::default(),
+
+            stock_templates_editor_state: StockTemplatesEditorState::default(),
+            stock_templates: Vec::new(),
+            stock_templates_file: "data/npc_stock_templates.ron".to_string(),
 
             classes_editor_state: classes_editor::ClassesEditorState::default(),
 
@@ -1029,8 +1055,57 @@ impl CampaignBuilderApp {
                     format!("Duplicate NPC ID: {}", npc.id),
                 ));
             }
+
+            // Cross-check stock_template reference against loaded templates
+            if let Some(ref tmpl_id) = npc.stock_template {
+                if !self.stock_templates.iter().any(|t| &t.id == tmpl_id) {
+                    errors.push(validation::ValidationResult::error(
+                        validation::ValidationCategory::NPCs,
+                        format!(
+                            "NPC '{}' references unknown stock template '{}'",
+                            npc.id, tmpl_id
+                        ),
+                    ));
+                }
+            }
         }
         errors
+    }
+
+    /// Validate stock template item ID references against the loaded item list.
+    ///
+    /// Returns warnings for template entries and magic pool entries whose item
+    /// IDs do not exist in the loaded `items` list.
+    fn validate_stock_template_refs(&self) -> Vec<validation::ValidationResult> {
+        let mut results = Vec::new();
+
+        for tmpl in &self.stock_templates {
+            for entry in &tmpl.entries {
+                if !self.items.iter().any(|it| it.id == entry.item_id) {
+                    results.push(validation::ValidationResult::warning(
+                        validation::ValidationCategory::NPCs,
+                        format!(
+                            "Template '{}' references unknown item_id {}",
+                            tmpl.id, entry.item_id
+                        ),
+                    ));
+                }
+            }
+
+            for &pool_id in &tmpl.magic_item_pool {
+                if !self.items.iter().any(|it| it.id == pool_id) {
+                    results.push(validation::ValidationResult::warning(
+                        validation::ValidationCategory::NPCs,
+                        format!(
+                            "Template '{}' magic pool references unknown item_id {}",
+                            tmpl.id, pool_id
+                        ),
+                    ));
+                }
+            }
+        }
+
+        results
     }
 
     /// Validate character IDs for uniqueness and references
@@ -2066,6 +2141,46 @@ impl CampaignBuilderApp {
         Ok(())
     }
 
+    /// Load stock templates from the campaign's `npc_stock_templates.ron` file.
+    ///
+    /// On success, populates both `stock_templates_editor_state.templates` and
+    /// the `stock_templates` mirror list.  Logs a warning (but does not fail)
+    /// when the file is absent — an empty template list is a valid state for a
+    /// new campaign.
+    fn load_stock_templates(&mut self) {
+        if let Some(dir) = &self.campaign_dir {
+            let path = dir.join(&self.campaign.stock_templates_file);
+            match self.stock_templates_editor_state.load_from_file(&path) {
+                Ok(()) => {
+                    self.stock_templates = self.stock_templates_editor_state.templates.clone();
+                    self.status_message =
+                        format!("Loaded {} stock templates", self.stock_templates.len());
+                }
+                Err(e) => {
+                    self.status_message = format!("Warning: could not load stock templates: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Save the current stock templates list to `npc_stock_templates.ron`.
+    ///
+    /// Updates `status_message` and clears `unsaved_changes` on success.
+    fn save_stock_templates_to_file(&mut self) {
+        if let Some(dir) = &self.campaign_dir {
+            let path = dir.join(&self.campaign.stock_templates_file);
+            match self.stock_templates_editor_state.save_to_file(&path) {
+                Ok(()) => {
+                    self.status_message = "Stock templates saved.".to_string();
+                    self.unsaved_changes = false;
+                }
+                Err(e) => {
+                    self.status_message = format!("Error saving stock templates: {}", e);
+                }
+            }
+        }
+    }
+
     /// Load monsters from RON file
     fn load_monsters(&mut self) {
         let monsters_file = self.campaign.monsters_file.clone();
@@ -2475,6 +2590,8 @@ impl CampaignBuilderApp {
         self.validation_errors.extend(self.validate_character_ids());
         // Dialogues validated elsewhere
         self.validation_errors.extend(self.validate_npc_ids());
+        self.validation_errors
+            .extend(self.validate_stock_template_refs());
         self.validation_errors
             .extend(self.validate_proficiency_ids());
 
@@ -2950,6 +3067,14 @@ impl CampaignBuilderApp {
             if let Err(e) = self.save_npcs_to_file(&npcs_path) {
                 save_warnings.push(format!("NPCs: {}", e));
             }
+
+            let stock_templates_path = dir.join(&self.campaign.stock_templates_file);
+            if let Err(e) = self
+                .stock_templates_editor_state
+                .save_to_file(&stock_templates_path)
+            {
+                save_warnings.push(format!("StockTemplates: {}", e));
+            }
         }
 
         // Now save campaign metadata to RON format
@@ -3084,6 +3209,8 @@ impl CampaignBuilderApp {
                         self.logger
                             .warn(category::FILE_IO, &format!("Failed to load NPCs: {}", e));
                     }
+
+                    self.load_stock_templates();
 
                     // Scan asset references and mark loaded data files
                     if let Some(ref mut manager) = self.asset_manager {
@@ -4147,6 +4274,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Dialogues,
                     EditorTab::NPCs,
                     EditorTab::Proficiencies,
+                    EditorTab::StockTemplates,
                     EditorTab::Assets,
                     EditorTab::Validation,
                 ];
@@ -4336,6 +4464,9 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.file_load_merge_mode,
             ),
             EditorTab::NPCs => {
+                // Thread available stock templates into the NPC editor before rendering
+                self.npc_editor_state.available_stock_templates = self.stock_templates.clone();
+
                 if self.npc_editor_state.show(
                     ui,
                     &self.dialogues,
@@ -4344,6 +4475,27 @@ impl eframe::App for CampaignBuilderApp {
                     &self.tool_config.display,
                     &self.campaign.npcs_file,
                 ) {
+                    self.unsaved_changes = true;
+                }
+
+                // If the NPC editor requested cross-tab navigation to edit a stock template,
+                // switch to the StockTemplates tab and open the named template for editing.
+                if let Some(tmpl_id) = self.npc_editor_state.requested_template_edit.take() {
+                    self.active_tab = EditorTab::StockTemplates;
+                    self.stock_templates_editor_state
+                        .open_template_for_edit(&tmpl_id);
+                    ui.ctx().request_repaint();
+                }
+            }
+            EditorTab::StockTemplates => {
+                let needs_save = self.stock_templates_editor_state.show(
+                    ui,
+                    &self.items,
+                    self.campaign_dir.as_ref(),
+                    &self.campaign.stock_templates_file,
+                );
+                if needs_save {
+                    self.stock_templates = self.stock_templates_editor_state.templates.clone();
                     self.unsaved_changes = true;
                 }
             }
@@ -10601,6 +10753,142 @@ fn test_another() {}
         assert_eq!(
             next_id, 2,
             "next available monster ID should skip used ID 1"
+        );
+    }
+
+    // =========================================================================
+    // Phase 7: Stock Templates Editor Tests
+    // =========================================================================
+
+    #[test]
+    fn test_validate_npc_ids_detects_unknown_stock_template() {
+        use antares::domain::world::NpcDefinition;
+
+        let mut app = CampaignBuilderApp::default();
+
+        // Add an NPC that references a non-existent stock template
+        let mut npc = NpcDefinition::new("merchant_bad", "Bad Merchant", "bad.png");
+        npc.is_merchant = true;
+        npc.stock_template = Some("nonexistent_template".to_string());
+        app.npc_editor_state.npcs.push(npc);
+
+        // stock_templates is empty — reference is unresolvable
+        app.stock_templates = vec![];
+
+        let errors = app.validate_npc_ids();
+        assert!(
+            errors.iter().any(|e| e
+                .message
+                .contains("unknown stock template 'nonexistent_template'")),
+            "expected unknown-stock-template error, got: {:?}",
+            errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_validate_npc_ids_valid_stock_template_passes() {
+        use antares::domain::world::npc_runtime::MerchantStockTemplate;
+        use antares::domain::world::NpcDefinition;
+
+        let mut app = CampaignBuilderApp::default();
+
+        let tmpl = MerchantStockTemplate {
+            id: "basic_stock".to_string(),
+            entries: vec![],
+            magic_item_pool: vec![],
+            magic_slot_count: 0,
+            magic_refresh_days: 7,
+        };
+        app.stock_templates = vec![tmpl];
+
+        let mut npc = NpcDefinition::new("merchant_ok", "Good Merchant", "ok.png");
+        npc.is_merchant = true;
+        npc.stock_template = Some("basic_stock".to_string());
+        app.npc_editor_state.npcs.push(npc);
+
+        let errors = app.validate_npc_ids();
+        // No stock-template error should be present for this NPC
+        assert!(
+            !errors
+                .iter()
+                .any(|e| e.message.contains("unknown stock template")),
+            "unexpected stock-template error for valid reference: {:?}",
+            errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_validate_campaign_warns_unknown_item_in_template() {
+        use antares::domain::world::npc_runtime::{MerchantStockTemplate, TemplateStockEntry};
+
+        let mut app = CampaignBuilderApp::default();
+
+        // Template references item_id 255 which does not exist in items list
+        let tmpl = MerchantStockTemplate {
+            id: "bad_items_tmpl".to_string(),
+            entries: vec![TemplateStockEntry {
+                item_id: 255,
+                quantity: 1,
+                override_price: None,
+            }],
+            magic_item_pool: vec![],
+            magic_slot_count: 0,
+            magic_refresh_days: 7,
+        };
+        app.stock_templates = vec![tmpl.clone()];
+        app.stock_templates_editor_state.templates = vec![tmpl];
+        // items is empty — item_id 255 is unknown
+        app.items = vec![];
+
+        let warnings = app.validate_stock_template_refs();
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.message.contains("unknown item_id 255")),
+            "expected unknown-item warning, got: {:?}",
+            warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_validate_campaign_warns_unknown_item_in_magic_pool() {
+        use antares::domain::world::npc_runtime::MerchantStockTemplate;
+
+        let mut app = CampaignBuilderApp::default();
+
+        // Template has a magic pool entry for item_id 254 which doesn't exist
+        let tmpl = MerchantStockTemplate {
+            id: "bad_pool_tmpl".to_string(),
+            entries: vec![],
+            magic_item_pool: vec![254],
+            magic_slot_count: 1,
+            magic_refresh_days: 7,
+        };
+        app.stock_templates = vec![tmpl.clone()];
+        app.stock_templates_editor_state.templates = vec![tmpl];
+        app.items = vec![];
+
+        let warnings = app.validate_stock_template_refs();
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.message.contains("magic pool") && w.message.contains("254")),
+            "expected magic-pool unknown-item warning, got: {:?}",
+            warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_editor_tab_stock_templates_name() {
+        assert_eq!(EditorTab::StockTemplates.name(), "Stock Templates");
+    }
+
+    #[test]
+    fn test_campaign_metadata_default_stock_templates_file() {
+        let meta = CampaignMetadata::default();
+        assert_eq!(
+            meta.stock_templates_file, "data/npc_stock_templates.ron",
+            "default stock_templates_file should be 'data/npc_stock_templates.ron'"
         );
     }
 

@@ -170,6 +170,8 @@ https://dev.to/mikeam565/rust-game-dev-log-5-improved-terrain-generation-dynamic
 
 Write a plan with a phased approach to implementing advanced procedural meshes in the game engine. THINK HARD and follow the rules in @PLAN.md
 
+✅ COMPLETED -
+
 ### Party View Point
 
 The view point of the party is not centered. When the party approaches a door the door is not centereed on the screen it is off by half. This behavior applies to all objects in the game. It makes navigation very difficult. The party view point should be centered.
@@ -347,6 +349,8 @@ Work required:
 
 This change is not backward compatible with existing RON item data that uses `tags` for helmet and boot slot routing. All affected item definitions must be migrated at the same time.
 
+✅ PLAN WRITTEN - [Armor Classification Expansion Implementation Plan](./armor_classification_expansion_implementation_plan.md)
+
 ### Equipped Weapon Damage in Combat
 
 Currently `perform_attack_action_with_rng` in `src/game/systems/combat.rs` hardcodes `Attack::physical(DiceRoll::new(1, 4, 0))` for every player attack, regardless of what the character has equipped in `equipment.weapon`. Monster attacks correctly read from their `attacks` list, but player characters always deal 1d4 physical damage. This means a Fighter wielding a longsword (1d8+2) deals the same damage as an unarmed apprentice.
@@ -372,6 +376,8 @@ Testing requirements:
 - `test_get_character_attack_returns_unarmed_fallback` — unit test: `equipment.weapon = None`, assert returned `Attack.damage == UNARMED_DAMAGE`.
 - `test_get_character_attack_invalid_item_id_falls_back_to_unarmed` — equip a non-existent item_id (not in ItemDatabase), assert fallback to `UNARMED_DAMAGE` rather than panic.
 
+✅ PLAN WRITTEN - [Equipped Weapon Damage Implementation Plan](./equipped_weapon_damage_implementation_plan.md)
+
 ### Dropped Items World Persistence
 
 When a character drops an item (via `drop_item()` in `src/domain/transactions.rs`), the item is currently removed from the character's inventory and discarded. There is no mechanism to place it in the game world at the position where it was dropped, nor to represent it as a pickable entity on the map.
@@ -395,6 +401,8 @@ Work required:
 - Ensure `SaveGame` serialization captures `dropped_items` on each map as part of the world state round-trip.
 
 This item is tracked here for future planning. It does not need to be addressed in the current inventory system implementation plan.
+
+✅ PLAN WRITTEN - [Dropped Item Persistence Implementation Plan](./dropped_item_persistence_implementation_plan.md)
 
 ## Creature Registry
 
@@ -436,7 +444,7 @@ We also need to refactor the creature id manager to use those ranges.
 ]
 ```
 
-
+✅ COMPLETED -
 
 ## Combat Feedback
 
@@ -588,3 +596,12 @@ How we handle Merchants (NPCs with Buy/Sell inventory), and Container Items (Che
 Write a plan with a phased approach to implementing buying and selling in the game engine. THINK HARD and follow the rules in @PLAN.md
 
 ✅ PLAN WRITTEN - [Buy and Sell Plan](./buy_and_sell_plan.md)
+
+
+### Automap and mini map
+
+We need to implement an automap and mini map in the game engine. The automap should be a full map of the current level that is revealed as the player explores. The mini map should be a smaller version of the automap that is always visible in the corner of the screen. The mini map should show the player's current position and the surrounding area. The automap should be accessible from the game menu and should allow the player to see the entire level and their current position on it. The automap should be mapped to the M key and configurable through the game config. We will combine the mini map, compas, and clock into a single UI element in the top right corner of the screen. The mini map should also show important locations like quest objectives, merchants, and points of interest. The automap should have a fog of war effect that hides unexplored areas of the map. The automap should also have a legend that shows what different symbols on the map mean (e.g. red dot for monsters, green dot for merchants, etc).
+
+Write a plan with a phased approach to implementing an automap and mini map in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Automap and Mini Map Implementation Plan](./automap_and_mini_map_implementation_plan.md)
