@@ -11,9 +11,11 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.1 for complete specifications.
 
+pub mod container_inventory_state;
 pub mod dialogue;
 pub mod inventory_state;
 pub mod menu;
+pub mod merchant_inventory_state;
 pub mod quests;
 pub mod resources;
 pub mod save_game;
@@ -55,6 +57,12 @@ pub enum GameMode {
     Menu(MenuState),
     /// NPC dialogue and interactions
     Dialogue(crate::application::dialogue::DialogueState),
+    /// Merchant buy/sell split-screen inventory (opened with `I` during Dialogue
+    /// with a merchant NPC).
+    MerchantInventory(crate::application::merchant_inventory_state::MerchantInventoryState),
+    /// Container interaction split-screen inventory (opened with `E` when
+    /// facing a chest, crate, hole in the wall, etc.).
+    ContainerInventory(crate::application::container_inventory_state::ContainerInventoryState),
 }
 
 /// State for inn party management mode
@@ -1048,6 +1056,84 @@ impl GameState {
     /// Enters dialogue mode
     pub fn enter_dialogue(&mut self) {
         self.mode = GameMode::Dialogue(crate::application::dialogue::DialogueState::new());
+    }
+
+    /// Enters the merchant buy/sell split-screen inventory.
+    ///
+    /// Called when the player presses `I` while in `GameMode::Dialogue` with a
+    /// merchant NPC.  The current mode (typically `Dialogue`) is stored so it
+    /// can be restored when the player closes the merchant screen.
+    ///
+    /// # Arguments
+    ///
+    /// * `npc_id`   – ID of the merchant NPC being traded with.
+    /// * `npc_name` – Display name shown in the right-panel header.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_merchant_inventory("merchant_tom".to_string(), "Tom's Goods".to_string());
+    /// assert!(matches!(state.mode, GameMode::MerchantInventory(_)));
+    /// ```
+    pub fn enter_merchant_inventory(&mut self, npc_id: String, npc_name: String) {
+        let prev = self.mode.clone();
+        let active_character_index = 0; // always start with the party leader
+        self.mode = GameMode::MerchantInventory(
+            crate::application::merchant_inventory_state::MerchantInventoryState::new(
+                npc_id,
+                npc_name,
+                active_character_index,
+                prev,
+            ),
+        );
+    }
+
+    /// Enters the container interaction split-screen inventory.
+    ///
+    /// Called when the player presses `E` while facing a container tile event
+    /// (chest, crate, hole in the wall, etc.).  The current mode (typically
+    /// `Exploration`) is stored so it can be restored when the player closes
+    /// the container screen.
+    ///
+    /// # Arguments
+    ///
+    /// * `container_event_id` – The map event ID of the container.
+    /// * `container_name`     – Display name shown in the right-panel header.
+    /// * `items`              – Current item list inside the container.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_container_inventory(
+    ///     "chest_001".to_string(),
+    ///     "Wooden Chest".to_string(),
+    ///     vec![],
+    /// );
+    /// assert!(matches!(state.mode, GameMode::ContainerInventory(_)));
+    /// ```
+    pub fn enter_container_inventory(
+        &mut self,
+        container_event_id: String,
+        container_name: String,
+        items: Vec<crate::domain::character::InventorySlot>,
+    ) {
+        let prev = self.mode.clone();
+        let active_character_index = 0;
+        self.mode = GameMode::ContainerInventory(
+            crate::application::container_inventory_state::ContainerInventoryState::new(
+                container_event_id,
+                container_name,
+                items,
+                active_character_index,
+                prev,
+            ),
+        );
     }
 
     /// Returns to exploration mode (or resumes previous mode when exiting menu)

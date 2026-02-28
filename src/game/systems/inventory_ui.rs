@@ -977,6 +977,26 @@ fn render_character_panel(
     panel_action
 }
 
+/// Public wrapper around [`paint_item_silhouette`] for use by sibling UI
+/// modules (`merchant_inventory_ui`, `container_inventory_ui`).
+///
+/// # Arguments
+///
+/// * `painter`   – The egui painter for the current frame.
+/// * `cell_rect` – Bounding rectangle of the slot cell.
+/// * `cell_size` – The size of the cell in pixels (used for scaling).
+/// * `item_type` – Optional item type to paint a silhouette for.
+/// * `color`     – Tint colour for the silhouette.
+pub fn paint_item_silhouette_pub(
+    painter: &egui::Painter,
+    cell_rect: egui::Rect,
+    cell_size: f32,
+    item_type: Option<&ItemType>,
+    color: egui::Color32,
+) {
+    paint_item_silhouette(painter, cell_rect, cell_size, item_type, color);
+}
+
 /// Paints an item-type silhouette inside a slot cell using the egui `Painter`.
 ///
 /// Each `ItemType` variant maps to a distinct geometric shape so the player

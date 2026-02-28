@@ -396,7 +396,6 @@ Work required:
 
 This item is tracked here for future planning. It does not need to be addressed in the current inventory system implementation plan.
 
-
 ## Creature Registry
 
 @creature_id_manager.rs specifies a range for creature ids.
@@ -439,20 +438,21 @@ We also need to refactor the creature id manager to use those ranges. We also ne
 
 The creatures registry should be able to tie the npc, character, and monster to a creature mesh which has its own ID.
 
+Write a plan with a phased approach to implementing the new creature registry ranges features. THINK HARD and follow the rules in @PLAN.md
+
+[Creature Registry Refactor](./creature_registry_refactor_plan.md)
 
 ## Combat Feedback
 
-We have missed deliverables from Phase 5 of #file:combat_system_improvement_implementation.md  The victory spash screen never goes away. It should go away when the party moves after combat.
+We have missed deliverables from Phase 5 of #file:combat_system_improvement_implementation.md The victory spash screen never goes away. It should go away when the party moves after combat.
 
 I have to double click Enter to select combat options. We should be able to select combat options with a single click of the Enter key. The first press of the Enter key should select the option and the second press should confirm the selection. There is no visual feedback that I clicked the option. We should have visual feedback that the option is selected when I click it with the Enter key.
 
-
 Mouse is not working to select combat options. We should be able to click on the combat options with the mouse to select them. In gerneal the mouse does not work in the game engine other than the Main Menu. We should have mouse support in the game engine for all UI interactions. InnKeeper Party Management is another place where mouse does not work.
-
 
 As part of phase 3 we added UI Cards for damage are only a small number in the upper left corner of the screen. They are inpossible to see and fade fast. Implement a Dialog Bubble that appears in the right top side of the screen that shows the damage dealt and received in combat. A combat log that remains visible until combat is over. The bubble should also have a typewriter effect that makes the text appear one character at a time.
 
-As part of Phase 3 we were supposed to  add in-world monster HP hover bars we have none. We should have HP bars that appear above monsters in the world that show their current HP. The HP bars should update in real time as the monster takes damage. We should be able to toggle the HP bars on and off in the game settings.
+As part of Phase 3 we were supposed to add in-world monster HP hover bars we have none. We should have HP bars that appear above monsters in the world that show their current HP. The HP bars should update in real time as the monster takes damage. We should be able to toggle the HP bars on and off in the game settings.
 
 Implement more structured logging for Combat Log.
 
@@ -465,7 +465,6 @@ Combat Log Format:
 Colors for Characters should be consistent throughout the Game. Monster colors can be random from a set of pre-defined color pallets.
 
 Combat log should have a scroll bar when it gets long enough.
-
 
 ✅ COMPLETED -
 
@@ -489,23 +488,25 @@ wide mouse input pass, not one-off fixes per screen.
 Work required:
 
 - Audit every gameplay mode and UI surface for mouse interaction support:
-    `Exploration`, `Combat`, `Menu`, `Dialogue`, `InnManagement`, and editor-like
-    in-game panels.
+  `Exploration`, `Combat`, `Menu`, `Dialogue`, `InnManagement`, and editor-like
+  in-game panels.
 - Define a unified click/hover/press interaction model so mouse behavior is
-    consistent across all systems.
+  consistent across all systems.
 - Ensure Bevy `Interaction` handling (`Pressed`, `Hovered`, `None`) is wired
-    consistently and does not depend on keyboard-first assumptions.
+  consistently and does not depend on keyboard-first assumptions.
 - Add a shared input utility layer for mouse activation detection to avoid
-    duplicated ad-hoc patterns across systems.
+  duplicated ad-hoc patterns across systems.
 - Validate mouse support for all combat actions and target selection paths.
 - Validate mouse support for game menu navigation, save/load dialogs, and
-    settings controls.
+  settings controls.
 - Validate mouse support for innkeeper party management and recruitment-related
-    UI flows.
+  UI flows.
 - Add regression tests for mouse input in each major mode to prevent future
-    breakage.
+  breakage.
 
 Write a plan with a phased approach to implementing game-wide mouse input support in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Game Wide Mouse Input Support](./game_wide_mouse_input_support_plan.md)
 
 ## Future Features
 
@@ -553,16 +554,15 @@ Boss Combat - Party sees the monster and can choose to attack or flee. The monst
 
 Write a plan with a phased approach to implementing different types of combat events in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-[Combat Events Implementation Plan](./combat_events_implementation_plan.md)
-
+✅ PLAN WRITTEN - [Combat Events Implementation Plan](./combat_events_implementation_plan.md)
 
 ### Items Procedural Meshes
 
-We need to implement procedural meshes for items in the game. Currently there are no procedural meshes for items. We should have procedural meshes for weapons, armor, and other equippable items. We should also have procedural meshes for consumable items like potions and scrolls. The procedural meshes should be based on the item data in the item RON files. For example, a sword with a long blade should have a different mesh than a dagger with a short blade. A potion with a red liquid should have a different mesh than a potion with a blue liquid. We should use the same procedural mesh system that we use for creatures and furniture to generate the item meshes based on their data.
+We need to implement procedural meshes for items in the game. Currently there are no procedural meshes for items. We should have procedural meshes for weapons, armor, and other equippable items. We should also have procedural meshes for consumable items like potions and scrolls. The procedural meshes should be based on the item data in the item RON files. For example, a sword with a long blade should have a different mesh than a dagger with a short blade. A potion with a red liquid should have a different mesh than a potion with a blue liquid. The items procedural mesh should lay on the ground. When we drop an item from inventory the procedural mesh should appear on that tile. When we pickup an item the procedural mesh should be removed from the tile. We should use the same procedural mesh system that we use for creatures and furniture to generate the item meshes based on their data.
 
 Write a plan with a phased approach to implementing procedural meshes for items in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-[Items Procedural Meshes Implementation Plan](./items_procedural_meshes_implementation_plan.md)
+✅ PLAN WRITTEN - [Items Procedural Meshes Implementation Plan](./items_procedural_meshes_implementation_plan.md)
 
 ### Locked Objects and Keys
 
@@ -570,7 +570,7 @@ We need to implement locked objects and keys in the game engine. Currently there
 
 Write a plan with a phased approach to implementing locked objects and keys in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-[Locked Objects and Keys Implementation Plan](./locked_objects_and_keys_implementation_plan.md)
+✅ PLAN WRITTEN - [Locked Objects and Keys Implementation Plan](./locked_objects_and_keys_implementation_plan.md)
 
 ### Inventory Navigation
 
@@ -583,6 +583,12 @@ Up Down Side Arrows - Navigate the grid inside the inventory (does not affect ch
 Enter - Selects Item and Highlights the Options to Drop or Send Item to Another Character or Merchant
 Action Buttons - Once highlighted by selecting an item can be navigated with the Side Arrows. Enter executed the action and returns focus to the first item in the inventory. ESC returns focus to the selected item where user can navigate the Inventory or Change Character Focus.
 
+✅ COMPLETED -
+
 ### Buy and Selling
 
-How we handle Merchants (NPCs with Buy/Sell inventory), and Container Items (Chests, Containers, Wholes in the Wall, etc...) Inventory with the Characters. While in a Dialogue with an NPC press "I" while interacting with the NPC and have a split Window with the Lead Characters (only one character inventory) inventory on the Left and the NPC on the right. TAB would toggle focus between the Lead Character inventory and the NPC Inventory. The Action Buttons for the NPC would be Buy and the action button for the Character would be Sell. To change the characters inventory to another character the user would use hte number keys. numbers 1 == Character 1, number 2 == Character 2. Container Items would use the same format. The change would be "E" opens the split inventory window and the Action buttons for Items being "Take" and "Take All" where "Take" is only the selected item and "Take All" is the contents of the container. THe Character action button would be "Stash" which would move the highlighted item from Character inventory to the Container Inventory. Navigation inside the inventory remains the same.
+How we handle Merchants (NPCs with Buy/Sell inventory), and Container Items (Chests, Containers, Wholes in the Wall, etc...) Inventory with the Characters. While in a Dialogue with an NPC press "I" while interacting with the NPC and have a split Window with the Lead Characters (only one character inventory) inventory on the Left and the NPC on the right. TAB would toggle focus between the Lead Character inventory and the NPC Inventory. The Action Buttons for the NPC would be Buy and the action button for the Character would be Sell. To change the characters inventory to another character the user would use hte number keys. numbers 1 == Character 1, number 2 == Character 2. Container Items would use the same format. The change would be "E" opens the split inventory window and the Action buttons for Items being "Take" and "Take All" where "Take" is only the selected item and "Take All" is the contents of the container. The Character action button would be "Stash" which would move the highlighted item from Character inventory to the Container Inventory. Navigation inside the inventory remains the same.
+
+Write a plan with a phased approach to implementing buying and selling in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Buy and Sell Plan](./buy_and_sell_plan.md)
