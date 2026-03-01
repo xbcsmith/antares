@@ -29,6 +29,10 @@
 //!     faction: Some("Village Council".to_string()),
 //!     is_merchant: false,
 //!     is_innkeeper: false,
+//!     is_priest: false,
+//!     stock_template: None,
+//!     service_catalog: None,
+//!     economy: None,
 //! };
 //! ```
 //!
@@ -42,6 +46,7 @@
 //! ```
 
 use crate::domain::dialogue::DialogueId;
+use crate::domain::inventory::{NpcEconomySettings, ServiceCatalog};
 use crate::domain::quest::QuestId;
 use crate::domain::types::{CreatureId, Direction, Position};
 use crate::domain::world::SpriteReference;
@@ -76,6 +81,10 @@ pub type NpcId = String;
 ///     faction: Some("Merchants Guild".to_string()),
 ///     is_merchant: true,
 ///     is_innkeeper: false,
+///     is_priest: false,
+///     stock_template: Some("general_goods".to_string()),
+///     service_catalog: None,
+///     economy: None,
 /// };
 ///
 /// assert_eq!(merchant.id, "merchant_tom");
@@ -126,6 +135,10 @@ pub struct NpcDefinition {
     ///     faction: None,
     ///     is_merchant: false,
     ///     is_innkeeper: false,
+    ///     is_priest: false,
+    ///     stock_template: None,
+    ///     service_catalog: None,
+    ///     economy: None,
     /// };
     /// ```
     #[serde(default)]
@@ -157,6 +170,10 @@ pub struct NpcDefinition {
     ///     faction: None,
     ///     is_merchant: false,
     ///     is_innkeeper: false,
+    ///     is_priest: false,
+    ///     stock_template: None,
+    ///     service_catalog: None,
+    ///     economy: None,
     /// };
     /// ```
     #[serde(default)]
@@ -177,6 +194,38 @@ pub struct NpcDefinition {
     /// If true, this NPC can rest party (inn/tavern)
     #[serde(default)]
     pub is_innkeeper: bool,
+
+    /// If true, this NPC offers priest services (healing, condition curing, restoration)
+    #[serde(default)]
+    pub is_priest: bool,
+
+    /// Optional ID referencing a merchant stock template in campaign data.
+    ///
+    /// Used to initialize the NPC's `MerchantStock` at runtime. For example,
+    /// `"blacksmith_basic_stock"` would look up the corresponding template in
+    /// `npc_stock_templates.ron`. When `None`, the merchant starts with no stock.
+    ///
+    /// This is static definition data. Runtime mutable stock quantities live in
+    /// `NpcRuntimeState` (Phase 2).
+    #[serde(default)]
+    pub stock_template: Option<String>,
+
+    /// Optional inline service catalog for priest or innkeeper NPCs.
+    ///
+    /// Defines what paid services (healing, curing, resting, etc.) this NPC
+    /// provides and at what cost. When `None`, the NPC offers no services.
+    ///
+    /// This is static definition data read at game load time.
+    #[serde(default)]
+    pub service_catalog: Option<ServiceCatalog>,
+
+    /// Optional per-NPC buy/sell rate overrides.
+    ///
+    /// When `Some`, these rates override the campaign-wide defaults for this
+    /// specific NPC. When `None`, the NPC uses the campaign default economy
+    /// settings (buy 50%, sell 100%).
+    #[serde(default)]
+    pub economy: Option<NpcEconomySettings>,
 }
 
 impl NpcDefinition {
@@ -220,6 +269,10 @@ impl NpcDefinition {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         }
     }
 
@@ -238,6 +291,7 @@ impl NpcDefinition {
     ///
     /// assert!(merchant.is_merchant);
     /// assert!(!merchant.is_innkeeper);
+    /// assert!(!merchant.is_priest);
     /// ```
     pub fn merchant(
         id: impl Into<String>,
@@ -256,6 +310,55 @@ impl NpcDefinition {
             faction: None,
             is_merchant: true,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+        }
+    }
+
+    /// Creates a priest NPC
+    ///
+    /// Priests offer paid services such as healing, condition curing, and
+    /// resurrection. Use the `service_catalog` field to define what services
+    /// this priest provides.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::npc::NpcDefinition;
+    ///
+    /// let priest = NpcDefinition::priest(
+    ///     "high_priest_alaric",
+    ///     "High Priest Alaric",
+    ///     "assets/portraits/priest.png"
+    /// );
+    ///
+    /// assert!(priest.is_priest);
+    /// assert!(!priest.is_merchant);
+    /// assert!(!priest.is_innkeeper);
+    /// ```
+    pub fn priest(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        portrait_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            description: String::new(),
+            portrait_id: portrait_id.into(),
+            dialogue_id: None,
+            creature_id: None,
+            sprite: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: true,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         }
     }
 
@@ -274,6 +377,7 @@ impl NpcDefinition {
     ///
     /// assert!(innkeeper.is_innkeeper);
     /// assert!(!innkeeper.is_merchant);
+    /// assert!(!innkeeper.is_priest);
     /// ```
     pub fn innkeeper(
         id: impl Into<String>,
@@ -292,6 +396,10 @@ impl NpcDefinition {
             faction: None,
             is_merchant: false,
             is_innkeeper: true,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         }
     }
 
@@ -570,6 +678,10 @@ mod tests {
             faction: Some("Village".to_string()),
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -707,6 +819,10 @@ NpcDefinition(
             faction: Some("Test Faction".to_string()),
             is_merchant: true,
             is_innkeeper: true,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         assert_eq!(npc.id, "complete_npc");
@@ -753,6 +869,10 @@ NpcDefinition(
             faction: Some("Wizards".to_string()),
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -805,5 +925,204 @@ NpcDefinition(
 
         let innkeeper = NpcDefinition::innkeeper("i1", "Innkeeper", "i.png");
         assert!(innkeeper.creature_id.is_none());
+    }
+
+    // ----- Phase 1 new tests -----
+
+    #[test]
+    fn test_npc_definition_is_priest_defaults_false() {
+        let ron_str = r#"
+NpcDefinition(
+    id: "old_npc",
+    name: "Old NPC",
+    portrait_id: "portrait.png",
+)
+"#;
+        let npc: NpcDefinition = ron::from_str(ron_str).expect("Failed to deserialize old format");
+        assert!(
+            !npc.is_priest,
+            "is_priest should default to false for old RON files without the field"
+        );
+    }
+
+    #[test]
+    fn test_npc_definition_priest_constructor() {
+        let priest = NpcDefinition::priest(
+            "high_priest_alaric",
+            "High Priest Alaric",
+            "assets/portraits/priest.png",
+        );
+
+        assert!(
+            priest.is_priest,
+            "priest() constructor must set is_priest = true"
+        );
+        assert!(
+            !priest.is_merchant,
+            "priest() constructor must set is_merchant = false"
+        );
+        assert!(
+            !priest.is_innkeeper,
+            "priest() constructor must set is_innkeeper = false"
+        );
+        assert_eq!(priest.id, "high_priest_alaric");
+        assert_eq!(priest.name, "High Priest Alaric");
+    }
+
+    #[test]
+    fn test_npc_definition_stock_template_defaults_none() {
+        let ron_str = r#"
+NpcDefinition(
+    id: "merchant_old",
+    name: "Old Merchant",
+    portrait_id: "merchant.png",
+    is_merchant: true,
+)
+"#;
+        let npc: NpcDefinition = ron::from_str(ron_str).expect("Failed to deserialize old format");
+        assert!(
+            npc.stock_template.is_none(),
+            "stock_template should default to None for old RON files without the field"
+        );
+    }
+
+    #[test]
+    fn test_npc_definition_service_catalog_defaults_none() {
+        let ron_str = r#"
+NpcDefinition(
+    id: "priest_old",
+    name: "Old Priest",
+    portrait_id: "priest.png",
+    is_priest: true,
+)
+"#;
+        let npc: NpcDefinition = ron::from_str(ron_str).expect("Failed to deserialize old format");
+        assert!(
+            npc.service_catalog.is_none(),
+            "service_catalog should default to None for old RON files without the field"
+        );
+    }
+
+    #[test]
+    fn test_npc_definition_economy_defaults_none() {
+        let ron_str = r#"
+NpcDefinition(
+    id: "merchant_no_economy",
+    name: "Plain Merchant",
+    portrait_id: "merchant.png",
+    is_merchant: true,
+)
+"#;
+        let npc: NpcDefinition = ron::from_str(ron_str).expect("Failed to deserialize old format");
+        assert!(
+            npc.economy.is_none(),
+            "economy should default to None for old RON files without the field"
+        );
+    }
+
+    #[test]
+    fn test_npc_definition_new_has_priest_false() {
+        let npc = NpcDefinition::new("guard", "Guard", "guard.png");
+        assert!(!npc.is_priest);
+        assert!(npc.stock_template.is_none());
+        assert!(npc.service_catalog.is_none());
+        assert!(npc.economy.is_none());
+    }
+
+    #[test]
+    fn test_npc_definition_merchant_has_priest_false() {
+        let merchant = NpcDefinition::merchant("m1", "Merchant", "m.png");
+        assert!(merchant.is_merchant);
+        assert!(!merchant.is_priest);
+        assert!(merchant.stock_template.is_none());
+        assert!(merchant.economy.is_none());
+    }
+
+    #[test]
+    fn test_npc_definition_innkeeper_has_priest_false() {
+        let innkeeper = NpcDefinition::innkeeper("i1", "Innkeeper", "i.png");
+        assert!(innkeeper.is_innkeeper);
+        assert!(!innkeeper.is_priest);
+        assert!(innkeeper.service_catalog.is_none());
+    }
+
+    #[test]
+    fn test_npc_definition_priest_with_service_catalog_serialization() {
+        use crate::domain::inventory::{ServiceCatalog, ServiceEntry};
+
+        let mut catalog = ServiceCatalog::new();
+        catalog
+            .services
+            .push(ServiceEntry::new("heal_all", 50, "Heal the entire party"));
+        catalog.services.push(ServiceEntry::with_gem_cost(
+            "raise_dead",
+            500,
+            1,
+            "Raise a dead character",
+        ));
+
+        let priest = NpcDefinition {
+            id: "priest_benedictus".to_string(),
+            name: "Father Benedictus".to_string(),
+            description: "A devoted priest of the light".to_string(),
+            portrait_id: "priest.png".to_string(),
+            dialogue_id: Some(20),
+            creature_id: None,
+            sprite: None,
+            quest_ids: vec![],
+            faction: Some("Temple of Light".to_string()),
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: true,
+            stock_template: None,
+            service_catalog: Some(catalog),
+            economy: None,
+        };
+
+        let serialized = ron::to_string(&priest).expect("Failed to serialize");
+        let deserialized: NpcDefinition =
+            ron::from_str(&serialized).expect("Failed to deserialize");
+
+        assert_eq!(priest, deserialized);
+        assert!(deserialized.is_priest);
+        let catalog = deserialized.service_catalog.as_ref().unwrap();
+        assert!(catalog.has_service("heal_all"));
+        assert!(catalog.has_service("raise_dead"));
+    }
+
+    #[test]
+    fn test_npc_definition_merchant_with_stock_template_and_economy_serialization() {
+        use crate::domain::inventory::NpcEconomySettings;
+
+        let npc = NpcDefinition {
+            id: "blacksmith_greg".to_string(),
+            name: "Blacksmith Greg".to_string(),
+            description: "A skilled weaponsmith".to_string(),
+            portrait_id: "blacksmith.png".to_string(),
+            dialogue_id: None,
+            creature_id: None,
+            sprite: None,
+            quest_ids: vec![],
+            faction: None,
+            is_merchant: true,
+            is_innkeeper: false,
+            is_priest: false,
+            stock_template: Some("blacksmith_basic_stock".to_string()),
+            service_catalog: None,
+            economy: Some(NpcEconomySettings::new(0.4, 1.2)),
+        };
+
+        let serialized = ron::to_string(&npc).expect("Failed to serialize");
+        let deserialized: NpcDefinition =
+            ron::from_str(&serialized).expect("Failed to deserialize");
+
+        assert_eq!(npc, deserialized);
+        assert_eq!(
+            deserialized.stock_template,
+            Some("blacksmith_basic_stock".to_string())
+        );
+        let economy = deserialized.economy.as_ref().unwrap();
+        assert_eq!(economy.buy_rate, 0.4);
+        assert_eq!(economy.sell_rate, 1.2);
     }
 }

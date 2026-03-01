@@ -8369,6 +8369,18 @@
             description: "A wooden sign pointing toward the Dark Forrest.",
             text: "To the Dark Forrest",
         ),
+        (
+            x: 3,
+            y: 3,
+        ): Container(
+            id: "test_chest_001",
+            name: "Old Chest",
+            description: "A dusty old chest sitting in the corner.",
+            items: [
+                (item_id: 1, charges: 0),
+                (item_id: 2, charges: 0),
+            ],
+        ),
     },
     allow_random_encounters: true,
     npc_placements: [

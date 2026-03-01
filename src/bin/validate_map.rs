@@ -270,6 +270,10 @@ fn print_map_summary(map: &Map) {
                 // Count furniture events (could add separate counter if needed)
                 signs += 1
             }
+            MapEvent::Container { .. } => {
+                // Count container events (could add separate counter if needed)
+                signs += 1
+            }
         }
     }
 

@@ -26,6 +26,7 @@ pub mod classes;
 pub mod combat;
 pub mod conditions;
 pub mod dialogue;
+pub mod inventory;
 pub mod items;
 pub mod magic;
 pub mod party_manager;
@@ -34,6 +35,7 @@ pub mod progression;
 pub mod quest;
 pub mod races;
 pub mod resources;
+pub mod transactions;
 pub mod types;
 pub mod visual;
 pub mod world;
@@ -44,7 +46,11 @@ pub use character_definition::{
     StartingEquipment,
 };
 pub use dialogue::{DialogueId, NodeId};
+pub use inventory::{
+    InventoryOwner, MerchantStock, NpcEconomySettings, ServiceCatalog, ServiceEntry, StockEntry,
+};
 pub use quest::QuestId;
+pub use transactions::{ServiceOutcome, TransactionError};
 pub use types::{
     CharacterId, CreatureId, EventId, InnkeeperId, ItemId, MapId, MeshId, MonsterId, RaceId,
     SpellId,

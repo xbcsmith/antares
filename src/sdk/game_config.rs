@@ -367,8 +367,16 @@ pub struct ControlsConfig {
     /// Keys for opening menu
     pub menu: Vec<String>,
 
+    /// Keys for opening the inventory screen
+    #[serde(default = "default_inventory_keys")]
+    pub inventory: Vec<String>,
+
     /// Movement cooldown in seconds (prevents double-moves)
     pub movement_cooldown: f32,
+}
+
+fn default_inventory_keys() -> Vec<String> {
+    vec!["I".to_string()]
 }
 
 impl Default for ControlsConfig {
@@ -380,6 +388,7 @@ impl Default for ControlsConfig {
             turn_right: vec!["D".to_string(), "ArrowRight".to_string()],
             interact: vec!["Space".to_string(), "E".to_string()],
             menu: vec!["Escape".to_string()],
+            inventory: default_inventory_keys(),
             movement_cooldown: 0.2,
         }
     }
@@ -390,13 +399,20 @@ impl ControlsConfig {
     ///
     /// # Errors
     ///
-    /// Returns error if movement cooldown is negative
+    /// Returns `ConfigError::ValidationError` if movement cooldown is negative or
+    /// if the inventory key list is empty.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.movement_cooldown < 0.0 {
             return Err(ConfigError::ValidationError(format!(
                 "movement_cooldown must be non-negative, got {}",
                 self.movement_cooldown
             )));
+        }
+
+        if self.inventory.is_empty() {
+            return Err(ConfigError::ValidationError(
+                "inventory key list must not be empty".to_string(),
+            ));
         }
 
         Ok(())
@@ -742,6 +758,29 @@ mod tests {
     }
 
     #[test]
+    fn test_controls_config_inventory_default() {
+        let config = ControlsConfig::default();
+        assert_eq!(config.inventory, vec!["I".to_string()]);
+    }
+
+    #[test]
+    fn test_controls_config_validate_empty_inventory_keys() {
+        let config = ControlsConfig {
+            inventory: vec![],
+            ..Default::default()
+        };
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::ValidationError(_))
+        ));
+    }
+
+    #[test]
+    fn test_controls_config_validate_non_empty_inventory_keys() {
+        assert!(ControlsConfig::default().validate().is_ok());
+    }
+
+    #[test]
     fn test_controls_config_validation_success() {
         let config = ControlsConfig::default();
         assert!(config.validate().is_ok());
@@ -925,5 +964,29 @@ mod tests {
             };
             assert!(config.validate().is_ok());
         }
+    }
+
+    #[test]
+    fn test_tutorial_config_deserializes_with_inventory_key() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let config_path = std::path::Path::new(manifest_dir).join("data/test_campaign/config.ron");
+        let config = GameConfig::load_or_default(&config_path).unwrap();
+        assert_eq!(config.controls.inventory, vec!["I".to_string()]);
+    }
+
+    #[test]
+    fn test_controls_config_ron_roundtrip_includes_inventory() {
+        let original = ControlsConfig {
+            inventory: vec!["I".to_string(), "F1".to_string()],
+            ..Default::default()
+        };
+        let ron_string = ron::to_string(&original).expect("serialization must succeed");
+        let deserialized: ControlsConfig =
+            ron::from_str(&ron_string).expect("deserialization must succeed");
+        assert_eq!(
+            deserialized.inventory,
+            vec!["I".to_string(), "F1".to_string()],
+            "inventory field must survive a RON round-trip"
+        );
     }
 }

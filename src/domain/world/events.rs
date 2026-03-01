@@ -63,10 +63,24 @@ pub enum EventResult {
         /// Innkeeper NPC identifier (NpcId string)
         innkeeper_id: crate::domain::world::NpcId,
     },
+    /// Enter a merchant shop
+    EnterMerchant {
+        /// Merchant NPC identifier (NpcId string)
+        npc_id: crate::domain::world::NpcId,
+    },
     /// Furniture or props event triggered
     Furniture {
         /// Type of furniture
         furniture_type: crate::domain::world::FurnitureType,
+    },
+    /// Open an interactive container (chest, barrel, crate, etc.)
+    EnterContainer {
+        /// Unique identifier for this container instance (matches `MapEvent::Container::id`).
+        container_event_id: String,
+        /// Display name shown in the container inventory right-panel header.
+        container_name: String,
+        /// Current item contents of the container.
+        items: Vec<crate::domain::character::InventorySlot>,
     },
 }
 
@@ -229,6 +243,17 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
             // Furniture events are repeatable - don't remove
             EventResult::Furniture { furniture_type }
         }
+
+        MapEvent::Container {
+            id, name, items, ..
+        } => {
+            // Container events are repeatable (persist partial takes via write-back on close)
+            EventResult::EnterContainer {
+                container_event_id: id.clone(),
+                container_name: name.clone(),
+                items: items.clone(),
+            }
+        }
     };
 
     Ok(result)
@@ -285,6 +310,7 @@ pub fn random_encounter<R: rand::Rng>(world: &World, rng: &mut R) -> Option<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::character::InventorySlot;
     use crate::domain::world::Map;
 
     #[test]
@@ -804,5 +830,121 @@ mod tests {
             trigger_event(&mut world, pos3),
             Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "wayfarers_lodge"
         ));
+    }
+
+    #[test]
+    fn test_container_event_returns_enter_container_result() {
+        // Arrange
+        let mut world = World::new();
+        let mut map = Map::new(1, "Test Map".to_string(), "Desc".to_string(), 20, 20);
+
+        let pos = Position::new(3, 3);
+        let items = vec![
+            InventorySlot {
+                item_id: 1,
+                charges: 0,
+            },
+            InventorySlot {
+                item_id: 2,
+                charges: 3,
+            },
+        ];
+        map.add_event(
+            pos,
+            MapEvent::Container {
+                id: "test_chest_001".to_string(),
+                name: "Old Chest".to_string(),
+                description: "A dusty old chest".to_string(),
+                items: items.clone(),
+            },
+        );
+
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // Act
+        let result = trigger_event(&mut world, pos);
+        assert!(result.is_ok());
+
+        // Assert
+        match result.unwrap() {
+            EventResult::EnterContainer {
+                container_event_id,
+                container_name,
+                items: result_items,
+            } => {
+                assert_eq!(container_event_id, "test_chest_001");
+                assert_eq!(container_name, "Old Chest");
+                assert_eq!(result_items.len(), 2);
+                assert_eq!(result_items[0].item_id, 1);
+                assert_eq!(result_items[1].item_id, 2);
+                assert_eq!(result_items[1].charges, 3);
+            }
+            _ => panic!("Expected EnterContainer result"),
+        }
+    }
+
+    #[test]
+    fn test_container_event_is_repeatable() {
+        // Container events must NOT be removed after triggering so re-interacting works.
+        let mut world = World::new();
+        let mut map = Map::new(1, "Test Map".to_string(), "Desc".to_string(), 20, 20);
+
+        let pos = Position::new(5, 5);
+        map.add_event(
+            pos,
+            MapEvent::Container {
+                id: "barrel_42".to_string(),
+                name: "Old Barrel".to_string(),
+                description: "".to_string(),
+                items: vec![InventorySlot {
+                    item_id: 10,
+                    charges: 0,
+                }],
+            },
+        );
+
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // First trigger
+        let r1 = trigger_event(&mut world, pos);
+        assert!(matches!(r1, Ok(EventResult::EnterContainer { .. })));
+
+        // Second trigger: event must still be present
+        let r2 = trigger_event(&mut world, pos);
+        assert!(
+            matches!(r2, Ok(EventResult::EnterContainer { .. })),
+            "Container event must be repeatable"
+        );
+    }
+
+    #[test]
+    fn test_container_event_empty_items() {
+        // A container with no items still produces EnterContainer (not None).
+        let mut world = World::new();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
+
+        let pos = Position::new(2, 2);
+        map.add_event(
+            pos,
+            MapEvent::Container {
+                id: "empty_crate".to_string(),
+                name: "Empty Crate".to_string(),
+                description: "".to_string(),
+                items: vec![],
+            },
+        );
+
+        world.add_map(map);
+        world.set_current_map(1);
+
+        let result = trigger_event(&mut world, pos);
+        match result.unwrap() {
+            EventResult::EnterContainer { items, .. } => {
+                assert!(items.is_empty());
+            }
+            _ => panic!("Expected EnterContainer for empty container"),
+        }
     }
 }

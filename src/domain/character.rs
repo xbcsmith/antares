@@ -13,6 +13,7 @@
 
 use crate::domain::classes::{ClassDatabase, ClassId, SpellSchool as ClassSpellSchool};
 use crate::domain::types::{CharacterId, InnkeeperId, ItemId, MapId, RaceId, SpellId};
+use bevy::prelude::Component;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -556,7 +557,7 @@ impl Default for Condition {
 // ===== Inventory =====
 
 /// Inventory slot with item ID and charges
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InventorySlot {
     pub item_id: ItemId,
     /// Charges remaining for magical items (0 = useless)
@@ -574,14 +575,14 @@ pub struct InventorySlot {
 /// assert!(inventory.has_space());
 /// assert!(!inventory.is_full());
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Inventory {
     pub items: Vec<InventorySlot>,
 }
 
 impl Inventory {
     /// Maximum number of items in backpack
-    pub const MAX_ITEMS: usize = 6;
+    pub const MAX_ITEMS: usize = 64;
 
     /// Creates a new empty inventory
     pub fn new() -> Self {
@@ -637,7 +638,7 @@ impl Default for Inventory {
 /// let mut equipment = Equipment::new();
 /// assert_eq!(equipment.equipped_count(), 0);
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Equipment {
     pub weapon: Option<ItemId>,
     pub armor: Option<ItemId>,
@@ -678,6 +679,36 @@ impl Equipment {
         .iter()
         .filter(|slot| slot.is_some())
         .count()
+    }
+
+    /// Returns `true` if the given item is currently occupying any equipment slot.
+    ///
+    /// Checks all seven slots: weapon, armor, shield, helmet, boots, accessory1,
+    /// and accessory2. This is used by the merchant sell guard to prevent the
+    /// player from selling a cursed item that is currently equipped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::Equipment;
+    ///
+    /// let mut eq = Equipment::new();
+    /// eq.weapon = Some(42);
+    ///
+    /// assert!(eq.is_item_equipped(42));
+    /// assert!(!eq.is_item_equipped(99));
+    /// ```
+    pub fn is_item_equipped(&self, item_id: crate::domain::types::ItemId) -> bool {
+        [
+            self.weapon,
+            self.armor,
+            self.shield,
+            self.helmet,
+            self.boots,
+            self.accessory1,
+            self.accessory2,
+        ]
+        .contains(&Some(item_id))
     }
 }
 
@@ -2053,5 +2084,145 @@ mod tests {
         assert_eq!(spell_list[4].len(), 0);
         assert_eq!(spell_list[5].len(), 0);
         assert_eq!(spell_list[6].len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod ecs_tests {
+    use super::*;
+    use bevy::prelude::World;
+
+    /// Verify that `Inventory` derives `Component` and can be inserted into
+    /// a Bevy `World` and queried back.
+    ///
+    /// This test confirms that the `#[derive(Component)]` attribute on
+    /// `Inventory` is functional and that the struct remains usable as
+    /// both a domain type and an ECS component.
+    #[test]
+    fn test_inventory_component_derive() {
+        let mut world = World::new();
+        let inventory = Inventory::new();
+        let entity = world.spawn(inventory).id();
+
+        let stored = world
+            .get::<Inventory>(entity)
+            .expect("Inventory component should be present on entity");
+
+        assert!(stored.items.is_empty());
+        assert!(!stored.is_full());
+        assert!(stored.has_space());
+    }
+
+    /// Verify that `Inventory` with items can round-trip through the ECS
+    /// component system without data loss.
+    #[test]
+    fn test_inventory_component_with_items() {
+        let mut world = World::new();
+        let mut inventory = Inventory::new();
+        inventory.add_item(42, 3).expect("add_item should succeed");
+        inventory.add_item(7, 0).expect("add_item should succeed");
+
+        let entity = world.spawn(inventory).id();
+
+        let stored = world
+            .get::<Inventory>(entity)
+            .expect("Inventory component should be present");
+
+        assert_eq!(stored.items.len(), 2);
+        assert_eq!(stored.items[0].item_id, 42);
+        assert_eq!(stored.items[0].charges, 3);
+        assert_eq!(stored.items[1].item_id, 7);
+        assert_eq!(stored.items[1].charges, 0);
+    }
+
+    /// Verify that `InventorySlot` derives `Component` and can be inserted
+    /// into a Bevy `World` and queried back with matching field values.
+    ///
+    /// `InventorySlot` is `Copy`, so it can be cheaply duplicated; this test
+    /// confirms the component derive does not interfere with that.
+    #[test]
+    fn test_inventory_slot_component_derive() {
+        let mut world = World::new();
+        let slot = InventorySlot {
+            item_id: 1,
+            charges: 3,
+        };
+        let entity = world.spawn(slot).id();
+
+        let stored = world
+            .get::<InventorySlot>(entity)
+            .expect("InventorySlot component should be present on entity");
+
+        assert_eq!(stored.item_id, 1);
+        assert_eq!(stored.charges, 3);
+    }
+
+    /// Verify that `InventorySlot` with zero charges can be stored and
+    /// retrieved as an ECS component.
+    #[test]
+    fn test_inventory_slot_component_zero_charges() {
+        let mut world = World::new();
+        let slot = InventorySlot {
+            item_id: 99,
+            charges: 0,
+        };
+        let entity = world.spawn(slot).id();
+
+        let stored = world
+            .get::<InventorySlot>(entity)
+            .expect("InventorySlot component should be present");
+
+        assert_eq!(stored.item_id, 99);
+        assert_eq!(stored.charges, 0);
+    }
+
+    /// Verify that `Equipment` derives `Component` and can be inserted into
+    /// a Bevy `World` and queried back.
+    ///
+    /// This test confirms that the `#[derive(Component)]` attribute on
+    /// `Equipment` is functional and that default (empty) equipment is
+    /// preserved when stored as a component.
+    #[test]
+    fn test_equipment_component_derive() {
+        let mut world = World::new();
+        let equipment = Equipment::new();
+        let entity = world.spawn(equipment).id();
+
+        let stored = world
+            .get::<Equipment>(entity)
+            .expect("Equipment component should be present on entity");
+
+        assert_eq!(stored.equipped_count(), 0);
+        assert!(stored.weapon.is_none());
+        assert!(stored.armor.is_none());
+        assert!(stored.shield.is_none());
+        assert!(stored.helmet.is_none());
+        assert!(stored.boots.is_none());
+        assert!(stored.accessory1.is_none());
+        assert!(stored.accessory2.is_none());
+    }
+
+    /// Verify that `Equipment` with populated slots round-trips through the
+    /// ECS component system without data loss.
+    #[test]
+    fn test_equipment_component_with_slots() {
+        let mut world = World::new();
+        let mut equipment = Equipment::new();
+        equipment.weapon = Some(10);
+        equipment.armor = Some(20);
+        equipment.helmet = Some(30);
+
+        let entity = world.spawn(equipment).id();
+
+        let stored = world
+            .get::<Equipment>(entity)
+            .expect("Equipment component should be present");
+
+        assert_eq!(stored.equipped_count(), 3);
+        assert_eq!(stored.weapon, Some(10));
+        assert_eq!(stored.armor, Some(20));
+        assert_eq!(stored.helmet, Some(30));
+        assert!(stored.shield.is_none());
+        assert!(stored.boots.is_none());
     }
 }

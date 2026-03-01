@@ -13,6 +13,10 @@
         faction: Some("Village"),
         is_merchant: false,
         is_innkeeper: false,
+        is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_innkeeper_town",
@@ -26,6 +30,19 @@
         faction: Some("Innkeepers Guild"),
         is_merchant: false,
         is_innkeeper: true,
+        is_priest: false,
+        stock_template: None,
+        service_catalog: Some((
+            services: [
+                (
+                    service_id: "rest",
+                    cost: 10,
+                    gem_cost: 0,
+                    description: "Rest the party, restoring HP and SP",
+                ),
+            ],
+        )),
+        economy: None,
     ),
     (
         id: "tutorial_merchant_town",
@@ -39,6 +56,10 @@
         faction: Some("Merchants Guild"),
         is_merchant: true,
         is_innkeeper: false,
+        is_priest: false,
+        stock_template: Some("town_merchant_basic"),
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_priestess_town",
@@ -52,6 +73,37 @@
         faction: Some("Temple"),
         is_merchant: false,
         is_innkeeper: false,
+        is_priest: true,
+        stock_template: None,
+        service_catalog: Some((
+            services: [
+                (
+                    service_id: "heal_all",
+                    cost: 50,
+                    gem_cost: 0,
+                    description: "Heal all party members to full HP",
+                ),
+                (
+                    service_id: "cure_poison",
+                    cost: 25,
+                    gem_cost: 0,
+                    description: "Cure poison from one character",
+                ),
+                (
+                    service_id: "cure_disease",
+                    cost: 75,
+                    gem_cost: 0,
+                    description: "Cure disease from one character",
+                ),
+                (
+                    service_id: "resurrect",
+                    cost: 200,
+                    gem_cost: 1,
+                    description: "Resurrect a dead character",
+                ),
+            ],
+        )),
+        economy: None,
     ),
     (
         id: "tutorial_wizard_arcturus",
@@ -68,6 +120,10 @@
         faction: Some("Wizards"),
         is_merchant: false,
         is_innkeeper: false,
+        is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_wizard_arcturus_brother",
@@ -84,6 +140,10 @@
         faction: Some("Village"),
         is_merchant: false,
         is_innkeeper: false,
+        is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_ranger_lost",
@@ -99,6 +159,10 @@
         faction: Some("Rangers"),
         is_merchant: false,
         is_innkeeper: false,
+        is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_elder_village2",
@@ -114,6 +178,10 @@
         faction: Some("Village"),
         is_merchant: false,
         is_innkeeper: false,
+        is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_innkeeper_town2",
@@ -127,6 +195,19 @@
         faction: Some("Innkeepers Guild"),
         is_merchant: false,
         is_innkeeper: true,
+        is_priest: false,
+        stock_template: None,
+        service_catalog: Some((
+            services: [
+                (
+                    service_id: "rest",
+                    cost: 10,
+                    gem_cost: 0,
+                    description: "Rest the party, restoring HP and SP",
+                ),
+            ],
+        )),
+        economy: None,
     ),
     (
         id: "tutorial_merchant_town2",
@@ -140,6 +221,10 @@
         faction: Some("Merchants Guild"),
         is_merchant: true,
         is_innkeeper: false,
+        is_priest: false,
+        stock_template: Some("mountain_pass_merchant"),
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_priest_town2",
@@ -153,6 +238,37 @@
         faction: Some("Temple"),
         is_merchant: false,
         is_innkeeper: false,
+        is_priest: true,
+        stock_template: None,
+        service_catalog: Some((
+            services: [
+                (
+                    service_id: "heal_all",
+                    cost: 50,
+                    gem_cost: 0,
+                    description: "Heal all party members to full HP",
+                ),
+                (
+                    service_id: "cure_poison",
+                    cost: 25,
+                    gem_cost: 0,
+                    description: "Cure poison from one character",
+                ),
+                (
+                    service_id: "cure_disease",
+                    cost: 75,
+                    gem_cost: 0,
+                    description: "Cure disease from one character",
+                ),
+                (
+                    service_id: "resurrect",
+                    cost: 200,
+                    gem_cost: 1,
+                    description: "Resurrect a dead character",
+                ),
+            ],
+        )),
+        economy: None,
     ),
     (
         id: "tutorial_goblin_dying",
@@ -168,5 +284,9 @@
         faction: Some("Goblins"),
         is_merchant: false,
         is_innkeeper: false,
+        is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
 ]

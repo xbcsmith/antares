@@ -170,6 +170,8 @@ https://dev.to/mikeam565/rust-game-dev-log-5-improved-terrain-generation-dynamic
 
 Write a plan with a phased approach to implementing advanced procedural meshes in the game engine. THINK HARD and follow the rules in @PLAN.md
 
+✅ COMPLETED -
+
 ### Party View Point
 
 The view point of the party is not centered. When the party approaches a door the door is not centereed on the screen it is off by half. This behavior applies to all objects in the game. It makes navigation very difficult. The party view point should be centered.
@@ -347,6 +349,8 @@ Work required:
 
 This change is not backward compatible with existing RON item data that uses `tags` for helmet and boot slot routing. All affected item definitions must be migrated at the same time.
 
+✅ PLAN WRITTEN - [Armor Classification Expansion Implementation Plan](./armor_classification_expansion_implementation_plan.md)
+
 ### Equipped Weapon Damage in Combat
 
 Currently `perform_attack_action_with_rng` in `src/game/systems/combat.rs` hardcodes `Attack::physical(DiceRoll::new(1, 4, 0))` for every player attack, regardless of what the character has equipped in `equipment.weapon`. Monster attacks correctly read from their `attacks` list, but player characters always deal 1d4 physical damage. This means a Fighter wielding a longsword (1d8+2) deals the same damage as an unarmed apprentice.
@@ -372,6 +376,8 @@ Testing requirements:
 - `test_get_character_attack_returns_unarmed_fallback` — unit test: `equipment.weapon = None`, assert returned `Attack.damage == UNARMED_DAMAGE`.
 - `test_get_character_attack_invalid_item_id_falls_back_to_unarmed` — equip a non-existent item_id (not in ItemDatabase), assert fallback to `UNARMED_DAMAGE` rather than panic.
 
+✅ PLAN WRITTEN - [Equipped Weapon Damage Implementation Plan](./equipped_weapon_damage_implementation_plan.md)
+
 ### Dropped Items World Persistence
 
 When a character drops an item (via `drop_item()` in `src/domain/transactions.rs`), the item is currently removed from the character's inventory and discarded. There is no mechanism to place it in the game world at the position where it was dropped, nor to represent it as a pickable entity on the map.
@@ -396,6 +402,7 @@ Work required:
 
 This item is tracked here for future planning. It does not need to be addressed in the current inventory system implementation plan.
 
+✅ PLAN WRITTEN - [Dropped Item Persistence Implementation Plan](./dropped_item_persistence_implementation_plan.md)
 
 ## Creature Registry
 
@@ -419,7 +426,7 @@ Category Ranges
 - Variants: 3000-3999
 - Custom: 4000+
 
-We also need to refactor the creature id manager to use those ranges. We also need to refactor the creature registry. Currently the creature registry uses a really strange method of storing creatures.
+We also need to refactor the creature id manager to use those ranges.
 
 ```rust
 
@@ -437,22 +444,19 @@ We also need to refactor the creature id manager to use those ranges. We also ne
 ]
 ```
 
-The creatures registry should be able to tie the npc, character, and monster to a creature mesh which has its own ID.
-
+✅ COMPLETED -
 
 ## Combat Feedback
 
-We have missed deliverables from Phase 5 of #file:combat_system_improvement_implementation.md  The victory spash screen never goes away. It should go away when the party moves after combat.
+We have missed deliverables from Phase 5 of #file:combat_system_improvement_implementation.md The victory spash screen never goes away. It should go away when the party moves after combat.
 
 I have to double click Enter to select combat options. We should be able to select combat options with a single click of the Enter key. The first press of the Enter key should select the option and the second press should confirm the selection. There is no visual feedback that I clicked the option. We should have visual feedback that the option is selected when I click it with the Enter key.
 
-
 Mouse is not working to select combat options. We should be able to click on the combat options with the mouse to select them. In gerneal the mouse does not work in the game engine other than the Main Menu. We should have mouse support in the game engine for all UI interactions. InnKeeper Party Management is another place where mouse does not work.
-
 
 As part of phase 3 we added UI Cards for damage are only a small number in the upper left corner of the screen. They are inpossible to see and fade fast. Implement a Dialog Bubble that appears in the right top side of the screen that shows the damage dealt and received in combat. A combat log that remains visible until combat is over. The bubble should also have a typewriter effect that makes the text appear one character at a time.
 
-As part of Phase 3 we were supposed to  add in-world monster HP hover bars we have none. We should have HP bars that appear above monsters in the world that show their current HP. The HP bars should update in real time as the monster takes damage. We should be able to toggle the HP bars on and off in the game settings.
+As part of Phase 3 we were supposed to add in-world monster HP hover bars we have none. We should have HP bars that appear above monsters in the world that show their current HP. The HP bars should update in real time as the monster takes damage. We should be able to toggle the HP bars on and off in the game settings.
 
 Implement more structured logging for Combat Log.
 
@@ -465,7 +469,6 @@ Combat Log Format:
 Colors for Characters should be consistent throughout the Game. Monster colors can be random from a set of pre-defined color pallets.
 
 Combat log should have a scroll bar when it gets long enough.
-
 
 ✅ COMPLETED -
 
@@ -489,43 +492,116 @@ wide mouse input pass, not one-off fixes per screen.
 Work required:
 
 - Audit every gameplay mode and UI surface for mouse interaction support:
-    `Exploration`, `Combat`, `Menu`, `Dialogue`, `InnManagement`, and editor-like
-    in-game panels.
+  `Exploration`, `Combat`, `Menu`, `Dialogue`, `InnManagement`, and editor-like
+  in-game panels.
 - Define a unified click/hover/press interaction model so mouse behavior is
-    consistent across all systems.
+  consistent across all systems.
 - Ensure Bevy `Interaction` handling (`Pressed`, `Hovered`, `None`) is wired
-    consistently and does not depend on keyboard-first assumptions.
+  consistently and does not depend on keyboard-first assumptions.
 - Add a shared input utility layer for mouse activation detection to avoid
-    duplicated ad-hoc patterns across systems.
+  duplicated ad-hoc patterns across systems.
 - Validate mouse support for all combat actions and target selection paths.
 - Validate mouse support for game menu navigation, save/load dialogs, and
-    settings controls.
+  settings controls.
 - Validate mouse support for innkeeper party management and recruitment-related
-    UI flows.
+  UI flows.
 - Add regression tests for mouse input in each major mode to prevent future
-    breakage.
+  breakage.
+
+Write a plan with a phased approach to implementing game-wide mouse input support in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Game Wide Mouse Input Support](./game_wide_mouse_input_support_plan.md)
 
 ## Future Features
 
+### Time System
+
+We need a time system in the game engine. The time system should keep track of the current time in the game world and allow for time to pass when the player takes certain actions. For example, when the player rests, time should pass and the party should heal. When the player travels to a new map, time should pass. When the player engages in combat, time should pass. The time system should also allow for events to be triggered at certain times. For example, an event that triggers at night or an event that triggers after a certain amount of time has passed. There should be a clock in the UI under the compass that shows the current time in the game world.
+
+Write a plan with a phased approach to implementing a time system in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Time System Implementation Plan](./time_system_implementation_plan.md)
+
 ### Rest System
 
-We need a party rest system to heal characters.
+We need a party rest system to heal characters. Bind rest to the R key and make it configurable in the game config. When the player presses the rest key, the party should rest and heal a certain amount of HP. The amount of HP healed should be based on the amount of time rested. Resting for 12 hours fully heals a party. The rest system should also have a chance to trigger random encounters while resting.
+
+Write a plan with a phased approach to implementing a rest system in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Rest System Implementation Plan](./rest_system_implementation_plan.md)
 
 ### Game Log
 
 We need a Game Log. It should be a log that shows all the important events that happen in the game. It should show things like when the player picks up an item, when they talk to an NPC, when they enter a new area, when they take damage, etc. The game log should be visible in the UI and should have a scroll bar so that the player can see past events. The game log should also have a filter so that the player can filter the log by event type (e.g. combat events, dialogue events, item events, etc).
 
+Write a plan with a phased approach to implementing a game log in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Game Log Implementation Plan](./game_log_implementation_plan.md)
+
 ### Procedural Meshes Direction Control
 
 There is no way to control what direction a creature procedural mesh is facing. We should be able to control the direction a creature is facing in the map.ron files. We should expand the event system to allow for signs and creatures (NPC, Recruitable CHracters, Monsters) to have a facing direction that can be set in the map.ron file and changed by events in the game. This would allow for things like a sign that changes the direction of an NPC when interacted with or a monster that turns to face the player when they get close.
 
+Write a plan with a phased approach to implementing directional control for procedural meshes in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Procedural Meshes Direction Control Implementation Plan](./procedural_meshes_direction_control_implementation_plan.md)
 
 ### Combat
 
-We need types of combat events. The party should not always be able to see the monster. We should have different types of combat events. For example, an ambush event where the monster is hidden and the party does not know it is there until it attacks. We should have different types of combat events that can be triggered by different conditions. For example, an ambush event that is triggered when the party enters a certain tile or a certain monster is nearby. The ambush event would cause the monster to attack the party without being visible on the map until it attacks.
+We need types of combat events. The party should not always be able to see the monster. We should have different types of combat events. For example, an ambush event where the monster is hidden and the party does not know it is there until it attacks. We should have different types of combat events that can be triggered by different conditions. For example, an ambush event that is triggered when the party enters a certain tile or a certain monster is nearby. The ambush event would cause the monster to attack the party without being visible on the map until it attacks. Another example are ambushes where the party is resting and the monster attacks them while they are resting (occurance should be configurable at the map level). The Capmaign Builder needs to support settign adn editing the combat event type for each encounter in the map.ron file.
 
 Normal Combat - Party sees the monster and can choose to attack or flee. Combat proceeds as normal.
 Ambush Combat - Party does not see the monster until it attacks. Party misses the first round because they do not see the monster. After the first round the monster becomes visible and combat proceeds as normal.
 Ranged Combat - Party sees the monster and can choose to attack or flee. The monster can attack from a distance and the party can choose to attack from a distance if they have a ranged weapon. Combat proceeds as normal but with the option for ranged attacks.
 Magic Combat - Party sees the monster and can choose to attack or flee. The monster can attack with magic and the party can choose to attack with magic if they have a spell equipped. Combat proceeds as normal but with the option for magic attacks.
 Boss Combat - Party sees the monster and can choose to attack or flee. The monster is a boss and has special abilities and mechanics. Combat proceeds as normal but with the added complexity of the boss mechanics.
+
+Write a plan with a phased approach to implementing different types of combat events in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Combat Events Implementation Plan](./combat_events_implementation_plan.md)
+
+### Items Procedural Meshes
+
+We need to implement procedural meshes for items in the game. Currently there are no procedural meshes for items. We should have procedural meshes for weapons, armor, and other equippable items. We should also have procedural meshes for consumable items like potions and scrolls. The procedural meshes should be based on the item data in the item RON files. For example, a sword with a long blade should have a different mesh than a dagger with a short blade. A potion with a red liquid should have a different mesh than a potion with a blue liquid. The items procedural mesh should lay on the ground. When we drop an item from inventory the procedural mesh should appear on that tile. When we pickup an item the procedural mesh should be removed from the tile. We should use the same procedural mesh system that we use for creatures and furniture to generate the item meshes based on their data.
+
+Write a plan with a phased approach to implementing procedural meshes for items in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Items Procedural Meshes Implementation Plan](./items_procedural_meshes_implementation_plan.md)
+
+### Locked Objects and Keys
+
+We need to implement locked objects and keys in the game engine. Currently there are no locked objects or keys in the game. We should have locked doors, chests, and other containers that require a key to open. The keys should be items that can be found in the world or given as quest rewards. The locked objects should have a locked and unlocked state. When the player interacts with a locked object without the key, they should get a message saying it is locked. When they interact with it with the key, it should unlock and allow them to access whatever is behind it (e.g. a new area, loot, etc). We also need a lockpick skill and lockpicking mechanic that allows the player to attempt to pick the lock on a locked object if they do not have the key. The success of the lockpicking attempt should be based on the player's lockpicking skill and a random chance.
+
+Write a plan with a phased approach to implementing locked objects and keys in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Locked Objects and Keys Implementation Plan](./locked_objects_and_keys_implementation_plan.md)
+
+### Inventory Navigation
+
+We need to fix Inventory Navigation for Characters, Merchants (NPCs with Buy/Sell inventory), and Items (Chests, Containers, Wholes in the Wall, etc...).
+
+This is how it should work:
+
+TAB - Cycles through Character Inventory Focus Highlighting Inventory with Yellow Box
+Up Down Side Arrows - Navigate the grid inside the inventory (does not affect character focus) Highlights Items Yellow
+Enter - Selects Item and Highlights the Options to Drop or Send Item to Another Character or Merchant
+Action Buttons - Once highlighted by selecting an item can be navigated with the Side Arrows. Enter executed the action and returns focus to the first item in the inventory. ESC returns focus to the selected item where user can navigate the Inventory or Change Character Focus.
+
+✅ COMPLETED -
+
+### Buy and Selling
+
+How we handle Merchants (NPCs with Buy/Sell inventory), and Container Items (Chests, Containers, Wholes in the Wall, etc...) Inventory with the Characters. While in a Dialogue with an NPC press "I" while interacting with the NPC and have a split Window with the Lead Characters (only one character inventory) inventory on the Left and the NPC on the right. TAB would toggle focus between the Lead Character inventory and the NPC Inventory. The Action Buttons for the NPC would be Buy and the action button for the Character would be Sell. To change the characters inventory to another character the user would use hte number keys. numbers 1 == Character 1, number 2 == Character 2. Container Items would use the same format. The change would be "E" opens the split inventory window and the Action buttons for Items being "Take" and "Take All" where "Take" is only the selected item and "Take All" is the contents of the container. The Character action button would be "Stash" which would move the highlighted item from Character inventory to the Container Inventory. Navigation inside the inventory remains the same.
+
+Write a plan with a phased approach to implementing buying and selling in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ COMPLETED - [Buy and Sell Plan](./buy_and_sell_plan.md)
+
+
+### Automap and mini map
+
+We need to implement an automap and mini map in the game engine. The automap should be a full map of the current level that is revealed as the player explores. The mini map should be a smaller version of the automap that is always visible in the corner of the screen. The mini map should show the player's current position and the surrounding area. The automap should be accessible from the game menu and should allow the player to see the entire level and their current position on it. The automap should be mapped to the M key and configurable through the game config. We will combine the mini map, compas, and clock into a single UI element in the top right corner of the screen. The mini map should also show important locations like quest objectives, merchants, and points of interest. The automap should have a fog of war effect that hides unexplored areas of the map. The automap should also have a legend that shows what different symbols on the map mean (e.g. red dot for monsters, green dot for merchants, etc).
+
+Write a plan with a phased approach to implementing an automap and mini map in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Automap and Mini Map Implementation Plan](./automap_and_mini_map_implementation_plan.md)

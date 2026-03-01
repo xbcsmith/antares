@@ -1,0 +1,68 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+//
+// npc_stock_templates.ron - Merchant stock template definitions
+//
+// This file defines reusable stock templates for merchant NPCs.
+// Each template specifies an initial inventory that is copied into
+// the NPC's mutable runtime stock when a new game session begins.
+//
+// Template IDs must be unique across all loaded template files.
+// Campaign-specific templates in campaigns/<name>/data/npc_stock_templates.ron
+// may override or supplement these core templates.
+//
+// Field reference:
+//   id            - Unique string identifier (referenced by NpcDefinition::stock_template)
+//   entries       - List of stock entries
+//     item_id       - References a valid item ID in items.ron
+//     quantity      - Initial available quantity (0 = sold out)
+//     override_price - Optional gold price override; None uses item base_cost * sell_rate
+
+[
+    // ===== Blacksmith Basic =====
+    // Common weapons and armor suitable for early-game adventurers.
+    // Quantities are moderate to encourage return visits.
+    (
+        id: "blacksmith_basic",
+        entries: [
+            // Weapons
+            (item_id: 1, quantity: 5, override_price: None),    // Club
+            (item_id: 2, quantity: 5, override_price: None),    // Dagger
+            (item_id: 3, quantity: 3, override_price: None),    // Short Sword
+            (item_id: 5, quantity: 3, override_price: None),    // Mace
+            // Armor
+            (item_id: 20, quantity: 4, override_price: None),   // Leather Armor
+            (item_id: 21, quantity: 2, override_price: None),   // Chain Mail
+            // Shields
+            (item_id: 23, quantity: 3, override_price: None),   // Wooden Shield
+        ],
+    ),
+
+    // ===== General Store Basic =====
+    // Everyday consumables and supplies for traveling adventurers.
+    // Higher quantities reflect common demand.
+    (
+        id: "general_store_basic",
+        entries: [
+            // Consumables
+            (item_id: 50, quantity: 8, override_price: None),   // Healing Potion
+            (item_id: 51, quantity: 6, override_price: None),   // Magic Potion
+            (item_id: 52, quantity: 5, override_price: None),   // Cure Poison Potion
+            // Ammunition
+            (item_id: 60, quantity: 10, override_price: None),  // Arrows
+            (item_id: 61, quantity: 10, override_price: None),  // Crossbow Bolts
+        ],
+    ),
+
+    // ===== Alchemist Basic =====
+    // Specialty potions and alchemical goods.
+    // Smaller quantities reflect the rarity and expertise required.
+    (
+        id: "alchemist_basic",
+        entries: [
+            (item_id: 50, quantity: 5, override_price: Some(60)),  // Healing Potion (premium price)
+            (item_id: 51, quantity: 4, override_price: Some(120)), // Magic Potion (premium price)
+            (item_id: 52, quantity: 3, override_price: Some(90)),  // Cure Poison Potion (premium price)
+        ],
+    ),
+]

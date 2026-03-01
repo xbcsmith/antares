@@ -8008,20 +8008,6 @@
     ],
     events: {
         (
-            x: 13,
-            y: 17,
-        ): Encounter(
-            name: "Dragon\'s Lair",
-            description: "The lair of the undead dragon. It guards a hoard of treasure.",
-            monster_group: [
-                30,
-                11,
-                11,
-                11,
-                11,
-            ],
-        ),
-        (
             x: 12,
             y: 10,
         ): Encounter(
@@ -8037,20 +8023,6 @@
                 1,
                 1,
                 1,
-            ],
-        ),
-        (
-            x: 1,
-            y: 3,
-        ): Encounter(
-            name: "The Undead King",
-            description: "The Lich was once a powerful Wizard King who ruled these lands.",
-            monster_group: [
-                31,
-                11,
-                11,
-                11,
-                11,
             ],
         ),
         (
@@ -8081,6 +8053,34 @@
                 y: 11,
             ),
             map_id: 5,
+        ),
+        (
+            x: 13,
+            y: 17,
+        ): Encounter(
+            name: "Dragon\'s Lair",
+            description: "The lair of the undead dragon. It guards a hoard of treasure.",
+            monster_group: [
+                30,
+                11,
+                11,
+                11,
+                11,
+            ],
+        ),
+        (
+            x: 1,
+            y: 3,
+        ): Encounter(
+            name: "The Undead King",
+            description: "The Lich was once a powerful Wizard King who ruled these lands.",
+            monster_group: [
+                31,
+                11,
+                11,
+                11,
+                11,
+            ],
         ),
     },
     allow_random_encounters: true,
