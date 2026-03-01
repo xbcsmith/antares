@@ -265,6 +265,9 @@ impl Plugin for AntaresPlugin {
 
         // Core combat plugin (Phase 1: Core Combat Infrastructure)
         app.add_plugins(antares::game::systems::combat::CombatPlugin);
+
+        // Phase 2: Time-of-Day ambient lighting
+        app.add_plugins(antares::game::systems::time::TimeOfDayPlugin);
     }
 }
 
