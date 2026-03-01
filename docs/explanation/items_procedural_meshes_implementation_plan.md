@@ -17,18 +17,18 @@ visual variation within each category.
 
 ### Existing Infrastructure
 
-| Subsystem | Location | Status |
-|---|---|---|
-| `MeshDefinition` / `CreatureDefinition` domain types | `src/domain/visual/mod.rs` | ✅ Complete |
-| `CreatureDatabase` | `src/domain/visual/creature_database.rs` | ✅ Complete |
-| `mesh_definition_to_bevy` conversion | `src/game/systems/creature_meshes.rs` | ✅ Complete |
-| `spawn_creature` hierarchical entity spawner | `src/game/systems/creature_spawning.rs` | ✅ Complete |
-| `ProceduralMeshCache` | `src/game/systems/procedural_meshes.rs` | ✅ Complete |
-| Furniture spawn pipeline (config structs + spawn fns) | `src/game/systems/procedural_meshes.rs` | ✅ Complete |
+| Subsystem                                                | Location                                  | Status      |
+| -------------------------------------------------------- | ----------------------------------------- | ----------- |
+| `MeshDefinition` / `CreatureDefinition` domain types     | `src/domain/visual/mod.rs`                | ✅ Complete |
+| `CreatureDatabase`                                       | `src/domain/visual/creature_database.rs`  | ✅ Complete |
+| `mesh_definition_to_bevy` conversion                     | `src/game/systems/creature_meshes.rs`     | ✅ Complete |
+| `spawn_creature` hierarchical entity spawner             | `src/game/systems/creature_spawning.rs`   | ✅ Complete |
+| `ProceduralMeshCache`                                    | `src/game/systems/procedural_meshes.rs`   | ✅ Complete |
+| Furniture spawn pipeline (config structs + spawn fns)    | `src/game/systems/procedural_meshes.rs`   | ✅ Complete |
 | `MapEvent::Furniture` → `spawn_furniture_with_rendering` | `src/game/systems/furniture_rendering.rs` | ✅ Complete |
-| `ItemDatabase` with full `Item` / `ItemType` definitions | `src/domain/items/database.rs` | ✅ Complete |
-| `MapEvent` enum | `src/domain/world/types.rs` | ✅ Complete |
-| `GameContent` resource with loaded databases | `src/application/resources.rs` | ✅ Complete |
+| `ItemDatabase` with full `Item` / `ItemType` definitions | `src/domain/items/database.rs`            | ✅ Complete |
+| `MapEvent` enum                                          | `src/domain/world/types.rs`               | ✅ Complete |
+| `GameContent` resource with loaded databases             | `src/application/resources.rs`            | ✅ Complete |
 
 ### Identified Issues
 
@@ -59,6 +59,7 @@ visual variation within each category.
 Create `src/domain/visual/item_mesh.rs`.
 
 Responsibilities:
+
 - Define `ItemMeshDescriptor` — the data that drives procedural generation for
   a single item category. Fields cover shape parameters, primary color, accent
   color, emissive flag, and scale.
@@ -75,6 +76,7 @@ Responsibilities:
   `pub mod item_mesh;` and re-export the two public types.
 
 Key decisions:
+
 - Reuse `CreatureDefinition` as the output type — no new rendering path is
   needed; the item sits on the ground as a flat-rotated creature.
 - Weapon length is derived from `WeaponData::damage.sides` (more sides → longer
@@ -163,21 +165,22 @@ File: `src/domain/items/database.rs` (extend existing `mod tests`)
 Extend `src/game/systems/procedural_meshes.rs` with item shape generator
 functions following the same pattern as `spawn_bench`, `spawn_chest`, etc.:
 
-| Generator | Config struct | Produced shape |
-|---|---|---|
-| `spawn_sword_mesh` | `SwordConfig { blade_length, blade_width, has_crossguard, color }` | Elongated box blade + crossguard quad + handle box |
-| `spawn_dagger_mesh` | `DaggerConfig { blade_length, color }` | Short blade + small handle |
-| `spawn_blunt_mesh` | `BluntConfig { head_radius, handle_length, color }` | Cylindrical head + handle |
-| `spawn_staff_mesh` | `StaffConfig { length, orb_radius, color }` | Long thin cylinder + sphere tip |
-| `spawn_bow_mesh` | `BowConfig { arc_height, color }` | Curved arc of quads + string line |
-| `spawn_armor_mesh` | `ArmorMeshConfig { width, height, color, is_helmet }` | Layered box chest piece or dome |
-| `spawn_shield_mesh` | `ShieldConfig { radius, color }` | Hexagonal polygon disc |
-| `spawn_potion_mesh` | `PotionConfig { liquid_color, bottle_color }` | Tapered cylinder body + sphere stopper; liquid interior uses `AlphaMode::Blend` |
-| `spawn_scroll_mesh` | `ScrollConfig { color }` | Rolled cylinder pair |
-| `spawn_ring_mesh` | `RingMeshConfig { color }` | Torus approximated with arc of thin quads |
-| `spawn_ammo_mesh` | `AmmoConfig { ammo_type, color }` | Arrow shaft + fletching; bolt variant; stone sphere |
+| Generator           | Config struct                                                      | Produced shape                                                                  |
+| ------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `spawn_sword_mesh`  | `SwordConfig { blade_length, blade_width, has_crossguard, color }` | Elongated box blade + crossguard quad + handle box                              |
+| `spawn_dagger_mesh` | `DaggerConfig { blade_length, color }`                             | Short blade + small handle                                                      |
+| `spawn_blunt_mesh`  | `BluntConfig { head_radius, handle_length, color }`                | Cylindrical head + handle                                                       |
+| `spawn_staff_mesh`  | `StaffConfig { length, orb_radius, color }`                        | Long thin cylinder + sphere tip                                                 |
+| `spawn_bow_mesh`    | `BowConfig { arc_height, color }`                                  | Curved arc of quads + string line                                               |
+| `spawn_armor_mesh`  | `ArmorMeshConfig { width, height, color, is_helmet }`              | Layered box chest piece or dome                                                 |
+| `spawn_shield_mesh` | `ShieldConfig { radius, color }`                                   | Hexagonal polygon disc                                                          |
+| `spawn_potion_mesh` | `PotionConfig { liquid_color, bottle_color }`                      | Tapered cylinder body + sphere stopper; liquid interior uses `AlphaMode::Blend` |
+| `spawn_scroll_mesh` | `ScrollConfig { color }`                                           | Rolled cylinder pair                                                            |
+| `spawn_ring_mesh`   | `RingMeshConfig { color }`                                         | Torus approximated with arc of thin quads                                       |
+| `spawn_ammo_mesh`   | `AmmoConfig { ammo_type, color }`                                  | Arrow shaft + fletching; bolt variant; stone sphere                             |
 
 All generators:
+
 - Accept `commands`, `materials`, `meshes`, `position: types::Position`,
   `map_id: types::MapId`, the typed config, and `cache: &mut ProceduralMeshCache`.
 - Spawn a parent entity with child mesh part entities, exactly as `spawn_creature`
@@ -272,6 +275,7 @@ plugin with `app.add_event::<ItemDroppedEvent>().add_event::<ItemPickedUpEvent>(
 Still in `src/game/systems/item_world_events.rs`, implement:
 
 **`spawn_dropped_item_system`**
+
 - Reads `EventReader<ItemDroppedEvent>`.
 - Looks up `Item` from `GameContent`.
 - Calls `ItemMeshDescriptor::from_item`, then
@@ -282,12 +286,14 @@ Still in `src/game/systems/item_world_events.rs`, implement:
 - Stores the entity in a new `DroppedItemRegistry` resource (see §2.6).
 
 **`despawn_picked_up_item_system`**
+
 - Reads `EventReader<ItemPickedUpEvent>`.
 - Looks up the entity in `DroppedItemRegistry` by `(map_id, tile_x, tile_y, item_id)`.
 - Calls `commands.entity(entity).despawn_recursive()`.
 - Removes entry from `DroppedItemRegistry`.
 
 **`load_map_dropped_items_system`**
+
 - Runs on map load (after `spawn_map_system`).
 - Iterates `MapEvent::DroppedItem` events on the current map.
 - Fires `ItemDroppedEvent` for each, so static map-authored dropped items get
@@ -498,16 +504,16 @@ File: `src/sdk/campaign_loader.rs` (extend existing integration tests)
 Extend `ItemMeshDescriptor::from_item` to derive accent colors from bonus
 attributes:
 
-| `BonusAttribute` | Accent color |
-|---|---|
-| `ResistFire` | Orange / amber |
-| `ResistCold` | Icy blue |
-| `ResistElectricity` | Yellow |
-| `ResistPoison` | Acid green |
-| `ResistMagic` | Purple |
-| `Might` | Warm red |
-| `AC` / `HP` | Teal |
-| `SP` / `Intellect` | Deep blue |
+| `BonusAttribute`    | Accent color   |
+| ------------------- | -------------- |
+| `ResistFire`        | Orange / amber |
+| `ResistCold`        | Icy blue       |
+| `ResistElectricity` | Yellow         |
+| `ResistPoison`      | Acid green     |
+| `ResistMagic`       | Purple         |
+| `Might`             | Warm red       |
+| `AC` / `HP`         | Teal           |
+| `SP` / `Intellect`  | Deep blue      |
 
 Metallic quality (from `is_magical`) sets `MaterialDefinition::metallic > 0.5`
 and `roughness < 0.3` for a shiny appearance. Non-magical items use
@@ -585,70 +591,463 @@ File: `src/domain/visual/item_mesh.rs` (extend `mod tests`)
 
 ### Phase 5: Campaign Builder SDK Integration
 
-#### 5.1 Item Mesh Preview in Item Editor
+Brings the Item Mesh workflow in the Campaign Builder to parity with the
+Creature Builder (`creatures_editor.rs`). The Creature Builder is the
+reference implementation; every major capability it provides must be matched
+for items.
 
-In `sdk/campaign_builder/` (egui-based), extend the existing item editor tab
-to add a "3D Ground Preview" section. The preview uses the same embedded Bevy
-renderer approach already established for creature preview. It:
+**Creature Builder capabilities to replicate:**
 
-- Creates an `ItemMeshDescriptor` from the currently edited `Item` on each
-  change.
-- Calls `to_creature_definition()` and feeds it to the in-editor preview
-  renderer.
-- Shows a "Regenerate Preview" button.
-- Shows the `ItemMeshCategory` label so authors know which shape archetype was
-  selected.
+| Creature Builder feature                                | Item Mesh Builder equivalent                                      |
+| ------------------------------------------------------- | ----------------------------------------------------------------- |
+| Registry list mode with search, filter, sort            | Item Mesh Registry list with search and `ItemMeshCategory` filter |
+| Two-column `TwoColumnLayout` list + detail              | Same layout in item mesh registry                                 |
+| Edit mode: mesh list panel + properties panel + preview | Edit mode: mesh override panel + properties + preview             |
+| Live embedded preview renderer (`PreviewRenderer`)      | Live preview via `ItemMeshDescriptor::to_creature_definition()`   |
+| Undo / redo stack (`CreatureUndoRedo`)                  | Undo / redo for override edits                                    |
+| Save-As dialog (writes new `.ron` to `assets/items/`)   | Save-As dialog for item mesh RON files                            |
+| Register existing asset dialog                          | Register existing item mesh RON dialog                            |
+| Validation panel with errors / warnings / info          | Validation panel for mesh descriptors                             |
+| Workflow state machine (`CreaturesWorkflow`)            | Workflow state machine for item mesh editor                       |
+| Keyboard shortcuts (`ShortcutManager`)                  | Same keyboard shortcuts                                           |
+| Context menu (`ContextMenuManager`)                     | Context menu on registry rows                                     |
+| Primitive replacement dialog                            | Not applicable (item meshes are fully procedural)                 |
+| `mode_indicator()` / `breadcrumb_string()` for toolbar  | Same helpers                                                      |
+| `has_unsaved_changes()`, `can_undo()`, `can_redo()`     | Same helpers                                                      |
 
-Follow the egui ID audit rules from `sdk/AGENTS.md`: every loop must use
-`push_id`, every `ScrollArea` has `id_salt`, every `ComboBox` uses
-`from_id_salt`.
+---
 
-#### 5.2 Item Mesh Override Editor
+#### 5.1 New State Struct: `ItemMeshEditorState`
 
-Add an expandable "Mesh Overrides" section to the item editor UI:
+Add `sdk/campaign_builder/src/item_mesh_editor.rs` (new file). Do **not**
+extend `ItemsEditorState` — keep item mesh editing as a separate tab to match
+the separation between the Items tab and the Creatures tab.
 
-- Toggle enabling `mesh_descriptor_override`.
-- Color pickers for `primary_color` and `accent_color` (RGBA).
-- Slider for `scale` (0.25–4.0).
-- Checkbox for `emissive`.
-- "Reset to defaults" button that sets `mesh_descriptor_override: None`.
+```rust
+pub struct ItemMeshEditorState {
+    pub mode: ItemMeshEditorMode,
+    pub search_query: String,
+    pub category_filter: Option<ItemMeshCategory>,
+    pub registry_sort_by: ItemMeshRegistrySortBy,
+    pub selected_entry: Option<usize>,
 
-All state mutations call `request_repaint()`.
+    // Edit mode state
+    pub edit_buffer: Option<ItemMeshDescriptor>,
+    pub override_enabled: bool,
+    pub preview_dirty: bool,
+    pub preview_error: Option<String>,
 
-#### 5.3 Item Mesh Registry Editor
+    // Undo / redo
+    pub undo_redo: ItemMeshUndoRedo,
 
-Add an "Item Meshes" editor tab to the campaign builder, listing registered
-item mesh RON files from `item_mesh_registry.ron`. Functionality:
+    // Save-As dialog
+    pub show_save_as_dialog: bool,
+    pub save_as_path_buffer: String,
 
-- View list of registered item mesh entries.
-- Add / remove entries.
-- Open the underlying RON file in the system editor.
-- Validate all registered meshes (calls `ItemMeshDatabase::validate`).
+    // Register-asset dialog
+    pub show_register_asset_dialog: bool,
+    pub register_asset_path_buffer: String,
+    pub register_asset_error: Option<String>,
+    pub available_item_assets: Vec<String>,
+    pub last_campaign_dir: Option<PathBuf>,
 
-#### 5.4 Testing Requirements
+    // Validation
+    pub show_validation_panel: bool,
+    pub validation_errors: Vec<String>,
+    pub validation_warnings: Vec<String>,
 
-Follow SDK testing rules from `sdk/AGENTS.md`.
+    // Registry delete confirmation
+    pub registry_delete_confirm_pending: bool,
 
-- `test_item_mesh_preview_panel_no_crash` — constructing the preview panel with
-  a default `Item` does not panic.
-- `test_item_mesh_override_toggle` — enabling override in UI populates the
-  override struct; disabling clears it.
-- `test_item_mesh_registry_editor_loads` — registry editor renders without
-  panic when given an empty registry.
+    // Import / export
+    pub show_import_dialog: bool,
+    pub import_export_buffer: String,
 
-#### 5.5 Deliverables
+    // Preview renderer (same `PreviewRenderer` type used by creatures_editor)
+    preview_renderer: Option<PreviewRenderer>,
 
-- [ ] 3-D Ground Preview panel in item editor
-- [ ] Mesh Override editor section in item editor
-- [ ] Item Mesh Registry editor tab
-- [ ] SDK tests passing
+    // Workflow
+    pub workflow: ItemMeshWorkflow,
 
-#### 5.6 Success Criteria
+    // Shortcuts and context menu
+    pub shortcut_manager: ShortcutManager,
+    pub context_menu_manager: ContextMenuManager,
+}
+```
 
-- Campaign authors can see a live preview of the item's ground mesh.
-- Override color changes reflect immediately in the preview.
-- `cargo clippy --all-targets --all-features -- -D warnings` passes with zero
-  warnings for all SDK code.
+`ItemMeshEditorMode`:
+
+```rust
+pub enum ItemMeshEditorMode {
+    Registry,  // list of all registered item mesh RON files
+    Edit,      // editing a single ItemMeshDescriptor
+}
+```
+
+`ItemMeshRegistrySortBy`:
+
+```rust
+pub enum ItemMeshRegistrySortBy {
+    Id,
+    Name,
+    Category,
+}
+```
+
+Follow all `sdk/AGENTS.md` egui ID rules: every loop uses `push_id`, every
+`ScrollArea` has `id_salt`, every `ComboBox` uses `from_id_salt`.
+
+---
+
+#### 5.2 Undo / Redo for Item Mesh Edits
+
+Add `sdk/campaign_builder/src/item_mesh_undo_redo.rs` (new file), modelled
+directly on `creature_undo_redo.rs`.
+
+```rust
+pub struct ItemMeshUndoRedo {
+    undo_stack: Vec<ItemMeshEditAction>,
+    redo_stack: Vec<ItemMeshEditAction>,
+}
+
+pub enum ItemMeshEditAction {
+    SetPrimaryColor { old: [f32; 4], new: [f32; 4] },
+    SetAccentColor  { old: [f32; 4], new: [f32; 4] },
+    SetScale        { old: f32,      new: f32        },
+    SetEmissive     { old: bool,     new: bool       },
+    SetOverrideEnabled { old: bool,  new: bool       },
+    ReplaceDescriptor { old: ItemMeshDescriptor, new: ItemMeshDescriptor },
+}
+```
+
+Implement `push`, `undo`, `redo`, `can_undo`, `can_redo`, and `clear`.
+
+---
+
+#### 5.3 Workflow State Machine
+
+Add `sdk/campaign_builder/src/item_mesh_workflow.rs` (new file), modelled on
+`creatures_workflow.rs`. The workflow tracks:
+
+- `RegistryMode` — browsing the list of registered item mesh assets.
+- `EditMode { file_name: String }` — editing a specific asset file.
+
+Expose `mode_indicator() -> String`, `breadcrumb_string() -> String`,
+`enter_edit(file_name)`, and `return_to_registry()`.
+
+---
+
+#### 5.4 Registry Mode UI
+
+In `ItemMeshEditorState::show_registry_mode()`, implement a two-column layout
+(`TwoColumnLayout::new("item_mesh_registry")`) with:
+
+**Left column — registry list:**
+
+- Search box (`search_query`).
+- Category filter `ComboBox::from_id_salt("item_mesh_category_filter")` with
+  `None` ("All Categories") plus each `ItemMeshCategory` variant.
+- Sort selector `ComboBox::from_id_salt("item_mesh_sort_by")`.
+- Scrollable list of registered entries; each row uses `ui.push_id(idx, …)`.
+  Selected row highlighted. Double-click opens Edit mode.
+- Category counts badge (mirrors `count_by_category` in creatures editor).
+- Toolbar row: **➕ New**, **📁 Register Asset**, **🔄 Reload**.
+
+**Right column — registry preview panel:**
+
+- Shows selected entry name, category, and file path.
+- Small read-only live preview (calls `sync_preview_renderer_from_descriptor`).
+- **✏️ Edit**, **📋 Duplicate**, **🗑 Delete** (with confirm flag matching
+  `registry_delete_confirm_pending` pattern), **📤 Export RON** buttons.
+- Context menu on each row with the same four actions.
+
+---
+
+#### 5.5 Edit Mode UI
+
+In `ItemMeshEditorState::show_edit_mode()`, implement a three-panel layout:
+
+**Top bar:**
+
+- Breadcrumb label from `breadcrumb_string()`.
+- Mode indicator from `mode_indicator()`.
+- Toolbar: **💾 Save**, **💾 Save As**, **↩ Revert**, **✅ Validate**,
+  **⬅ Back to Registry**.
+- Undo (`Ctrl+Z`) and Redo (`Ctrl+Shift+Z`) buttons, enabled by `can_undo()`
+  / `can_redo()`.
+
+**Left panel — mesh override properties:**
+
+- Toggle `override_enabled` checkbox. When disabled, all controls below are
+  greyed out (shown but `ui.add_enabled(false, …)`).
+- `ItemMeshCategory` display (read-only; derived from the item type).
+- Primary color RGBA picker (label + four `Slider` widgets, or `egui::color_picker`).
+- Accent color RGBA picker.
+- Scale `Slider` (range 0.25–4.0, step 0.05).
+- Emissive checkbox.
+- **↺ Reset to Defaults** button — sets `override_enabled = false` and
+  replaces descriptor with `ItemMeshDescriptor::from_item(&current_item)`.
+
+Every state mutation must:
+
+1. Push an `ItemMeshEditAction` onto the undo stack.
+2. Set `preview_dirty = true`.
+3. Call `ui.ctx().request_repaint()`.
+
+**Centre panel — live preview:**
+
+- Same `PreviewRenderer` widget used by the creature editor, fed via
+  `ItemMeshDescriptor::to_creature_definition()`.
+- "Regenerate Preview" button (clears `preview_dirty`, calls
+  `sync_preview_renderer_from_descriptor`).
+- Shows `ItemMeshCategory` label and triangle-count statistic.
+- Shows `preview_error` as a red label if set.
+- Camera distance slider (`camera_distance`, range 1.0–20.0).
+
+---
+
+#### 5.6 Inline Validation Panel
+
+In `show_edit_mode()`, below the properties panel, add a collapsible
+**✅ Validation** section that shows `validation_errors` (red) and
+`validation_warnings` (yellow) populated by calling
+`ItemMeshDatabase::validate_descriptor(&descriptor)` whenever **Validate** is
+clicked or the descriptor changes (throttled — not every frame).
+
+Mirrors `refresh_validation_state` / `validate_selected_mesh` in
+`creatures_editor.rs`.
+
+---
+
+#### 5.7 Save-As Dialog
+
+Add `show_save_as_dialog_window()` modelled on the creature editor's version:
+
+- `egui::Window::new("Save Item Mesh As")` with unique title (Rule 8).
+- Path text field pre-populated by `default_save_as_path()` which returns
+  `assets/items/<slugified_name>.ron`.
+- Validates that the path is under `assets/items/`.
+- On confirm: serialises the `ItemMeshDescriptor` to RON, writes the file,
+  appends a new entry to `item_mesh_registry.ron`, registers the entry in the
+  in-memory registry list, clears `has_unsaved_changes`.
+
+---
+
+#### 5.8 Register Existing Asset Dialog
+
+Add `show_register_asset_dialog_window()` modelled on the creature editor's:
+
+- Lists `.ron` files found in `<campaign_dir>/assets/items/` (refreshed when
+  `last_campaign_dir` changes, cached in `available_item_assets`).
+- Path autocomplete from the cached list.
+- **Validate** button: deserialises the RON, checks for duplicate IDs, sets
+  `register_asset_error` on failure.
+- **Register** button (enabled only after successful validation): appends the
+  entry to the in-memory registry and writes `item_mesh_registry.ron`.
+- **Cancel** — closes dialog without modifying registry.
+
+---
+
+#### 5.9 Extend `ItemsEditorState` with Mesh Preview Pane
+
+The existing `items_editor.rs` `show_form()` gets a new **"Ground Mesh
+Preview"** collapsible group at the bottom of the edit form, below the Tags
+section:
+
+```rust
+ui.collapsing("🧊 Ground Mesh Preview", |ui| {
+    let descriptor = ItemMeshDescriptor::from_item(&self.edit_buffer);
+    ui.label(format!("Category: {:?}", descriptor.category));
+    // Embed the preview renderer here (same approach as creatures_editor preview fallback)
+    if ui.button("🔄 Refresh Preview").clicked() {
+        // trigger preview sync
+    }
+    // Static label fallback when renderer unavailable:
+    ui.label(format!("Shape: {:?}", descriptor.shape));
+    if let Some(ovr) = &descriptor.override_params {
+        ui.label(format!("Scale override: {:.2}×", ovr.scale));
+        ui.label(format!("Emissive: {}", ovr.emissive));
+    } else {
+        ui.label("No mesh override (auto-generated from item type)");
+    }
+    if ui.button("✏️ Open in Item Mesh Editor").clicked() {
+        // sets a cross-tab navigation signal to open item_mesh_editor for this item
+    }
+});
+```
+
+The "Open in Item Mesh Editor" button sets a `requested_open_item_mesh:
+Option<ItemId>` field on `ItemsEditorState` that the parent tab dispatcher
+reads to switch tabs — identical to the `requested_open_npc` pattern used in
+the maps editor.
+
+---
+
+#### 5.10 Wire `ItemMeshEditorState` into the Campaign Builder Tab Bar
+
+In `sdk/campaign_builder/src/lib.rs` (or wherever tabs are registered),
+add an **"Item Meshes"** tab alongside the existing **"Items"** and
+**"Creatures"** tabs. The tab:
+
+- Holds an `ItemMeshEditorState` as part of the builder app state.
+- Receives the current `item_mesh_registry` (a `Vec<ItemMeshEntry>`) and
+  `campaign_dir` from the app state.
+- On save, writes `item_mesh_registry.ron` to the campaign directory.
+- Cross-tab navigation: when `items_editor.requested_open_item_mesh` is
+  `Some(id)`, switch to the Item Meshes tab and call
+  `item_mesh_editor.open_for_editing(id)`.
+
+---
+
+#### 5.11 Keyboard Shortcuts
+
+Register the same shortcuts as the creature editor, scoped to the Item Mesh
+Editor tab:
+
+| Shortcut                  | Action                            |
+| ------------------------- | --------------------------------- |
+| `Ctrl+Z`                  | Undo                              |
+| `Ctrl+Shift+Z` / `Ctrl+Y` | Redo                              |
+| `Ctrl+S`                  | Save                              |
+| `Ctrl+Shift+S`            | Save As                           |
+| `Escape`                  | Back to Registry (from Edit mode) |
+
+Use the existing `ShortcutManager` type from `keyboard_shortcuts.rs`.
+
+---
+
+#### 5.12 Testing Requirements
+
+Follow all SDK testing rules from `sdk/AGENTS.md`.
+
+**`ItemMeshUndoRedo` unit tests:**
+
+- `test_item_mesh_undo_redo_push_and_undo` — push a `SetScale` action; undo;
+  assert `can_undo() == false`, `can_redo() == true`.
+- `test_item_mesh_undo_redo_redo` — push, undo, redo; assert `can_redo() == false`.
+- `test_item_mesh_undo_redo_clear` — push two actions, clear; assert both
+  stacks empty.
+
+**`ItemMeshEditorState` unit tests:**
+
+- `test_item_mesh_editor_state_default` — `ItemMeshEditorState::default()` is
+  in `Registry` mode; `selected_entry` is `None`; `override_enabled` is `false`.
+- `test_item_mesh_editor_mode_indicator_registry` — `mode_indicator()` returns
+  `"Registry Mode"` when in `ItemMeshEditorMode::Registry`.
+- `test_item_mesh_editor_mode_indicator_edit` — `mode_indicator()` returns
+  `"Asset Editor: sword.ron"` when in Edit mode with `file_name = "sword.ron"`.
+- `test_item_mesh_editor_breadcrumb_registry` — `breadcrumb_string()` returns
+  `"Item Meshes"` in Registry mode.
+- `test_item_mesh_editor_breadcrumb_edit` — `breadcrumb_string()` returns
+  `"Item Meshes > sword.ron"` in Edit mode.
+- `test_item_mesh_editor_has_unsaved_changes_false_by_default` — fresh state
+  returns `false`.
+- `test_item_mesh_editor_has_unsaved_changes_true_after_edit` — mutating
+  `edit_buffer` sets `has_unsaved_changes() == true`.
+- `test_item_mesh_editor_can_undo_false_by_default` — `can_undo() == false`
+  on a fresh state.
+- `test_item_mesh_editor_can_redo_false_by_default` — `can_redo() == false`.
+- `test_item_mesh_editor_back_to_registry_clears_edit_state` — call
+  `back_to_registry()`; assert mode is `Registry`, `edit_buffer` is `None`,
+  `preview_dirty` is `false`.
+
+**Registry mode tests:**
+
+- `test_available_item_assets_empty_when_no_assets_dir` — given a campaign dir
+  with no `assets/items/` subdirectory, `available_item_assets` is empty.
+- `test_available_item_assets_populated_from_campaign_dir` — given a temp dir
+  with two `.ron` files in `assets/items/`, the list contains both file names.
+- `test_available_item_assets_not_refreshed_when_dir_unchanged` — calling
+  `refresh_available_assets` twice with the same dir does not re-read the
+  filesystem on the second call (cache hit).
+- `test_available_item_assets_refreshed_when_dir_changes` — changing
+  `last_campaign_dir` triggers a refresh.
+- `test_register_asset_validate_duplicate_id_sets_error` — registering an
+  asset whose parsed ID already exists in the registry sets
+  `register_asset_error`.
+- `test_register_asset_cancel_does_not_modify_registry` — cancel after
+  populating the path buffer; assert registry unchanged.
+- `test_register_asset_success_appends_entry` — validate + register a valid
+  RON; assert registry length increased by one.
+
+**Edit mode / save-as tests:**
+
+- `test_perform_save_as_with_path_appends_new_entry` — save-as to a valid
+  `assets/items/` path appends an entry to the registry and writes the file.
+- `test_perform_save_as_requires_campaign_directory` — save-as with no campaign
+  dir set returns an error message.
+- `test_perform_save_as_rejects_non_item_asset_paths` — a path outside
+  `assets/items/` returns an error.
+- `test_revert_edit_buffer_restores_original` — mutate `edit_buffer`, call
+  `revert_edit_buffer_from_registry()`; assert buffer matches the original
+  registry entry.
+- `test_revert_edit_buffer_errors_in_registry_mode` — calling revert in
+  Registry mode returns an appropriate error.
+
+**Validation tests:**
+
+- `test_validate_descriptor_reports_invalid_scale` — a descriptor with
+  `override_params.scale = 0.0` fails validation with a message containing
+  `"scale"`.
+- `test_validate_descriptor_passes_for_default_descriptor` — an
+  auto-generated `ItemMeshDescriptor::from_item(&default_item())` passes
+  validation with no errors.
+
+**Cross-tab navigation test:**
+
+- `test_items_editor_requested_open_item_mesh_set_on_button` — constructing
+  an `ItemsEditorState` with a selected item and calling the open-in-mesh-editor
+  action sets `requested_open_item_mesh == Some(item_id)`.
+
+---
+
+#### 5.13 Deliverables
+
+- [ ] `sdk/campaign_builder/src/item_mesh_editor.rs` — `ItemMeshEditorState`,
+      `ItemMeshEditorMode`, `ItemMeshRegistrySortBy`
+- [ ] `sdk/campaign_builder/src/item_mesh_undo_redo.rs` — `ItemMeshUndoRedo`,
+      `ItemMeshEditAction`
+- [ ] `sdk/campaign_builder/src/item_mesh_workflow.rs` — `ItemMeshWorkflow`
+      with `mode_indicator()`, `breadcrumb_string()`, `enter_edit()`,
+      `return_to_registry()`
+- [ ] Registry mode: two-column list + preview panel with search, filter, sort
+- [ ] Registry mode: **New**, **Register Asset**, **Duplicate**, **Delete**
+      (with confirm), **Export RON** actions
+- [ ] Register-existing-asset dialog with filesystem scan, validation, and
+      duplicate-ID guard
+- [ ] Edit mode: override properties panel + live preview + validation panel
+- [ ] Edit mode: undo / redo wired to all property mutations
+- [ ] Save-As dialog writing to `assets/items/` and updating
+      `item_mesh_registry.ron`
+- [ ] Revert action restoring the edit buffer from the registry entry
+- [ ] Keyboard shortcuts (`Ctrl+Z/Y/S`, `Escape`) via `ShortcutManager`
+- [ ] Context menu on registry rows via `ContextMenuManager`
+- [ ] **"Ground Mesh Preview"** collapsible in existing `items_editor.rs`
+      `show_form()`, with "Open in Item Mesh Editor" cross-tab signal
+- [ ] **"Item Meshes"** tab wired into the Campaign Builder tab bar
+- [ ] `mode_indicator()`, `breadcrumb_string()`, `has_unsaved_changes()`,
+      `can_undo()`, `can_redo()` public helpers
+- [ ] All 28 new tests pass; all four quality gates pass with zero warnings
+- [ ] SPDX headers on all three new `.rs` files
+
+#### 5.14 Success Criteria
+
+A campaign author can:
+
+1. Open the Campaign Builder and navigate to the **Item Meshes** tab.
+2. Browse registered item mesh RON files in the registry list, filter by
+   `ItemMeshCategory`, and see a live preview of the selected entry.
+3. Double-click an entry (or click **✏️ Edit**) to enter Edit mode.
+4. Adjust primary/accent color, scale, and emissive flag; see the preview
+   update immediately; undo and redo each change.
+5. Click **💾 Save As**, confirm the path is under `assets/items/`, and verify
+   the `.ron` file is written and the registry is updated.
+6. Click **Register Asset**, browse to an existing `.ron` in `assets/items/`,
+   validate it, and register it — duplicate IDs are caught and reported.
+7. Navigate to the **Items** tab, edit any item, expand **"Ground Mesh
+   Preview"**, and click **"Open in Item Mesh Editor"** to be taken directly to
+   the mesh editor for that item.
+8. All four `cargo` quality gates pass with zero warnings.
 
 ---
 
@@ -658,6 +1057,7 @@ Follow SDK testing rules from `sdk/AGENTS.md`.
 
 Run `examples/generate_item_meshes.py` against all items in `data/items.ron`
 to ensure every item ID has either:
+
 - An auto-generated mesh via `ItemMeshDescriptor::from_item` (the default), or
 - An explicit entry in `item_mesh_registry.ron` pointing to a hand-crafted RON.
 
@@ -669,21 +1069,21 @@ provide a hand-crafted mesh file.
 Walk through the tutorial campaign with all item types dropped on the ground.
 For each category, verify:
 
-| Category | Quality check |
-|---|---|
-| Sword | Blade clearly longer than dagger, crossguard visible |
-| Dagger | Compact, sits flat convincingly |
-| Blunt (Club) | Boxy head distinct from sword shapes |
-| Staff | Tall cylinder + visible sphere tip |
-| Bow | Curved arc shape recognizable |
-| Armor | Plate silhouette different from leather |
-| Helmet | Dome shape distinct from chest |
-| Shield | Hexagonal disc shape visible |
-| Potion | Rounded bottle with color-coded liquid |
-| Scroll | Rolled paper cylinder shape |
-| Ring | Torus shape visible even at tile scale |
-| Arrow | Thin shaft + fletching |
-| Quest Item | Unique glowing scroll shape |
+| Category     | Quality check                                        |
+| ------------ | ---------------------------------------------------- |
+| Sword        | Blade clearly longer than dagger, crossguard visible |
+| Dagger       | Compact, sits flat convincingly                      |
+| Blunt (Club) | Boxy head distinct from sword shapes                 |
+| Staff        | Tall cylinder + visible sphere tip                   |
+| Bow          | Curved arc shape recognizable                        |
+| Armor        | Plate silhouette different from leather              |
+| Helmet       | Dome shape distinct from chest                       |
+| Shield       | Hexagonal disc shape visible                         |
+| Potion       | Rounded bottle with color-coded liquid               |
+| Scroll       | Rolled paper cylinder shape                          |
+| Ring         | Torus shape visible even at tile scale               |
+| Arrow        | Thin shaft + fletching                               |
+| Quest Item   | Unique glowing scroll shape                          |
 
 #### 6.3 Tutorial Campaign Authored Drops
 
@@ -744,6 +1144,7 @@ All tests that load campaign content MUST use `data/test_campaign`, never
 ### Naming Conventions
 
 New files follow the project lowercase underscore convention:
+
 - `item_mesh.rs`, `dropped_item.rs`, `item_world_events.rs`
 - `item_mesh_registry.ron`, `sword.ron`, `health_potion.ron`
 
@@ -796,11 +1197,11 @@ Phase 6 (Full coverage)        → requires all prior phases
 
 ## Risk Mitigation
 
-| Risk | Mitigation |
-|---|---|
-| Item mesh silhouette too small at tile scale | Scale all items by 1.5× relative to creature scale; adjust per category in generator |
-| Z-fighting between item mesh and floor tile | Ground all items at Y = 0.05 (5 cm above floor) |
-| Many simultaneous drops causes frame spike | `ProceduralMeshCache` caches base meshes; color variation via material only, not mesh duplication |
-| `DroppedItemRegistry` accumulates stale entries on crash/reload | Registry is rebuilt from `MapEvent::DroppedItem` events on each map load |
-| Item mesh RON files diverge from domain shapes | `validate_mesh_descriptors` in SDK validation catches mismatches at authoring time |
-| Torus (ring) too thin to see | Minimum ring outer radius of 0.15 world units; increase segment count to 12 for the torus arc |
+| Risk                                                            | Mitigation                                                                                        |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Item mesh silhouette too small at tile scale                    | Scale all items by 1.5× relative to creature scale; adjust per category in generator              |
+| Z-fighting between item mesh and floor tile                     | Ground all items at Y = 0.05 (5 cm above floor)                                                   |
+| Many simultaneous drops causes frame spike                      | `ProceduralMeshCache` caches base meshes; color variation via material only, not mesh duplication |
+| `DroppedItemRegistry` accumulates stale entries on crash/reload | Registry is rebuilt from `MapEvent::DroppedItem` events on each map load                          |
+| Item mesh RON files diverge from domain shapes                  | `validate_mesh_descriptors` in SDK validation catches mismatches at authoring time                |
+| Torus (ring) too thin to see                                    | Minimum ring outer radius of 0.15 world units; increase segment count to 12 for the torus arc     |

@@ -20,20 +20,20 @@ and optional smooth rotation animation.
 
 ### Existing Infrastructure
 
-| Component | Location | State |
-|---|---|---|
-| `Direction` enum | [src/domain/types.rs](../../src/domain/types.rs) | `North/East/South/West` with `turn_left()`, `turn_right()`, `forward()` — **no yaw conversion** |
-| `NpcPlacement.facing` | [src/domain/world/npc.rs](../../src/domain/world/npc.rs) | `Option<Direction>` — present in domain, stored in map RON |
-| `ResolvedNpc.facing` | [src/domain/world/types.rs](../../src/domain/world/types.rs) | Propagated from `NpcPlacement` |
-| `spawn_creature()` | [src/game/systems/creature_spawning.rs](../../src/game/systems/creature_spawning.rs) | Takes `Vec3 position` — **no rotation parameter** |
-| NPC creature spawn in `map.rs` | [src/game/systems/map.rs](../../src/game/systems/map.rs) ~L1035 | Calls `spawn_creature()` without `resolved_npc.facing` |
-| Encounter creature spawn | [src/game/systems/map.rs](../../src/game/systems/map.rs) ~L1164 | Spawns at identity rotation |
-| `RecruitableCharacter` spawn | [src/game/systems/map.rs](../../src/game/systems/map.rs) ~L1211 | Spawns at identity rotation |
-| `MapEvent::Furniture` | [src/domain/world/types.rs](../../src/domain/world/types.rs) | Has `rotation_y: Option<f32>` — **reference pattern** |
-| `MapEvent::Sign` | [src/domain/world/types.rs](../../src/domain/world/types.rs) | No `facing` field |
-| `MapEvent::NpcDialogue` | [src/domain/world/types.rs](../../src/domain/world/types.rs) | No `facing` field |
-| `MapEvent::Encounter` | [src/domain/world/types.rs](../../src/domain/world/types.rs) | No `facing` field |
-| `MapEvent::RecruitableCharacter` | [src/domain/world/types.rs](../../src/domain/world/types.rs) | No `facing` field |
+| Component                        | Location                                                                             | State                                                                                           |
+| -------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `Direction` enum                 | [src/domain/types.rs](../../src/domain/types.rs)                                     | `North/East/South/West` with `turn_left()`, `turn_right()`, `forward()` — **no yaw conversion** |
+| `NpcPlacement.facing`            | [src/domain/world/npc.rs](../../src/domain/world/npc.rs)                             | `Option<Direction>` — present in domain, stored in map RON                                      |
+| `ResolvedNpc.facing`             | [src/domain/world/types.rs](../../src/domain/world/types.rs)                         | Propagated from `NpcPlacement`                                                                  |
+| `spawn_creature()`               | [src/game/systems/creature_spawning.rs](../../src/game/systems/creature_spawning.rs) | Takes `Vec3 position` — **no rotation parameter**                                               |
+| NPC creature spawn in `map.rs`   | [src/game/systems/map.rs](../../src/game/systems/map.rs) ~L1035                      | Calls `spawn_creature()` without `resolved_npc.facing`                                          |
+| Encounter creature spawn         | [src/game/systems/map.rs](../../src/game/systems/map.rs) ~L1164                      | Spawns at identity rotation                                                                     |
+| `RecruitableCharacter` spawn     | [src/game/systems/map.rs](../../src/game/systems/map.rs) ~L1211                      | Spawns at identity rotation                                                                     |
+| `MapEvent::Furniture`            | [src/domain/world/types.rs](../../src/domain/world/types.rs)                         | Has `rotation_y: Option<f32>` — **reference pattern**                                           |
+| `MapEvent::Sign`                 | [src/domain/world/types.rs](../../src/domain/world/types.rs)                         | No `facing` field                                                                               |
+| `MapEvent::NpcDialogue`          | [src/domain/world/types.rs](../../src/domain/world/types.rs)                         | No `facing` field                                                                               |
+| `MapEvent::Encounter`            | [src/domain/world/types.rs](../../src/domain/world/types.rs)                         | No `facing` field                                                                               |
+| `MapEvent::RecruitableCharacter` | [src/domain/world/types.rs](../../src/domain/world/types.rs)                         | No `facing` field                                                                               |
 
 ### Identified Issues
 
@@ -197,7 +197,7 @@ functional smoke-test for the new feature.
 #### 2.6 Deliverables
 
 - [ ] `facing: Option<Direction>` added (with `#[serde(default)]`) to
-  `MapEvent::Sign`, `NpcDialogue`, `Encounter`, `RecruitableCharacter`
+      `MapEvent::Sign`, `NpcDialogue`, `Encounter`, `RecruitableCharacter`
 - [ ] NPC creature spawn path passes `resolved_npc.facing`
 - [ ] NPC sprite fallback path applies rotation from `facing`
 - [ ] `spawn_sign()` accepts and applies `facing`
@@ -382,10 +382,330 @@ unchanged and performant.
 
 ---
 
+---
+
+## Phase 5: Campaign Builder SDK UI
+
+Exposes all new domain fields introduced in Phases 2–4 as editable controls
+in the Campaign Builder map editor, so campaign authors never need to hand-edit
+RON files to set facing directions, proximity behaviour, or rotation speed.
+
+---
+
+### 5.1 Add `facing` to `EventEditorState`
+
+In `sdk/campaign_builder/src/map_editor.rs`, add a new field to
+`EventEditorState` alongside the existing per-event-type fields:
+
+```rust
+/// Facing direction for the spawned entity (Sign, NpcDialogue, Encounter,
+/// RecruitableCharacter). `None` means the engine default (North).
+pub event_facing: Option<String>,
+```
+
+Initialise it to `None` in `Default for EventEditorState`.
+
+---
+
+### 5.2 Add Facing Combo-Box to Affected Event Editor Panels
+
+The four `MapEvent` variants that gain `facing` in Phase 2 are `Sign`,
+`NpcDialogue`, `Encounter`, and `RecruitableCharacter`. In `show_event_editor()`
+in `sdk/campaign_builder/src/map_editor.rs`, add the following block at the
+**bottom** of each of those four `match` arms, immediately before the arm
+closes — using the same pattern as the existing `facing` combo-box in
+`show_npc_placement_editor()`:
+
+```rust
+// Facing direction
+ui.horizontal(|ui| {
+    ui.label("Facing:")
+        .on_hover_text("Initial facing direction of the spawned entity");
+    egui::ComboBox::from_id_salt("event_facing_combo")
+        .selected_text(
+            event_editor.event_facing.as_deref().unwrap_or("None")
+        )
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut event_editor.event_facing, None, "None");
+            for dir in &["North", "East", "South", "West"] {
+                ui.selectable_value(
+                    &mut event_editor.event_facing,
+                    Some((*dir).to_string()),
+                    *dir,
+                );
+            }
+        });
+    if event_editor.event_facing.is_some() {
+        if ui.small_button("✖ Clear").clicked() {
+            event_editor.event_facing = None;
+            editor.has_changes = true;
+        }
+    }
+});
+if event_editor.event_facing.is_some() {
+    editor.has_changes = true;
+}
+```
+
+Each arm uses a **unique `id_salt`** to satisfy the egui ID rules:
+
+| Event type             | `id_salt`                           |
+| ---------------------- | ----------------------------------- |
+| `Sign`                 | `"sign_event_facing_combo"`         |
+| `NpcDialogue`          | `"npc_dialogue_event_facing_combo"` |
+| `Encounter`            | `"encounter_event_facing_combo"`    |
+| `RecruitableCharacter` | `"recruitable_event_facing_combo"`  |
+
+---
+
+### 5.3 Update `to_map_event()` to Forward `event_facing`
+
+In `impl EventEditorState`, update the four relevant arms of `to_map_event()`
+to parse `event_facing` into `Option<Direction>` and include it in the
+constructed `MapEvent`:
+
+```rust
+let facing = event_editor.event_facing.as_deref().and_then(|f| match f {
+    "North" => Some(Direction::North),
+    "South" => Some(Direction::South),
+    "East"  => Some(Direction::East),
+    "West"  => Some(Direction::West),
+    _       => None,
+});
+
+// Then pass `facing` into the MapEvent variant, e.g.:
+MapEvent::Sign {
+    name: self.name.clone(),
+    description: self.description.clone(),
+    text: self.sign_text.clone(),
+    facing,
+}
+```
+
+Apply the same pattern for `NpcDialogue`, `Encounter`, and
+`RecruitableCharacter`.
+
+---
+
+### 5.4 Update `from_map_event()` to Read `event_facing`
+
+In `impl EventEditorState`, update the four relevant arms of `from_map_event()`
+to populate `event_facing` from the loaded event:
+
+```rust
+MapEvent::Sign { facing, .. } => {
+    s.event_type = EventType::Sign;
+    // ... existing fields ...
+    s.event_facing = facing.map(|d| format!("{:?}", d));
+}
+```
+
+Apply the same pattern for `NpcDialogue`, `Encounter`, and
+`RecruitableCharacter`. When the loaded event's `facing` field is `None`
+(as it will be for all pre-existing RON files), `event_facing` is set to
+`None` and the combo-box shows "None" — preserving backward compatibility.
+
+---
+
+### 5.5 Add `proximity_facing` and `rotation_speed` Fields to `EventEditorState`
+
+Add two more fields, covering the Phase 3 and Phase 4 RON flags that apply
+to `Encounter` and `NpcDialogue` events:
+
+```rust
+/// Insert `ProximityFacing` component on the spawned entity so it turns
+/// toward the party when the party is within range.
+/// Applies to Encounter and NpcDialogue events only.
+pub event_proximity_facing: bool,
+
+/// Rotation speed in degrees per second for smooth facing transitions.
+/// `None` means snap (instant). Applies to Encounter and NpcDialogue only.
+pub event_rotation_speed: Option<f32>,
+```
+
+Initialise both to their "off" defaults in `Default for EventEditorState`:
+
+```rust
+event_proximity_facing: false,
+event_rotation_speed: None,
+```
+
+---
+
+### 5.6 Add Proximity Facing and Rotation Speed UI to Encounter and NpcDialogue Panels
+
+In `show_event_editor()`, within the `EventType::Encounter` and
+`EventType::NpcDialogue` arms only, add the following block **after** the
+facing combo-box from §5.2:
+
+```rust
+ui.separator();
+ui.label("🔄 Behaviour:");
+
+// Proximity facing toggle
+if ui
+    .checkbox(&mut event_editor.event_proximity_facing, "Turn to face party on proximity")
+    .on_hover_text(
+        "When enabled the entity automatically turns toward the party \
+         when they step within 2 tiles."
+    )
+    .changed()
+{
+    editor.has_changes = true;
+}
+
+// Rotation speed (only meaningful when proximity_facing is on)
+if event_editor.event_proximity_facing {
+    ui.horizontal(|ui| {
+        ui.label("Rotation Speed (deg/s):")
+            .on_hover_text("Leave empty for instant snap. Enter a value for smooth rotation.");
+        let mut speed_str = event_editor
+            .event_rotation_speed
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        if ui.text_edit_singleline(&mut speed_str).changed() {
+            event_editor.event_rotation_speed = speed_str.parse::<f32>().ok();
+            editor.has_changes = true;
+        }
+        if event_editor.event_rotation_speed.is_some()
+            && ui.small_button("✖ Snap").clicked()
+        {
+            event_editor.event_rotation_speed = None;
+            editor.has_changes = true;
+        }
+    });
+}
+```
+
+---
+
+### 5.7 Update `to_map_event()` and `from_map_event()` for Phase 3–4 Fields
+
+**`to_map_event()`** — for `Encounter` and `NpcDialogue`:
+
+```rust
+MapEvent::Encounter {
+    name: self.name.clone(),
+    description: self.description.clone(),
+    monster_group: monsters,
+    facing,
+    proximity_facing: self.event_proximity_facing,
+    rotation_speed: self.event_rotation_speed,
+    // ...
+}
+```
+
+**`from_map_event()`** — for `Encounter` and `NpcDialogue`:
+
+```rust
+MapEvent::Encounter {
+    facing,
+    proximity_facing,
+    rotation_speed,
+    ..
+} => {
+    // ... existing fields ...
+    s.event_facing = facing.map(|d| format!("{:?}", d));
+    s.event_proximity_facing = *proximity_facing;
+    s.event_rotation_speed = *rotation_speed;
+}
+```
+
+---
+
+### 5.8 Display Facing and Behaviour in the Inspector Panel
+
+In `show_inspector_panel()` in `sdk/campaign_builder/src/map_editor.rs`,
+extend the `MapEvent::Sign`, `MapEvent::NpcDialogue`, `MapEvent::Encounter`,
+and `MapEvent::RecruitableCharacter` display branches to show the facing
+and behaviour flags:
+
+```rust
+if let Some(dir) = facing {
+    ui.label(format!("Facing: {:?}", dir));
+}
+```
+
+For `Encounter` and `NpcDialogue`, also show:
+
+```rust
+if *proximity_facing {
+    ui.label("🔄 Turns toward party on proximity");
+    if let Some(speed) = rotation_speed {
+        ui.label(format!("  Rotation speed: {:.0} deg/s", speed));
+    } else {
+        ui.label("  Rotation: instant snap");
+    }
+}
+```
+
+---
+
+### 5.9 Testing Requirements
+
+**`EventEditorState` unit tests** (in `mod tests` of `map_editor.rs`):
+
+- `test_event_editor_state_default_facing_none` — `EventEditorState::default()`
+  has `event_facing == None`, `event_proximity_facing == false`,
+  `event_rotation_speed == None`.
+- `test_event_editor_to_sign_with_facing` — set `event_type = Sign`,
+  `event_facing = Some("East".to_string())`; call `to_map_event()`; assert
+  result is `MapEvent::Sign { facing: Some(Direction::East), .. }`.
+- `test_event_editor_from_sign_with_facing` — call `from_map_event()` with
+  `MapEvent::Sign { facing: Some(Direction::West), .. }`; assert
+  `event_facing == Some("West".to_string())`.
+- `test_event_editor_from_sign_no_facing` — call `from_map_event()` with a
+  `MapEvent::Sign` whose `facing` is `None`; assert `event_facing == None`.
+- `test_event_editor_to_encounter_with_facing_and_proximity` — set
+  `event_facing = Some("South".to_string())`, `event_proximity_facing = true`,
+  `event_rotation_speed = Some(180.0)`; call `to_map_event()`; assert the
+  resulting `MapEvent::Encounter` has all three fields set correctly.
+- `test_event_editor_from_encounter_with_proximity` — round-trip an
+  `Encounter` with `proximity_facing: true, rotation_speed: Some(90.0)`;
+  assert the buffer fields survive.
+- `test_event_editor_facing_round_trip_all_variants` — for each of the four
+  `Direction` values and each of the four affected event types, assert that
+  `from_map_event(to_map_event())` is a lossless round-trip.
+- `test_event_editor_proximity_false_clears_rotation_speed_in_ui` — a
+  documentation test confirming that when `event_proximity_facing` is `false`
+  the rotation-speed field is not forwarded to `to_map_event()` (i.e., it
+  defaults to `None` in the output even when the buffer holds a value).
+
+---
+
+### 5.10 Deliverables
+
+- [ ] `event_facing: Option<String>` field on `EventEditorState`
+- [ ] `event_proximity_facing: bool` and `event_rotation_speed: Option<f32>`
+      fields on `EventEditorState`
+- [ ] `Default` initialises all three fields to their "off" values
+- [ ] **Facing** combo-box visible in the editor for `Sign`, `NpcDialogue`,
+      `Encounter`, and `RecruitableCharacter` event types
+- [ ] **Proximity Facing** checkbox and **Rotation Speed** input visible for
+      `Encounter` and `NpcDialogue` only
+- [ ] `to_map_event()` forwards all three fields for all relevant variants
+- [ ] `from_map_event()` reads all three fields for all relevant variants
+- [ ] Inspector panel displays facing and behaviour flags for all four types
+- [ ] Unique `id_salt` used for every combo-box (no egui ID clashes)
+- [ ] All eight new tests pass; all four quality gates pass with zero warnings
+
+### 5.11 Success Criteria
+
+A campaign author can open the map editor, select any `Sign`, `NpcDialogue`,
+`Encounter`, or `RecruitableCharacter` event, choose "South" from the Facing
+combo-box, tick "Turn to face party on proximity" (for Encounter / NpcDialogue),
+enter `180` as the rotation speed, save the map, and confirm the saved RON
+contains `facing: Some(South)`, `proximity_facing: true`, and
+`rotation_speed: Some(180.0)`. Loading the same map back into the editor
+repopulates all three controls correctly. All four `cargo` quality gates pass
+with zero warnings.
+
+---
+
 ## Architecture Compliance Notes
 
-- `Direction` and `FacingComponent` changes stay in the domain/game layers;
-  no SDK layer changes required
+- `direction_to_yaw_radians` is the single source of truth for the angle
+  mapping; no other file redefines north/south/etc as raw floats
 - `MapEvent` field additions use `#[serde(default)]` — all existing RON
   files remain valid without migration
 - `SetFacing` follows the existing `#[derive(Message)]` broadcast pattern
@@ -393,5 +713,7 @@ unchanged and performant.
   never in domain structs
 - No new `.rs` files are absolutely required; `facing.rs` is permitted if
   `map.rs` becomes too large but is not mandatory
-- `direction_to_yaw_radians` is the single source of truth for the angle
-  mapping; no other file redefines north/south/etc as raw floats
+- **SDK changes ARE required**: Phase 2 adds `facing` to four `MapEvent`
+  variants; Phases 3–4 add `proximity_facing` and `rotation_speed` to two
+  variants. All must be surfaced in the Campaign Builder map editor (Phase 5)
+  so campaign authors can configure them without editing RON by hand.

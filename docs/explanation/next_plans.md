@@ -595,7 +595,7 @@ How we handle Merchants (NPCs with Buy/Sell inventory), and Container Items (Che
 
 Write a plan with a phased approach to implementing buying and selling in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Buy and Sell Plan](./buy_and_sell_plan.md)
+✅ COMPLETED - [Buy and Sell Plan](./buy_and_sell_plan.md)
 
 
 ### Automap and mini map

@@ -4032,6 +4032,12 @@ impl MapsEditorState {
                                 ui.label("  ⛔ Blocks movement");
                             }
                         }
+                        MapEvent::Container {
+                            id, name, items, ..
+                        } => {
+                            ui.label(format!("Container: {} ({} items)", name, items.len()));
+                            ui.label(format!("  ID: {}", id));
+                        }
                     }
 
                     ui.horizontal(|ui| {
@@ -4224,6 +4230,9 @@ impl MapsEditorState {
                 name, description, ..
             } => (name.clone(), description.clone()),
             MapEvent::Furniture { name, .. } => (name.clone(), String::new()),
+            MapEvent::Container {
+                name, description, ..
+            } => (name.clone(), description.clone()),
         }
     }
 

@@ -412,7 +412,7 @@ Add this example to `docs/how-to/authoring_time_events.md`.
 - [ ] `time_condition: Option<TimeCondition>` on applicable `MapEvent` variants
 - [ ] `trigger_event` accepts `&GameTime` and evaluates conditions
 - [ ] `TimeAdvanceEvent` Bevy event and `apply_time_advance` system in
-  `src/game/systems/time.rs`
+      `src/game/systems/time.rs`
 - [ ] `docs/how-to/authoring_time_events.md` with example RON snippets
 - [ ] All phase-4 tests pass
 
@@ -421,6 +421,260 @@ Add this example to `docs/how-to/authoring_time_events.md`.
 A campaign author can write a night-only encounter or a day-only merchant that the
 engine correctly gates by the current `GameTime`. The event system remains pure-
 function at the domain layer.
+
+---
+
+## Phase 5: Campaign Builder — Starting Date/Time
+
+Adds a **Starting Date/Time** row to the Campaign Builder's Campaign Editor
+(**Gameplay** section) so campaign authors can configure the day, hour, and minute
+at which a new game begins, rather than always starting at Day 1, 00:00.
+
+---
+
+### 5.1 Add `starting_time` to `CampaignConfig`
+
+In [src/sdk/campaign_loader.rs](../../src/sdk/campaign_loader.rs), add a field to
+`CampaignConfig`:
+
+```rust
+/// Starting game time for a new campaign (day, hour, minute).
+/// Defaults to Day 1, 08:00 (morning) if not specified.
+#[serde(default = "default_starting_time")]
+pub starting_time: GameTime,
+```
+
+Add the default function immediately after the other `default_*` helpers:
+
+```rust
+fn default_starting_time() -> GameTime {
+    GameTime::new(1, 8, 0) // Day 1, 08:00 — campaign starts in the morning
+}
+```
+
+Update `Default for CampaignConfig` to include `starting_time:
+default_starting_time()`.
+
+The `#[serde(default)]` attribute ensures all existing `config.ron` files that lack
+this field continue to deserialize correctly (backward compatible by design).
+
+---
+
+### 5.2 Wire `starting_time` into `GameState` at Campaign Load
+
+In [src/bin/antares.rs](../../src/bin/antares.rs), in `AntaresPlugin::build()`,
+after the starting-map and starting-position setup, set the game clock:
+
+```rust
+// Initialise the game clock from the campaign's configured starting time
+game_state.time = self.campaign.config.starting_time.clone();
+```
+
+This ensures that when a new game starts the clock reflects the campaign author's
+intent (e.g. a horror campaign can start at midnight, a cheerful campaign at dawn).
+
+---
+
+### 5.3 Add `starting_time` to `CampaignMetadataEditBuffer`
+
+In [sdk/campaign_builder/src/campaign_editor.rs](../../sdk/campaign_builder/src/campaign_editor.rs),
+extend `CampaignMetadataEditBuffer` with three separate integer fields (split from
+`GameTime` for ergonomic drag-value editing):
+
+```rust
+/// Starting day (1-based)
+pub starting_day: u32,
+/// Starting hour (0–23)
+pub starting_hour: u8,
+/// Starting minute (0–59)
+pub starting_minute: u8,
+```
+
+Update `CampaignMetadataEditBuffer::from_metadata()`:
+
+```rust
+starting_day:    m.starting_time.day,
+starting_hour:   m.starting_time.hour,
+starting_minute: m.starting_time.minute,
+```
+
+Update `CampaignMetadataEditBuffer::apply_to()`:
+
+```rust
+dest.starting_time = GameTime::new(
+    self.starting_day.max(1),
+    self.starting_hour.min(23),
+    self.starting_minute.min(59),
+);
+```
+
+Update `Default for CampaignMetadataEditBuffer`:
+
+```rust
+starting_day:    1,
+starting_hour:   8,
+starting_minute: 0,
+```
+
+---
+
+### 5.4 Add Starting Date/Time UI Row to the Gameplay Section
+
+In `render_ui()` inside `CampaignSection::Gameplay`, add a row immediately **after**
+the **Starting Direction** row and **before** the **Starting Gold** row:
+
+```rust
+ui.label("Starting Date/Time:")
+    .on_hover_text("Day, hour (0–23), and minute (0–59) at which the campaign begins");
+ui.horizontal(|ui| {
+    ui.label("Day");
+    let mut day = self.buffer.starting_day as i32;
+    if ui
+        .add(egui::DragValue::new(&mut day).range(1..=9999))
+        .changed()
+    {
+        self.buffer.starting_day = day.max(1) as u32;
+        self.has_unsaved_changes = true;
+        *unsaved_changes = true;
+    }
+
+    ui.label("Hour");
+    let mut hour = self.buffer.starting_hour as i32;
+    if ui
+        .add(egui::DragValue::new(&mut hour).range(0..=23))
+        .changed()
+    {
+        self.buffer.starting_hour = hour.clamp(0, 23) as u8;
+        self.has_unsaved_changes = true;
+        *unsaved_changes = true;
+    }
+
+    ui.label("Min");
+    let mut minute = self.buffer.starting_minute as i32;
+    if ui
+        .add(egui::DragValue::new(&mut minute).range(0..=59))
+        .changed()
+    {
+        self.buffer.starting_minute = minute.clamp(0, 59) as u8;
+        self.has_unsaved_changes = true;
+        *unsaved_changes = true;
+    }
+
+    // Preview the time-of-day period next to the spinners
+    let preview_time = antares::domain::types::GameTime::new(
+        self.buffer.starting_day.max(1),
+        self.buffer.starting_hour.min(23),
+        self.buffer.starting_minute.min(59),
+    );
+    ui.colored_label(
+        egui::Color32::GRAY,
+        format!("({})", period_label(preview_time.time_of_day())),
+    );
+});
+ui.end_row();
+```
+
+Add a private helper function at the bottom of `campaign_editor.rs` (outside the
+`impl` block):
+
+```rust
+/// Returns a short display label for a `TimeOfDay` period used in the
+/// starting-time preview hint.
+fn period_label(tod: antares::domain::types::TimeOfDay) -> &'static str {
+    match tod {
+        antares::domain::types::TimeOfDay::Dawn      => "Dawn",
+        antares::domain::types::TimeOfDay::Morning   => "Morning",
+        antares::domain::types::TimeOfDay::Afternoon => "Afternoon",
+        antares::domain::types::TimeOfDay::Dusk      => "Dusk",
+        antares::domain::types::TimeOfDay::Evening   => "Evening",
+        antares::domain::types::TimeOfDay::Night     => "Night",
+    }
+}
+```
+
+Note: `period_label` depends on `TimeOfDay`, which is defined in **Phase 2** of this
+plan. The Campaign Builder starting-time UI therefore depends on Phase 2 being
+complete. If implemented before Phase 2, replace the preview hint with a plain
+`format!("{:02}:{:02}", hour, minute)` label and add `TimeOfDay` integration in a
+follow-up once Phase 2 lands.
+
+---
+
+### 5.5 Update `campaigns/tutorial/config.ron`
+
+Add `starting_time: (day: 1, hour: 8, minute: 0)` inside the `config:` block so
+the tutorial campaign has an explicit starting time and serves as the canonical
+example for campaign authors:
+
+```ron
+controls: (
+    // ... existing keys ...
+),
+starting_time: (day: 1, hour: 8, minute: 0),
+```
+
+---
+
+### 5.6 Update `data/test_campaign/config.ron`
+
+Add the same field to the test-campaign fixture so the test suite does not rely on
+the `serde(default)` fallback:
+
+```ron
+starting_time: (day: 1, hour: 8, minute: 0),
+```
+
+---
+
+### 5.7 Testing Requirements
+
+**Domain / loader tests** (in `src/sdk/campaign_loader.rs`):
+
+- `test_campaign_config_starting_time_default` — `CampaignConfig::default()` has
+  `starting_time == GameTime::new(1, 8, 0)`.
+- `test_campaign_config_starting_time_roundtrip` — serialize a `CampaignConfig` with
+  `starting_time: GameTime::new(3, 22, 30)` to RON and deserialize it; assert the
+  field survives the round-trip unchanged.
+- `test_campaign_config_missing_starting_time_uses_default` — deserialize a RON
+  string that lacks the `starting_time` key; assert it defaults to Day 1, 08:00.
+
+**Campaign Editor buffer tests** (in `sdk/campaign_builder/src/campaign_editor.rs`):
+
+- `test_buffer_from_metadata_copies_starting_time` — build a `CampaignMetadata`
+  with `starting_time: GameTime::new(2, 20, 45)`; call `from_metadata()`; assert
+  `buffer.starting_day == 2`, `starting_hour == 20`, `starting_minute == 45`.
+- `test_buffer_apply_to_writes_starting_time` — set buffer fields to day=5, hour=6,
+  minute=30; call `apply_to()`; assert `dest.starting_time == GameTime::new(5, 6, 30)`.
+- `test_buffer_starting_time_clamps_hour` — set `starting_hour = 25`; call
+  `apply_to()`; assert `dest.starting_time.hour == 23`.
+- `test_buffer_starting_time_clamps_minute` — set `starting_minute = 75`; call
+  `apply_to()`; assert `dest.starting_time.minute == 59`.
+- `test_buffer_starting_time_clamps_day_zero` — set `starting_day = 0`; call
+  `apply_to()`; assert `dest.starting_time.day == 1`.
+
+---
+
+### 5.8 Deliverables
+
+- [ ] `starting_time: GameTime` field on `CampaignConfig` with `serde(default)`
+- [ ] `default_starting_time()` returning `GameTime::new(1, 8, 0)`
+- [ ] `AntaresPlugin::build()` sets `game_state.time` from `starting_time`
+- [ ] `starting_day`, `starting_hour`, `starting_minute` fields on
+      `CampaignMetadataEditBuffer`
+- [ ] `from_metadata()` and `apply_to()` updated to round-trip `starting_time`
+- [ ] **Starting Date/Time** row in Campaign Builder → Campaign Editor → Gameplay
+- [ ] `period_label()` helper (or plain time preview if Phase 2 not yet complete)
+- [ ] `campaigns/tutorial/config.ron` updated with explicit `starting_time`
+- [ ] `data/test_campaign/config.ron` updated with explicit `starting_time`
+- [ ] All phase-5 tests pass
+
+### 5.9 Success Criteria
+
+A campaign author can open the Campaign Builder, navigate to Campaign Editor →
+Gameplay, and set Day 3, 22:00 as the starting time. After saving and launching the
+game, the HUD clock (Phase 3) shows `22:00` and `Day 3` from the first frame of
+exploration. A campaign whose `config.ron` lacks the field starts at Day 1, 08:00
+without error. All four `cargo` quality gates pass with zero warnings.
 
 ---
 

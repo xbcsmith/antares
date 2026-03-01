@@ -71,11 +71,11 @@ helper.
 
 In [src/domain/resources.rs](../../src/domain/resources.rs), update:
 
-| Constant | Old | New | Reason |
-|---|---|---|---|
-| `REST_DURATION_HOURS` | `8` | `12` | Full heal requires 12 hours per spec |
-| `HP_RESTORE_RATE` | `0.125` (1/8) | `0.0833` (1/12) | Rate must match 12-hour full heal |
-| `SP_RESTORE_RATE` | `0.125` (1/8) | `0.0833` (1/12) | Same |
+| Constant              | Old           | New             | Reason                               |
+| --------------------- | ------------- | --------------- | ------------------------------------ |
+| `REST_DURATION_HOURS` | `8`           | `12`            | Full heal requires 12 hours per spec |
+| `HP_RESTORE_RATE`     | `0.125` (1/8) | `0.0833` (1/12) | Rate must match 12-hour full heal    |
+| `SP_RESTORE_RATE`     | `0.125` (1/8) | `0.0833` (1/12) | Same                                 |
 
 Add a new constant:
 
@@ -139,7 +139,7 @@ Extend `ResourceError` with:
 #### 1.7 Success Criteria
 
 `rest_party_hour()` × 12 restores all party members to full HP/SP. The time
-advancement removed from `rest_party()` is confirmed by tests. All  `cargo
+advancement removed from `rest_party()` is confirmed by tests. All `cargo
 clippy` gates pass with zero warnings.
 
 ---
@@ -203,17 +203,100 @@ block that:
 In [campaigns/config.template.ron](../../campaigns/config.template.ron), add
 `rest: ["R"]` inside the `controls:` block so campaign authors can see it.
 
-#### 2.6 Testing Requirements
+#### 2.6 Add Rest Key Binding Slot in Campaign Builder Config Editor
+
+In [sdk/campaign_builder/src/config_editor.rs](../../sdk/campaign_builder/src/config_editor.rs),
+mirror the same changes made for the Inventory key binding slot:
+
+1. **Add buffer field** to `ConfigEditorState`:
+
+```rust
+pub controls_rest_buffer: String,
+```
+
+2. **Initialise** the buffer to `String::new()` in `Default for ConfigEditorState`.
+
+3. **Add UI row** in `show_controls_section`, after the existing **Menu** row,
+   using the same `show_key_binding_with_capture` closure with action ID `"rest"`:
+
+```rust
+// Rest
+show_key_binding_with_capture(
+    ui,
+    "Rest",
+    &mut self.controls_rest_buffer,
+    "rest",
+    unsaved_changes,
+    &mut self.validation_errors,
+    &mut self.capturing_key_for,
+);
+```
+
+4. **`update_edit_buffers`** — add:
+
+```rust
+self.controls_rest_buffer = format_key_list(&self.game_config.controls.rest);
+```
+
+5. **`update_config_from_buffers`** — add:
+
+```rust
+self.game_config.controls.rest = parse_key_list(&self.controls_rest_buffer);
+```
+
+6. **`handle_key_capture`** — add `"rest"` arm to the match on `action_id`:
+
+```rust
+"rest" => &mut self.controls_rest_buffer,
+```
+
+7. **`validate_config`** — add validation call after the `"menu"` check:
+
+```rust
+if let Err(e) = self.validate_key_binding("rest", &self.controls_rest_buffer) {
+    self.validation_errors.insert("rest".to_string(), e);
+}
+```
+
+8. **Update existing `validate_config` tests** — each test that sets up a fully
+   valid controls state must also set `state.controls_rest_buffer = "R".to_string()`.
+
+##### Testing Requirements
+
+- `test_rest_key_binding_appears_in_update_edit_buffers` — set
+  `game_config.controls.rest = vec!["R", "F5"]`; call `update_edit_buffers()`; assert
+  `controls_rest_buffer == "R, F5"`.
+- `test_rest_key_binding_update_config_from_buffers` — set buffer to `"R, F5"`; call
+  `update_config_from_buffers()`; assert `controls.rest == ["R", "F5"]`.
+- `test_validate_config_invalid_rest_key_binding` — set buffer to `"BadKey"`; assert
+  `validate_config()` returns `Err` and `validation_errors` contains key `"rest"`.
+- `test_rest_buffer_default_is_empty` — `ConfigEditorState::default()` has
+  `controls_rest_buffer == ""`.
+- `test_rest_round_trip_buffer_conversion` — round-trip `["R"]` through
+  `update_edit_buffers` → `update_config_from_buffers`; assert unchanged.
+
+##### Deliverables
+
+- [ ] `controls_rest_buffer: String` field in `ConfigEditorState`
+- [ ] `Default` initialises the buffer to `String::new()`
+- [ ] **Rest** row visible in Campaign Builder → Config Editor → Controls → Key Bindings
+- [ ] `update_edit_buffers` populates the rest buffer
+- [ ] `update_config_from_buffers` writes the rest buffer back to `controls.rest`
+- [ ] `handle_key_capture` routes `"rest"` captures to `controls_rest_buffer`
+- [ ] `validate_config` validates the rest binding and surfaces errors in the UI
+- [ ] All five new tests pass; all existing `validate_config` tests updated
+
+#### 2.7 Testing Requirements
 
 - `test_controls_config_rest_default` — `ControlsConfig::default().rest ==
-  vec!["R"]`.
+vec!["R"]`.
 - `test_key_map_rest_action` — default `KeyMap` maps `KeyCode::KeyR` to
   `GameAction::Rest`.
 - `test_controls_config_validates_empty_rest_list` — empty `rest` vec fails
   `validate()`.
 - `test_custom_rest_key` — set `rest: ["F5"]`; `KeyMap` maps `F5 → Rest`.
 
-#### 2.7 Deliverables
+#### 2.8 Deliverables
 
 - [ ] `rest: Vec<String>` field in `ControlsConfig` with `serde(default)`
 - [ ] `default_rest_keys()` returning `["R"]`
@@ -221,9 +304,10 @@ In [campaigns/config.template.ron](../../campaigns/config.template.ron), add
 - [ ] `KeyMap` wires `rest` keys to `GameAction::Rest`
 - [ ] `handle_input` writes `InitiateRestEvent` on `R` press in Exploration mode
 - [ ] `config.template.ron` updated
+- [ ] Campaign Builder Config Editor **Rest** key binding slot (section 2.6)
 - [ ] All phase-2 tests pass
 
-#### 2.8 Success Criteria
+#### 2.9 Success Criteria
 
 Pressing `R` during exploration fires `InitiateRestEvent`. Pressing `R` during
 Combat, Menu, Dialogue, or InnManagement does nothing. `ControlsConfig` round-trips
@@ -301,8 +385,8 @@ In `src/game/systems/rest.rs`, implement a `RestPlugin`:
          and return to `GameMode::Exploration` (combat is initiated separately by a
          `RestCompleteEvent` handler in the encounter system).
      - Else (all hours completed): write `RestCompleteEvent { interrupted:
-       false, encounter_group: None }` and set `game_state.mode =
-       GameMode::Exploration`.
+false, encounter_group: None }` and set `game_state.mode =
+GameMode::Exploration`.
 
 The system advances **one hour per Bevy frame** to keep the rest fast without being
 instant (the HUD will show each tick — see Phase 4).
@@ -361,7 +445,7 @@ add `.add_plugins(RestPlugin)`.
 - [ ] `GameMode::Resting(RestState)` variant
 - [ ] `GameState::enter_rest(hours)` method
 - [ ] `src/game/systems/rest.rs` with `InitiateRestEvent`, `RestCompleteEvent`,
-  `process_rest`, `handle_rest_complete`, and `RestPlugin`
+      `process_rest`, `handle_rest_complete`, and `RestPlugin`
 - [ ] `RestPlugin` registered in the game application
 - [ ] `handle_input` mode guard updated to block input during `Resting`
 - [ ] All phase-3 tests pass
@@ -391,7 +475,7 @@ marker component `RestProgressRoot` that:
   - Title text: `"Resting…"`
   - Progress text: `"Hour X / 12"` (updated each frame).
   - Flavour text cycling through rest-atmosphere messages (e.g. `"The party settles
-    in for the night."`, `"Distant sounds echo in the dark."`).
+in for the night."`, `"Distant sounds echo in the dark."`).
   - Hint text: `"(encounter may interrupt)"`.
 
 #### 4.2 Add `update_rest_ui` System

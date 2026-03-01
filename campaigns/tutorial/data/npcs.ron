@@ -1,21 +1,3 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
-// SPDX-License-Identifier: Apache-2.0
-//
-// npcs.ron - Tutorial campaign NPC definitions
-//
-// This file contains all NPC definitions for the tutorial campaign in RON format.
-// See architecture.md Section 7.2 for format specifications.
-//
-// NPC Roles:
-//   - is_merchant: Can buy/sell items
-//   - is_innkeeper: Provides rest and healing services
-//   - is_priest: Provides healing and condition curing services
-//   - quest_ids: List of quests this NPC is involved with
-//
-// Factions:
-//   - Used to group NPCs by allegiance or organization
-//   - Affects dialogue options and quest availability
-
 [
     (
         id: "tutorial_elder_village",
@@ -32,6 +14,9 @@
         is_merchant: false,
         is_innkeeper: false,
         is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_innkeeper_town",
@@ -46,6 +31,7 @@
         is_merchant: false,
         is_innkeeper: true,
         is_priest: false,
+        stock_template: None,
         service_catalog: Some((
             services: [
                 (
@@ -56,6 +42,7 @@
                 ),
             ],
         )),
+        economy: None,
     ),
     (
         id: "tutorial_merchant_town",
@@ -70,12 +57,9 @@
         is_merchant: true,
         is_innkeeper: false,
         is_priest: false,
-        stock_template: Some("tutorial_merchant_stock"),
-        economy: Some((
-            buy_rate: 0.5,
-            sell_rate: 1.0,
-            max_buy_value: None,
-        )),
+        stock_template: Some("town_merchant_basic"),
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_priestess_town",
@@ -90,6 +74,7 @@
         is_merchant: false,
         is_innkeeper: false,
         is_priest: true,
+        stock_template: None,
         service_catalog: Some((
             services: [
                 (
@@ -118,6 +103,7 @@
                 ),
             ],
         )),
+        economy: None,
     ),
     (
         id: "tutorial_wizard_arcturus",
@@ -135,6 +121,9 @@
         is_merchant: false,
         is_innkeeper: false,
         is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_wizard_arcturus_brother",
@@ -152,6 +141,9 @@
         is_merchant: false,
         is_innkeeper: false,
         is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_ranger_lost",
@@ -168,6 +160,9 @@
         is_merchant: false,
         is_innkeeper: false,
         is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_elder_village2",
@@ -184,6 +179,9 @@
         is_merchant: false,
         is_innkeeper: false,
         is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_innkeeper_town2",
@@ -198,6 +196,7 @@
         is_merchant: false,
         is_innkeeper: true,
         is_priest: false,
+        stock_template: None,
         service_catalog: Some((
             services: [
                 (
@@ -208,6 +207,7 @@
                 ),
             ],
         )),
+        economy: None,
     ),
     (
         id: "tutorial_merchant_town2",
@@ -222,12 +222,9 @@
         is_merchant: true,
         is_innkeeper: false,
         is_priest: false,
-        stock_template: Some("tutorial_blacksmith_stock"),
-        economy: Some((
-            buy_rate: 0.5,
-            sell_rate: 1.0,
-            max_buy_value: None,
-        )),
+        stock_template: Some("mountain_pass_merchant"),
+        service_catalog: None,
+        economy: None,
     ),
     (
         id: "tutorial_priest_town2",
@@ -242,6 +239,7 @@
         is_merchant: false,
         is_innkeeper: false,
         is_priest: true,
+        stock_template: None,
         service_catalog: Some((
             services: [
                 (
@@ -270,6 +268,7 @@
                 ),
             ],
         )),
+        economy: None,
     ),
     (
         id: "tutorial_goblin_dying",
@@ -286,5 +285,8 @@
         is_merchant: false,
         is_innkeeper: false,
         is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     ),
 ]
