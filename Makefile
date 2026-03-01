@@ -37,12 +37,11 @@ build-windows: ; $(info $(M) running cargo build with target x86_64-pc-windows-m
 build-macos: ; $(info $(M) running cargo build with target x86_64-apple-darwin...) @ ## Runs a cargo build with target x86_64-apple-darwin
 	$Q $(CARGO) build --target x86_64-apple-darwin
 
-# Run the project
-run: ; $(info $(M) running cargo run...) @ ## Runs a cargo run
-	$Q $(CARGO) run
-
 sdk: ; $(info $(M) running  cargo run --package campaign_builder --bin campaign-builder -- --campaign campaigns/tutorial) @ ## Runs a cargo run --package campaign_builder --bin campaign-builder with the tutorial campaign
 	$Q $(CARGO) run --package campaign_builder --bin campaign-builder -- --campaign campaigns/tutorial
+
+run: ; $(info $(M) running cargo run...) @ ## Runs a cargo run
+	$Q $(CARGO) run --package antares --bin antares -- --campaign campaigns/tutorial
 
 # Run tests
 test: ; $(info $(M) running cargo test...) @ ## Runs a cargo test

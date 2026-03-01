@@ -84,6 +84,9 @@ pub enum DatabaseError {
     #[error("Failed to load creatures: {0}")]
     CreatureLoadError(String),
 
+    #[error("Failed to load NPC stock templates: {0}")]
+    NpcStockTemplateLoadError(String),
+
     #[error("Failed to load map {map_id}: {error}")]
     MapLoadError { map_id: String, error: String },
 
@@ -919,6 +922,11 @@ impl NpcDatabase {
         self.npcs.values().filter(|n| n.is_innkeeper).collect()
     }
 
+    /// Returns all priest NPCs
+    pub fn priests(&self) -> Vec<&crate::domain::world::NpcDefinition> {
+        self.npcs.values().filter(|n| n.is_priest).collect()
+    }
+
     /// Returns NPCs that give quests
     pub fn quest_givers(&self) -> Vec<&crate::domain::world::NpcDefinition> {
         self.npcs.values().filter(|n| n.gives_quests()).collect()
@@ -1020,6 +1028,12 @@ pub struct ContentDatabase {
 
     /// Creature visual definitions database
     pub creatures: crate::domain::visual::creature_database::CreatureDatabase,
+
+    /// Merchant stock template database
+    ///
+    /// Loaded from `npc_stock_templates.ron` in the data or campaign directory.
+    /// Used to initialize the runtime stock for merchant NPCs when a session begins.
+    pub npc_stock_templates: crate::domain::world::npc_runtime::MerchantStockTemplateDatabase,
 }
 
 impl ContentDatabase {
@@ -1047,6 +1061,8 @@ impl ContentDatabase {
             characters: CharacterDatabase::new(),
             npcs: NpcDatabase::new(),
             creatures: crate::domain::visual::creature_database::CreatureDatabase::new(),
+            npc_stock_templates:
+                crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new(),
         }
     }
 
@@ -1184,6 +1200,16 @@ impl ContentDatabase {
             NpcDatabase::new()
         };
 
+        // Load NPC stock templates
+        let npc_stock_templates = if data_dir.join("npc_stock_templates.ron").exists() {
+            crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::load_from_file(
+                data_dir.join("npc_stock_templates.ron"),
+            )
+            .map_err(|e| DatabaseError::NpcStockTemplateLoadError(e.to_string()))?
+        } else {
+            crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new()
+        };
+
         // Load creatures
         let creatures = if data_dir.join("creatures.ron").exists() {
             crate::domain::visual::creature_database::CreatureDatabase::load_from_registry(
@@ -1207,6 +1233,7 @@ impl ContentDatabase {
             conditions,
             characters,
             npcs,
+            npc_stock_templates,
             creatures,
         })
     }
@@ -1314,6 +1341,16 @@ impl ContentDatabase {
             NpcDatabase::new()
         };
 
+        // Load NPC stock templates
+        let npc_stock_templates = if data_path.join("npc_stock_templates.ron").exists() {
+            crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::load_from_file(
+                data_path.join("npc_stock_templates.ron"),
+            )
+            .map_err(|e| DatabaseError::NpcStockTemplateLoadError(e.to_string()))?
+        } else {
+            crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new()
+        };
+
         // Load creatures
         let creatures = if data_path.join("creatures.ron").exists() {
             let root_path = data_path.parent().unwrap_or(data_path);
@@ -1338,6 +1375,7 @@ impl ContentDatabase {
             conditions,
             characters,
             npcs,
+            npc_stock_templates,
             creatures,
         })
     }
@@ -1492,6 +1530,7 @@ impl ContentDatabase {
             character_count: self.characters.len(),
             npc_count: self.npcs.count(),
             creature_count: self.creatures.count(),
+            npc_stock_template_count: self.npc_stock_templates.len(),
         }
     }
 }
@@ -1555,6 +1594,9 @@ pub struct ContentStats {
 
     /// Number of creature visual definitions
     pub creature_count: usize,
+
+    /// Number of merchant stock template definitions
+    pub npc_stock_template_count: usize,
 }
 
 impl ContentStats {
@@ -1578,6 +1620,7 @@ impl ContentStats {
     ///     character_count: 8,
     ///     npc_count: 12,
     ///     creature_count: 0,
+    ///     npc_stock_template_count: 0,
     /// };
     /// assert_eq!(stats.total(), 263);
     /// ```
@@ -1594,6 +1637,7 @@ impl ContentStats {
             + self.character_count
             + self.npc_count
             + self.creature_count
+            + self.npc_stock_template_count
     }
 }
 
@@ -1631,6 +1675,7 @@ mod tests {
             character_count: 6,
             npc_count: 0,
             creature_count: 0,
+            npc_stock_template_count: 0,
         };
         assert_eq!(stats.total(), 17);
     }
@@ -2223,6 +2268,7 @@ mod tests {
             character_count: 6,
             npc_count: 0,
             creature_count: 0,
+            npc_stock_template_count: 0,
         };
 
         // Total should include character_count, npc_count, and creature_count
@@ -2265,6 +2311,10 @@ mod tests {
             faction: Some("Village".to_string()),
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         db.add_npc(npc.clone()).expect("Failed to add NPC");
@@ -2335,6 +2385,28 @@ mod tests {
         let innkeepers = db.innkeepers();
         assert_eq!(innkeepers.len(), 1);
         assert_eq!(innkeepers[0].id, "inn_1");
+    }
+
+    #[test]
+    fn test_npc_database_priests() {
+        let mut db = NpcDatabase::new();
+
+        let priest =
+            crate::domain::world::NpcDefinition::priest("priest_1", "Father Alaric", "priest.png");
+
+        let merchant =
+            crate::domain::world::NpcDefinition::merchant("merchant_1", "Shop", "merchant.png");
+
+        let guard = crate::domain::world::NpcDefinition::new("guard_1", "City Guard", "guard.png");
+
+        db.add_npc(priest).expect("Failed to add priest");
+        db.add_npc(merchant).expect("Failed to add merchant");
+        db.add_npc(guard).expect("Failed to add guard");
+
+        let priests = db.priests();
+        assert_eq!(priests.len(), 1);
+        assert_eq!(priests[0].id, "priest_1");
+        assert!(priests[0].is_priest);
     }
 
     #[test]
@@ -2504,6 +2576,7 @@ mod tests {
             character_count: 9,
             creature_count: 0,
             npc_count: 15,
+            npc_stock_template_count: 0,
         };
 
         assert_eq!(stats.total(), 181);
@@ -2697,5 +2770,219 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ===== Phase 4: MerchantStockTemplateDatabase and ContentDatabase Integration Tests =====
+
+    #[test]
+    fn test_merchant_stock_template_database_new() {
+        // Assert that a freshly constructed database is empty
+        let db = crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new();
+        assert_eq!(db.len(), 0);
+        assert!(db.is_empty());
+    }
+
+    #[test]
+    fn test_merchant_stock_template_database_load_from_file() {
+        // Load the core npc_stock_templates.ron and assert at least 3 templates exist
+        let path = "data/npc_stock_templates.ron";
+
+        if !std::path::Path::new(path).exists() {
+            return;
+        }
+
+        let db =
+            crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::load_from_file(path)
+                .expect("Failed to load npc_stock_templates.ron");
+
+        assert!(
+            db.len() >= 3,
+            "Expected at least 3 templates, got {}",
+            db.len()
+        );
+        assert!(
+            db.get("blacksmith_basic").is_some(),
+            "blacksmith_basic not found"
+        );
+        assert!(
+            db.get("general_store_basic").is_some(),
+            "general_store_basic not found"
+        );
+        assert!(
+            db.get("alchemist_basic").is_some(),
+            "alchemist_basic not found"
+        );
+    }
+
+    #[test]
+    fn test_content_database_includes_npc_stock_templates() {
+        // Load core content and assert npc_stock_templates is populated
+        let data_path = "data";
+
+        if !std::path::Path::new(data_path).exists()
+            || !std::path::Path::new("data/npc_stock_templates.ron").exists()
+        {
+            return;
+        }
+
+        let db =
+            ContentDatabase::load_core(data_path).expect("Failed to load core content database");
+
+        assert!(
+            !db.npc_stock_templates.is_empty(),
+            "npc_stock_templates should be populated after load_core"
+        );
+        assert!(
+            db.stats().npc_stock_template_count > 0,
+            "ContentStats::npc_stock_template_count should be > 0"
+        );
+    }
+
+    #[test]
+    fn test_base_merchant_has_stock_template() {
+        // Load data/npcs.ron and verify base_merchant has stock_template = Some("blacksmith_basic")
+        let path = "data/npcs.ron";
+
+        if !std::path::Path::new(path).exists() {
+            return;
+        }
+
+        let db = NpcDatabase::load_from_file(path).expect("Failed to load data/npcs.ron");
+
+        let merchant = db
+            .get_npc("base_merchant")
+            .expect("base_merchant not found");
+        assert_eq!(
+            merchant.stock_template,
+            Some("blacksmith_basic".to_string()),
+            "base_merchant should have stock_template = Some(\"blacksmith_basic\")"
+        );
+        assert!(
+            merchant.economy.is_some(),
+            "base_merchant should have economy settings"
+        );
+    }
+
+    #[test]
+    fn test_base_priest_has_service_catalog() {
+        // Load data/npcs.ron and verify base_priest has a service_catalog with at least 4 entries
+        let path = "data/npcs.ron";
+
+        if !std::path::Path::new(path).exists() {
+            return;
+        }
+
+        let db = NpcDatabase::load_from_file(path).expect("Failed to load data/npcs.ron");
+
+        let priest = db.get_npc("base_priest").expect("base_priest not found");
+        let catalog = priest
+            .service_catalog
+            .as_ref()
+            .expect("base_priest should have a service_catalog");
+
+        assert!(
+            catalog.services.len() >= 4,
+            "base_priest service_catalog should have at least 4 services, got {}",
+            catalog.services.len()
+        );
+
+        // Verify the expected service IDs are present
+        let service_ids: Vec<&str> = catalog
+            .services
+            .iter()
+            .map(|s| s.service_id.as_str())
+            .collect();
+        assert!(
+            service_ids.contains(&"heal_all"),
+            "Expected 'heal_all' service"
+        );
+        assert!(
+            service_ids.contains(&"cure_poison"),
+            "Expected 'cure_poison' service"
+        );
+        assert!(
+            service_ids.contains(&"cure_disease"),
+            "Expected 'cure_disease' service"
+        );
+        assert!(
+            service_ids.contains(&"resurrect"),
+            "Expected 'resurrect' service"
+        );
+    }
+
+    #[test]
+    fn test_base_innkeeper_has_service_catalog() {
+        // Load data/npcs.ron and verify base_innkeeper has a service_catalog with "rest"
+        let path = "data/npcs.ron";
+
+        if !std::path::Path::new(path).exists() {
+            return;
+        }
+
+        let db = NpcDatabase::load_from_file(path).expect("Failed to load data/npcs.ron");
+
+        let innkeeper = db
+            .get_npc("base_innkeeper")
+            .expect("base_innkeeper not found");
+        let catalog = innkeeper
+            .service_catalog
+            .as_ref()
+            .expect("base_innkeeper should have a service_catalog");
+
+        assert!(
+            !catalog.services.is_empty(),
+            "base_innkeeper service_catalog should have at least one service"
+        );
+
+        let has_rest = catalog.services.iter().any(|s| s.service_id == "rest");
+        assert!(has_rest, "base_innkeeper should offer 'rest' service");
+    }
+
+    #[test]
+    fn test_content_database_npc_stock_template_count_in_stats() {
+        // Assert that stats() reflects the npc_stock_templates field correctly
+        let mut db = ContentDatabase::new();
+
+        // Empty database should have 0
+        assert_eq!(db.stats().npc_stock_template_count, 0);
+
+        // Add a template manually
+        db.npc_stock_templates
+            .add(crate::domain::world::npc_runtime::MerchantStockTemplate {
+                id: "test_template".to_string(),
+                entries: vec![],
+                magic_item_pool: vec![],
+                magic_slot_count: 0,
+                magic_refresh_days: 7,
+            });
+
+        assert_eq!(db.stats().npc_stock_template_count, 1);
+        assert_eq!(db.npc_stock_templates.len(), 1);
+    }
+
+    #[test]
+    fn test_content_database_load_campaign_includes_npc_stock_templates() {
+        // Load the test campaign and verify npc_stock_templates is populated
+        let campaign_path = "data/test_campaign";
+
+        if !std::path::Path::new(campaign_path).exists()
+            || !std::path::Path::new("data/test_campaign/data/npc_stock_templates.ron").exists()
+        {
+            return;
+        }
+
+        let db = ContentDatabase::load_campaign(campaign_path)
+            .expect("Failed to load test campaign database");
+
+        assert!(
+            !db.npc_stock_templates.is_empty(),
+            "Test campaign npc_stock_templates should be populated"
+        );
+        assert!(
+            db.npc_stock_templates
+                .get("tutorial_merchant_stock")
+                .is_some(),
+            "tutorial_merchant_stock template not found in test campaign"
+        );
     }
 }

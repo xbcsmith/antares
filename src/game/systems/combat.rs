@@ -798,8 +798,6 @@ impl Plugin for CombatPlugin {
                 update_monster_hp_hover_bars.after(spawn_monster_hp_hover_bars),
             )
             .add_systems(Update, cleanup_monster_hp_hover_bars)
-            // Phase 4: Monster AI Systems
-            .add_systems(Update, execute_monster_turn)
             // Phase 5: Combat resolution & rewards
             .add_systems(Update, check_combat_resolution)
             .add_systems(Update, handle_combat_victory)
@@ -819,7 +817,11 @@ impl Plugin for CombatPlugin {
             )
             .add_systems(Update, cleanup_combat_ui)
             .add_systems(Update, update_combat_ui)
-            .add_systems(Update, cleanup_floating_damage);
+            .add_systems(Update, cleanup_floating_damage)
+            // Phase 4: Monster AI — must run AFTER update_combat_ui so the UI
+            // always reflects the current EnemyTurn state (and hides the action
+            // menu) before the monster acts and potentially advances the turn.
+            .add_systems(Update, execute_monster_turn.after(update_combat_ui));
     }
 }
 
@@ -879,6 +881,7 @@ fn handle_combat_started(
     mut reader: MessageReader<CombatStarted>,
     mut combat_res: ResMut<CombatResource>,
     global_state: Res<GlobalState>,
+    mut turn_state: ResMut<CombatTurnStateResource>,
     mut music_writer: Option<MessageWriter<crate::game::systems::audio::PlayMusic>>,
 ) {
     for msg in reader.read() {
@@ -900,6 +903,22 @@ fn handle_combat_started(
                 }
             }
             combat_res.player_orig_indices = mapping;
+
+            // Initialize CombatTurnStateResource from the actual first actor in
+            // turn_order.  Without this, a monster-first initiative order (e.g.
+            // Ancient Wolf speed 14 > all party speeds) would leave the resource
+            // stuck on PlayerTurn, causing the action buttons to flash incorrectly
+            // and the monster turn to be skipped or mishandled on the first frame.
+            turn_state.0 = match combat_res.state.turn_order.first() {
+                Some(CombatantId::Monster(_)) => {
+                    info!("Combat started: monster goes first — setting EnemyTurn");
+                    CombatTurnState::EnemyTurn
+                }
+                _ => {
+                    info!("Combat started: player goes first — setting PlayerTurn");
+                    CombatTurnState::PlayerTurn
+                }
+            };
 
             // Store encounter position so handle_combat_victory can remove
             // the MapEvent::Encounter from the map on victory (Phase 4).
@@ -3109,7 +3128,41 @@ fn execute_monster_turn(
         .get(combat_res.state.current_turn)
         .cloned();
 
-    if let Some(CombatantId::Monster(_)) = current_actor {
+    if let Some(CombatantId::Monster(monster_idx)) = current_actor {
+        // Check if the monster is able to act.  If it cannot (dead, paralyzed,
+        // or already acted this round), we must still advance the turn so that
+        // combat does not deadlock with turn_state perpetually stuck on EnemyTurn.
+        let can_act = combat_res
+            .state
+            .participants
+            .get(monster_idx)
+            .map(|p| p.can_act())
+            .unwrap_or(false);
+
+        if !can_act {
+            // Advance past this incapacitated / already-acted monster and update
+            // turn_state so the next actor (player or another monster) gets control.
+            info!(
+                "Monster at participant index {} cannot act — advancing turn",
+                monster_idx
+            );
+            // Advance turn (round effects are handled inside advance_turn when
+            // the round wraps; we pass an empty condition list here because the
+            // full DoT tick already happened in perform_monster_turn_with_rng on
+            // earlier turns this round).
+            let _ = combat_res.state.advance_turn(&[]);
+            turn_state.0 = match combat_res
+                .state
+                .turn_order
+                .get(combat_res.state.current_turn)
+            {
+                Some(CombatantId::Player(_)) => CombatTurnState::PlayerTurn,
+                Some(CombatantId::Monster(_)) => CombatTurnState::EnemyTurn,
+                None => CombatTurnState::PlayerTurn,
+            };
+            return;
+        }
+
         // Fallback content when none registered (tests often omit GameContent)
         let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
@@ -3131,6 +3184,20 @@ fn execute_monster_turn(
             };
             emit_combat_feedback(Some(attacker), target, effect, &mut feedback_writer);
         }
+    } else if !combat_res.state.turn_order.is_empty() {
+        // The turn_order slot exists but is a Player, yet turn_state is EnemyTurn
+        // — this is a stale/inconsistent state.  Correct it so the player regains
+        // control rather than hanging forever.
+        //
+        // The `turn_order.is_empty()` guard prevents this branch from firing
+        // during partially-initialised test states where EnemyTurn is set
+        // manually before a full combat state (with monsters) is wired up.
+        warn!(
+            "execute_monster_turn: EnemyTurn but current actor is not a monster (turn {}); \
+             correcting to PlayerTurn",
+            combat_res.state.current_turn
+        );
+        turn_state.0 = CombatTurnState::PlayerTurn;
     }
 }
 
@@ -4719,7 +4786,13 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CombatPlugin);
 
-        // Create combat state
+        // Create combat state with a monster as the first actor so that forcing
+        // EnemyTurn is consistent with the combat state and the stale-state
+        // correction in execute_monster_turn does not fire (the monster cannot
+        // act because has_acted == true, which triggers the incapacitated-skip
+        // path that advances to PlayerTurn — so we use a two-step approach:
+        // first confirm the menu exists on PlayerTurn, then verify it is hidden
+        // when we set EnemyTurn with an *already-acted* monster current actor).
         let mut gs = GameState::new();
         let hero = Character::new(
             "Hero".to_string(),
@@ -4728,31 +4801,64 @@ mod tests {
             Sex::Male,
             Alignment::Good,
         );
-        gs.party.add_member(hero).unwrap();
-        gs.enter_combat();
+        gs.party.add_member(hero.clone()).unwrap();
 
+        // Build a combat state with player first so the initial state is PlayerTurn.
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(10, 8, 8, 10, 8, 10, 8),
+            10,
+            8,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        cs.add_monster(monster);
+        // Force player first in turn order.
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cs.current_turn = 0;
+
+        gs.enter_combat_with_state(cs.clone());
         app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None];
+        }
 
-        // Set turn state to PlayerTurn
+        // Set turn state to PlayerTurn and run to spawn UI.
         app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
-
-        // Run update to spawn and update UI
         app.update();
 
-        // Action menu should be visible when PlayerTurn (spawns with default visibility)
+        // Action menu should be visible when PlayerTurn.
         let mut menu_query = app
             .world_mut()
             .query_filtered::<&Visibility, With<ActionMenuPanel>>();
         let count = menu_query.iter(app.world()).count();
         assert_eq!(count, 1, "Action menu should exist");
 
-        // Change to EnemyTurn
+        // Advance combat turn to the monster (current_turn = 1) and set EnemyTurn.
+        // Mark the monster as already-acted so execute_monster_turn skips it and
+        // immediately advances back to the player — but on *this* frame we only
+        // care that update_combat_ui received EnemyTurn and hid the menu.
+        // We set current_turn = 1 to point at the monster slot.
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state.current_turn = 1;
+            // Mark monster as having acted so the can_act() == false path fires
+            // and the turn is advanced *within the same update call* before
+            // update_combat_ui runs — however the ordering guarantees
+            // execute_monster_turn runs *after* update_combat_ui in the schedule,
+            // so on this frame update_combat_ui still sees EnemyTurn.
+        }
         app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::EnemyTurn;
-
-        // Run update
         app.update();
 
-        // Action menu should be hidden
+        // Action menu should be hidden on the frame where EnemyTurn is set.
         let mut menu_query = app
             .world_mut()
             .query_filtered::<&Visibility, With<ActionMenuPanel>>();
@@ -6296,17 +6402,30 @@ mod tests {
             "single Enter attack should not enter target-selection mode"
         );
 
-        // Turn should advance away from player's turn after executing attack.
-        let turn_state = app.world().resource::<CombatTurnStateResource>();
-        assert!(
-            !matches!(turn_state.0, CombatTurnState::PlayerTurn),
-            "single Enter attack should advance turn state"
-        );
-
+        // With execute_monster_turn now scheduled after update_combat_ui, the
+        // monster (Goblin) fires its turn in the *same* frame as the player's
+        // attack: the sequence within one app.update() is:
+        //   1. handle_attack_action  → advances current_turn to 1, sets EnemyTurn
+        //   2. update_combat_ui      → hides action menu (sees EnemyTurn)
+        //   3. execute_monster_turn  → Goblin acts, advances current_turn back to 0,
+        //                              sets PlayerTurn
+        //
+        // So after the frame the observable state is back to PlayerTurn with
+        // current_turn == 0.  The meaningful invariants are:
+        //   a) TargetSelection was cleared (attack was executed, not just armed)
+        //   b) The combat is still InProgress (goblin survived or didn't — either
+        //      way the state machine ran without panicking)
+        //   c) The round advanced (at minimum current_turn wrapped back to 0)
         let cr = app.world().resource::<CombatResource>();
+        assert!(
+            cr.state.is_in_progress()
+                || cr.state.status == crate::domain::combat::types::CombatStatus::Victory,
+            "combat must still be progressing or have resolved cleanly after one round"
+        );
+        // current_turn wrapped back to 0 after the full mini-round
         assert_eq!(
-            cr.state.current_turn, 1,
-            "single Enter attack should advance current_turn to next combatant"
+            cr.state.current_turn, 0,
+            "current_turn must wrap back to 0 after player attacks and monster responds in same frame"
         );
     }
 
@@ -7459,9 +7578,28 @@ mod tests {
         );
         gs.party.add_member(hero.clone()).unwrap();
 
+        // Build a combat state where the monster is the current actor so that
+        // EnemyTurn is consistent with the turn_order.  The monster has already
+        // acted (has_acted == true) so can_act() returns false — execute_monster_turn
+        // will advance the turn on the *second* update, but for the frame on which
+        // we check input blocking the system still sees EnemyTurn at entry.
         let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
         cs.add_player(hero.clone());
-        cs.turn_order = vec![CombatantId::Player(0)];
+        let mut blocking_monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(10, 8, 8, 10, 8, 10, 8),
+            10,
+            8,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        blocking_monster.mark_acted();
+        cs.add_monster(blocking_monster);
+        // Monster is current actor (index 1 in participants, slot 0 in turn_order).
+        cs.turn_order = vec![CombatantId::Monster(1), CombatantId::Player(0)];
         cs.current_turn = 0;
         gs.enter_combat_with_state(cs.clone());
 
@@ -7469,24 +7607,37 @@ mod tests {
         {
             let mut cr = app.world_mut().resource_mut::<CombatResource>();
             cr.state = cs;
-            cr.player_orig_indices = vec![Some(0)];
+            cr.player_orig_indices = vec![Some(0), None];
         }
 
         // Enemy turn — input should be blocked.
         app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::EnemyTurn;
-        app.update(); // spawn UI
+        app.update(); // spawn UI; execute_monster_turn skips the already-acted monster
+                      // and advances turn_state to PlayerTurn on this frame
+
+        // After the first update execute_monster_turn has advanced to PlayerTurn
+        // (monster could not act).  Force EnemyTurn again so we can test that
+        // combat_input_system blocks keyboard input when turn_state is EnemyTurn.
+        // Also move current_turn back to the monster slot to keep state consistent.
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state.current_turn = 0; // back to monster slot
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::EnemyTurn;
 
         // Record active_index before pressing Tab.
         let index_before = app.world().resource::<ActionMenuState>().active_index;
 
-        // Press Tab during EnemyTurn.
+        // Press Tab during EnemyTurn — combat_input_system runs before
+        // execute_monster_turn in the schedule, so it sees EnemyTurn first and
+        // blocks the input.
         {
             let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
             kb.press(KeyCode::Tab);
         }
         app.update();
 
-        // active_index must be unchanged — input was blocked.
+        // active_index must be unchanged — input was blocked by combat_input_system.
         let index_after = app.world().resource::<ActionMenuState>().active_index;
         assert_eq!(
             index_after, index_before,
@@ -7496,5 +7647,160 @@ mod tests {
         // TargetSelection must also remain None.
         let ts = app.world().resource::<TargetSelection>();
         assert!(ts.0.is_none(), "No dispatch must occur during EnemyTurn");
+    }
+
+    /// Regression: when the fastest combatant is a monster (e.g. Ancient Wolf
+    /// speed 14 > all party speeds), `handle_combat_started` must initialise
+    /// `CombatTurnStateResource` to `EnemyTurn`, not leave it at the default
+    /// `PlayerTurn`.  Before the fix the action buttons would appear on the
+    /// first frame and the player could "act" before the monster's turn ran.
+    #[test]
+    fn test_monster_first_initiative_sets_enemy_turn() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Party member with speed 8 (slower than the wolf).
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "Slow Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Force a very low speed so the monster is guaranteed to go first.
+        hero.stats.speed.base = 5;
+        hero.stats.speed.current = 5;
+        gs.party.add_member(hero.clone()).unwrap();
+
+        // Monster with speed 14 — goes first under Handicap::Even.
+        let fast_wolf = crate::domain::combat::monster::Monster::new(
+            99,
+            "Ancient Wolf".to_string(),
+            crate::domain::character::Stats::new(16, 5, 7, 14, 14, 10, 10),
+            30,
+            12,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(2, 6, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(fast_wolf);
+        // calculate_turn_order puts the monster first (speed 14 > 5).
+        crate::domain::combat::engine::start_combat(&mut cs);
+
+        // Confirm the turn order really does put the monster first.
+        assert!(
+            matches!(cs.turn_order.first(), Some(CombatantId::Monster(_))),
+            "test precondition: monster must be first in turn order"
+        );
+
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Deliver the CombatStarted message so handle_combat_started fires.
+        {
+            let mut writer = app.world_mut().resource_mut::<Messages<CombatStarted>>();
+            writer.write(CombatStarted {
+                encounter_position: None,
+                encounter_map_id: None,
+            });
+        }
+        // Seed CombatResource so handle_combat_started has something to copy.
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None];
+        }
+
+        // First frame: handle_combat_started fires and sets CombatTurnStateResource.
+        app.update();
+
+        let ts = app.world().resource::<CombatTurnStateResource>();
+        assert!(
+            matches!(ts.0, CombatTurnState::EnemyTurn),
+            "CombatTurnStateResource must be EnemyTurn when monster goes first, got {:?}",
+            ts.0
+        );
+
+        // The turn-state assertion above is the authoritative proof of the fix.
+        // We do NOT assert action-menu visibility here because execute_monster_turn
+        // fires on the very next frame (the wolf acts, advances the turn to the
+        // player, and flips turn_state back to PlayerTurn), which would make the
+        // menu visible again and cause a flaky assertion.  The core contract —
+        // "handle_combat_started sets EnemyTurn when the monster is first" — is
+        // fully covered by the turn_state assertion that already passed above.
+    }
+
+    /// Regression: when a monster's `can_act()` returns false (already acted,
+    /// dead, or paralyzed) `execute_monster_turn` must still advance the turn
+    /// pointer and flip `CombatTurnStateResource` to `PlayerTurn` so the player
+    /// is not locked out.  Before the fix the system returned early without
+    /// advancing the turn, leaving `turn_state` stuck on `EnemyTurn` forever
+    /// and causing "input blocked — not player turn" to spam the log.
+    #[test]
+    fn test_incapacitated_monster_turn_advances_to_player() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        // Build a combat state where the monster is first in turn order but
+        // has already acted (has_acted == true), so can_act() returns false.
+        let mut already_acted_wolf = crate::domain::combat::monster::Monster::new(
+            99,
+            "Ancient Wolf".to_string(),
+            crate::domain::character::Stats::new(16, 5, 7, 14, 14, 10, 10),
+            30,
+            12,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(2, 6, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        already_acted_wolf.mark_acted(); // simulate already acted this round
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(already_acted_wolf);
+        // Force monster first in the turn order.
+        cs.turn_order = vec![CombatantId::Monster(1), CombatantId::Player(0)];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Seed CombatResource and force turn_state to EnemyTurn.
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::EnemyTurn;
+
+        // One frame: execute_monster_turn should detect can_act()==false and
+        // advance the turn to the player, flipping turn_state to PlayerTurn.
+        app.update();
+
+        let ts = app.world().resource::<CombatTurnStateResource>();
+        assert!(
+            matches!(ts.0, CombatTurnState::PlayerTurn),
+            "turn_state must be PlayerTurn after skipping incapacitated monster, got {:?}",
+            ts.0
+        );
     }
 }

@@ -370,6 +370,10 @@ mod tests {
             faction: Some("Merchants Guild".to_string()),
             is_merchant: true,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         let guard = crate::domain::world::npc::NpcDefinition {
@@ -384,6 +388,10 @@ mod tests {
             faction: Some("City Watch".to_string()),
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         npc_db.add_npc(merchant).unwrap();

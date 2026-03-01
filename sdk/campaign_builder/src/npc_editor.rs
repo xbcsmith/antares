@@ -34,6 +34,7 @@ use crate::ui_helpers::{
 };
 use antares::domain::dialogue::{DialogueId, DialogueTree};
 use antares::domain::quest::{Quest, QuestId};
+use antares::domain::world::npc_runtime::MerchantStockTemplate;
 use antares::domain::world::{NpcDefinition, NpcId, SpriteReference};
 use antares::domain::CreatureId;
 use antares::sdk::tool_config::DisplayConfig;
@@ -122,6 +123,15 @@ pub struct NpcEditorState {
     /// Whether the autocomplete buffers should be reset on next form render
     #[serde(skip)]
     pub reset_autocomplete_buffers: bool,
+
+    /// Stock templates available for merchant assignment (populated by caller)
+    #[serde(skip)]
+    pub available_stock_templates: Vec<MerchantStockTemplate>,
+
+    /// Set by the UI when the user clicks "✏ Edit template"; consumed by
+    /// `CampaignBuilderApp` to switch tab and open the named template.
+    #[serde(skip)]
+    pub requested_template_edit: Option<String>,
 }
 
 /// NPC editor mode
@@ -153,6 +163,8 @@ pub struct NpcEditBuffer {
     pub sprite_sheet: String,
     /// Optional sprite index (0-based)
     pub sprite_index: String,
+    /// ID of the stock template this merchant uses (empty = no template)
+    pub stock_template: String,
 }
 
 impl Default for NpcEditBuffer {
@@ -170,6 +182,7 @@ impl Default for NpcEditBuffer {
             creature_id: String::new(),
             sprite_sheet: String::new(),
             sprite_index: String::new(),
+            stock_template: String::new(),
         }
     }
 }
@@ -200,6 +213,8 @@ impl Default for NpcEditorState {
             last_campaign_dir: None,
             last_npcs_file: None,
             reset_autocomplete_buffers: false,
+            available_stock_templates: Vec::new(),
+            requested_template_edit: None,
         }
     }
 }
@@ -782,6 +797,59 @@ impl NpcEditorState {
                     });
 
                     ui.checkbox(&mut self.edit_buffer.is_merchant, "🏪 Is Merchant");
+
+                    if self.edit_buffer.is_merchant {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label("Stock Template:");
+                            egui::ComboBox::from_id_salt("npc_edit_stock_template_select")
+                                .selected_text(if self.edit_buffer.stock_template.is_empty() {
+                                    "None (no stock)".to_string()
+                                } else {
+                                    self.edit_buffer.stock_template.clone()
+                                })
+                                .show_ui(ui, |ui| {
+                                    if ui
+                                        .selectable_label(
+                                            self.edit_buffer.stock_template.is_empty(),
+                                            "None (no stock)",
+                                        )
+                                        .clicked()
+                                    {
+                                        self.edit_buffer.stock_template.clear();
+                                    }
+                                    for tmpl in &self.available_stock_templates {
+                                        ui.push_id(&tmpl.id, |ui| {
+                                            if ui
+                                                .selectable_label(
+                                                    self.edit_buffer.stock_template == tmpl.id,
+                                                    &tmpl.id,
+                                                )
+                                                .on_hover_text(format!(
+                                                    "{} entries, {} magic slots",
+                                                    tmpl.entries.len(),
+                                                    tmpl.magic_slot_count
+                                                ))
+                                                .clicked()
+                                            {
+                                                self.edit_buffer.stock_template =
+                                                    tmpl.id.clone();
+                                            }
+                                        });
+                                    }
+                                });
+
+                            if !self.edit_buffer.stock_template.is_empty() {
+                                if ui.small_button("✏ Edit template").clicked() {
+                                    // Signal the caller to navigate to the Stock Templates tab
+                                    // and open this template for editing.
+                                    self.requested_template_edit =
+                                        Some(self.edit_buffer.stock_template.clone());
+                                }
+                            }
+                        });
+                    }
+
                     ui.checkbox(&mut self.edit_buffer.is_innkeeper, "🛏️ Is Innkeeper");
                 });
 
@@ -1226,6 +1294,7 @@ impl NpcEditorState {
                     .sprite
                     .as_ref()
                     .map_or(String::new(), |s| s.sprite_index.to_string()),
+                stock_template: npc.stock_template.clone().unwrap_or_default(),
             };
             self.selected_npc = Some(idx);
             self.mode = NpcEditorMode::Edit;
@@ -1375,6 +1444,14 @@ impl NpcEditorState {
             },
             is_merchant: self.edit_buffer.is_merchant,
             is_innkeeper: self.edit_buffer.is_innkeeper,
+            stock_template: if self.edit_buffer.stock_template.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.stock_template.clone())
+            },
+            is_priest: false,
+            service_catalog: None,
+            economy: None,
         };
 
         // Perform the in-memory save and remember the result
@@ -2197,5 +2274,90 @@ mod tests {
 
         state.save_npc();
         assert_eq!(state.npcs[0].portrait_id, "");
+    }
+
+    // ── Phase 7: stock_template field tests ───────────────────────────────────
+
+    #[test]
+    fn test_npc_edit_buffer_stock_template_default_empty() {
+        let buf = NpcEditBuffer::default();
+        assert_eq!(buf.stock_template, "");
+    }
+
+    #[test]
+    fn test_save_npc_merchant_with_stock_template() {
+        let mut state = NpcEditorState::new();
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "merchant_bob".to_string();
+        state.edit_buffer.name = "Merchant Bob".to_string();
+        state.edit_buffer.portrait_id = "bob.png".to_string();
+        state.edit_buffer.is_merchant = true;
+        state.edit_buffer.stock_template = "blacksmith".to_string();
+
+        let saved = state.save_npc();
+        assert!(saved, "save_npc should succeed");
+        assert_eq!(state.npcs[0].stock_template, Some("blacksmith".to_string()));
+    }
+
+    #[test]
+    fn test_save_npc_merchant_no_template() {
+        let mut state = NpcEditorState::new();
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "merchant_empty".to_string();
+        state.edit_buffer.name = "Empty Merchant".to_string();
+        state.edit_buffer.portrait_id = "em.png".to_string();
+        state.edit_buffer.is_merchant = true;
+        state.edit_buffer.stock_template = String::new();
+
+        let saved = state.save_npc();
+        assert!(saved, "save_npc should succeed");
+        assert_eq!(
+            state.npcs[0].stock_template, None,
+            "empty stock_template string should serialise as None"
+        );
+    }
+
+    #[test]
+    fn test_start_edit_npc_populates_stock_template() {
+        use antares::domain::world::NpcDefinition;
+
+        let mut state = NpcEditorState::new();
+
+        let npc = NpcDefinition {
+            id: "wizard_shop_keeper".to_string(),
+            name: "Mysto".to_string(),
+            description: "A mysterious wizard".to_string(),
+            portrait_id: "wizard.png".to_string(),
+            dialogue_id: None,
+            creature_id: None,
+            sprite: None,
+            quest_ids: vec![],
+            faction: None,
+            is_merchant: true,
+            is_innkeeper: false,
+            is_priest: false,
+            stock_template: Some("wizard_shop".to_string()),
+            service_catalog: None,
+            economy: None,
+        };
+        state.npcs.push(npc);
+
+        state.start_edit_npc(0);
+        assert_eq!(state.edit_buffer.stock_template, "wizard_shop");
+    }
+
+    #[test]
+    fn test_requested_template_edit_set_on_click() {
+        let mut state = NpcEditorState::new();
+        assert!(state.requested_template_edit.is_none());
+
+        // Simulate what the UI does when "✏ Edit template" is clicked
+        state.requested_template_edit = Some("foo".to_string());
+        assert_eq!(state.requested_template_edit, Some("foo".to_string()));
+
+        // Consuming it (as CampaignBuilderApp does via .take()) clears it
+        let taken = state.requested_template_edit.take();
+        assert_eq!(taken, Some("foo".to_string()));
+        assert!(state.requested_template_edit.is_none());
     }
 }

@@ -21,6 +21,7 @@ pub mod blueprint;
 mod events;
 mod movement;
 pub mod npc;
+pub mod npc_runtime;
 pub mod sprite_selection;
 mod types;
 
@@ -28,6 +29,9 @@ pub use blueprint::MapBlueprint;
 pub use events::{random_encounter, trigger_event, EventError, EventResult};
 pub use movement::{check_tile_blocked, move_party, MovementError};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};
+pub use npc_runtime::{
+    MerchantStockTemplate, MerchantStockTemplateDatabase, NpcRuntimeState, NpcRuntimeStore,
+};
 pub use types::{
     ArchConfig, AsyncMeshConfig, AsyncMeshTaskId, ColumnConfig, ColumnStyle, DetailLevel,
     DoorFrameConfig, EncounterTable, FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags,

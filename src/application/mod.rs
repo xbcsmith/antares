@@ -11,8 +11,11 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.1 for complete specifications.
 
+pub mod container_inventory_state;
 pub mod dialogue;
+pub mod inventory_state;
 pub mod menu;
+pub mod merchant_inventory_state;
 pub mod quests;
 pub mod resources;
 pub mod save_game;
@@ -21,6 +24,7 @@ use crate::application::menu::MenuState;
 use crate::domain::character::{Party, Roster};
 use crate::domain::party_manager::{PartyManagementError, PartyManager};
 use crate::domain::types::{GameTime, InnkeeperId};
+use crate::domain::world::npc_runtime::NpcRuntimeStore;
 use crate::domain::world::World;
 use crate::sdk::campaign_loader::{Campaign, CampaignError};
 use crate::sdk::database::ContentDatabase;
@@ -45,12 +49,20 @@ pub enum GameMode {
     Exploration,
     /// Turn-based tactical combat containing full combat state
     Combat(crate::domain::combat::engine::CombatState),
+    /// Inventory management screen
+    Inventory(crate::application::inventory_state::InventoryState),
+    /// Inn party management interface
+    InnManagement(InnManagementState),
     /// Menu system (character management, inventory)
     Menu(MenuState),
     /// NPC dialogue and interactions
     Dialogue(crate::application::dialogue::DialogueState),
-    /// Inn party management interface
-    InnManagement(InnManagementState),
+    /// Merchant buy/sell split-screen inventory (opened with `I` during Dialogue
+    /// with a merchant NPC).
+    MerchantInventory(crate::application::merchant_inventory_state::MerchantInventoryState),
+    /// Container interaction split-screen inventory (opened with `E` when
+    /// facing a chest, crate, hole in the wall, etc.).
+    ContainerInventory(crate::application::container_inventory_state::ContainerInventoryState),
 }
 
 /// State for inn party management mode
@@ -336,6 +348,13 @@ pub struct GameState {
     /// Tracks which characters have been encountered on maps (prevents re-recruiting)
     #[serde(default)]
     pub encountered_characters: std::collections::HashSet<String>,
+    /// Per-NPC mutable runtime state (merchant stock, consumed services).
+    ///
+    /// Serialised into save data so stock levels persist across save/load cycles.
+    /// Initialised via `NpcRuntimeStore::initialize_merchant` for each NPC that
+    /// has a `stock_template` when a new game session begins.
+    #[serde(default)]
+    pub npc_runtime: NpcRuntimeStore,
 }
 
 /// Errors returned by `GameState::initialize_roster`.
@@ -422,6 +441,7 @@ impl GameState {
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
             quests: QuestLog::new(),
             encountered_characters: std::collections::HashSet::new(),
+            npc_runtime: NpcRuntimeStore::new(),
         }
     }
 
@@ -495,6 +515,7 @@ impl GameState {
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
             quests: QuestLog::new(),
             encountered_characters: std::collections::HashSet::new(),
+            npc_runtime: NpcRuntimeStore::new(),
         };
 
         // Phase 2: Initialize roster from content database (premade characters)
@@ -1001,6 +1022,31 @@ impl GameState {
         self.mode = GameMode::Exploration;
     }
 
+    /// Enters inventory mode, storing the current mode for resume on close.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_inventory();
+    /// assert!(matches!(state.mode, GameMode::Inventory(_)));
+    /// ```
+    pub fn enter_inventory(&mut self) {
+        let prev = self.mode.clone();
+        let party_size = self.party.members.len();
+        let mut inv_state = crate::application::inventory_state::InventoryState::new(prev);
+        // Open a panel for every current party member so the grid is fully
+        // populated on first open — the player should not have to Tab to see
+        // their own characters.
+        inv_state.open_panels = (0..party_size).collect();
+        if inv_state.open_panels.is_empty() {
+            inv_state.open_panels.push(0);
+        }
+        self.mode = GameMode::Inventory(inv_state);
+    }
+
     /// Enters menu mode
     pub fn enter_menu(&mut self) {
         let prev = self.mode.clone();
@@ -1010,6 +1056,84 @@ impl GameState {
     /// Enters dialogue mode
     pub fn enter_dialogue(&mut self) {
         self.mode = GameMode::Dialogue(crate::application::dialogue::DialogueState::new());
+    }
+
+    /// Enters the merchant buy/sell split-screen inventory.
+    ///
+    /// Called when the player presses `I` while in `GameMode::Dialogue` with a
+    /// merchant NPC.  The current mode (typically `Dialogue`) is stored so it
+    /// can be restored when the player closes the merchant screen.
+    ///
+    /// # Arguments
+    ///
+    /// * `npc_id`   – ID of the merchant NPC being traded with.
+    /// * `npc_name` – Display name shown in the right-panel header.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_merchant_inventory("merchant_tom".to_string(), "Tom's Goods".to_string());
+    /// assert!(matches!(state.mode, GameMode::MerchantInventory(_)));
+    /// ```
+    pub fn enter_merchant_inventory(&mut self, npc_id: String, npc_name: String) {
+        let prev = self.mode.clone();
+        let active_character_index = 0; // always start with the party leader
+        self.mode = GameMode::MerchantInventory(
+            crate::application::merchant_inventory_state::MerchantInventoryState::new(
+                npc_id,
+                npc_name,
+                active_character_index,
+                prev,
+            ),
+        );
+    }
+
+    /// Enters the container interaction split-screen inventory.
+    ///
+    /// Called when the player presses `E` while facing a container tile event
+    /// (chest, crate, hole in the wall, etc.).  The current mode (typically
+    /// `Exploration`) is stored so it can be restored when the player closes
+    /// the container screen.
+    ///
+    /// # Arguments
+    ///
+    /// * `container_event_id` – The map event ID of the container.
+    /// * `container_name`     – Display name shown in the right-panel header.
+    /// * `items`              – Current item list inside the container.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_container_inventory(
+    ///     "chest_001".to_string(),
+    ///     "Wooden Chest".to_string(),
+    ///     vec![],
+    /// );
+    /// assert!(matches!(state.mode, GameMode::ContainerInventory(_)));
+    /// ```
+    pub fn enter_container_inventory(
+        &mut self,
+        container_event_id: String,
+        container_name: String,
+        items: Vec<crate::domain::character::InventorySlot>,
+    ) {
+        let prev = self.mode.clone();
+        let active_character_index = 0;
+        self.mode = GameMode::ContainerInventory(
+            crate::application::container_inventory_state::ContainerInventoryState::new(
+                container_event_id,
+                container_name,
+                items,
+                active_character_index,
+                prev,
+            ),
+        );
     }
 
     /// Returns to exploration mode (or resumes previous mode when exiting menu)
@@ -1022,12 +1146,85 @@ impl GameState {
         }
     }
 
-    /// Advances game time by the specified number of minutes
-    pub fn advance_time(&mut self, minutes: u32) {
+    /// Advances game time by the specified number of minutes.
+    ///
+    /// After advancing, active spell durations are ticked and merchant NPC stock
+    /// is restocked / magic slots are rotated if a new in-game day has begun.
+    ///
+    /// # Arguments
+    ///
+    /// * `minutes`   - Number of in-game minutes to advance.
+    /// * `templates` - Template database used to replenish merchant stock.
+    ///   Pass `None` in contexts where the content is not available (e.g.
+    ///   headless unit tests that do not load campaign data); restocking is
+    ///   silently skipped in that case.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    /// use antares::domain::world::npc_runtime::MerchantStockTemplateDatabase;
+    ///
+    /// let mut state = GameState::new();
+    /// let templates = MerchantStockTemplateDatabase::new();
+    /// state.advance_time(60, Some(&templates));
+    /// assert_eq!(state.time.minute, 0);
+    /// assert_eq!(state.time.hour, 1);
+    /// ```
+    pub fn advance_time(
+        &mut self,
+        minutes: u32,
+        templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
+    ) {
         self.time.advance_minutes(minutes);
         // Tick active spell durations
         for _ in 0..minutes {
             self.active_spells.tick();
+        }
+        // Trigger daily restock and magic-slot rotation when templates are available.
+        if let Some(tmpl) = templates {
+            self.npc_runtime.tick_restock(&self.time, tmpl);
+        }
+    }
+
+    /// Ensures all merchant NPCs in the content database have runtime state initialised.
+    ///
+    /// This method is idempotent: if a runtime state already exists for an NPC it is
+    /// left unchanged. It is used in two scenarios:
+    ///
+    /// 1. **New game**: after `new_game` creates the state, merchant stock is seeded
+    ///    from templates.
+    /// 2. **Legacy save load**: a save file created before `npc_runtime` was added will
+    ///    deserialise to an empty `NpcRuntimeStore` (via `#[serde(default)]`). Calling
+    ///    this method after loading such a save re-creates the merchant stock from
+    ///    templates so the player can interact with merchants normally.
+    ///
+    /// # Arguments
+    ///
+    /// * `content` - The loaded content database that contains NPC definitions and
+    ///   stock templates.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    /// use antares::sdk::database::ContentDatabase;
+    ///
+    /// let mut state = GameState::new();
+    /// let content = ContentDatabase::new();
+    /// // With an empty content database this is a no-op.
+    /// state.ensure_npc_runtime_initialized(&content);
+    /// assert!(state.npc_runtime.is_empty());
+    /// ```
+    pub fn ensure_npc_runtime_initialized(&mut self, content: &ContentDatabase) {
+        for npc_id in content.npcs.all_npcs() {
+            // Only initialise NPCs that do not yet have a runtime state.
+            if self.npc_runtime.get(&npc_id).is_none() {
+                if let Some(npc) = content.npcs.get_npc(&npc_id) {
+                    self.npc_runtime
+                        .initialize_merchant(npc, &content.npc_stock_templates);
+                }
+            }
         }
     }
 }
@@ -1143,6 +1340,42 @@ mod tests {
     }
 
     #[test]
+    fn test_game_mode_inventory_variant_constructable() {
+        use crate::application::inventory_state::InventoryState;
+        let mode = GameMode::Inventory(InventoryState::default());
+        assert!(
+            matches!(mode, GameMode::Inventory(_)),
+            "GameMode::Inventory variant must be constructable"
+        );
+    }
+
+    #[test]
+    fn test_enter_inventory_sets_mode() {
+        let mut state = GameState::new();
+        state.enter_inventory();
+        assert!(
+            matches!(state.mode, GameMode::Inventory(_)),
+            "enter_inventory must transition mode to GameMode::Inventory"
+        );
+    }
+
+    #[test]
+    fn test_enter_inventory_stores_previous_mode() {
+        let mut state = GameState::new();
+        // Start from Exploration (default)
+        assert!(matches!(state.mode, GameMode::Exploration));
+        state.enter_inventory();
+        if let GameMode::Inventory(inv) = &state.mode {
+            assert!(
+                matches!(inv.get_resume_mode(), GameMode::Exploration),
+                "enter_inventory must store the previous mode for resume"
+            );
+        } else {
+            panic!("mode must be Inventory after enter_inventory");
+        }
+    }
+
+    #[test]
     fn test_active_spells_tick() {
         let mut spells = ActiveSpells::new();
         spells.light = 10;
@@ -1185,9 +1418,113 @@ mod tests {
         let mut state = GameState::new();
         state.active_spells.light = 10;
 
-        state.advance_time(5);
+        state.advance_time(5, None);
         assert_eq!(state.active_spells.light, 5);
         assert_eq!(state.time.minute, 5);
+    }
+
+    #[test]
+    fn test_advance_time_no_restock_without_templates() {
+        use crate::domain::inventory::{MerchantStock, StockEntry};
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        let mut state = GameState::new();
+
+        // Insert a merchant with depleted stock.
+        let stock = MerchantStock {
+            entries: vec![StockEntry {
+                item_id: 1,
+                quantity: 0,
+                override_price: None,
+            }],
+            restock_template: Some("some_template".to_string()),
+        };
+        let mut runtime = NpcRuntimeState::new("merchant_alice".to_string());
+        runtime.stock = Some(stock);
+        state.npc_runtime.insert(runtime);
+
+        // Advance past a day boundary with None templates — must not panic and must
+        // not alter stock.
+        state.advance_time(1440, None); // 24 hours
+
+        let runtime = state
+            .npc_runtime
+            .get(&"merchant_alice".to_string())
+            .unwrap();
+        assert_eq!(
+            runtime
+                .stock
+                .as_ref()
+                .unwrap()
+                .get_entry(1)
+                .unwrap()
+                .quantity,
+            0,
+            "stock must be unchanged when templates is None"
+        );
+        assert_eq!(
+            runtime.last_restock_day, 0,
+            "last_restock_day must not be updated"
+        );
+    }
+
+    #[test]
+    fn test_advance_time_triggers_restock() {
+        use crate::domain::inventory::{MerchantStock, StockEntry};
+        use crate::domain::world::npc_runtime::{
+            MerchantStockTemplate, MerchantStockTemplateDatabase, NpcRuntimeState,
+            TemplateStockEntry,
+        };
+
+        let mut state = GameState::new();
+
+        // Build a template database with one template.
+        let mut templates = MerchantStockTemplateDatabase::new();
+        templates.add(MerchantStockTemplate {
+            id: "basic_shop".to_string(),
+            entries: vec![TemplateStockEntry {
+                item_id: 2,
+                quantity: 4,
+                override_price: None,
+            }],
+            magic_item_pool: vec![],
+            magic_slot_count: 0,
+            magic_refresh_days: 7,
+        });
+
+        // Insert a merchant with depleted stock referencing that template.
+        let stock = MerchantStock {
+            entries: vec![StockEntry {
+                item_id: 2,
+                quantity: 0,
+                override_price: None,
+            }],
+            restock_template: Some("basic_shop".to_string()),
+        };
+        let mut runtime = NpcRuntimeState::new("merchant_bob".to_string());
+        runtime.stock = Some(stock);
+        state.npc_runtime.insert(runtime);
+
+        // GameState starts at day 1, hour 0, minute 0.
+        // Advance 24 hours so a new day begins (day 2).
+        state.advance_time(1440, Some(&templates));
+
+        let runtime = state.npc_runtime.get(&"merchant_bob".to_string()).unwrap();
+        assert_eq!(
+            runtime
+                .stock
+                .as_ref()
+                .unwrap()
+                .get_entry(2)
+                .unwrap()
+                .quantity,
+            4,
+            "stock must be restocked after crossing a day boundary"
+        );
+        assert!(
+            runtime.last_restock_day > 0,
+            "last_restock_day must be updated"
+        );
     }
 
     #[test]
@@ -2620,5 +2957,117 @@ mod tests {
             })
             .collect();
         assert_eq!(in_party_indices.len(), state.party.size());
+    }
+
+    // ===== Phase 5: NPC Runtime Initialization Tests =====
+
+    /// Helper that builds a minimal `ContentDatabase` with one merchant NPC and a
+    /// matching stock template.  Used by the `ensure_npc_runtime_initialized` tests.
+    fn build_content_db_with_merchant() -> crate::sdk::database::ContentDatabase {
+        use crate::domain::world::npc::NpcDefinition;
+        use crate::domain::world::npc_runtime::{
+            MerchantStockTemplate, MerchantStockTemplateDatabase, TemplateStockEntry,
+        };
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Build a stock template
+        let mut templates = MerchantStockTemplateDatabase::new();
+        templates.add(MerchantStockTemplate {
+            id: "basic_goods".to_string(),
+            entries: vec![TemplateStockEntry {
+                item_id: 1,
+                quantity: 5,
+                override_price: None,
+            }],
+            magic_item_pool: vec![],
+            magic_slot_count: 0,
+            magic_refresh_days: 7,
+        });
+        db.npc_stock_templates = templates;
+
+        // Build an NPC database with one merchant referencing the template
+        let mut merchant = NpcDefinition::merchant("merchant_alice", "Alice", "alice.png");
+        merchant.stock_template = Some("basic_goods".to_string());
+        db.npcs.add_npc(merchant).expect("add_npc should succeed");
+
+        db
+    }
+
+    #[test]
+    fn test_ensure_npc_runtime_initialized_populates_merchants() {
+        // Arrange: empty npc_runtime in GameState
+        let mut state = GameState::new();
+        assert!(state.npc_runtime.is_empty());
+
+        let content = build_content_db_with_merchant();
+
+        // Act
+        state.ensure_npc_runtime_initialized(&content);
+
+        // Assert: merchant now has runtime state with stock
+        let runtime = state
+            .npc_runtime
+            .get(&"merchant_alice".to_string())
+            .expect("merchant_alice should have runtime state after initialization");
+
+        assert!(
+            runtime.stock.is_some(),
+            "merchant_alice should have stock initialized from template"
+        );
+        assert_eq!(
+            runtime
+                .stock
+                .as_ref()
+                .unwrap()
+                .get_entry(1)
+                .expect("item 1 should be in stock")
+                .quantity,
+            5
+        );
+    }
+
+    #[test]
+    fn test_ensure_npc_runtime_initialized_is_idempotent() {
+        // Arrange: initialize once
+        let mut state = GameState::new();
+        let content = build_content_db_with_merchant();
+
+        state.ensure_npc_runtime_initialized(&content);
+
+        // Simulate a buy: decrement the stock quantity
+        {
+            let runtime = state
+                .npc_runtime
+                .get_mut(&"merchant_alice".to_string())
+                .unwrap();
+            let entry = runtime
+                .stock
+                .as_mut()
+                .unwrap()
+                .get_entry_mut(1)
+                .expect("item 1 should be in stock");
+            entry.quantity = 2; // simulate two items bought
+        }
+
+        // Act: call again (second time should be a no-op for existing entries)
+        state.ensure_npc_runtime_initialized(&content);
+
+        // Assert: the decremented quantity is still 2 (not reset to 5)
+        let runtime = state
+            .npc_runtime
+            .get(&"merchant_alice".to_string())
+            .unwrap();
+        assert_eq!(
+            runtime
+                .stock
+                .as_ref()
+                .unwrap()
+                .get_entry(1)
+                .unwrap()
+                .quantity,
+            2,
+            "Second call to ensure_npc_runtime_initialized must not overwrite existing state"
+        );
     }
 }

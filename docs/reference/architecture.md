@@ -67,82 +67,76 @@ advanced systems for dialogue, campaigns, and character definitions.
 
 ```text
 src/
-├── main.rs                 # Game application entry point
-├── lib.rs                  # Library root
-│
-├── domain/                 # Core game logic (pure functions)
-│   ├── mod.rs             # Domain module exports
-│   ├── types.rs           # Core type aliases (ItemId, SpellId, etc.)
-│   ├── character.rs       # Character system with AttributePair stats
-│   ├── items/            # Item system (weapons, armor, consumables)
-│   │   ├── mod.rs       # Item module exports
-│   │   ├── item.rs      # Item definitions and types
-│   │   ├── equipment.rs  # Equipment slots and equipping
-│   │   └── inventory.rs  # Inventory management
-│   ├── magic/            # Spell system
-│   │   ├── mod.rs       # Magic module exports
-│   │   ├── spell.rs     # Spell definitions and casting
-│   │   └── spellbook.rs # Character spell management
-│   ├── combat/           # Combat engine
-│   │   ├── mod.rs       # Combat module exports
-│   │   ├── engine.rs    # Turn-based combat system
-│   │   └── monster.rs   # Monster definitions and AI
-│   ├── world/            # World and map system
-│   │   ├── mod.rs       # World module exports
-│   │   ├── map.rs       # Map data structures
-│   │   └── events.rs    # Map events and NPCs
-│   ├── dialogue.rs       # Dialogue system with node-based trees
-│   ├── classes.rs        # Data-driven class definitions
-│   ├── races.rs          # Data-driven race definitions
-│   ├── proficiency.rs    # Proficiency system for equipment
-│   ├── conditions.rs     # Status conditions
-│   ├── quest.rs         # Quest tracking system
-│   ├── party_manager.rs  # Party vs roster management
-│   ├── resources.rs     # Party-wide resources (gold, food, etc.)
-│   └── character_definition.rs # Data-driven character templates
-│
-├── application/           # Game state and orchestration
-│   ├── mod.rs           # Application module exports
-│   ├── game_state.rs    # Main GameState and mode management
-│   ├── campaign_loader.rs # Campaign loading and initialization
-│   └── active_spells.rs # Party-wide spell effect tracking
-│
-├── game/               # Bevy ECS components and systems
-│   ├── mod.rs          # Game module exports
-│   ├── components/     # Bevy components
-│   │   ├── mod.rs     # Component exports
-│   │   └── dialogue.rs # Dialogue components
-│   ├── systems/        # Rendering and UI systems
-│   │   ├── mod.rs     # System exports
-│   │   ├── audio.rs   # Audio system
-│   │   ├── camera.rs  # Camera system
-│   │   ├── dialogue_visuals.rs # Dialogue rendering
-│   │   └── ui.rs      # UI system
-│   └── resources.rs    # Bevy resources
-│
-├── sdk/               # Content creation and validation tools
-│   ├── mod.rs          # SDK module exports
-│   ├── database.rs     # Unified content database
-│   ├── campaign_loader.rs # Campaign loading system
-│   ├── validation.rs   # Cross-reference validation
-│   ├── serialization.rs # RON format helpers
-│   ├── templates.rs    # Content templates
-│   └── editors/       # Content editing tools
-│       ├── mod.rs     # Editor exports
-│       ├── dialogue_editor.rs # Dialogue editor
-│       ├── map_editor.rs      # Map editor
-│       ├── quest_editor.rs     # Quest editor
-│       └── map_builder.rs     # Map building tools
-│
-└── bin/               # Executable applications
-    ├── antares.rs           # Main game application
-    ├── campaign_validator.rs # Campaign validation tool
-    ├── class_editor.rs      # Class editor tool
-    ├── race_editor.rs       # Race editor tool
-    ├── item_editor.rs       # Item editor tool
-    ├── map_builder.rs      # Map building tool
-    ├── name_gen.rs         # Name generator
-    └── validate_map.rs     # Map validation tool
+├── lib.rs                       # Library root (`application`, `domain`, `game`, `sdk`)
+├── application/                 # GameState, mode transitions, save/menu/inventory state
+│   ├── mod.rs
+│   ├── dialogue.rs
+│   ├── inventory_state.rs
+│   ├── menu.rs
+│   ├── quests.rs
+│   ├── resources.rs
+│   └── save_game.rs
+├── domain/                      # Core game logic and data structures
+│   ├── mod.rs
+│   ├── campaign.rs
+│   ├── campaign_loader.rs
+│   ├── character.rs
+│   ├── character_definition.rs
+│   ├── classes.rs
+│   ├── combat/
+│   ├── conditions.rs
+│   ├── dialogue.rs
+│   ├── inventory.rs
+│   ├── items/
+│   ├── magic/
+│   ├── party_manager.rs
+│   ├── proficiency.rs
+│   ├── progression.rs
+│   ├── quest.rs
+│   ├── races.rs
+│   ├── resources.rs
+│   ├── transactions.rs
+│   ├── types.rs
+│   ├── visual/
+│   └── world/
+├── game/                        # Bevy ECS integration (components/systems/resources)
+│   ├── mod.rs
+│   ├── components/
+│   ├── resources/
+│   └── systems/                # combat, map, camera, menu, inventory_ui, inn_ui, etc.
+├── sdk/                         # Library SDK: loading, validation, packaging, templates
+│   ├── mod.rs
+│   ├── cache.rs
+│   ├── campaign_loader.rs
+│   ├── campaign_packager.rs
+│   ├── creature_validation.rs
+│   ├── database.rs
+│   ├── dialogue_editor.rs
+│   ├── game_config.rs
+│   ├── map_editor.rs
+│   ├── name_generator.rs
+│   ├── quest_editor.rs
+│   ├── serialization.rs
+│   ├── templates.rs
+│   ├── tool_config.rs
+│   └── validation.rs
+└── bin/                         # CLI binaries
+    ├── antares.rs
+    ├── campaign_validator.rs
+    ├── class_editor.rs
+    ├── item_editor.rs
+    ├── map_builder.rs
+    ├── name_gen.rs
+    ├── race_editor.rs
+    ├── update_tutorial_maps.rs
+    └── validate_map.rs
+
+sdk/campaign_builder/            # Separate workspace member (eframe/egui GUI SDK)
+├── Cargo.toml
+└── src/
+    ├── lib.rs                   # CampaignBuilderApp and editor tabs
+    ├── main.rs                  # `campaign-builder` entrypoint
+    └── ...                      # assets/maps/items/classes/races/etc. editor modules
 ```
 
 #### 3.3 Layer Architecture Details
@@ -212,19 +206,24 @@ _Purpose_: Content creation, validation, and development tools
 
 ```rust
 pub struct GameState {
+    pub campaign: Option<Campaign>,
     pub world: World,
     pub roster: Roster,
     pub party: Party,
     pub active_spells: ActiveSpells,
+    pub config: GameConfig,
     pub mode: GameMode,
     pub time: GameTime,
     pub quests: QuestLog,
+    pub encountered_characters: HashSet<String>,
+    pub npc_runtime: NpcRuntimeStore,
 }
 
 pub enum GameMode {
     Exploration,
     Combat(CombatState),
-    Menu,
+    Inventory(InventoryState),
+    Menu(MenuState),
     Dialogue(DialogueState),
     InnManagement(InnManagementState),
 }
@@ -242,11 +241,15 @@ pub struct World {
 
 pub struct Map {
     pub id: MapId,
+    pub name: String,
+    pub description: String,
     pub width: u32,
     pub height: u32,
-    pub tiles: Vec<Vec<Tile>>,
-    pub events: HashMap<Position, Event>,
-    pub npcs: Vec<Npc>,
+    pub tiles: Vec<Tile>,
+    pub events: HashMap<Position, MapEvent>,
+    pub encounter_table: Option<EncounterTable>,
+    pub allow_random_encounters: bool,
+    pub npc_placements: Vec<NpcPlacement>,
 }
 
 pub struct Tile {
@@ -306,7 +309,7 @@ pub struct Character {
     pub active_conditions: Vec<ActiveCondition>, // Data-driven conditions
     pub resistances: Resistances,       // Damage resistances
     pub quest_flags: QuestFlags,        // Per-character quest/event tracking
-    pub portrait_id: u8,                // Portrait/avatar ID
+    pub portrait_id: String,            // Portrait/avatar ID (string key/path stem)
     pub worthiness: u8,                 // Special quest attribute
     pub gold: u32,                      // Individual gold (0-max)
     pub gems: u32,                      // Individual gems (0-max)
@@ -527,11 +530,11 @@ impl Condition {
 
 /// Container for items (backpack or equipped)
 pub struct Inventory {
-    pub items: Vec<InventorySlot>,  // Max 6 items in backpack
+    pub items: Vec<InventorySlot>,  // Max 255 items in backpack
 }
 
 impl Inventory {
-    pub const MAX_ITEMS: usize = 6;
+    pub const MAX_ITEMS: usize = 64;
 
     pub fn is_full(&self) -> bool {
         self.items.len() >= Self::MAX_ITEMS
@@ -845,22 +848,6 @@ pub enum BonusAttribute {
     ResistPsychic,
 }
 
-/// DEPRECATED: Class and alignment restrictions (bitflags)
-/// Use classification and tags system instead
-#[derive(Debug, Clone, Copy)]
-pub struct Disablement(u8);
-
-impl Disablement {
-    pub const KNIGHT: u8 = 0b00100000;
-    pub const PALADIN: u8 = 0b00010000;
-    pub const ARCHER: u8 = 0b00001000;
-    pub const CLERIC: u8 = 0b00000100;
-    pub const SORCERER: u8 = 0b00000010;
-    pub const ROBBER: u8 = 0b00000001;
-    pub const GOOD: u8 = 0b10000000;
-    pub const EVIL: u8 = 0b01000000;
-    pub const NEUTRAL: u8 = Self::GOOD | Self::EVIL;
-}
 
 /// Consumable effect variants (parameterized)
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1803,17 +1790,6 @@ _Sorcerer Spells:_
 - Buffs (Power, Quickness, Shield)
 - Utility (Location, Fly, Teleport, Detect Magic)
 
-</text>
-
-<old_text line=287> **Events:**
-
-- Encounters (monsters)
-- NPCs (quests, dialogue)
-- Treasures (chests, loot)
-- Traps (damage, status effects)
-- Teleporters
-- Doors (locked/unlocked)
-
 #### 5.4 Map and Movement
 
 **First-Person Perspective:**
@@ -1842,7 +1818,7 @@ _Sorcerer Spells:_
 
 **Serialization Strategy:**
 
-- Use `serde` for JSON or binary serialization
+- Use `serde` + `ron` save-file serialization
 - Save entire GameState (including Roster + Party + ActiveSpells)
 - Include version number for compatibility
 - Save AttributePair base values, restore to current on load
@@ -1922,10 +1898,11 @@ The menu system provides in-game access to save/load, settings, and game control
 
 #### 6.3 SDK Tooling
 
-- **Content Editors**: Custom CLI applications with `crossterm` for terminal UI
-- **Validation Framework**: Comprehensive data validation with detailed error messages
-- **Template System**: Content templates for rapid development
-- **Campaign Management**: Campaign packaging and distribution tools
+- **Library SDK (`src/sdk`)**: Reusable loading/validation/packaging APIs
+- **CLI SDK Tools (`src/bin`)**: Validators and focused editors (`campaign_validator`, `class_editor`, `item_editor`, etc.)
+- **GUI Campaign Builder (`sdk/campaign_builder`)**: eframe/egui visual editor with multi-tab campaign editing workflow
+- **Validation Frameworks**: Both runtime SDK validation (`src/sdk/validation.rs`) and builder-side validation categories/results
+- **Campaign Management**: Campaign metadata loading, content database assembly, and packaging support
 
 ---
 
@@ -1943,6 +1920,9 @@ data/                                    # Base game data
 ├── races.ron                      # Race definitions with stat modifiers
 ├── conditions.ron                 # Status condition definitions
 ├── proficiencies.ron              # Proficiency system definitions
+├── npcs.ron                        # NPC definitions
+├── npc_stock_templates.ron         # Merchant stock templates
+├── creatures.ron                   # Creature visual registry
 ├── dialogues.ron                  # NPC dialogue trees
 ├── quests.ron                     # Quest definitions and objectives
 └── maps/                          # Map data directory
@@ -1954,11 +1934,12 @@ data/                                    # Base game data
 campaigns/                            # Campaign-specific content
 └── tutorial/
     ├── campaign.ron                 # Campaign metadata
-    ├── config.ron                   # Campaign configuration
     ├── README.md                    # Campaign documentation
     ├── data/                        # Campaign-specific overrides
     │   ├── characters.ron           # Override base characters
     │   ├── items.ron               # Override base items
+    │   ├── npcs.ron                # Campaign NPC overrides
+    │   ├── creatures.ron           # Campaign creature registry override
     │   ├── maps/                   # Campaign-specific maps
     │   │   └── tutorial_dungeon.ron
     │   └── dialogues.ron          # Campaign dialogues
@@ -2469,68 +2450,16 @@ cargo build --release --bin item_editor
 
 ---
 
-### 8. Development Phases
-
-#### Phase 1: Core Engine (Weeks 1-3)
-
-- Basic game loop
-- Character creation
-- Stats and combat math
-- Simple map rendering
-- Movement system
-
-#### Phase 2: Combat (Weeks 4-5)
-
-- Turn-based combat engine
-- Basic monster AI
-- Combat UI
-- XP and leveling
-
-#### Phase 3: World (Weeks 6-8)
-
-- Map loading system
-- Multiple map types
-- Events and triggers
-- NPCs and dialogue
-
-#### Phase 4: Systems (Weeks 9-11)
-
-- Inventory and equipment
-- Magic system
-- Status effects
-- Shops and trading
-
-#### Phase 5: Content (Weeks 12-14)
-
-- Create maps
-- Design encounters
-- Write quests
-- Balance gameplay
-
-#### Phase 6: Polish (Weeks 15-16)
-
-- Save/load
-- Audio
-- UI improvements
-- Bug fixes
-
----
-
-### 9. Testing Strategy
-
-- **Unit Tests**: Combat math, stat calculations, dice rolling, character
-  creation
-- **Integration Tests**: Save/load, map transitions, combat flow, rest/food
-  system
-- **Playtesting**: Balance, difficulty curve, fun factor, progression curve
-
----
-
 ### 8. SDK and Content Creation Tools
 
 #### 8.1 SDK Overview
 
-The Antares SDK provides comprehensive tools for creating, editing, and validating game content. All tools are command-line applications with terminal-based interfaces using `crossterm`.
+The Antares SDK is split into two cooperating parts:
+
+1. **Core SDK library (`src/sdk`)** for campaign loading, content databases, validation, formatting, and templates.
+2. **Campaign Builder GUI (`sdk/campaign_builder`)** for end-to-end visual content authoring using eframe/egui.
+
+CLI tools remain available via `src/bin` for validation and focused editing workflows.
 
 #### 8.2 Content Editors
 
@@ -2715,12 +2644,12 @@ pub struct TemplateRegistry {
 
 #### 10.1 Missing Core Features
 
-**Save/Load System** (Priority: High)
+**Save/Load Enhancements** (Priority: High)
 
-- Game state serialization and persistence
-- Character progress saving and loading
-- Campaign progress tracking
-- Auto-save functionality
+- Additional save UX improvements and recovery tooling
+- Save metadata/history management improvements
+- Expanded compatibility/migration workflows
+- Auto-save policy tuning and controls
 
 **Procedural Content Generation** (Priority: Medium)
 
@@ -3317,9 +3246,9 @@ The Antares architecture has evolved significantly from its initial design:
 
 **🔄 Areas Requiring Updates:**
 
-- **Documentation**: Now updated to reflect current implementation
-- **Save/Load System**: Core feature pending implementation
-- **Procedural Generation**: Planned feature not yet implemented
+- **Documentation cadence**: Keep architectural sections synchronized with ongoing engine + SDK refactors
+- **Procedural generation depth**: Additional map/content generation systems remain a future expansion area
+- **Cross-layer cleanup**: Continue converging legacy examples and newer implementation details in long-form reference sections
 
 #### 13.3 Architectural Strengths
 

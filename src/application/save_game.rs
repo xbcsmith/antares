@@ -788,11 +788,20 @@ mod tests {
         let save_path = manager.save_path("migration_test");
         let mut ron_content = std::fs::read_to_string(&save_path).unwrap();
 
-        // Remove encountered_characters field to simulate old format
-        // This simulates a save file created before encountered_characters existed
-        if let Some(start) = ron_content.find("encountered_characters:") {
-            if let Some(end) = ron_content[start..].find("},") {
-                let full_end = start + end + 2;
+        // Remove encountered_characters field to simulate old format.
+        // This simulates a save file created before encountered_characters existed.
+        //
+        // encountered_characters serializes as a set literal: `{}` (empty) or
+        // `{"val1", "val2"}`. The field always ends with a `,` because other
+        // serde(default) fields (npc_runtime, etc.) follow it.
+        // We match the whole line, including the trailing newline, so we don't
+        // accidentally clip into adjacent fields.
+        let field_marker = "encountered_characters:";
+        if let Some(start) = ron_content.find(field_marker) {
+            // Find the newline that terminates this field's line.
+            // The field value is always on a single line for HashSet<String>.
+            if let Some(nl) = ron_content[start..].find('\n') {
+                let full_end = start + nl + 1; // include the newline
                 ron_content.replace_range(start..full_end, "");
             }
         }
@@ -1085,5 +1094,498 @@ mod tests {
             CharacterLocation::InParty
         );
         assert_eq!(loaded_state.party.members[1].name, "Char2");
+    }
+
+    // ===== Phase 5: NPC Runtime Persistence Tests =====
+
+    /// Helper that builds a `GameState` pre-populated with one merchant NPC's
+    /// runtime stock so that save/load tests can verify round-trip fidelity.
+    fn make_game_state_with_merchant_runtime() -> GameState {
+        use crate::domain::inventory::{MerchantStock, StockEntry};
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        let mut state = GameState::new();
+
+        // Manually construct the runtime state that would normally be seeded from
+        // a template.  We do it by hand here so the test has no dependency on
+        // the tutorial campaign files being present.
+        let stock = MerchantStock {
+            entries: vec![
+                StockEntry {
+                    item_id: 10,
+                    quantity: 3,
+                    override_price: None,
+                },
+                StockEntry {
+                    item_id: 20,
+                    quantity: 7,
+                    override_price: Some(150),
+                },
+            ],
+            restock_template: Some("weapons_basic".to_string()),
+        };
+
+        let mut runtime = NpcRuntimeState::new("merchant_alice".to_string());
+        runtime.stock = Some(stock);
+        runtime.services_consumed.push("heal_all".to_string());
+
+        state.npc_runtime.insert(runtime);
+        state
+    }
+
+    #[test]
+    fn test_save_load_preserves_npc_runtime_stock() {
+        // Arrange: game state with a merchant that has been partially bought from
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut state = make_game_state_with_merchant_runtime();
+
+        // Simulate a buy: decrement item 10 from 3 → 1
+        {
+            let runtime = state
+                .npc_runtime
+                .get_mut(&"merchant_alice".to_string())
+                .unwrap();
+            runtime
+                .stock
+                .as_mut()
+                .unwrap()
+                .get_entry_mut(10)
+                .unwrap()
+                .quantity = 1;
+        }
+
+        // Act: save then load
+        manager.save("npc_runtime_test", &state).unwrap();
+        let loaded = manager.load("npc_runtime_test").unwrap();
+
+        // Assert: the decremented quantity is preserved (1, not original 3)
+        let runtime = loaded
+            .npc_runtime
+            .get(&"merchant_alice".to_string())
+            .expect("merchant_alice runtime state should be present after load");
+
+        assert!(
+            runtime.stock.is_some(),
+            "merchant stock should survive the round-trip"
+        );
+        let stock = runtime.stock.as_ref().unwrap();
+
+        assert_eq!(
+            stock.get_entry(10).unwrap().quantity,
+            1,
+            "decremented quantity must be preserved through save/load"
+        );
+        assert_eq!(
+            stock.get_entry(20).unwrap().quantity,
+            7,
+            "untouched quantity must be preserved through save/load"
+        );
+        assert_eq!(
+            stock.get_entry(20).unwrap().override_price,
+            Some(150),
+            "override_price must be preserved through save/load"
+        );
+        assert_eq!(
+            stock.restock_template,
+            Some("weapons_basic".to_string()),
+            "restock_template must be preserved through save/load"
+        );
+
+        // Services consumed should also round-trip
+        assert_eq!(
+            runtime.services_consumed,
+            vec!["heal_all".to_string()],
+            "services_consumed must be preserved through save/load"
+        );
+    }
+
+    #[test]
+    fn test_save_load_legacy_format_empty_npc_runtime() {
+        // Arrange: produce a save file, then strip the npc_runtime field to
+        // simulate a save file created before Phase 2 was implemented.
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut state = GameState::new();
+        // Add a character so the save has recognisable non-default content
+        state
+            .roster
+            .add_character(
+                create_test_character("LegacyChar"),
+                crate::domain::character::CharacterLocation::InParty,
+            )
+            .unwrap();
+
+        // Write a normal save first
+        manager.save("legacy_test", &state).unwrap();
+
+        // Read the raw RON, remove the npc_runtime field to simulate old format.
+        // The field serialises as a single line:
+        //   npc_runtime: (npcs: {}),
+        // We strip the entire line so the save parser falls back to Default.
+        let save_path = manager.save_path("legacy_test");
+        let ron_content = std::fs::read_to_string(&save_path).unwrap();
+
+        // Strip the npc_runtime field from the RON.  Because ron pretty-print
+        // renders the NpcRuntimeStore as a multi-line struct:
+        //
+        //   npc_runtime: (
+        //       npcs: {},
+        //   ),
+        //
+        // we cannot simply remove the first line; we must remove everything
+        // from "npc_runtime:" up to and including the closing ")," line.
+        //
+        // Strategy: find the marker line, then scan forward counting
+        // un-matched opening parens until they all close, then consume
+        // the trailing comma and newline.
+        let field_marker = "npc_runtime:";
+        let stripped = if let Some(start) = ron_content.find(field_marker) {
+            // Find the end of the field value by counting paren depth.
+            // We start scanning from the character after the marker.
+            let after_marker = start + field_marker.len();
+            let tail = &ron_content[after_marker..];
+
+            let mut depth: i32 = 0;
+            let mut found_open = false;
+            let mut field_end = after_marker; // position just past the closing ")"
+
+            for (offset, ch) in tail.char_indices() {
+                match ch {
+                    '(' => {
+                        depth += 1;
+                        found_open = true;
+                    }
+                    ')' => {
+                        depth -= 1;
+                        if found_open && depth == 0 {
+                            // offset points at ')'; advance past it
+                            field_end = after_marker + offset + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Consume optional trailing comma and newline after the closing ")"
+            let rest = &ron_content[field_end..];
+            let extra = rest
+                .chars()
+                .take_while(|c| *c == ',' || *c == '\n' || *c == '\r')
+                .map(|c| c.len_utf8())
+                .sum::<usize>();
+            let end = field_end + extra;
+
+            format!("{}{}", &ron_content[..start], &ron_content[end..])
+        } else {
+            // Field not found – the file already lacks it; no change needed
+            ron_content.clone()
+        };
+
+        std::fs::write(&save_path, &stripped).unwrap();
+
+        // Act: load the legacy-format save – must succeed without error
+        let loaded = manager
+            .load("legacy_test")
+            .expect("loading a legacy save without npc_runtime field must succeed");
+
+        // Assert: npc_runtime defaults to empty store
+        assert!(
+            loaded.npc_runtime.is_empty(),
+            "npc_runtime should default to empty when the field is absent in the save file"
+        );
+
+        // Assert: other state is preserved correctly
+        assert_eq!(
+            loaded.roster.characters.len(),
+            1,
+            "roster should be preserved from legacy save"
+        );
+        assert_eq!(
+            loaded.roster.characters[0].name, "LegacyChar",
+            "character name should be preserved from legacy save"
+        );
+    }
+
+    // ===== Buy and Sell Phase 5: Tutorial Data Wiring, Save Persistence =====
+
+    /// Verifies that buying an item from a merchant reduces the stock count and
+    /// that the reduction persists across a save/load cycle.
+    ///
+    /// Per Phase 5 spec (section 5.3): create a GameState with a merchant having
+    /// 3 units of item 1, buy 1 unit (stock → 2), serialise, deserialise, and
+    /// assert the loaded state shows 2 units.
+    #[test]
+    fn test_save_load_preserves_merchant_stock_after_buy() {
+        use crate::domain::inventory::{MerchantStock, StockEntry};
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        // 1. Create a GameState with a merchant that has 3 units of item 1.
+        let mut state = GameState::new();
+        let stock = MerchantStock {
+            entries: vec![StockEntry {
+                item_id: 1,
+                quantity: 3,
+                override_price: None,
+            }],
+            restock_template: Some("tutorial_merchant_stock".to_string()),
+        };
+        let mut runtime = NpcRuntimeState::new("tutorial_merchant_town".to_string());
+        runtime.stock = Some(stock);
+        state.npc_runtime.insert(runtime);
+
+        // 2. Buy 1 unit — reduces stock from 3 → 2.
+        {
+            let runtime = state
+                .npc_runtime
+                .get_mut(&"tutorial_merchant_town".to_string())
+                .unwrap();
+            runtime
+                .stock
+                .as_mut()
+                .unwrap()
+                .get_entry_mut(1)
+                .unwrap()
+                .quantity = 2;
+        }
+
+        // 3. Serialise to RON with save_game.
+        manager.save("phase5_buy_test", &state).unwrap();
+
+        // 4. Deserialise with load_game.
+        let loaded = manager.load("phase5_buy_test").unwrap();
+
+        // 5. Assert the loaded state has 2 units of item 1 in the merchant stock.
+        let loaded_runtime = loaded
+            .npc_runtime
+            .get(&"tutorial_merchant_town".to_string())
+            .expect("tutorial_merchant_town runtime must survive the round-trip");
+
+        assert!(
+            loaded_runtime.stock.is_some(),
+            "merchant stock must be present after round-trip"
+        );
+        let loaded_stock = loaded_runtime.stock.as_ref().unwrap();
+        assert_eq!(
+            loaded_stock.get_entry(1).unwrap().quantity,
+            2,
+            "stock quantity after buy (3→2) must be preserved through save/load"
+        );
+        assert_eq!(
+            loaded_stock.restock_template,
+            Some("tutorial_merchant_stock".to_string()),
+            "restock_template must be preserved through save/load"
+        );
+    }
+
+    /// Verifies that a partial container take (removing some but not all items)
+    /// survives a save/load cycle within the same map.
+    ///
+    /// Container state is stored in `MapEvent::Container { items, .. }` which is
+    /// serialised as part of `World` inside `GameState`. This test confirms the
+    /// write-back path is correctly round-tripped.
+    #[test]
+    fn test_save_load_preserves_container_items_after_partial_take() {
+        use crate::domain::character::InventorySlot;
+        use crate::domain::types::Position;
+        use crate::domain::world::MapEvent;
+        use crate::domain::world::{Map, World};
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        // Build a world with one map containing a container event that starts
+        // with 3 items (item_ids 10, 20, 30).
+        let mut state = GameState::new();
+        let mut map = Map::new(
+            1,
+            "Test Map".to_string(),
+            "A map with a container".to_string(),
+            10,
+            10,
+        );
+        let container_pos = Position::new(5, 5);
+        map.add_event(
+            container_pos,
+            MapEvent::Container {
+                id: "chest_room1".to_string(),
+                name: "Old Chest".to_string(),
+                description: "A battered chest".to_string(),
+                items: vec![
+                    InventorySlot {
+                        item_id: 10,
+                        charges: 0,
+                    },
+                    InventorySlot {
+                        item_id: 20,
+                        charges: 0,
+                    },
+                    InventorySlot {
+                        item_id: 30,
+                        charges: 0,
+                    },
+                ],
+            },
+        );
+        let mut world = World::new();
+        world.add_map(map);
+        world.set_current_map(1);
+        state.world = world;
+
+        // Simulate a partial take: player takes item_id 20, leaving 10 and 30.
+        {
+            let map_mut = state.world.get_current_map_mut().unwrap();
+            if let Some(MapEvent::Container { items, .. }) = map_mut.events.get_mut(&container_pos)
+            {
+                items.retain(|slot| slot.item_id != 20);
+            }
+        }
+
+        // Save then load.
+        manager.save("phase5_container_test", &state).unwrap();
+        let loaded = manager.load("phase5_container_test").unwrap();
+
+        // Verify the container on the loaded map has exactly items 10 and 30.
+        let loaded_map = loaded
+            .world
+            .get_map(1)
+            .expect("map 1 must be present after round-trip");
+        let loaded_event = loaded_map
+            .get_event(container_pos)
+            .expect("container event must be present after round-trip");
+
+        match loaded_event {
+            MapEvent::Container { items, id, .. } => {
+                assert_eq!(id, "chest_room1", "container id must be preserved");
+                assert_eq!(
+                    items.len(),
+                    2,
+                    "container must have 2 items after partial take and round-trip"
+                );
+                assert!(
+                    items.iter().any(|s| s.item_id == 10),
+                    "item_id 10 must still be in the container"
+                );
+                assert!(
+                    items.iter().any(|s| s.item_id == 30),
+                    "item_id 30 must still be in the container"
+                );
+                assert!(
+                    !items.iter().any(|s| s.item_id == 20),
+                    "taken item_id 20 must NOT be in the container after round-trip"
+                );
+            }
+            other => panic!("expected Container event, got {:?}", other),
+        }
+    }
+    /// Verifies that `last_restock_day`, `magic_slots`, and `last_magic_refresh_day`
+    /// survive a full save/load cycle.
+    ///
+    /// These Phase-6 fields are serialised as part of `NpcRuntimeState` inside
+    /// `GameState::npc_runtime`.  This test ensures they are not silently dropped
+    /// or reset to their default sentinel values during round-trip serialisation.
+    #[test]
+    fn test_save_load_preserves_restock_day_and_magic_slots() {
+        use crate::domain::inventory::{MerchantStock, StockEntry};
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut state = GameState::new();
+
+        // Build a runtime state that has been through a restock cycle:
+        //   - last_restock_day = 3  (restocked on day 3)
+        //   - magic_slots = [101, 102]  (two magic items currently in stock)
+        //   - last_magic_refresh_day = 1  (magic slots refreshed on day 1)
+        let stock = MerchantStock {
+            entries: vec![
+                StockEntry {
+                    item_id: 10,
+                    quantity: 2,
+                    override_price: None,
+                },
+                // Magic-slot entries mirroring magic_slots.
+                StockEntry {
+                    item_id: 101,
+                    quantity: 1,
+                    override_price: None,
+                },
+                StockEntry {
+                    item_id: 102,
+                    quantity: 1,
+                    override_price: None,
+                },
+            ],
+            restock_template: Some("tutorial_merchant_stock".to_string()),
+        };
+
+        let mut runtime = NpcRuntimeState::new("merchant_phase6".to_string());
+        runtime.stock = Some(stock);
+        runtime.last_restock_day = 3;
+        runtime.magic_slots = vec![101, 102];
+        runtime.last_magic_refresh_day = 1;
+
+        state.npc_runtime.insert(runtime);
+
+        // Save and reload.
+        manager
+            .save("phase6_restock_roundtrip", &state)
+            .expect("save must succeed");
+        let loaded = manager
+            .load("phase6_restock_roundtrip")
+            .expect("load must succeed");
+
+        let loaded_runtime = loaded
+            .npc_runtime
+            .get(&"merchant_phase6".to_string())
+            .expect("merchant_phase6 must be present after round-trip");
+
+        assert_eq!(
+            loaded_runtime.last_restock_day, 3,
+            "last_restock_day must survive save/load"
+        );
+        assert_eq!(
+            loaded_runtime.magic_slots,
+            vec![101, 102],
+            "magic_slots must survive save/load"
+        );
+        assert_eq!(
+            loaded_runtime.last_magic_refresh_day, 1,
+            "last_magic_refresh_day must survive save/load"
+        );
+
+        // Verify the magic-slot stock entries are also intact.
+        let loaded_stock = loaded_runtime
+            .stock
+            .as_ref()
+            .expect("stock must be Some after round-trip");
+        assert_eq!(
+            loaded_stock
+                .get_entry(101)
+                .expect("item 101 must exist")
+                .quantity,
+            1
+        );
+        assert_eq!(
+            loaded_stock
+                .get_entry(102)
+                .expect("item 102 must exist")
+                .quantity,
+            1
+        );
+        assert_eq!(
+            loaded_stock
+                .restock_template
+                .as_deref()
+                .expect("restock_template must be Some"),
+            "tutorial_merchant_stock"
+        );
     }
 }

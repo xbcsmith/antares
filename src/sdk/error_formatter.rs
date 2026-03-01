@@ -388,6 +388,33 @@ impl ErrorFormatter {
                     "Edit data/creatures.ron to ensure mesh names are unique".to_string(),
                 ]
             }
+
+            ValidationError::MissingStockTemplateItem { context, item_id } => {
+                vec![
+                    format!(
+                        "NPC '{}' stock template references item ID {} which does not exist",
+                        context, item_id
+                    ),
+                    format!("Add item {} to 'data/items.ron' or campaign items.ron", item_id),
+                    format!("Or remove item {} from the stock template in 'data/npc_stock_templates.ron'", item_id),
+                    "Use 'campaign_validator' to check all stock template references".to_string(),
+                ]
+            }
+
+            ValidationError::InvalidServiceId {
+                context,
+                service_id,
+            } => {
+                vec![
+                    format!(
+                        "NPC '{}' service catalog contains unrecognised service ID '{}'",
+                        context, service_id
+                    ),
+                    format!("Known built-in service IDs: heal_all, heal, restore_sp, cure_poison, cure_disease, cure_all, resurrect, rest"),
+                    format!("If '{}' is a custom service, this warning can be ignored — custom IDs are supported for extensibility", service_id),
+                    "Edit 'data/npcs.ron' or the campaign npcs.ron to correct the service ID".to_string(),
+                ]
+            }
         }
     }
 

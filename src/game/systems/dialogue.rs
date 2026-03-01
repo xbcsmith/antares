@@ -1005,6 +1005,495 @@ fn execute_action(
                 selected_roster_slot: None,
             });
         }
+
+        DialogueAction::BuyItem {
+            item_id,
+            target_character_id,
+        } => {
+            // Resolve speaker NPC ID from dialogue state
+            let npc_id = match dialogue_state
+                .and_then(|d| d.speaker_npc_id.clone())
+                .or_else(|| {
+                    if let crate::application::GameMode::Dialogue(ref ds) = game_state.mode {
+                        ds.speaker_npc_id.clone()
+                    } else {
+                        None
+                    }
+                }) {
+                Some(id) => id,
+                None => {
+                    warn!("BuyItem action fired but no speaker_npc_id in DialogueState");
+                    return;
+                }
+            };
+
+            // Resolve target character: use explicit ID or default to index 0
+            let character_id = match target_character_id {
+                Some(cid) => *cid,
+                None => {
+                    if game_state.party.members.is_empty() {
+                        warn!("BuyItem action fired but party is empty");
+                        return;
+                    }
+                    0
+                }
+            };
+
+            // Look up NPC definition
+            let npc_def = match db.npcs.get_npc(&npc_id) {
+                Some(def) => def.clone(),
+                None => {
+                    error!("BuyItem: NPC '{}' not found in content database", npc_id);
+                    return;
+                }
+            };
+
+            // Ensure runtime state exists for this NPC (idempotent).
+            if game_state.npc_runtime.get(&npc_id).is_none() {
+                let tmpl_db =
+                    crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new();
+                game_state
+                    .npc_runtime
+                    .initialize_merchant(&npc_def, &tmpl_db);
+            }
+
+            // Clone the NPC runtime state so we can call buy_item which takes
+            // `&mut Party` and `&mut NpcRuntimeState` simultaneously without
+            // conflicting borrows on game_state.
+            let mut npc_runtime_clone = match game_state.npc_runtime.get(&npc_id) {
+                Some(rt) => rt.clone(),
+                None => {
+                    warn!(
+                        "BuyItem: NPC runtime for '{}' unavailable after init",
+                        npc_id
+                    );
+                    return;
+                }
+            };
+
+            let buy_result = {
+                // Validate character index before splitting borrows
+                if character_id as usize >= game_state.party.members.len() {
+                    warn!(
+                        "BuyItem: character index {} out of range (party size {})",
+                        character_id,
+                        game_state.party.members.len()
+                    );
+                    return;
+                }
+
+                let (party, members) = (&mut game_state.party.gold, &mut game_state.party.members);
+                let character = &mut members[character_id as usize];
+
+                // Temporarily wrap party gold in a minimal Party-like struct.
+                // buy_item takes &mut Party; we can't split party/members here,
+                // so we reconstruct a temporary Party just for the borrow.
+                // Instead, call the domain function through a small adapter that
+                // re-uses the existing Party reference.
+                use crate::domain::character::Party;
+                // Reconstruct a temporary party with only gold for the call.
+                // We swap the gold out, call the function, swap back.
+                let saved_gold = *party;
+                let mut tmp_party = Party::new();
+                tmp_party.gold = saved_gold;
+
+                let result = crate::domain::transactions::buy_item(
+                    &mut tmp_party,
+                    character,
+                    character_id,
+                    &mut npc_runtime_clone,
+                    &npc_def,
+                    *item_id,
+                    &db.items,
+                );
+
+                // Write gold back regardless of outcome (buy_item is transactional:
+                // gold is only deducted on success, so tmp_party.gold is either
+                // unchanged or reduced by the exact price).
+                *party = tmp_party.gold;
+
+                result
+            };
+
+            match buy_result {
+                Ok(slot) => {
+                    // Commit the mutated NPC runtime state back to the store
+                    game_state.npc_runtime.insert(npc_runtime_clone);
+                    info!(
+                        "Bought item {} (charges={}) for character {}",
+                        item_id, slot.charges, character_id
+                    );
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("Purchased item {}.", item_id));
+                    }
+                }
+                Err(e) => {
+                    // On failure nothing was mutated: no commit needed
+                    warn!("BuyItem failed: {}", e);
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("Cannot buy item: {}", e));
+                    }
+                }
+            }
+        }
+
+        DialogueAction::SellItem {
+            item_id,
+            source_character_id,
+        } => {
+            // Resolve speaker NPC ID from dialogue state
+            let npc_id = match dialogue_state
+                .and_then(|d| d.speaker_npc_id.clone())
+                .or_else(|| {
+                    if let crate::application::GameMode::Dialogue(ref ds) = game_state.mode {
+                        ds.speaker_npc_id.clone()
+                    } else {
+                        None
+                    }
+                }) {
+                Some(id) => id,
+                None => {
+                    warn!("SellItem action fired but no speaker_npc_id in DialogueState");
+                    return;
+                }
+            };
+
+            // Resolve source character: explicit ID or search party for item
+            let character_id = match source_character_id {
+                Some(cid) => *cid,
+                None => {
+                    // Find first party member who has the item
+                    match game_state
+                        .party
+                        .members
+                        .iter()
+                        .enumerate()
+                        .find(|(_, c)| c.inventory.items.iter().any(|s| s.item_id == *item_id))
+                        .map(|(idx, _)| idx as crate::domain::types::CharacterId)
+                    {
+                        Some(cid) => cid,
+                        None => {
+                            warn!(
+                                "SellItem: no party member has item {} in their inventory",
+                                item_id
+                            );
+                            return;
+                        }
+                    }
+                }
+            };
+
+            // Look up NPC definition
+            let npc_def = match db.npcs.get_npc(&npc_id) {
+                Some(def) => def.clone(),
+                None => {
+                    error!("SellItem: NPC '{}' not found in content database", npc_id);
+                    return;
+                }
+            };
+
+            // Ensure runtime state exists for this NPC (idempotent).
+            if game_state.npc_runtime.get(&npc_id).is_none() {
+                let tmpl_db =
+                    crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new();
+                game_state
+                    .npc_runtime
+                    .initialize_merchant(&npc_def, &tmpl_db);
+            }
+
+            // Clone the NPC runtime state for the same reason as BuyItem.
+            let mut npc_runtime_clone = match game_state.npc_runtime.get(&npc_id) {
+                Some(rt) => rt.clone(),
+                None => {
+                    warn!(
+                        "SellItem: NPC runtime for '{}' unavailable after init",
+                        npc_id
+                    );
+                    return;
+                }
+            };
+
+            let sell_result = {
+                if character_id as usize >= game_state.party.members.len() {
+                    warn!(
+                        "SellItem: character index {} out of range (party size {})",
+                        character_id,
+                        game_state.party.members.len()
+                    );
+                    return;
+                }
+
+                let (party_gold, members) =
+                    (&mut game_state.party.gold, &mut game_state.party.members);
+                let character = &mut members[character_id as usize];
+
+                use crate::domain::character::Party;
+                let saved_gold = *party_gold;
+                let mut tmp_party = Party::new();
+                tmp_party.gold = saved_gold;
+
+                let result = crate::domain::transactions::sell_item(
+                    &mut tmp_party,
+                    character,
+                    character_id,
+                    &mut npc_runtime_clone,
+                    &npc_def,
+                    *item_id,
+                    &db.items,
+                );
+
+                *party_gold = tmp_party.gold;
+                result
+            };
+
+            match sell_result {
+                Ok(price) => {
+                    // Commit mutated NPC runtime state
+                    game_state.npc_runtime.insert(npc_runtime_clone);
+                    info!("Sold item {} for {} gold", item_id, price);
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("Sold item {} for {} gold.", item_id, price));
+                    }
+                }
+                Err(e) => {
+                    warn!("SellItem failed: {}", e);
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("Cannot sell item: {}", e));
+                    }
+                }
+            }
+        }
+
+        DialogueAction::OpenMerchant { npc_id } => {
+            // Look up the NPC display name from the content database.
+            let npc_name = db
+                .npcs
+                .get_npc(npc_id)
+                .map(|n| n.name.clone())
+                .unwrap_or_else(|| npc_id.clone());
+
+            // Guard: NPC must exist and be a merchant to open the shop.
+            let npc_is_merchant = db
+                .npcs
+                .get_npc(npc_id)
+                .map(|n| n.is_merchant)
+                .unwrap_or(false);
+
+            if !npc_is_merchant {
+                warn!(
+                    "OpenMerchant: NPC '{}' not found or is not a merchant; ignoring action",
+                    npc_id
+                );
+                if let Some(ref mut log) = game_log {
+                    log.add(format!("'{}' is not a merchant.", npc_name));
+                }
+                return;
+            }
+
+            // Ensure the merchant's NpcRuntimeState (including stock) is
+            // initialised before entering the inventory screen.  This call is
+            // idempotent on subsequent visits.
+            game_state.ensure_npc_runtime_initialized(db);
+
+            // Transition game mode to MerchantInventory.
+            info!(
+                "OpenMerchant: entering merchant inventory for NPC '{}' ('{}')",
+                npc_id, npc_name
+            );
+            game_state.enter_merchant_inventory(npc_id.clone(), npc_name);
+        }
+
+        DialogueAction::ConsumeService {
+            service_id,
+            target_character_ids,
+        } => {
+            // Resolve speaker NPC ID from dialogue state
+            let npc_id = match dialogue_state
+                .and_then(|d| d.speaker_npc_id.clone())
+                .or_else(|| {
+                    if let crate::application::GameMode::Dialogue(ref ds) = game_state.mode {
+                        ds.speaker_npc_id.clone()
+                    } else {
+                        None
+                    }
+                }) {
+                Some(id) => id,
+                None => {
+                    warn!("ConsumeService action fired but no speaker_npc_id in DialogueState");
+                    return;
+                }
+            };
+
+            // Look up NPC definition and service catalog
+            let npc_def = match db.npcs.get_npc(&npc_id) {
+                Some(def) => def.clone(),
+                None => {
+                    error!(
+                        "ConsumeService: NPC '{}' not found in content database",
+                        npc_id
+                    );
+                    return;
+                }
+            };
+
+            let service_catalog = match npc_def.service_catalog.clone() {
+                Some(catalog) => catalog,
+                None => {
+                    warn!("ConsumeService: NPC '{}' has no service catalog", npc_id);
+                    return;
+                }
+            };
+
+            // Ensure runtime state exists for this NPC (idempotent).
+            if game_state.npc_runtime.get(&npc_id).is_none() {
+                let tmpl_db =
+                    crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new();
+                game_state
+                    .npc_runtime
+                    .initialize_merchant(&npc_def, &tmpl_db);
+            }
+
+            // Collect target character indices: empty list means whole party
+            let target_indices: Vec<usize> = if target_character_ids.is_empty() {
+                (0..game_state.party.members.len()).collect()
+            } else {
+                target_character_ids
+                    .iter()
+                    .filter_map(|cid| {
+                        let idx = *cid;
+                        if idx < game_state.party.members.len() {
+                            Some(idx)
+                        } else {
+                            warn!("ConsumeService: character index {} out of range", cid);
+                            None
+                        }
+                    })
+                    .collect()
+            };
+
+            if target_indices.is_empty() {
+                warn!("ConsumeService: no valid target characters resolved");
+                return;
+            }
+
+            // Build mutable target references — we must collect indices and apply
+            // them one by one to satisfy Rust's borrow rules for `Vec::get_mut`.
+            // First, perform the gold/gem deduction check against the service entry.
+            let service_cost = match service_catalog.get_service(service_id) {
+                Some(entry) => (entry.cost, entry.gem_cost),
+                None => {
+                    warn!(
+                        "ConsumeService: service '{}' not found in catalog for NPC '{}'",
+                        service_id, npc_id
+                    );
+                    return;
+                }
+            };
+
+            if game_state.party.gold < service_cost.0 {
+                warn!(
+                    "ConsumeService: insufficient gold (have {}, need {})",
+                    game_state.party.gold, service_cost.0
+                );
+                if let Some(ref mut log) = game_log {
+                    log.add(format!(
+                        "Not enough gold for service '{}' (need {} gold).",
+                        service_id, service_cost.0
+                    ));
+                }
+                return;
+            }
+
+            if game_state.party.gems < service_cost.1 {
+                warn!(
+                    "ConsumeService: insufficient gems (have {}, need {})",
+                    game_state.party.gems, service_cost.1
+                );
+                if let Some(ref mut log) = game_log {
+                    log.add(format!(
+                        "Not enough gems for service '{}' (need {} gems).",
+                        service_id, service_cost.1
+                    ));
+                }
+                return;
+            }
+
+            // Apply service to each target character individually, deducting cost once
+            // up front and then applying the effect per character.
+            game_state.party.gold = game_state.party.gold.saturating_sub(service_cost.0);
+            game_state.party.gems = game_state.party.gems.saturating_sub(service_cost.1);
+
+            let mut affected: Vec<crate::domain::types::CharacterId> = Vec::new();
+            for idx in &target_indices {
+                if let Some(character) = game_state.party.members.get_mut(*idx) {
+                    apply_service_effect_inline(character, service_id);
+                    affected.push(*idx as crate::domain::types::CharacterId);
+                }
+            }
+
+            // Record the consumed service in NPC runtime state
+            if let Some(npc_runtime) = game_state.npc_runtime.get_mut(&npc_id) {
+                npc_runtime.services_consumed.push(service_id.clone());
+            }
+
+            info!(
+                "ConsumeService '{}': paid {} gold, {} gems; affected {} character(s)",
+                service_id,
+                service_cost.0,
+                service_cost.1,
+                affected.len()
+            );
+            if let Some(ref mut log) = game_log {
+                log.add(format!(
+                    "Service '{}' applied to {} character(s).",
+                    service_id,
+                    affected.len()
+                ));
+            }
+        }
+    }
+}
+
+/// Apply a named service effect to a single character.
+///
+/// This mirrors `domain::transactions::apply_service_effect` but operates
+/// directly on a `Character` reference so that `execute_action` can avoid the
+/// borrow-checker complexity of constructing a `Vec<&mut Character>` while
+/// also holding a mutable borrow on `game_state.party.gold`.
+///
+/// Unrecognised service IDs are silently ignored (no-op), matching the
+/// behaviour of the domain-layer helper.
+fn apply_service_effect_inline(
+    character: &mut crate::domain::character::Character,
+    service_id: &str,
+) {
+    use crate::domain::character::Condition;
+    match service_id {
+        "heal_all" | "heal" => {
+            character.hp.current = character.hp.base;
+        }
+        "restore_sp" => {
+            character.sp.current = character.sp.base;
+        }
+        "cure_poison" => {
+            character.conditions.remove(Condition::POISONED);
+        }
+        "cure_disease" => {
+            character.conditions.remove(Condition::DISEASED);
+        }
+        "cure_all" => {
+            character.conditions.clear();
+        }
+        "resurrect" => {
+            character.conditions.clear();
+            character.hp.current = 1;
+        }
+        "rest" => {
+            character.hp.current = character.hp.base;
+            character.sp.current = character.sp.base;
+            character.conditions.clear();
+        }
+        _ => {}
     }
 }
 
@@ -2061,6 +2550,475 @@ mod tests {
                 .any(|e| e.contains("Opening party management")),
             "Expected opening message in game log. Actual entries: {:?}",
             entries
+        );
+    }
+
+    // ===== Phase 3: Transaction Dialogue Integration Tests =====
+
+    /// Build a minimal ContentDatabase containing one merchant NPC ("merchant_tom")
+    /// with item 1 in stock (qty 3, price 10) and item 2 in stock (qty 2, price 20).
+    /// The item database contains matching Item entries.
+    fn make_merchant_db() -> crate::sdk::database::ContentDatabase {
+        use crate::domain::items::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::DiceRoll;
+        use crate::domain::world::npc::NpcDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add items to item database
+        let item1 = Item {
+            id: 1,
+            name: "Iron Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 6, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::Simple,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+        let item2 = Item {
+            id: 2,
+            name: "Shield".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 4, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::Simple,
+            }),
+            base_cost: 20,
+            sell_cost: 10,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+        db.items.add_item(item1).unwrap();
+        db.items.add_item(item2).unwrap();
+
+        // Add merchant NPC
+        let merchant = NpcDefinition::merchant("merchant_tom", "Tom", "tom.png");
+        db.npcs.add_npc(merchant).unwrap();
+
+        // Pre-populate NPC runtime store with stock so the test bypasses lazy-init
+        db
+    }
+
+    /// Build a GameState with one party member and merchant_tom's NPC runtime
+    /// pre-initialised with stock for items 1 and 2.
+    fn make_game_state_with_merchant(party_gold: u32) -> crate::application::GameState {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::inventory::{MerchantStock, StockEntry};
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        let mut gs = crate::application::GameState::new();
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        gs.party.gold = party_gold;
+
+        // Pre-initialise merchant runtime state with stock
+        let mut npc_runtime = NpcRuntimeState::new("merchant_tom".to_string());
+        npc_runtime.stock = Some(MerchantStock {
+            entries: vec![
+                StockEntry::new(1, 3), // item 1, qty 3
+                StockEntry::new(2, 2), // item 2, qty 2
+            ],
+            restock_template: None,
+        });
+        gs.npc_runtime.insert(npc_runtime);
+
+        gs
+    }
+
+    /// Make a DialogueState with speaker_npc_id set to "merchant_tom".
+    fn merchant_dialogue_state() -> crate::application::dialogue::DialogueState {
+        crate::application::dialogue::DialogueState::start(
+            1,
+            1,
+            None,
+            Some("merchant_tom".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_buy_item_dialogue_action_deducts_gold() {
+        // Arrange
+        let db = make_merchant_db();
+        let mut game_state = make_game_state_with_merchant(100);
+        game_state.mode = crate::application::GameMode::Dialogue(merchant_dialogue_state());
+
+        // Act: buy item 1 (costs 10 gold) for character 0
+        execute_action(
+            &DialogueAction::BuyItem {
+                item_id: 1,
+                target_character_id: None,
+            },
+            &mut game_state,
+            &db,
+            Some(&merchant_dialogue_state()),
+            None,
+            None,
+        );
+
+        // Assert: gold decreased and item is in inventory
+        assert_eq!(
+            game_state.party.gold, 90,
+            "Party gold should decrease by 10 after buying item 1"
+        );
+        assert!(
+            game_state.party.members[0]
+                .inventory
+                .items
+                .iter()
+                .any(|s| s.item_id == 1),
+            "Item 1 should be in character 0 inventory after purchase"
+        );
+    }
+
+    #[test]
+    fn test_buy_item_dialogue_action_insufficient_gold_no_mutation() {
+        // Arrange
+        let db = make_merchant_db();
+        let mut game_state = make_game_state_with_merchant(5); // only 5 gold, item costs 10
+
+        // Act: attempt to buy item 1 with insufficient gold
+        execute_action(
+            &DialogueAction::BuyItem {
+                item_id: 1,
+                target_character_id: None,
+            },
+            &mut game_state,
+            &db,
+            Some(&merchant_dialogue_state()),
+            None,
+            None,
+        );
+
+        // Assert: gold unchanged and inventory empty
+        assert_eq!(
+            game_state.party.gold, 5,
+            "Party gold should not change when purchase fails"
+        );
+        assert!(
+            game_state.party.members[0].inventory.items.is_empty(),
+            "Inventory should be empty when purchase fails due to insufficient gold"
+        );
+    }
+
+    #[test]
+    fn test_consume_service_dialogue_action_heals_party() {
+        use crate::domain::inventory::{ServiceCatalog, ServiceEntry};
+        use crate::domain::world::npc::NpcDefinition;
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        // Arrange: build a priest NPC with heal_all service
+        let mut db = ContentDatabase::new();
+        let mut priest = NpcDefinition::priest("priest_anna", "Anna", "anna.png");
+        let mut catalog = ServiceCatalog::new();
+        catalog.services.push(ServiceEntry::new(
+            "heal_all".to_string(),
+            50, // cost 50 gold
+            "Heal all party members".to_string(),
+        ));
+        priest.service_catalog = Some(catalog);
+        db.npcs.add_npc(priest).unwrap();
+
+        let mut game_state = crate::application::GameState::new();
+
+        // Add a party member with reduced HP
+        use crate::domain::character::{Alignment, Character, Sex};
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp.base = 30;
+        hero.hp.current = 5; // damaged
+        game_state.party.add_member(hero).unwrap();
+        game_state.party.gold = 100;
+
+        // Pre-init priest runtime
+        let priest_runtime = NpcRuntimeState::new("priest_anna".to_string());
+        game_state.npc_runtime.insert(priest_runtime);
+
+        // Dialogue state pointing to the priest
+        let dlg_state = crate::application::dialogue::DialogueState::start(
+            1,
+            1,
+            None,
+            Some("priest_anna".to_string()),
+        );
+
+        // Act: consume heal_all service for whole party
+        execute_action(
+            &DialogueAction::ConsumeService {
+                service_id: "heal_all".to_string(),
+                target_character_ids: vec![],
+            },
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+        );
+
+        // Assert: HP restored and gold deducted
+        assert_eq!(
+            game_state.party.members[0].hp.current, game_state.party.members[0].hp.base,
+            "Character HP should be fully restored after heal_all service"
+        );
+        assert_eq!(
+            game_state.party.gold, 50,
+            "Party should have paid 50 gold for heal_all service"
+        );
+    }
+
+    #[test]
+    fn test_consume_service_dialogue_action_insufficient_gold_no_mutation() {
+        use crate::domain::inventory::{ServiceCatalog, ServiceEntry};
+        use crate::domain::world::npc::NpcDefinition;
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        // Arrange: build a priest NPC with heal_all service costing 50 gold
+        let mut db = ContentDatabase::new();
+        let mut priest = NpcDefinition::priest("priest_anna", "Anna", "anna.png");
+        let mut catalog = ServiceCatalog::new();
+        catalog.services.push(ServiceEntry::new(
+            "heal_all".to_string(),
+            50,
+            "Heal all".to_string(),
+        ));
+        priest.service_catalog = Some(catalog);
+        db.npcs.add_npc(priest).unwrap();
+
+        let mut game_state = crate::application::GameState::new();
+
+        use crate::domain::character::{Alignment, Character, Sex};
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp.base = 30;
+        hero.hp.current = 5; // damaged
+        game_state.party.add_member(hero).unwrap();
+        game_state.party.gold = 0; // no gold
+
+        let priest_runtime = NpcRuntimeState::new("priest_anna".to_string());
+        game_state.npc_runtime.insert(priest_runtime);
+
+        let dlg_state = crate::application::dialogue::DialogueState::start(
+            1,
+            1,
+            None,
+            Some("priest_anna".to_string()),
+        );
+
+        // Act: attempt heal_all with no gold
+        execute_action(
+            &DialogueAction::ConsumeService {
+                service_id: "heal_all".to_string(),
+                target_character_ids: vec![],
+            },
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+        );
+
+        // Assert: HP unchanged and gold unchanged
+        assert_eq!(
+            game_state.party.members[0].hp.current, 5,
+            "HP should be unchanged when service cannot be afforded"
+        );
+        assert_eq!(
+            game_state.party.gold, 0,
+            "Gold should be unchanged when service cannot be afforded"
+        );
+    }
+
+    #[test]
+    fn test_dialogue_action_description_buy_item() {
+        // Confirms description() returns a non-empty string for BuyItem
+        let action = DialogueAction::BuyItem {
+            item_id: 1,
+            target_character_id: None,
+        };
+        let desc = action.description();
+        assert!(!desc.is_empty(), "BuyItem description should not be empty");
+        assert!(
+            desc.contains("1"),
+            "BuyItem description should mention item id"
+        );
+    }
+
+    /// `OpenMerchant` must transition game mode to `MerchantInventory` when
+    /// the NPC exists and has `is_merchant == true`.
+    #[test]
+    fn test_open_merchant_dialogue_action_enters_merchant_inventory() {
+        // Arrange: use the merchant DB fixture that has "merchant_tom"
+        let db = make_merchant_db();
+        let mut game_state = make_game_state_with_merchant(0);
+        game_state.mode = crate::application::GameMode::Dialogue(merchant_dialogue_state());
+
+        // Act
+        execute_action(
+            &DialogueAction::OpenMerchant {
+                npc_id: "merchant_tom".to_string(),
+            },
+            &mut game_state,
+            &db,
+            Some(&merchant_dialogue_state()),
+            None,
+            None,
+        );
+
+        // Assert: mode must be MerchantInventory
+        assert!(
+            matches!(
+                game_state.mode,
+                crate::application::GameMode::MerchantInventory(_)
+            ),
+            "OpenMerchant must transition mode to MerchantInventory, got {:?}",
+            game_state.mode
+        );
+    }
+
+    /// `OpenMerchant` with an unknown NPC ID must not panic and must not change
+    /// the game mode (graceful degradation).
+    #[test]
+    fn test_open_merchant_dialogue_action_unknown_npc_no_panic() {
+        // Arrange: empty content database — NPC "ghost_npc" does not exist
+        let db = ContentDatabase::new();
+        let mut game_state = crate::application::GameState::new();
+        let mode_before = std::mem::discriminant(&game_state.mode);
+
+        // Act: must not panic
+        execute_action(
+            &DialogueAction::OpenMerchant {
+                npc_id: "ghost_npc".to_string(),
+            },
+            &mut game_state,
+            &db,
+            None,
+            None,
+            None,
+        );
+
+        // Assert: game mode is unchanged (no transition on unknown NPC)
+        assert_eq!(
+            std::mem::discriminant(&game_state.mode),
+            mode_before,
+            "OpenMerchant with unknown NPC must not change game mode"
+        );
+    }
+
+    #[test]
+    fn test_sell_item_dialogue_action_adds_gold() {
+        use crate::domain::items::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::DiceRoll;
+        use crate::domain::world::npc::NpcDefinition;
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        // Arrange
+        let mut db = ContentDatabase::new();
+
+        // Item with sell_cost = 5
+        let item1 = Item {
+            id: 1,
+            name: "Old Dagger".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 4, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::Simple,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+        db.items.add_item(item1).unwrap();
+
+        let merchant = NpcDefinition::merchant("merchant_tom", "Tom", "tom.png");
+        db.npcs.add_npc(merchant).unwrap();
+
+        use crate::domain::character::{Alignment, Character, Sex};
+        let mut gs = crate::application::GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Give character item 1 in inventory
+        hero.inventory.add_item(1, 0).unwrap();
+        gs.party.add_member(hero).unwrap();
+        gs.party.gold = 0;
+
+        // Pre-init merchant runtime (no stock needed for selling)
+        let npc_runtime = NpcRuntimeState::new("merchant_tom".to_string());
+        gs.npc_runtime.insert(npc_runtime);
+
+        let dlg_state = merchant_dialogue_state();
+
+        // Act
+        execute_action(
+            &DialogueAction::SellItem {
+                item_id: 1,
+                source_character_id: None,
+            },
+            &mut gs,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+        );
+
+        // Assert: item removed from inventory and gold increased
+        assert!(
+            gs.party.members[0]
+                .inventory
+                .items
+                .iter()
+                .all(|s| s.item_id != 1),
+            "Item 1 should be removed from inventory after selling"
+        );
+        assert!(
+            gs.party.gold > 0,
+            "Party gold should increase after selling an item"
         );
     }
 }

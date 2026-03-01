@@ -325,6 +325,10 @@ fn test_fallback_mechanism_for_missing_creature_id() {
         faction: None,
         is_merchant: false,
         is_innkeeper: false,
+        is_priest: false,
+        stock_template: None,
+        service_catalog: None,
+        economy: None,
     };
 
     // Assert: NPC exists but has no creature_id

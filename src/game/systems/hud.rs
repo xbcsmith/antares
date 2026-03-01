@@ -17,6 +17,7 @@ use crate::application::GameMode;
 use crate::domain::character::{Condition, PARTY_MAX_SIZE};
 use crate::domain::conditions::ActiveCondition;
 use crate::domain::types::Direction;
+use crate::game::components::inventory::{CharacterEntity, PartyEntities};
 use crate::game::resources::GlobalState;
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -154,7 +155,7 @@ pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PortraitAssets::default())
-            .add_systems(Startup, setup_hud)
+            .add_systems(Startup, (setup_hud, setup_party_entities))
             .add_systems(
                 Update,
                 (
@@ -173,6 +174,35 @@ impl Plugin for HudPlugin {
 /// Used to hide exploration HUD during combat.
 fn not_in_combat(global_state: Res<GlobalState>) -> bool {
     !matches!(global_state.0.mode, GameMode::Combat(_))
+}
+
+/// Spawns one pure-identity Bevy entity per party slot and stores them in
+/// the [`PartyEntities`] resource.
+///
+/// Each entity carries a single [`CharacterEntity`] component with its
+/// zero-based `party_index`.  These entities have no mesh, transform, or
+/// visibility — they exist solely so that later inventory systems can attach
+/// per-character components and look up entities by party index.
+///
+/// The [`PartyEntities`] resource is initialised (all `None`) first, then
+/// populated with the freshly-spawned entity handles.
+///
+/// # Arguments
+///
+/// * `commands` - Bevy command buffer used to spawn entities and insert the
+///   resource.
+fn setup_party_entities(mut commands: Commands) {
+    // Pre-populate all slots as None, then fill them in.
+    let mut entity_array: [Option<Entity>; PARTY_MAX_SIZE] = [None; PARTY_MAX_SIZE];
+
+    for (party_index, slot) in entity_array.iter_mut().enumerate() {
+        let entity = commands.spawn(CharacterEntity { party_index }).id();
+        *slot = Some(entity);
+    }
+
+    commands.insert_resource(PartyEntities {
+        entities: entity_array,
+    });
 }
 
 // ===== Systems =====
@@ -1183,6 +1213,80 @@ mod layout_tests {
     fn test_format_hp_display_zero() {
         let display = format_hp_display(0, 100);
         assert_eq!(display, "HP: 0/100");
+    }
+}
+
+#[cfg(test)]
+mod party_entity_tests {
+    use super::*;
+    use bevy::prelude::{App, Startup};
+
+    /// `setup_party_entities` must insert a `PartyEntities` resource and spawn
+    /// exactly `PARTY_MAX_SIZE` entities, each carrying the correct
+    /// `CharacterEntity { party_index }`.
+    #[test]
+    fn test_setup_party_entities_spawns_correct_count() {
+        let mut app = App::new();
+        app.add_systems(Startup, setup_party_entities);
+        app.update();
+
+        let world = app.world();
+        let pe = world
+            .get_resource::<PartyEntities>()
+            .expect("PartyEntities resource must exist after setup_party_entities");
+
+        assert_eq!(
+            pe.entities.len(),
+            PARTY_MAX_SIZE,
+            "resource must have exactly PARTY_MAX_SIZE slots"
+        );
+        assert!(
+            pe.entities.iter().all(|e| e.is_some()),
+            "all slots must be populated after startup"
+        );
+    }
+
+    /// Each entity stored in `PartyEntities` must carry the correct
+    /// `CharacterEntity` component with the matching `party_index`.
+    #[test]
+    fn test_setup_party_entities_correct_indices() {
+        let mut app = App::new();
+        app.add_systems(Startup, setup_party_entities);
+        app.update();
+
+        let world = app.world();
+        let pe = world
+            .get_resource::<PartyEntities>()
+            .expect("PartyEntities resource must exist");
+
+        for (expected_index, maybe_entity) in pe.entities.iter().enumerate() {
+            let entity = maybe_entity.expect("slot should be populated");
+            let marker = world
+                .get::<CharacterEntity>(entity)
+                .expect("entity must have CharacterEntity component");
+            assert_eq!(
+                marker.party_index, expected_index,
+                "party_index must match slot position"
+            );
+        }
+    }
+
+    /// Running `setup_party_entities` twice (e.g. in back-to-back updates)
+    /// must not panic; the resource simply gets overwritten.
+    #[test]
+    fn test_setup_party_entities_idempotent_resource_insert() {
+        let mut app = App::new();
+        // Register as a regular Update system so we can call update() twice.
+        app.add_systems(Startup, setup_party_entities);
+        app.update();
+        // A second update should not panic (resource overwrite is safe).
+        app.update();
+
+        let world = app.world();
+        let pe = world
+            .get_resource::<PartyEntities>()
+            .expect("PartyEntities must still exist after second update");
+        assert_eq!(pe.entities.len(), PARTY_MAX_SIZE);
     }
 }
 

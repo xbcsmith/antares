@@ -185,6 +185,27 @@ pub enum ValidationError {
     /// Creature has duplicate mesh names
     #[error("Creature '{name}' (ID {creature_id}) has duplicate mesh names")]
     CreatureDuplicateMeshNames { creature_id: u32, name: String },
+
+    /// Item referenced in a merchant stock template does not exist in the item database
+    #[error("NPC '{context}' stock template references missing item ID {item_id}")]
+    MissingStockTemplateItem {
+        /// The NPC ID whose stock template contains the bad reference
+        context: String,
+        /// The item ID that could not be found in the item database
+        item_id: crate::domain::types::ItemId,
+    },
+
+    /// A service catalog entry uses an unrecognised service ID
+    ///
+    /// Emitted as a `Warning` (not `Error`) to allow custom service IDs for
+    /// future extensibility.
+    #[error("NPC '{context}' service catalog contains unknown service ID '{service_id}'")]
+    InvalidServiceId {
+        /// The NPC ID whose service catalog contains the unrecognised entry
+        context: String,
+        /// The unrecognised service ID string
+        service_id: String,
+    },
 }
 
 impl ValidationError {
@@ -216,9 +237,12 @@ impl ValidationError {
             | ValidationError::CreatureInvalidScale { .. }
             | ValidationError::CreatureNoMeshes { .. }
             | ValidationError::CreatureMeshTopology { .. }
-            | ValidationError::CreatureDuplicateMeshNames { .. } => Severity::Error,
+            | ValidationError::CreatureDuplicateMeshNames { .. }
+            | ValidationError::MissingStockTemplateItem { .. } => Severity::Error,
 
-            ValidationError::DisconnectedMap { .. } => Severity::Warning,
+            ValidationError::DisconnectedMap { .. } | ValidationError::InvalidServiceId { .. } => {
+                Severity::Warning
+            }
 
             ValidationError::BalanceWarning { severity, .. } => *severity,
 
@@ -345,6 +369,12 @@ impl<'a> Validator<'a> {
         // Validate creatures
         errors.extend(self.validate_creatures());
 
+        // Validate merchant stock template references
+        errors.extend(self.validate_merchant_stock());
+
+        // Validate service catalog entries
+        errors.extend(self.validate_service_catalogs());
+
         Ok(errors)
     }
 
@@ -445,6 +475,141 @@ impl<'a> Validator<'a> {
                 if npc.is_innkeeper && npc.dialogue_id.is_none() {
                     errors.push(ValidationError::InnkeeperMissingDialogue {
                         innkeeper_id: npc_id.clone(),
+                    });
+                }
+            }
+        }
+
+        errors
+    }
+
+    /// Validates merchant stock templates referenced by NPC definitions.
+    ///
+    /// For every NPC marked `is_merchant == true`:
+    /// - If `stock_template` is `Some(id)`, verifies the template exists in
+    ///   `db.npc_stock_templates`.
+    /// - For each entry in the found template, verifies the `item_id` exists in
+    ///   `db.items`.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<ValidationError>` containing any errors found.  An empty vector
+    /// means all merchant stock references are valid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::database::ContentDatabase;
+    /// use antares::sdk::validation::Validator;
+    ///
+    /// let db = ContentDatabase::new();
+    /// let validator = Validator::new(&db);
+    /// let errors = validator.validate_merchant_stock();
+    /// assert!(errors.is_empty());
+    /// ```
+    pub fn validate_merchant_stock(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+
+        for npc_id in self.db.npcs.all_npcs() {
+            let npc = match self.db.npcs.get_npc(&npc_id) {
+                Some(n) => n,
+                None => continue,
+            };
+
+            if !npc.is_merchant {
+                continue;
+            }
+
+            let template_id = match &npc.stock_template {
+                Some(id) => id,
+                None => continue,
+            };
+
+            // Check that the referenced template exists
+            let template = match self.db.npc_stock_templates.get(template_id) {
+                Some(t) => t,
+                None => {
+                    errors.push(ValidationError::MissingItem {
+                        context: format!("NPC '{}' stock_template '{}'", npc_id, template_id),
+                        item_id: 0,
+                    });
+                    continue;
+                }
+            };
+
+            // Validate every item in the template exists
+            for entry in &template.entries {
+                if !self.db.items.has_item(&entry.item_id) {
+                    errors.push(ValidationError::MissingStockTemplateItem {
+                        context: npc_id.clone(),
+                        item_id: entry.item_id,
+                    });
+                }
+            }
+        }
+
+        errors
+    }
+
+    /// Known built-in service IDs recognised by the game engine.
+    ///
+    /// Service IDs outside this list are emitted as `Warning`-level
+    /// `InvalidServiceId` errors to allow custom service IDs for future
+    /// extensibility without breaking existing campaigns.
+    const KNOWN_SERVICE_IDS: &'static [&'static str] = &[
+        "heal_all",
+        "heal",
+        "restore_sp",
+        "cure_poison",
+        "cure_disease",
+        "cure_all",
+        "resurrect",
+        "rest",
+    ];
+
+    /// Validates service catalog entries for all NPCs that have one.
+    ///
+    /// For every NPC whose `service_catalog` is `Some`, each `ServiceEntry`
+    /// is checked against [`Validator::KNOWN_SERVICE_IDS`].  Entries with
+    /// unknown service IDs are emitted as `Warning`-severity
+    /// [`ValidationError::InvalidServiceId`] to allow forward-compatible
+    /// custom service IDs.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<ValidationError>` containing any warnings found.  An empty
+    /// vector means all service IDs are known built-in IDs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::database::ContentDatabase;
+    /// use antares::sdk::validation::Validator;
+    ///
+    /// let db = ContentDatabase::new();
+    /// let validator = Validator::new(&db);
+    /// let warnings = validator.validate_service_catalogs();
+    /// assert!(warnings.is_empty());
+    /// ```
+    pub fn validate_service_catalogs(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+
+        for npc_id in self.db.npcs.all_npcs() {
+            let npc = match self.db.npcs.get_npc(&npc_id) {
+                Some(n) => n,
+                None => continue,
+            };
+
+            let catalog = match &npc.service_catalog {
+                Some(c) => c,
+                None => continue,
+            };
+
+            for entry in &catalog.services {
+                if !Self::KNOWN_SERVICE_IDS.contains(&entry.service_id.as_str()) {
+                    errors.push(ValidationError::InvalidServiceId {
+                        context: npc_id.clone(),
+                        service_id: entry.service_id.clone(),
                     });
                 }
             }
@@ -876,6 +1041,30 @@ impl<'a> Validator<'a> {
                 }
                 crate::domain::world::MapEvent::Furniture { .. } => {
                     // Furniture events are always valid - they spawn procedurally
+                }
+                crate::domain::world::MapEvent::Container { id, items, .. } => {
+                    // Validate that the container id is non-empty
+                    if id.trim().is_empty() {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Error,
+                            message: format!(
+                                "Map {} has Container event with empty id at ({}, {})",
+                                map.id, pos.x, pos.y
+                            ),
+                        });
+                    }
+                    // Validate each item id referenced in the container
+                    for slot in items {
+                        if !self.db.items.has_item(&(slot.item_id as ItemId)) {
+                            errors.push(ValidationError::MissingItem {
+                                context: format!(
+                                    "Map {} container '{}' at ({}, {})",
+                                    map.id, id, pos.x, pos.y
+                                ),
+                                item_id: slot.item_id as ItemId,
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -1933,5 +2122,245 @@ mod tests {
             errors[0],
             ValidationError::InnkeeperMissingDialogue { ref innkeeper_id } if innkeeper_id == "isolated_test"
         ));
+    }
+
+    // ===== Phase 4: Merchant Stock and Service Catalog Validation Tests =====
+
+    #[test]
+    fn test_validate_merchant_stock_valid() {
+        // Arrange: merchant NPC with valid stock template referencing valid items
+        use crate::domain::items::ItemDatabase;
+        use crate::domain::world::npc_runtime::{MerchantStockTemplate, TemplateStockEntry};
+
+        let mut db = ContentDatabase::new();
+
+        // Build a minimal item database with item 1
+        let item_ron = r#"[
+            (
+                id: 1,
+                name: "Club",
+                item_type: Weapon((
+                    damage: (count: 1, sides: 3, bonus: 0),
+                    bonus: 0,
+                    hands_required: 1,
+                    classification: Simple,
+                )),
+                base_cost: 1,
+                sell_cost: 0,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: [],
+            ),
+        ]"#;
+        db.items = ItemDatabase::load_from_string(item_ron).expect("Failed to load test items");
+
+        // Add a stock template referencing item 1
+        db.npc_stock_templates.add(MerchantStockTemplate {
+            id: "test_template".to_string(),
+            entries: vec![TemplateStockEntry {
+                item_id: 1,
+                quantity: 3,
+                override_price: None,
+            }],
+            magic_item_pool: vec![],
+            magic_slot_count: 0,
+            magic_refresh_days: 7,
+        });
+
+        // Add a merchant NPC referencing the template
+        let mut merchant = crate::domain::world::npc::NpcDefinition::merchant(
+            "valid_merchant",
+            "Valid Merchant",
+            "portrait",
+        );
+        merchant.stock_template = Some("test_template".to_string());
+        db.npcs.add_npc(merchant).unwrap();
+
+        // Act
+        let validator = Validator::new(&db);
+        let errors = validator.validate_merchant_stock();
+
+        // Assert: no errors for valid configuration
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_validate_merchant_stock_missing_template() {
+        // Arrange: merchant NPC referencing a non-existent template
+        let mut db = ContentDatabase::new();
+
+        let mut merchant = crate::domain::world::npc::NpcDefinition::merchant(
+            "bad_merchant",
+            "Bad Merchant",
+            "portrait",
+        );
+        merchant.stock_template = Some("nonexistent_template".to_string());
+        db.npcs.add_npc(merchant).unwrap();
+
+        // Act
+        let validator = Validator::new(&db);
+        let errors = validator.validate_merchant_stock();
+
+        // Assert: at least one error for missing template
+        assert!(
+            !errors.is_empty(),
+            "Expected at least one error for missing template"
+        );
+    }
+
+    #[test]
+    fn test_validate_merchant_stock_invalid_item() {
+        // Arrange: stock template references item_id 999 which is not in ItemDatabase
+        use crate::domain::world::npc_runtime::{MerchantStockTemplate, TemplateStockEntry};
+
+        let mut db = ContentDatabase::new();
+
+        // Template referencing an item that does not exist
+        db.npc_stock_templates.add(MerchantStockTemplate {
+            id: "bad_items_template".to_string(),
+            entries: vec![TemplateStockEntry {
+                item_id: 200,
+                quantity: 2,
+                override_price: None,
+            }],
+            magic_item_pool: vec![],
+            magic_slot_count: 0,
+            magic_refresh_days: 7,
+        });
+
+        let mut merchant = crate::domain::world::npc::NpcDefinition::merchant(
+            "item_merchant",
+            "Item Merchant",
+            "portrait",
+        );
+        merchant.stock_template = Some("bad_items_template".to_string());
+        db.npcs.add_npc(merchant).unwrap();
+
+        // Act
+        let validator = Validator::new(&db);
+        let errors = validator.validate_merchant_stock();
+
+        // Assert: should have a MissingStockTemplateItem error
+        let has_missing_stock_item = errors.iter().any(|e| {
+            matches!(
+                e,
+                ValidationError::MissingStockTemplateItem {
+                    context,
+                    item_id: 200,
+                } if context == "item_merchant"
+            )
+        });
+        assert!(
+            has_missing_stock_item,
+            "Expected MissingStockTemplateItem error but got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_validate_service_catalogs_known_ids() {
+        // Arrange: NPC with service catalog using only known service IDs
+        use crate::domain::inventory::{ServiceCatalog, ServiceEntry};
+
+        let mut db = ContentDatabase::new();
+
+        let mut priest = crate::domain::world::npc::NpcDefinition::priest(
+            "good_priest",
+            "Good Priest",
+            "portrait",
+        );
+
+        let mut catalog = ServiceCatalog::new();
+        catalog
+            .services
+            .push(ServiceEntry::new("heal_all", 50, "Heal all party members"));
+        catalog
+            .services
+            .push(ServiceEntry::new("cure_poison", 25, "Cure poison"));
+        catalog.services.push(ServiceEntry::new(
+            "resurrect",
+            200,
+            "Resurrect dead character",
+        ));
+        catalog
+            .services
+            .push(ServiceEntry::new("rest", 10, "Rest the party"));
+        priest.service_catalog = Some(catalog);
+        db.npcs.add_npc(priest).unwrap();
+
+        // Act
+        let validator = Validator::new(&db);
+        let warnings = validator.validate_service_catalogs();
+
+        // Assert: no warnings for all-known service IDs
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings but got: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn test_validate_service_catalogs_unknown_id() {
+        // Arrange: NPC with service catalog containing an unknown service ID
+        use crate::domain::inventory::{ServiceCatalog, ServiceEntry};
+
+        let mut db = ContentDatabase::new();
+
+        let mut priest = crate::domain::world::npc::NpcDefinition::priest(
+            "custom_priest",
+            "Custom Priest",
+            "portrait",
+        );
+
+        let mut catalog = ServiceCatalog::new();
+        catalog
+            .services
+            .push(ServiceEntry::new("heal_all", 50, "Heal all party members"));
+        // Unknown custom service ID
+        catalog.services.push(ServiceEntry::new(
+            "transmute_gold",
+            500,
+            "Transmute items to gold",
+        ));
+        priest.service_catalog = Some(catalog);
+        db.npcs.add_npc(priest).unwrap();
+
+        // Act
+        let validator = Validator::new(&db);
+        let warnings = validator.validate_service_catalogs();
+
+        // Assert: exactly one warning with Warning severity (not Error)
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected exactly one warning but got: {:?}",
+            warnings
+        );
+        assert_eq!(
+            warnings[0].severity(),
+            Severity::Warning,
+            "Unknown service ID should be Warning severity, not Error"
+        );
+        assert!(
+            matches!(
+                &warnings[0],
+                ValidationError::InvalidServiceId {
+                    context,
+                    service_id,
+                } if context == "custom_priest" && service_id == "transmute_gold"
+            ),
+            "Expected InvalidServiceId for 'transmute_gold' but got: {:?}",
+            warnings[0]
+        );
     }
 }

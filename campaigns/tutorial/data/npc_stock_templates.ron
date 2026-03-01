@@ -1,0 +1,127 @@
+[
+    MerchantStockTemplate(
+        id: "town_merchant_basic",
+        entries: [
+            TemplateStockEntry(
+                item_id: 1,
+                quantity: 3,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 2,
+                quantity: 3,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 3,
+                quantity: 3,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 4,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 5,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 6,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 7,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 8,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 9,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 20,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 21,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 22,
+                quantity: 1,
+                override_price: None,
+            ),
+        ],
+        magic_item_pool: [
+            30,
+            11,
+            12,
+            30,
+            41,
+        ],
+        magic_slot_count: 5,
+        magic_refresh_days: 7,
+    ),
+    MerchantStockTemplate(
+        id: "mountain_pass_merchant",
+        entries: [
+            TemplateStockEntry(
+                item_id: 10,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 105,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 22,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 7,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 4,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 30,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 107,
+                quantity: 2,
+                override_price: None,
+            ),
+        ],
+        magic_item_pool: [
+            40,
+            11,
+            12,
+            42,
+            41,
+            43,
+            31,
+        ],
+        magic_slot_count: 7,
+        magic_refresh_days: 7,
+    ),
+]

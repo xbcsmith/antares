@@ -31,4 +31,5 @@ CampaignMetadata(
     npcs_file: "data/npcs.ron",
     proficiencies_file: "data/proficiencies.ron",
     creatures_file: "data/creatures.ron",
+    stock_templates_file: "data/npc_stock_templates.ron",
 )

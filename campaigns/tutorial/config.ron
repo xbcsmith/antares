@@ -20,6 +20,7 @@ GameConfig(
         turn_right: ["D", "ArrowRight"],
         interact: ["Space", "E"],
         menu: ["Escape"],
+        inventory: ["I"],
         movement_cooldown: 0.2,
     ),
     camera: CameraConfig(

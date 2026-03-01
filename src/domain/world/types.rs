@@ -1866,6 +1866,32 @@ pub enum MapEvent {
         #[serde(default)]
         color_tint: Option<[f32; 3]>,
     },
+    /// An interactive container (chest, barrel, hole-in-the-wall, crate, etc.)
+    /// whose contents can be taken or stashed into by the party.
+    ///
+    /// Pressing `E` while facing this event tile opens `GameMode::ContainerInventory`.
+    /// On close, the updated item list is written back so partial takes persist
+    /// within a session.
+    Container {
+        /// Unique identifier for this container instance.
+        ///
+        /// Used as the `container_event_id` stored in `ContainerInventoryState`
+        /// and as the key to write the updated item list back to the map event
+        /// on close.
+        id: String,
+        /// Display name shown in the container inventory right-panel header.
+        #[serde(default)]
+        name: String,
+        /// Optional description (shown in game log when the container is opened).
+        #[serde(default)]
+        description: String,
+        /// Current items stored inside the container.
+        ///
+        /// Modified in-place when the player takes or stashes items so that
+        /// re-interacting within the same session shows the updated contents.
+        #[serde(default)]
+        items: Vec<crate::domain::character::InventorySlot>,
+    },
 }
 
 /// Default scale for furniture events (1.0x)
@@ -1948,6 +1974,14 @@ pub struct ResolvedNpc {
     pub is_merchant: bool,
     /// Whether NPC is an innkeeper
     pub is_innkeeper: bool,
+    /// Whether NPC is a priest offering healing/curing services
+    pub is_priest: bool,
+    /// Optional stock template ID for initializing merchant inventory
+    pub stock_template: Option<String>,
+    /// Optional inline service catalog for priest or innkeeper NPCs
+    pub service_catalog: Option<crate::domain::inventory::ServiceCatalog>,
+    /// Optional per-NPC economy settings overriding campaign defaults
+    pub economy: Option<crate::domain::inventory::NpcEconomySettings>,
 }
 
 impl ResolvedNpc {
@@ -1975,6 +2009,10 @@ impl ResolvedNpc {
     ///     faction: Some("City Watch".to_string()),
     ///     is_merchant: false,
     ///     is_innkeeper: false,
+    ///     is_priest: false,
+    ///     stock_template: None,
+    ///     service_catalog: None,
+    ///     economy: None,
     /// };
     ///
     /// let placement = NpcPlacement::new("guard", Position::new(5, 5));
@@ -2000,6 +2038,10 @@ impl ResolvedNpc {
             faction: definition.faction.clone(),
             is_merchant: definition.is_merchant,
             is_innkeeper: definition.is_innkeeper,
+            is_priest: definition.is_priest,
+            stock_template: definition.stock_template.clone(),
+            service_catalog: definition.service_catalog.clone(),
+            economy: definition.economy.clone(),
         }
     }
 }
@@ -2388,6 +2430,10 @@ mod map_npc_resolution_tests {
             faction: Some("City Watch".to_string()),
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         npc_db.add_npc(npc_def).unwrap();
 
@@ -2424,6 +2470,10 @@ mod map_npc_resolution_tests {
             faction: Some("Village".to_string()),
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         npc_db.add_npc(npc_def).unwrap();
 
@@ -2455,6 +2505,10 @@ mod map_npc_resolution_tests {
             faction: Some("Test Faction".to_string()),
             is_merchant: true,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         let placement = NpcPlacement {
@@ -2550,6 +2604,10 @@ mod map_npc_resolution_tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         let placement = NpcPlacement {

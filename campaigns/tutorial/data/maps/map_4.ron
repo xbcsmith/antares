@@ -8008,16 +8008,6 @@
     ],
     events: {
         (
-            x: 1,
-            y: 1,
-        ): Treasure(
-            name: "The Foo Stand",
-            description: "The Foo Stand",
-            loot: [
-                103,
-            ],
-        ),
-        (
             x: 19,
             y: 17,
         ): Teleport(
@@ -8030,6 +8020,26 @@
             map_id: 4,
         ),
         (
+            x: 16,
+            y: 15,
+        ): Treasure(
+            name: "Foo",
+            description: "The Foo",
+            loot: [
+                102,
+            ],
+        ),
+        (
+            x: 1,
+            y: 1,
+        ): Treasure(
+            name: "The Foo Stand",
+            description: "The Foo Stand",
+            loot: [
+                103,
+            ],
+        ),
+        (
             x: 2,
             y: 2,
         ): Encounter(
@@ -8039,16 +8049,6 @@
                 2,
                 2,
                 2,
-            ],
-        ),
-        (
-            x: 16,
-            y: 15,
-        ): Treasure(
-            name: "Foo",
-            description: "The Foo",
-            loot: [
-                102,
             ],
         ),
         (

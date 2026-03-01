@@ -55,6 +55,7 @@ pub struct ConfigEditorState {
     pub controls_turn_right_buffer: String,
     pub controls_interact_buffer: String,
     pub controls_menu_buffer: String,
+    pub controls_inventory_buffer: String,
 
     /// Validation errors by field name
     pub validation_errors: std::collections::HashMap<String, String>,
@@ -90,6 +91,7 @@ impl Default for ConfigEditorState {
             controls_turn_right_buffer: String::new(),
             controls_interact_buffer: String::new(),
             controls_menu_buffer: String::new(),
+            controls_inventory_buffer: String::new(),
             validation_errors: std::collections::HashMap::new(),
             capturing_key_for: None,
             last_captured_key: None,
@@ -668,6 +670,17 @@ impl ConfigEditorState {
                 &mut self.capturing_key_for,
             );
 
+            // Inventory
+            show_key_binding_with_capture(
+                ui,
+                "Inventory",
+                &mut self.controls_inventory_buffer,
+                "inventory",
+                unsaved_changes,
+                &mut self.validation_errors,
+                &mut self.capturing_key_for,
+            );
+
             ui.add_space(5.0);
         });
 
@@ -932,6 +945,7 @@ impl ConfigEditorState {
         self.controls_turn_right_buffer = format_key_list(&self.game_config.controls.turn_right);
         self.controls_interact_buffer = format_key_list(&self.game_config.controls.interact);
         self.controls_menu_buffer = format_key_list(&self.game_config.controls.menu);
+        self.controls_inventory_buffer = format_key_list(&self.game_config.controls.inventory);
     }
 
     /// Update config from edit buffers
@@ -944,6 +958,7 @@ impl ConfigEditorState {
         self.game_config.controls.turn_right = parse_key_list(&self.controls_turn_right_buffer);
         self.game_config.controls.interact = parse_key_list(&self.controls_interact_buffer);
         self.game_config.controls.menu = parse_key_list(&self.controls_menu_buffer);
+        self.game_config.controls.inventory = parse_key_list(&self.controls_inventory_buffer);
     }
 
     /// Handle key capture events from egui input
@@ -981,6 +996,7 @@ impl ConfigEditorState {
                             "turn_right" => &mut self.controls_turn_right_buffer,
                             "interact" => &mut self.controls_interact_buffer,
                             "menu" => &mut self.controls_menu_buffer,
+                            "inventory" => &mut self.controls_inventory_buffer,
                             _ => return,
                         };
 
@@ -1172,6 +1188,9 @@ impl ConfigEditorState {
         }
         if let Err(e) = self.validate_key_binding("menu", &self.controls_menu_buffer) {
             self.validation_errors.insert("menu".to_string(), e);
+        }
+        if let Err(e) = self.validate_key_binding("inventory", &self.controls_inventory_buffer) {
+            self.validation_errors.insert("inventory".to_string(), e);
         }
 
         // Validate camera settings
@@ -1477,6 +1496,7 @@ mod tests {
         state.controls_turn_right_buffer = "D".to_string();
         state.controls_interact_buffer = "E".to_string();
         state.controls_menu_buffer = "Escape".to_string();
+        state.controls_inventory_buffer = "I".to_string();
 
         let result = state.validate_config();
         assert!(result.is_ok());
@@ -1493,6 +1513,7 @@ mod tests {
         state.controls_turn_right_buffer = "D".to_string();
         state.controls_interact_buffer = "E".to_string();
         state.controls_menu_buffer = "Escape".to_string();
+        state.controls_inventory_buffer = "I".to_string();
 
         let result = state.validate_config();
         assert!(result.is_err());
@@ -1509,6 +1530,7 @@ mod tests {
         state.controls_turn_right_buffer = "D".to_string();
         state.controls_interact_buffer = "E".to_string();
         state.controls_menu_buffer = "Escape".to_string();
+        state.controls_inventory_buffer = "I".to_string();
 
         let result = state.validate_config();
         assert!(result.is_err());
@@ -1524,6 +1546,7 @@ mod tests {
         state.controls_turn_right_buffer = "D".to_string();
         state.controls_interact_buffer = "E".to_string();
         state.controls_menu_buffer = "Escape".to_string();
+        state.controls_inventory_buffer = "I".to_string();
 
         let result = state.validate_config();
         assert!(result.is_err());
@@ -1541,6 +1564,7 @@ mod tests {
         state.controls_turn_right_buffer = "D".to_string();
         state.controls_interact_buffer = "E".to_string();
         state.controls_menu_buffer = "Escape".to_string();
+        state.controls_inventory_buffer = "I".to_string();
 
         let result = state.validate_config();
         assert!(result.is_err());
@@ -1762,5 +1786,56 @@ mod tests {
             .controls
             .move_forward
             .contains(&"8".to_string()));
+    }
+
+    #[test]
+    fn test_inventory_key_binding_appears_in_update_edit_buffers() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.controls.inventory = vec!["I".to_string(), "Tab".to_string()];
+        state.update_edit_buffers();
+        assert_eq!(state.controls_inventory_buffer, "I, Tab");
+    }
+
+    #[test]
+    fn test_inventory_key_binding_update_config_from_buffers() {
+        let mut state = ConfigEditorState::new();
+        state.controls_inventory_buffer = "I, Tab".to_string();
+        state.update_config_from_buffers();
+        assert_eq!(
+            state.game_config.controls.inventory,
+            vec!["I".to_string(), "Tab".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_validate_config_invalid_inventory_key_binding() {
+        let mut state = ConfigEditorState::new();
+        state.controls_move_forward_buffer = "W".to_string();
+        state.controls_move_back_buffer = "S".to_string();
+        state.controls_turn_left_buffer = "A".to_string();
+        state.controls_turn_right_buffer = "D".to_string();
+        state.controls_interact_buffer = "E".to_string();
+        state.controls_menu_buffer = "Escape".to_string();
+        state.controls_inventory_buffer = "BadKey".to_string();
+
+        let result = state.validate_config();
+        assert!(result.is_err());
+        assert!(state.validation_errors.contains_key("inventory"));
+    }
+
+    #[test]
+    fn test_inventory_buffer_default_is_empty() {
+        let state = ConfigEditorState::default();
+        assert_eq!(state.controls_inventory_buffer, "");
+    }
+
+    #[test]
+    fn test_inventory_round_trip_buffer_conversion() {
+        let mut state = ConfigEditorState::new();
+        let original_keys = vec!["I".to_string()];
+        state.game_config.controls.inventory = original_keys.clone();
+        state.update_edit_buffers();
+        state.update_config_from_buffers();
+        assert_eq!(state.game_config.controls.inventory, original_keys);
     }
 }

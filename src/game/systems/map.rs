@@ -1539,6 +1539,10 @@ mod tests {
             faction: None,
             is_merchant: true,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         // Verify the NpcDialogue component can be created with the NPC's data
@@ -1582,6 +1586,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         // Verify that None dialogue_id is handled correctly
