@@ -446,6 +446,13 @@ fn map_change_handler(
         if global_state.0.world.get_map(ev.target_map).is_some() {
             global_state.0.world.set_current_map(ev.target_map);
             global_state.0.world.set_party_position(ev.target_pos);
+            // Each map transition (teleport, dungeon entrance, town portal, etc.)
+            // costs time. Advance after confirming the map actually exists so that
+            // invalid/no-op events do not tick the clock.
+            global_state.0.advance_time(
+                crate::domain::resources::TIME_COST_MAP_TRANSITION_MINUTES,
+                None,
+            );
         } else {
             // Gracefully ignore invalid map changes
             warn!(

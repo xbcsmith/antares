@@ -34,6 +34,15 @@ pub enum ResourceError {
 
 // ===== Constants =====
 
+/// Minutes of game time consumed per tile stepped in exploration mode.
+pub const TIME_COST_STEP_MINUTES: u32 = 5;
+
+/// Minutes of game time consumed per combat round.
+pub const TIME_COST_COMBAT_ROUND_MINUTES: u32 = 5;
+
+/// Minutes of game time consumed when transitioning between maps (same-world).
+pub const TIME_COST_MAP_TRANSITION_MINUTES: u32 = 30;
+
 /// Food consumption per rest period (8 hours)
 pub const FOOD_PER_REST: u32 = 1;
 
