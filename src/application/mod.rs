@@ -1161,9 +1161,9 @@ impl GameState {
     /// consistently advancing game time through [`GameState::advance_time`].
     ///
     /// Unlike calling [`crate::domain::resources::rest_party`] directly (which
-    /// only advances the raw `GameTime`), this method also ticks active-spell
-    /// durations and triggers daily merchant restocking for the duration of the
-    /// rest.
+    /// only restores HP/SP and consumes food), this method also ticks
+    /// active-spell durations and triggers daily merchant restocking for the
+    /// full rest duration via [`GameState::advance_time`].
     ///
     /// # Arguments
     ///
@@ -1184,6 +1184,7 @@ impl GameState {
     ///
     /// let mut state = GameState::new();
     /// use antares::domain::character::{Character, Sex, Alignment};
+    /// use antares::domain::resources::REST_DURATION_HOURS;
     /// let mut hero = Character::new(
     ///     "Hero".to_string(),
     ///     "human".to_string(),
@@ -1194,27 +1195,28 @@ impl GameState {
     /// hero.hp.base = 20;
     /// hero.hp.current = 10;
     /// state.party.add_member(hero).unwrap();
-    /// state.party.food = 10;
-    /// state.active_spells.light = 5;
+    /// state.party.food = 20;
+    /// // Use a value ≤ 255 that is fully consumed by REST_DURATION_HOURS * 60 ticks.
+    /// // REST_DURATION_HOURS * 60 = 720 > u8::MAX, so we use a smaller sentinel.
+    /// state.active_spells.light = 60; // expires after 60 minutes (< 12 hours)
     ///
-    /// state.rest_party(8, None).unwrap();
+    /// state.rest_party(REST_DURATION_HOURS, None).unwrap();
     ///
-    /// // Active spells ticked for 8 * 60 = 480 minutes
+    /// // Active spell with only 60 ticks must expire during a 12-hour rest
     /// assert_eq!(state.active_spells.light, 0);
-    /// // Time advanced by 8 hours
-    /// assert_eq!(state.time.hour, 8);
+    /// // Time advanced by REST_DURATION_HOURS hours
+    /// assert_eq!(state.time.hour, REST_DURATION_HOURS as u8);
     /// ```
     pub fn rest_party(
         &mut self,
         hours: u32,
         templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
     ) -> Result<(), crate::domain::resources::ResourceError> {
-        // Perform HP/SP restoration and food consumption.  We pass a temporary
-        // GameTime that is discarded afterwards — the authoritative time advance
-        // goes through `advance_time` below so that active-spell ticking and
-        // merchant restocking are not missed.
-        let mut scratch_time = self.time;
-        crate::domain::resources::rest_party(&mut self.party, &mut scratch_time, hours)?;
+        // Perform HP/SP restoration and food consumption.
+        // rest_party() no longer takes a game_time parameter — time advancement
+        // is exclusively handled by advance_time() below so that active-spell
+        // ticking and merchant restocking are never bypassed.
+        crate::domain::resources::rest_party(&mut self.party, hours)?;
 
         // Advance the authoritative clock via the GameState path so that active
         // spells are ticked and merchant stock is restocked for the full duration.
@@ -3305,9 +3307,12 @@ mod tests {
         );
         state.party.add_member(hero).unwrap();
 
-        // Give a light spell with exactly REST_DURATION_HOURS * 60 ticks remaining.
-        let ticks = REST_DURATION_HOURS * 60; // e.g. 8 * 60 = 480
-        state.active_spells.light = ticks as u8;
+        // Give a light spell that will expire during a full rest.
+        // REST_DURATION_HOURS * 60 = 720, which overflows u8::MAX (255).
+        // Use 240 minutes (4 hours), which is safely less than 12 * 60 and fits
+        // in a u8.  After REST_DURATION_HOURS hours the spell must be fully ticked.
+        let ticks: u8 = 240;
+        state.active_spells.light = ticks;
 
         state
             .rest_party(REST_DURATION_HOURS, None)

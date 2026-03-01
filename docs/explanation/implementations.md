@@ -4,6 +4,7 @@
 
 | Phase                                             | Status      | Date       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------------------------------------------- | ----------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rest System Phase 1: Core Domain Corrections**  | ✅ COMPLETE | 2026-07-19 | **`REST_DURATION_HOURS` updated to 12; `HP_RESTORE_RATE`/`SP_RESTORE_RATE` derived from `1.0/12`; `rest_party()` `game_time` parameter removed (time is now caller responsibility); `rest_party_hour()` per-hour helper added; `ResourceError::CannotRestWithActiveEncounter` and `ResourceError::RestInterrupted{hours_completed}` variants added; `GameState::rest_party()` updated to use new signature; 16 new tests in `domain::resources::tests`**                                                      |
 | **Time System Phase 3: Clock UI in the HUD**      | ✅ COMPLETE | 2026-07-19 | **`ClockRoot`, `ClockTimeText`, `ClockDayText` marker components; 9 clock constants (`CLOCK_FONT_SIZE`, `CLOCK_BACKGROUND_COLOR`, `CLOCK_BORDER_COLOR`, `CLOCK_TEXT_COLOR`, `CLOCK_NIGHT_TEXT_COLOR`, `CLOCK_DAY_TEXT_COLOR`, `CLOCK_TOP_OFFSET`, `CLOCK_WIDTH`, `CLOCK_PADDING`); clock widget spawned below compass in `setup_hud`; `update_clock` system registered in `HudPlugin`; `format_clock_time`, `format_clock_day`, `clock_text_color` pure helper functions; 27 new tests in `mod clock_tests`** |
 | **Time System Phase 2: Time-of-Day System**       | ✅ COMPLETE | 2026-07-19 | **`TimeOfDay` enum (6 periods); `GameTime::time_of_day()`; `GameState::time_of_day()` helper; `is_night`/`is_day` delegate to `time_of_day()`; `TimeOfDayPlugin` + `update_ambient_light` system in `src/game/systems/time.rs`; 28 new tests**                                                                                                                                                                                                                                                                |
 | **Time System Phase 1: Time Advancement Hooks**   | ✅ COMPLETE | 2026-07-19 | **TIME*COST*\* constants; time advance on step, map-transition, combat round, and rest**                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -61,6 +62,134 @@
 
 **Total Lines Implemented**: 10,600+ lines of production code + 6,200+ lines of documentation
 **Total Tests**: 541+ new tests (all passing), 2,797 total tests passing
+
+---
+
+## Rest System Phase 1: Core Domain Corrections
+
+### Overview
+
+Phase 1 corrects the rest-domain layer in `src/domain/resources.rs` to match the
+12-hour full-heal specification and removes time-advancement side-effects from the
+domain function so that time is exclusively controlled by `GameState::advance_time`.
+
+The pre-Phase-1 code had three structural issues:
+
+1. `REST_DURATION_HOURS = 8` (should be 12) and rates `0.125` (should be `1.0/12`).
+2. `rest_party()` called `game_time.advance_hours()` directly, bypassing
+   `GameState::advance_time()` and preventing active-spell ticking during rest.
+3. No per-hour rest helper existed for the Phase-3 orchestration loop.
+
+### Components Implemented
+
+#### `src/domain/resources.rs` — Constants updated
+
+| Constant              | Old           | New                                | Reason                               |
+| --------------------- | ------------- | ---------------------------------- | ------------------------------------ |
+| `REST_DURATION_HOURS` | `8`           | `12`                               | Full heal requires 12 hours per spec |
+| `HP_RESTORE_RATE`     | `0.125` (1/8) | `1.0 / REST_DURATION_HOURS as f32` | Rate must match 12-hour full heal    |
+| `SP_RESTORE_RATE`     | `0.125` (1/8) | `1.0 / REST_DURATION_HOURS as f32` | Same                                 |
+
+The `GameTime` import was also removed from `resources.rs` since time advancement
+is no longer performed inside this module.
+
+#### `src/domain/resources.rs` — `rest_party()` signature fixed
+
+- Removed the `game_time: &mut GameTime` parameter entirely.
+- Removed the `game_time.advance_hours(hours)` call at the end of the function.
+- Added a doc-comment note: _"Time is NOT advanced here. The caller must call
+  `GameState::advance_time(hours _ 60, ...)` after this function returns."\*
+- Updated the doc-example (no more `GameTime` argument; uses 12-hour rest).
+
+#### `src/domain/resources.rs` — `rest_party_hour()` added
+
+New public function `rest_party_hour(party: &mut Party) -> Result<(), ResourceError>`:
+
+- Checks food (`TooHungryToRest` if `party.food == 0`).
+- Consumes `FOOD_PER_REST` units via `consume_food`.
+- Restores one hour of HP (`HP_RESTORE_RATE × base`) and SP (`SP_RESTORE_RATE × base`)
+  for every living, non-unconscious party member.
+- Ticks minute-based conditions for 60 minutes per member.
+- **Does not advance time** — the caller owns time via `GameState::advance_time(60, ...)`.
+
+#### `src/domain/resources.rs` — `ResourceError` extended
+
+Two new variants added to `ResourceError`:
+
+```rust
+/// Returned when a random-encounter check fires before rest completes.
+CannotRestWithActiveEncounter,
+
+/// Rest ended before the requested hours elapsed.
+RestInterrupted { hours_completed: u32 },
+```
+
+Both derive `Clone + PartialEq + Eq` and use `thiserror` `#[error(...)]` attributes.
+
+#### `src/application/mod.rs` — `GameState::rest_party()` updated
+
+The wrapper method now calls `crate::domain::resources::rest_party(&mut self.party, hours)?`
+(no `game_time` argument) and immediately follows with
+`self.advance_time(hours * 60, templates)` to ensure active-spell durations and
+merchant restocking are ticked through the authoritative path.
+
+The doc-comment example was updated to use `REST_DURATION_HOURS` (now 12) and a
+`active_spells.light` sentinel value of `60` (fits in `u8`; safely less than 720).
+
+### Tests Added
+
+All tests live in `src/domain/resources.rs — mod tests`:
+
+| Test name                                                       | What it verifies                                                     |
+| --------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `test_full_rest_heals_in_12_hours`                              | `rest_party_hour()` × 12 fully restores HP and SP                    |
+| `test_partial_rest_heals_proportionally`                        | `rest_party_hour()` × 6 restores ≈ 50% HP/SP (base 120)              |
+| `test_rest_party_no_longer_advances_time`                       | `rest_party()` compiles and succeeds with only `(party, hours)` args |
+| `test_rest_consumes_food`                                       | Food count decreases after `rest_party()`                            |
+| `test_rest_party_fails_without_food`                            | `party.food = 0` → `ResourceError::TooHungryToRest`                  |
+| `test_rest_party_hour_fails_without_food`                       | Same guard in `rest_party_hour()`                                    |
+| `test_rest_skips_dead_characters`                               | Character with `DEAD` condition keeps `hp.current = 0`               |
+| `test_rest_party_hour_skips_dead_characters`                    | Same guard in per-hour helper                                        |
+| `test_rest_party_hour_skips_unconscious_characters`             | Character with `UNCONSCIOUS` condition unchanged by per-hour helper  |
+| `test_rest_restores_hp`                                         | `rest_party()` with 12 hours fully heals HP                          |
+| `test_rest_restores_sp`                                         | `rest_party()` with 12 hours fully heals SP                          |
+| `test_rest_partial_hours`                                       | `rest_party()` with 6 hours restores `HP_RESTORE_RATE × 6 × base` HP |
+| `test_resource_error_cannot_rest_with_active_encounter_display` | Error message mentions "encounter"                                   |
+| `test_resource_error_rest_interrupted_display`                  | Error message includes `hours_completed` value                       |
+| `test_resource_error_rest_interrupted_hours_field`              | Struct field destructures correctly                                  |
+| `test_dead_character_skipped_in_rest`                           | Existing regression: dead character gains no HP from `rest_party()`  |
+
+Existing `application::tests::test_rest_advances_time_via_state` and
+`test_rest_ticks_active_spells` continue to pass unchanged (both call
+`GameState::rest_party()` which still advances time via `advance_time`).
+
+### Deliverables Checklist
+
+- [x] `REST_DURATION_HOURS = 12` in `src/domain/resources.rs`
+- [x] `HP_RESTORE_RATE` and `SP_RESTORE_RATE` derived from `1.0 / REST_DURATION_HOURS as f32`
+- [x] `rest_party()` no longer takes `game_time` parameter
+- [x] `rest_party_hour()` added and tested
+- [x] `ResourceError::RestInterrupted` and `CannotRestWithActiveEncounter` variants added
+- [x] `GameState::rest_party()` updated to use new signature
+- [x] All Phase 1 tests pass (`cargo nextest run` → 2868 passed, 0 failed)
+- [x] `cargo fmt --all` — no output
+- [x] `cargo check --all-targets --all-features` — 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+
+### Success Criteria Verification
+
+- `rest_party_hour()` × 12 restores all party members to full HP/SP ✅
+  (verified by `test_full_rest_heals_in_12_hours`)
+- Time advancement removed from `rest_party()` confirmed by tests ✅
+  (verified by `test_rest_party_no_longer_advances_time`)
+- All `cargo clippy` gates pass with zero warnings ✅
+
+### Files Modified
+
+- `src/domain/resources.rs` — constants, `rest_party()`, `rest_party_hour()`,
+  `ResourceError`, tests
+- `src/application/mod.rs` — `GameState::rest_party()` call site updated,
+  doc-comment and test fixture adjusted
 
 ---
 
