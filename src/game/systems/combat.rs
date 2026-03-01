@@ -292,6 +292,10 @@ pub struct CombatResource {
     /// Map ID of the map containing the encounter tile.
     /// Set alongside `encounter_position`; cleared after victory.
     pub encounter_map_id: Option<crate::domain::types::MapId>,
+    /// The last round number for which game time was advanced.
+    /// Used by `tick_combat_time` to detect new rounds and charge
+    /// `TIME_COST_COMBAT_ROUND_MINUTES` exactly once per round.
+    pub last_timed_round: u32,
 }
 
 impl CombatResource {
@@ -303,6 +307,7 @@ impl CombatResource {
             resolution_handled: false,
             encounter_position: None,
             encounter_map_id: None,
+            last_timed_round: 0,
         }
     }
 
@@ -313,6 +318,7 @@ impl CombatResource {
         self.resolution_handled = false;
         self.encounter_position = None;
         self.encounter_map_id = None;
+        self.last_timed_round = 0;
     }
 }
 
@@ -821,7 +827,20 @@ impl Plugin for CombatPlugin {
             // Phase 4: Monster AI — must run AFTER update_combat_ui so the UI
             // always reflects the current EnemyTurn state (and hides the action
             // menu) before the monster acts and potentially advances the turn.
-            .add_systems(Update, execute_monster_turn.after(update_combat_ui));
+            .add_systems(Update, execute_monster_turn.after(update_combat_ui))
+            // Phase 1 (Time): advance game clock once per new combat round.
+            // Runs after all action handlers so the round counter is already
+            // incremented before we sample it.
+            .add_systems(
+                Update,
+                tick_combat_time
+                    .after(handle_attack_action)
+                    .after(handle_cast_spell_action)
+                    .after(handle_use_item_action)
+                    .after(handle_defend_action)
+                    .after(handle_flee_action)
+                    .after(execute_monster_turn),
+            );
     }
 }
 
@@ -3207,6 +3226,33 @@ fn execute_monster_turn(
 ///
 /// This ensures the resolution is only handled once by tracking a flag in
 /// `CombatResource`.
+/// System: advance game time by `TIME_COST_COMBAT_ROUND_MINUTES` once per new
+/// combat round.
+///
+/// `CombatResource::last_timed_round` is initialised to `0` and the combat
+/// state's round counter starts at `1`, so the first round is charged
+/// immediately when combat begins.  Subsequent rounds are charged when
+/// `combat_res.state.round` exceeds `last_timed_round`.
+///
+/// This system is a no-op outside of combat, ensuring that the clock is never
+/// advanced by stale combat data.
+fn tick_combat_time(mut combat_res: ResMut<CombatResource>, mut global_state: ResMut<GlobalState>) {
+    // Only run while the global state is in combat mode.
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    let current_round = combat_res.state.round;
+    if current_round > combat_res.last_timed_round {
+        let new_rounds = current_round - combat_res.last_timed_round;
+        global_state.0.advance_time(
+            new_rounds * crate::domain::resources::TIME_COST_COMBAT_ROUND_MINUTES,
+            None,
+        );
+        combat_res.last_timed_round = current_round;
+    }
+}
+
 fn check_combat_resolution(
     mut victory_writer: Option<MessageWriter<CombatVictory>>,
     mut defeat_writer: Option<MessageWriter<CombatDefeat>>,

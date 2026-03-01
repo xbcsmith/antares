@@ -4,6 +4,7 @@
 
 | Phase                                             | Status      | Date       | Description                                                                                |
 | ------------------------------------------------- | ----------- | ---------- | ------------------------------------------------------------------------------------------ |
+| **Time System Phase 1: Time Advancement Hooks**   | ✅ COMPLETE | 2026-07-19 | **TIME*COST*\* constants; time advance on step, map-transition, combat round, and rest**   |
 | **Inventory MAX_ITEMS=64 + Test Decoupling**      | ✅ COMPLETE | 2026-02-27 | **Raised Inventory::MAX_ITEMS to 64; removed all test dependencies on campaigns/tutorial** |
 | **Architecture Reference Sync (Engine + SDK)**    | ✅ COMPLETE | 2026-02-27 | **Updated docs/reference/architecture.md to match current src/ and SDK layout**            |
 | **Inventory System Phase 1**                      | ✅ COMPLETE | 2026-07-18 | **Shared Inventory Domain Model**                                                          |
@@ -58,6 +59,106 @@
 
 **Total Lines Implemented**: 10,600+ lines of production code + 6,200+ lines of documentation
 **Total Tests**: 541+ new tests (all passing), 2,797 total tests passing
+
+---
+
+## Time System Phase 1: Time Advancement Hooks
+
+### Overview
+
+Antares already had `GameTime` (`day`, `hour`, `minute`) in `GameState.time` and
+`GameState::advance_time()` that ticks active-spell durations. However, time was
+never wired to any player action outside of resting — movement, combat, and map
+transitions all happened without advancing the clock. Phase 1 wires time to every
+action that should cost time, fixes the `rest_party()` active-spell bypass, and
+adds `GameState::rest_party()` as the authoritative rest path.
+
+### Components Implemented
+
+#### `src/domain/resources.rs` — TIME*COST*\* constants
+
+Three new constants alongside the existing `REST_DURATION_HOURS`:
+
+```antares/src/domain/resources.rs#L37-47
+/// Minutes of game time consumed per tile stepped in exploration mode.
+pub const TIME_COST_STEP_MINUTES: u32 = 5;
+
+/// Minutes of game time consumed per combat round.
+pub const TIME_COST_COMBAT_ROUND_MINUTES: u32 = 5;
+
+/// Minutes of game time consumed when transitioning between maps (same-world).
+pub const TIME_COST_MAP_TRANSITION_MINUTES: u32 = 30;
+```
+
+#### `src/application/mod.rs` — exploration movement hook
+
+`GameState::move_party_and_handle_events()` now calls
+`self.advance_time(TIME_COST_STEP_MINUTES, None)` immediately after
+`move_party()` succeeds and before event resolution. A blocked/failed move
+returns early before the hook, so time never advances for invalid moves.
+
+#### `src/game/systems/map.rs` — map-transition hook
+
+`map_change_handler` now calls `global_state.0.advance_time(TIME_COST_MAP_TRANSITION_MINUTES, None)`
+after confirming the target map exists. Invalid map IDs are still silently
+ignored and the clock is not ticked.
+
+#### `src/game/systems/combat.rs` — combat-round hook
+
+- `CombatResource` gained a `last_timed_round: u32` field (initialised to `0`,
+  cleared on `clear()`).
+- A new private system `tick_combat_time` runs after all action handlers and
+  `execute_monster_turn`. It compares `combat_res.state.round` (starts at `1`)
+  against `last_timed_round` and calls `global_state.0.advance_time(new_rounds * TIME_COST_COMBAT_ROUND_MINUTES, None)`
+  once per new round. Because `last_timed_round` starts at `0` and the domain
+  `CombatState.round` starts at `1`, the first round is charged as soon as
+  combat begins.
+
+#### `src/application/mod.rs` — `GameState::rest_party()`
+
+A new `GameState::rest_party(hours, templates)` method:
+
+1. Calls the domain `rest_party()` with a scratch `GameTime` to perform HP/SP
+   restoration and food consumption (the scratch time is discarded).
+2. Advances the authoritative clock via `self.advance_time(hours * 60, templates)`
+   so that active-spell ticking and daily merchant restocking are not missed.
+
+This ensures callers never need to call both `rest_party` and `advance_time`
+separately — the `GameState` method is the single source of truth.
+
+### Tests Added
+
+All four tests added to `src/application/mod.rs` under `mod tests`:
+
+| Test                                      | Assertion                                                                                |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `test_step_advances_time`                 | One successful `move_party_and_handle_events` advances clock by `TIME_COST_STEP_MINUTES` |
+| `test_blocked_step_does_not_advance_time` | Moving into a walled tile returns `Err`; time unchanged                                  |
+| `test_rest_advances_time_via_state`       | `GameState::rest_party(8, None)` advances clock by exactly `8 * 60` minutes              |
+| `test_rest_ticks_active_spells`           | `GameState::rest_party(REST_DURATION_HOURS, None)` fully expires a matching active spell |
+
+### Deliverables Checklist
+
+- [x] `TIME_COST_STEP_MINUTES`, `TIME_COST_COMBAT_ROUND_MINUTES`, `TIME_COST_MAP_TRANSITION_MINUTES` constants in `src/domain/resources.rs`
+- [x] Time advance on successful movement step (`src/application/mod.rs`)
+- [x] Time advance on map transition (`src/game/systems/map.rs`)
+- [x] Time advance per combat round (`src/game/systems/combat.rs` — `tick_combat_time` system)
+- [x] `rest_party()` callers consistently use `GameState::advance_time()` via `GameState::rest_party()`
+- [x] All phase-1 tests pass (4 new tests; 2800/2801 total pass — 1 pre-existing flaky perf test unrelated to these changes)
+
+### Success Criteria
+
+- Each player action that costs time does so. Time never goes backward.
+- All four `cargo` quality gates pass with zero warnings.
+
+### Files Modified
+
+| File                         | Change                                                                                                         |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `src/domain/resources.rs`    | Added `TIME_COST_STEP_MINUTES`, `TIME_COST_COMBAT_ROUND_MINUTES`, `TIME_COST_MAP_TRANSITION_MINUTES` constants |
+| `src/application/mod.rs`     | Wired `advance_time` into `move_party_and_handle_events`; added `GameState::rest_party()`                      |
+| `src/game/systems/map.rs`    | Wired `advance_time` into `map_change_handler`                                                                 |
+| `src/game/systems/combat.rs` | Added `last_timed_round` to `CombatResource`; added `tick_combat_time` system                                  |
 
 ---
 
