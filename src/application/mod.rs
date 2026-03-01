@@ -23,7 +23,7 @@ pub mod save_game;
 use crate::application::menu::MenuState;
 use crate::domain::character::{Party, Roster};
 use crate::domain::party_manager::{PartyManagementError, PartyManager};
-use crate::domain::types::{GameTime, InnkeeperId};
+use crate::domain::types::{GameTime, InnkeeperId, TimeOfDay};
 use crate::domain::world::npc_runtime::NpcRuntimeStore;
 use crate::domain::world::World;
 use crate::sdk::campaign_loader::{Campaign, CampaignError};
@@ -1221,6 +1221,29 @@ impl GameState {
         self.advance_time(hours * 60, templates);
 
         Ok(())
+    }
+
+    /// Returns the current [`TimeOfDay`] period for the game clock.
+    ///
+    /// This is a convenience wrapper around [`GameTime::time_of_day`] so that
+    /// any system with access to [`GameState`] can query the period without
+    /// having to reach into `state.time` directly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    /// use antares::domain::types::TimeOfDay;
+    ///
+    /// let mut state = GameState::new();
+    /// // Default start time is Day 1, 06:00 — Dawn
+    /// assert_eq!(state.time_of_day(), TimeOfDay::Dawn);
+    ///
+    /// state.time.advance_hours(6); // advance to 12:00
+    /// assert_eq!(state.time_of_day(), TimeOfDay::Afternoon);
+    /// ```
+    pub fn time_of_day(&self) -> TimeOfDay {
+        self.time.time_of_day()
     }
 
     /// * `minutes`   - Number of in-game minutes to advance.
@@ -3295,6 +3318,76 @@ mod tests {
             state.active_spells.light, 0,
             "active spell must be fully ticked after a full rest of {} hours",
             REST_DURATION_HOURS
+        );
+    }
+
+    // ===== GameState::time_of_day() Tests =====
+
+    #[test]
+    fn test_game_state_time_of_day_default_is_dawn() {
+        // GameState::new() starts at Day 1, 06:00 — which is Dawn (05:00–07:59)
+        let state = GameState::new();
+        assert_eq!(
+            state.time_of_day(),
+            crate::domain::types::TimeOfDay::Dawn,
+            "default start time (06:00) should be Dawn"
+        );
+    }
+
+    #[test]
+    fn test_game_state_time_of_day_delegates_to_game_time() {
+        use crate::domain::types::{GameTime, TimeOfDay};
+
+        let pairs: &[(u8, TimeOfDay)] = &[
+            (5, TimeOfDay::Dawn),
+            (8, TimeOfDay::Morning),
+            (12, TimeOfDay::Afternoon),
+            (16, TimeOfDay::Dusk),
+            (19, TimeOfDay::Evening),
+            (22, TimeOfDay::Night),
+            (0, TimeOfDay::Night),
+        ];
+
+        for &(hour, ref expected) in pairs {
+            let mut state = GameState::new();
+            state.time = GameTime::new(1, hour, 0);
+            assert_eq!(
+                &state.time_of_day(),
+                expected,
+                "hour {} should map to {:?}",
+                hour,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_game_state_time_of_day_advances_correctly() {
+        use crate::domain::types::TimeOfDay;
+
+        // Start at 06:00 (Dawn), advance 6 hours → 12:00 (Afternoon)
+        let mut state = GameState::new();
+        assert_eq!(state.time_of_day(), TimeOfDay::Dawn);
+
+        state.time.advance_hours(6);
+        assert_eq!(
+            state.time_of_day(),
+            TimeOfDay::Afternoon,
+            "06:00 + 6 hours should be Afternoon"
+        );
+    }
+
+    #[test]
+    fn test_game_state_time_of_day_night_via_advance_time() {
+        use crate::domain::types::TimeOfDay;
+
+        // Start at 06:00, advance 16 hours → 22:00 (Night)
+        let mut state = GameState::new();
+        state.advance_time(16 * 60, None);
+        assert_eq!(
+            state.time_of_day(),
+            TimeOfDay::Night,
+            "06:00 + 16 hours should be Night"
         );
     }
 }

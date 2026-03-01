@@ -35,4 +35,5 @@ pub mod procedural_meshes;
 pub mod quest;
 pub mod recruitment_dialog;
 pub mod sprite_uv_update;
+pub mod time;
 pub mod ui;

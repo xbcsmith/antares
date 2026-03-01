@@ -5,7 +5,7 @@
 //!
 //! This module defines the fundamental types used throughout the game,
 //! including type aliases for IDs and supporting structures like Position,
-//! Direction, DiceRoll, and GameTime.
+//! Direction, DiceRoll, GameTime, and TimeOfDay.
 //!
 //! # Architecture Reference
 //!
@@ -273,6 +273,92 @@ impl DiceRoll {
     }
 }
 
+// ===== TimeOfDay =====
+
+/// Categorised period of the day for event gating and visual effects.
+///
+/// Used to gate map events by time, drive ambient lighting changes,
+/// and provide a human-readable time period to the HUD clock.
+///
+/// Hour boundaries (24-hour clock):
+/// - Dawn:      05:00 – 07:59
+/// - Morning:   08:00 – 11:59
+/// - Afternoon: 12:00 – 15:59
+/// - Dusk:      16:00 – 18:59
+/// - Evening:   19:00 – 21:59
+/// - Night:     22:00 – 04:59
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::{GameTime, TimeOfDay};
+///
+/// assert_eq!(GameTime::new(1, 6, 0).time_of_day(), TimeOfDay::Dawn);
+/// assert_eq!(GameTime::new(1, 10, 0).time_of_day(), TimeOfDay::Morning);
+/// assert_eq!(GameTime::new(1, 14, 0).time_of_day(), TimeOfDay::Afternoon);
+/// assert_eq!(GameTime::new(1, 17, 0).time_of_day(), TimeOfDay::Dusk);
+/// assert_eq!(GameTime::new(1, 20, 0).time_of_day(), TimeOfDay::Evening);
+/// assert_eq!(GameTime::new(1, 23, 0).time_of_day(), TimeOfDay::Night);
+/// assert_eq!(GameTime::new(1, 2, 0).time_of_day(), TimeOfDay::Night);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TimeOfDay {
+    /// 05:00–07:59 — pale light, roosters crow
+    Dawn,
+    /// 08:00–11:59 — full daylight
+    Morning,
+    /// 12:00–15:59 — peak brightness
+    Afternoon,
+    /// 16:00–18:59 — golden light, shadows lengthen
+    Dusk,
+    /// 19:00–21:59 — dark but not full night
+    Evening,
+    /// 22:00–04:59 — pitch black without a light source
+    Night,
+}
+
+impl TimeOfDay {
+    /// Returns a short human-readable label for the period.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::TimeOfDay;
+    ///
+    /// assert_eq!(TimeOfDay::Dawn.label(), "Dawn");
+    /// assert_eq!(TimeOfDay::Night.label(), "Night");
+    /// ```
+    pub fn label(&self) -> &'static str {
+        match self {
+            TimeOfDay::Dawn => "Dawn",
+            TimeOfDay::Morning => "Morning",
+            TimeOfDay::Afternoon => "Afternoon",
+            TimeOfDay::Dusk => "Dusk",
+            TimeOfDay::Evening => "Evening",
+            TimeOfDay::Night => "Night",
+        }
+    }
+
+    /// Returns `true` for periods where ambient darkness applies
+    /// (Evening and Night require a light source outdoors).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::TimeOfDay;
+    ///
+    /// assert!(TimeOfDay::Night.is_dark());
+    /// assert!(TimeOfDay::Evening.is_dark());
+    /// assert!(!TimeOfDay::Dawn.is_dark());
+    /// assert!(!TimeOfDay::Morning.is_dark());
+    /// assert!(!TimeOfDay::Afternoon.is_dark());
+    /// assert!(!TimeOfDay::Dusk.is_dark());
+    /// ```
+    pub fn is_dark(&self) -> bool {
+        matches!(self, TimeOfDay::Evening | TimeOfDay::Night)
+    }
+}
+
 // ===== GameTime =====
 
 /// Game time tracking
@@ -354,12 +440,76 @@ impl GameTime {
         self.day += days;
     }
 
-    /// Returns true if it is currently nighttime (6 PM to 6 AM)
-    pub fn is_night(&self) -> bool {
-        self.hour >= 18 || self.hour < 6
+    /// Returns the current [`TimeOfDay`] period based on the hour.
+    ///
+    /// | Period    | Hours         |
+    /// |-----------|---------------|
+    /// | Dawn      | 05:00 – 07:59 |
+    /// | Morning   | 08:00 – 11:59 |
+    /// | Afternoon | 12:00 – 15:59 |
+    /// | Dusk      | 16:00 – 18:59 |
+    /// | Evening   | 19:00 – 21:59 |
+    /// | Night     | 22:00 – 04:59 |
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::{GameTime, TimeOfDay};
+    ///
+    /// assert_eq!(GameTime::new(1, 5, 0).time_of_day(), TimeOfDay::Dawn);
+    /// assert_eq!(GameTime::new(1, 8, 0).time_of_day(), TimeOfDay::Morning);
+    /// assert_eq!(GameTime::new(1, 12, 0).time_of_day(), TimeOfDay::Afternoon);
+    /// assert_eq!(GameTime::new(1, 16, 0).time_of_day(), TimeOfDay::Dusk);
+    /// assert_eq!(GameTime::new(1, 19, 0).time_of_day(), TimeOfDay::Evening);
+    /// assert_eq!(GameTime::new(1, 22, 0).time_of_day(), TimeOfDay::Night);
+    /// assert_eq!(GameTime::new(1, 3, 0).time_of_day(), TimeOfDay::Night);
+    /// ```
+    pub fn time_of_day(&self) -> TimeOfDay {
+        match self.hour {
+            5..=7 => TimeOfDay::Dawn,
+            8..=11 => TimeOfDay::Morning,
+            12..=15 => TimeOfDay::Afternoon,
+            16..=18 => TimeOfDay::Dusk,
+            19..=21 => TimeOfDay::Evening,
+            // 22-23 and 0-4 are Night
+            _ => TimeOfDay::Night,
+        }
     }
 
-    /// Returns true if it is currently daytime (6 AM to 6 PM)
+    /// Returns `true` if it is currently nighttime (Evening or Night period).
+    ///
+    /// Delegates to [`GameTime::time_of_day`] for consistency with the
+    /// [`TimeOfDay`] system.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::GameTime;
+    ///
+    /// assert!(GameTime::new(1, 20, 0).is_night()); // Evening
+    /// assert!(GameTime::new(1, 23, 0).is_night()); // Night
+    /// assert!(GameTime::new(1, 3, 0).is_night());  // Night (early morning)
+    /// assert!(!GameTime::new(1, 12, 0).is_night()); // Afternoon
+    /// ```
+    pub fn is_night(&self) -> bool {
+        matches!(self.time_of_day(), TimeOfDay::Evening | TimeOfDay::Night)
+    }
+
+    /// Returns `true` if it is currently daytime (Dawn through Dusk).
+    ///
+    /// Delegates to [`GameTime::time_of_day`] for consistency with the
+    /// [`TimeOfDay`] system.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::GameTime;
+    ///
+    /// assert!(GameTime::new(1, 6, 0).is_day());   // Dawn
+    /// assert!(GameTime::new(1, 14, 0).is_day());  // Afternoon
+    /// assert!(GameTime::new(1, 17, 0).is_day());  // Dusk
+    /// assert!(!GameTime::new(1, 22, 0).is_day()); // Night
+    /// ```
     pub fn is_day(&self) -> bool {
         !self.is_night()
     }
@@ -369,6 +519,125 @@ impl GameTime {
 mod tests {
     use super::*;
     use rand::rng;
+
+    // ===== TimeOfDay Tests =====
+
+    #[test]
+    fn test_time_of_day_night_early_morning() {
+        // 00:00–04:59 is Night
+        assert_eq!(GameTime::new(1, 0, 0).time_of_day(), TimeOfDay::Night);
+        assert_eq!(GameTime::new(1, 1, 0).time_of_day(), TimeOfDay::Night);
+        assert_eq!(GameTime::new(1, 4, 59).time_of_day(), TimeOfDay::Night);
+    }
+
+    #[test]
+    fn test_time_of_day_dawn() {
+        // 05:00–07:59 is Dawn
+        assert_eq!(GameTime::new(1, 5, 0).time_of_day(), TimeOfDay::Dawn);
+        assert_eq!(GameTime::new(1, 6, 30).time_of_day(), TimeOfDay::Dawn);
+        assert_eq!(GameTime::new(1, 7, 59).time_of_day(), TimeOfDay::Dawn);
+    }
+
+    #[test]
+    fn test_time_of_day_morning() {
+        // 08:00–11:59 is Morning
+        assert_eq!(GameTime::new(1, 8, 0).time_of_day(), TimeOfDay::Morning);
+        assert_eq!(GameTime::new(1, 10, 0).time_of_day(), TimeOfDay::Morning);
+        assert_eq!(GameTime::new(1, 11, 59).time_of_day(), TimeOfDay::Morning);
+    }
+
+    #[test]
+    fn test_time_of_day_afternoon() {
+        // 12:00–15:59 is Afternoon
+        assert_eq!(GameTime::new(1, 12, 0).time_of_day(), TimeOfDay::Afternoon);
+        assert_eq!(GameTime::new(1, 14, 0).time_of_day(), TimeOfDay::Afternoon);
+        assert_eq!(GameTime::new(1, 15, 59).time_of_day(), TimeOfDay::Afternoon);
+    }
+
+    #[test]
+    fn test_time_of_day_dusk() {
+        // 16:00–18:59 is Dusk
+        assert_eq!(GameTime::new(1, 16, 0).time_of_day(), TimeOfDay::Dusk);
+        assert_eq!(GameTime::new(1, 17, 30).time_of_day(), TimeOfDay::Dusk);
+        assert_eq!(GameTime::new(1, 18, 59).time_of_day(), TimeOfDay::Dusk);
+    }
+
+    #[test]
+    fn test_time_of_day_evening() {
+        // 19:00–21:59 is Evening
+        assert_eq!(GameTime::new(1, 19, 0).time_of_day(), TimeOfDay::Evening);
+        assert_eq!(GameTime::new(1, 20, 30).time_of_day(), TimeOfDay::Evening);
+        assert_eq!(GameTime::new(1, 21, 59).time_of_day(), TimeOfDay::Evening);
+    }
+
+    #[test]
+    fn test_time_of_day_night() {
+        // 22:00–23:59 is Night
+        assert_eq!(GameTime::new(1, 22, 0).time_of_day(), TimeOfDay::Night);
+        assert_eq!(GameTime::new(1, 23, 59).time_of_day(), TimeOfDay::Night);
+    }
+
+    #[test]
+    fn test_time_of_day_boundary_transitions() {
+        // Test exact boundary hours
+        assert_eq!(GameTime::new(1, 4, 59).time_of_day(), TimeOfDay::Night);
+        assert_eq!(GameTime::new(1, 5, 0).time_of_day(), TimeOfDay::Dawn);
+        assert_eq!(GameTime::new(1, 7, 59).time_of_day(), TimeOfDay::Dawn);
+        assert_eq!(GameTime::new(1, 8, 0).time_of_day(), TimeOfDay::Morning);
+        assert_eq!(GameTime::new(1, 11, 59).time_of_day(), TimeOfDay::Morning);
+        assert_eq!(GameTime::new(1, 12, 0).time_of_day(), TimeOfDay::Afternoon);
+        assert_eq!(GameTime::new(1, 15, 59).time_of_day(), TimeOfDay::Afternoon);
+        assert_eq!(GameTime::new(1, 16, 0).time_of_day(), TimeOfDay::Dusk);
+        assert_eq!(GameTime::new(1, 18, 59).time_of_day(), TimeOfDay::Dusk);
+        assert_eq!(GameTime::new(1, 19, 0).time_of_day(), TimeOfDay::Evening);
+        assert_eq!(GameTime::new(1, 21, 59).time_of_day(), TimeOfDay::Evening);
+        assert_eq!(GameTime::new(1, 22, 0).time_of_day(), TimeOfDay::Night);
+    }
+
+    #[test]
+    fn test_is_night_delegates_to_time_of_day() {
+        // Evening (19–21) should be night
+        assert!(GameTime::new(1, 19, 0).is_night());
+        assert!(GameTime::new(1, 21, 59).is_night());
+        // Night (22–04) should be night
+        assert!(GameTime::new(1, 22, 0).is_night());
+        assert!(GameTime::new(1, 23, 59).is_night());
+        assert!(GameTime::new(1, 0, 0).is_night());
+        assert!(GameTime::new(1, 4, 59).is_night());
+        // Dawn/Morning/Afternoon/Dusk should NOT be night
+        assert!(!GameTime::new(1, 5, 0).is_night());
+        assert!(!GameTime::new(1, 8, 0).is_night());
+        assert!(!GameTime::new(1, 12, 0).is_night());
+        assert!(!GameTime::new(1, 16, 0).is_night());
+    }
+
+    #[test]
+    fn test_is_day_is_inverse_of_is_night() {
+        for hour in 0u8..24 {
+            let t = GameTime::new(1, hour, 0);
+            assert_eq!(t.is_day(), !t.is_night(), "hour {} mismatch", hour);
+        }
+    }
+
+    #[test]
+    fn test_time_of_day_label() {
+        assert_eq!(TimeOfDay::Dawn.label(), "Dawn");
+        assert_eq!(TimeOfDay::Morning.label(), "Morning");
+        assert_eq!(TimeOfDay::Afternoon.label(), "Afternoon");
+        assert_eq!(TimeOfDay::Dusk.label(), "Dusk");
+        assert_eq!(TimeOfDay::Evening.label(), "Evening");
+        assert_eq!(TimeOfDay::Night.label(), "Night");
+    }
+
+    #[test]
+    fn test_time_of_day_is_dark() {
+        assert!(TimeOfDay::Evening.is_dark());
+        assert!(TimeOfDay::Night.is_dark());
+        assert!(!TimeOfDay::Dawn.is_dark());
+        assert!(!TimeOfDay::Morning.is_dark());
+        assert!(!TimeOfDay::Afternoon.is_dark());
+        assert!(!TimeOfDay::Dusk.is_dark());
+    }
 
     #[test]
     fn test_position_creation() {
@@ -491,14 +760,17 @@ mod tests {
 
     #[test]
     fn test_game_time_is_night() {
-        let mut time = GameTime::new(1, 20, 0); // 8 PM
+        // 20:00 (Evening) → night
+        let time = GameTime::new(1, 20, 0);
         assert!(time.is_night());
         assert!(!time.is_day());
 
-        time = GameTime::new(1, 3, 0); // 3 AM
+        // 3:00 (Night) → night
+        let time = GameTime::new(1, 3, 0);
         assert!(time.is_night());
 
-        time = GameTime::new(1, 12, 0); // Noon
+        // 12:00 (Afternoon) → day
+        let time = GameTime::new(1, 12, 0);
         assert!(!time.is_night());
         assert!(time.is_day());
     }
