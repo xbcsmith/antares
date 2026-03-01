@@ -12599,3 +12599,69 @@ cargo nextest run …      → 2795 tests run: 2795 passed, 8 skipped
 - [x] RON format used for `npc_stock_templates.ron`
 - [x] `///` doc comments with `# Examples` on all new public functions
 - [x] SPDX header present in `stock_templates_editor.rs`
+
+---
+
+## Left Panel Standardization — Phase 1: Core Infrastructure (StandardListItem Component)
+
+**Date**: 2026-03-01
+**File**: `sdk/campaign_builder/src/ui_helpers.rs`
+
+### Summary
+
+Implemented the `StandardListItem` component foundation for Phase 1 of the Left
+Panel Standardization plan. This provides a reusable infrastructure for
+rendering consistent, metadata-rich list items across all 14 Campaign Builder
+editors, replacing the current ad-hoc string concatenation and inline badge
+patterns.
+
+### Changes
+
+#### New Types and Functions (`sdk/campaign_builder/src/ui_helpers.rs`)
+
+- **`MetadataBadge`** — A `#[derive(Debug, Clone)]` struct with `text: String`,
+  `color: egui::Color32`, and `tooltip: Option<String>`. Supports a builder
+  pattern: `MetadataBadge::new(text)`, `.with_color(color)`,
+  `.with_tooltip(text)`.
+
+- **`StandardListItemConfig<'a>`** — Configuration struct for a single left-panel
+  list entry. Fields: `label: String`, `selected: bool`,
+  `badges: Vec<MetadataBadge>`, `id: Option<String>`, `icon: Option<&'a str>`.
+  Builder methods: `new(label)`, `.selected(bool)`, `.with_badges(Vec)`,
+  `.with_id(impl Display)`, `.with_icon(&'a str)`.
+
+- **`show_standard_list_item(ui, config) -> (bool, ItemAction)`** — Renders a
+  `selectable_label` with the primary label (icon-prefixed if provided), attaches
+  a right-click context menu with Edit / Delete / Duplicate / Export actions, and
+  renders a horizontal badge row below the label (small colored text with an
+  optional RGBA-tinted background, plus a muted `#<id>` display at the right end).
+
+#### Module Docstring
+
+Updated the `//!` module header in `ui_helpers.rs` to document the new
+`## Standard List Item Component` section listing `MetadataBadge`,
+`StandardListItemConfig`, and `show_standard_list_item`.
+
+#### Tests (4 new)
+
+Added to the existing `mod tests` block in `ui_helpers.rs` under the
+`// Standard List Item Component Tests` heading:
+
+| Test name | What it covers |
+|---|---|
+| `metadata_badge_new_creates_default` | Default color is `Color32::GRAY`, tooltip is `None` |
+| `metadata_badge_builder_pattern` | `.with_color()` and `.with_tooltip()` builder methods |
+| `standard_list_item_config_new_creates_default` | All fields default correctly |
+| `standard_list_item_config_builder_pattern` | All builder methods produce correct state |
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 — no deviations
+- [x] Module placement: new items added to `sdk/campaign_builder/src/ui_helpers.rs`
+- [x] `ItemAction` type alias used (re-uses existing `ItemAction` enum)
+- [x] No magic numbers (spacing constants from existing `ui_helpers` conventions)
+- [x] `///` doc comments with `# Examples` on all public items
+- [x] No test references `campaigns/tutorial`
+- [x] `cargo fmt` — no output (formatted)
+- [x] `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings

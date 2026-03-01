@@ -17,6 +17,12 @@
 //! - [`TwoColumnLayout`] - Standard two-column list/detail layout
 //! - [`ImportExportDialog`] - Standard import/export dialog for RON data
 //!
+//! ## Standard List Item Component
+//!
+//! - [`MetadataBadge`] - Colored metadata badge for list item secondary rows
+//! - [`StandardListItemConfig`] - Configuration for a standard left-panel list item
+//! - [`show_standard_list_item`] - Renders a list item with badges and a right-click context menu
+//!
 //! ## Attribute Widgets
 //!
 //! - [`AttributePairInput`] - Widget for editing `AttributePair` (u8 base/current)
@@ -1291,6 +1297,371 @@ impl<'a> TwoColumnLayout<'a> {
 
         panel_height
     }
+}
+
+// =============================================================================
+// Standard List Item Component
+// =============================================================================
+
+/// A colored badge for displaying rich metadata in left-panel list items.
+///
+/// Badges appear as small colored text labels rendered below the primary item
+/// label in the left panel list. They convey category, type, status, and other
+/// relevant metadata without cluttering the primary label.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::ui_helpers::MetadataBadge;
+/// use eframe::egui;
+///
+/// let badge = MetadataBadge::new("Weapon")
+///     .with_color(egui::Color32::from_rgb(200, 100, 50))
+///     .with_tooltip("Melee weapon");
+///
+/// assert_eq!(badge.text, "Weapon");
+/// assert_eq!(badge.tooltip, Some("Melee weapon".to_string()));
+/// ```
+#[derive(Debug, Clone)]
+pub struct MetadataBadge {
+    /// The text displayed on the badge
+    pub text: String,
+    /// The foreground color of the badge text
+    pub color: egui::Color32,
+    /// Optional tooltip shown when the user hovers over the badge
+    pub tooltip: Option<String>,
+}
+
+impl MetadataBadge {
+    /// Creates a new metadata badge with the given text using the default gray color.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The badge label text
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::ui_helpers::MetadataBadge;
+    ///
+    /// let badge = MetadataBadge::new("Armor");
+    /// assert_eq!(badge.text, "Armor");
+    /// assert!(badge.tooltip.is_none());
+    /// ```
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            color: egui::Color32::GRAY,
+            tooltip: None,
+        }
+    }
+
+    /// Sets the foreground color of the badge text.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - The desired text color
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::ui_helpers::MetadataBadge;
+    /// use eframe::egui;
+    ///
+    /// let badge = MetadataBadge::new("Magic")
+    ///     .with_color(egui::Color32::from_rgb(128, 0, 200));
+    /// assert_eq!(badge.color, egui::Color32::from_rgb(128, 0, 200));
+    /// ```
+    pub fn with_color(mut self, color: egui::Color32) -> Self {
+        self.color = color;
+        self
+    }
+
+    /// Sets a tooltip shown when the user hovers over the badge.
+    ///
+    /// # Arguments
+    ///
+    /// * `tooltip` - The tooltip text
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::ui_helpers::MetadataBadge;
+    ///
+    /// let badge = MetadataBadge::new("Magic")
+    ///     .with_tooltip("Magical item");
+    /// assert_eq!(badge.tooltip, Some("Magical item".to_string()));
+    /// ```
+    pub fn with_tooltip(mut self, tooltip: impl Into<String>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
+    }
+}
+
+/// Configuration for rendering a standard left-panel list item.
+///
+/// Encapsulates the primary label, optional icon prefix, selection state,
+/// metadata badges, and an optional display ID. Pass this to
+/// [`show_standard_list_item`] to render a consistent list entry across all
+/// editors.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::ui_helpers::{MetadataBadge, StandardListItemConfig};
+/// use eframe::egui;
+///
+/// let badges = vec![
+///     MetadataBadge::new("Sword").with_color(egui::Color32::from_rgb(200, 100, 50)),
+/// ];
+/// let config = StandardListItemConfig::new("Iron Sword")
+///     .with_badges(badges)
+///     .with_id(1u32)
+///     .with_icon("⚔️")
+///     .selected(true);
+///
+/// assert_eq!(config.label, "Iron Sword");
+/// assert!(config.selected);
+/// assert_eq!(config.badges.len(), 1);
+/// assert_eq!(config.id, Some("1".to_string()));
+/// assert_eq!(config.icon, Some("⚔️"));
+/// ```
+pub struct StandardListItemConfig<'a> {
+    /// Primary display label for the item
+    pub label: String,
+    /// Whether this item is currently selected (highlighted)
+    pub selected: bool,
+    /// Optional metadata badges shown below the primary label
+    pub badges: Vec<MetadataBadge>,
+    /// Optional display ID shown at the end of the metadata row in gray
+    pub id: Option<String>,
+    /// Optional icon or emoji prefix rendered before the primary label
+    pub icon: Option<&'a str>,
+}
+
+impl<'a> StandardListItemConfig<'a> {
+    /// Creates a new list item configuration with the given label.
+    ///
+    /// All optional fields default to `None` / `false` / empty.
+    ///
+    /// # Arguments
+    ///
+    /// * `label` - The primary display label
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::ui_helpers::StandardListItemConfig;
+    ///
+    /// let config = StandardListItemConfig::new("Iron Sword");
+    /// assert_eq!(config.label, "Iron Sword");
+    /// assert!(!config.selected);
+    /// assert!(config.badges.is_empty());
+    /// assert!(config.id.is_none());
+    /// assert!(config.icon.is_none());
+    /// ```
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            selected: false,
+            badges: Vec::new(),
+            id: None,
+            icon: None,
+        }
+    }
+
+    /// Sets the selection state of the list item.
+    ///
+    /// When `selected` is `true` the item is rendered with a highlighted background.
+    ///
+    /// # Arguments
+    ///
+    /// * `selected` - Whether this item should appear selected
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::ui_helpers::StandardListItemConfig;
+    ///
+    /// let config = StandardListItemConfig::new("Iron Sword").selected(true);
+    /// assert!(config.selected);
+    /// ```
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    /// Attaches metadata badges that appear below the primary label.
+    ///
+    /// # Arguments
+    ///
+    /// * `badges` - A vector of [`MetadataBadge`] values to display
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::ui_helpers::{MetadataBadge, StandardListItemConfig};
+    ///
+    /// let badges = vec![MetadataBadge::new("Weapon"), MetadataBadge::new("Magic")];
+    /// let config = StandardListItemConfig::new("Iron Sword").with_badges(badges);
+    /// assert_eq!(config.badges.len(), 2);
+    /// ```
+    pub fn with_badges(mut self, badges: Vec<MetadataBadge>) -> Self {
+        self.badges = badges;
+        self
+    }
+
+    /// Sets the display ID shown in gray at the end of the metadata row.
+    ///
+    /// The value is converted to a string via [`Display`][std::fmt::Display]
+    /// and rendered as `#<id>` in a small, muted style.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - A value that implements `Display`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::ui_helpers::StandardListItemConfig;
+    ///
+    /// let config = StandardListItemConfig::new("Iron Sword").with_id(42u32);
+    /// assert_eq!(config.id, Some("42".to_string()));
+    /// ```
+    pub fn with_id(mut self, id: impl std::fmt::Display) -> Self {
+        self.id = Some(id.to_string());
+        self
+    }
+
+    /// Sets an icon or emoji prefix rendered before the primary label text.
+    ///
+    /// # Arguments
+    ///
+    /// * `icon` - A string slice containing the icon or emoji
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::ui_helpers::StandardListItemConfig;
+    ///
+    /// let config = StandardListItemConfig::new("Iron Sword").with_icon("⚔️");
+    /// assert_eq!(config.icon, Some("⚔️"));
+    /// ```
+    pub fn with_icon(mut self, icon: &'a str) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+}
+
+/// Shows a standard list item in the left panel with badges and a context menu.
+///
+/// Renders the primary label (with optional icon prefix), a row of colored
+/// metadata badges below it, and wires up a right-click context menu with
+/// Edit / Delete / Duplicate / Export actions.
+///
+/// # Arguments
+///
+/// * `ui`     - The egui UI context
+/// * `config` - The [`StandardListItemConfig`] describing the item
+///
+/// # Returns
+///
+/// A tuple `(clicked, action)` where:
+/// - `clicked` is `true` if the item was left-clicked (indicates selection intent)
+/// - `action` is the [`ItemAction`] triggered from the context menu
+///   (`ItemAction::None` if no action was triggered this frame)
+///
+/// # Examples
+///
+/// ```no_run
+/// use eframe::egui;
+/// use campaign_builder::ui_helpers::{
+///     ItemAction, MetadataBadge, StandardListItemConfig, show_standard_list_item,
+/// };
+///
+/// fn example(ui: &mut egui::Ui, is_selected: bool) {
+///     let badges = vec![
+///         MetadataBadge::new("Sword").with_color(egui::Color32::from_rgb(200, 100, 50)),
+///     ];
+///     let config = StandardListItemConfig::new("Iron Sword")
+///         .with_badges(badges)
+///         .with_id(1u32)
+///         .selected(is_selected);
+///
+///     let (clicked, action) = show_standard_list_item(ui, config);
+///
+///     if clicked {
+///         // handle item selection
+///     }
+///     match action {
+///         ItemAction::Edit      => { /* enter edit mode */ }
+///         ItemAction::Delete    => { /* delete item */ }
+///         ItemAction::Duplicate => { /* duplicate item */ }
+///         ItemAction::Export    => { /* export item */ }
+///         ItemAction::None      => {}
+///     }
+/// }
+/// ```
+pub fn show_standard_list_item(
+    ui: &mut egui::Ui,
+    config: StandardListItemConfig,
+) -> (bool, ItemAction) {
+    let mut action = ItemAction::None;
+
+    // Build the primary label text with optional icon prefix
+    let label_text = match config.icon {
+        Some(icon) => format!("{icon} {}", config.label),
+        None => config.label.clone(),
+    };
+
+    let response = ui.selectable_label(config.selected, &label_text);
+    let clicked = response.clicked();
+
+    // Wire up the right-click context menu
+    response.context_menu(|ctx_ui| {
+        if ctx_ui.button("✏️ Edit").clicked() {
+            action = ItemAction::Edit;
+            ctx_ui.close_menu();
+        }
+        if ctx_ui.button("🗑️ Delete").clicked() {
+            action = ItemAction::Delete;
+            ctx_ui.close_menu();
+        }
+        if ctx_ui.button("📋 Duplicate").clicked() {
+            action = ItemAction::Duplicate;
+            ctx_ui.close_menu();
+        }
+        if ctx_ui.button("📤 Export").clicked() {
+            action = ItemAction::Export;
+            ctx_ui.close_menu();
+        }
+    });
+
+    // Render the metadata badges row below the primary label
+    if !config.badges.is_empty() || config.id.is_some() {
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            for badge in &config.badges {
+                let [r, g, b, _] = badge.color.to_array();
+                let bg = egui::Color32::from_rgba_unmultiplied(r, g, b, 40);
+                let badge_response = ui.label(
+                    egui::RichText::new(&badge.text)
+                        .small()
+                        .color(badge.color)
+                        .background_color(bg),
+                );
+                if let Some(ref tooltip) = badge.tooltip {
+                    badge_response.on_hover_text(tooltip);
+                }
+                ui.add_space(2.0);
+            }
+            if let Some(ref id) = config.id {
+                ui.label(egui::RichText::new(format!("#{id}")).small().weak());
+            }
+        });
+    }
+
+    (clicked, action)
 }
 
 // =============================================================================
@@ -4715,6 +5086,53 @@ mod tests {
         let size = Vec2::new(0.0, 0.0);
         let min = 100.0;
         assert_eq!(compute_panel_height_from_size(size, min), min);
+    }
+
+    // =========================================================================
+    // Standard List Item Component Tests
+    // =========================================================================
+
+    #[test]
+    fn metadata_badge_new_creates_default() {
+        let badge = MetadataBadge::new("Test");
+        assert_eq!(badge.text, "Test");
+        assert_eq!(badge.color, egui::Color32::GRAY);
+        assert!(badge.tooltip.is_none());
+    }
+
+    #[test]
+    fn metadata_badge_builder_pattern() {
+        let badge = MetadataBadge::new("Magic")
+            .with_color(egui::Color32::from_rgb(128, 0, 200))
+            .with_tooltip("Magical item");
+        assert_eq!(badge.text, "Magic");
+        assert_eq!(badge.color, egui::Color32::from_rgb(128, 0, 200));
+        assert_eq!(badge.tooltip, Some("Magical item".to_string()));
+    }
+
+    #[test]
+    fn standard_list_item_config_new_creates_default() {
+        let config = StandardListItemConfig::new("Test Item");
+        assert_eq!(config.label, "Test Item");
+        assert!(!config.selected);
+        assert!(config.badges.is_empty());
+        assert!(config.id.is_none());
+        assert!(config.icon.is_none());
+    }
+
+    #[test]
+    fn standard_list_item_config_builder_pattern() {
+        let badges = vec![MetadataBadge::new("Test")];
+        let config = StandardListItemConfig::new("Iron Sword")
+            .with_badges(badges)
+            .selected(true)
+            .with_id(42u32)
+            .with_icon("⚔️");
+        assert_eq!(config.label, "Iron Sword");
+        assert!(config.selected);
+        assert_eq!(config.badges.len(), 1);
+        assert_eq!(config.id, Some("42".to_string()));
+        assert_eq!(config.icon, Some("⚔️"));
     }
 
     // =========================================================================
