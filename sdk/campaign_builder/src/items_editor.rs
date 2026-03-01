@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{
-    autocomplete_tag_list_selector, extract_item_tag_candidates, ActionButtons, EditorToolbar,
-    ItemAction, ToolbarAction, TwoColumnLayout,
+    autocomplete_tag_list_selector, extract_item_tag_candidates, show_standard_list_item,
+    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
+    TwoColumnLayout,
 };
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
@@ -375,7 +376,7 @@ impl ItemsEditorState {
         let search_lower = self.search_query.to_lowercase();
 
         // Build filtered list snapshot to avoid borrow conflicts in closures
-        let filtered_items: Vec<(usize, String, Item)> = items
+        let filtered_items: Vec<(usize, Item)> = items
             .iter()
             .enumerate()
             .filter(|(_, item)| {
@@ -404,24 +405,12 @@ impl ItemsEditorState {
                 }
                 true
             })
-            .map(|(idx, item)| {
-                let mut label = format!("{}: {}", item.id, item.name);
-                if item.is_magical() {
-                    label.push_str(" ✨");
-                }
-                if item.is_cursed {
-                    label.push_str(" 💀");
-                }
-                if item.is_quest_item() {
-                    label.push_str(" 📜");
-                }
-                (idx, label, item.clone())
-            })
+            .map(|(idx, item)| (idx, item.clone()))
             .collect();
 
         // Sort by ID
         let mut sorted_items = filtered_items;
-        sorted_items.sort_by_key(|(idx, _, _)| items[*idx].id);
+        sorted_items.sort_by_key(|(idx, _)| items[*idx].id);
 
         let selected = self.selected_item;
         let mut new_selection = selected;
@@ -436,14 +425,66 @@ impl ItemsEditorState {
         TwoColumnLayout::new("items").show_split(
             ui,
             |left_ui| {
-                // Left panel: Map list
+                // Left panel: Item list
                 left_ui.heading("Items");
                 left_ui.separator();
 
-                for (idx, label, _) in &sorted_items {
-                    let is_selected = selected == Some(*idx);
-                    if left_ui.selectable_label(is_selected, label).clicked() {
+                for (idx, item) in &sorted_items {
+                    let mut badges = Vec::new();
+
+                    // Type badge with colour coding
+                    let type_badge = match &item.item_type {
+                        ItemType::Weapon(_) => MetadataBadge::new("Weapon")
+                            .with_color(egui::Color32::from_rgb(200, 100, 100)),
+                        ItemType::Armor(_) => MetadataBadge::new("Armor")
+                            .with_color(egui::Color32::from_rgb(100, 100, 200)),
+                        ItemType::Accessory(_) => MetadataBadge::new("Accessory")
+                            .with_color(egui::Color32::from_rgb(200, 200, 100)),
+                        ItemType::Consumable(_) => MetadataBadge::new("Consumable")
+                            .with_color(egui::Color32::from_rgb(100, 200, 100)),
+                        ItemType::Ammo(_) => MetadataBadge::new("Ammo")
+                            .with_color(egui::Color32::from_rgb(150, 150, 150)),
+                        ItemType::Quest(_) => MetadataBadge::new("Quest")
+                            .with_color(egui::Color32::from_rgb(255, 215, 0)),
+                    };
+                    badges.push(type_badge);
+
+                    // Property badges
+                    if item.is_magical() {
+                        badges.push(
+                            MetadataBadge::new("Magic")
+                                .with_color(egui::Color32::from_rgb(138, 43, 226))
+                                .with_tooltip("Magical item"),
+                        );
+                    }
+                    if item.is_cursed {
+                        badges.push(
+                            MetadataBadge::new("Cursed")
+                                .with_color(egui::Color32::from_rgb(139, 0, 0))
+                                .with_tooltip("Cursed item - cannot be unequipped"),
+                        );
+                    }
+                    if item.is_quest_item() {
+                        badges.push(
+                            MetadataBadge::new("Quest")
+                                .with_color(egui::Color32::from_rgb(255, 215, 0))
+                                .with_tooltip("Quest item"),
+                        );
+                    }
+
+                    let config = StandardListItemConfig::new(&item.name)
+                        .with_badges(badges)
+                        .with_id(item.id)
+                        .selected(selected == Some(*idx));
+
+                    let (clicked, ctx_action) = show_standard_list_item(left_ui, config);
+
+                    if clicked {
                         new_selection = Some(*idx);
+                    }
+
+                    if ctx_action != ItemAction::None {
+                        action_requested = Some(ctx_action);
                     }
                 }
 
@@ -454,17 +495,10 @@ impl ItemsEditorState {
             |right_ui| {
                 // Right panel: Detail view
                 if let Some(idx) = selected {
-                    if let Some((_, _, item)) = sorted_items.iter().find(|(i, _, _)| *i == idx) {
+                    if let Some((_, item)) = sorted_items.iter().find(|(i, _)| *i == idx) {
                         right_ui.heading(&item.name);
                         right_ui.separator();
 
-                        // Use shared ActionButtons component
-                        let action = ActionButtons::new().enabled(true).show(right_ui);
-                        if action != ItemAction::None {
-                            action_requested = Some(action);
-                        }
-
-                        right_ui.separator();
                         Self::show_preview_static(right_ui, item, classes);
                     } else {
                         right_ui.vertical_centered(|ui| {

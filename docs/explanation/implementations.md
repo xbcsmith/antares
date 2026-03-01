@@ -12665,3 +12665,80 @@ Added to the existing `mod tests` block in `ui_helpers.rs` under the
 - [x] `cargo fmt` — no output (formatted)
 - [x] `cargo check --all-targets --all-features` — `Finished` with 0 errors
 - [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
+
+---
+
+## Phase 2: Items Editor Standardization
+
+**Date**: 2026-03-01
+**File modified**: `sdk/campaign_builder/src/items_editor.rs`
+
+### Summary
+
+Refactored the Items Editor left panel to use the `StandardListItemConfig` /
+`show_standard_list_item` infrastructure introduced in Phase 1. Emoji-concatenated
+labels are replaced by structured `MetadataBadge` components with colour coding and
+tooltips. Context-menu actions (Edit / Delete / Duplicate / Export) are now driven
+by the right-click menu wired inside `show_standard_list_item`, so the redundant
+`ActionButtons` component has been removed from the right panel detail view.
+
+### Changes
+
+#### `sdk/campaign_builder/src/items_editor.rs`
+
+**Imports** — removed `ActionButtons`; added `MetadataBadge`, `StandardListItemConfig`,
+`show_standard_list_item`.
+
+**`show_list` — `filtered_items` collection**
+
+Changed from `Vec<(usize, String, Item)>` (where the `String` was a manually built
+label with emoji appended) to `Vec<(usize, Item)>`. The label-building `.map()` block
+that appended `" ✨"`, `" 💀"`, `" 📜"` has been removed entirely.
+
+**`show_list` — `sorted_items` sort key**
+
+Updated tuple destructuring from `(idx, _, _)` to `(idx, _)` to match the new
+two-element tuple.
+
+**`show_list` — left panel rendering loop**
+
+Replaced the bare `selectable_label` loop with a `show_standard_list_item` call per
+item. Badges built per item:
+
+| Badge text  | Colour (RGB)       | When shown          | Tooltip                            |
+|-------------|--------------------|---------------------|------------------------------------|
+| `Weapon`    | (200, 100, 100)    | `ItemType::Weapon`  | —                                  |
+| `Armor`     | (100, 100, 200)    | `ItemType::Armor`   | —                                  |
+| `Accessory` | (200, 200, 100)    | `ItemType::Accessory` | —                                |
+| `Consumable` | (100, 200, 100)   | `ItemType::Consumable` | —                               |
+| `Ammo`      | (150, 150, 150)    | `ItemType::Ammo`    | —                                  |
+| `Quest`     | (255, 215,   0)    | `ItemType::Quest`   | —                                  |
+| `Magic`     | (138,  43, 226)    | `item.is_magical()` | "Magical item"                     |
+| `Cursed`    | (139,   0,   0)    | `item.is_cursed`    | "Cursed item - cannot be unequipped" |
+| `Quest`     | (255, 215,   0)    | `item.is_quest_item()` | "Quest item"                    |
+
+The item ID is passed via `.with_id(item.id)` and rendered as `#<id>` in a muted
+small font at the right end of the badge row.
+
+**`show_list` — right panel**
+
+- Removed `ActionButtons::new().enabled(true).show(right_ui)` and the redundant
+  `right_ui.separator()` that followed it.
+- Updated item tuple destructuring from `(_, _, item)` / `(i, _, _)` to `(_, item)`
+  / `(i, _)` to match the new two-element tuple.
+- The action-handling block after the closures remains intact; actions are now
+  exclusively triggered via the context menu.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 — no deviations
+- [x] Module placement: changes confined to `sdk/campaign_builder/src/items_editor.rs`
+- [x] `ItemAction` enum used consistently for context-menu actions
+- [x] `MetadataBadge` / `StandardListItemConfig` type aliases used, not raw strings
+- [x] No magic constants introduced (colours are inline per badge semantics)
+- [x] No test references `campaigns/tutorial`
+- [x] `cargo fmt --all` — no output (formatted)
+- [x] `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
+- [x] Pre-existing `test_sprite_directory_structure` failure is unrelated to this work;
+      all item-domain and items-editor unit tests pass
