@@ -12742,3 +12742,88 @@ small font at the right end of the badge row.
 - [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
 - [x] Pre-existing `test_sprite_directory_structure` failure is unrelated to this work;
       all item-domain and items-editor unit tests pass
+
+---
+
+## Phase 3: Monsters Editor Left-Panel Standardization (2026-03-01)
+
+### Overview
+
+Refactored `sdk/campaign_builder/src/monsters_editor.rs` to replace the ad-hoc
+label-string formatting in `show_list` with the `StandardListItemConfig` /
+`MetadataBadge` / `show_standard_list_item` infrastructure introduced in Phase 1.
+Context-menu actions (Edit / Delete / Duplicate / Export) now come from the
+right-click menu on each list item rather than from a separate `ActionButtons`
+widget in the right panel.
+
+### Deliverables
+
+- [x] `monsters_editor.rs` imports updated — `ActionButtons` removed; `MetadataBadge`,
+      `StandardListItemConfig`, `show_standard_list_item` added.
+- [x] `filtered_monsters` collection changed from `Vec<(usize, String, MonsterDefinition)>`
+      to `Vec<(usize, MonsterDefinition)>` — the manual `format!("{} {} (HP:{})", …)`
+      label-building step removed.
+- [x] `sorted_monsters` sort key updated from `|(idx, _, _)|` to `|(idx, _)|`.
+- [x] Left-panel rendering loop replaced with `show_standard_list_item` + badges.
+- [x] Right-panel `ActionButtons::new().enabled(true).show(right_ui)` removed;
+      tuple destructuring updated from `(_, _, monster)` / `(i, _, _)` to
+      `(_, monster)` / `(i, _)`.
+- [x] All quality gates pass.
+
+### Changes
+
+#### `sdk/campaign_builder/src/monsters_editor.rs`
+
+**Imports** — removed `ActionButtons`; added `MetadataBadge`, `StandardListItemConfig`,
+`show_standard_list_item`.
+
+**`show_list` — `filtered_monsters` collection**
+
+Changed from `Vec<(usize, String, MonsterDefinition)>` (where the `String` was a
+manually built label with undead icon and HP appended) to `Vec<(usize, MonsterDefinition)>`.
+The label-building `.map()` block constructing `format!("{} {} (HP:{})", undead_icon, …)`
+has been removed entirely.
+
+**`show_list` — `sorted_monsters` sort key**
+
+Updated tuple destructuring from `(idx, _, _)` to `(idx, _)` to match the new
+two-element tuple.
+
+**`show_list` — left panel rendering loop**
+
+Replaced the bare `selectable_label` loop with a `show_standard_list_item` call
+per monster. Badges built per monster:
+
+| Badge text              | Colour (RGB)       | When shown                   | Tooltip                   |
+|-------------------------|--------------------|------------------------------|---------------------------|
+| `HP:<base>`             | (200, 100, 100)    | Always                       | "Hit Points"              |
+| `AC:<base>`             | (100, 100, 200)    | Always                       | "Armor Class"             |
+| `Undead`                | (139,   0, 139)    | `monster.is_undead == true`  | "Undead creature"         |
+| `Attacks:<count>`       | (255, 165,   0)    | `!monster.attacks.is_empty()`| "Number of attacks"       |
+
+The monster icon (`💀` for undead, `👹` for living) is passed via `.with_icon(icon)`
+and prepended to the name in the selectable label. The monster ID (`MonsterId = u8`)
+is passed via `.with_id(monster.id)` and rendered as a muted small ID label.
+
+**`show_list` — right panel**
+
+- Removed `ActionButtons::new().enabled(true).show(right_ui)` and the redundant
+  `right_ui.separator()` that followed it.
+- Updated monster tuple destructuring from `(_, _, monster)` / `(i, _, _)` to
+  `(_, monster)` / `(i, _)` to match the new two-element tuple.
+- The action-handling block after the closures remains intact; actions are now
+  exclusively triggered via the context menu.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 — no deviations
+- [x] Module placement: changes confined to `sdk/campaign_builder/src/monsters_editor.rs`
+- [x] `ItemAction` enum used consistently for context-menu actions
+- [x] `MetadataBadge` / `StandardListItemConfig` used, not raw strings
+- [x] No magic constants introduced (colours are inline per badge semantics)
+- [x] No test references `campaigns/tutorial`
+- [x] `cargo fmt --all` — no output (formatted)
+- [x] `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
+- [x] 2796/2796 tests pass; pre-existing `test_sprite_directory_structure` failure
+      is unrelated to this work
