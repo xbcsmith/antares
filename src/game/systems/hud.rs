@@ -75,6 +75,26 @@ pub const COMPASS_BORDER_COLOR: Color = Color::srgba(0.4, 0.4, 0.4, 1.0);
 pub const COMPASS_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 1.0);
 pub const COMPASS_FONT_SIZE: f32 = 24.0;
 
+// Clock display constants
+/// Font size used for both time and day lines in the clock widget
+pub const CLOCK_FONT_SIZE: f32 = 14.0;
+/// Background color of the clock panel (matches compass style)
+pub const CLOCK_BACKGROUND_COLOR: Color = Color::srgba(0.1, 0.1, 0.1, 0.9);
+/// Border color of the clock panel (matches compass style)
+pub const CLOCK_BORDER_COLOR: Color = Color::srgba(0.4, 0.4, 0.4, 1.0);
+/// Default text color for the clock (used when no specific period tint is desired)
+pub const CLOCK_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 1.0);
+/// Text color used during night / evening — cool blue-white tint
+pub const CLOCK_NIGHT_TEXT_COLOR: Color = Color::srgba(0.6, 0.6, 1.0, 1.0);
+/// Text color used during day periods — warm golden tint
+pub const CLOCK_DAY_TEXT_COLOR: Color = Color::srgba(1.0, 0.9, 0.5, 1.0);
+/// Vertical gap between the bottom of the compass and the top of the clock panel
+pub const CLOCK_TOP_OFFSET: f32 = COMPASS_SIZE + 28.0; // 48 (compass) + 8 (gap) + 20 (top margin)
+/// Width of the clock panel (matches compass width)
+pub const CLOCK_WIDTH: f32 = COMPASS_SIZE;
+/// Padding inside the clock panel
+pub const CLOCK_PADDING: f32 = 4.0;
+
 // Portrait display constants
 pub const PORTRAIT_SIZE: f32 = 40.0;
 pub const PORTRAIT_MARGIN: Val = Val::Px(4.0);
@@ -128,6 +148,18 @@ pub struct CompassRoot;
 #[derive(Component)]
 pub struct CompassText;
 
+/// Marker component for the clock widget container (sits below the compass)
+#[derive(Component)]
+pub struct ClockRoot;
+
+/// Marker component for the time-of-day text node (displays "HH:MM")
+#[derive(Component)]
+pub struct ClockTimeText;
+
+/// Marker component for the day counter text node (displays "Day N")
+#[derive(Component)]
+pub struct ClockDayText;
+
 /// Marker component for character portrait image
 #[derive(Component)]
 pub struct CharacterPortrait {
@@ -162,6 +194,7 @@ impl Plugin for HudPlugin {
                     ensure_portraits_loaded,
                     update_hud,
                     update_compass,
+                    update_clock,
                     update_portraits,
                 )
                     .run_if(not_in_combat),
@@ -354,6 +387,52 @@ fn setup_hud(mut commands: Commands) {
                 CompassText,
             ));
         });
+
+    // Spawn clock display (below the compass)
+    //
+    // The clock sits directly below the compass in a vertical flex column,
+    // anchored to the same right edge. It shows two lines: the current
+    // time ("HH:MM") and the current day ("Day N").
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(20.0),
+                top: Val::Px(CLOCK_TOP_OFFSET),
+                width: Val::Px(CLOCK_WIDTH),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::all(Val::Px(CLOCK_PADDING)),
+                row_gap: Val::Px(2.0),
+                ..default()
+            },
+            BackgroundColor(CLOCK_BACKGROUND_COLOR),
+            ClockRoot,
+        ))
+        .with_children(|parent| {
+            // Time line: "HH:MM"
+            parent.spawn((
+                Text::new("00:00"),
+                TextFont {
+                    font_size: CLOCK_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(CLOCK_DAY_TEXT_COLOR),
+                ClockTimeText,
+            ));
+
+            // Day line: "Day N"
+            parent.spawn((
+                Text::new("Day 1"),
+                TextFont {
+                    font_size: CLOCK_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(CLOCK_TEXT_COLOR),
+                ClockDayText,
+            ));
+        });
 }
 
 /// Updates HUD elements based on current party state
@@ -463,6 +542,42 @@ fn update_compass(
 ) {
     if let Ok(mut text) = compass_query.single_mut() {
         **text = direction_to_string(&global_state.0.world.party_facing);
+    }
+}
+
+/// Updates the clock widget with the current in-game time and day.
+///
+/// Runs every frame (guarded by `not_in_combat`) so that any time
+/// advancement — a step, rest, map transition, or combat round — is
+/// reflected in the HUD without delay.
+///
+/// The time text color shifts between [`CLOCK_DAY_TEXT_COLOR`] during bright
+/// periods (Dawn through Dusk) and [`CLOCK_NIGHT_TEXT_COLOR`] during dark
+/// periods (Evening and Night), giving the player an ambient visual cue.
+///
+/// # Arguments
+/// * `global_state` - Game state containing the `time` field
+/// * `time_query`   - Query for the [`ClockTimeText`] entity
+/// * `day_query`    - Query for the [`ClockDayText`] entity
+#[allow(clippy::type_complexity)]
+fn update_clock(
+    global_state: Res<GlobalState>,
+    mut time_query: Query<
+        (&mut Text, &mut TextColor),
+        (With<ClockTimeText>, Without<ClockDayText>),
+    >,
+    mut day_query: Query<(&mut Text, &mut TextColor), (With<ClockDayText>, Without<ClockTimeText>)>,
+) {
+    let game_time = &global_state.0.time;
+    let time_of_day = global_state.0.time_of_day();
+    let time_color = clock_text_color(time_of_day);
+
+    for (mut text, mut color) in &mut time_query {
+        **text = format_clock_time(game_time.hour, game_time.minute);
+        *color = TextColor(time_color);
+    }
+    for (mut text, _color) in &mut day_query {
+        **text = format_clock_day(game_time.day);
     }
 }
 
@@ -1068,6 +1183,78 @@ pub fn count_conditions(conditions: &Condition) -> u8 {
 /// assert_eq!(direction_to_string(&Direction::North), "N");
 /// assert_eq!(direction_to_string(&Direction::East), "E");
 /// ```
+/// Formats the in-game hour and minute as a zero-padded "HH:MM" string.
+///
+/// # Arguments
+/// * `hour`   - Current hour (0–23)
+/// * `minute` - Current minute (0–59)
+///
+/// # Returns
+/// A `String` in `"HH:MM"` format.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::format_clock_time;
+///
+/// assert_eq!(format_clock_time(0, 0),   "00:00");
+/// assert_eq!(format_clock_time(9, 5),   "09:05");
+/// assert_eq!(format_clock_time(12, 5),  "12:05");
+/// assert_eq!(format_clock_time(23, 59), "23:59");
+/// ```
+pub fn format_clock_time(hour: u8, minute: u8) -> String {
+    format!("{:02}:{:02}", hour, minute)
+}
+
+/// Formats the in-game day counter as `"Day N"`.
+///
+/// # Arguments
+/// * `day` - Current day (1-based)
+///
+/// # Returns
+/// A `String` in `"Day N"` format.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::format_clock_day;
+///
+/// assert_eq!(format_clock_day(1),  "Day 1");
+/// assert_eq!(format_clock_day(42), "Day 42");
+/// ```
+pub fn format_clock_day(day: u32) -> String {
+    format!("Day {}", day)
+}
+
+/// Returns the appropriate clock text color for a given [`TimeOfDay`] period.
+///
+/// - Dark periods (Evening, Night) → [`CLOCK_NIGHT_TEXT_COLOR`] (cool blue-white)
+/// - All other periods             → [`CLOCK_DAY_TEXT_COLOR`]   (warm golden)
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::TimeOfDay;
+/// use antares::game::systems::hud::{
+///     clock_text_color, CLOCK_DAY_TEXT_COLOR, CLOCK_NIGHT_TEXT_COLOR,
+/// };
+/// use bevy::prelude::Color;
+///
+/// let night_color = clock_text_color(TimeOfDay::Night);
+/// let day_color   = clock_text_color(TimeOfDay::Morning);
+/// // Night → cool tint
+/// assert_eq!(night_color, CLOCK_NIGHT_TEXT_COLOR);
+/// // Morning → warm tint
+/// assert_eq!(day_color,   CLOCK_DAY_TEXT_COLOR);
+/// ```
+pub fn clock_text_color(time_of_day: crate::domain::types::TimeOfDay) -> Color {
+    if time_of_day.is_dark() {
+        CLOCK_NIGHT_TEXT_COLOR
+    } else {
+        CLOCK_DAY_TEXT_COLOR
+    }
+}
+
 pub fn direction_to_string(direction: &Direction) -> String {
     match direction {
         Direction::North => "N".to_string(),
@@ -1470,6 +1657,18 @@ mod tests {
     #[test]
     fn test_direction_to_string_west() {
         assert_eq!(direction_to_string(&Direction::West), "W");
+    }
+
+    #[test]
+    fn test_clock_constants_valid() {
+        // Font size must be positive
+        const { assert!(CLOCK_FONT_SIZE > 0.0) }
+        // Top offset must place the clock below the compass
+        const { assert!(CLOCK_TOP_OFFSET > COMPASS_SIZE) }
+        // Clock width must be positive
+        const { assert!(CLOCK_WIDTH > 0.0) }
+        // Padding must be non-negative
+        const { assert!(CLOCK_PADDING >= 0.0) }
     }
 
     #[test]
@@ -1894,5 +2093,383 @@ mod tests {
         assert!(names.contains(&"10.png".to_string()));
         assert!(names.contains(&"sage.jpg".to_string()));
         assert!(!names.contains(&"README.md".to_string()));
+    }
+}
+
+// ===== Clock Tests =====
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    use crate::domain::types::TimeOfDay;
+
+    // ── format_clock_time ────────────────────────────────────────────────────
+
+    /// hour=0, minute=0 → "00:00"  (midnight — both fields must be zero-padded)
+    #[test]
+    fn test_clock_format_midnight() {
+        assert_eq!(format_clock_time(0, 0), "00:00");
+    }
+
+    /// hour=12, minute=5 → "12:05"  (single-digit minute is zero-padded)
+    #[test]
+    fn test_clock_format_noon() {
+        assert_eq!(format_clock_time(12, 5), "12:05");
+    }
+
+    /// hour=9, minute=0 → "09:00"  (single-digit hour is zero-padded)
+    #[test]
+    fn test_clock_format_single_digit_hour() {
+        assert_eq!(format_clock_time(9, 0), "09:00");
+    }
+
+    /// hour=23, minute=59 → "23:59"  (end-of-day boundary)
+    #[test]
+    fn test_clock_format_end_of_day() {
+        assert_eq!(format_clock_time(23, 59), "23:59");
+    }
+
+    /// hour=0, minute=1 → "00:01"  (both zero-padded)
+    #[test]
+    fn test_clock_format_zero_hour_one_minute() {
+        assert_eq!(format_clock_time(0, 1), "00:01");
+    }
+
+    /// hour=6, minute=30 → "06:30"  (dawn start time — used in GameState default)
+    #[test]
+    fn test_clock_format_dawn_default() {
+        assert_eq!(format_clock_time(6, 30), "06:30");
+    }
+
+    /// Verify all valid hours (0-23) produce correctly formatted strings
+    #[test]
+    fn test_clock_format_all_hours_produce_valid_strings() {
+        for hour in 0u8..24 {
+            let formatted = format_clock_time(hour, 0);
+            // Must be exactly 5 characters: "HH:MM"
+            assert_eq!(
+                formatted.len(),
+                5,
+                "format_clock_time({}, 0) produced '{}' — expected 5 chars",
+                hour,
+                formatted
+            );
+            assert!(
+                formatted.contains(':'),
+                "format_clock_time({}, 0) missing colon",
+                hour
+            );
+        }
+    }
+
+    /// Verify all valid minutes (0-59) produce correctly formatted strings
+    #[test]
+    fn test_clock_format_all_minutes_produce_valid_strings() {
+        for minute in 0u8..60 {
+            let formatted = format_clock_time(0, minute);
+            assert_eq!(
+                formatted.len(),
+                5,
+                "format_clock_time(0, {}) produced '{}' — expected 5 chars",
+                minute,
+                formatted
+            );
+        }
+    }
+
+    // ── format_clock_day ─────────────────────────────────────────────────────
+
+    /// day=1 → "Day 1"  (first day of the game)
+    #[test]
+    fn test_clock_day_display_first_day() {
+        assert_eq!(format_clock_day(1), "Day 1");
+    }
+
+    /// day=42 → "Day 42"  (arbitrary multi-digit day)
+    #[test]
+    fn test_clock_day_display_forty_two() {
+        assert_eq!(format_clock_day(42), "Day 42");
+    }
+
+    /// day=365 → "Day 365"  (one year into the game)
+    #[test]
+    fn test_clock_day_display_year() {
+        assert_eq!(format_clock_day(365), "Day 365");
+    }
+
+    /// day=0 → "Day 0"  (edge-case — technically invalid but must not panic)
+    #[test]
+    fn test_clock_day_display_zero() {
+        assert_eq!(format_clock_day(0), "Day 0");
+    }
+
+    /// day=u32::MAX must not panic
+    #[test]
+    fn test_clock_day_display_max() {
+        let result = format_clock_day(u32::MAX);
+        assert!(
+            result.starts_with("Day "),
+            "format_clock_day(u32::MAX) should start with 'Day '"
+        );
+    }
+
+    // ── clock_text_color ─────────────────────────────────────────────────────
+
+    /// Night period must return CLOCK_NIGHT_TEXT_COLOR
+    #[test]
+    fn test_clock_text_color_night_returns_night_color() {
+        let color = clock_text_color(TimeOfDay::Night);
+        assert_eq!(color, CLOCK_NIGHT_TEXT_COLOR);
+    }
+
+    /// Evening period must return CLOCK_NIGHT_TEXT_COLOR (it is_dark())
+    #[test]
+    fn test_clock_text_color_evening_returns_night_color() {
+        let color = clock_text_color(TimeOfDay::Evening);
+        assert_eq!(color, CLOCK_NIGHT_TEXT_COLOR);
+    }
+
+    /// Dawn period must return CLOCK_DAY_TEXT_COLOR
+    #[test]
+    fn test_clock_text_color_dawn_returns_day_color() {
+        let color = clock_text_color(TimeOfDay::Dawn);
+        assert_eq!(color, CLOCK_DAY_TEXT_COLOR);
+    }
+
+    /// Morning period must return CLOCK_DAY_TEXT_COLOR
+    #[test]
+    fn test_clock_text_color_morning_returns_day_color() {
+        let color = clock_text_color(TimeOfDay::Morning);
+        assert_eq!(color, CLOCK_DAY_TEXT_COLOR);
+    }
+
+    /// Afternoon period must return CLOCK_DAY_TEXT_COLOR
+    #[test]
+    fn test_clock_text_color_afternoon_returns_day_color() {
+        let color = clock_text_color(TimeOfDay::Afternoon);
+        assert_eq!(color, CLOCK_DAY_TEXT_COLOR);
+    }
+
+    /// Dusk period must return CLOCK_DAY_TEXT_COLOR (it is NOT dark)
+    #[test]
+    fn test_clock_text_color_dusk_returns_day_color() {
+        let color = clock_text_color(TimeOfDay::Dusk);
+        assert_eq!(color, CLOCK_DAY_TEXT_COLOR);
+    }
+
+    /// clock_text_color must agree with TimeOfDay::is_dark() for every period
+    #[test]
+    fn test_clock_text_color_agrees_with_is_dark_for_all_periods() {
+        let all_periods = [
+            TimeOfDay::Dawn,
+            TimeOfDay::Morning,
+            TimeOfDay::Afternoon,
+            TimeOfDay::Dusk,
+            TimeOfDay::Evening,
+            TimeOfDay::Night,
+        ];
+        for period in all_periods {
+            let color = clock_text_color(period);
+            if period.is_dark() {
+                assert_eq!(
+                    color, CLOCK_NIGHT_TEXT_COLOR,
+                    "{:?} is_dark() but did not return CLOCK_NIGHT_TEXT_COLOR",
+                    period
+                );
+            } else {
+                assert_eq!(
+                    color, CLOCK_DAY_TEXT_COLOR,
+                    "{:?} is not dark but did not return CLOCK_DAY_TEXT_COLOR",
+                    period
+                );
+            }
+        }
+    }
+
+    // ── constant sanity checks ───────────────────────────────────────────────
+
+    /// CLOCK_FONT_SIZE must be a positive, legible value
+    #[test]
+    fn test_clock_font_size_is_positive() {
+        const { assert!(CLOCK_FONT_SIZE > 0.0) }
+    }
+
+    /// CLOCK_TOP_OFFSET must be strictly larger than COMPASS_SIZE so the
+    /// clock panel does not overlap the compass widget
+    #[test]
+    fn test_clock_top_offset_places_clock_below_compass() {
+        const { assert!(CLOCK_TOP_OFFSET > COMPASS_SIZE) }
+    }
+
+    /// CLOCK_WIDTH must be a positive value
+    #[test]
+    fn test_clock_width_is_positive() {
+        const { assert!(CLOCK_WIDTH > 0.0) }
+    }
+
+    /// CLOCK_PADDING must be non-negative
+    #[test]
+    fn test_clock_padding_is_non_negative() {
+        const { assert!(CLOCK_PADDING >= 0.0) }
+    }
+
+    /// Night and day text colors must be distinct (different visual tints)
+    #[test]
+    fn test_clock_night_and_day_colors_are_distinct() {
+        let night = CLOCK_NIGHT_TEXT_COLOR.to_srgba();
+        let day = CLOCK_DAY_TEXT_COLOR.to_srgba();
+        // At least one channel must differ noticeably
+        let differs = (night.red - day.red).abs() > 0.05
+            || (night.green - day.green).abs() > 0.05
+            || (night.blue - day.blue).abs() > 0.05;
+        assert!(
+            differs,
+            "CLOCK_NIGHT_TEXT_COLOR and CLOCK_DAY_TEXT_COLOR should be visually distinct"
+        );
+    }
+
+    /// All clock color constants must be fully opaque (alpha == 1.0)
+    #[test]
+    fn test_clock_colors_are_opaque() {
+        for (name, color) in [
+            ("CLOCK_TEXT_COLOR", CLOCK_TEXT_COLOR),
+            ("CLOCK_NIGHT_TEXT_COLOR", CLOCK_NIGHT_TEXT_COLOR),
+            ("CLOCK_DAY_TEXT_COLOR", CLOCK_DAY_TEXT_COLOR),
+        ] {
+            let alpha = color.to_srgba().alpha;
+            assert!(
+                (alpha - 1.0).abs() < f32::EPSILON,
+                "{} must have alpha 1.0, got {}",
+                name,
+                alpha
+            );
+        }
+    }
+
+    /// Background and border constants must have positive alpha (visible)
+    #[test]
+    fn test_clock_background_and_border_colors_are_visible() {
+        assert!(
+            CLOCK_BACKGROUND_COLOR.to_srgba().alpha > 0.0,
+            "CLOCK_BACKGROUND_COLOR must not be fully transparent"
+        );
+        assert!(
+            CLOCK_BORDER_COLOR.to_srgba().alpha > 0.0,
+            "CLOCK_BORDER_COLOR must not be fully transparent"
+        );
+    }
+
+    // ── Bevy integration: clock widget spawned and updated ───────────────────
+
+    /// After startup the clock widget must exist in the world with initial
+    /// placeholder text ("00:00" for time, "Day 1" for day).
+    #[test]
+    fn test_clock_widget_spawned_on_startup() {
+        use crate::application::GameState;
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(GameState::new()));
+
+        // Startup systems run on the first update
+        app.update();
+
+        let world = app.world_mut();
+
+        // ClockTimeText entity must exist
+        let mut time_q = world.query_filtered::<&Text, With<ClockTimeText>>();
+        let time_count = time_q.iter(world).count();
+        assert_eq!(time_count, 1, "Expected exactly one ClockTimeText entity");
+
+        // ClockDayText entity must exist
+        let mut day_q = world.query_filtered::<&Text, With<ClockDayText>>();
+        let day_count = day_q.iter(world).count();
+        assert_eq!(day_count, 1, "Expected exactly one ClockDayText entity");
+
+        // ClockRoot entity must exist
+        let mut root_q = world.query_filtered::<Entity, With<ClockRoot>>();
+        let root_count = root_q.iter(world).count();
+        assert_eq!(root_count, 1, "Expected exactly one ClockRoot entity");
+    }
+
+    /// After startup + one update, the clock text must reflect the default
+    /// GameState time (Day 1, 06:00 — the canonical starting time).
+    #[test]
+    fn test_clock_widget_shows_default_game_time() {
+        use crate::application::GameState;
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(GameState::new()));
+
+        app.update(); // Startup
+        app.update(); // Update (runs update_clock)
+
+        let world = app.world_mut();
+
+        // Time text should reflect the default start time
+        let mut time_q = world.query_filtered::<&Text, With<ClockTimeText>>();
+        let time_text_ref = time_q.single(world).unwrap();
+        let time_text: &str = time_text_ref;
+        // GameState::new() starts at 06:00
+        assert!(
+            time_text.contains("06:00"),
+            "ClockTimeText should contain '06:00' at default start, got '{}'",
+            time_text
+        );
+
+        // Day text should say "Day 1"
+        let mut day_q = world.query_filtered::<&Text, With<ClockDayText>>();
+        let day_text_ref = day_q.single(world).unwrap();
+        let day_text: &str = day_text_ref;
+        assert!(
+            day_text.contains("Day 1"),
+            "ClockDayText should contain 'Day 1' at default start, got '{}'",
+            day_text
+        );
+    }
+
+    /// Advancing time in the GameState must be reflected in the clock widget
+    /// on the next update cycle.
+    #[test]
+    fn test_clock_widget_updates_after_time_advance() {
+        use crate::application::GameState;
+        use bevy::prelude::*;
+
+        let mut state = GameState::new();
+        // Advance 18 hours from 06:00 → 00:00 on Day 2
+        state.time.advance_hours(18);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+
+        app.update(); // Startup
+        app.update(); // Update
+
+        let world = app.world_mut();
+
+        let mut time_q = world.query_filtered::<&Text, With<ClockTimeText>>();
+        let time_text_ref = time_q.single(world).unwrap();
+        let time_text: &str = time_text_ref;
+        assert!(
+            time_text.contains("00:00"),
+            "ClockTimeText should be '00:00' after 18h advance from 06:00, got '{}'",
+            time_text
+        );
+
+        let mut day_q = world.query_filtered::<&Text, With<ClockDayText>>();
+        let day_text_ref = day_q.single(world).unwrap();
+        let day_text: &str = day_text_ref;
+        assert!(
+            day_text.contains("Day 2"),
+            "ClockDayText should be 'Day 2' after rolling over midnight, got '{}'",
+            day_text
+        );
     }
 }
