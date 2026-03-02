@@ -58,6 +58,7 @@
 | **Left Panel Standardization — Phase 5 (Classes Editor)** | ✅ COMPLETE | 2026-03-02 | **Classes list migrated to `StandardListItemConfig` with Hit Die, Proficiency count, Spell School, and Pure Caster badges; context-menu actions wired from left panel** |
 | **Left Panel Standardization — Phase 6 (Conditions Editor)** | ✅ COMPLETE | 2026-03-02 | **Conditions list migrated to `StandardListItemConfig` with effect-type, duration, and severity badges; right-panel action buttons removed in favor of left-panel context menu actions** |
 | **Left Panel Standardization — Phase 7 (Map Editor)** | ✅ COMPLETE | 2026-03-02 | **Map list migrated to `StandardListItemConfig` with Size, Environment, NPC count, and Event count badges; right-panel action buttons removed in favor of left-panel context menu actions** |
+| **Left Panel Standardization — Phase 8 (Quest Editor)** | ✅ COMPLETE | 2026-03-02 | **Quest list migrated to `StandardListItemConfig` with quest-type, repeatable, level-range, and reward-count badges; right-panel action buttons removed in favor of left-panel context menu actions** |
 
 **Total Lines Implemented**: 10,600+ lines of production code + 6,200+ lines of documentation
 **Total Tests**: 541+ new tests (all passing), 2,797 total tests passing
