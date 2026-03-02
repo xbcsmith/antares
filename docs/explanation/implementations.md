@@ -12827,3 +12827,78 @@ is passed via `.with_id(monster.id)` and rendered as a muted small ID label.
 - [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
 - [x] 2796/2796 tests pass; pre-existing `test_sprite_directory_structure` failure
       is unrelated to this work
+
+---
+
+## Left Panel Standardization — Phase 4: Spells Editor
+
+**Date**: 2026-03-01
+**File**: `sdk/campaign_builder/src/spells_editor.rs`
+
+### Summary
+
+Standardised the left-panel list in the Spells Editor to use
+`StandardListItemConfig` / `MetadataBadge` / `show_standard_list_item` from
+`ui_helpers.rs` (introduced in Phase 1). The old ad-hoc label string
+(`"{school_icon} L{level}: {name}"`) has been replaced with a structured item
+displaying styled metadata badges for school, level, and SP cost, plus a
+right-click context menu for Edit / Delete / Duplicate / Export.
+
+### Changes
+
+**`spells_editor.rs` — imports**
+
+Replaced `ActionButtons` import with `MetadataBadge`, `StandardListItemConfig`,
+and `show_standard_list_item`.
+
+**`show_list` — `filtered_spells` collection**
+
+Changed from `Vec<(usize, String, Spell)>` (where the `String` was a manually
+built label with school icon and level prefix) to `Vec<(usize, Spell)>`. The
+label-building `.map()` block constructing `format!("{} L{}: {}", school_icon,
+spell.level, spell.name)` has been removed entirely.
+
+**`show_list` — `sorted_spells` sort key**
+
+Updated tuple destructuring from `(idx, _, _)` to `(idx, _)` to match the new
+two-element tuple.
+
+**`show_list` — left panel rendering loop**
+
+Replaced the bare `selectable_label` loop with a `show_standard_list_item` call
+per spell. Badges built per spell:
+
+| Badge text    | Colour (RGB)       | When shown | Tooltip              |
+|---------------|--------------------|------------|----------------------|
+| `Cleric`      | (255, 215,   0)    | Always     | "Cleric spell"       |
+| `Sorcerer`    | (138,  43, 226)    | Always     | "Sorcerer spell"     |
+| `Lv<level>`   | (100, 200, 200)    | Always     | "Spell level"        |
+| `SP:<cost>`   | (150, 150, 255)    | Always     | "Spell Point cost"   |
+
+The school icon (`✝️` for Cleric, `🔮` for Sorcerer) is passed via
+`.with_icon(school_icon)` and prepended to the spell name in the selectable
+label. The spell ID is passed via `.with_id(spell.id)` and rendered as a muted
+small ID label.
+
+**`show_list` — right panel**
+
+- Removed `ActionButtons::new().enabled(true).show(right_ui)` and the redundant
+  `right_ui.separator()` that followed it.
+- Updated spell tuple destructuring from `(_, _, spell)` / `(i, _, _)` to
+  `(_, spell)` / `(i, _)` to match the new two-element tuple.
+- The action-handling block after the closures remains intact; actions are now
+  exclusively triggered via the context menu.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 — no deviations
+- [x] Module placement: changes confined to `sdk/campaign_builder/src/spells_editor.rs`
+- [x] `ItemAction` enum used consistently for context-menu actions
+- [x] `MetadataBadge` / `StandardListItemConfig` used, not raw strings
+- [x] School icon preserved (`✝️` / `🔮`) for visual consistency
+- [x] No magic constants introduced (colours are inline per badge semantics)
+- [x] No test references `campaigns/tutorial`
+- [x] `cargo fmt --all` — no output (formatted)
+- [x] `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
+- [x] 2796/2796 tests pass (excluding pre-existing `test_sprite_directory_structure`)
