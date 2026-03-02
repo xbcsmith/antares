@@ -33,6 +33,9 @@
 //! - Every `ScrollArea` has a unique `id_salt`
 //! - Every `ComboBox` uses `from_id_salt`
 
+use crate::ui_helpers::{
+    show_standard_list_item, ItemAction, MetadataBadge, StandardListItemConfig,
+};
 use antares::domain::items::types::Item;
 use antares::domain::world::npc_runtime::{MerchantStockTemplate, TemplateStockEntry};
 use eframe::egui;
@@ -421,6 +424,7 @@ impl StockTemplatesEditorState {
         templates_file: &str,
     ) -> bool {
         let mut needs_save = false;
+        let mut action_requested: Option<(usize, ItemAction)> = None;
 
         ui.heading("📦 Stock Templates");
         ui.separator();
@@ -543,39 +547,72 @@ impl StockTemplatesEditorState {
 
         // --- two-column layout: list + preview ---
         let avail = ui.available_width();
-        let list_width = (avail * 0.35).max(180.0).min(300.0);
+        let list_width = (avail * 0.35).clamp(180.0, 300.0);
+
+        let filter_lower = self.search_filter.to_lowercase();
+        let filtered_templates: Vec<(usize, MerchantStockTemplate)> = self
+            .templates
+            .iter()
+            .enumerate()
+            .filter(|(_, tmpl)| {
+                filter_lower.is_empty() || tmpl.id.to_lowercase().contains(&filter_lower)
+            })
+            .map(|(idx, tmpl)| (idx, tmpl.clone()))
+            .collect();
+
+        let selected = self.selected_template;
+        let mut new_selection = selected;
 
         ui.horizontal_top(|ui| {
             // Left: scrollable list
             ui.vertical(|ui| {
                 ui.set_width(list_width);
-                let filter_lower = self.search_filter.to_lowercase();
 
                 egui::ScrollArea::vertical()
                     .id_salt("stock_tmpl_list_scroll")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        for (idx, tmpl) in self.templates.iter().enumerate() {
-                            if !filter_lower.is_empty()
-                                && !tmpl.id.to_lowercase().contains(&filter_lower)
-                            {
-                                continue;
-                            }
+                        for (idx, tmpl) in &filtered_templates {
+                            ui.push_id(format!("stmpl_row_{}_{}", idx, tmpl.id), |ui| {
+                                let badges = vec![
+                                    MetadataBadge::new(format!("Entries:{}", tmpl.entries.len()))
+                                        .with_color(egui::Color32::from_rgb(120, 170, 220))
+                                        .with_tooltip("Number of regular stock entries"),
+                                    MetadataBadge::new(format!(
+                                        "Magic:{}",
+                                        tmpl.magic_item_pool.len()
+                                    ))
+                                    .with_color(egui::Color32::from_rgb(180, 110, 210))
+                                    .with_tooltip("Magic-item pool size"),
+                                    MetadataBadge::new(format!(
+                                        "Slots:{} @{}d",
+                                        tmpl.magic_slot_count, tmpl.magic_refresh_days
+                                    ))
+                                    .with_color(egui::Color32::from_rgb(180, 180, 120))
+                                    .with_tooltip("Magic slots and refresh cadence"),
+                                ];
 
-                            ui.push_id(format!("stmpl_row_{}", idx), |ui| {
-                                let label = format!("{} ({} entries)", tmpl.id, tmpl.entries.len());
-                                let is_selected = self.selected_template == Some(idx);
-                                if ui.selectable_label(is_selected, &label).clicked() {
-                                    self.selected_template = Some(idx);
+                                let config = StandardListItemConfig::new(&tmpl.id)
+                                    .with_badges(badges)
+                                    .selected(selected == Some(*idx));
+                                let (clicked, action) = show_standard_list_item(ui, config);
+                                if clicked {
+                                    new_selection = Some(*idx);
+                                    ui.ctx().request_repaint();
+                                }
+                                if action != ItemAction::None {
+                                    action_requested = Some((*idx, action));
                                 }
                             });
                         }
 
-                        if self.templates.is_empty() {
-                            ui.label(
-                                egui::RichText::new("(no templates — click ➕ New to add one)")
-                                    .weak(),
-                            );
+                        if filtered_templates.is_empty() {
+                            let empty_text = if self.templates.is_empty() {
+                                "(no templates — click ➕ New to add one)"
+                            } else {
+                                "(no templates match the search filter)"
+                            };
+                            ui.label(egui::RichText::new(empty_text).weak());
                         }
                     });
             });
@@ -594,6 +631,51 @@ impl StockTemplatesEditorState {
                 }
             });
         });
+
+        self.selected_template = new_selection;
+
+        if let Some((idx, action)) = action_requested {
+            self.selected_template = Some(idx);
+            match action {
+                ItemAction::Edit => {
+                    self.start_edit_template(idx);
+                }
+                ItemAction::Delete => {
+                    self.show_delete_confirm = true;
+                }
+                ItemAction::Duplicate => {
+                    if idx < self.templates.len() {
+                        let mut duplicated = self.templates[idx].clone();
+                        let new_id = self.next_duplicate_template_id(&duplicated.id);
+                        duplicated.id = new_id.clone();
+                        self.templates.push(duplicated);
+                        self.selected_template = Some(self.templates.len() - 1);
+                        self.has_unsaved_changes = true;
+                        needs_save = true;
+                        self.validation_warnings =
+                            vec![format!("Duplicated template as '{}'", new_id)];
+                    }
+                }
+                ItemAction::Export => {
+                    if idx < self.templates.len() {
+                        match ron::ser::to_string_pretty(
+                            &self.templates[idx],
+                            ron::ser::PrettyConfig::default(),
+                        ) {
+                            Ok(ron_text) => {
+                                ui.ctx().copy_text(ron_text);
+                                self.validation_warnings =
+                                    vec!["Copied template RON to clipboard".to_string()];
+                            }
+                            Err(e) => {
+                                self.validation_errors = vec![format!("Export failed: {}", e)];
+                            }
+                        }
+                    }
+                }
+                ItemAction::None => {}
+            }
+        }
 
         // surface any persistent errors
         if !self.validation_errors.is_empty() {
@@ -1124,6 +1206,17 @@ impl StockTemplatesEditorState {
             self.validation_errors.clear();
             self.validation_warnings.clear();
         }
+    }
+
+    /// Returns a unique template ID suitable for a duplicated template.
+    fn next_duplicate_template_id(&self, source_id: &str) -> String {
+        let mut candidate = format!("{}_copy", source_id);
+        let mut suffix = 2u32;
+        while self.templates.iter().any(|t| t.id == candidate) {
+            candidate = format!("{}_copy_{}", source_id, suffix);
+            suffix += 1;
+        }
+        candidate
     }
 
     /// Navigate directly to edit mode for a template identified by `id`.

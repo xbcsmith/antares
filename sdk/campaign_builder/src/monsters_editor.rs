@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{
-    ActionButtons, AttributePair16Input, AttributePairInput, EditorToolbar, ItemAction,
-    ToolbarAction, TwoColumnLayout,
+    show_standard_list_item, AttributePair16Input, AttributePairInput, EditorToolbar, ItemAction,
+    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
@@ -284,25 +284,18 @@ impl MonstersEditorState {
         let search_lower = self.search_query.to_lowercase();
 
         // Build filtered list snapshot to avoid borrow conflicts in closures
-        let filtered_monsters: Vec<(usize, String, MonsterDefinition)> = monsters
+        let filtered_monsters: Vec<(usize, MonsterDefinition)> = monsters
             .iter()
             .enumerate()
             .filter(|(_, monster)| {
                 search_lower.is_empty() || monster.name.to_lowercase().contains(&search_lower)
             })
-            .map(|(idx, monster)| {
-                let undead_icon = if monster.is_undead { "💀" } else { "👹" };
-                (
-                    idx,
-                    format!("{} {} (HP:{})", undead_icon, monster.name, monster.hp.base),
-                    monster.clone(),
-                )
-            })
+            .map(|(idx, monster)| (idx, monster.clone()))
             .collect();
 
         // Sort by ID
         let mut sorted_monsters = filtered_monsters;
-        sorted_monsters.sort_by_key(|(idx, _, _)| monsters[*idx].id);
+        sorted_monsters.sort_by_key(|(idx, _)| monsters[*idx].id);
 
         let selected = self.selected_monster;
         let mut new_selection = selected;
@@ -317,10 +310,57 @@ impl MonstersEditorState {
                 left_ui.heading("Monsters");
                 left_ui.separator();
 
-                for (idx, label, _) in &sorted_monsters {
-                    let is_selected = selected == Some(*idx);
-                    if left_ui.selectable_label(is_selected, label).clicked() {
+                for (idx, monster) in &sorted_monsters {
+                    let mut badges = Vec::new();
+
+                    // HP badge
+                    badges.push(
+                        MetadataBadge::new(format!("HP:{}", monster.hp.base))
+                            .with_color(egui::Color32::from_rgb(200, 100, 100))
+                            .with_tooltip("Hit Points"),
+                    );
+
+                    // AC badge
+                    badges.push(
+                        MetadataBadge::new(format!("AC:{}", monster.ac.base))
+                            .with_color(egui::Color32::from_rgb(100, 100, 200))
+                            .with_tooltip("Armor Class"),
+                    );
+
+                    // Undead badge
+                    if monster.is_undead {
+                        badges.push(
+                            MetadataBadge::new("Undead")
+                                .with_color(egui::Color32::from_rgb(139, 0, 139))
+                                .with_tooltip("Undead creature"),
+                        );
+                    }
+
+                    // Attacks badge
+                    if !monster.attacks.is_empty() {
+                        badges.push(
+                            MetadataBadge::new(format!("Attacks:{}", monster.attacks.len()))
+                                .with_color(egui::Color32::from_rgb(255, 165, 0))
+                                .with_tooltip("Number of attacks"),
+                        );
+                    }
+
+                    let icon = if monster.is_undead { "💀" } else { "👹" };
+
+                    let config = StandardListItemConfig::new(&monster.name)
+                        .with_badges(badges)
+                        .with_id(monster.id)
+                        .selected(selected == Some(*idx))
+                        .with_icon(icon);
+
+                    let (clicked, ctx_action) = show_standard_list_item(left_ui, config);
+
+                    if clicked {
                         new_selection = Some(*idx);
+                    }
+
+                    if ctx_action != ItemAction::None {
+                        action_requested = Some(ctx_action);
                     }
                 }
 
@@ -331,18 +371,8 @@ impl MonstersEditorState {
             |right_ui| {
                 // Right panel: Detail view
                 if let Some(idx) = selected {
-                    if let Some((_, _, monster)) =
-                        sorted_monsters.iter().find(|(i, _, _)| *i == idx)
-                    {
+                    if let Some((_, monster)) = sorted_monsters.iter().find(|(i, _)| *i == idx) {
                         right_ui.heading(&monster.name);
-                        right_ui.separator();
-
-                        // Use shared ActionButtons component
-                        let action = ActionButtons::new().enabled(true).show(right_ui);
-                        if action != ItemAction::None {
-                            action_requested = Some(action);
-                        }
-
                         right_ui.separator();
 
                         if show_preview {

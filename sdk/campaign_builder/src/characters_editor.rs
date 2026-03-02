@@ -10,8 +10,8 @@
 use crate::ui_helpers::{
     autocomplete_class_selector, autocomplete_item_list_selector, autocomplete_item_selector,
     autocomplete_portrait_selector, autocomplete_race_selector, extract_portrait_candidates,
-    resolve_portrait_path, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
-    TwoColumnLayout,
+    resolve_portrait_path, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{Alignment, Sex, Stats};
 use antares::domain::character_definition::{
@@ -1266,8 +1266,7 @@ impl CharactersEditorState {
             .map(|(idx, c)| (idx, c.clone()))
             .collect();
 
-        let mut action_idx: Option<usize> = None;
-        let mut action_type = ItemAction::None;
+        let mut action_requested: Option<(usize, ItemAction)> = None;
         let mut select_idx: Option<usize> = None;
 
         TwoColumnLayout::new("characters_list").show_split(
@@ -1281,46 +1280,54 @@ impl CharactersEditorState {
                             ui.label("No characters found. Click 'New' to create one.");
                         } else {
                             for (original_idx, character) in &filtered_characters {
-                                let is_selected = selected_character_idx == Some(*original_idx);
+                                ui.push_id(character.id.clone(), |row_ui| {
+                                    let mut badges = Vec::new();
 
-                                // Character info
-                                let label = format!(
-                                    "{} ({} {})",
-                                    character.name, character.race_id, character.class_id
-                                );
-                                let response = ui.selectable_label(is_selected, label);
-
-                                if response.clicked() {
-                                    select_idx = Some(*original_idx);
-                                }
-
-                                // Show character type badge
-                                ui.horizontal(|ui| {
-                                    ui.add_space(20.0);
                                     if character.is_premade {
-                                        ui.label(
-                                            egui::RichText::new("⭐ Premade")
-                                                .small()
-                                                .color(egui::Color32::GOLD),
+                                        badges.push(
+                                            MetadataBadge::new("Premade")
+                                                .with_color(egui::Color32::GOLD)
+                                                .with_tooltip(
+                                                    "Premade character available at character creation",
+                                                ),
                                         );
                                     } else {
-                                        ui.label(
-                                            egui::RichText::new("📋 Template")
-                                                .small()
-                                                .color(egui::Color32::LIGHT_BLUE),
+                                        badges.push(
+                                            MetadataBadge::new("Template")
+                                                .with_color(egui::Color32::LIGHT_BLUE)
+                                                .with_tooltip("Character template"),
                                         );
                                     }
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "| {} | ID: {}",
-                                            alignment_name(character.alignment),
-                                            character.id
-                                        ))
-                                        .small()
-                                        .weak(),
+
+                                    badges.push(
+                                        MetadataBadge::new(alignment_name(character.alignment))
+                                            .with_color(egui::Color32::GRAY)
+                                            .with_tooltip("Character alignment"),
                                     );
+
+                                    badges.push(
+                                        MetadataBadge::new(format!(
+                                            "{} {}",
+                                            character.race_id, character.class_id
+                                        ))
+                                        .with_color(egui::Color32::from_rgb(150, 180, 220))
+                                        .with_tooltip("Race and Class"),
+                                    );
+
+                                    let config = StandardListItemConfig::new(&character.name)
+                                        .with_badges(badges)
+                                        .selected(selected_character_idx == Some(*original_idx));
+
+                                    let (clicked, ctx_action) =
+                                        show_standard_list_item(row_ui, config);
+
+                                    if clicked {
+                                        select_idx = Some(*original_idx);
+                                    }
+                                    if ctx_action != ItemAction::None {
+                                        action_requested = Some((*original_idx, ctx_action));
+                                    }
                                 });
-                                ui.add_space(4.0);
                             }
                         }
                     });
@@ -1329,20 +1336,6 @@ impl CharactersEditorState {
                 // Right panel: preview of selected character
                 if let Some(idx) = selected_character_idx {
                     if let Some(character) = self.characters.get(idx).cloned() {
-                        // Action buttons (correct placement - in RIGHT panel)
-                        let action = ActionButtons::new()
-                            .enabled(true)
-                            .with_edit(true)
-                            .with_delete(true)
-                            .with_duplicate(true)
-                            .show(right_ui);
-
-                        if action != ItemAction::None {
-                            action_idx = Some(idx);
-                            action_type = action;
-                        }
-
-                        right_ui.separator();
                         self.show_character_preview(right_ui, &character, items, campaign_dir);
                     }
                 } else {
@@ -1357,7 +1350,8 @@ impl CharactersEditorState {
         }
 
         // Handle actions
-        if let Some(idx) = action_idx {
+        if let Some((idx, action_type)) = action_requested {
+            self.selected_character = Some(idx);
             match action_type {
                 ItemAction::Edit => {
                     self.start_edit_character(idx);

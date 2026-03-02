@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{
-    autocomplete_condition_selector, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
-    TwoColumnLayout,
+    autocomplete_condition_selector, show_standard_list_item, EditorToolbar, ItemAction,
+    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::conditions::ConditionDefinition;
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
@@ -308,7 +308,7 @@ impl SpellsEditorState {
         let search_lower = self.search_query.to_lowercase();
 
         // Build filtered list snapshot to avoid borrow conflicts in closures
-        let filtered_spells: Vec<(usize, String, Spell)> = spells
+        let filtered_spells: Vec<(usize, Spell)> = spells
             .iter()
             .enumerate()
             .filter(|(_, spell)| {
@@ -327,22 +327,12 @@ impl SpellsEditorState {
                 }
                 true
             })
-            .map(|(idx, spell)| {
-                let school_icon = match spell.school {
-                    SpellSchool::Cleric => "✝️",
-                    SpellSchool::Sorcerer => "🔮",
-                };
-                (
-                    idx,
-                    format!("{} L{}: {}", school_icon, spell.level, spell.name),
-                    spell.clone(),
-                )
-            })
+            .map(|(idx, spell)| (idx, spell.clone()))
             .collect();
 
         // Sort by ID
         let mut sorted_spells = filtered_spells;
-        sorted_spells.sort_by_key(|(idx, _, _)| spells[*idx].id);
+        sorted_spells.sort_by_key(|(idx, _)| spells[*idx].id);
 
         let selected = self.selected_spell;
         let mut new_selection = selected;
@@ -357,10 +347,52 @@ impl SpellsEditorState {
                 left_ui.heading("Spells");
                 left_ui.separator();
 
-                for (idx, label, _) in &sorted_spells {
-                    let is_selected = selected == Some(*idx);
-                    if left_ui.selectable_label(is_selected, label).clicked() {
+                for (idx, spell) in &sorted_spells {
+                    let mut badges = Vec::new();
+
+                    // School badge
+                    let (school_name, school_color, school_icon) = match spell.school {
+                        SpellSchool::Cleric => {
+                            ("Cleric", egui::Color32::from_rgb(255, 215, 0), "✝️")
+                        }
+                        SpellSchool::Sorcerer => {
+                            ("Sorcerer", egui::Color32::from_rgb(138, 43, 226), "🔮")
+                        }
+                    };
+                    badges.push(
+                        MetadataBadge::new(school_name)
+                            .with_color(school_color)
+                            .with_tooltip(format!("{} spell", school_name)),
+                    );
+
+                    // Level badge
+                    badges.push(
+                        MetadataBadge::new(format!("Lv{}", spell.level))
+                            .with_color(egui::Color32::from_rgb(100, 200, 200))
+                            .with_tooltip("Spell level"),
+                    );
+
+                    // SP Cost badge
+                    badges.push(
+                        MetadataBadge::new(format!("SP:{}", spell.sp_cost))
+                            .with_color(egui::Color32::from_rgb(150, 150, 255))
+                            .with_tooltip("Spell Point cost"),
+                    );
+
+                    let config = StandardListItemConfig::new(&spell.name)
+                        .with_badges(badges)
+                        .with_id(spell.id)
+                        .selected(selected == Some(*idx))
+                        .with_icon(school_icon);
+
+                    let (clicked, ctx_action) = show_standard_list_item(left_ui, config);
+
+                    if clicked {
                         new_selection = Some(*idx);
+                    }
+
+                    if ctx_action != ItemAction::None {
+                        action_requested = Some(ctx_action);
                     }
                 }
 
@@ -371,16 +403,8 @@ impl SpellsEditorState {
             |right_ui| {
                 // Right panel: Detail view
                 if let Some(idx) = selected {
-                    if let Some((_, _, spell)) = sorted_spells.iter().find(|(i, _, _)| *i == idx) {
+                    if let Some((_, spell)) = sorted_spells.iter().find(|(i, _)| *i == idx) {
                         right_ui.heading(&spell.name);
-                        right_ui.separator();
-
-                        // Use shared ActionButtons component
-                        let action = ActionButtons::new().enabled(true).show(right_ui);
-                        if action != ItemAction::None {
-                            action_requested = Some(action);
-                        }
-
                         right_ui.separator();
 
                         if show_preview {

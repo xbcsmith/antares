@@ -8008,25 +8008,15 @@
     ],
     events: {
         (
-            x: 19,
-            y: 17,
-        ): Teleport(
-            name: "Dungeon Portal",
-            description: "A portal that teleports the party to Dark Forrest (map 4) at (19,10).",
-            destination: (
-                x: 19,
-                y: 10,
-            ),
-            map_id: 4,
-        ),
-        (
-            x: 16,
-            y: 15,
-        ): Treasure(
-            name: "Foo",
-            description: "The Foo",
-            loot: [
-                102,
+            x: 2,
+            y: 2,
+        ): Encounter(
+            name: "Kobold Ambush",
+            description: "A group of kobolds jump out to attack!",
+            monster_group: [
+                2,
+                2,
+                2,
             ],
         ),
         (
@@ -8040,24 +8030,34 @@
             ],
         ),
         (
-            x: 2,
-            y: 2,
-        ): Encounter(
-            name: "Kobold Ambush",
-            description: "A group of kobolds jump out to attack!",
-            monster_group: [
-                2,
-                2,
-                2,
-            ],
-        ),
-        (
             x: 9,
             y: 7,
         ): Sign(
             name: "Cave Entrance Sign",
             description: "Sign marking the entrance to the Cave of Arcturus.",
             text: "The Cave of Arcturus!",
+        ),
+        (
+            x: 16,
+            y: 15,
+        ): Treasure(
+            name: "Foo",
+            description: "The Foo",
+            loot: [
+                102,
+            ],
+        ),
+        (
+            x: 19,
+            y: 17,
+        ): Teleport(
+            name: "Dungeon Portal",
+            description: "A portal that teleports the party to Dark Forrest (map 4) at (19,10).",
+            destination: (
+                x: 19,
+                y: 10,
+            ),
+            map_id: 4,
         ),
     },
     allow_random_encounters: true,

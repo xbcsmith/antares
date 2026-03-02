@@ -12,8 +12,9 @@ use crate::preview_features::PreviewState;
 use crate::preview_features::PreviewStatistics;
 use crate::preview_renderer::PreviewRenderer;
 use crate::ui_helpers::{
-    autocomplete_creature_asset_selector, extract_creature_asset_candidates, ActionButtons,
-    EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout,
+    autocomplete_creature_asset_selector, extract_creature_asset_candidates,
+    show_standard_list_item, ActionButtons, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::types::CreatureId;
 use antares::domain::visual::{
@@ -534,7 +535,8 @@ impl CreaturesEditorState {
 
         // Deferred mutations collected inside closures; applied after show_split.
         let mut pending_edit: Option<(usize, String)> = None;
-        let mut pending_preview_action: Option<RegistryPreviewAction> = None;
+        let mut pending_left_action: Option<RegistryPreviewAction> = None;
+        let mut pending_right_action: Option<RegistryPreviewAction> = None;
         // Pending selection change: (new_idx, reset_delete_confirm)
         let mut pending_selection: Option<usize> = None;
         let mut pending_selection_reset_confirm = false;
@@ -560,18 +562,6 @@ impl CreaturesEditorState {
                     if filtered_indices.is_empty() {
                         left_ui.label("No creatures found. Click 'New' to create one.");
                     } else {
-                        // Column header row
-                        left_ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("ID").strong());
-                            ui.separator();
-                            ui.label(egui::RichText::new("Name").strong());
-                            ui.separator();
-                            ui.label(egui::RichText::new("Status").strong());
-                            ui.separator();
-                            ui.label(egui::RichText::new("Category").strong());
-                        });
-                        left_ui.separator();
-
                         // Each row is wrapped in push_id(creature_id) so that
                         // selectable_label, colored_label etc. get unique egui
                         // IDs even when names or categories repeat.
@@ -585,74 +575,84 @@ impl CreaturesEditorState {
                             let color = category.color();
 
                             left_ui.push_id(creature_id, |ui| {
-                                ui.horizontal(|ui| {
-                                    // ID badge with category color
-                                    let id_text = format!("{:03}", creature_id);
-                                    ui.colored_label(
-                                        egui::Color32::from_rgb(
-                                            (color[0] * 255.0) as u8,
-                                            (color[1] * 255.0) as u8,
-                                            (color[2] * 255.0) as u8,
-                                        ),
-                                        egui::RichText::new(id_text).strong(),
-                                    );
+                                let mut badges = Vec::new();
 
-                                    ui.separator();
+                                let cat_color = egui::Color32::from_rgb(
+                                    (color[0] * 200.0) as u8,
+                                    (color[1] * 200.0) as u8,
+                                    (color[2] * 200.0) as u8,
+                                );
+                                badges.push(
+                                    MetadataBadge::new(category.display_name())
+                                        .with_color(cat_color)
+                                        .with_tooltip("Creature category"),
+                                );
 
-                                    // Creature name (selectable)
-                                    let label = format!(
-                                        "{} ({} mesh{})",
-                                        creature_name,
+                                badges.push(
+                                    MetadataBadge::new(format!(
+                                        "{} mesh{}",
                                         creature_mesh_count,
                                         if creature_mesh_count == 1 { "" } else { "es" }
-                                    );
-                                    let response = ui.selectable_label(is_selected, label);
+                                    ))
+                                    .with_color(egui::Color32::from_rgb(150, 150, 200))
+                                    .with_tooltip("Number of meshes"),
+                                );
 
-                                    if response.clicked() {
-                                        // Collect as deferred so we mutate self
-                                        // after show_split returns.
-                                        if selected_entry != Some(idx) {
-                                            pending_selection_reset_confirm = true;
+                                // `row_idx` aligns with `row_valid` from the precomputed snapshot.
+                                let is_valid = row_valid.get(row_idx).copied().unwrap_or(false);
+                                if !is_valid {
+                                    badges.push(
+                                        MetadataBadge::new("ID Warning")
+                                            .with_color(egui::Color32::YELLOW)
+                                            .with_tooltip("ID validation issue detected"),
+                                    );
+                                }
+
+                                let label = format!("{:03} {}", creature_id, creature_name);
+                                let config = StandardListItemConfig::new(label)
+                                    .with_badges(badges)
+                                    .selected(is_selected);
+                                let (clicked, ctx_action) = show_standard_list_item(ui, config);
+
+                                if clicked {
+                                    if selected_entry != Some(idx) {
+                                        pending_selection_reset_confirm = true;
+                                    }
+                                    pending_selection = Some(idx);
+                                    // Rule 7: request repaint so the right
+                                    // column shows updated content next frame.
+                                    ui.ctx().request_repaint();
+                                }
+
+                                // Double-click-to-edit from the list is replaced by context-menu
+                                // Edit and the existing right-panel Edit action.
+                                if ctx_action != ItemAction::None {
+                                    if selected_entry != Some(idx) {
+                                        pending_selection_reset_confirm = true;
+                                    }
+                                    pending_selection = Some(idx);
+
+                                    match ctx_action {
+                                        ItemAction::Edit => {
+                                            let file_name = format!(
+                                                "assets/creatures/{}.ron",
+                                                creature_name.to_lowercase().replace(' ', "_")
+                                            );
+                                            pending_edit = Some((idx, file_name));
                                         }
-                                        pending_selection = Some(idx);
-                                        // Rule 7: request repaint so the right
-                                        // column shows updated content next frame.
-                                        ui.ctx().request_repaint();
+                                        ItemAction::Delete => {
+                                            pending_left_action =
+                                                Some(RegistryPreviewAction::Delete);
+                                        }
+                                        ItemAction::Duplicate => {
+                                            pending_left_action =
+                                                Some(RegistryPreviewAction::Duplicate);
+                                        }
+                                        _ => {}
                                     }
+                                }
 
-                                    if response.double_clicked() {
-                                        let file_name = format!(
-                                            "assets/creatures/{}.ron",
-                                            creature_name.to_lowercase().replace(' ', "_")
-                                        );
-                                        pending_edit = Some((idx, file_name));
-                                    }
-
-                                    ui.separator();
-
-                                    // Validation status indicator (pre-computed above).
-                                    // `row_idx` is the position in filtered_indices,
-                                    // which aligns with `row_valid`.
-                                    let is_valid = row_valid.get(row_idx).copied().unwrap_or(false);
-                                    if is_valid {
-                                        ui.label("✓");
-                                    } else {
-                                        ui.colored_label(egui::Color32::YELLOW, "⚠");
-                                    }
-
-                                    ui.separator();
-
-                                    // Category badge
-                                    ui.label(
-                                        egui::RichText::new(category.display_name())
-                                            .small()
-                                            .background_color(egui::Color32::from_rgb(
-                                                (color[0] * 100.0) as u8,
-                                                (color[1] * 100.0) as u8,
-                                                (color[2] * 100.0) as u8,
-                                            )),
-                                    );
-                                });
+                                ui.add_space(4.0);
                             });
                         }
                     }
@@ -681,12 +681,14 @@ impl CreaturesEditorState {
                                 delete_confirm_pending,
                             );
                             if action.is_some() {
-                                pending_preview_action = action;
+                                pending_right_action = action;
                             }
                         }
                     }
                 },
             );
+
+        let pending_preview_action = pending_right_action.or(pending_left_action);
 
         // --- Apply deferred mutations (all closures have returned) ---
 
@@ -1070,7 +1072,6 @@ impl CreaturesEditorState {
     /// * `ui`      - The egui Ui region to render into.
     /// * `creature` - Read-only view of the creature to display.
     /// * `idx`     - Index of the creature in the backing `creatures` vec.
-    /// Renders the registry preview panel for the creature at `idx`.
     ///
     /// Accepts a pre-cloned `creature` snapshot (not a live borrow from the
     /// `creatures` Vec) so that the caller can hold `&mut self` and pass the
