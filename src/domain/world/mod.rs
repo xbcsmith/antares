@@ -38,5 +38,6 @@ pub use types::{
     FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, InstanceData, LayeredSprite,
     Map, MapEvent, RailingConfig, ResolvedNpc, RockVariant, SpriteAnimation, SpriteLayer,
     SpriteMaterialProperties, SpriteReference, SpriteSelectionRule, StructureType, TerrainType,
-    Tile, TileVisualMetadata, TreeType, WallSegmentConfig, WallType, WaterFlowDirection, World,
+    Tile, TileVisualMetadata, TimeCondition, TreeType, WallSegmentConfig, WallType,
+    WaterFlowDirection, World,
 };

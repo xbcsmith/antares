@@ -103,6 +103,7 @@ fn generate_starter_town() -> Result<(), Box<dyn std::error::Error>> {
             name: "Inn Sign".to_string(),
             description: "A sign outside the inn.".to_string(),
             text: "Welcome to the Cozy Inn! Rest and manage your party here.".to_string(),
+            time_condition: None,
         },
     );
     map.add_event(
@@ -111,6 +112,7 @@ fn generate_starter_town() -> Result<(), Box<dyn std::error::Error>> {
             name: "Shop Sign".to_string(),
             description: "A sign outside the general store.".to_string(),
             text: "General Store - Buy and sell items for your adventures.".to_string(),
+            time_condition: None,
         },
     );
     map.add_event(
@@ -119,6 +121,7 @@ fn generate_starter_town() -> Result<(), Box<dyn std::error::Error>> {
             name: "Temple Sign".to_string(),
             description: "A sign outside the temple.".to_string(),
             text: "Temple of Healing - The priests can restore your health.".to_string(),
+            time_condition: None,
         },
     );
     map.add_event(
@@ -127,6 +130,7 @@ fn generate_starter_town() -> Result<(), Box<dyn std::error::Error>> {
             name: "Warning Sign".to_string(),
             description: "A warning sign near the dungeon entrance.".to_string(),
             text: "WARNING: Dungeon entrance ahead. Prepare for combat!".to_string(),
+            time_condition: None,
         },
     );
 
@@ -218,6 +222,7 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             name: "Goblin Ambush".to_string(),
             description: "A group of goblins waiting in the dark.".to_string(),
             monster_group: vec![1, 2],
+            time_condition: None,
         },
     );
     map.add_event(
@@ -226,6 +231,7 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             name: "Skeleton Guard".to_string(),
             description: "Skeletons guarding the corridor.".to_string(),
             monster_group: vec![2, 1],
+            time_condition: None,
         },
     );
     map.add_event(
@@ -234,6 +240,7 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             name: "Spider Nest".to_string(),
             description: "Giant spiders dropping from the ceiling.".to_string(),
             monster_group: vec![1, 3],
+            time_condition: None,
         },
     );
     map.add_event(
@@ -242,6 +249,7 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             name: "Boss Fight".to_string(),
             description: "The dungeon boss and minions.".to_string(),
             monster_group: vec![3, 3, 3],
+            time_condition: None,
         },
     );
 
@@ -289,6 +297,7 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             name: "Exit Sign".to_string(),
             description: "A sign pointing to the exit.".to_string(),
             text: "Exit to town.".to_string(),
+            time_condition: None,
         },
     );
 
@@ -352,6 +361,7 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             name: "Wolf Pack".to_string(),
             description: "A pack of hungry wolves.".to_string(),
             monster_group: vec![4, 4],
+            time_condition: None,
         },
     );
     map.add_event(
@@ -360,6 +370,7 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             name: "Bear Attack".to_string(),
             description: "An angry bear defending its territory.".to_string(),
             monster_group: vec![5, 4],
+            time_condition: None,
         },
     );
     map.add_event(
@@ -368,6 +379,7 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             name: "Bandit Camp".to_string(),
             description: "Bandits lying in wait.".to_string(),
             monster_group: vec![6, 5],
+            time_condition: None,
         },
     );
     map.add_event(
@@ -376,6 +388,7 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             name: "Bandit Leader".to_string(),
             description: "The bandit leader and his bodyguard.".to_string(),
             monster_group: vec![6, 6],
+            time_condition: None,
         },
     );
 
@@ -423,6 +436,7 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             name: "Exit Sign".to_string(),
             description: "A sign pointing to the exit.".to_string(),
             text: "Exit to town.".to_string(),
+            time_condition: None,
         },
     );
 

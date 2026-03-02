@@ -63,6 +63,85 @@ pub enum GameMode {
     /// Container interaction split-screen inventory (opened with `E` when
     /// facing a chest, crate, hole in the wall, etc.).
     ContainerInventory(crate::application::container_inventory_state::ContainerInventoryState),
+    /// Party is resting — per-hour healing loop is running.
+    ///
+    /// Input is blocked during this mode (except `GameAction::Menu` which
+    /// cancels the rest in a future enhancement). The orchestration system
+    /// drives the rest sequence one hour per Bevy frame.
+    Resting(RestState),
+}
+
+// ===== Rest State =====
+
+/// Tracks progress of an in-progress party rest sequence.
+///
+/// Stored inside [`GameMode::Resting`] so that the rest orchestration system
+/// can advance the sequence one hour per Bevy frame and detect encounter
+/// interruptions.
+///
+/// A save made while resting serialises this state, so loading the save
+/// correctly resumes the rest sequence.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::RestState;
+///
+/// let state = RestState::new(12);
+/// assert_eq!(state.hours_requested, 12);
+/// assert_eq!(state.hours_completed, 0);
+/// assert!(!state.interrupted);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RestState {
+    /// Total hours of rest requested (e.g. 12 for a full rest).
+    pub hours_requested: u32,
+    /// Hours of rest completed so far.
+    pub hours_completed: u32,
+    /// Set when a random encounter interrupts the rest before completion.
+    pub interrupted: bool,
+}
+
+impl RestState {
+    /// Creates a new `RestState` for the given number of requested hours.
+    ///
+    /// # Arguments
+    ///
+    /// * `hours` — total hours of rest to attempt.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::RestState;
+    ///
+    /// let s = RestState::new(6);
+    /// assert_eq!(s.hours_requested, 6);
+    /// assert_eq!(s.hours_completed, 0);
+    /// assert!(!s.interrupted);
+    /// ```
+    pub fn new(hours: u32) -> Self {
+        Self {
+            hours_requested: hours,
+            hours_completed: 0,
+            interrupted: false,
+        }
+    }
+
+    /// Returns `true` when all requested hours have been completed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::RestState;
+    ///
+    /// let mut s = RestState::new(2);
+    /// assert!(!s.is_complete());
+    /// s.hours_completed = 2;
+    /// assert!(s.is_complete());
+    /// ```
+    pub fn is_complete(&self) -> bool {
+        self.hours_completed >= self.hours_requested
+    }
 }
 
 /// State for inn party management mode
@@ -986,7 +1065,7 @@ impl GameState {
         }
 
         // No random encounter (or a tile event exists) - handle tile event as before
-        let ev = crate::domain::world::trigger_event(&mut self.world, position)
+        let ev = crate::domain::world::trigger_event(&mut self.world, position, &self.time)
             .map_err(MoveHandleError::Event)?;
 
         match ev {
@@ -1024,6 +1103,31 @@ impl GameState {
     /// Exits combat mode and returns to exploration
     pub fn exit_combat(&mut self) {
         self.mode = GameMode::Exploration;
+    }
+
+    /// Enters resting mode for the specified number of hours.
+    ///
+    /// Transitions the game to [`GameMode::Resting`] with a fresh
+    /// [`RestState`].  The rest orchestration system (`process_rest`) drives
+    /// the per-hour loop; callers should not call this while already in
+    /// `Resting` mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `hours` — number of in-game hours to rest (typically
+    ///   [`crate::domain::resources::REST_DURATION_HOURS`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_rest(12);
+    /// assert!(matches!(state.mode, GameMode::Resting(_)));
+    /// ```
+    pub fn enter_rest(&mut self, hours: u32) {
+        self.mode = GameMode::Resting(RestState::new(hours));
     }
 
     /// Enters inventory mode, storing the current mode for resume on close.
@@ -1161,9 +1265,9 @@ impl GameState {
     /// consistently advancing game time through [`GameState::advance_time`].
     ///
     /// Unlike calling [`crate::domain::resources::rest_party`] directly (which
-    /// only advances the raw `GameTime`), this method also ticks active-spell
-    /// durations and triggers daily merchant restocking for the duration of the
-    /// rest.
+    /// only restores HP/SP and consumes food), this method also ticks
+    /// active-spell durations and triggers daily merchant restocking for the
+    /// full rest duration via [`GameState::advance_time`].
     ///
     /// # Arguments
     ///
@@ -1184,6 +1288,7 @@ impl GameState {
     ///
     /// let mut state = GameState::new();
     /// use antares::domain::character::{Character, Sex, Alignment};
+    /// use antares::domain::resources::REST_DURATION_HOURS;
     /// let mut hero = Character::new(
     ///     "Hero".to_string(),
     ///     "human".to_string(),
@@ -1194,27 +1299,28 @@ impl GameState {
     /// hero.hp.base = 20;
     /// hero.hp.current = 10;
     /// state.party.add_member(hero).unwrap();
-    /// state.party.food = 10;
-    /// state.active_spells.light = 5;
+    /// state.party.food = 20;
+    /// // Use a value ≤ 255 that is fully consumed by REST_DURATION_HOURS * 60 ticks.
+    /// // REST_DURATION_HOURS * 60 = 720 > u8::MAX, so we use a smaller sentinel.
+    /// state.active_spells.light = 60; // expires after 60 minutes (< 12 hours)
     ///
-    /// state.rest_party(8, None).unwrap();
+    /// state.rest_party(REST_DURATION_HOURS, None).unwrap();
     ///
-    /// // Active spells ticked for 8 * 60 = 480 minutes
+    /// // Active spell with only 60 ticks must expire during a 12-hour rest
     /// assert_eq!(state.active_spells.light, 0);
-    /// // Time advanced by 8 hours
-    /// assert_eq!(state.time.hour, 8);
+    /// // Time advanced by REST_DURATION_HOURS hours
+    /// assert_eq!(state.time.hour, REST_DURATION_HOURS as u8);
     /// ```
     pub fn rest_party(
         &mut self,
         hours: u32,
         templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
     ) -> Result<(), crate::domain::resources::ResourceError> {
-        // Perform HP/SP restoration and food consumption.  We pass a temporary
-        // GameTime that is discarded afterwards — the authoritative time advance
-        // goes through `advance_time` below so that active-spell ticking and
-        // merchant restocking are not missed.
-        let mut scratch_time = self.time;
-        crate::domain::resources::rest_party(&mut self.party, &mut scratch_time, hours)?;
+        // Perform HP/SP restoration and food consumption.
+        // rest_party() no longer takes a game_time parameter — time advancement
+        // is exclusively handled by advance_time() below so that active-spell
+        // ticking and merchant restocking are never bypassed.
+        crate::domain::resources::rest_party(&mut self.party, hours)?;
 
         // Advance the authoritative clock via the GameState path so that active
         // spells are ticked and merchant stock is restocked for the full duration.
@@ -3305,9 +3411,12 @@ mod tests {
         );
         state.party.add_member(hero).unwrap();
 
-        // Give a light spell with exactly REST_DURATION_HOURS * 60 ticks remaining.
-        let ticks = REST_DURATION_HOURS * 60; // e.g. 8 * 60 = 480
-        state.active_spells.light = ticks as u8;
+        // Give a light spell that will expire during a full rest.
+        // REST_DURATION_HOURS * 60 = 720, which overflows u8::MAX (255).
+        // Use 240 minutes (4 hours), which is safely less than 12 * 60 and fits
+        // in a u8.  After REST_DURATION_HOURS hours the spell must be fully ticked.
+        let ticks: u8 = 240;
+        state.active_spells.light = ticks;
 
         state
             .rest_party(REST_DURATION_HOURS, None)

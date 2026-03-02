@@ -62,6 +62,7 @@ fn create_test_map_with_recruitment_event(
         description: "A noble knight".to_string(),
         character_id: character_id.to_string(),
         dialogue_id,
+        time_condition: None,
     };
 
     map.events.insert(Position { x: 5, y: 5 }, event);
@@ -319,6 +320,7 @@ fn test_multiple_recruitable_events_on_map() {
             description: "A brave knight".to_string(),
             character_id: "knight_1".to_string(),
             dialogue_id: Some(1001),
+            time_condition: None,
         },
     );
 
@@ -329,6 +331,7 @@ fn test_multiple_recruitable_events_on_map() {
             description: "A wise wizard".to_string(),
             character_id: "wizard_1".to_string(),
             dialogue_id: Some(1002),
+            time_condition: None,
         },
     );
 
@@ -500,6 +503,7 @@ fn test_recruitment_map_event_properties() {
         description: "A noble knight seeking adventure".to_string(),
         character_id: character_id.to_string(),
         dialogue_id,
+        time_condition: None,
     };
 
     // Assert: Verify all event properties
@@ -509,6 +513,7 @@ fn test_recruitment_map_event_properties() {
             description,
             character_id: cid,
             dialogue_id: did,
+            ..
         } => {
             assert_eq!(name, "Sir Roland");
             assert_eq!(description, "A noble knight seeking adventure");

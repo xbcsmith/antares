@@ -10,7 +10,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.2 for complete specifications.
 
-use crate::domain::types::{Direction, MapId, Position};
+use crate::domain::types::{Direction, GameTime, MapId, Position, TimeOfDay};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -1741,8 +1741,113 @@ impl Default for AsyncMeshConfig {
 
 // ===== Map Event System =====
 
-/// Map events are special occurrences that can happen at specific tile locations.
+// Map events are special occurrences that can happen at specific tile locations.
+// ===== TimeCondition =====
+
+/// Optional time-based condition that gates whether a [`MapEvent`] fires.
 ///
+/// When a `MapEvent` carries a `time_condition: Some(TimeCondition::...)`, the
+/// event system evaluates the condition against the current [`GameTime`] before
+/// processing the event.  If the condition is **not** met the event is silently
+/// skipped and [`crate::domain::world::EventResult::None`] is returned — keeping
+/// the domain layer pure (no Bevy dependency required).
+///
+/// A missing condition (`None`) means the event **always** fires, preserving
+/// backward compatibility with all existing RON map data files.
+///
+/// # Variants
+///
+/// | Variant            | Fires when …                                            |
+/// |--------------------|---------------------------------------------------------|
+/// | `DuringPeriods`    | current [`TimeOfDay`] is in the supplied list           |
+/// | `AfterDay`         | `game_time.day > threshold`                             |
+/// | `BeforeDay`        | `game_time.day < threshold`                             |
+/// | `BetweenHours`     | `from <= game_time.hour <= to` (24-hour, inclusive)     |
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::TimeCondition;
+/// use antares::domain::types::{GameTime, TimeOfDay};
+///
+/// let cond = TimeCondition::DuringPeriods(vec![TimeOfDay::Night, TimeOfDay::Evening]);
+/// assert!(cond.is_met(&GameTime::new(1, 23, 0)));  // Night — fires
+/// assert!(!cond.is_met(&GameTime::new(1, 12, 0))); // Afternoon — skipped
+///
+/// let cond2 = TimeCondition::AfterDay(5);
+/// assert!(cond2.is_met(&GameTime::new(6, 0, 0)));  // Day 6 > 5 — fires
+/// assert!(!cond2.is_met(&GameTime::new(5, 0, 0))); // Day 5 not > 5 — skipped
+///
+/// let cond3 = TimeCondition::BeforeDay(10);
+/// assert!(cond3.is_met(&GameTime::new(9, 0, 0)));   // Day 9 < 10 — fires
+/// assert!(!cond3.is_met(&GameTime::new(10, 0, 0))); // Day 10 not < 10 — skipped
+///
+/// let cond4 = TimeCondition::BetweenHours { from: 20, to: 23 };
+/// assert!(cond4.is_met(&GameTime::new(1, 21, 0)));  // 21 in [20,23] — fires
+/// assert!(!cond4.is_met(&GameTime::new(1, 10, 0))); // 10 not in [20,23] — skipped
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TimeCondition {
+    /// Event fires only during these time-of-day periods.
+    DuringPeriods(Vec<TimeOfDay>),
+    /// Event fires only after this many in-game days have elapsed (day > threshold).
+    AfterDay(u32),
+    /// Event fires only before this many in-game days have elapsed (day < threshold).
+    BeforeDay(u32),
+    /// Event fires only between these hours (inclusive, 0–23, 24-hour clock).
+    BetweenHours {
+        /// First hour of the active window (0–23, inclusive).
+        from: u8,
+        /// Last hour of the active window (0–23, inclusive).
+        to: u8,
+    },
+}
+
+impl TimeCondition {
+    /// Returns `true` when the supplied [`GameTime`] satisfies this condition.
+    ///
+    /// This is a pure function with no side-effects; it is safe to call from
+    /// both the domain layer and Bevy systems.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::TimeCondition;
+    /// use antares::domain::types::{GameTime, TimeOfDay};
+    ///
+    /// // DuringPeriods — fires at Night, not at Noon
+    /// let night_only = TimeCondition::DuringPeriods(vec![TimeOfDay::Night]);
+    /// assert!(night_only.is_met(&GameTime::new(1, 23, 0)));
+    /// assert!(!night_only.is_met(&GameTime::new(1, 12, 0)));
+    ///
+    /// // AfterDay — fires after day 5
+    /// assert!(TimeCondition::AfterDay(5).is_met(&GameTime::new(6, 0, 0)));
+    /// assert!(!TimeCondition::AfterDay(5).is_met(&GameTime::new(5, 0, 0)));
+    ///
+    /// // BeforeDay — fires before day 10
+    /// assert!(TimeCondition::BeforeDay(10).is_met(&GameTime::new(9, 0, 0)));
+    /// assert!(!TimeCondition::BeforeDay(10).is_met(&GameTime::new(10, 0, 0)));
+    ///
+    /// // BetweenHours — fires during hours 20–23
+    /// let late = TimeCondition::BetweenHours { from: 20, to: 23 };
+    /// assert!(late.is_met(&GameTime::new(1, 20, 0)));
+    /// assert!(late.is_met(&GameTime::new(1, 23, 59)));
+    /// assert!(!late.is_met(&GameTime::new(1, 19, 59)));
+    /// ```
+    pub fn is_met(&self, game_time: &GameTime) -> bool {
+        match self {
+            TimeCondition::DuringPeriods(periods) => periods.contains(&game_time.time_of_day()),
+            TimeCondition::AfterDay(threshold) => game_time.day > *threshold,
+            TimeCondition::BeforeDay(threshold) => game_time.day < *threshold,
+            TimeCondition::BetweenHours { from, to } => {
+                game_time.hour >= *from && game_time.hour <= *to
+            }
+        }
+    }
+}
+
+// ===== MapEvent =====
+
 /// Events are triggered when the party moves to a tile containing an event,
 /// or when the party explicitly interacts with the environment. Each event type
 /// has specific properties and effects on gameplay.
@@ -1758,6 +1863,11 @@ pub enum MapEvent {
         description: String,
         /// Monster group IDs
         monster_group: Vec<u8>,
+        /// Optional time condition — if `Some`, the encounter only fires when
+        /// the condition is met.  `None` means always fire (default, backward
+        /// compatible with existing RON data).
+        #[serde(default)]
+        time_condition: Option<TimeCondition>,
     },
     /// Treasure chest
     Treasure {
@@ -1806,6 +1916,10 @@ pub enum MapEvent {
         description: String,
         /// Message text
         text: String,
+        /// Optional time condition — if `Some`, the sign is only readable when
+        /// the condition is met.  `None` means always readable (default).
+        #[serde(default)]
+        time_condition: Option<TimeCondition>,
     },
     /// NPC dialogue trigger
     NpcDialogue {
@@ -1817,6 +1931,10 @@ pub enum MapEvent {
         description: String,
         /// NPC identifier (string-based ID for NPC database lookup)
         npc_id: crate::domain::world::NpcId,
+        /// Optional time condition — if `Some`, the NPC is only available
+        /// during the specified time window.  `None` means always available.
+        #[serde(default)]
+        time_condition: Option<TimeCondition>,
     },
     /// Recruitable character encounter
     RecruitableCharacter {
@@ -1831,6 +1949,11 @@ pub enum MapEvent {
         /// Optional dialogue tree for recruitment interaction
         #[serde(default)]
         dialogue_id: Option<crate::domain::dialogue::DialogueId>,
+        /// Optional time condition — if `Some`, the recruitable character is
+        /// only present during the specified time window.  `None` means always
+        /// present (default).
+        #[serde(default)]
+        time_condition: Option<TimeCondition>,
     },
     /// Enter an inn for party management
     EnterInn {
@@ -2752,6 +2875,350 @@ impl Default for World {
     }
 }
 
+// ===== TimeCondition Tests =====
+#[cfg(test)]
+mod time_condition_tests {
+    use super::*;
+    use crate::domain::types::GameTime;
+
+    // ── DuringPeriods ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_time_condition_during_periods_night_fires_at_night() {
+        let cond = TimeCondition::DuringPeriods(vec![TimeOfDay::Night]);
+        // 23:00 is Night
+        assert!(
+            cond.is_met(&GameTime::new(1, 23, 0)),
+            "DuringPeriods([Night]) must fire at hour 23"
+        );
+    }
+
+    #[test]
+    fn test_time_condition_during_periods_night_skips_at_noon() {
+        let cond = TimeCondition::DuringPeriods(vec![TimeOfDay::Night]);
+        // 12:00 is Afternoon — condition must NOT be met
+        assert!(
+            !cond.is_met(&GameTime::new(1, 12, 0)),
+            "DuringPeriods([Night]) must not fire at hour 12 (Afternoon)"
+        );
+    }
+
+    #[test]
+    fn test_time_condition_during_periods_evening_and_night() {
+        let cond = TimeCondition::DuringPeriods(vec![TimeOfDay::Night, TimeOfDay::Evening]);
+        // Evening: 19:00
+        assert!(
+            cond.is_met(&GameTime::new(1, 19, 0)),
+            "must fire at Evening (19:00)"
+        );
+        // Night: 22:00
+        assert!(
+            cond.is_met(&GameTime::new(1, 22, 0)),
+            "must fire at Night (22:00)"
+        );
+        // Dawn: 06:00 — not in list
+        assert!(
+            !cond.is_met(&GameTime::new(1, 6, 0)),
+            "must not fire at Dawn (06:00)"
+        );
+    }
+
+    #[test]
+    fn test_time_condition_during_periods_all_six_variants() {
+        // Each variant fires at the canonical hour for that period and nowhere else.
+        let cases = [
+            (TimeOfDay::Dawn, 6u8),
+            (TimeOfDay::Morning, 9),
+            (TimeOfDay::Afternoon, 13),
+            (TimeOfDay::Dusk, 17),
+            (TimeOfDay::Evening, 20),
+            (TimeOfDay::Night, 23),
+        ];
+        for (period, canonical_hour) in cases {
+            let cond = TimeCondition::DuringPeriods(vec![period]);
+            assert!(
+                cond.is_met(&GameTime::new(1, canonical_hour, 0)),
+                "{:?} must fire at its canonical hour {}",
+                period,
+                canonical_hour
+            );
+            // Any other period's canonical hour must NOT fire
+            for (other_period, other_hour) in cases {
+                if other_period != period {
+                    assert!(
+                        !cond.is_met(&GameTime::new(1, other_hour, 0)),
+                        "{:?} must not fire at hour {} ({:?})",
+                        period,
+                        other_hour,
+                        other_period
+                    );
+                }
+            }
+        }
+    }
+
+    // ── AfterDay ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_time_condition_after_day_fires() {
+        // AfterDay(5): day > 5 fires, day == 5 does not, day < 5 does not
+        let cond = TimeCondition::AfterDay(5);
+        assert!(
+            cond.is_met(&GameTime::new(6, 0, 0)),
+            "AfterDay(5) must fire on day 6"
+        );
+        assert!(
+            cond.is_met(&GameTime::new(10, 0, 0)),
+            "AfterDay(5) must fire on day 10"
+        );
+        assert!(
+            !cond.is_met(&GameTime::new(5, 0, 0)),
+            "AfterDay(5) must NOT fire on day 5 (not strictly greater)"
+        );
+        assert!(
+            !cond.is_met(&GameTime::new(1, 0, 0)),
+            "AfterDay(5) must NOT fire on day 1"
+        );
+    }
+
+    #[test]
+    fn test_time_condition_after_day_boundary() {
+        let cond = TimeCondition::AfterDay(1);
+        // day=1 should not fire (not strictly greater than threshold)
+        assert!(!cond.is_met(&GameTime::new(1, 23, 59)));
+        // day=2 should fire
+        assert!(cond.is_met(&GameTime::new(2, 0, 0)));
+    }
+
+    // ── BeforeDay ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_time_condition_before_day_fires() {
+        let cond = TimeCondition::BeforeDay(10);
+        assert!(
+            cond.is_met(&GameTime::new(9, 0, 0)),
+            "BeforeDay(10) must fire on day 9"
+        );
+        assert!(
+            cond.is_met(&GameTime::new(1, 0, 0)),
+            "BeforeDay(10) must fire on day 1"
+        );
+        assert!(
+            !cond.is_met(&GameTime::new(10, 0, 0)),
+            "BeforeDay(10) must NOT fire on day 10 (not strictly less)"
+        );
+        assert!(
+            !cond.is_met(&GameTime::new(15, 0, 0)),
+            "BeforeDay(10) must NOT fire on day 15"
+        );
+    }
+
+    // ── BetweenHours ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_time_condition_between_hours_fires_within_range() {
+        let cond = TimeCondition::BetweenHours { from: 20, to: 23 };
+        assert!(
+            cond.is_met(&GameTime::new(1, 20, 0)),
+            "must fire at from boundary (20)"
+        );
+        assert!(
+            cond.is_met(&GameTime::new(1, 21, 30)),
+            "must fire mid-range (21)"
+        );
+        assert!(
+            cond.is_met(&GameTime::new(1, 23, 59)),
+            "must fire at to boundary (23)"
+        );
+    }
+
+    #[test]
+    fn test_time_condition_between_hours_skips_outside_range() {
+        let cond = TimeCondition::BetweenHours { from: 20, to: 23 };
+        assert!(
+            !cond.is_met(&GameTime::new(1, 19, 59)),
+            "must not fire just before from (19)"
+        );
+        // Hour 0 is outside [20,23]
+        assert!(
+            !cond.is_met(&GameTime::new(2, 0, 0)),
+            "must not fire at midnight (0)"
+        );
+        assert!(
+            !cond.is_met(&GameTime::new(1, 10, 0)),
+            "must not fire at noon (10)"
+        );
+    }
+
+    #[test]
+    fn test_time_condition_between_hours_full_day_range() {
+        // from=0, to=23 should always fire
+        let cond = TimeCondition::BetweenHours { from: 0, to: 23 };
+        for hour in 0u8..24 {
+            assert!(
+                cond.is_met(&GameTime::new(1, hour, 0)),
+                "BetweenHours{{0,23}} must fire at hour {}",
+                hour
+            );
+        }
+    }
+
+    #[test]
+    fn test_time_condition_between_hours_single_hour() {
+        // Only hour 12 should fire
+        let cond = TimeCondition::BetweenHours { from: 12, to: 12 };
+        assert!(cond.is_met(&GameTime::new(1, 12, 0)));
+        assert!(!cond.is_met(&GameTime::new(1, 11, 59)));
+        assert!(!cond.is_met(&GameTime::new(1, 13, 0)));
+    }
+
+    // ── RON round-trip ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_time_condition_ron_roundtrip_during_periods() {
+        let original = TimeCondition::DuringPeriods(vec![TimeOfDay::Night, TimeOfDay::Evening]);
+        let ron_str = ron::to_string(&original).expect("serialize");
+        let back: TimeCondition = ron::from_str(&ron_str).expect("deserialize");
+        assert_eq!(original, back);
+    }
+
+    #[test]
+    fn test_time_condition_ron_roundtrip_after_day() {
+        let original = TimeCondition::AfterDay(7);
+        let ron_str = ron::to_string(&original).expect("serialize");
+        let back: TimeCondition = ron::from_str(&ron_str).expect("deserialize");
+        assert_eq!(original, back);
+    }
+
+    #[test]
+    fn test_time_condition_ron_roundtrip_between_hours() {
+        let original = TimeCondition::BetweenHours { from: 6, to: 18 };
+        let ron_str = ron::to_string(&original).expect("serialize");
+        let back: TimeCondition = ron::from_str(&ron_str).expect("deserialize");
+        assert_eq!(original, back);
+    }
+
+    // ── MapEvent time_condition field ────────────────────────────────────────
+
+    #[test]
+    fn test_map_event_encounter_time_condition_none_by_default() {
+        let event = MapEvent::Encounter {
+            name: "Goblins".to_string(),
+            description: String::new(),
+            monster_group: vec![1],
+            time_condition: None,
+        };
+        match event {
+            MapEvent::Encounter {
+                time_condition: None,
+                ..
+            } => {}
+            _ => panic!("default time_condition must be None"),
+        }
+    }
+
+    #[test]
+    fn test_map_event_encounter_with_time_condition_night() {
+        let event = MapEvent::Encounter {
+            name: "Night Ambush".to_string(),
+            description: String::new(),
+            monster_group: vec![3, 3, 4],
+            time_condition: Some(TimeCondition::DuringPeriods(vec![
+                TimeOfDay::Night,
+                TimeOfDay::Evening,
+            ])),
+        };
+        match event {
+            MapEvent::Encounter {
+                time_condition: Some(tc),
+                ..
+            } => {
+                assert!(tc.is_met(&GameTime::new(1, 23, 0)));
+                assert!(!tc.is_met(&GameTime::new(1, 12, 0)));
+            }
+            _ => panic!("expected Some time_condition"),
+        }
+    }
+
+    #[test]
+    fn test_map_event_sign_time_condition_ron_roundtrip() {
+        let event = MapEvent::Sign {
+            name: "Night Warning".to_string(),
+            description: String::new(),
+            text: "The monsters wake at night!".to_string(),
+            time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
+        };
+        let ron_str = ron::to_string(&event).expect("serialize");
+        // Ensure the RON contains the condition
+        assert!(
+            ron_str.contains("DuringPeriods"),
+            "RON must contain DuringPeriods; got: {ron_str}"
+        );
+    }
+
+    #[test]
+    fn test_map_event_sign_no_time_condition_backward_compat() {
+        // A RON string without time_condition must still deserialize (serde default)
+        let ron_str = r#"Sign(name: "Old Sign", description: "", text: "Hello")"#;
+        let event: MapEvent =
+            ron::from_str(ron_str).expect("must deserialize without time_condition");
+        match event {
+            MapEvent::Sign {
+                time_condition: None,
+                text,
+                ..
+            } => {
+                assert_eq!(text, "Hello");
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn test_map_event_npc_dialogue_time_condition() {
+        let event = MapEvent::NpcDialogue {
+            name: "Day Merchant".to_string(),
+            description: String::new(),
+            npc_id: "day_merchant".to_string(),
+            time_condition: Some(TimeCondition::BetweenHours { from: 8, to: 18 }),
+        };
+        match event {
+            MapEvent::NpcDialogue {
+                time_condition: Some(tc),
+                ..
+            } => {
+                assert!(tc.is_met(&GameTime::new(1, 12, 0)), "fires at noon");
+                assert!(
+                    !tc.is_met(&GameTime::new(1, 22, 0)),
+                    "does not fire at night"
+                );
+            }
+            _ => panic!("expected Some time_condition"),
+        }
+    }
+
+    #[test]
+    fn test_map_event_recruitable_character_time_condition() {
+        let event = MapEvent::RecruitableCharacter {
+            name: "Wandering Warrior".to_string(),
+            description: String::new(),
+            character_id: "warrior_01".to_string(),
+            dialogue_id: None,
+            time_condition: Some(TimeCondition::AfterDay(3)),
+        };
+        match event {
+            MapEvent::RecruitableCharacter {
+                time_condition: Some(tc),
+                ..
+            } => {
+                assert!(tc.is_met(&GameTime::new(4, 0, 0)));
+                assert!(!tc.is_met(&GameTime::new(3, 0, 0)));
+            }
+            _ => panic!("expected Some time_condition"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3177,6 +3644,7 @@ mod tests {
             name: "Sign".to_string(),
             description: "Desc".to_string(),
             text: "Welcome!".to_string(),
+            time_condition: None,
         };
 
         map.add_event(pos, event);
@@ -3232,6 +3700,7 @@ mod tests {
             name: "Test Sign".to_string(),
             description: "A test sign".to_string(),
             text: "Hello, World!".to_string(),
+            time_condition: None,
         };
         map.add_event(pos, event.clone());
 
