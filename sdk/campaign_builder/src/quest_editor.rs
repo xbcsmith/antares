@@ -16,7 +16,10 @@
 //! - Prerequisite chain management
 //! - Quest validation and preview
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use crate::ui_helpers::{
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
+};
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
 use antares::domain::quest::{Quest, QuestId, QuestObjective, QuestReward, QuestStage};
@@ -1193,7 +1196,7 @@ impl QuestEditorState {
 
                 let selected_idx = self.selected_quest;
                 let mut new_selection: Option<usize> = None;
-                let mut action_requested: Option<ItemAction> = None;
+                let mut action_requested: Option<(usize, ItemAction)> = None;
 
                 // Use shared TwoColumnLayout component
                 TwoColumnLayout::new("quests").show_split(
@@ -1204,16 +1207,60 @@ impl QuestEditorState {
                         left_ui.separator();
 
                         for (idx, quest) in &filtered_quests {
-                            let is_selected = selected_idx == Some(*idx);
-                            let label = format!(
-                                "{} - {} {}",
-                                quest.id,
-                                quest.name,
-                                if quest.is_main_quest { "⭐" } else { "" }
-                            );
-                            if left_ui.selectable_label(is_selected, label).clicked() {
-                                new_selection = Some(*idx);
-                            }
+                            left_ui.push_id(quest.id, |row_ui| {
+                                let mut badges = Vec::new();
+
+                                let (type_name, type_color) = if quest.is_main_quest {
+                                    ("Main Quest", egui::Color32::from_rgb(255, 215, 0))
+                                } else {
+                                    ("Side Quest", egui::Color32::from_rgb(192, 192, 192))
+                                };
+                                badges.push(
+                                    MetadataBadge::new(type_name)
+                                        .with_color(type_color)
+                                        .with_tooltip("Quest type"),
+                                );
+
+                                if quest.repeatable {
+                                    badges.push(
+                                        MetadataBadge::new("Repeatable")
+                                            .with_color(egui::Color32::from_rgb(100, 200, 100))
+                                            .with_tooltip("Can be completed multiple times"),
+                                    );
+                                }
+
+                                if let (Some(min), Some(max)) = (quest.min_level, quest.max_level) {
+                                    badges.push(
+                                        MetadataBadge::new(format!("Lv{}-{}", min, max))
+                                            .with_color(egui::Color32::from_rgb(100, 150, 255))
+                                            .with_tooltip("Recommended level range"),
+                                    );
+                                }
+
+                                if !quest.rewards.is_empty() {
+                                    badges.push(
+                                        MetadataBadge::new(format!(
+                                            "Rewards:{}",
+                                            quest.rewards.len()
+                                        ))
+                                        .with_color(egui::Color32::from_rgb(240, 200, 90))
+                                        .with_tooltip("Number of quest rewards"),
+                                    );
+                                }
+
+                                let config = StandardListItemConfig::new(&quest.name)
+                                    .with_badges(badges)
+                                    .with_id(quest.id)
+                                    .selected(selected_idx == Some(*idx));
+
+                                let (clicked, ctx_action) = show_standard_list_item(row_ui, config);
+                                if clicked {
+                                    new_selection = Some(*idx);
+                                }
+                                if ctx_action != ItemAction::None {
+                                    action_requested = Some((*idx, ctx_action));
+                                }
+                            });
                         }
 
                         if filtered_quests.is_empty() {
@@ -1227,14 +1274,6 @@ impl QuestEditorState {
                                 filtered_quests.iter().find(|(i, _)| *i == idx)
                             {
                                 right_ui.heading(&quest.name);
-                                right_ui.separator();
-
-                                // Use shared ActionButtons component
-                                let action = ActionButtons::new().enabled(true).show(right_ui);
-                                if action != ItemAction::None {
-                                    action_requested = Some(action);
-                                }
-
                                 right_ui.separator();
 
                                 // Show quest preview
@@ -1260,46 +1299,38 @@ impl QuestEditorState {
                 }
 
                 // Handle action button clicks after closures
-                if let Some(action) = action_requested {
+                if let Some((action_idx, action)) = action_requested {
+                    self.selected_quest = Some(action_idx);
                     match action {
                         ItemAction::Edit => {
-                            if let Some(idx) = self.selected_quest {
-                                self.start_edit_quest(quests, idx);
-                            }
+                            self.start_edit_quest(quests, action_idx);
                         }
                         ItemAction::Delete => {
-                            if let Some(idx) = self.selected_quest {
-                                self.delete_quest(quests, idx);
-                                self.selected_quest = None;
-                                *unsaved_changes = true;
-                            }
+                            self.delete_quest(quests, action_idx);
+                            self.selected_quest = None;
+                            *unsaved_changes = true;
                         }
                         ItemAction::Duplicate => {
-                            if let Some(idx) = self.selected_quest {
-                                if idx < quests.len() {
-                                    let next_id =
-                                        quests.iter().map(|q| q.id).max().unwrap_or(0) + 1;
-                                    let mut new_quest = quests[idx].clone();
-                                    new_quest.id = next_id;
-                                    new_quest.name = format!("{} (Copy)", new_quest.name);
-                                    quests.push(new_quest);
-                                    *unsaved_changes = true;
-                                    *status_message = "Quest duplicated".to_string();
-                                }
+                            if action_idx < quests.len() {
+                                let next_id = quests.iter().map(|q| q.id).max().unwrap_or(0) + 1;
+                                let mut new_quest = quests[action_idx].clone();
+                                new_quest.id = next_id;
+                                new_quest.name = format!("{} (Copy)", new_quest.name);
+                                quests.push(new_quest);
+                                *unsaved_changes = true;
+                                *status_message = "Quest duplicated".to_string();
                             }
                         }
                         ItemAction::Export => {
-                            if let Some(idx) = self.selected_quest {
-                                if idx < quests.len() {
-                                    if let Ok(ron_str) = ron::ser::to_string_pretty(
-                                        &quests[idx],
-                                        ron::ser::PrettyConfig::default(),
-                                    ) {
-                                        ui.ctx().copy_text(ron_str);
-                                        *status_message = "Quest copied to clipboard".to_string();
-                                    } else {
-                                        *status_message = "Failed to export quest".to_string();
-                                    }
+                            if action_idx < quests.len() {
+                                if let Ok(ron_str) = ron::ser::to_string_pretty(
+                                    &quests[action_idx],
+                                    ron::ser::PrettyConfig::default(),
+                                ) {
+                                    ui.ctx().copy_text(ron_str);
+                                    *status_message = "Quest copied to clipboard".to_string();
+                                } else {
+                                    *status_message = "Failed to export quest".to_string();
                                 }
                             }
                         }

@@ -25,12 +25,13 @@
 //! - `NpcEditorState`: Main editor state with `show()` method
 //! - `NpcEditorMode`: List/Add/Edit modes
 //! - `NpcEditBuffer`: Form field buffer for editing
-//! - Standard UI components: EditorToolbar, TwoColumnLayout, ActionButtons
+//! - Standard UI components: EditorToolbar, TwoColumnLayout
 
 use crate::ui_helpers::{
     autocomplete_portrait_selector, autocomplete_sprite_sheet_selector,
     extract_portrait_candidates, extract_sprite_sheet_candidates, resolve_portrait_path,
-    ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout,
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::dialogue::{DialogueId, DialogueTree};
 use antares::domain::quest::{Quest, QuestId};
@@ -392,7 +393,7 @@ impl NpcEditorState {
 
         let selected = self.selected_npc;
         let mut new_selection = selected;
-        let mut action_requested: Option<ItemAction> = None;
+        let mut action_requested: Option<(usize, ItemAction)> = None;
 
         ui.separator();
 
@@ -412,57 +413,62 @@ impl NpcEditorState {
                     left_ui.label("No NPCs found");
                 } else {
                     for (idx, npc) in &sorted_npcs {
-                        let is_selected = selected == Some(*idx);
-
-                        // Primary selectable label (name)
-                        let response = left_ui.selectable_label(is_selected, &npc.name);
-                        if response.clicked() {
-                            new_selection = Some(*idx);
-                        }
-
-                        // Badges and metadata (indented like Characters list)
-                        left_ui.horizontal(|ui| {
-                            ui.add_space(20.0);
+                        left_ui.push_id(*idx, |ui| {
+                            let is_selected = selected == Some(*idx);
+                            let mut badges = Vec::new();
 
                             if npc.is_merchant {
-                                ui.label(
-                                    egui::RichText::new("🏪 Merchant")
-                                        .small()
-                                        .color(egui::Color32::GOLD),
+                                badges.push(
+                                    MetadataBadge::new("Merchant")
+                                        .with_color(egui::Color32::GOLD)
+                                        .with_tooltip("This NPC is a merchant"),
                                 );
                             }
-
                             if npc.is_innkeeper {
-                                ui.label(
-                                    egui::RichText::new("🛏️ Innkeeper")
-                                        .small()
-                                        .color(egui::Color32::LIGHT_BLUE),
+                                badges.push(
+                                    MetadataBadge::new("Innkeeper")
+                                        .with_color(egui::Color32::LIGHT_BLUE)
+                                        .with_tooltip("This NPC is an innkeeper"),
                                 );
                             }
-
                             if !npc.quest_ids.is_empty() {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "📜 Quests: {}",
-                                        npc.quest_ids.len()
-                                    ))
-                                    .small()
-                                    .color(egui::Color32::from_rgb(150, 200, 120)),
+                                badges.push(
+                                    MetadataBadge::new(format!("Quests:{}", npc.quest_ids.len()))
+                                        .with_color(egui::Color32::from_rgb(200, 180, 100))
+                                        .with_tooltip("Number of associated quests"),
                                 );
                             }
+                            if npc.dialogue_id.is_some() {
+                                badges.push(
+                                    MetadataBadge::new("Dialogue")
+                                        .with_color(egui::Color32::from_rgb(100, 200, 180))
+                                        .with_tooltip("Has dialogue tree"),
+                                );
+                            }
+                            if let Some(faction) = npc.faction.as_deref() {
+                                if !faction.trim().is_empty() {
+                                    badges.push(
+                                        MetadataBadge::new(format!("Faction:{}", faction))
+                                            .with_color(egui::Color32::from_rgb(170, 170, 200))
+                                            .with_tooltip("NPC faction"),
+                                    );
+                                }
+                            }
 
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "| Faction: {} | ID: {}",
-                                    npc.faction.as_deref().unwrap_or("None"),
-                                    npc.id
-                                ))
-                                .small()
-                                .weak(),
-                            );
+                            let config = StandardListItemConfig::new(&npc.name)
+                                .with_badges(badges)
+                                .selected(is_selected);
+
+                            let (clicked, ctx_action) = show_standard_list_item(ui, config);
+                            if clicked {
+                                new_selection = Some(*idx);
+                            }
+                            if ctx_action != ItemAction::None {
+                                action_requested = Some((*idx, ctx_action));
+                            }
+
+                            ui.add_space(4.0);
                         });
-
-                        left_ui.add_space(4.0);
                     }
                 }
             },
@@ -471,14 +477,6 @@ impl NpcEditorState {
                 if let Some(idx) = selected {
                     if let Some((_, npc)) = sorted_npcs.iter().find(|(i, _)| *i == idx) {
                         right_ui.heading(&npc.name);
-                        right_ui.separator();
-
-                        // Use shared ActionButtons component
-                        let action = ActionButtons::new().enabled(true).show(right_ui);
-                        if action != ItemAction::None {
-                            action_requested = Some(action);
-                        }
-
                         right_ui.separator();
                         self.show_preview(right_ui, npc, campaign_dir);
                     } else {
@@ -500,46 +498,39 @@ impl NpcEditorState {
         self.selected_npc = new_selection;
 
         // Handle action button clicks after closures
-        if let Some(action) = action_requested {
+        if let Some((idx, action)) = action_requested {
             match action {
                 ItemAction::Edit => {
-                    if let Some(idx) = self.selected_npc {
-                        if idx < self.npcs.len() {
-                            self.start_edit_npc(idx);
-                        }
+                    if idx < self.npcs.len() {
+                        self.selected_npc = Some(idx);
+                        self.start_edit_npc(idx);
                     }
                 }
                 ItemAction::Delete => {
-                    if let Some(idx) = self.selected_npc {
-                        if idx < self.npcs.len() {
-                            self.npcs.remove(idx);
-                            self.selected_npc = None;
-                            needs_save = true;
-                        }
+                    if idx < self.npcs.len() {
+                        self.npcs.remove(idx);
+                        self.selected_npc = None;
+                        needs_save = true;
                     }
                 }
                 ItemAction::Duplicate => {
-                    if let Some(idx) = self.selected_npc {
-                        if idx < self.npcs.len() {
-                            let mut new_npc = self.npcs[idx].clone();
-                            let next_id = self.next_npc_id();
-                            new_npc.id = next_id;
-                            new_npc.name = format!("{} (Copy)", new_npc.name);
-                            self.npcs.push(new_npc);
-                            needs_save = true;
-                        }
+                    if idx < self.npcs.len() {
+                        let mut new_npc = self.npcs[idx].clone();
+                        let next_id = self.next_npc_id();
+                        new_npc.id = next_id;
+                        new_npc.name = format!("{} (Copy)", new_npc.name);
+                        self.npcs.push(new_npc);
+                        needs_save = true;
                     }
                 }
                 ItemAction::Export => {
-                    if let Some(idx) = self.selected_npc {
-                        if idx < self.npcs.len() {
-                            if let Ok(ron_str) = ron::ser::to_string_pretty(
-                                &self.npcs[idx],
-                                ron::ser::PrettyConfig::default(),
-                            ) {
-                                self.import_buffer = ron_str;
-                                self.show_import_dialog = true;
-                            }
+                    if idx < self.npcs.len() {
+                        if let Ok(ron_str) = ron::ser::to_string_pretty(
+                            &self.npcs[idx],
+                            ron::ser::PrettyConfig::default(),
+                        ) {
+                            self.import_buffer = ron_str;
+                            self.show_import_dialog = true;
                         }
                     }
                 }

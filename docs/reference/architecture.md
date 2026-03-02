@@ -174,6 +174,10 @@ _Purpose_: Content creation, validation, and development tools
 - **Validation System**: Cross-reference validation for data integrity
 - **Editor Tools**: Complete set of content editors (items, classes, races, maps, quests, dialogue)
 - **Campaign Tools**: Campaign packaging, loading, and metadata management
+- **Campaign Builder UI Pattern**: `sdk/campaign_builder/src/ui_helpers.rs` defines
+    `MetadataBadge`, `StandardListItemConfig`, and `show_standard_list_item` for
+    consistent left-panel list rendering and context-menu action handling across
+    all Campaign Builder editors
 
 #### 3.4 Key Architectural Patterns
 

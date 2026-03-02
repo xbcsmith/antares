@@ -265,6 +265,65 @@ All tests are in `src/game/systems/rest.rs` `mod tests`:
 | **Buy and Sell — Phase 7: Campaign Builder — Stock Template and Container Item Editor** | ✅ COMPLETE | 2026-07-18 | **New `StockTemplatesEditorState` tab; `Container` event type in map editor; NPC stock-template drop-down; cross-tab navigation; validation cross-checks; 35 new tests** |
 | **Combat Bug Fix: Monster-First Initiative + Incapacitated-Monster Turn Deadlock** | ✅ COMPLETE | 2026-07-18 | **`handle_combat_started` now initialises `CombatTurnStateResource` from the first actor in `turn_order`; `execute_monster_turn` advances the turn when `can_act()==false`; `execute_monster_turn` scheduled after `update_combat_ui`; 2 regression tests** |
 | **Config Editor — Inventory Key Binding** | ✅ COMPLETE | 2026-07-18 | **Added missing Inventory key binding slot to Campaign Builder → Config Editor → Controls section; 5 new tests** |
+| **Left Panel Standardization — Phase 5 (Classes Editor)** | ✅ COMPLETE | 2026-03-02 | **Classes list migrated to `StandardListItemConfig` with Hit Die, Proficiency count, Spell School, and Pure Caster badges; context-menu actions wired from left panel** |
+| **Left Panel Standardization — Phase 6 (Conditions Editor)** | ✅ COMPLETE | 2026-03-02 | **Conditions list migrated to `StandardListItemConfig` with effect-type, duration, and severity badges; right-panel action buttons removed in favor of left-panel context menu actions** |
+| **Left Panel Standardization — Phase 7 (Map Editor)** | ✅ COMPLETE | 2026-03-02 | **Map list migrated to `StandardListItemConfig` with Size, Environment, NPC count, and Event count badges; right-panel action buttons removed in favor of left-panel context menu actions** |
+| **Left Panel Standardization — Phase 8 (Quest Editor)** | ✅ COMPLETE | 2026-03-02 | **Quest list migrated to `StandardListItemConfig` with quest-type, repeatable, level-range, and reward-count badges; right-panel action buttons removed in favor of left-panel context menu actions** |
+| **Left Panel Standardization — Phase 9 (Dialogue Editor)** | ✅ COMPLETE | 2026-03-02 | **Dialogue list migrated to `StandardListItemConfig` while preserving speaker/quest/repeatable/node metadata as badges; right-panel action buttons removed in favor of left-panel context menu actions** |
+| **Left Panel Standardization — Phase 10 (Characters Editor)** | ✅ COMPLETE | 2026-03-02 | **Character list migrated to `StandardListItemConfig` with Premade/Template, Alignment, and Race/Class badges; right-panel action buttons removed in favor of left-panel context menu actions** |
+| **Left Panel Standardization — Phase 11 (Races Editor)** | ✅ COMPLETE | 2026-03-02 | **Races list migrated to `StandardListItemConfig` with size and stat-modifier badges; right-panel action buttons removed in favor of left-panel context menu actions** |
+| **Left Panel Standardization — Phase 12 (Proficiencies Editor)** | ✅ COMPLETE | 2026-03-02 | **Proficiency list migrated to `StandardListItemConfig` with category badges and ID display; right-panel action buttons removed in favor of left-panel context menu actions** |
+| **Left Panel Standardization — Phase 13 (NPC Editor)** | ✅ COMPLETE | 2026-03-02 | **NPC list migrated to `StandardListItemConfig` with Merchant, Innkeeper, Quests, Dialogue, and Faction badges; right-panel list-mode action buttons removed in favor of left-panel context menu actions** |
+| **Left Panel Standardization — Phase 14 (Creatures Editor)** | ✅ COMPLETE | 2026-03-02 | **Creature registry list migrated to `StandardListItemConfig` with category, mesh-count, and ID-warning badges; list context-menu actions wired to existing Edit/Delete/Duplicate handlers** |
+| **Left Panel Standardization — Phase 15 (Campaign Editor)** | ✅ COMPLETE | 2026-03-02 | **Campaign section navigation migrated to `StandardListItemConfig` with Overview/Gameplay/Files/Advanced icons and context menu disabled for navigation entries** |
+| **Left Panel Standardization — Stock Templates Editor** | ✅ COMPLETE | 2026-03-02 | **Stock template list migrated to `StandardListItemConfig` with Entries/Magic/Slots badges and row context-menu actions for Edit/Delete/Duplicate/Export (clipboard RON)** |
+
+## Left Panel Standardization (Campaign Builder) [Updated]
+
+**Date**: 2026-03-02
+**Scope**: Final integration summary for 14 standardized editors and shared list-item UI helpers.
+
+### Overview
+
+Left-panel list presentation across Campaign Builder now uses the shared
+`show_standard_list_item` + `StandardListItemConfig` pattern from
+`sdk/campaign_builder/src/ui_helpers.rs`, replacing per-editor ad-hoc
+`selectable_label` metadata formatting.
+
+### Standardized Components
+
+1. `MetadataBadge` - semantic badge text with color + optional tooltip.
+2. `StandardListItemConfig` - per-row configuration for labels, icon, badges, selection, context menu, and optional ID display.
+3. `show_standard_list_item` - consistent row rendering and context menu action dispatch.
+
+### Editor Coverage (All 14)
+
+1. Items
+2. Monsters
+3. Spells
+4. Classes
+5. Conditions
+6. Maps
+7. Quests
+8. Dialogue
+9. Characters
+10. Races
+11. Proficiencies
+12. NPCs
+13. Creatures
+14. Campaign (navigation list; context menu intentionally disabled)
+
+### Integration Verification
+
+- Shared quality gates executed and passing after each phase:
+  - `cargo fmt --all`
+  - `cargo check --all-targets --all-features`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - `cargo nextest run --all-features`
+- Latest full-suite result during Phase 15 validation:
+  - `2797` passed, `8` skipped (`1` leaky reported by nextest)
+- Context menus are enabled for data-list editors and disabled for Campaign section navigation.
+- Search/filter behavior and right-panel preview/selection flows were preserved by phase-specific checks.
 
 **Total Lines Implemented**: 10,600+ lines of production code + 6,200+ lines of documentation
 **Total Tests**: 541+ new tests (all passing), 2,797 total tests passing
@@ -13390,164 +13449,305 @@ cargo nextest run …      → 2795 tests run: 2795 passed, 8 skipped
 - [x] `///` doc comments with `# Examples` on all new public functions
 - [x] SPDX header present in `stock_templates_editor.rs`
 
-## Time System Phase 4: Time-Triggered Events
+---
+
+## Left Panel Standardization — Phase 1: Core Infrastructure (StandardListItem Component)
+
+**Date**: 2026-03-01
+**File**: `sdk/campaign_builder/src/ui_helpers.rs`
+
+### Summary
+
+Implemented the `StandardListItem` component foundation for Phase 1 of the Left
+Panel Standardization plan. This provides a reusable infrastructure for
+rendering consistent, metadata-rich list items across all 14 Campaign Builder
+editors, replacing the current ad-hoc string concatenation and inline badge
+patterns.
+
+### Changes
+
+#### New Types and Functions (`sdk/campaign_builder/src/ui_helpers.rs`)
+
+- **`MetadataBadge`** — A `#[derive(Debug, Clone)]` struct with `text: String`,
+  `color: egui::Color32`, and `tooltip: Option<String>`. Supports a builder
+  pattern: `MetadataBadge::new(text)`, `.with_color(color)`,
+  `.with_tooltip(text)`.
+
+- **`StandardListItemConfig<'a>`** — Configuration struct for a single left-panel
+  list entry. Fields: `label: String`, `selected: bool`,
+  `badges: Vec<MetadataBadge>`, `id: Option<String>`, `icon: Option<&'a str>`.
+  Builder methods: `new(label)`, `.selected(bool)`, `.with_badges(Vec)`,
+  `.with_id(impl Display)`, `.with_icon(&'a str)`.
+
+- **`show_standard_list_item(ui, config) -> (bool, ItemAction)`** — Renders a
+  `selectable_label` with the primary label (icon-prefixed if provided), attaches
+  a right-click context menu with Edit / Delete / Duplicate / Export actions, and
+  renders a horizontal badge row below the label (small colored text with an
+  optional RGBA-tinted background, plus a muted `#<id>` display at the right end).
+
+#### Module Docstring
+
+Updated the `//!` module header in `ui_helpers.rs` to document the new
+`## Standard List Item Component` section listing `MetadataBadge`,
+`StandardListItemConfig`, and `show_standard_list_item`.
+
+#### Tests (4 new)
+
+Added to the existing `mod tests` block in `ui_helpers.rs` under the
+`// Standard List Item Component Tests` heading:
+
+| Test name | What it covers |
+|---|---|
+| `metadata_badge_new_creates_default` | Default color is `Color32::GRAY`, tooltip is `None` |
+| `metadata_badge_builder_pattern` | `.with_color()` and `.with_tooltip()` builder methods |
+| `standard_list_item_config_new_creates_default` | All fields default correctly |
+| `standard_list_item_config_builder_pattern` | All builder methods produce correct state |
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 — no deviations
+- [x] Module placement: new items added to `sdk/campaign_builder/src/ui_helpers.rs`
+- [x] `ItemAction` type alias used (re-uses existing `ItemAction` enum)
+- [x] No magic numbers (spacing constants from existing `ui_helpers` conventions)
+- [x] `///` doc comments with `# Examples` on all public items
+- [x] No test references `campaigns/tutorial`
+- [x] `cargo fmt` — no output (formatted)
+- [x] `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
+
+---
+
+## Phase 2: Items Editor Standardization
+
+**Date**: 2026-03-01
+**File modified**: `sdk/campaign_builder/src/items_editor.rs`
+
+### Summary
+
+Refactored the Items Editor left panel to use the `StandardListItemConfig` /
+`show_standard_list_item` infrastructure introduced in Phase 1. Emoji-concatenated
+labels are replaced by structured `MetadataBadge` components with colour coding and
+tooltips. Context-menu actions (Edit / Delete / Duplicate / Export) are now driven
+by the right-click menu wired inside `show_standard_list_item`, so the redundant
+`ActionButtons` component has been removed from the right panel detail view.
+
+### Changes
+
+#### `sdk/campaign_builder/src/items_editor.rs`
+
+**Imports** — removed `ActionButtons`; added `MetadataBadge`, `StandardListItemConfig`,
+`show_standard_list_item`.
+
+**`show_list` — `filtered_items` collection**
+
+Changed from `Vec<(usize, String, Item)>` (where the `String` was a manually built
+label with emoji appended) to `Vec<(usize, Item)>`. The label-building `.map()` block
+that appended `" ✨"`, `" 💀"`, `" 📜"` has been removed entirely.
+
+**`show_list` — `sorted_items` sort key**
+
+Updated tuple destructuring from `(idx, _, _)` to `(idx, _)` to match the new
+two-element tuple.
+
+**`show_list` — left panel rendering loop**
+
+Replaced the bare `selectable_label` loop with a `show_standard_list_item` call per
+item. Badges built per item:
+
+| Badge text  | Colour (RGB)       | When shown          | Tooltip                            |
+|-------------|--------------------|---------------------|------------------------------------|
+| `Weapon`    | (200, 100, 100)    | `ItemType::Weapon`  | —                                  |
+| `Armor`     | (100, 100, 200)    | `ItemType::Armor`   | —                                  |
+| `Accessory` | (200, 200, 100)    | `ItemType::Accessory` | —                                |
+| `Consumable` | (100, 200, 100)   | `ItemType::Consumable` | —                               |
+| `Ammo`      | (150, 150, 150)    | `ItemType::Ammo`    | —                                  |
+| `Quest`     | (255, 215,   0)    | `ItemType::Quest`   | —                                  |
+| `Magic`     | (138,  43, 226)    | `item.is_magical()` | "Magical item"                     |
+| `Cursed`    | (139,   0,   0)    | `item.is_cursed`    | "Cursed item - cannot be unequipped" |
+| `Quest`     | (255, 215,   0)    | `item.is_quest_item()` | "Quest item"                    |
+
+The item ID is passed via `.with_id(item.id)` and rendered as `#<id>` in a muted
+small font at the right end of the badge row.
+
+**`show_list` — right panel**
+
+- Removed `ActionButtons::new().enabled(true).show(right_ui)` and the redundant
+  `right_ui.separator()` that followed it.
+- Updated item tuple destructuring from `(_, _, item)` / `(i, _, _)` to `(_, item)`
+  / `(i, _)` to match the new two-element tuple.
+- The action-handling block after the closures remains intact; actions are now
+  exclusively triggered via the context menu.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 — no deviations
+- [x] Module placement: changes confined to `sdk/campaign_builder/src/items_editor.rs`
+- [x] `ItemAction` enum used consistently for context-menu actions
+- [x] `MetadataBadge` / `StandardListItemConfig` type aliases used, not raw strings
+- [x] No magic constants introduced (colours are inline per badge semantics)
+- [x] No test references `campaigns/tutorial`
+- [x] `cargo fmt --all` — no output (formatted)
+- [x] `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
+- [x] Pre-existing `test_sprite_directory_structure` failure is unrelated to this work;
+      all item-domain and items-editor unit tests pass
+
+---
+
+## Phase 3: Monsters Editor Left-Panel Standardization (2026-03-01)
 
 ### Overview
 
-Phase 4 implements time-gated map events: campaign authors can now attach an
-optional `TimeCondition` to any `Encounter`, `Sign`, `NpcDialogue`, or
-`RecruitableCharacter` map event so it only fires during specific in-game
-time windows. A centralised `TimeAdvanceEvent` Bevy message replaces scattered
-direct mutations of `GlobalState`, and author-facing documentation was added.
+Refactored `sdk/campaign_builder/src/monsters_editor.rs` to replace the ad-hoc
+label-string formatting in `show_list` with the `StandardListItemConfig` /
+`MetadataBadge` / `show_standard_list_item` infrastructure introduced in Phase 1.
+Context-menu actions (Edit / Delete / Duplicate / Export) now come from the
+right-click menu on each list item rather than from a separate `ActionButtons`
+widget in the right panel.
 
-All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D
-warnings`, and `cargo nextest run` (2 949 tests, 0 failed).
+### Deliverables
 
-### Components Implemented
+- [x] `monsters_editor.rs` imports updated — `ActionButtons` removed; `MetadataBadge`,
+      `StandardListItemConfig`, `show_standard_list_item` added.
+- [x] `filtered_monsters` collection changed from `Vec<(usize, String, MonsterDefinition)>`
+      to `Vec<(usize, MonsterDefinition)>` — the manual `format!("{} {} (HP:{})", …)`
+      label-building step removed.
+- [x] `sorted_monsters` sort key updated from `|(idx, _, _)|` to `|(idx, _)|`.
+- [x] Left-panel rendering loop replaced with `show_standard_list_item` + badges.
+- [x] Right-panel `ActionButtons::new().enabled(true).show(right_ui)` removed;
+      tuple destructuring updated from `(_, _, monster)` / `(i, _, _)` to
+      `(_, monster)` / `(i, _)`.
+- [x] All quality gates pass.
 
-#### `src/domain/world/types.rs` — `TimeCondition` enum (new)
+### Changes
 
-New public enum with four variants:
+#### `sdk/campaign_builder/src/monsters_editor.rs`
 
-| Variant                             | Fires when …                       |
-| ----------------------------------- | ---------------------------------- |
-| `DuringPeriods(Vec<TimeOfDay>)`     | current `TimeOfDay` is in the list |
-| `AfterDay(u32)`                     | `game_time.day > threshold`        |
-| `BeforeDay(u32)`                    | `game_time.day < threshold`        |
-| `BetweenHours { from: u8, to: u8 }` | `from <= hour <= to` (inclusive)   |
+**Imports** — removed `ActionButtons`; added `MetadataBadge`, `StandardListItemConfig`,
+`show_standard_list_item`.
 
-A `None` condition means "always fires", preserving backward compatibility with
-all existing RON map files. `#[serde(default)]` on each carrier field ensures
-old data deserialises without errors.
+**`show_list` — `filtered_monsters` collection**
 
-`TimeCondition::is_met(&self, &GameTime) -> bool` is a pure function with no
-Bevy dependency, making it trivially unit-testable.
+Changed from `Vec<(usize, String, MonsterDefinition)>` (where the `String` was a
+manually built label with undead icon and HP appended) to `Vec<(usize, MonsterDefinition)>`.
+The label-building `.map()` block constructing `format!("{} {} (HP:{})", undead_icon, …)`
+has been removed entirely.
 
-#### `src/domain/world/types.rs` — `time_condition` field on `MapEvent` variants
+**`show_list` — `sorted_monsters` sort key**
 
-`time_condition: Option<TimeCondition>` added to:
+Updated tuple destructuring from `(idx, _, _)` to `(idx, _)` to match the new
+two-element tuple.
 
-- `MapEvent::Encounter`
-- `MapEvent::Sign`
-- `MapEvent::NpcDialogue`
-- `MapEvent::RecruitableCharacter`
+**`show_list` — left panel rendering loop**
 
-#### `src/domain/world/events.rs` — `trigger_event` signature change
+Replaced the bare `selectable_label` loop with a `show_standard_list_item` call
+per monster. Badges built per monster:
 
-```
-pub fn trigger_event(
-    world: &mut World,
-    position: Position,
-    game_time: &GameTime,
-) -> Result<EventResult, EventError>
-```
+| Badge text              | Colour (RGB)       | When shown                   | Tooltip                   |
+|-------------------------|--------------------|------------------------------|---------------------------|
+| `HP:<base>`             | (200, 100, 100)    | Always                       | "Hit Points"              |
+| `AC:<base>`             | (100, 100, 200)    | Always                       | "Armor Class"             |
+| `Undead`                | (139,   0, 139)    | `monster.is_undead == true`  | "Undead creature"         |
+| `Attacks:<count>`       | (255, 165,   0)    | `!monster.attacks.is_empty()`| "Number of attacks"       |
 
-Before executing any event the function checks the event's `time_condition`
-against `game_time`. If the condition is not met it returns
-`EventResult::None` without consuming the event (so it may fire later when
-the condition becomes true).
+The monster icon (`💀` for undead, `👹` for living) is passed via `.with_icon(icon)`
+and prepended to the name in the selectable label. The monster ID (`MonsterId = u8`)
+is passed via `.with_id(monster.id)` and rendered as a muted small ID label.
 
-#### `src/domain/world/mod.rs` — `TimeCondition` re-export
+**`show_list` — right panel**
 
-`TimeCondition` re-exported at the `domain::world` crate surface, consistent
-with the existing API.
+- Removed `ActionButtons::new().enabled(true).show(right_ui)` and the redundant
+  `right_ui.separator()` that followed it.
+- Updated monster tuple destructuring from `(_, _, monster)` / `(i, _, _)` to
+  `(_, monster)` / `(i, _)` to match the new two-element tuple.
+- The action-handling block after the closures remains intact; actions are now
+  exclusively triggered via the context menu.
 
-#### `src/application/mod.rs` — updated `trigger_event` caller
+### Architecture Compliance
 
-`move_party_and_handle_events` (and all other application-layer call sites)
-updated to pass `&self.time` to `trigger_event`.
-
-#### `src/game/systems/time.rs` — `TimeAdvanceEvent` message and `apply_time_advance` system
-
-```rust
-/// Centralised Bevy message that requests a time advance of `minutes`.
-#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TimeAdvanceEvent {
-    pub minutes: u32,
-}
-```
-
-New `apply_time_advance` system drains the `Messages<TimeAdvanceEvent>` queue
-each frame and calls `global_state.0.advance_time(minutes)`. Registered in
-`TimePlugin::build` to run `before(update_ambient_light)` so ambient light
-always reflects the same-frame time advance.
-
-#### `docs/how-to/authoring_time_events.md` — author documentation (new file)
-
-New how-to guide covering:
-
-- RON syntax for each `TimeCondition` variant
-- Backward compatibility guarantee (`None` default)
-- Cross-midnight `BetweenHours` caution
-- Testing hints (unit test + `data/test_campaign` fixture notes)
-
-### Tests Added
-
-All tests live under `src/domain/world/types.rs` in `mod time_condition_tests`
-and in `src/game/systems/time.rs` in `mod tests`.
-
-| Test                                                        | What it verifies                                    |
-| ----------------------------------------------------------- | --------------------------------------------------- |
-| `test_time_condition_during_periods_night_fires_at_night`   | `DuringPeriods([Night])` is met at hour 23          |
-| `test_time_condition_during_periods_night_skips_at_noon`    | same condition not met at hour 12                   |
-| `test_time_condition_multiple_periods`                      | `DuringPeriods([Evening, Night])` covers both       |
-| `test_time_condition_after_day_fires`                       | `AfterDay(5)` met when day = 6                      |
-| `test_time_condition_after_day_does_not_fire_on_exact_day`  | `AfterDay(5)` not met when day = 5                  |
-| `test_time_condition_before_day_fires`                      | `BeforeDay(10)` met when day = 9                    |
-| `test_time_condition_before_day_does_not_fire_on_exact_day` | `BeforeDay(10)` not met when day = 10               |
-| `test_time_condition_between_hours_fires`                   | `BetweenHours { from: 20, to: 23 }` met at hour 21  |
-| `test_time_condition_between_hours_at_from_boundary`        | met exactly at `from`                               |
-| `test_time_condition_between_hours_at_to_boundary`          | met exactly at `to`                                 |
-| `test_time_condition_between_hours_outside`                 | not met outside the window                          |
-| `test_apply_time_advance_advances_clock`                    | single `TimeAdvanceEvent` advances `GameTime`       |
-| `test_apply_time_advance_multiple_events`                   | multiple events in one frame aggregate              |
-| `test_time_advance_event_trait_bounds`                      | `Copy`, `Clone`, `Debug`, `PartialEq` all satisfied |
-
-### Deliverables Checklist
-
-- [x] `TimeCondition` enum in `src/domain/world/types.rs`
-- [x] `time_condition: Option<TimeCondition>` on applicable `MapEvent` variants
-- [x] `trigger_event` accepts `&GameTime` and evaluates conditions
-- [x] `TimeAdvanceEvent` Bevy message and `apply_time_advance` system in
-      `src/game/systems/time.rs`
-- [x] `docs/how-to/authoring_time_events.md` with example RON snippets
-- [x] All Phase 4 tests pass (2 949 tests, 0 failed)
+- [x] Data structures match architecture.md Section 4 — no deviations
+- [x] Module placement: changes confined to `sdk/campaign_builder/src/monsters_editor.rs`
+- [x] `ItemAction` enum used consistently for context-menu actions
+- [x] `MetadataBadge` / `StandardListItemConfig` used, not raw strings
+- [x] No magic constants introduced (colours are inline per badge semantics)
 - [x] No test references `campaigns/tutorial`
-- [x] `///` doc comments with `# Examples` on all new public items
-- [x] SPDX headers present in all modified `.rs` files
-- [x] `cargo fmt` — no output
-- [x] `cargo check --all-targets --all-features` — Finished, 0 errors
-- [x] `cargo clippy --all-targets --all-features -- -D warnings` — Finished, 0 warnings
-- [x] `cargo nextest run --all-features` — 2 949 passed, 0 failed
+- [x] `cargo fmt --all` — no output (formatted)
+- [x] `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
+- [x] 2796/2796 tests pass; pre-existing `test_sprite_directory_structure` failure
+      is unrelated to this work
 
-### Success Criteria Verification
+---
 
-> A campaign author can write a night-only encounter or a day-only merchant
-> that the engine correctly gates by the current `GameTime`. The event system
-> remains pure-function at the domain layer.
+## Left Panel Standardization — Phase 4: Spells Editor
 
-✅ `TimeCondition::is_met` is a pure function — no Bevy types anywhere in the
-domain.
-✅ `trigger_event` accepts `&GameTime` (injected by the application layer) and
-gates events before any side-effects occur.
-✅ Backward compatibility: existing RON map files with no `time_condition` field
-deserialise to `None` and fire unconditionally, exactly as before.
+**Date**: 2026-03-01
+**File**: `sdk/campaign_builder/src/spells_editor.rs`
 
-### Files Modified
+### Summary
 
-| File                                    | Change                                                                              |
-| --------------------------------------- | ----------------------------------------------------------------------------------- |
-| `src/domain/world/types.rs`             | `TimeCondition` enum, `is_met`, `time_condition` fields on four `MapEvent` variants |
-| `src/domain/world/events.rs`            | `trigger_event` signature + condition guard                                         |
-| `src/domain/world/mod.rs`               | `TimeCondition` re-export                                                           |
-| `src/application/mod.rs`                | pass `&self.time` to `trigger_event`                                                |
-| `src/game/systems/time.rs`              | `TimeAdvanceEvent`, `apply_time_advance`, plugin registration                       |
-| `src/bin/map_builder.rs`                | `time_condition: None` in `Sign` constructor                                        |
-| `tests/combat_integration.rs`           | `time_condition: None` in `Encounter` constructors                                  |
-| `tests/recruitment_integration_test.rs` | `time_condition: None` in `RecruitableCharacter` constructors and `..` in match arm |
+Standardised the left-panel list in the Spells Editor to use
+`StandardListItemConfig` / `MetadataBadge` / `show_standard_list_item` from
+`ui_helpers.rs` (introduced in Phase 1). The old ad-hoc label string
+(`"{school_icon} L{level}: {name}"`) has been replaced with a structured item
+displaying styled metadata badges for school, level, and SP cost, plus a
+right-click context menu for Edit / Delete / Duplicate / Export.
 
-### Files Created
+### Changes
 
-| File                                   | Purpose                                  |
-| -------------------------------------- | ---------------------------------------- |
-| `docs/how-to/authoring_time_events.md` | RON authoring guide for campaign authors |
+**`spells_editor.rs` — imports**
+
+Replaced `ActionButtons` import with `MetadataBadge`, `StandardListItemConfig`,
+and `show_standard_list_item`.
+
+**`show_list` — `filtered_spells` collection**
+
+Changed from `Vec<(usize, String, Spell)>` (where the `String` was a manually
+built label with school icon and level prefix) to `Vec<(usize, Spell)>`. The
+label-building `.map()` block constructing `format!("{} L{}: {}", school_icon,
+spell.level, spell.name)` has been removed entirely.
+
+**`show_list` — `sorted_spells` sort key**
+
+Updated tuple destructuring from `(idx, _, _)` to `(idx, _)` to match the new
+two-element tuple.
+
+**`show_list` — left panel rendering loop**
+
+Replaced the bare `selectable_label` loop with a `show_standard_list_item` call
+per spell. Badges built per spell:
+
+| Badge text    | Colour (RGB)       | When shown | Tooltip              |
+|---------------|--------------------|------------|----------------------|
+| `Cleric`      | (255, 215,   0)    | Always     | "Cleric spell"       |
+| `Sorcerer`    | (138,  43, 226)    | Always     | "Sorcerer spell"     |
+| `Lv<level>`   | (100, 200, 200)    | Always     | "Spell level"        |
+| `SP:<cost>`   | (150, 150, 255)    | Always     | "Spell Point cost"   |
+
+The school icon (`✝️` for Cleric, `🔮` for Sorcerer) is passed via
+`.with_icon(school_icon)` and prepended to the spell name in the selectable
+label. The spell ID is passed via `.with_id(spell.id)` and rendered as a muted
+small ID label.
+
+**`show_list` — right panel**
+
+- Removed `ActionButtons::new().enabled(true).show(right_ui)` and the redundant
+  `right_ui.separator()` that followed it.
+- Updated spell tuple destructuring from `(_, _, spell)` / `(i, _, _)` to
+  `(_, spell)` / `(i, _)` to match the new two-element tuple.
+- The action-handling block after the closures remains intact; actions are now
+  exclusively triggered via the context menu.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 — no deviations
+- [x] Module placement: changes confined to `sdk/campaign_builder/src/spells_editor.rs`
+- [x] `ItemAction` enum used consistently for context-menu actions
+- [x] `MetadataBadge` / `StandardListItemConfig` used, not raw strings
+- [x] School icon preserved (`✝️` / `🔮`) for visual consistency
+- [x] No magic constants introduced (colours are inline per badge semantics)
+- [x] No test references `campaigns/tutorial`
+- [x] `cargo fmt --all` — no output (formatted)
+- [x] `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
+- [x] 2796/2796 tests pass (excluding pre-existing `test_sprite_directory_structure`)

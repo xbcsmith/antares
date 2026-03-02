@@ -35,7 +35,10 @@
 //! );
 //! ```
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use crate::ui_helpers::{
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
+};
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::Item;
 use antares::domain::proficiency::{ProficiencyCategory, ProficiencyDefinition};
@@ -517,7 +520,7 @@ impl ProficienciesEditorState {
         status_message: &mut String,
     ) {
         // Build filtered snapshot to avoid borrow conflicts in closures
-        let filtered_proficiencies: Vec<(usize, String, ProficiencyDefinition)> = proficiencies
+        let filtered_proficiencies: Vec<(usize, ProficiencyDefinition)> = proficiencies
             .iter()
             .enumerate()
             .filter(|(_, p)| {
@@ -531,22 +534,13 @@ impl ProficienciesEditorState {
                         .contains(&self.search_query.to_lowercase());
                 matches_category && matches_search
             })
-            .map(|(idx, prof)| {
-                let emoji = match prof.category {
-                    ProficiencyCategory::Weapon => "⚔️",
-                    ProficiencyCategory::Armor => "🛡️",
-                    ProficiencyCategory::Shield => "🛡️",
-                    ProficiencyCategory::MagicItem => "✨",
-                };
-                let label = format!("{} {}: {}", emoji, prof.id, prof.name);
-                (idx, label, prof.clone())
-            })
+            .map(|(idx, prof)| (idx, prof.clone()))
             .collect();
 
         // Store selected and action outside closures
         let selected = self.selected_proficiency;
         let mut new_selection = selected;
-        let mut action_requested: Option<ItemAction> = None;
+        let mut action_requested: Option<(usize, ItemAction)> = None;
 
         TwoColumnLayout::new("proficiencies_list_layout").show_split(
             ui,
@@ -558,11 +552,40 @@ impl ProficienciesEditorState {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .show(left_ui, |left_ui| {
-                        for (i, (idx, label, _prof)) in filtered_proficiencies.iter().enumerate() {
-                            let is_selected = selected == Some(*idx);
-                            if left_ui.selectable_label(is_selected, label).clicked() {
-                                new_selection = Some(*idx);
-                            }
+                        for (idx, prof) in &filtered_proficiencies {
+                            left_ui.push_id(prof.id.clone(), |row_ui| {
+                                let (cat_label, cat_color) = match prof.category {
+                                    ProficiencyCategory::Weapon => {
+                                        ("Weapon", egui::Color32::from_rgb(200, 80, 80))
+                                    }
+                                    ProficiencyCategory::Armor => {
+                                        ("Armor", egui::Color32::from_rgb(80, 80, 200))
+                                    }
+                                    ProficiencyCategory::Shield => {
+                                        ("Shield", egui::Color32::from_rgb(80, 150, 200))
+                                    }
+                                    ProficiencyCategory::MagicItem => {
+                                        ("Magic Item", egui::Color32::from_rgb(180, 80, 220))
+                                    }
+                                };
+
+                                let badges = vec![MetadataBadge::new(cat_label)
+                                    .with_color(cat_color)
+                                    .with_tooltip("Proficiency category")];
+
+                                let config = StandardListItemConfig::new(&prof.name)
+                                    .with_badges(badges)
+                                    .with_id(&prof.id)
+                                    .selected(selected == Some(*idx));
+
+                                let (clicked, ctx_action) = show_standard_list_item(row_ui, config);
+                                if clicked {
+                                    new_selection = Some(*idx);
+                                }
+                                if ctx_action != ItemAction::None {
+                                    action_requested = Some((*idx, ctx_action));
+                                }
+                            });
                         }
 
                         if filtered_proficiencies.is_empty() {
@@ -573,8 +596,7 @@ impl ProficienciesEditorState {
             |right_ui| {
                 // Right column: preview and actions
                 if let Some(idx) = selected {
-                    if let Some((_, _label, prof)) =
-                        filtered_proficiencies.iter().find(|(i, _, _)| *i == idx)
+                    if let Some((_, prof)) = filtered_proficiencies.iter().find(|(i, _)| *i == idx)
                     {
                         right_ui.label("Details:");
                         right_ui.separator();
@@ -584,20 +606,6 @@ impl ProficienciesEditorState {
 
                         // Preview static display with usage
                         Self::show_preview_static(right_ui, prof, usage);
-
-                        right_ui.separator();
-
-                        // Action buttons
-                        let action = ActionButtons::new()
-                            .with_edit(true)
-                            .with_delete(true)
-                            .with_duplicate(true)
-                            .with_export(true)
-                            .show(right_ui);
-
-                        if action != ItemAction::None {
-                            action_requested = Some(action);
-                        }
                     } else {
                         right_ui.label("Select a proficiency to view details");
                     }
@@ -660,63 +668,53 @@ impl ProficienciesEditorState {
         }
 
         // Handle action button clicks after closures
-        if let Some(action) = action_requested {
+        if let Some((action_idx, action)) = action_requested {
+            self.selected_proficiency = Some(action_idx);
             match action {
                 ItemAction::Edit => {
-                    if let Some(idx) = self.selected_proficiency {
-                        if idx < proficiencies.len() {
-                            self.mode = ProficienciesEditorMode::Edit;
-                            self.edit_buffer = proficiencies[idx].clone();
-                        }
+                    if action_idx < proficiencies.len() {
+                        self.mode = ProficienciesEditorMode::Edit;
+                        self.edit_buffer = proficiencies[action_idx].clone();
                     }
                 }
                 ItemAction::Delete => {
-                    if let Some(idx) = self.selected_proficiency {
-                        if idx < proficiencies.len() {
-                            // Initiate delete confirmation
-                            self.confirm_delete_id = Some(proficiencies[idx].id.clone());
-                        }
+                    if action_idx < proficiencies.len() {
+                        // Initiate delete confirmation
+                        self.confirm_delete_id = Some(proficiencies[action_idx].id.clone());
                     }
                 }
                 ItemAction::Duplicate => {
-                    if let Some(idx) = self.selected_proficiency {
-                        if idx < proficiencies.len() {
-                            let mut new_prof = proficiencies[idx].clone();
-                            new_prof.id =
-                                Self::next_proficiency_id(proficiencies, new_prof.category);
-                            new_prof.name = format!("{} (Copy)", new_prof.name);
-                            proficiencies.push(new_prof);
-                            *unsaved_changes = true;
-                            *status_message = "Duplicated proficiency".to_string();
-                        }
+                    if action_idx < proficiencies.len() {
+                        let mut new_prof = proficiencies[action_idx].clone();
+                        new_prof.id = Self::next_proficiency_id(proficiencies, new_prof.category);
+                        new_prof.name = format!("{} (Copy)", new_prof.name);
+                        proficiencies.push(new_prof);
+                        *unsaved_changes = true;
+                        *status_message = "Duplicated proficiency".to_string();
                     }
                 }
                 ItemAction::Export => {
-                    if let Some(idx) = self.selected_proficiency {
-                        if idx < proficiencies.len() {
-                            let prof = &proficiencies[idx];
-                            if let Some(path) = rfd::FileDialog::new()
-                                .set_file_name(format!("{}.ron", prof.id))
-                                .add_filter("RON", &["ron"])
-                                .save_file()
-                            {
-                                match ron::ser::to_string_pretty(prof, Default::default()) {
-                                    Ok(contents) => match std::fs::write(&path, contents) {
-                                        Ok(_) => {
-                                            *status_message = format!(
-                                                "Exported proficiency to: {}",
-                                                path.display()
-                                            );
-                                        }
-                                        Err(e) => {
-                                            *status_message =
-                                                format!("Failed to save proficiency: {}", e);
-                                        }
-                                    },
+                    if action_idx < proficiencies.len() {
+                        let prof = &proficiencies[action_idx];
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_file_name(format!("{}.ron", prof.id))
+                            .add_filter("RON", &["ron"])
+                            .save_file()
+                        {
+                            match ron::ser::to_string_pretty(prof, Default::default()) {
+                                Ok(contents) => match std::fs::write(&path, contents) {
+                                    Ok(_) => {
+                                        *status_message =
+                                            format!("Exported proficiency to: {}", path.display());
+                                    }
                                     Err(e) => {
                                         *status_message =
-                                            format!("Failed to serialize proficiency: {}", e);
+                                            format!("Failed to save proficiency: {}", e);
                                     }
+                                },
+                                Err(e) => {
+                                    *status_message =
+                                        format!("Failed to serialize proficiency: {}", e);
                                 }
                             }
                         }

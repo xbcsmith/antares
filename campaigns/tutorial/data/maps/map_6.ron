@@ -8008,24 +8008,6 @@
     ],
     events: {
         (
-            x: 12,
-            y: 10,
-        ): Encounter(
-            name: "Goblin Tribe",
-            description: "Tribe of Goblins",
-            monster_group: [
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-            ],
-        ),
-        (
             x: 14,
             y: 1,
         ): Encounter(
@@ -8041,18 +8023,6 @@
                 133,
                 34,
             ],
-        ),
-        (
-            x: 19,
-            y: 15,
-        ): Teleport(
-            name: "Mountain Pass Portal",
-            description: "Portal to the Mountain Pass",
-            destination: (
-                x: 19,
-                y: 11,
-            ),
-            map_id: 5,
         ),
         (
             x: 13,
@@ -8081,6 +8051,36 @@
                 11,
                 11,
             ],
+        ),
+        (
+            x: 12,
+            y: 10,
+        ): Encounter(
+            name: "Goblin Tribe",
+            description: "Tribe of Goblins",
+            monster_group: [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+            ],
+        ),
+        (
+            x: 19,
+            y: 15,
+        ): Teleport(
+            name: "Mountain Pass Portal",
+            description: "Portal to the Mountain Pass",
+            destination: (
+                x: 19,
+                y: 11,
+            ),
+            map_id: 5,
         ),
     },
     allow_random_encounters: true,

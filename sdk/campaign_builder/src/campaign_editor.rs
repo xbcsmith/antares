@@ -37,7 +37,8 @@
 //!   consistency with other editors.
 
 use crate::ui_helpers::{
-    compute_default_panel_height, EditorToolbar, ToolbarAction, TwoColumnLayout,
+    compute_default_panel_height, show_standard_list_item, EditorToolbar, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{FOOD_MAX, FOOD_MIN, PARTY_MAX_SIZE};
 use antares::domain::world::npc::NpcDefinition;
@@ -573,25 +574,24 @@ impl CampaignMetadataEditorState {
                     left_ui.heading("Sections");
                     left_ui.separator();
 
-                    // List of sections (mutate local `new_selected`, not `self`); use local booleans to avoid borrow conflicts
-                    let is_overview = new_selected.get() == CampaignSection::Overview;
-                    if left_ui.selectable_label(is_overview, "Overview").clicked() {
-                        new_selected.set(CampaignSection::Overview);
-                    }
+                    // List of sections (mutate local `new_selected`, not `self`).
+                    let sections: [(&str, &str, CampaignSection); 4] = [
+                        ("📋", "Overview", CampaignSection::Overview),
+                        ("⚔️", "Gameplay", CampaignSection::Gameplay),
+                        ("📁", "Files", CampaignSection::Files),
+                        ("⚙️", "Advanced", CampaignSection::Advanced),
+                    ];
 
-                    let is_gameplay = new_selected.get() == CampaignSection::Gameplay;
-                    if left_ui.selectable_label(is_gameplay, "Gameplay").clicked() {
-                        new_selected.set(CampaignSection::Gameplay);
-                    }
-
-                    let is_files = new_selected.get() == CampaignSection::Files;
-                    if left_ui.selectable_label(is_files, "Files").clicked() {
-                        new_selected.set(CampaignSection::Files);
-                    }
-
-                    let is_advanced = new_selected.get() == CampaignSection::Advanced;
-                    if left_ui.selectable_label(is_advanced, "Advanced").clicked() {
-                        new_selected.set(CampaignSection::Advanced);
+                    for (icon, label, section) in sections {
+                        let is_selected = new_selected.get() == section;
+                        let config = StandardListItemConfig::new(label)
+                            .with_icon(icon)
+                            .selected(is_selected)
+                            .with_context_menu(false);
+                        let (clicked, _) = show_standard_list_item(left_ui, config);
+                        if clicked {
+                            new_selected.set(section);
+                        }
                     }
 
                     left_ui.separator();

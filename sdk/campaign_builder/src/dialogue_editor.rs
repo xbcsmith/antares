@@ -20,8 +20,9 @@
 //! - Import/export RON support
 
 use crate::ui_helpers::{
-    autocomplete_item_selector, autocomplete_quest_selector, ActionButtons, EditorToolbar,
-    ItemAction, ToolbarAction, TwoColumnLayout,
+    autocomplete_item_selector, autocomplete_quest_selector, show_standard_list_item,
+    ActionButtons, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
+    TwoColumnLayout,
 };
 use antares::domain::dialogue::{
     DialogueAction, DialogueChoice, DialogueCondition, DialogueId, DialogueNode, DialogueTree,
@@ -1468,7 +1469,7 @@ impl DialogueEditorState {
 
         // Track actions
         let mut new_selection: Option<usize> = None;
-        let mut action_requested: Option<ItemAction> = None;
+        let mut action_requested: Option<(usize, ItemAction)> = None;
 
         TwoColumnLayout::new("dialogues").show_split(
             ui,
@@ -1478,52 +1479,52 @@ impl DialogueEditorState {
                 left_ui.separator();
 
                 for (idx, dialogue) in &dialogues_snapshot {
-                    let is_selected = selected_dialogue_idx == Some(*idx);
-
-                    let response = left_ui.selectable_label(is_selected, &dialogue.name);
-                    if response.clicked() {
-                        new_selection = Some(*idx);
-                    }
-
-                    // Indented sub-text
-                    left_ui.horizontal(|ui| {
-                        ui.add_space(20.0);
+                    left_ui.push_id(dialogue.id, |row_ui| {
+                        let mut badges = Vec::new();
 
                         if let Some(speaker) = &dialogue.speaker_name {
-                            ui.label(
-                                egui::RichText::new(format!("👤 {}", speaker))
-                                    .small()
-                                    .color(egui::Color32::LIGHT_BLUE),
+                            badges.push(
+                                MetadataBadge::new(format!("Speaker:{}", speaker))
+                                    .with_color(egui::Color32::LIGHT_BLUE)
+                                    .with_tooltip("Dialogue speaker"),
                             );
                         }
 
                         if let Some(quest_id) = dialogue.associated_quest {
-                            ui.label(
-                                egui::RichText::new(format!("📜 Quest #{}", quest_id))
-                                    .small()
-                                    .color(egui::Color32::GOLD),
+                            badges.push(
+                                MetadataBadge::new(format!("Quest:{}", quest_id))
+                                    .with_color(egui::Color32::GOLD)
+                                    .with_tooltip("Associated quest ID"),
                             );
                         }
 
                         if dialogue.repeatable {
-                            ui.label(
-                                egui::RichText::new("🔄 Repeatable")
-                                    .small()
-                                    .color(egui::Color32::GREEN),
+                            badges.push(
+                                MetadataBadge::new("Repeatable")
+                                    .with_color(egui::Color32::GREEN)
+                                    .with_tooltip("Dialogue can be repeated"),
                             );
                         }
 
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "| Nodes: {} | ID: {}",
-                                dialogue.nodes.len(),
-                                dialogue.id
-                            ))
-                            .small()
-                            .weak(),
+                        badges.push(
+                            MetadataBadge::new(format!("Nodes:{}", dialogue.nodes.len()))
+                                .with_color(egui::Color32::from_rgb(170, 170, 170))
+                                .with_tooltip("Number of dialogue nodes"),
                         );
+
+                        let config = StandardListItemConfig::new(&dialogue.name)
+                            .with_badges(badges)
+                            .with_id(dialogue.id)
+                            .selected(selected_dialogue_idx == Some(*idx));
+
+                        let (clicked, ctx_action) = show_standard_list_item(row_ui, config);
+                        if clicked {
+                            new_selection = Some(*idx);
+                        }
+                        if ctx_action != ItemAction::None {
+                            action_requested = Some((*idx, ctx_action));
+                        }
                     });
-                    left_ui.add_space(4.0);
                 }
             },
             |right_ui| {
@@ -1532,14 +1533,6 @@ impl DialogueEditorState {
                     if let Some((_, dialogue)) = dialogues_snapshot.iter().find(|(i, _)| *i == idx)
                     {
                         right_ui.heading(&dialogue.name);
-                        right_ui.separator();
-
-                        // Action buttons using shared component
-                        let action = ActionButtons::new().enabled(true).show(right_ui);
-                        if action != ItemAction::None {
-                            action_requested = Some(action);
-                        }
-
                         right_ui.separator();
 
                         // Dialogue details
@@ -1673,45 +1666,37 @@ impl DialogueEditorState {
         }
 
         // Handle action button clicks
-        if let Some(action) = action_requested {
+        if let Some((action_idx, action)) = action_requested {
+            self.selected_dialogue = Some(action_idx);
             match action {
                 ItemAction::Edit => {
-                    if let Some(idx) = self.selected_dialogue {
-                        self.start_edit_dialogue(idx);
-                    }
+                    self.start_edit_dialogue(action_idx);
                 }
                 ItemAction::Delete => {
-                    if let Some(idx) = self.selected_dialogue {
-                        self.delete_dialogue(idx);
-                        *dialogues = self.dialogues.clone();
-                        *unsaved_changes = true;
-                    }
+                    self.delete_dialogue(action_idx);
+                    *dialogues = self.dialogues.clone();
+                    *unsaved_changes = true;
                 }
                 ItemAction::Duplicate => {
-                    if let Some(idx) = self.selected_dialogue {
-                        if let Some(dialogue) = self.dialogues.get(idx) {
-                            let mut new_dialogue = dialogue.clone();
-                            new_dialogue.id = self.next_available_dialogue_id();
-                            new_dialogue.name = format!("{} (Copy)", new_dialogue.name);
-                            self.dialogues.push(new_dialogue);
-                            *dialogues = self.dialogues.clone();
-                            *unsaved_changes = true;
-                            *status_message = "Dialogue duplicated".to_string();
-                        }
+                    if let Some(dialogue) = self.dialogues.get(action_idx) {
+                        let mut new_dialogue = dialogue.clone();
+                        new_dialogue.id = self.next_available_dialogue_id();
+                        new_dialogue.name = format!("{} (Copy)", new_dialogue.name);
+                        self.dialogues.push(new_dialogue);
+                        *dialogues = self.dialogues.clone();
+                        *unsaved_changes = true;
+                        *status_message = "Dialogue duplicated".to_string();
                     }
                 }
                 ItemAction::Export => {
-                    if let Some(idx) = self.selected_dialogue {
-                        if let Some(dialogue) = self.dialogues.get(idx) {
-                            match ron::ser::to_string_pretty(dialogue, Default::default()) {
-                                Ok(contents) => {
-                                    ui.ctx().copy_text(contents);
-                                    *status_message = "Copied dialogue to clipboard".to_string();
-                                }
-                                Err(e) => {
-                                    *status_message =
-                                        format!("Failed to serialize dialogue: {}", e);
-                                }
+                    if let Some(dialogue) = self.dialogues.get(action_idx) {
+                        match ron::ser::to_string_pretty(dialogue, Default::default()) {
+                            Ok(contents) => {
+                                ui.ctx().copy_text(contents);
+                                *status_message = "Copied dialogue to clipboard".to_string();
+                            }
+                            Err(e) => {
+                                *status_message = format!("Failed to serialize dialogue: {}", e);
                             }
                         }
                     }

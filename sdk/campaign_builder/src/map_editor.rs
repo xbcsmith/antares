@@ -14,7 +14,7 @@
 //! - Visual preview with color-coded tiles
 //! - Undo/redo support
 //! - Real-time validation feedback
-//! - Standard editor pattern with EditorToolbar, TwoColumnLayout, ActionButtons
+//! - Standard editor pattern with EditorToolbar, TwoColumnLayout, and standard list items
 //!
 //! # Architecture
 //!
@@ -37,8 +37,9 @@
 //! ```
 
 use crate::ui_helpers::{
-    autocomplete_item_list_selector, autocomplete_monster_list_selector, ActionButtons,
-    EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout,
+    autocomplete_item_list_selector, autocomplete_monster_list_selector, show_standard_list_item,
+    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
+    TwoColumnLayout,
 };
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
@@ -3055,8 +3056,8 @@ impl MapsEditorState {
 
     /// Render the Maps Editor UI
     ///
-    /// This follows the standard editor pattern with EditorToolbar, TwoColumnLayout,
-    /// and ActionButtons.
+    /// This follows the standard editor pattern with EditorToolbar,
+    /// TwoColumnLayout, and context-menu list actions.
     #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
@@ -3224,7 +3225,7 @@ impl MapsEditorState {
 
         let selected = self.selected_map_idx;
         let mut new_selection = selected;
-        let mut action_requested: Option<ItemAction> = None;
+        let mut action_requested: Option<(usize, ItemAction)> = None;
 
         TwoColumnLayout::new("maps").show_split(
             ui,
@@ -3234,14 +3235,48 @@ impl MapsEditorState {
                 left_ui.separator();
 
                 for (idx, id, name, width, height, events, npcs) in &filtered_maps {
-                    let is_selected = selected == Some(*idx);
-                    let label = format!(
-                        "[{}] {} ({}x{}) E:{} N:{}",
-                        id, name, width, height, events, npcs
-                    );
-                    if left_ui.selectable_label(is_selected, &label).clicked() {
-                        new_selection = Some(*idx);
-                    }
+                    left_ui.push_id(*id, |row_ui| {
+                        let mut badges = Vec::new();
+
+                        badges.push(
+                            MetadataBadge::new(format!("{}x{}", width, height))
+                                .with_color(egui::Color32::from_rgb(100, 150, 200))
+                                .with_tooltip("Map dimensions"),
+                        );
+
+                        let (environment_name, environment_color) =
+                            classify_map_environment(&maps[*idx]);
+                        badges.push(
+                            MetadataBadge::new(environment_name)
+                                .with_color(environment_color)
+                                .with_tooltip("Map environment"),
+                        );
+
+                        badges.push(
+                            MetadataBadge::new(format!("NPCs:{}", npcs))
+                                .with_color(egui::Color32::from_rgb(200, 100, 200))
+                                .with_tooltip("Number of NPC placements"),
+                        );
+
+                        badges.push(
+                            MetadataBadge::new(format!("Events:{}", events))
+                                .with_color(egui::Color32::from_rgb(230, 150, 70))
+                                .with_tooltip("Number of map events"),
+                        );
+
+                        let config = StandardListItemConfig::new(name)
+                            .with_badges(badges)
+                            .with_id(*id)
+                            .selected(selected == Some(*idx));
+
+                        let (clicked, ctx_action) = show_standard_list_item(row_ui, config);
+                        if clicked {
+                            new_selection = Some(*idx);
+                        }
+                        if ctx_action != ItemAction::None {
+                            action_requested = Some((*idx, ctx_action));
+                        }
+                    });
                 }
 
                 if filtered_maps.is_empty() {
@@ -3257,16 +3292,6 @@ impl MapsEditorState {
                         let map = &maps[idx];
 
                         right_ui.heading(&map.name);
-                        right_ui.separator();
-
-                        // Action buttons
-                        action_requested = Some(
-                            ActionButtons::new()
-                                .enabled(true)
-                                .with_duplicate(true)
-                                .show(right_ui),
-                        );
-
                         right_ui.separator();
 
                         // Map info
@@ -3322,71 +3347,62 @@ impl MapsEditorState {
         }
 
         // Handle actions
-        if let Some(action) = action_requested {
+        if let Some((action_idx, action)) = action_requested {
+            self.selected_map_idx = Some(action_idx);
             match action {
                 ItemAction::Edit => {
-                    if let Some(idx) = self.selected_map_idx {
-                        if idx < maps.len() {
-                            self.active_editor = Some(MapEditorState::new(maps[idx].clone()));
-                            self.mode = MapsEditorMode::Edit;
-                        }
+                    if action_idx < maps.len() {
+                        self.active_editor = Some(MapEditorState::new(maps[action_idx].clone()));
+                        self.mode = MapsEditorMode::Edit;
                     }
                 }
                 ItemAction::Delete => {
-                    if let Some(idx) = self.selected_map_idx {
-                        if idx < maps.len() {
-                            // Save map before deletion for undo (not implemented yet)
-                            let map = &maps[idx];
-                            if let Some(dir) = campaign_dir {
-                                let map_path =
-                                    dir.join(maps_dir).join(format!("map_{}.ron", map.id));
-                                if map_path.exists() {
-                                    let _ = fs::remove_file(&map_path);
-                                }
+                    if action_idx < maps.len() {
+                        // Save map before deletion for undo (not implemented yet)
+                        let map = &maps[action_idx];
+                        if let Some(dir) = campaign_dir {
+                            let map_path = dir.join(maps_dir).join(format!("map_{}.ron", map.id));
+                            if map_path.exists() {
+                                let _ = fs::remove_file(&map_path);
                             }
-                            maps.remove(idx);
-                            self.selected_map_idx = None;
-                            *unsaved_changes = true;
-                            *status_message = "Map deleted".to_string();
                         }
+                        maps.remove(action_idx);
+                        self.selected_map_idx = None;
+                        *unsaved_changes = true;
+                        *status_message = "Map deleted".to_string();
                     }
                 }
                 ItemAction::Duplicate => {
-                    if let Some(idx) = self.selected_map_idx {
-                        if idx < maps.len() {
-                            let mut new_map = maps[idx].clone();
-                            new_map.id = Self::next_available_map_id(maps);
-                            new_map.name = format!("{} (Copy)", new_map.name);
-                            maps.push(new_map);
-                            self.selected_map_idx = Some(maps.len() - 1);
-                            *unsaved_changes = true;
-                            *status_message = "Map duplicated".to_string();
-                        }
+                    if action_idx < maps.len() {
+                        let mut new_map = maps[action_idx].clone();
+                        new_map.id = Self::next_available_map_id(maps);
+                        new_map.name = format!("{} (Copy)", new_map.name);
+                        maps.push(new_map);
+                        self.selected_map_idx = Some(maps.len() - 1);
+                        *unsaved_changes = true;
+                        *status_message = "Map duplicated".to_string();
                     }
                 }
                 ItemAction::Export => {
-                    if let Some(idx) = self.selected_map_idx {
-                        if idx < maps.len() {
-                            let map = &maps[idx];
-                            if let Some(path) = rfd::FileDialog::new()
-                                .set_file_name(format!("map_{}.ron", map.id))
-                                .add_filter("RON", &["ron"])
-                                .save_file()
-                            {
-                                match ron::ser::to_string_pretty(map, Default::default()) {
-                                    Ok(contents) => match fs::write(&path, contents) {
-                                        Ok(_) => {
-                                            *status_message =
-                                                format!("Exported map to: {}", path.display());
-                                        }
-                                        Err(e) => {
-                                            *status_message =
-                                                format!("Failed to export map: {}", e);
-                                        }
-                                    },
-                                    Err(e) => {
-                                        *status_message = format!("Failed to serialize map: {}", e);
+                    if action_idx < maps.len() {
+                        let map = &maps[action_idx];
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_file_name(format!("map_{}.ron", map.id))
+                            .add_filter("RON", &["ron"])
+                            .save_file()
+                        {
+                            match ron::ser::to_string_pretty(map, Default::default()) {
+                                Ok(contents) => match fs::write(&path, contents) {
+                                    Ok(_) => {
+                                        *status_message =
+                                            format!("Exported map to: {}", path.display());
                                     }
+                                    Err(e) => {
+                                        *status_message = format!("Failed to export map: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    *status_message = format!("Failed to serialize map: {}", e);
                                 }
                             }
                         }
@@ -5885,6 +5901,30 @@ impl MapsEditorState {
             }
         }
     }
+}
+
+fn classify_map_environment(map: &Map) -> (&'static str, Color32) {
+    let total_tiles = map.tiles.len();
+    if total_tiles == 0 {
+        return ("Indoor", Color32::from_rgb(139, 69, 19));
+    }
+
+    let wall_tiles = map
+        .tiles
+        .iter()
+        .filter(|tile| !matches!(tile.wall_type, WallType::None))
+        .count();
+    let wall_ratio = wall_tiles as f32 / total_tiles as f32;
+
+    if !map.allow_random_encounters {
+        return ("Indoor", Color32::from_rgb(139, 69, 19));
+    }
+
+    if wall_ratio > 0.20 {
+        return ("Dungeon", Color32::from_rgb(100, 100, 100));
+    }
+
+    ("Outdoor", Color32::from_rgb(50, 200, 50))
 }
 
 #[cfg(test)]
