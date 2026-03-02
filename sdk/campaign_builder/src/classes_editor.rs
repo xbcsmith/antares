@@ -13,7 +13,10 @@
 //! - Proficiency selection uses multi-select autocomplete with quick-add buttons
 //! - Entity validation warnings display for missing item/proficiency references
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use crate::ui_helpers::{
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
+};
 use antares::domain::classes::{ClassDefinition, SpellSchool, SpellStat};
 use antares::domain::items::types::Item;
 use antares::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
@@ -490,7 +493,7 @@ impl ClassesEditorState {
 
                 // Track actions from UI
                 let mut new_selection: Option<usize> = None;
-                let mut action_requested: Option<ItemAction> = None;
+                let mut action_requested: Option<(usize, ItemAction)> = None;
 
                 TwoColumnLayout::new("classes").show_split(
                     ui,
@@ -500,10 +503,65 @@ impl ClassesEditorState {
                         left_ui.separator();
 
                         for (idx, class) in &classes_snapshot {
-                            let is_selected = selected_class_idx == Some(*idx);
-                            if left_ui.selectable_label(is_selected, &class.name).clicked() {
-                                new_selection = Some(*idx);
-                            }
+                            left_ui.push_id(class.id.clone(), |row_ui| {
+                                let mut badges = Vec::new();
+
+                                badges.push(
+                                    MetadataBadge::new(format!(
+                                        "{}d{}",
+                                        class.hp_die.count, class.hp_die.sides
+                                    ))
+                                    .with_color(egui::Color32::from_rgb(200, 50, 50))
+                                    .with_tooltip("Hit Die"),
+                                );
+
+                                badges.push(
+                                    MetadataBadge::new(format!(
+                                        "Prof:{}",
+                                        class.proficiencies.len()
+                                    ))
+                                    .with_color(egui::Color32::from_rgb(50, 200, 50))
+                                    .with_tooltip("Number of proficiencies"),
+                                );
+
+                                if let Some(school) = class.spell_school {
+                                    let (school_name, color) = match school {
+                                        SpellSchool::Cleric => {
+                                            ("Cleric", egui::Color32::from_rgb(255, 215, 0))
+                                        }
+                                        SpellSchool::Sorcerer => {
+                                            ("Sorcerer", egui::Color32::from_rgb(138, 43, 226))
+                                        }
+                                    };
+                                    badges.push(
+                                        MetadataBadge::new(school_name)
+                                            .with_color(color)
+                                            .with_tooltip("Spell school"),
+                                    );
+
+                                    if class.is_pure_caster {
+                                        badges.push(
+                                            MetadataBadge::new("Pure Caster")
+                                                .with_color(egui::Color32::from_rgb(100, 100, 255))
+                                                .with_tooltip("Full spellcasting progression"),
+                                        );
+                                    }
+                                }
+
+                                let config = StandardListItemConfig::new(&class.name)
+                                    .with_badges(badges)
+                                    .selected(selected_class_idx == Some(*idx));
+
+                                let (clicked, ctx_action) = show_standard_list_item(row_ui, config);
+
+                                if clicked {
+                                    new_selection = Some(*idx);
+                                }
+
+                                if ctx_action != ItemAction::None {
+                                    action_requested = Some((*idx, ctx_action));
+                                }
+                            });
                         }
                     },
                     |right_ui| {
@@ -513,14 +571,6 @@ impl ClassesEditorState {
                                 classes_snapshot.iter().find(|(i, _)| *i == idx)
                             {
                                 right_ui.heading(&class.name);
-                                right_ui.separator();
-
-                                // Action buttons using shared component
-                                let action = ActionButtons::new().enabled(true).show(right_ui);
-                                if action != ItemAction::None {
-                                    action_requested = Some(action);
-                                }
-
                                 right_ui.separator();
 
                                 egui::ScrollArea::vertical().show(right_ui, |ui| {
@@ -662,48 +712,40 @@ impl ClassesEditorState {
                 }
 
                 // Handle action button clicks after closures
-                if let Some(action) = action_requested {
+                if let Some((action_idx, action)) = action_requested {
+                    self.selected_class = Some(action_idx);
                     match action {
                         ItemAction::Edit => {
-                            if let Some(idx) = self.selected_class {
-                                self.start_edit_class(idx);
-                            }
+                            self.start_edit_class(action_idx);
                         }
                         ItemAction::Delete => {
-                            if let Some(idx) = self.selected_class {
-                                self.delete_class(idx);
-                                *unsaved_changes = true;
-                            }
+                            self.delete_class(action_idx);
+                            *unsaved_changes = true;
                         }
                         ItemAction::Duplicate => {
-                            if let Some(idx) = self.selected_class {
-                                if let Some(class) = self.classes.get(idx).cloned() {
-                                    let mut dup = class;
-                                    let base_id = dup.id.clone();
-                                    let mut suffix = 1;
-                                    while self.classes.iter().any(|c| c.id == dup.id) {
-                                        dup.id = format!("{}_copy{}", base_id, suffix);
-                                        suffix += 1;
-                                    }
-                                    self.classes.push(dup);
-                                    *unsaved_changes = true;
-                                    *status_message = "Class duplicated".to_string();
+                            if let Some(class) = self.classes.get(action_idx).cloned() {
+                                let mut dup = class;
+                                let base_id = dup.id.clone();
+                                let mut suffix = 1;
+                                while self.classes.iter().any(|c| c.id == dup.id) {
+                                    dup.id = format!("{}_copy{}", base_id, suffix);
+                                    suffix += 1;
                                 }
+                                self.classes.push(dup);
+                                *unsaved_changes = true;
+                                *status_message = "Class duplicated".to_string();
                             }
                         }
                         ItemAction::Export => {
-                            if let Some(idx) = self.selected_class {
-                                if let Some(class) = self.classes.get(idx) {
-                                    match ron::ser::to_string_pretty(class, Default::default()) {
-                                        Ok(contents) => {
-                                            ui.ctx().copy_text(contents);
-                                            *status_message =
-                                                "Copied class to clipboard".to_string();
-                                        }
-                                        Err(e) => {
-                                            *status_message =
-                                                format!("Failed to serialize class: {}", e);
-                                        }
+                            if let Some(class) = self.classes.get(action_idx) {
+                                match ron::ser::to_string_pretty(class, Default::default()) {
+                                    Ok(contents) => {
+                                        ui.ctx().copy_text(contents);
+                                        *status_message = "Copied class to clipboard".to_string();
+                                    }
+                                    Err(e) => {
+                                        *status_message =
+                                            format!("Failed to serialize class: {}", e);
                                     }
                                 }
                             }

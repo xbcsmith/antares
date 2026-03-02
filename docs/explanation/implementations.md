@@ -55,6 +55,7 @@
 | **Buy and Sell — Phase 7: Campaign Builder — Stock Template and Container Item Editor** | ✅ COMPLETE | 2026-07-18 | **New `StockTemplatesEditorState` tab; `Container` event type in map editor; NPC stock-template drop-down; cross-tab navigation; validation cross-checks; 35 new tests** |
 | **Combat Bug Fix: Monster-First Initiative + Incapacitated-Monster Turn Deadlock** | ✅ COMPLETE | 2026-07-18 | **`handle_combat_started` now initialises `CombatTurnStateResource` from the first actor in `turn_order`; `execute_monster_turn` advances the turn when `can_act()==false`; `execute_monster_turn` scheduled after `update_combat_ui`; 2 regression tests** |
 | **Config Editor — Inventory Key Binding** | ✅ COMPLETE | 2026-07-18 | **Added missing Inventory key binding slot to Campaign Builder → Config Editor → Controls section; 5 new tests** |
+| **Left Panel Standardization — Phase 5 (Classes Editor)** | ✅ COMPLETE | 2026-03-02 | **Classes list migrated to `StandardListItemConfig` with Hit Die, Proficiency count, Spell School, and Pure Caster badges; context-menu actions wired from left panel** |
 
 **Total Lines Implemented**: 10,600+ lines of production code + 6,200+ lines of documentation
 **Total Tests**: 541+ new tests (all passing), 2,797 total tests passing
