@@ -583,6 +583,11 @@ impl GameState {
         // Preserve campaign-specific game configuration for state
         let campaign_config = campaign.game_config.clone();
 
+        // Initialise the game clock from the campaign's configured starting time.
+        // Campaign authors set this in config.ron via `starting_time: (day: N, hour: H, minute: M)`.
+        // Falls back to Day 1, 08:00 when the field is absent (serde default).
+        let starting_time = campaign.config.starting_time;
+
         let mut state = Self {
             campaign: Some(campaign),
             world: World::new(),
@@ -591,7 +596,7 @@ impl GameState {
             active_spells: ActiveSpells::new(),
             config: campaign_config,
             mode: GameMode::Exploration,
-            time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
+            time: starting_time,
             quests: QuestLog::new(),
             encountered_characters: std::collections::HashSet::new(),
             npc_runtime: NpcRuntimeStore::new(),
@@ -2075,6 +2080,7 @@ mod tests {
                 allow_multiclassing: false,
                 starting_level: 1,
                 max_level: 20,
+                starting_time: crate::domain::types::GameTime::new(1, 8, 0),
             },
             data: crate::sdk::campaign_loader::CampaignData {
                 items: "items.ron".to_string(),
@@ -2238,6 +2244,7 @@ mod tests {
                 allow_multiclassing: false,
                 starting_level: 1,
                 max_level: 20,
+                starting_time: crate::domain::types::GameTime::new(1, 8, 0),
             },
             data: crate::sdk::campaign_loader::CampaignData {
                 items: "items.ron".to_string(),

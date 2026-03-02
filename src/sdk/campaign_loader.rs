@@ -32,7 +32,7 @@
 //! # }
 //! ```
 
-use crate::domain::types::{Direction, Position};
+use crate::domain::types::{Direction, GameTime, Position};
 use crate::sdk::database::ContentDatabase;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -185,6 +185,14 @@ pub struct CampaignConfig {
     /// Maximum character level
     #[serde(default = "default_max_level")]
     pub max_level: u8,
+
+    /// Starting game time for a new campaign (day, hour, minute).
+    ///
+    /// Defaults to Day 1, 08:00 (morning) if not specified in the RON file.
+    /// The `serde(default)` attribute ensures existing `campaign.ron` files that
+    /// lack this field continue to deserialize correctly.
+    #[serde(default = "default_starting_time")]
+    pub starting_time: GameTime,
 }
 
 fn default_starting_innkeeper() -> String {
@@ -205,6 +213,11 @@ fn default_starting_level() -> u8 {
 
 fn default_max_level() -> u8 {
     20
+}
+
+/// Default starting time: Day 1, 08:00 — campaign begins in the morning.
+fn default_starting_time() -> GameTime {
+    GameTime::new(1, 8, 0)
 }
 
 /// Difficulty levels
@@ -463,6 +476,11 @@ pub struct CampaignMetadata {
     pub characters_file: String,
     #[serde(default = "default_creatures_path")]
     pub creatures_file: String,
+    /// Starting game time for a new campaign (day, hour, minute).
+    ///
+    /// Defaults to Day 1, 08:00 (morning) if not specified in the RON file.
+    #[serde(default = "default_starting_time")]
+    pub starting_time: GameTime,
 }
 
 impl TryFrom<CampaignMetadata> for Campaign {
@@ -514,6 +532,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 allow_multiclassing: metadata.allow_multiclassing,
                 starting_level: metadata.starting_level,
                 max_level: metadata.max_level,
+                starting_time: metadata.starting_time,
             },
             data: CampaignData {
                 items: metadata.items_file,
@@ -775,6 +794,7 @@ mod tests {
             allow_multiclassing: false,
             starting_level: default_starting_level(),
             max_level: default_max_level(),
+            starting_time: default_starting_time(),
         };
 
         assert_eq!(config.max_party_size, 6);
@@ -782,6 +802,86 @@ mod tests {
         assert_eq!(config.starting_level, 1);
         assert_eq!(config.max_level, 20);
         assert_eq!(config.difficulty, Difficulty::Normal);
+    }
+
+    /// `CampaignConfig::default_starting_time` returns Day 1, 08:00.
+    #[test]
+    fn test_campaign_config_starting_time_default() {
+        let t = default_starting_time();
+        assert_eq!(t.day, 1, "default day should be 1");
+        assert_eq!(t.hour, 8, "default hour should be 8 (morning)");
+        assert_eq!(t.minute, 0, "default minute should be 0");
+    }
+
+    /// Serialise a `CampaignConfig` with a custom `starting_time` to RON and
+    /// round-trip it back; the field must survive unchanged.
+    #[test]
+    fn test_campaign_config_starting_time_roundtrip() {
+        use crate::domain::types::GameTime;
+
+        let original = CampaignConfig {
+            starting_map: 1,
+            starting_position: Position::new(0, 0),
+            starting_direction: Direction::North,
+            starting_gold: 0,
+            starting_food: 0,
+            starting_innkeeper: default_starting_innkeeper(),
+            max_party_size: default_max_party_size(),
+            max_roster_size: default_max_roster_size(),
+            difficulty: Difficulty::default(),
+            permadeath: false,
+            allow_multiclassing: false,
+            starting_level: 1,
+            max_level: 20,
+            starting_time: GameTime::new(3, 22, 30),
+        };
+
+        let ron_str = ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default())
+            .expect("serialization failed");
+
+        let deserialized: CampaignConfig = ron::from_str(&ron_str).expect("deserialization failed");
+
+        assert_eq!(deserialized.starting_time.day, 3);
+        assert_eq!(deserialized.starting_time.hour, 22);
+        assert_eq!(deserialized.starting_time.minute, 30);
+    }
+
+    /// Deserialising a RON string that lacks the `starting_time` key must
+    /// silently fall back to Day 1, 08:00 via `serde(default)`.
+    #[test]
+    fn test_campaign_config_missing_starting_time_uses_default() {
+        // Minimal RON that omits `starting_time`
+        let ron_str = r#"(
+            starting_map: 1,
+            starting_position: (x: 0, y: 0),
+            starting_direction: North,
+            starting_gold: 100,
+            starting_food: 50,
+            starting_innkeeper: "tutorial_innkeeper_town",
+            max_party_size: 6,
+            max_roster_size: 20,
+            difficulty: Normal,
+            permadeath: false,
+            allow_multiclassing: false,
+            starting_level: 1,
+            max_level: 20,
+        )"#;
+
+        let config: CampaignConfig =
+            ron::from_str(ron_str).expect("deserialization of minimal RON failed");
+
+        assert_eq!(
+            config.starting_time.day, 1,
+            "missing field → day defaults to 1"
+        );
+        assert_eq!(
+            config.starting_time.hour, 8,
+            "missing field → hour defaults to 8"
+        );
+        assert_eq!(
+            config.starting_time.minute, 0,
+            "missing field → minute defaults to 0"
+        );
     }
 
     #[test]
@@ -847,6 +947,20 @@ mod tests {
             campaign.config.starting_innkeeper,
             "tutorial_innkeeper_town".to_string()
         );
+    }
+
+    /// Loading the test_campaign fixture must populate `starting_time` with the
+    /// explicit value written in `data/test_campaign/campaign.ron`.
+    #[test]
+    fn test_test_campaign_has_explicit_starting_time() {
+        let loader = CampaignLoader::new("data");
+        let campaign = loader
+            .load_campaign("test_campaign")
+            .expect("Failed to load test_campaign");
+
+        assert_eq!(campaign.config.starting_time.day, 1);
+        assert_eq!(campaign.config.starting_time.hour, 8);
+        assert_eq!(campaign.config.starting_time.minute, 0);
     }
 
     #[test]

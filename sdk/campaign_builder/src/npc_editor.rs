@@ -1718,6 +1718,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         state.start_edit_npc(0);
@@ -1754,6 +1758,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -1795,6 +1803,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         // Edit it
@@ -1824,6 +1836,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         assert!(state.matches_filters(&npc));
     }
@@ -1845,6 +1861,10 @@ mod tests {
             faction: None,
             is_merchant: true,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         assert!(state.matches_filters(&npc));
 
@@ -1860,6 +1880,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: true,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         assert!(!state.matches_filters(&npc2));
     }
@@ -1881,6 +1905,10 @@ mod tests {
             faction: None,
             is_merchant: true,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         assert!(state.matches_filters(&merchant));
 
@@ -1896,6 +1924,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         assert!(!state.matches_filters(&non_merchant));
     }
@@ -1919,6 +1951,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         let id2 = state.next_npc_id();
@@ -1963,6 +1999,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         state.start_edit_npc(0);
@@ -2024,6 +2064,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         state.mode = NpcEditorMode::Add;
@@ -2173,6 +2217,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         // Start editing

@@ -2070,6 +2070,10 @@ mod tests {
             faction: Some("Village".to_string()),
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         manager.scan_references(&[], &[], &[], &[], &[], &[], &[npc]);
@@ -2129,6 +2133,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         manager.scan_references(&[], &[], &[], &[], &[], &[], &[npc]);
@@ -2213,6 +2221,10 @@ mod tests {
                 faction: Some("Village".to_string()),
                 is_merchant: false,
                 is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
             },
             antares::domain::world::npc::NpcDefinition {
                 id: "tutorial_merchant_town".to_string(),
@@ -2226,6 +2238,10 @@ mod tests {
                 faction: Some("Merchants Guild".to_string()),
                 is_merchant: true,
                 is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
             },
             antares::domain::world::npc::NpcDefinition {
                 id: "tutorial_wizard_arcturus_brother".to_string(),
@@ -2239,6 +2255,10 @@ mod tests {
                 faction: Some("Village".to_string()),
                 is_merchant: false,
                 is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
             },
         ];
 

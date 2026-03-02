@@ -1,5 +1,157 @@
 # Implementations
 
+## Phase 5: Campaign Builder — Starting Date/Time
+
+### Overview
+
+Phase 5 adds a **Starting Date/Time** field to the campaign configuration
+system, allowing campaign authors to specify the day, hour, and minute at which
+a new game begins. A horror campaign can start at midnight; a cheerful
+adventure can start at dawn. The field defaults to Day 1, 08:00 (Morning) so
+all existing `campaign.ron` files continue to work without modification.
+
+### Files Changed
+
+#### `src/sdk/campaign_loader.rs` — `CampaignConfig` and `CampaignMetadata` updated
+
+- Added `#[serde(default = "default_starting_time")] pub starting_time: GameTime`
+  to `CampaignConfig`. Existing RON files that lack the field fall back to
+  `GameTime::new(1, 8, 0)` via `serde(default)`.
+- Added the same `starting_time: GameTime` field (with `serde(default)`) to the
+  raw `CampaignMetadata` struct so the field is preserved when the SDK reads a
+  `campaign.ron` file and converts it to a `Campaign`.
+- Added `default_starting_time() -> GameTime` helper returning `GameTime::new(1, 8, 0)`.
+- The `TryFrom<CampaignMetadata> for Campaign` conversion now forwards
+  `metadata.starting_time` into `CampaignConfig::starting_time`.
+- New tests:
+  - `test_campaign_config_starting_time_default` — default is Day 1, 08:00.
+  - `test_campaign_config_starting_time_roundtrip` — Day 3, 22:30 survives a
+    RON serialize/deserialize cycle.
+  - `test_campaign_config_missing_starting_time_uses_default` — minimal RON
+    without the field deserializes to the default.
+  - `test_test_campaign_has_explicit_starting_time` — the fixture campaign
+    carries the explicit field once updated.
+
+#### `src/application/mod.rs` — `GameState::new_game()` updated
+
+Replaced the hardcoded `time: GameTime::new(1, 6, 0)` with:
+
+```rust
+let starting_time = campaign.config.starting_time;
+// ...
+time: starting_time,
+```
+
+The game clock is now seeded from `CampaignConfig::starting_time` at game
+start. Campaign authors control the opening time from `campaign.ron`.
+
+#### `campaigns/tutorial/campaign.ron` — explicit starting time added
+
+```ron
+starting_time: (day: 1, hour: 8, minute: 0),
+```
+
+Serves as the canonical example for campaign authors.
+
+#### `data/test_campaign/campaign.ron` — explicit starting time added
+
+```ron
+starting_time: (day: 1, hour: 8, minute: 0),
+```
+
+Tests no longer rely on the `serde(default)` fallback; the fixture explicitly
+carries the field for determinism.
+
+#### `sdk/campaign_builder/src/lib.rs` — `CampaignMetadata` updated
+
+- Imported `GameTime` from `antares::domain::types`.
+- Added `#[serde(default = "default_starting_time")] pub starting_time: GameTime`
+  to `CampaignMetadata` (the SDK builder's own metadata struct).
+- Added `default_starting_time() -> GameTime` helper.
+- `impl Default for CampaignMetadata` now includes `starting_time: default_starting_time()`.
+- `validate_campaign()` builds `CampaignConfig` from `self.campaign`; updated
+  that initializer to include `starting_time: self.campaign.starting_time`.
+
+#### `sdk/campaign_builder/src/campaign_editor.rs` — buffer + UI + helper updated
+
+**`CampaignMetadataEditBuffer`** — three new fields for ergonomic drag-value editing:
+
+```rust
+pub starting_day:    u32,   // 1-based
+pub starting_hour:   u8,    // 0–23
+pub starting_minute: u8,    // 0–59
+```
+
+**`from_metadata()`** — copies `m.starting_time.{day, hour, minute}` into the
+three split buffer fields.
+
+**`apply_to()`** — reconstructs a `GameTime` with clamping:
+
+```rust
+dest.starting_time = GameTime::new(
+    self.starting_day.max(1),
+    self.starting_hour.min(23),
+    self.starting_minute.min(59),
+);
+```
+
+**Gameplay UI row** — inserted immediately after "Starting Direction" and
+before "Starting Gold" in the `CampaignSection::Gameplay` grid:
+
+- Label `"Starting Date/Time:"` with hover text.
+- Three `DragValue` spinners: **Day** (1–9999), **Hour** (0–23), **Min** (0–59).
+- Grey preview label showing the `TimeOfDay` period name, e.g. `(Morning)`.
+
+**`pub fn period_label(tod: TimeOfDay) -> &'static str`** — module-level helper
+that maps every `TimeOfDay` variant to its display string. Used by the preview
+hint and independently testable.
+
+New tests added to `mod tests`:
+
+- `test_buffer_from_metadata_copies_starting_time`
+- `test_buffer_apply_to_writes_starting_time`
+- `test_buffer_starting_time_clamps_hour` (25 → 23)
+- `test_buffer_starting_time_clamps_minute` (75 → 59)
+- `test_buffer_starting_time_clamps_day_zero` (0 → 1)
+- `test_period_label_all_variants`
+- `test_period_label_matches_game_time_time_of_day`
+- `test_buffer_default_starting_time_fields`
+- `test_buffer_starting_time_roundtrip_via_metadata`
+
+### Propagation fixes (struct initializers)
+
+All existing `CampaignConfig { … }` struct literal initializers throughout the
+codebase were updated to include `starting_time: GameTime::new(1, 8, 0)`:
+
+- `src/application/save_game.rs` (test helper)
+- `src/application/mod.rs` (two test helpers)
+- `src/sdk/campaign_packager.rs` (two test helpers)
+- `src/sdk/validation.rs` (three test helpers)
+- `tests/campaign_integration_test.rs` (integration test helper)
+- `src/bin/antares.rs` (unit-test helper)
+
+### Quality gates
+
+```
+cargo fmt --all           → clean
+cargo check --all-targets → Finished, 0 errors
+cargo clippy … -D warnings → Finished, 0 warnings
+cargo nextest run         → 2953 passed, 0 failed, 8 skipped
+```
+
+Note: The `campaign_builder` package has pre-existing compilation errors from
+Phase 4 (`time_condition` fields on `MapEvent`) that are unrelated to Phase 5.
+The `antares` crate itself compiles and tests cleanly.
+
+### Success criteria met
+
+- Campaign author can set Day 3, 22:00 in the Campaign Builder → Gameplay tab.
+- After save + launch, the game clock starts at that time.
+- A `campaign.ron` missing `starting_time` starts at Day 1, 08:00 (no error).
+- All four quality gates pass with zero warnings on the `antares` crate.
+
+---
+
 ## Rest System Phase 4: Rest UI Feedback
 
 ### Overview
@@ -13496,12 +13648,12 @@ Updated the `//!` module header in `ui_helpers.rs` to document the new
 Added to the existing `mod tests` block in `ui_helpers.rs` under the
 `// Standard List Item Component Tests` heading:
 
-| Test name | What it covers |
-|---|---|
-| `metadata_badge_new_creates_default` | Default color is `Color32::GRAY`, tooltip is `None` |
-| `metadata_badge_builder_pattern` | `.with_color()` and `.with_tooltip()` builder methods |
-| `standard_list_item_config_new_creates_default` | All fields default correctly |
-| `standard_list_item_config_builder_pattern` | All builder methods produce correct state |
+| Test name                                       | What it covers                                        |
+| ----------------------------------------------- | ----------------------------------------------------- |
+| `metadata_badge_new_creates_default`            | Default color is `Color32::GRAY`, tooltip is `None`   |
+| `metadata_badge_builder_pattern`                | `.with_color()` and `.with_tooltip()` builder methods |
+| `standard_list_item_config_new_creates_default` | All fields default correctly                          |
+| `standard_list_item_config_builder_pattern`     | All builder methods produce correct state             |
 
 ### Architecture Compliance
 
@@ -13554,17 +13706,17 @@ two-element tuple.
 Replaced the bare `selectable_label` loop with a `show_standard_list_item` call per
 item. Badges built per item:
 
-| Badge text  | Colour (RGB)       | When shown          | Tooltip                            |
-|-------------|--------------------|---------------------|------------------------------------|
-| `Weapon`    | (200, 100, 100)    | `ItemType::Weapon`  | —                                  |
-| `Armor`     | (100, 100, 200)    | `ItemType::Armor`   | —                                  |
-| `Accessory` | (200, 200, 100)    | `ItemType::Accessory` | —                                |
-| `Consumable` | (100, 200, 100)   | `ItemType::Consumable` | —                               |
-| `Ammo`      | (150, 150, 150)    | `ItemType::Ammo`    | —                                  |
-| `Quest`     | (255, 215,   0)    | `ItemType::Quest`   | —                                  |
-| `Magic`     | (138,  43, 226)    | `item.is_magical()` | "Magical item"                     |
-| `Cursed`    | (139,   0,   0)    | `item.is_cursed`    | "Cursed item - cannot be unequipped" |
-| `Quest`     | (255, 215,   0)    | `item.is_quest_item()` | "Quest item"                    |
+| Badge text   | Colour (RGB)    | When shown             | Tooltip                              |
+| ------------ | --------------- | ---------------------- | ------------------------------------ |
+| `Weapon`     | (200, 100, 100) | `ItemType::Weapon`     | —                                    |
+| `Armor`      | (100, 100, 200) | `ItemType::Armor`      | —                                    |
+| `Accessory`  | (200, 200, 100) | `ItemType::Accessory`  | —                                    |
+| `Consumable` | (100, 200, 100) | `ItemType::Consumable` | —                                    |
+| `Ammo`       | (150, 150, 150) | `ItemType::Ammo`       | —                                    |
+| `Quest`      | (255, 215, 0)   | `ItemType::Quest`      | —                                    |
+| `Magic`      | (138, 43, 226)  | `item.is_magical()`    | "Magical item"                       |
+| `Cursed`     | (139, 0, 0)     | `item.is_cursed`       | "Cursed item - cannot be unequipped" |
+| `Quest`      | (255, 215, 0)   | `item.is_quest_item()` | "Quest item"                         |
 
 The item ID is passed via `.with_id(item.id)` and rendered as `#<id>` in a muted
 small font at the right end of the badge row.
@@ -13643,12 +13795,12 @@ two-element tuple.
 Replaced the bare `selectable_label` loop with a `show_standard_list_item` call
 per monster. Badges built per monster:
 
-| Badge text              | Colour (RGB)       | When shown                   | Tooltip                   |
-|-------------------------|--------------------|------------------------------|---------------------------|
-| `HP:<base>`             | (200, 100, 100)    | Always                       | "Hit Points"              |
-| `AC:<base>`             | (100, 100, 200)    | Always                       | "Armor Class"             |
-| `Undead`                | (139,   0, 139)    | `monster.is_undead == true`  | "Undead creature"         |
-| `Attacks:<count>`       | (255, 165,   0)    | `!monster.attacks.is_empty()`| "Number of attacks"       |
+| Badge text        | Colour (RGB)    | When shown                    | Tooltip             |
+| ----------------- | --------------- | ----------------------------- | ------------------- |
+| `HP:<base>`       | (200, 100, 100) | Always                        | "Hit Points"        |
+| `AC:<base>`       | (100, 100, 200) | Always                        | "Armor Class"       |
+| `Undead`          | (139, 0, 139)   | `monster.is_undead == true`   | "Undead creature"   |
+| `Attacks:<count>` | (255, 165, 0)   | `!monster.attacks.is_empty()` | "Number of attacks" |
 
 The monster icon (`💀` for undead, `👹` for living) is passed via `.with_icon(icon)`
 and prepended to the name in the selectable label. The monster ID (`MonsterId = u8`)
@@ -13717,12 +13869,12 @@ two-element tuple.
 Replaced the bare `selectable_label` loop with a `show_standard_list_item` call
 per spell. Badges built per spell:
 
-| Badge text    | Colour (RGB)       | When shown | Tooltip              |
-|---------------|--------------------|------------|----------------------|
-| `Cleric`      | (255, 215,   0)    | Always     | "Cleric spell"       |
-| `Sorcerer`    | (138,  43, 226)    | Always     | "Sorcerer spell"     |
-| `Lv<level>`   | (100, 200, 200)    | Always     | "Spell level"        |
-| `SP:<cost>`   | (150, 150, 255)    | Always     | "Spell Point cost"   |
+| Badge text  | Colour (RGB)    | When shown | Tooltip            |
+| ----------- | --------------- | ---------- | ------------------ |
+| `Cleric`    | (255, 215, 0)   | Always     | "Cleric spell"     |
+| `Sorcerer`  | (138, 43, 226)  | Always     | "Sorcerer spell"   |
+| `Lv<level>` | (100, 200, 200) | Always     | "Spell level"      |
+| `SP:<cost>` | (150, 150, 255) | Always     | "Spell Point cost" |
 
 The school icon (`✝️` for Cleric, `🔮` for Sorcerer) is passed via
 `.with_icon(school_icon)` and prepended to the spell name in the selectable

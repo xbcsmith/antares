@@ -89,7 +89,7 @@ use antares::domain::items::types::{
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
 use antares::domain::proficiency::ProficiencyDefinition;
 use antares::domain::quest::{Quest, QuestId};
-use antares::domain::types::{CreatureId, DiceRoll, ItemId, MapId, MonsterId, SpellId};
+use antares::domain::types::{CreatureId, DiceRoll, GameTime, ItemId, MapId, MonsterId, SpellId};
 use antares::domain::visual::CreatureReference;
 use antares::domain::world::npc_runtime::MerchantStockTemplate;
 use antares::domain::world::Map;
@@ -369,6 +369,14 @@ pub struct CampaignMetadata {
     /// Relative path to the NPC stock templates RON file
     #[serde(default = "default_stock_templates_file")]
     pub stock_templates_file: String,
+
+    /// Starting game time for a new campaign (day, hour, minute).
+    ///
+    /// Defaults to Day 1, 08:00 (morning) if not specified in the RON file.
+    /// The `serde(default)` attribute ensures existing `campaign.ron` files that
+    /// lack this field continue to deserialize correctly.
+    #[serde(default = "default_starting_time")]
+    pub starting_time: GameTime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -416,6 +424,11 @@ fn default_stock_templates_file() -> String {
     "data/npc_stock_templates.ron".to_string()
 }
 
+/// Default starting time: Day 1, 08:00 — campaign begins in the morning.
+fn default_starting_time() -> GameTime {
+    GameTime::new(1, 8, 0)
+}
+
 impl Default for CampaignMetadata {
     fn default() -> Self {
         Self {
@@ -454,6 +467,7 @@ impl Default for CampaignMetadata {
             proficiencies_file: "data/proficiencies.ron".to_string(),
             creatures_file: "data/creatures.ron".to_string(),
             stock_templates_file: "data/npc_stock_templates.ron".to_string(),
+            starting_time: default_starting_time(),
         }
     }
 }
@@ -2835,6 +2849,7 @@ impl CampaignBuilderApp {
                 allow_multiclassing: self.campaign.allow_multiclassing,
                 starting_level: self.campaign.starting_level,
                 max_level: self.campaign.max_level,
+                starting_time: self.campaign.starting_time,
             };
 
             let config_errors = validator.validate_campaign_config(&config);
@@ -5744,6 +5759,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         app.npc_editor_state.npcs.push(npc);
 
@@ -6868,6 +6887,8 @@ mod tests {
             conditions_file: "data/conditions.ron".to_string(),
             npcs_file: "data/npcs.ron".to_string(),
             proficiencies_file: "data/proficiencies.ron".to_string(),
+            stock_templates_file: "data/npc_stock_templates.ron".to_string(),
+            starting_time: default_starting_time(),
         };
 
         let ron_config = ron::ser::PrettyConfig::new()

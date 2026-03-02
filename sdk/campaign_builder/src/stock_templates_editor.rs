@@ -1403,8 +1403,10 @@ mod tests {
 
     #[test]
     fn test_to_template_validates_empty_id() {
-        let mut buf = StockTemplateEditBuffer::default();
-        buf.id = String::new();
+        let buf = StockTemplateEditBuffer {
+            id: String::new(),
+            ..StockTemplateEditBuffer::default()
+        };
         let mut warnings = Vec::new();
         let result = buf.to_template(&[], StockTemplatesEditorMode::Add, &mut warnings);
         assert!(result.is_err());
@@ -1420,7 +1422,7 @@ mod tests {
 
     #[test]
     fn test_to_template_validates_invalid_item_id() {
-        let mut buf = StockTemplateEditBuffer {
+        let buf = StockTemplateEditBuffer {
             id: "test_tmpl".to_string(),
             entries: vec![TemplateEntryBuffer {
                 item_id: "not_a_number".to_string(),

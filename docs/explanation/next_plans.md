@@ -522,13 +522,15 @@ Write a plan with a phased approach to implementing a time system in the game en
 
 ✅ COMPLETE - [Time System Implementation Plan](./time_system_implementation_plan.md)
 
+NEED TODO PHASE 5 SDK WORK
+
 ### Rest System
 
 We need a party rest system to heal characters. Bind rest to the R key and make it configurable in the game config. When the player presses the rest key, the party should rest and heal a certain amount of HP. The amount of HP healed should be based on the amount of time rested. Resting for 12 hours fully heals a party. The rest system should also have a chance to trigger random encounters while resting.
 
 Write a plan with a phased approach to implementing a rest system in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Rest System Implementation Plan](./rest_system_implementation_plan.md)
+✅ COMPLETE - [Rest System Implementation Plan](./rest_system_implementation_plan.md)
 
 ### Game Log
 
