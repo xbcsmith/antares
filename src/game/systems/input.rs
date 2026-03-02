@@ -582,6 +582,13 @@ fn handle_input(
         return;
     }
 
+    // Block all movement/interaction input when resting.
+    // The rest orchestration system drives the rest sequence; the player
+    // cannot walk away mid-rest.
+    if matches!(game_state.mode, crate::application::GameMode::Resting(_)) {
+        return;
+    }
+
     let world = &mut game_state.world;
     let mut moved = false;
 

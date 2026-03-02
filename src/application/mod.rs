@@ -63,6 +63,85 @@ pub enum GameMode {
     /// Container interaction split-screen inventory (opened with `E` when
     /// facing a chest, crate, hole in the wall, etc.).
     ContainerInventory(crate::application::container_inventory_state::ContainerInventoryState),
+    /// Party is resting — per-hour healing loop is running.
+    ///
+    /// Input is blocked during this mode (except `GameAction::Menu` which
+    /// cancels the rest in a future enhancement). The orchestration system
+    /// drives the rest sequence one hour per Bevy frame.
+    Resting(RestState),
+}
+
+// ===== Rest State =====
+
+/// Tracks progress of an in-progress party rest sequence.
+///
+/// Stored inside [`GameMode::Resting`] so that the rest orchestration system
+/// can advance the sequence one hour per Bevy frame and detect encounter
+/// interruptions.
+///
+/// A save made while resting serialises this state, so loading the save
+/// correctly resumes the rest sequence.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::RestState;
+///
+/// let state = RestState::new(12);
+/// assert_eq!(state.hours_requested, 12);
+/// assert_eq!(state.hours_completed, 0);
+/// assert!(!state.interrupted);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RestState {
+    /// Total hours of rest requested (e.g. 12 for a full rest).
+    pub hours_requested: u32,
+    /// Hours of rest completed so far.
+    pub hours_completed: u32,
+    /// Set when a random encounter interrupts the rest before completion.
+    pub interrupted: bool,
+}
+
+impl RestState {
+    /// Creates a new `RestState` for the given number of requested hours.
+    ///
+    /// # Arguments
+    ///
+    /// * `hours` — total hours of rest to attempt.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::RestState;
+    ///
+    /// let s = RestState::new(6);
+    /// assert_eq!(s.hours_requested, 6);
+    /// assert_eq!(s.hours_completed, 0);
+    /// assert!(!s.interrupted);
+    /// ```
+    pub fn new(hours: u32) -> Self {
+        Self {
+            hours_requested: hours,
+            hours_completed: 0,
+            interrupted: false,
+        }
+    }
+
+    /// Returns `true` when all requested hours have been completed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::RestState;
+    ///
+    /// let mut s = RestState::new(2);
+    /// assert!(!s.is_complete());
+    /// s.hours_completed = 2;
+    /// assert!(s.is_complete());
+    /// ```
+    pub fn is_complete(&self) -> bool {
+        self.hours_completed >= self.hours_requested
+    }
 }
 
 /// State for inn party management mode
@@ -1024,6 +1103,31 @@ impl GameState {
     /// Exits combat mode and returns to exploration
     pub fn exit_combat(&mut self) {
         self.mode = GameMode::Exploration;
+    }
+
+    /// Enters resting mode for the specified number of hours.
+    ///
+    /// Transitions the game to [`GameMode::Resting`] with a fresh
+    /// [`RestState`].  The rest orchestration system (`process_rest`) drives
+    /// the per-hour loop; callers should not call this while already in
+    /// `Resting` mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `hours` — number of in-game hours to rest (typically
+    ///   [`crate::domain::resources::REST_DURATION_HOURS`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_rest(12);
+    /// assert!(matches!(state.mode, GameMode::Resting(_)));
+    /// ```
+    pub fn enter_rest(&mut self, hours: u32) {
+        self.mode = GameMode::Resting(RestState::new(hours));
     }
 
     /// Enters inventory mode, storing the current mode for resume on close.

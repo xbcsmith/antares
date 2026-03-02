@@ -268,6 +268,9 @@ impl Plugin for AntaresPlugin {
 
         // Phase 2: Time-of-Day ambient lighting
         app.add_plugins(antares::game::systems::time::TimeOfDayPlugin);
+
+        // Phase 3: Rest orchestration system
+        app.add_plugins(antares::game::systems::rest::RestPlugin);
     }
 }
 
