@@ -67,6 +67,53 @@
 | **Left Panel Standardization — Phase 14 (Creatures Editor)** | ✅ COMPLETE | 2026-03-02 | **Creature registry list migrated to `StandardListItemConfig` with category, mesh-count, and ID-warning badges; list context-menu actions wired to existing Edit/Delete/Duplicate handlers** |
 | **Left Panel Standardization — Phase 15 (Campaign Editor)** | ✅ COMPLETE | 2026-03-02 | **Campaign section navigation migrated to `StandardListItemConfig` with Overview/Gameplay/Files/Advanced icons and context menu disabled for navigation entries** |
 
+## Left Panel Standardization (Campaign Builder) [Updated]
+
+**Date**: 2026-03-02
+**Scope**: Final integration summary for 14 standardized editors and shared list-item UI helpers.
+
+### Overview
+
+Left-panel list presentation across Campaign Builder now uses the shared
+`show_standard_list_item` + `StandardListItemConfig` pattern from
+`sdk/campaign_builder/src/ui_helpers.rs`, replacing per-editor ad-hoc
+`selectable_label` metadata formatting.
+
+### Standardized Components
+
+1. `MetadataBadge` - semantic badge text with color + optional tooltip.
+2. `StandardListItemConfig` - per-row configuration for labels, icon, badges, selection, context menu, and optional ID display.
+3. `show_standard_list_item` - consistent row rendering and context menu action dispatch.
+
+### Editor Coverage (All 14)
+
+1. Items
+2. Monsters
+3. Spells
+4. Classes
+5. Conditions
+6. Maps
+7. Quests
+8. Dialogue
+9. Characters
+10. Races
+11. Proficiencies
+12. NPCs
+13. Creatures
+14. Campaign (navigation list; context menu intentionally disabled)
+
+### Integration Verification
+
+- Shared quality gates executed and passing after each phase:
+  - `cargo fmt --all`
+  - `cargo check --all-targets --all-features`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - `cargo nextest run --all-features`
+- Latest full-suite result during Phase 15 validation:
+  - `2797` passed, `8` skipped (`1` leaky reported by nextest)
+- Context menus are enabled for data-list editors and disabled for Campaign section navigation.
+- Search/filter behavior and right-panel preview/selection flows were preserved by phase-specific checks.
+
 **Total Lines Implemented**: 10,600+ lines of production code + 6,200+ lines of documentation
 **Total Tests**: 541+ new tests (all passing), 2,797 total tests passing
 
