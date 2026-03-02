@@ -2069,6 +2069,7 @@ mod tests {
                 description: "A veteran smith".to_string(),
                 character_id: "npc_old_gareth".to_string(),
                 dialogue_id: None,
+                time_condition: None,
             },
         );
 
@@ -2159,6 +2160,7 @@ mod tests {
                 description: "A veteran smith".to_string(),
                 character_id: "npc_old_gareth".to_string(),
                 dialogue_id: None,
+                time_condition: None,
             },
         );
         game_state.world.add_map(map);
@@ -2229,6 +2231,7 @@ mod tests {
                 name: "Goblins".to_string(),
                 description: "Goblins lurk here".to_string(),
                 monster_group: vec![1],
+                time_condition: None,
             },
         );
 
@@ -2302,6 +2305,7 @@ mod tests {
                 name: "Trolls".to_string(),
                 description: "Trolls guard this tile".to_string(),
                 monster_group: vec![2],
+                time_condition: None,
             },
         );
 

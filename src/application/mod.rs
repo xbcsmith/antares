@@ -1065,7 +1065,7 @@ impl GameState {
         }
 
         // No random encounter (or a tile event exists) - handle tile event as before
-        let ev = crate::domain::world::trigger_event(&mut self.world, position)
+        let ev = crate::domain::world::trigger_event(&mut self.world, position, &self.time)
             .map_err(MoveHandleError::Event)?;
 
         match ev {

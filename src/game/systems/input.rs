@@ -643,6 +643,7 @@ fn handle_input(
                     name: npc.npc_id.clone(),
                     description: String::new(),
                     npc_id: npc.npc_id.clone(),
+                    time_condition: None,
                 },
                 position: npc.position,
             });
@@ -1756,6 +1757,7 @@ mod interaction_tests {
                 name: "TestSign".to_string(),
                 description: "This is a test sign".to_string(),
                 text: "You found it!".to_string(),
+                time_condition: None,
             },
         );
 
@@ -1861,6 +1863,7 @@ mod interaction_tests {
                 description: "A recruitable character".to_string(),
                 character_id: "hero_01".to_string(),
                 dialogue_id: None,
+                time_condition: None,
             },
         );
 
@@ -1894,6 +1897,7 @@ mod interaction_tests {
                 name: "Skeleton".to_string(),
                 description: "A rattling skeleton".to_string(),
                 monster_group: vec![1],
+                time_condition: None,
             },
         );
 

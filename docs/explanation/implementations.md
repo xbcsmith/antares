@@ -13389,3 +13389,165 @@ cargo nextest run …      → 2795 tests run: 2795 passed, 8 skipped
 - [x] RON format used for `npc_stock_templates.ron`
 - [x] `///` doc comments with `# Examples` on all new public functions
 - [x] SPDX header present in `stock_templates_editor.rs`
+
+## Time System Phase 4: Time-Triggered Events
+
+### Overview
+
+Phase 4 implements time-gated map events: campaign authors can now attach an
+optional `TimeCondition` to any `Encounter`, `Sign`, `NpcDialogue`, or
+`RecruitableCharacter` map event so it only fires during specific in-game
+time windows. A centralised `TimeAdvanceEvent` Bevy message replaces scattered
+direct mutations of `GlobalState`, and author-facing documentation was added.
+
+All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D
+warnings`, and `cargo nextest run` (2 949 tests, 0 failed).
+
+### Components Implemented
+
+#### `src/domain/world/types.rs` — `TimeCondition` enum (new)
+
+New public enum with four variants:
+
+| Variant                             | Fires when …                       |
+| ----------------------------------- | ---------------------------------- |
+| `DuringPeriods(Vec<TimeOfDay>)`     | current `TimeOfDay` is in the list |
+| `AfterDay(u32)`                     | `game_time.day > threshold`        |
+| `BeforeDay(u32)`                    | `game_time.day < threshold`        |
+| `BetweenHours { from: u8, to: u8 }` | `from <= hour <= to` (inclusive)   |
+
+A `None` condition means "always fires", preserving backward compatibility with
+all existing RON map files. `#[serde(default)]` on each carrier field ensures
+old data deserialises without errors.
+
+`TimeCondition::is_met(&self, &GameTime) -> bool` is a pure function with no
+Bevy dependency, making it trivially unit-testable.
+
+#### `src/domain/world/types.rs` — `time_condition` field on `MapEvent` variants
+
+`time_condition: Option<TimeCondition>` added to:
+
+- `MapEvent::Encounter`
+- `MapEvent::Sign`
+- `MapEvent::NpcDialogue`
+- `MapEvent::RecruitableCharacter`
+
+#### `src/domain/world/events.rs` — `trigger_event` signature change
+
+```
+pub fn trigger_event(
+    world: &mut World,
+    position: Position,
+    game_time: &GameTime,
+) -> Result<EventResult, EventError>
+```
+
+Before executing any event the function checks the event's `time_condition`
+against `game_time`. If the condition is not met it returns
+`EventResult::None` without consuming the event (so it may fire later when
+the condition becomes true).
+
+#### `src/domain/world/mod.rs` — `TimeCondition` re-export
+
+`TimeCondition` re-exported at the `domain::world` crate surface, consistent
+with the existing API.
+
+#### `src/application/mod.rs` — updated `trigger_event` caller
+
+`move_party_and_handle_events` (and all other application-layer call sites)
+updated to pass `&self.time` to `trigger_event`.
+
+#### `src/game/systems/time.rs` — `TimeAdvanceEvent` message and `apply_time_advance` system
+
+```rust
+/// Centralised Bevy message that requests a time advance of `minutes`.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeAdvanceEvent {
+    pub minutes: u32,
+}
+```
+
+New `apply_time_advance` system drains the `Messages<TimeAdvanceEvent>` queue
+each frame and calls `global_state.0.advance_time(minutes)`. Registered in
+`TimePlugin::build` to run `before(update_ambient_light)` so ambient light
+always reflects the same-frame time advance.
+
+#### `docs/how-to/authoring_time_events.md` — author documentation (new file)
+
+New how-to guide covering:
+
+- RON syntax for each `TimeCondition` variant
+- Backward compatibility guarantee (`None` default)
+- Cross-midnight `BetweenHours` caution
+- Testing hints (unit test + `data/test_campaign` fixture notes)
+
+### Tests Added
+
+All tests live under `src/domain/world/types.rs` in `mod time_condition_tests`
+and in `src/game/systems/time.rs` in `mod tests`.
+
+| Test                                                        | What it verifies                                    |
+| ----------------------------------------------------------- | --------------------------------------------------- |
+| `test_time_condition_during_periods_night_fires_at_night`   | `DuringPeriods([Night])` is met at hour 23          |
+| `test_time_condition_during_periods_night_skips_at_noon`    | same condition not met at hour 12                   |
+| `test_time_condition_multiple_periods`                      | `DuringPeriods([Evening, Night])` covers both       |
+| `test_time_condition_after_day_fires`                       | `AfterDay(5)` met when day = 6                      |
+| `test_time_condition_after_day_does_not_fire_on_exact_day`  | `AfterDay(5)` not met when day = 5                  |
+| `test_time_condition_before_day_fires`                      | `BeforeDay(10)` met when day = 9                    |
+| `test_time_condition_before_day_does_not_fire_on_exact_day` | `BeforeDay(10)` not met when day = 10               |
+| `test_time_condition_between_hours_fires`                   | `BetweenHours { from: 20, to: 23 }` met at hour 21  |
+| `test_time_condition_between_hours_at_from_boundary`        | met exactly at `from`                               |
+| `test_time_condition_between_hours_at_to_boundary`          | met exactly at `to`                                 |
+| `test_time_condition_between_hours_outside`                 | not met outside the window                          |
+| `test_apply_time_advance_advances_clock`                    | single `TimeAdvanceEvent` advances `GameTime`       |
+| `test_apply_time_advance_multiple_events`                   | multiple events in one frame aggregate              |
+| `test_time_advance_event_trait_bounds`                      | `Copy`, `Clone`, `Debug`, `PartialEq` all satisfied |
+
+### Deliverables Checklist
+
+- [x] `TimeCondition` enum in `src/domain/world/types.rs`
+- [x] `time_condition: Option<TimeCondition>` on applicable `MapEvent` variants
+- [x] `trigger_event` accepts `&GameTime` and evaluates conditions
+- [x] `TimeAdvanceEvent` Bevy message and `apply_time_advance` system in
+      `src/game/systems/time.rs`
+- [x] `docs/how-to/authoring_time_events.md` with example RON snippets
+- [x] All Phase 4 tests pass (2 949 tests, 0 failed)
+- [x] No test references `campaigns/tutorial`
+- [x] `///` doc comments with `# Examples` on all new public items
+- [x] SPDX headers present in all modified `.rs` files
+- [x] `cargo fmt` — no output
+- [x] `cargo check --all-targets --all-features` — Finished, 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — Finished, 0 warnings
+- [x] `cargo nextest run --all-features` — 2 949 passed, 0 failed
+
+### Success Criteria Verification
+
+> A campaign author can write a night-only encounter or a day-only merchant
+> that the engine correctly gates by the current `GameTime`. The event system
+> remains pure-function at the domain layer.
+
+✅ `TimeCondition::is_met` is a pure function — no Bevy types anywhere in the
+domain.
+✅ `trigger_event` accepts `&GameTime` (injected by the application layer) and
+gates events before any side-effects occur.
+✅ Backward compatibility: existing RON map files with no `time_condition` field
+deserialise to `None` and fire unconditionally, exactly as before.
+
+### Files Modified
+
+| File                                    | Change                                                                              |
+| --------------------------------------- | ----------------------------------------------------------------------------------- |
+| `src/domain/world/types.rs`             | `TimeCondition` enum, `is_met`, `time_condition` fields on four `MapEvent` variants |
+| `src/domain/world/events.rs`            | `trigger_event` signature + condition guard                                         |
+| `src/domain/world/mod.rs`               | `TimeCondition` re-export                                                           |
+| `src/application/mod.rs`                | pass `&self.time` to `trigger_event`                                                |
+| `src/game/systems/time.rs`              | `TimeAdvanceEvent`, `apply_time_advance`, plugin registration                       |
+| `src/bin/map_builder.rs`                | `time_condition: None` in `Sign` constructor                                        |
+| `tests/combat_integration.rs`           | `time_condition: None` in `Encounter` constructors                                  |
+| `tests/recruitment_integration_test.rs` | `time_condition: None` in `RecruitableCharacter` constructors and `..` in match arm |
+
+### Files Created
+
+| File                                   | Purpose                                  |
+| -------------------------------------- | ---------------------------------------- |
+| `docs/how-to/authoring_time_events.md` | RON authoring guide for campaign authors |
