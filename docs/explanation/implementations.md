@@ -1,5 +1,210 @@
 # Implementations
 
+## Rest System Phase 4: Rest UI Feedback
+
+### Overview
+
+Phase 4 completes the rest system by adding a visible rest-progress overlay,
+cycling flavour text, `GameLog` notification messages for completion and
+interruption, a `RestConfig` struct for campaign-level tuning, and wiring of
+`rest_encounter_rate_multiplier` into the per-hour encounter roll.
+
+### Components Implemented
+
+#### `src/sdk/game_config.rs` — `RestConfig` struct (new)
+
+A new top-level configuration struct for the rest system:
+
+```rust
+pub struct RestConfig {
+    pub full_rest_hours: u32,
+    pub rest_encounter_rate_multiplier: f32,
+    pub allow_partial_rest: bool,
+}
+```
+
+- `full_rest_hours` — how many in-game hours constitute a full rest (default 12).
+- `rest_encounter_rate_multiplier` — scales the encounter chance per rest-hour.
+  `0.0` disables encounters; `1.0` is normal; values above `1.0` increase the
+  rate. Must be `>= 0.0`.
+- `allow_partial_rest` — reserved for a future "choose your rest duration" UI;
+  always `false` in this phase.
+- `impl Default` returns `{ full_rest_hours: 12, rest_encounter_rate_multiplier: 1.0, allow_partial_rest: false }`.
+- `validate()` returns `ConfigError::ValidationError` if `full_rest_hours == 0`
+  or `rest_encounter_rate_multiplier < 0.0`.
+
+#### `src/sdk/game_config.rs` — `GameConfig` updated
+
+`GameConfig` gains a new `#[serde(default)] pub rest: RestConfig` field so
+that existing `config.ron` files without a `rest:` block continue to
+deserialise correctly using the struct's `Default` implementation.
+
+`GameConfig::validate()` now calls `self.rest.validate()`.
+
+#### `src/game/systems/rest.rs` — `RestProgressRoot` marker component (new)
+
+```rust
+#[derive(Component)]
+pub struct RestProgressRoot;
+```
+
+Marks the full-screen overlay node spawned by `setup_rest_ui`. The overlay
+is hidden (`Display::None`) by default and shown (`Display::Flex`) while the
+game is in `GameMode::Resting`.
+
+#### `src/game/systems/rest.rs` — `RestProgressLabel` marker component (new)
+
+```rust
+#[derive(Component)]
+pub struct RestProgressLabel;
+```
+
+Marks the `"Hour X / Y"` progress text node. Updated every frame by
+`update_rest_ui`.
+
+#### `src/game/systems/rest.rs` — `RestHintLabel` marker component (new)
+
+```rust
+#[derive(Component)]
+pub struct RestHintLabel;
+```
+
+Marks the cycling flavour text node. The displayed string is selected by
+`hours_completed % REST_FLAVOUR_MESSAGES.len()`.
+
+#### `src/game/systems/rest.rs` — `REST_FLAVOUR_MESSAGES` constant (new)
+
+A `&[&str; 12]` slice of rest-atmosphere messages cycled through the hint
+label (one per completed hour). Examples: `"The party settles in for the
+night."`, `"Distant sounds echo in the dark."`, etc.
+
+#### `src/game/systems/rest.rs` — `setup_rest_ui` system (new)
+
+A Bevy `Startup` system that spawns the rest-progress overlay hierarchy:
+
+```text
+RestProgressRoot  (full-screen, Display::None, ZIndex 100, semi-transparent black)
+  └─ column panel (centred)
+       ├─ title:    "Resting…"            (32 px, golden tint)
+       ├─ progress: "Hour 0 / 12"         (22 px) ← RestProgressLabel
+       ├─ hint:     first flavour message (16 px, green tint) ← RestHintLabel
+       └─ hint2:    "(encounter may interrupt)" (13 px, muted red)
+```
+
+#### `src/game/systems/rest.rs` — `update_rest_ui` system (new)
+
+A Bevy `Update` system chained after `handle_rest_complete`. Each frame:
+
+1. Reads `global_state.0.mode`.
+2. If `GameMode::Resting(rs)`: sets `RestProgressRoot` to `Display::Flex`,
+   updates progress label to `"Hour {} / {}", rs.hours_completed + 1, rs.hours_requested`,
+   and updates hint label to `REST_FLAVOUR_MESSAGES[rs.hours_completed % len]`.
+3. Otherwise: sets `RestProgressRoot` to `Display::None`.
+
+#### `src/game/systems/rest.rs` — `process_rest` updated
+
+The random-encounter section now reads
+`game_state.config.rest.rest_encounter_rate_multiplier`:
+
+- `multiplier <= 0.0` → skip the RNG roll entirely (no encounters).
+- `multiplier >= 1.0` → call `random_encounter()` normally.
+- `0.0 < multiplier < 1.0` → call `random_encounter()` then apply an
+  additional probability gate: keep the result only if
+  `rng.random::<f32>() < multiplier`.
+
+#### `src/game/systems/rest.rs` — `handle_rest_complete` updated
+
+Now accepts `mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>`
+and writes:
+
+- **On completion**: `"The party rests for the night and awakens refreshed."`
+- **On interruption**: `"Rest interrupted! Enemies attack!"`
+
+These messages surface in the existing `GameLog` used by dialogue, recruitment,
+and merchant systems.
+
+#### `src/game/systems/rest.rs` — `RestPlugin` updated
+
+`build()` now registers:
+
+- `Startup` system: `setup_rest_ui`
+- `Update` chain: `(process_rest, handle_rest_complete, update_rest_ui).chain()`
+
+#### `campaigns/config.template.ron` — updated
+
+Added a `rest: RestConfig(...)` block as a new top-level field of `GameConfig`
+with inline comments documenting all three fields and their valid ranges.
+
+#### `src/bin/antares.rs` — test helper updated
+
+The `create_test_campaign` helper's `GameConfig` struct literal gained
+`rest: Default::default()` to satisfy the exhaustiveness check introduced by
+the new field.
+
+### Tests Added
+
+All tests are in `src/game/systems/rest.rs` `mod tests`:
+
+| Test                                                   | What it verifies                                                                                                                |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `test_rest_config_zero_multiplier_prevents_encounters` | With `rest_encounter_rate_multiplier: 0.0`, a full 12-hour rest completes without interruption (mode returns to `Exploration`). |
+| `test_rest_progress_root_is_marker`                    | `RestProgressRoot` can be constructed as a unit struct.                                                                         |
+| `test_rest_progress_label_is_marker`                   | `RestProgressLabel` can be constructed as a unit struct.                                                                        |
+| `test_rest_hint_label_is_marker`                       | `RestHintLabel` can be constructed as a unit struct.                                                                            |
+| `test_rest_flavour_messages_non_empty`                 | `REST_FLAVOUR_MESSAGES` has at least one entry.                                                                                 |
+| `test_rest_flavour_messages_all_non_empty`             | Every string in `REST_FLAVOUR_MESSAGES` is non-empty.                                                                           |
+| `test_rest_flavour_index_never_out_of_bounds`          | `hours_completed % len` is always in-bounds for 0..=100.                                                                        |
+| `test_rest_plugin_builds_without_global_state`         | `RestPlugin` build + update does not panic without `GlobalState`.                                                               |
+| `test_rest_completion_message_emitted`                 | After a 1-hour rest completes, `GameLog` contains `"awakens refreshed"`.                                                        |
+| `test_rest_interrupt_message_emitted`                  | A pre-written interrupted `RestCompleteEvent` causes `GameLog` to contain `"interrupted"`.                                      |
+| `test_rest_ui_shows_during_resting_mode`               | While in `Resting` mode, `RestProgressRoot` has `Display::Flex`.                                                                |
+| `test_rest_ui_hides_after_completion`                  | After rest completes, `RestProgressRoot` has `Display::None`.                                                                   |
+
+`src/sdk/game_config.rs` `mod tests` gains:
+
+| Test                                                    | What it verifies                                                                            |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `test_rest_config_default_values`                       | Default values are `full_rest_hours=12`, `multiplier=1.0`, `allow_partial_rest=false`.      |
+| `test_rest_config_validation_success`                   | Default `RestConfig` validates without error.                                               |
+| `test_rest_config_validation_zero_hours_fails`          | `full_rest_hours = 0` returns `ValidationError`.                                            |
+| `test_rest_config_validation_negative_multiplier_fails` | `rest_encounter_rate_multiplier = -0.1` returns `ValidationError`.                          |
+| `test_rest_config_multiplier_zero_is_valid`             | `multiplier = 0.0` is accepted.                                                             |
+| `test_rest_config_multiplier_above_one_is_valid`        | `multiplier = 2.5` is accepted.                                                             |
+| `test_rest_config_ron_roundtrip`                        | `RestConfig` serialises and deserialises through RON without loss.                          |
+| `test_game_config_rest_field_default`                   | `GameConfig::default().rest` has the expected default values.                               |
+| `test_game_config_validates_rest_block`                 | `GameConfig` with `full_rest_hours = 0` fails validation.                                   |
+| `test_game_config_rest_defaults_when_missing_from_ron`  | A `GameConfig` RON string without a `rest:` block deserialises with `full_rest_hours = 12`. |
+
+### Deliverables Checklist
+
+- [x] `RestProgressRoot` marker component and overlay node
+- [x] `update_rest_ui` system updating progress label each frame
+- [x] Overlay shown/hidden based on `GameMode::Resting`
+- [x] Completion notification message (`"…awakens refreshed."`)
+- [x] Interruption notification message (`"Rest interrupted! Enemies attack!"`)
+- [x] `RestConfig` struct with `rest_encounter_rate_multiplier`
+- [x] `process_rest` reads `rest_encounter_rate_multiplier`
+- [x] `config.template.ron` updated with `rest:` block
+- [x] All phase-4 tests pass (2918 total; 0 failed)
+
+### Success Criteria Verification
+
+| Criterion                                                              | Status                                                                                   |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Player sees a clear rest progress overlay when resting                 | ✅ `RestProgressRoot` shown with `Display::Flex` during `Resting` mode                   |
+| Overlay updates each frame                                             | ✅ `update_rest_ui` runs every `Update` after `handle_rest_complete`                     |
+| Encounter-interrupted rest immediately exits overlay and begins combat | ✅ `handle_rest_complete` initiates combat; `update_rest_ui` hides overlay on next frame |
+| Campaign authors can disable rest encounters (`multiplier = 0.0`)      | ✅ Zero-multiplier path skips RNG roll; test confirms no interruption over 12+ frames    |
+
+### Files Modified
+
+| File                            | Change                                                                                                                                                                                                                                                                                                     |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/sdk/game_config.rs`        | Added `RestConfig` struct, `impl Default`, `impl RestConfig::validate`; added `rest: RestConfig` field to `GameConfig`; added 10 new tests                                                                                                                                                                 |
+| `src/game/systems/rest.rs`      | Added `RestProgressRoot`, `RestProgressLabel`, `RestHintLabel` components; `REST_FLAVOUR_MESSAGES` constant; `setup_rest_ui` and `update_rest_ui` systems; updated `process_rest` (multiplier logic) and `handle_rest_complete` (`GameLog` notifications); updated `RestPlugin::build`; added 12 new tests |
+| `src/bin/antares.rs`            | Added `rest: Default::default()` to `GameConfig` struct literal in test helper                                                                                                                                                                                                                             |
+| `campaigns/config.template.ron` | Added `rest: RestConfig(...)` block with inline documentation                                                                                                                                                                                                                                              |
+
 ## Implementation Status Overview
 
 | Phase                                              | Status      | Date       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |

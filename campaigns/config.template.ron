@@ -181,6 +181,31 @@ GameConfig(
         // false = no shadows (better performance)
         shadows_enabled: true,
     ),
+
+    // ========================================================================
+    // Rest System Configuration
+    // ========================================================================
+    rest: RestConfig(
+        // Full-rest duration in hours.
+        // Number of in-game hours for a complete rest that fully restores HP and SP.
+        // Must be at least 1.
+        // Default: 12 (one in-game night)
+        full_rest_hours: 12,
+
+        // Encounter check probability multiplier during rest.
+        // Scales the random-encounter chance for each rest-hour tick.
+        //   0.0 = no encounters during rest (safe area, town, inn)
+        //   1.0 = normal encounter rate (default, same as walking)
+        //   2.0 = doubled encounter rate (dangerous wilderness camp)
+        // Must be >= 0.0
+        rest_encounter_rate_multiplier: 1.0,
+
+        // Allow partial rest (rest for fewer than full_rest_hours).
+        // NOT YET IMPLEMENTED — keep false.
+        // When true in a future version, the player will be able to choose
+        // a shorter rest duration via the UI.
+        allow_partial_rest: false,
+    ),
 )
 
 // ============================================================================

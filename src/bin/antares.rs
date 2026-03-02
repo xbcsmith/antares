@@ -361,6 +361,7 @@ mod tests {
                 audio: Default::default(),
                 controls: ControlsConfig::default(),
                 camera: CameraConfig::default(),
+                rest: Default::default(),
             },
         }
     }
