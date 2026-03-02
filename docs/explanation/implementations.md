@@ -64,6 +64,7 @@
 | **Left Panel Standardization — Phase 11 (Races Editor)** | ✅ COMPLETE | 2026-03-02 | **Races list migrated to `StandardListItemConfig` with size and stat-modifier badges; right-panel action buttons removed in favor of left-panel context menu actions** |
 | **Left Panel Standardization — Phase 12 (Proficiencies Editor)** | ✅ COMPLETE | 2026-03-02 | **Proficiency list migrated to `StandardListItemConfig` with category badges and ID display; right-panel action buttons removed in favor of left-panel context menu actions** |
 | **Left Panel Standardization — Phase 13 (NPC Editor)** | ✅ COMPLETE | 2026-03-02 | **NPC list migrated to `StandardListItemConfig` with Merchant, Innkeeper, Quests, Dialogue, and Faction badges; right-panel list-mode action buttons removed in favor of left-panel context menu actions** |
+| **Left Panel Standardization — Phase 14 (Creatures Editor)** | ✅ COMPLETE | 2026-03-02 | **Creature registry list migrated to `StandardListItemConfig` with category, mesh-count, and ID-warning badges; list context-menu actions wired to existing Edit/Delete/Duplicate handlers** |
 
 **Total Lines Implemented**: 10,600+ lines of production code + 6,200+ lines of documentation
 **Total Tests**: 541+ new tests (all passing), 2,797 total tests passing
