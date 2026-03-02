@@ -10,8 +10,8 @@
 use crate::ui_helpers::{
     autocomplete_ability_list_selector, autocomplete_proficiency_list_selector,
     autocomplete_tag_list_selector, extract_item_tag_candidates, extract_proficiency_candidates,
-    extract_special_ability_candidates, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
-    TwoColumnLayout,
+    extract_special_ability_candidates, show_standard_list_item, EditorToolbar, ItemAction,
+    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::items::types::Item;
 use antares::domain::proficiency::{ProficiencyDatabase, ProficiencyDefinition, ProficiencyId};
@@ -590,24 +590,9 @@ impl RacesEditorState {
                             .id_salt("races_list_scroll")
                             .show(left_ui, |ui: &mut egui::Ui| {
                                 for (idx, race) in &races_snapshot {
-                                    let is_selected = selected_race_idx == Some(*idx);
-                                    let size_str = match race.size {
-                                        SizeCategory::Small => "S",
-                                        SizeCategory::Medium => "M",
-                                        SizeCategory::Large => "L",
-                                    };
+                                    ui.push_id(race.id.clone(), |row_ui| {
+                                        let mut badges = Vec::new();
 
-                                    let response = ui.selectable_label(is_selected, &race.name);
-
-                                    if response.clicked() {
-                                        new_selection.set(Some(*idx));
-                                    }
-
-                                    // Sub-text with badges and metadata
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(20.0);
-
-                                        // Size Badge
                                         let (size_text, size_color) = match race.size {
                                             SizeCategory::Small => {
                                                 ("Small", egui::Color32::LIGHT_GRAY)
@@ -617,72 +602,49 @@ impl RacesEditorState {
                                             }
                                             SizeCategory::Large => ("Large", egui::Color32::GOLD),
                                         };
-
-                                        ui.label(
-                                            egui::RichText::new(size_text)
-                                                .small()
-                                                .color(size_color),
+                                        badges.push(
+                                            MetadataBadge::new(size_text)
+                                                .with_color(size_color)
+                                                .with_tooltip("Race size category"),
                                         );
 
-                                        // Stat Modifiers summary
                                         let stats = &race.stat_modifiers;
-                                        let mut mods = Vec::new();
-                                        if stats.might != 0 {
-                                            mods.push(format!("Mgt:{:+}", stats.might));
-                                        }
-                                        if stats.intellect != 0 {
-                                            mods.push(format!("Int:{:+}", stats.intellect));
-                                        }
-                                        if stats.personality != 0 {
-                                            mods.push(format!("Per:{:+}", stats.personality));
-                                        }
-                                        if stats.endurance != 0 {
-                                            mods.push(format!("End:{:+}", stats.endurance));
-                                        }
-                                        if stats.speed != 0 {
-                                            mods.push(format!("Spd:{:+}", stats.speed));
-                                        }
-                                        if stats.accuracy != 0 {
-                                            mods.push(format!("Acc:{:+}", stats.accuracy));
-                                        }
-                                        if stats.luck != 0 {
-                                            mods.push(format!("Lck:{:+}", stats.luck));
-                                        }
+                                        let mods: Vec<String> = [
+                                            ("Mgt", stats.might),
+                                            ("Int", stats.intellect),
+                                            ("Per", stats.personality),
+                                            ("End", stats.endurance),
+                                            ("Spd", stats.speed),
+                                            ("Acc", stats.accuracy),
+                                            ("Lck", stats.luck),
+                                        ]
+                                        .iter()
+                                        .filter(|(_, v)| *v != 0)
+                                        .map(|(name, v)| format!("{name}:{v:+}"))
+                                        .collect();
 
                                         if !mods.is_empty() {
-                                            ui.label(
-                                                egui::RichText::new(format!(
-                                                    "| {}",
-                                                    mods.join(", ")
-                                                ))
-                                                .small()
-                                                .weak(),
+                                            badges.push(
+                                                MetadataBadge::new(mods.join(" "))
+                                                    .with_color(egui::Color32::from_rgb(
+                                                        180, 220, 180,
+                                                    ))
+                                                    .with_tooltip("Racial stat modifiers"),
                                             );
                                         }
 
-                                        ui.label(
-                                            egui::RichText::new(format!("| ID: {}", race.id))
-                                                .small()
-                                                .weak(),
-                                        );
-                                    });
+                                        let config = StandardListItemConfig::new(&race.name)
+                                            .with_badges(badges)
+                                            .with_id(&race.id)
+                                            .selected(selected_race_idx == Some(*idx));
 
-                                    ui.add_space(4.0);
-
-                                    // Context menu
-                                    response.context_menu(|ui| {
-                                        if ui.button("Edit").clicked() {
-                                            action_to_perform.set(Some((*idx, ItemAction::Edit)));
-                                            ui.close();
+                                        let (clicked, ctx_action) =
+                                            show_standard_list_item(row_ui, config);
+                                        if clicked {
+                                            new_selection.set(Some(*idx));
                                         }
-                                        if ui.button("Delete").clicked() {
-                                            action_to_perform.set(Some((*idx, ItemAction::Delete)));
-                                            ui.close();
-                                        }
-                                        if ui.button("Duplicate").clicked() {
-                                            action_to_perform
-                                                .set(Some((*idx, ItemAction::Duplicate)));
-                                            ui.close();
+                                        if ctx_action != ItemAction::None {
+                                            action_to_perform.set(Some((*idx, ctx_action)));
                                         }
                                     });
                                 }
@@ -699,17 +661,6 @@ impl RacesEditorState {
                                         ui.heading(&race.name);
                                         ui.separator();
 
-                                        let action = ActionButtons::new()
-                                            .with_edit(true)
-                                            .with_delete(true)
-                                            .with_duplicate(true)
-                                            .with_export(true)
-                                            .show(ui);
-
-                                        if action != ItemAction::None {
-                                            action_to_perform.set(Some((idx, action)));
-                                        }
-                                        ui.separator();
                                         ui.label(format!("ID: {}", race.id));
                                         ui.label(format!("Size: {:?}", race.size));
 

@@ -61,6 +61,7 @@
 | **Left Panel Standardization — Phase 8 (Quest Editor)** | ✅ COMPLETE | 2026-03-02 | **Quest list migrated to `StandardListItemConfig` with quest-type, repeatable, level-range, and reward-count badges; right-panel action buttons removed in favor of left-panel context menu actions** |
 | **Left Panel Standardization — Phase 9 (Dialogue Editor)** | ✅ COMPLETE | 2026-03-02 | **Dialogue list migrated to `StandardListItemConfig` while preserving speaker/quest/repeatable/node metadata as badges; right-panel action buttons removed in favor of left-panel context menu actions** |
 | **Left Panel Standardization — Phase 10 (Characters Editor)** | ✅ COMPLETE | 2026-03-02 | **Character list migrated to `StandardListItemConfig` with Premade/Template, Alignment, and Race/Class badges; right-panel action buttons removed in favor of left-panel context menu actions** |
+| **Left Panel Standardization — Phase 11 (Races Editor)** | ✅ COMPLETE | 2026-03-02 | **Races list migrated to `StandardListItemConfig` with size and stat-modifier badges; right-panel action buttons removed in favor of left-panel context menu actions** |
 
 **Total Lines Implemented**: 10,600+ lines of production code + 6,200+ lines of documentation
 **Total Tests**: 541+ new tests (all passing), 2,797 total tests passing
