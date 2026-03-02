@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{
-    ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout,
-    DEFAULT_PANEL_MIN_HEIGHT,
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout, DEFAULT_PANEL_MIN_HEIGHT,
 };
 use antares::domain::character::{ATTRIBUTE_MODIFIER_MAX, ATTRIBUTE_MODIFIER_MIN};
 use antares::domain::conditions::{
@@ -518,7 +518,7 @@ impl ConditionsEditorState {
         let search_lower = self.search_filter.to_lowercase();
 
         // Build filtered list snapshot to avoid borrow conflicts in closures
-        let mut filtered_conditions: Vec<(usize, String, ConditionDefinition)> = conditions
+        let mut filtered_conditions: Vec<(usize, ConditionDefinition)> = conditions
             .iter()
             .enumerate()
             .filter(|(_, c)| {
@@ -530,39 +530,35 @@ impl ConditionsEditorState {
                 let type_match = self.filter_effect_type.matches(c);
                 text_match && type_match
             })
-            .map(|(idx, c)| {
-                let effect_indicator = get_effect_type_indicator(c);
-                let label = format!("{} {}", effect_indicator, c.name);
-                (idx, label, c.clone())
-            })
+            .map(|(idx, c)| (idx, c.clone()))
             .collect();
 
         // Apply sorting
         match self.sort_order {
             ConditionSortOrder::NameAsc => {
                 filtered_conditions
-                    .sort_by(|a, b| a.2.name.to_lowercase().cmp(&b.2.name.to_lowercase()));
+                    .sort_by(|a, b| a.1.name.to_lowercase().cmp(&b.1.name.to_lowercase()));
             }
             ConditionSortOrder::NameDesc => {
                 filtered_conditions
-                    .sort_by(|a, b| b.2.name.to_lowercase().cmp(&a.2.name.to_lowercase()));
+                    .sort_by(|a, b| b.1.name.to_lowercase().cmp(&a.1.name.to_lowercase()));
             }
             ConditionSortOrder::IdAsc => {
                 filtered_conditions
-                    .sort_by(|a, b| a.2.id.to_lowercase().cmp(&b.2.id.to_lowercase()));
+                    .sort_by(|a, b| a.1.id.to_lowercase().cmp(&b.1.id.to_lowercase()));
             }
             ConditionSortOrder::IdDesc => {
                 filtered_conditions
-                    .sort_by(|a, b| b.2.id.to_lowercase().cmp(&a.2.id.to_lowercase()));
+                    .sort_by(|a, b| b.1.id.to_lowercase().cmp(&a.1.id.to_lowercase()));
             }
             ConditionSortOrder::EffectCount => {
-                filtered_conditions.sort_by(|a, b| b.2.effects.len().cmp(&a.2.effects.len()));
+                filtered_conditions.sort_by(|a, b| b.1.effects.len().cmp(&a.1.effects.len()));
             }
         }
 
         let selected = self.selected_condition_idx;
         let mut new_selection = selected;
-        let mut action_requested: Option<ItemAction> = None;
+        let mut action_requested: Option<(usize, ItemAction)> = None;
         let show_preview = self.show_preview;
         let preview_magnitude = self.preview_magnitude;
 
@@ -587,11 +583,24 @@ impl ConditionsEditorState {
                 left_ui.heading("Conditions");
                 left_ui.separator();
 
-                for (idx, label, _) in &filtered_conditions {
-                    let is_selected = selected == Some(*idx);
-                    if left_ui.selectable_label(is_selected, label).clicked() {
-                        new_selection = Some(*idx);
-                    }
+                for (idx, condition) in &filtered_conditions {
+                    left_ui.push_id(condition.id.clone(), |row_ui| {
+                        let badges = build_condition_badges(condition);
+                        let config = StandardListItemConfig::new(&condition.name)
+                            .with_badges(badges)
+                            .with_id(&condition.id)
+                            .selected(selected == Some(*idx));
+
+                        let (clicked, ctx_action) = show_standard_list_item(row_ui, config);
+
+                        if clicked {
+                            new_selection = Some(*idx);
+                        }
+
+                        if ctx_action != ItemAction::None {
+                            action_requested = Some((*idx, ctx_action));
+                        }
+                    });
                 }
 
                 if filtered_conditions.is_empty() {
@@ -601,18 +610,10 @@ impl ConditionsEditorState {
             |right_ui| {
                 // Right panel: Detail view
                 if let Some(idx) = selected {
-                    if let Some((_, _, condition)) =
-                        filtered_conditions.iter().find(|(i, _, _)| *i == idx)
+                    if let Some((_, condition)) =
+                        filtered_conditions.iter().find(|(i, _)| *i == idx)
                     {
                         right_ui.heading(&condition.name);
-                        right_ui.separator();
-
-                        // Use shared ActionButtons component
-                        let action = ActionButtons::new().enabled(true).show(right_ui);
-                        if action != ItemAction::None {
-                            action_requested = Some(action);
-                        }
-
                         right_ui.separator();
 
                         // Show spell references
@@ -674,61 +675,53 @@ impl ConditionsEditorState {
         }
 
         // Handle action button clicks after closures
-        if let Some(action) = action_requested {
+        if let Some((action_idx, action)) = action_requested {
+            self.selected_condition_idx = Some(action_idx);
             match action {
                 ItemAction::Edit => {
-                    if let Some(idx) = self.selected_condition_idx {
-                        if idx < conditions.len() {
-                            self.mode = ConditionsEditorMode::Edit;
-                            self.edit_buffer = Some(conditions[idx].clone());
-                            self.editing_original_id = Some(conditions[idx].id.clone());
-                        }
+                    if action_idx < conditions.len() {
+                        self.mode = ConditionsEditorMode::Edit;
+                        self.edit_buffer = Some(conditions[action_idx].clone());
+                        self.editing_original_id = Some(conditions[action_idx].id.clone());
                     }
                 }
                 ItemAction::Delete => {
-                    if let Some(idx) = self.selected_condition_idx {
-                        if idx < conditions.len() {
-                            self.selected_for_delete = Some(conditions[idx].id.clone());
-                            self.delete_confirmation_open = true;
-                        }
+                    if action_idx < conditions.len() {
+                        self.selected_for_delete = Some(conditions[action_idx].id.clone());
+                        self.delete_confirmation_open = true;
                     }
                 }
                 ItemAction::Duplicate => {
-                    if let Some(idx) = self.selected_condition_idx {
-                        if idx < conditions.len() {
-                            let mut dup = conditions[idx].clone();
-                            let base = dup.id.clone();
-                            let mut suffix = 1;
-                            while conditions.iter().any(|c| c.id == dup.id) {
-                                dup.id = format!("{}_copy{}", base, suffix);
-                                suffix += 1;
-                            }
-                            dup.name = format!("{} (Copy)", dup.name);
-                            conditions.push(dup);
-                            self.save_conditions(
-                                conditions,
-                                campaign_dir,
-                                conditions_file,
-                                unsaved_changes,
-                                status_message,
-                            );
+                    if action_idx < conditions.len() {
+                        let mut dup = conditions[action_idx].clone();
+                        let base = dup.id.clone();
+                        let mut suffix = 1;
+                        while conditions.iter().any(|c| c.id == dup.id) {
+                            dup.id = format!("{}_copy{}", base, suffix);
+                            suffix += 1;
                         }
+                        dup.name = format!("{} (Copy)", dup.name);
+                        conditions.push(dup);
+                        self.save_conditions(
+                            conditions,
+                            campaign_dir,
+                            conditions_file,
+                            unsaved_changes,
+                            status_message,
+                        );
                     }
                 }
                 ItemAction::Export => {
-                    if let Some(idx) = self.selected_condition_idx {
-                        if idx < conditions.len() {
-                            if let Ok(ron_str) = ron::ser::to_string_pretty(
-                                &conditions[idx],
-                                ron::ser::PrettyConfig::default(),
-                            ) {
-                                self.import_export_buffer = ron_str;
-                                self.show_import_dialog = true;
-                                *status_message =
-                                    "Condition exported to clipboard dialog".to_string();
-                            } else {
-                                *status_message = "Failed to export condition".to_string();
-                            }
+                    if action_idx < conditions.len() {
+                        if let Ok(ron_str) = ron::ser::to_string_pretty(
+                            &conditions[action_idx],
+                            ron::ser::PrettyConfig::default(),
+                        ) {
+                            self.import_export_buffer = ron_str;
+                            self.show_import_dialog = true;
+                            *status_message = "Condition exported to clipboard dialog".to_string();
+                        } else {
+                            *status_message = "Failed to export condition".to_string();
                         }
                     }
                 }
@@ -1614,6 +1607,121 @@ impl ConditionsEditorState {
     }
 }
 
+fn build_condition_badges(condition: &ConditionDefinition) -> Vec<MetadataBadge> {
+    let mut badges = Vec::new();
+
+    let effect_type = if condition.effects.is_empty() {
+        "Empty"
+    } else if condition
+        .effects
+        .iter()
+        .all(|e| matches!(e, ConditionEffect::AttributeModifier { .. }))
+    {
+        "Attribute"
+    } else if condition
+        .effects
+        .iter()
+        .all(|e| matches!(e, ConditionEffect::StatusEffect(_)))
+    {
+        "Status"
+    } else if condition
+        .effects
+        .iter()
+        .all(|e| matches!(e, ConditionEffect::DamageOverTime { .. }))
+    {
+        "DOT"
+    } else if condition
+        .effects
+        .iter()
+        .all(|e| matches!(e, ConditionEffect::HealOverTime { .. }))
+    {
+        "HOT"
+    } else {
+        "Mixed"
+    };
+
+    let effect_color = match effect_type {
+        "Attribute" => egui::Color32::from_rgb(120, 170, 255),
+        "Status" => egui::Color32::from_rgb(220, 180, 80),
+        "DOT" => egui::Color32::from_rgb(210, 90, 90),
+        "HOT" => egui::Color32::from_rgb(90, 190, 120),
+        "Mixed" => egui::Color32::from_rgb(180, 140, 220),
+        _ => egui::Color32::GRAY,
+    };
+    badges.push(
+        MetadataBadge::new(effect_type)
+            .with_color(effect_color)
+            .with_tooltip("Primary effect type"),
+    );
+
+    let duration_label = match &condition.default_duration {
+        ConditionDuration::Instant => "Instant".to_string(),
+        ConditionDuration::Rounds(n) => format!("{}r", n),
+        ConditionDuration::Minutes(n) => format!("{}m", n),
+        ConditionDuration::Permanent => "Permanent".to_string(),
+    };
+    badges.push(
+        MetadataBadge::new(duration_label)
+            .with_color(egui::Color32::from_rgb(245, 165, 90))
+            .with_tooltip("Default duration"),
+    );
+
+    let severity = compute_condition_severity(condition);
+    let (severity_color, severity_tip) = match severity {
+        "High" => (
+            egui::Color32::from_rgb(210, 70, 70),
+            "High impact condition effects",
+        ),
+        "Medium" => (
+            egui::Color32::from_rgb(220, 170, 80),
+            "Moderate impact condition effects",
+        ),
+        _ => (
+            egui::Color32::from_rgb(110, 190, 110),
+            "Low impact condition effects",
+        ),
+    };
+    badges.push(
+        MetadataBadge::new(format!("Severity:{}", severity))
+            .with_color(severity_color)
+            .with_tooltip(severity_tip),
+    );
+
+    badges
+}
+
+fn compute_condition_severity(condition: &ConditionDefinition) -> &'static str {
+    if condition.effects.is_empty() {
+        return "Low";
+    }
+
+    let mut score = 0_i32;
+    for effect in &condition.effects {
+        match effect {
+            ConditionEffect::AttributeModifier { value, .. } => {
+                score += i32::from(*value).abs();
+            }
+            ConditionEffect::StatusEffect(_) => {
+                score += 6;
+            }
+            ConditionEffect::DamageOverTime { damage, .. } => {
+                score += i32::from(damage.count) + i32::from(damage.sides) / 2;
+            }
+            ConditionEffect::HealOverTime { amount } => {
+                score += i32::from(amount.count) + i32::from(amount.sides) / 2;
+            }
+        }
+    }
+
+    if score >= 12 {
+        "High"
+    } else if score >= 6 {
+        "Medium"
+    } else {
+        "Low"
+    }
+}
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -1961,25 +2069,6 @@ pub fn compute_condition_statistics(conditions: &[ConditionDefinition]) -> Condi
     }
 
     stats
-}
-
-/// Returns a short emoji indicator for the primary effect type of a condition
-fn get_effect_type_indicator(condition: &ConditionDefinition) -> &'static str {
-    if condition.effects.is_empty() {
-        return "○"; // Empty
-    }
-    match &condition.effects[0] {
-        ConditionEffect::AttributeModifier { value, .. } => {
-            if *value >= 0 {
-                "⬆" // Buff
-            } else {
-                "⬇" // Debuff
-            }
-        }
-        ConditionEffect::StatusEffect(_) => "◆", // Status
-        ConditionEffect::DamageOverTime { .. } => "🔥", // DOT
-        ConditionEffect::HealOverTime { .. } => "💚", // HOT
-    }
 }
 
 /// Render the conditions editor (compatibility wrapper).
