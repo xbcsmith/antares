@@ -300,6 +300,7 @@ fn handle_events(
                 name,
                 description,
                 dialogue_id,
+                time_condition: _,
             } => {
                 let msg = format!("{} - {}", name, description);
                 println!("{}", msg);
@@ -974,6 +975,7 @@ mod tests {
                 description: "A recruitable NPC".to_string(),
                 character_id: "some_char".to_string(),
                 dialogue_id: None,
+                time_condition: None,
             },
         );
 
@@ -1023,6 +1025,7 @@ mod tests {
                 name: "Skeleton Ambush".to_string(),
                 description: "A skeleton blocks the path".to_string(),
                 monster_group: vec![1],
+                time_condition: None,
             },
         );
 
@@ -1157,6 +1160,7 @@ mod tests {
                 name: "Elder".to_string(),
                 description: "Village Elder".to_string(),
                 npc_id: "test_elder".to_string(),
+                time_condition: None,
             },
         );
 
@@ -1222,6 +1226,7 @@ mod tests {
                 name: "Merchant".to_string(),
                 description: "Town Merchant".to_string(),
                 npc_id: "test_merchant".to_string(),
+                time_condition: None,
             },
         );
 
@@ -1307,6 +1312,7 @@ mod tests {
                 name: "Apprentice Zara".to_string(),
                 description: "A young gnome apprentice studies a spellbook intently.".to_string(),
                 dialogue_id: Some(101u16),
+                time_condition: None,
             },
         );
 
@@ -1375,6 +1381,7 @@ mod tests {
                 name: "Unknown".to_string(),
                 description: "Unknown NPC".to_string(),
                 npc_id: "nonexistent_npc".to_string(),
+                time_condition: None,
             },
         );
 

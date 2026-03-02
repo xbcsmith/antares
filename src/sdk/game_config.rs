@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Game Configuration Module
@@ -113,6 +113,7 @@ pub enum ConfigError {
 /// let config = GameConfig::default();
 /// assert_eq!(config.graphics.resolution, (1280, 720));
 /// assert_eq!(config.audio.master_volume, 0.8);
+/// assert_eq!(config.rest.full_rest_hours, 12);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GameConfig {
@@ -127,6 +128,10 @@ pub struct GameConfig {
 
     /// Camera configuration
     pub camera: CameraConfig,
+
+    /// Rest system configuration
+    #[serde(default)]
+    pub rest: RestConfig,
 }
 
 impl GameConfig {
@@ -198,6 +203,7 @@ impl GameConfig {
         self.audio.validate()?;
         self.controls.validate()?;
         self.camera.validate()?;
+        self.rest.validate()?;
         Ok(())
     }
 }
@@ -371,12 +377,20 @@ pub struct ControlsConfig {
     #[serde(default = "default_inventory_keys")]
     pub inventory: Vec<String>,
 
+    /// Keys for initiating a party rest sequence
+    #[serde(default = "default_rest_keys")]
+    pub rest: Vec<String>,
+
     /// Movement cooldown in seconds (prevents double-moves)
     pub movement_cooldown: f32,
 }
 
 fn default_inventory_keys() -> Vec<String> {
     vec!["I".to_string()]
+}
+
+fn default_rest_keys() -> Vec<String> {
+    vec!["R".to_string()]
 }
 
 impl Default for ControlsConfig {
@@ -389,6 +403,7 @@ impl Default for ControlsConfig {
             interact: vec!["Space".to_string(), "E".to_string()],
             menu: vec!["Escape".to_string()],
             inventory: default_inventory_keys(),
+            rest: default_rest_keys(),
             movement_cooldown: 0.2,
         }
     }
@@ -399,8 +414,8 @@ impl ControlsConfig {
     ///
     /// # Errors
     ///
-    /// Returns `ConfigError::ValidationError` if movement cooldown is negative or
-    /// if the inventory key list is empty.
+    /// Returns `ConfigError::ValidationError` if movement cooldown is negative,
+    /// if the inventory key list is empty, or if the rest key list is empty.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.movement_cooldown < 0.0 {
             return Err(ConfigError::ValidationError(format!(
@@ -412,6 +427,12 @@ impl ControlsConfig {
         if self.inventory.is_empty() {
             return Err(ConfigError::ValidationError(
                 "inventory key list must not be empty".to_string(),
+            ));
+        }
+
+        if self.rest.is_empty() {
+            return Err(ConfigError::ValidationError(
+                "rest key list must not be empty".to_string(),
             ));
         }
 
@@ -527,11 +548,226 @@ pub enum CameraMode {
     Isometric,
 }
 
+/// Rest system configuration
+///
+/// Controls tunable parameters for the party rest mechanic.  Place a `rest:`
+/// block inside `GameConfig` in `config.ron` to override any of these values.
+/// All fields default to sensible values so the block may be omitted entirely.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::game_config::RestConfig;
+///
+/// let cfg = RestConfig::default();
+/// assert_eq!(cfg.full_rest_hours, 12);
+/// assert!((cfg.rest_encounter_rate_multiplier - 1.0).abs() < f32::EPSILON);
+/// assert!(!cfg.allow_partial_rest);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RestConfig {
+    /// Full-rest duration in hours.
+    ///
+    /// The number of in-game hours required for a complete rest cycle that
+    /// fully restores HP and SP.  Defaults to `12`.  Must be at least `1`.
+    pub full_rest_hours: u32,
+
+    /// Encounter check probability multiplier during rest.
+    ///
+    /// Scales the chance that each rest-hour triggers a random encounter.
+    /// `0.0` disables encounters entirely (useful for town or safe-area maps).
+    /// `1.0` uses the map's unmodified encounter rate.
+    /// Values above `1.0` increase the encounter chance beyond normal.
+    ///
+    /// Must be `>= 0.0`.  Defaults to `1.0`.
+    pub rest_encounter_rate_multiplier: f32,
+
+    /// Allow partial rest (rest for fewer than `full_rest_hours`).
+    ///
+    /// When `true`, the player will eventually be able to choose a shorter
+    /// rest duration via the UI.  Currently not fully implemented; set to
+    /// `false` (default) to keep the standard full-rest behaviour.
+    pub allow_partial_rest: bool,
+}
+
+impl Default for RestConfig {
+    fn default() -> Self {
+        Self {
+            full_rest_hours: 12,
+            rest_encounter_rate_multiplier: 1.0,
+            allow_partial_rest: false,
+        }
+    }
+}
+
+impl RestConfig {
+    /// Validate the rest configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError::ValidationError` if:
+    /// - `full_rest_hours` is zero.
+    /// - `rest_encounter_rate_multiplier` is negative.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::game_config::RestConfig;
+    ///
+    /// assert!(RestConfig::default().validate().is_ok());
+    /// ```
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.full_rest_hours == 0 {
+            return Err(ConfigError::ValidationError(
+                "full_rest_hours must be at least 1".to_string(),
+            ));
+        }
+        if self.rest_encounter_rate_multiplier < 0.0 {
+            return Err(ConfigError::ValidationError(format!(
+                "rest_encounter_rate_multiplier must be >= 0.0, got {}",
+                self.rest_encounter_rate_multiplier
+            )));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    // ── RestConfig tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_rest_config_default_values() {
+        let config = RestConfig::default();
+        assert_eq!(config.full_rest_hours, 12);
+        assert!((config.rest_encounter_rate_multiplier - 1.0).abs() < f32::EPSILON);
+        assert!(!config.allow_partial_rest);
+    }
+
+    #[test]
+    fn test_rest_config_validation_success() {
+        assert!(RestConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn test_rest_config_validation_zero_hours_fails() {
+        let config = RestConfig {
+            full_rest_hours: 0,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_rest_config_validation_negative_multiplier_fails() {
+        let config = RestConfig {
+            rest_encounter_rate_multiplier: -0.1,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_rest_config_multiplier_zero_is_valid() {
+        let config = RestConfig {
+            rest_encounter_rate_multiplier: 0.0,
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_rest_config_multiplier_above_one_is_valid() {
+        let config = RestConfig {
+            rest_encounter_rate_multiplier: 2.5,
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_rest_config_ron_roundtrip() {
+        let original = RestConfig {
+            full_rest_hours: 8,
+            rest_encounter_rate_multiplier: 0.5,
+            allow_partial_rest: true,
+        };
+        let ron_string = ron::to_string(&original).expect("serialization must succeed");
+        let deserialized: RestConfig =
+            ron::from_str(&ron_string).expect("deserialization must succeed");
+        assert_eq!(deserialized, original);
+    }
+
+    #[test]
+    fn test_game_config_rest_field_default() {
+        let config = GameConfig::default();
+        assert_eq!(config.rest.full_rest_hours, 12);
+        assert!((config.rest.rest_encounter_rate_multiplier - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_game_config_validates_rest_block() {
+        let mut config = GameConfig::default();
+        config.rest.full_rest_hours = 0; // invalid
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_game_config_rest_defaults_when_missing_from_ron() {
+        // A RON config without a `rest:` block must deserialise with defaults.
+        let ron_without_rest = r#"GameConfig(
+            graphics: GraphicsConfig(
+                resolution: (1280, 720),
+                fullscreen: false,
+                vsync: true,
+                msaa_samples: 4,
+                shadow_quality: Medium,
+            ),
+            audio: AudioConfig(
+                master_volume: 0.8,
+                music_volume: 0.6,
+                sfx_volume: 1.0,
+                ambient_volume: 0.5,
+                enable_audio: true,
+            ),
+            controls: ControlsConfig(
+                move_forward: ["W", "ArrowUp"],
+                move_back: ["S", "ArrowDown"],
+                turn_left: ["A", "ArrowLeft"],
+                turn_right: ["D", "ArrowRight"],
+                interact: ["Space", "E"],
+                menu: ["Escape"],
+                movement_cooldown: 0.2,
+            ),
+            camera: CameraConfig(
+                mode: FirstPerson,
+                eye_height: 0.6,
+                fov: 70.0,
+                near_clip: 0.1,
+                far_clip: 1000.0,
+                smooth_rotation: false,
+                rotation_speed: 180.0,
+                light_height: 5.0,
+                light_intensity: 2000000.0,
+                light_range: 60.0,
+                shadows_enabled: true,
+            ),
+        )"#;
+        let config: GameConfig =
+            ron::from_str(ron_without_rest).expect("deserialization must succeed");
+        assert_eq!(
+            config.rest.full_rest_hours, 12,
+            "rest.full_rest_hours must default to 12 when absent"
+        );
+        assert!(
+            (config.rest.rest_encounter_rate_multiplier - 1.0).abs() < f32::EPSILON,
+            "rest.rest_encounter_rate_multiplier must default to 1.0 when absent"
+        );
+    }
 
     #[test]
     fn test_game_config_default_values() {
@@ -799,6 +1035,33 @@ mod tests {
     }
 
     #[test]
+    fn test_controls_config_rest_default() {
+        let config = ControlsConfig::default();
+        assert_eq!(config.rest, vec!["R".to_string()]);
+    }
+
+    #[test]
+    fn test_controls_config_validates_empty_rest_list() {
+        let config = ControlsConfig {
+            rest: vec![],
+            ..Default::default()
+        };
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::ValidationError(_))
+        ));
+    }
+
+    #[test]
+    fn test_controls_config_validate_non_empty_rest_keys() {
+        let config = ControlsConfig {
+            rest: vec!["R".to_string()],
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
     fn test_load_valid_config_file() {
         let ron_content = r#"(
             graphics: (
@@ -987,6 +1250,44 @@ mod tests {
             deserialized.inventory,
             vec!["I".to_string(), "F1".to_string()],
             "inventory field must survive a RON round-trip"
+        );
+    }
+
+    #[test]
+    fn test_controls_config_ron_roundtrip_includes_rest() {
+        let original = ControlsConfig {
+            rest: vec!["R".to_string(), "F5".to_string()],
+            ..Default::default()
+        };
+        let ron_string = ron::to_string(&original).expect("serialization must succeed");
+        let deserialized: ControlsConfig =
+            ron::from_str(&ron_string).expect("deserialization must succeed");
+        assert_eq!(
+            deserialized.rest,
+            vec!["R".to_string(), "F5".to_string()],
+            "rest field must survive a RON round-trip"
+        );
+    }
+
+    #[test]
+    fn test_controls_config_rest_defaults_when_missing_from_ron() {
+        // RON that omits the `rest` field — serde default must kick in.
+        let ron_without_rest = r#"(
+            move_forward: ["W"],
+            move_back: ["S"],
+            turn_left: ["A"],
+            turn_right: ["D"],
+            interact: ["E"],
+            menu: ["Escape"],
+            inventory: ["I"],
+            movement_cooldown: 0.2,
+        )"#;
+        let config: ControlsConfig =
+            ron::from_str(ron_without_rest).expect("deserialization must succeed");
+        assert_eq!(
+            config.rest,
+            vec!["R".to_string()],
+            "rest must default to [\"R\"] when absent from RON"
         );
     }
 }

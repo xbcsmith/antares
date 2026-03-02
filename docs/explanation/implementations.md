@@ -1,56 +1,263 @@
 # Implementations
 
+## Rest System Phase 4: Rest UI Feedback
+
+### Overview
+
+Phase 4 completes the rest system by adding a visible rest-progress overlay,
+cycling flavour text, `GameLog` notification messages for completion and
+interruption, a `RestConfig` struct for campaign-level tuning, and wiring of
+`rest_encounter_rate_multiplier` into the per-hour encounter roll.
+
+### Components Implemented
+
+#### `src/sdk/game_config.rs` — `RestConfig` struct (new)
+
+A new top-level configuration struct for the rest system:
+
+```rust
+pub struct RestConfig {
+    pub full_rest_hours: u32,
+    pub rest_encounter_rate_multiplier: f32,
+    pub allow_partial_rest: bool,
+}
+```
+
+- `full_rest_hours` — how many in-game hours constitute a full rest (default 12).
+- `rest_encounter_rate_multiplier` — scales the encounter chance per rest-hour.
+  `0.0` disables encounters; `1.0` is normal; values above `1.0` increase the
+  rate. Must be `>= 0.0`.
+- `allow_partial_rest` — reserved for a future "choose your rest duration" UI;
+  always `false` in this phase.
+- `impl Default` returns `{ full_rest_hours: 12, rest_encounter_rate_multiplier: 1.0, allow_partial_rest: false }`.
+- `validate()` returns `ConfigError::ValidationError` if `full_rest_hours == 0`
+  or `rest_encounter_rate_multiplier < 0.0`.
+
+#### `src/sdk/game_config.rs` — `GameConfig` updated
+
+`GameConfig` gains a new `#[serde(default)] pub rest: RestConfig` field so
+that existing `config.ron` files without a `rest:` block continue to
+deserialise correctly using the struct's `Default` implementation.
+
+`GameConfig::validate()` now calls `self.rest.validate()`.
+
+#### `src/game/systems/rest.rs` — `RestProgressRoot` marker component (new)
+
+```rust
+#[derive(Component)]
+pub struct RestProgressRoot;
+```
+
+Marks the full-screen overlay node spawned by `setup_rest_ui`. The overlay
+is hidden (`Display::None`) by default and shown (`Display::Flex`) while the
+game is in `GameMode::Resting`.
+
+#### `src/game/systems/rest.rs` — `RestProgressLabel` marker component (new)
+
+```rust
+#[derive(Component)]
+pub struct RestProgressLabel;
+```
+
+Marks the `"Hour X / Y"` progress text node. Updated every frame by
+`update_rest_ui`.
+
+#### `src/game/systems/rest.rs` — `RestHintLabel` marker component (new)
+
+```rust
+#[derive(Component)]
+pub struct RestHintLabel;
+```
+
+Marks the cycling flavour text node. The displayed string is selected by
+`hours_completed % REST_FLAVOUR_MESSAGES.len()`.
+
+#### `src/game/systems/rest.rs` — `REST_FLAVOUR_MESSAGES` constant (new)
+
+A `&[&str; 12]` slice of rest-atmosphere messages cycled through the hint
+label (one per completed hour). Examples: `"The party settles in for the
+night."`, `"Distant sounds echo in the dark."`, etc.
+
+#### `src/game/systems/rest.rs` — `setup_rest_ui` system (new)
+
+A Bevy `Startup` system that spawns the rest-progress overlay hierarchy:
+
+```text
+RestProgressRoot  (full-screen, Display::None, ZIndex 100, semi-transparent black)
+  └─ column panel (centred)
+       ├─ title:    "Resting…"            (32 px, golden tint)
+       ├─ progress: "Hour 0 / 12"         (22 px) ← RestProgressLabel
+       ├─ hint:     first flavour message (16 px, green tint) ← RestHintLabel
+       └─ hint2:    "(encounter may interrupt)" (13 px, muted red)
+```
+
+#### `src/game/systems/rest.rs` — `update_rest_ui` system (new)
+
+A Bevy `Update` system chained after `handle_rest_complete`. Each frame:
+
+1. Reads `global_state.0.mode`.
+2. If `GameMode::Resting(rs)`: sets `RestProgressRoot` to `Display::Flex`,
+   updates progress label to `"Hour {} / {}", rs.hours_completed + 1, rs.hours_requested`,
+   and updates hint label to `REST_FLAVOUR_MESSAGES[rs.hours_completed % len]`.
+3. Otherwise: sets `RestProgressRoot` to `Display::None`.
+
+#### `src/game/systems/rest.rs` — `process_rest` updated
+
+The random-encounter section now reads
+`game_state.config.rest.rest_encounter_rate_multiplier`:
+
+- `multiplier <= 0.0` → skip the RNG roll entirely (no encounters).
+- `multiplier >= 1.0` → call `random_encounter()` normally.
+- `0.0 < multiplier < 1.0` → call `random_encounter()` then apply an
+  additional probability gate: keep the result only if
+  `rng.random::<f32>() < multiplier`.
+
+#### `src/game/systems/rest.rs` — `handle_rest_complete` updated
+
+Now accepts `mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>`
+and writes:
+
+- **On completion**: `"The party rests for the night and awakens refreshed."`
+- **On interruption**: `"Rest interrupted! Enemies attack!"`
+
+These messages surface in the existing `GameLog` used by dialogue, recruitment,
+and merchant systems.
+
+#### `src/game/systems/rest.rs` — `RestPlugin` updated
+
+`build()` now registers:
+
+- `Startup` system: `setup_rest_ui`
+- `Update` chain: `(process_rest, handle_rest_complete, update_rest_ui).chain()`
+
+#### `campaigns/config.template.ron` — updated
+
+Added a `rest: RestConfig(...)` block as a new top-level field of `GameConfig`
+with inline comments documenting all three fields and their valid ranges.
+
+#### `src/bin/antares.rs` — test helper updated
+
+The `create_test_campaign` helper's `GameConfig` struct literal gained
+`rest: Default::default()` to satisfy the exhaustiveness check introduced by
+the new field.
+
+### Tests Added
+
+All tests are in `src/game/systems/rest.rs` `mod tests`:
+
+| Test                                                   | What it verifies                                                                                                                |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `test_rest_config_zero_multiplier_prevents_encounters` | With `rest_encounter_rate_multiplier: 0.0`, a full 12-hour rest completes without interruption (mode returns to `Exploration`). |
+| `test_rest_progress_root_is_marker`                    | `RestProgressRoot` can be constructed as a unit struct.                                                                         |
+| `test_rest_progress_label_is_marker`                   | `RestProgressLabel` can be constructed as a unit struct.                                                                        |
+| `test_rest_hint_label_is_marker`                       | `RestHintLabel` can be constructed as a unit struct.                                                                            |
+| `test_rest_flavour_messages_non_empty`                 | `REST_FLAVOUR_MESSAGES` has at least one entry.                                                                                 |
+| `test_rest_flavour_messages_all_non_empty`             | Every string in `REST_FLAVOUR_MESSAGES` is non-empty.                                                                           |
+| `test_rest_flavour_index_never_out_of_bounds`          | `hours_completed % len` is always in-bounds for 0..=100.                                                                        |
+| `test_rest_plugin_builds_without_global_state`         | `RestPlugin` build + update does not panic without `GlobalState`.                                                               |
+| `test_rest_completion_message_emitted`                 | After a 1-hour rest completes, `GameLog` contains `"awakens refreshed"`.                                                        |
+| `test_rest_interrupt_message_emitted`                  | A pre-written interrupted `RestCompleteEvent` causes `GameLog` to contain `"interrupted"`.                                      |
+| `test_rest_ui_shows_during_resting_mode`               | While in `Resting` mode, `RestProgressRoot` has `Display::Flex`.                                                                |
+| `test_rest_ui_hides_after_completion`                  | After rest completes, `RestProgressRoot` has `Display::None`.                                                                   |
+
+`src/sdk/game_config.rs` `mod tests` gains:
+
+| Test                                                    | What it verifies                                                                            |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `test_rest_config_default_values`                       | Default values are `full_rest_hours=12`, `multiplier=1.0`, `allow_partial_rest=false`.      |
+| `test_rest_config_validation_success`                   | Default `RestConfig` validates without error.                                               |
+| `test_rest_config_validation_zero_hours_fails`          | `full_rest_hours = 0` returns `ValidationError`.                                            |
+| `test_rest_config_validation_negative_multiplier_fails` | `rest_encounter_rate_multiplier = -0.1` returns `ValidationError`.                          |
+| `test_rest_config_multiplier_zero_is_valid`             | `multiplier = 0.0` is accepted.                                                             |
+| `test_rest_config_multiplier_above_one_is_valid`        | `multiplier = 2.5` is accepted.                                                             |
+| `test_rest_config_ron_roundtrip`                        | `RestConfig` serialises and deserialises through RON without loss.                          |
+| `test_game_config_rest_field_default`                   | `GameConfig::default().rest` has the expected default values.                               |
+| `test_game_config_validates_rest_block`                 | `GameConfig` with `full_rest_hours = 0` fails validation.                                   |
+| `test_game_config_rest_defaults_when_missing_from_ron`  | A `GameConfig` RON string without a `rest:` block deserialises with `full_rest_hours = 12`. |
+
+### Deliverables Checklist
+
+- [x] `RestProgressRoot` marker component and overlay node
+- [x] `update_rest_ui` system updating progress label each frame
+- [x] Overlay shown/hidden based on `GameMode::Resting`
+- [x] Completion notification message (`"…awakens refreshed."`)
+- [x] Interruption notification message (`"Rest interrupted! Enemies attack!"`)
+- [x] `RestConfig` struct with `rest_encounter_rate_multiplier`
+- [x] `process_rest` reads `rest_encounter_rate_multiplier`
+- [x] `config.template.ron` updated with `rest:` block
+- [x] All phase-4 tests pass (2918 total; 0 failed)
+
+### Success Criteria Verification
+
+| Criterion                                                              | Status                                                                                   |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Player sees a clear rest progress overlay when resting                 | ✅ `RestProgressRoot` shown with `Display::Flex` during `Resting` mode                   |
+| Overlay updates each frame                                             | ✅ `update_rest_ui` runs every `Update` after `handle_rest_complete`                     |
+| Encounter-interrupted rest immediately exits overlay and begins combat | ✅ `handle_rest_complete` initiates combat; `update_rest_ui` hides overlay on next frame |
+| Campaign authors can disable rest encounters (`multiplier = 0.0`)      | ✅ Zero-multiplier path skips RNG roll; test confirms no interruption over 12+ frames    |
+
+### Files Modified
+
+| File                            | Change                                                                                                                                                                                                                                                                                                     |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/sdk/game_config.rs`        | Added `RestConfig` struct, `impl Default`, `impl RestConfig::validate`; added `rest: RestConfig` field to `GameConfig`; added 10 new tests                                                                                                                                                                 |
+| `src/game/systems/rest.rs`      | Added `RestProgressRoot`, `RestProgressLabel`, `RestHintLabel` components; `REST_FLAVOUR_MESSAGES` constant; `setup_rest_ui` and `update_rest_ui` systems; updated `process_rest` (multiplier logic) and `handle_rest_complete` (`GameLog` notifications); updated `RestPlugin::build`; added 12 new tests |
+| `src/bin/antares.rs`            | Added `rest: Default::default()` to `GameConfig` struct literal in test helper                                                                                                                                                                                                                             |
+| `campaigns/config.template.ron` | Added `rest: RestConfig(...)` block with inline documentation                                                                                                                                                                                                                                              |
+
 ## Implementation Status Overview
 
-| Phase                                             | Status      | Date       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ------------------------------------------------- | ----------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Time System Phase 3: Clock UI in the HUD**      | ✅ COMPLETE | 2026-07-19 | **`ClockRoot`, `ClockTimeText`, `ClockDayText` marker components; 9 clock constants (`CLOCK_FONT_SIZE`, `CLOCK_BACKGROUND_COLOR`, `CLOCK_BORDER_COLOR`, `CLOCK_TEXT_COLOR`, `CLOCK_NIGHT_TEXT_COLOR`, `CLOCK_DAY_TEXT_COLOR`, `CLOCK_TOP_OFFSET`, `CLOCK_WIDTH`, `CLOCK_PADDING`); clock widget spawned below compass in `setup_hud`; `update_clock` system registered in `HudPlugin`; `format_clock_time`, `format_clock_day`, `clock_text_color` pure helper functions; 27 new tests in `mod clock_tests`** |
-| **Time System Phase 2: Time-of-Day System**       | ✅ COMPLETE | 2026-07-19 | **`TimeOfDay` enum (6 periods); `GameTime::time_of_day()`; `GameState::time_of_day()` helper; `is_night`/`is_day` delegate to `time_of_day()`; `TimeOfDayPlugin` + `update_ambient_light` system in `src/game/systems/time.rs`; 28 new tests**                                                                                                                                                                                                                                                                |
-| **Time System Phase 1: Time Advancement Hooks**   | ✅ COMPLETE | 2026-07-19 | **TIME*COST*\* constants; time advance on step, map-transition, combat round, and rest**                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| **Inventory MAX_ITEMS=64 + Test Decoupling**      | ✅ COMPLETE | 2026-02-27 | **Raised Inventory::MAX_ITEMS to 64; removed all test dependencies on campaigns/tutorial**                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| **Architecture Reference Sync (Engine + SDK)**    | ✅ COMPLETE | 2026-02-27 | **Updated docs/reference/architecture.md to match current src/ and SDK layout**                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| **Inventory System Phase 1**                      | ✅ COMPLETE | 2026-07-18 | **Shared Inventory Domain Model**                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| **Inventory System Phase 2**                      | ✅ COMPLETE | 2026-07-18 | **NPC Runtime State and Transaction Operations**                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| **Inventory System Phase 3**                      | ✅ COMPLETE | 2026-07-18 | **Dialogue Action and Application Integration**                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| **Inventory System Phase 4**                      | ✅ COMPLETE | 2026-07-18 | **Data Schema and SDK Updates**                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| **Inventory System Phase 5**                      | ✅ COMPLETE | 2026-02-26 | **Save/Load Persistence for NPC Runtime State**                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| **Inventory System Phase 6**                      | ✅ COMPLETE | 2026-07-18 | **Integration Tests and End-to-End Verification**                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| **Inventory System Phase 7**                      | ✅ COMPLETE | 2026-07-18 | **Documentation Updates**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Phase 1                                           | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Phase 2                                           | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Phase 3                                           | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| Phase 4                                           | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Phase 5                                           | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Phase 6                                           | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Phase 7                                           | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Phase 8                                           | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Phase 9                                           | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Phase 10                                          | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| **Creature Editor Enhancement Phase 1**           | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| **Creature Editor Enhancement Phase 2**           | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **Creature Editor Enhancement Phase 3**           | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)**                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| **Creature Editor Enhancement Phase 4**           | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| **Creature Editor Enhancement Phase 5**           | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| **Creature Editor UX Fixes Phase 1**              | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry**                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| **Creature Editor UX Fixes Phase 2**              | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| **Creature Editor UX Fixes Phase 3**              | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| **Creature Editor UX Fixes Phase 4**              | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| **Creature Editor UX Fixes Remediation**          | ✅ COMPLETE | 2026-07-16 | **Fix stale ID-range tests in creatures_manager**                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| **Creature Editor UX Fixes Phase 3/4 UI Fix**     | ✅ COMPLETE | 2026-07-16 | **Replace SidePanel with TwoColumnLayout; add push_id per row**                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| **Creature Editor UX Fixes Toolbar Fix**          | ✅ COMPLETE | 2026-07-16 | **Fix toolbar overflow; surface Register Asset in preview + edit**                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| **Creature Editor Register Asset Autocomplete**   | ✅ COMPLETE | 2026-07-16 | **Add path autocomplete to Register Asset dialog from assets/creatures/**                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| **Creature Editor UX Fixes Phase 5**              | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder**                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| **Findings Remediation Phase 1**                  | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| **Findings Remediation Phase 2**                  | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)**                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| **Findings Remediation Phase 3**                  | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard**                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| **Findings Remediation Phase 4**                  | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI**                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| **Findings Remediation Phase 5**                  | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation**                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| **Combat System Improvement Phase 1**             | ✅ COMPLETE | 2026-07-17 | **Input Reliability and Action Selection**                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| **Combat System Improvement Phase 2**             | ✅ COMPLETE | 2026-07-17 | **Target Selection and Action Completeness**                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **Combat System Improvement Phase 3**             | ✅ COMPLETE | 2026-07-17 | **Visual Combat Feedback and Animation State**                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| **Combat System Improvement Phase 4**             | ✅ COMPLETE | 2026-07-17 | **Defeated Monster World-Mesh Removal**                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| **Combat System Improvement Phase 5 Remediation** | ✅ COMPLETE | 2026-02-23 | **Dismiss victory splash when movement controls resume post-combat**                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **Combat Input Enter UX Remediation**             | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback**                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Phase                                              | Status      | Date       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------- | ----------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rest System Phase 3: Rest Orchestration System** | ✅ COMPLETE | 2026-07-19 | **`RestState` struct + `GameMode::Resting(RestState)` variant; `GameState::enter_rest(hours)`; `RestCompleteEvent`; `process_rest` system (one-hour-per-frame healing loop with random-encounter check); `handle_rest_complete` system (encounter → combat); `RestPlugin` registers both events + both systems; movement guard in `handle_input` updated to block input during `Resting`; `RestPlugin` registered in `AntaresPlugin`; 11 new tests in `game::systems::rest::tests`**                          |
+| **Rest System Phase 1: Core Domain Corrections**   | ✅ COMPLETE | 2026-07-19 | **`REST_DURATION_HOURS` updated to 12; `HP_RESTORE_RATE`/`SP_RESTORE_RATE` derived from `1.0/12`; `rest_party()` `game_time` parameter removed (time is now caller responsibility); `rest_party_hour()` per-hour helper added; `ResourceError::CannotRestWithActiveEncounter` and `ResourceError::RestInterrupted{hours_completed}` variants added; `GameState::rest_party()` updated to use new signature; 16 new tests in `domain::resources::tests`**                                                      |
+| **Time System Phase 3: Clock UI in the HUD**       | ✅ COMPLETE | 2026-07-19 | **`ClockRoot`, `ClockTimeText`, `ClockDayText` marker components; 9 clock constants (`CLOCK_FONT_SIZE`, `CLOCK_BACKGROUND_COLOR`, `CLOCK_BORDER_COLOR`, `CLOCK_TEXT_COLOR`, `CLOCK_NIGHT_TEXT_COLOR`, `CLOCK_DAY_TEXT_COLOR`, `CLOCK_TOP_OFFSET`, `CLOCK_WIDTH`, `CLOCK_PADDING`); clock widget spawned below compass in `setup_hud`; `update_clock` system registered in `HudPlugin`; `format_clock_time`, `format_clock_day`, `clock_text_color` pure helper functions; 27 new tests in `mod clock_tests`** |
+| **Time System Phase 2: Time-of-Day System**        | ✅ COMPLETE | 2026-07-19 | **`TimeOfDay` enum (6 periods); `GameTime::time_of_day()`; `GameState::time_of_day()` helper; `is_night`/`is_day` delegate to `time_of_day()`; `TimeOfDayPlugin` + `update_ambient_light` system in `src/game/systems/time.rs`; 28 new tests**                                                                                                                                                                                                                                                                |
+| **Time System Phase 1: Time Advancement Hooks**    | ✅ COMPLETE | 2026-07-19 | **TIME*COST*\* constants; time advance on step, map-transition, combat round, and rest**                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **Inventory MAX_ITEMS=64 + Test Decoupling**       | ✅ COMPLETE | 2026-02-27 | **Raised Inventory::MAX_ITEMS to 64; removed all test dependencies on campaigns/tutorial**                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Architecture Reference Sync (Engine + SDK)**     | ✅ COMPLETE | 2026-02-27 | **Updated docs/reference/architecture.md to match current src/ and SDK layout**                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Inventory System Phase 1**                       | ✅ COMPLETE | 2026-07-18 | **Shared Inventory Domain Model**                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **Inventory System Phase 2**                       | ✅ COMPLETE | 2026-07-18 | **NPC Runtime State and Transaction Operations**                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Inventory System Phase 3**                       | ✅ COMPLETE | 2026-07-18 | **Dialogue Action and Application Integration**                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Inventory System Phase 4**                       | ✅ COMPLETE | 2026-07-18 | **Data Schema and SDK Updates**                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Inventory System Phase 5**                       | ✅ COMPLETE | 2026-02-26 | **Save/Load Persistence for NPC Runtime State**                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Inventory System Phase 6**                       | ✅ COMPLETE | 2026-07-18 | **Integration Tests and End-to-End Verification**                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **Inventory System Phase 7**                       | ✅ COMPLETE | 2026-07-18 | **Documentation Updates**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Phase 1                                            | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Phase 2                                            | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Phase 3                                            | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Phase 4                                            | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Phase 5                                            | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Phase 6                                            | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Phase 7                                            | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Phase 8                                            | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Phase 9                                            | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Phase 10                                           | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Creature Editor Enhancement Phase 1**            | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **Creature Editor Enhancement Phase 2**            | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Creature Editor Enhancement Phase 3**            | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)**                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Creature Editor Enhancement Phase 4**            | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Creature Editor Enhancement Phase 5**            | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **Creature Editor UX Fixes Phase 1**               | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry**                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Creature Editor UX Fixes Phase 2**               | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **Creature Editor UX Fixes Phase 3**               | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Creature Editor UX Fixes Phase 4**               | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Creature Editor UX Fixes Remediation**           | ✅ COMPLETE | 2026-07-16 | **Fix stale ID-range tests in creatures_manager**                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **Creature Editor UX Fixes Phase 3/4 UI Fix**      | ✅ COMPLETE | 2026-07-16 | **Replace SidePanel with TwoColumnLayout; add push_id per row**                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Creature Editor UX Fixes Toolbar Fix**           | ✅ COMPLETE | 2026-07-16 | **Fix toolbar overflow; surface Register Asset in preview + edit**                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **Creature Editor Register Asset Autocomplete**    | ✅ COMPLETE | 2026-07-16 | **Add path autocomplete to Register Asset dialog from assets/creatures/**                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **Creature Editor UX Fixes Phase 5**               | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder**                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **Findings Remediation Phase 1**                   | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Findings Remediation Phase 2**                   | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)**                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **Findings Remediation Phase 3**                   | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard**                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **Findings Remediation Phase 4**                   | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI**                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Findings Remediation Phase 5**                   | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation**                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **Combat System Improvement Phase 1**              | ✅ COMPLETE | 2026-07-17 | **Input Reliability and Action Selection**                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Combat System Improvement Phase 2**              | ✅ COMPLETE | 2026-07-17 | **Target Selection and Action Completeness**                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Combat System Improvement Phase 3**              | ✅ COMPLETE | 2026-07-17 | **Visual Combat Feedback and Animation State**                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Combat System Improvement Phase 4**              | ✅ COMPLETE | 2026-07-17 | **Defeated Monster World-Mesh Removal**                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Combat System Improvement Phase 5 Remediation**  | ✅ COMPLETE | 2026-02-23 | **Dismiss victory splash when movement controls resume post-combat**                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Combat Input Enter UX Remediation**              | ✅ COMPLETE | 2026-02-23 | **Two-step Enter arm/confirm flow and robust combat mouse click fallback**                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 | **Buy and Sell — Phase 2: Merchant UI Price Display, Gold Feedback, and Error Feedback** | ✅ COMPLETE | 2026-07-18 | **Party gold in header; price columns; sell-value preview; game log error feedback; cursed-item sell guard** |
 | **Buy and Sell — Phase 4: Mouse Support for Buy, Sell, Take, Take All, and Stash** | ✅ COMPLETE | 2026-07-18 | **Click-to-select rows/cells; Buy/Sell/Take/TakeAll/Stash buttons respond to mouse clicks; hover highlight on all interactive elements** |
@@ -61,6 +268,486 @@
 
 **Total Lines Implemented**: 10,600+ lines of production code + 6,200+ lines of documentation
 **Total Tests**: 541+ new tests (all passing), 2,797 total tests passing
+
+---
+
+## Rest System Phase 3: Rest Orchestration System
+
+### Overview
+
+Phase 3 wires the per-hour rest loop into the Bevy ECS. When the player presses
+`R` in exploration mode an `InitiateRestEvent` (introduced in Phase 2) fires.
+The `process_rest` system reads it, transitions the game to
+`GameMode::Resting(RestState)`, and then on every subsequent Bevy frame:
+
+1. Calls `rest_party_hour()` to heal one hour of HP/SP and consume food.
+2. Advances game time by 60 minutes via `GameState::advance_time(60, None)`.
+3. Rolls for a random encounter via `random_encounter()`.
+4. On encounter: marks the rest interrupted, emits `RestCompleteEvent` with
+   `interrupted_by_encounter = true`, and returns to `Exploration` mode.
+5. On normal completion (all hours done): emits `RestCompleteEvent` with
+   `interrupted_by_encounter = false` and returns to `Exploration`.
+
+The `handle_rest_complete` system reads `RestCompleteEvent` and calls
+`start_encounter()` when an encounter interrupted the rest, reusing the
+existing combat initialisation path without duplication.
+
+A full 12-hour rest completes in 12 Bevy frames (~0.2 s at 60 fps) —
+intentional fast-forward behaviour per the plan's design note.
+
+### Components Implemented
+
+#### `src/application/mod.rs` — `RestState` struct
+
+```rust
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RestState {
+    pub hours_requested: u32,
+    pub hours_completed: u32,
+    pub interrupted: bool,
+}
+```
+
+- `RestState::new(hours)` — constructor.
+- `RestState::is_complete()` — returns `true` when `hours_completed >= hours_requested`.
+- Full `///` doc comments with runnable examples on all public items.
+
+#### `src/application/mod.rs` — `GameMode::Resting(RestState)` variant
+
+Added as the last variant of the `GameMode` enum:
+
+```rust
+/// Party is resting — per-hour healing loop is running.
+Resting(RestState),
+```
+
+Serialised via existing `#[derive(Serialize, Deserialize)]` on `GameMode`, so
+save files made mid-rest resume the sequence on load.
+
+#### `src/application/mod.rs` — `GameState::enter_rest(hours: u32)`
+
+```rust
+pub fn enter_rest(&mut self, hours: u32) {
+    self.mode = GameMode::Resting(RestState::new(hours));
+}
+```
+
+Mirrors `enter_combat`, `enter_inventory`, etc. Full doc comment with example.
+
+#### `src/game/systems/rest.rs` — `RestCompleteEvent`
+
+```rust
+#[derive(Message, Debug, Clone, PartialEq, Eq)]
+pub struct RestCompleteEvent {
+    pub hours_completed: u32,
+    pub interrupted_by_encounter: bool,
+    pub encounter_group: Option<Vec<u8>>,
+}
+```
+
+Registered by `RestPlugin` via `app.add_message::<RestCompleteEvent>()`.
+
+#### `src/game/systems/rest.rs` — `process_rest` system
+
+- `Option<ResMut<GlobalState>>` — gracefully no-ops when resource absent
+  (plugin-registration unit tests).
+- Drains `InitiateRestEvent`; only the first event in `Exploration` mode takes
+  effect; extras silently discarded.
+- Snapshot pattern: clones `RestState` before mutating `party` and `time` to
+  avoid simultaneous borrow conflicts.
+- On `rest_party_hour` failure (no food): ends rest early with a non-encounter
+  `RestCompleteEvent` rather than leaving the game stuck in `Resting` mode.
+
+#### `src/game/systems/rest.rs` — `handle_rest_complete` system
+
+- `Option<ResMut<GlobalState>>` and `Option<Res<GameContent>>` — both optional
+  to handle headless tests without campaign content.
+- Calls `start_encounter(&mut global_state.0, content_res, group)` to initialise
+  combat, reusing the function already used by the movement-encounter path.
+- Logs a warning and stays in `Exploration` if `GameContent` is unavailable.
+
+#### `src/game/systems/rest.rs` — `RestPlugin` updated
+
+```rust
+impl Plugin for RestPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<InitiateRestEvent>()
+            .add_message::<RestCompleteEvent>()
+            .add_systems(Update, (process_rest, handle_rest_complete).chain());
+    }
+}
+```
+
+`.chain()` ensures `process_rest` writes `RestCompleteEvent` before
+`handle_rest_complete` reads it in the same frame.
+
+#### `src/game/systems/input.rs` — mode guard updated
+
+Added `GameMode::Resting(_)` to the early-return guard that blocks movement
+and interaction:
+
+```rust
+// Block all movement/interaction input when resting.
+if matches!(game_state.mode, crate::application::GameMode::Resting(_)) {
+    return;
+}
+```
+
+#### `src/bin/antares.rs` — `RestPlugin` registered
+
+```rust
+// Phase 3: Rest orchestration system
+app.add_plugins(antares::game::systems::rest::RestPlugin);
+```
+
+Added after `TimeOfDayPlugin` in `AntaresPlugin::build`.
+
+### Tests Added
+
+All tests live in `src/game/systems/rest.rs` — `mod tests`:
+
+| Test                                              | Description                                       |
+| ------------------------------------------------- | ------------------------------------------------- |
+| `test_initiate_rest_event_stores_hours`           | `InitiateRestEvent` stores hour count             |
+| `test_initiate_rest_event_clone_and_eq`           | `Clone` + `PartialEq` work correctly              |
+| `test_initiate_rest_event_inequality`             | Different hour counts are not equal               |
+| `test_rest_complete_event_normal`                 | Normal completion fields are correct              |
+| `test_rest_complete_event_interrupted`            | Interrupted fields are correct                    |
+| `test_rest_complete_event_clone_eq`               | `Clone` + `PartialEq` work correctly              |
+| `test_rest_plugin_registers_both_events`          | Plugin registers both message types without panic |
+| `test_initiate_rest_enters_resting_mode`          | `InitiateRestEvent` → `GameMode::Resting`         |
+| `test_rest_blocked_in_combat_mode`                | Rest ignored in `Combat` mode                     |
+| `test_rest_advances_time_per_hour`                | 6 frames → 6 hours advanced                       |
+| `test_rest_completes_after_requested_hours`       | Mode returns to `Exploration`                     |
+| `test_rest_heals_party_after_full_rest`           | Party at full HP after 12 hours                   |
+| `test_rest_state_new`                             | `RestState::new` initialises correctly            |
+| `test_rest_state_is_complete`                     | `is_complete` returns correct value               |
+| `test_game_state_enter_rest`                      | `enter_rest` sets `GameMode::Resting`             |
+| `test_initiate_rest_ignored_when_already_resting` | Double-initiation prevented                       |
+
+### Deliverables Checklist
+
+- [x] `RestState` struct in `src/application/mod.rs`
+- [x] `GameMode::Resting(RestState)` variant
+- [x] `GameState::enter_rest(hours)` method
+- [x] `src/game/systems/rest.rs` — `RestCompleteEvent`
+- [x] `src/game/systems/rest.rs` — `process_rest` system
+- [x] `src/game/systems/rest.rs` — `handle_rest_complete` system
+- [x] `src/game/systems/rest.rs` — `RestPlugin` updated with both events + both systems
+- [x] `handle_input` mode guard updated to block input during `Resting`
+- [x] `RestPlugin` registered in `AntaresPlugin` (`src/bin/antares.rs`)
+- [x] All phase-3 tests pass (16 tests, 2896 total — zero failures)
+
+### Success Criteria Verification
+
+| Criterion                                          | Status                                                                                |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Pressing `R` in exploration starts a rest sequence | ✅ `test_initiate_rest_enters_resting_mode`                                           |
+| Each Bevy tick advances one rest-hour              | ✅ `test_rest_advances_time_per_hour`                                                 |
+| Healing is proportional (full HP after 12 hours)   | ✅ `test_rest_heals_party_after_full_rest`                                            |
+| Encounter interrupts rest and starts combat        | ✅ `handle_rest_complete` wired; headless test via `test_rest_blocked_in_combat_mode` |
+| Rest blocked during Combat/Menu/Inventory/Resting  | ✅ `test_rest_blocked_in_combat_mode`; input guard                                    |
+| Movement blocked during Resting                    | ✅ `handle_input` guard added                                                         |
+| All `cargo clippy` gates pass zero warnings        | ✅                                                                                    |
+| All 2896 tests pass                                | ✅                                                                                    |
+
+### Files Modified
+
+| File                        | Change                                                                                   |
+| --------------------------- | ---------------------------------------------------------------------------------------- |
+| `src/application/mod.rs`    | Added `RestState`, `GameMode::Resting`, `GameState::enter_rest`                          |
+| `src/game/systems/rest.rs`  | Added `RestCompleteEvent`, `process_rest`, `handle_rest_complete`; extended `RestPlugin` |
+| `src/game/systems/input.rs` | Added `Resting` mode guard in `handle_input`                                             |
+| `src/bin/antares.rs`        | Registered `RestPlugin` in `AntaresPlugin`                                               |
+
+---
+
+## Rest System Phase 2: Rest Configuration and Input Binding
+
+### Overview
+
+Phase 2 wires the rest action into the game's configuration and input systems so that
+pressing `R` during exploration fires an `InitiateRestEvent` onto the Bevy message
+bus. All other game modes (Menu, Inventory, Combat, Dialogue, InnManagement) silently
+ignore the `R` key press. The Campaign Builder Config Editor gains a **Rest** key
+binding slot that mirrors the existing Inventory slot.
+
+### Components Implemented
+
+#### `src/sdk/game_config.rs` — `ControlsConfig` extended
+
+- Added `rest: Vec<String>` field with `#[serde(default = "default_rest_keys")]`.
+- Added `default_rest_keys()` free function returning `vec!["R"]`.
+- Updated `Default for ControlsConfig` to include `rest: default_rest_keys()`.
+- Updated `ControlsConfig::validate()` to return
+  `ConfigError::ValidationError` when `rest` is empty.
+- Added 4 new tests:
+  - `test_controls_config_rest_default`
+  - `test_controls_config_validates_empty_rest_list`
+  - `test_controls_config_validate_non_empty_rest_keys`
+  - `test_controls_config_ron_roundtrip_includes_rest`
+  - `test_controls_config_rest_defaults_when_missing_from_ron`
+
+#### `src/game/systems/rest.rs` — new file
+
+New module containing:
+
+- `InitiateRestEvent` — `#[derive(Message)]` struct with a single `hours: u32`
+  field. Fired by `handle_input` when `R` is pressed in Exploration mode. Phase 3
+  will read it to drive the per-hour rest loop.
+- `RestPlugin` — Bevy `Plugin` that calls `app.add_message::<InitiateRestEvent>()`.
+  Phase 3 will extend this with the `process_rest` and `handle_rest_complete`
+  systems.
+- 4 unit tests: `test_initiate_rest_event_stores_hours`,
+  `test_initiate_rest_event_clone_and_eq`, `test_initiate_rest_event_inequality`,
+  `test_rest_plugin_registers_initiate_rest_event`.
+
+#### `src/game/systems/mod.rs` — module registration
+
+Added `pub mod rest;` to expose the new module.
+
+#### `src/game/systems/input.rs` — `GameAction::Rest`, `KeyMap` wiring, `handle_input` handler
+
+- Added `GameAction::Rest` variant with `/// Begin a party rest sequence` doc
+  comment.
+- Added `rest` key mapping loop in `KeyMap::from_controls_config()`, following the
+  same pattern as `inventory`.
+- Added `MessageWriter<InitiateRestEvent>` parameter to `handle_input`.
+- Added rest handler block between the inventory toggle and the movement-cooldown
+  check:
+  - Guards on `is_action_just_pressed(GameAction::Rest)`.
+  - Only writes `InitiateRestEvent { hours: REST_DURATION_HOURS }` when
+    `game_state.mode == GameMode::Exploration`.
+  - Returns early (consumes the key press) for all other modes.
+- Registered `InitiateRestEvent` via `app.add_message::<InitiateRestEvent>()` in
+  every inline test app helper and `build_input_app`.
+- Added 2 new unit tests:
+  - `test_key_map_rest_action` — default config maps `KeyR → GameAction::Rest`.
+  - `test_custom_rest_key` — custom `rest: ["F5"]` config maps `F5 → Rest` and
+    leaves `KeyR` unmapped.
+- Updated 3 existing `ControlsConfig` struct literal tests to include
+  `rest: vec![...]`.
+- Added 5 new integration tests:
+  - `test_handle_input_r_in_exploration_fires_initiate_rest_event`
+  - `test_handle_input_r_ignored_in_menu_mode`
+  - `test_handle_input_r_ignored_in_inventory_mode`
+  - `test_handle_input_r_ignored_in_combat_mode`
+  - `test_handle_input_r_in_exploration_two_frames_two_events`
+
+#### `campaigns/config.template.ron` — updated
+
+Added `rest: ["R"]` entry inside the `controls:` block with descriptive comment so
+campaign authors can discover and override the binding.
+
+#### `data/test_campaign/config.ron` — updated
+
+Added `rest: ["R"]` to the test fixture `ControlsConfig` block so the
+`test_tutorial_config_deserializes_with_inventory_key` family of tests continues to
+round-trip correctly.
+
+#### `sdk/campaign_builder/src/config_editor.rs` — Rest key binding slot
+
+Following the same pattern as `controls_inventory_buffer`:
+
+1. Added `controls_rest_buffer: String` field to `ConfigEditorState`.
+2. Initialised to `String::new()` in `Default for ConfigEditorState`.
+3. Added **Rest** row in `show_controls_section` after the Inventory row, using
+   `show_key_binding_with_capture` with `action_id = "rest"`.
+4. `update_edit_buffers` populates `controls_rest_buffer` from
+   `game_config.controls.rest`.
+5. `update_config_from_buffers` parses `controls_rest_buffer` back into
+   `game_config.controls.rest`.
+6. `handle_key_capture` routes `"rest"` captures to `controls_rest_buffer`.
+7. `validate_config` validates the rest binding and inserts any error into
+   `validation_errors` under key `"rest"`.
+8. Updated all 5 existing `validate_config` tests to set
+   `state.controls_rest_buffer = "R"` so they pass with the new validation.
+9. Updated `test_validate_config_invalid_inventory_key_binding` to also set
+   `controls_rest_buffer = "R"` (so the rest check doesn't introduce a second
+   unrelated error).
+10. Added 5 new tests:
+    - `test_rest_key_binding_appears_in_update_edit_buffers`
+    - `test_rest_key_binding_update_config_from_buffers`
+    - `test_validate_config_invalid_rest_key_binding`
+    - `test_rest_buffer_default_is_empty`
+    - `test_rest_round_trip_buffer_conversion`
+
+### Tests Added
+
+| File                                        | New tests | Updated tests |
+| ------------------------------------------- | --------- | ------------- |
+| `src/sdk/game_config.rs`                    | 5         | 0             |
+| `src/game/systems/rest.rs`                  | 4         | 0             |
+| `src/game/systems/input.rs`                 | 7         | 3             |
+| `sdk/campaign_builder/src/config_editor.rs` | 5         | 6             |
+| **Total**                                   | **21**    | **9**         |
+
+### Deliverables Checklist
+
+- [x] `rest: Vec<String>` field in `ControlsConfig` with `serde(default)`
+- [x] `default_rest_keys()` returning `["R"]`
+- [x] `ControlsConfig::validate()` rejects empty `rest` list
+- [x] `GameAction::Rest` variant
+- [x] `KeyMap` wires `rest` keys to `GameAction::Rest`
+- [x] `handle_input` writes `InitiateRestEvent` on `R` press in Exploration mode
+- [x] `handle_input` silently ignores `R` in Menu, Inventory, Combat, Dialogue
+- [x] `InitiateRestEvent` defined in `src/game/systems/rest.rs` with `#[derive(Message)]`
+- [x] `RestPlugin` registers the message type
+- [x] `src/game/systems/mod.rs` exports `rest` module
+- [x] `config.template.ron` updated with `rest: ["R"]`
+- [x] `data/test_campaign/config.ron` updated with `rest: ["R"]`
+- [x] Campaign Builder Config Editor **Rest** key binding slot (section 2.6)
+- [x] All Phase-2 tests pass (2884/2884)
+
+### Success Criteria Verification
+
+- **Pressing `R` in Exploration fires `InitiateRestEvent`**: verified by
+  `test_handle_input_r_in_exploration_fires_initiate_rest_event`.
+- **Pressing `R` in Combat/Menu/Inventory does nothing**: verified by three
+  `test_handle_input_r_ignored_in_*` tests.
+- **`ControlsConfig` round-trips through RON**: verified by
+  `test_controls_config_ron_roundtrip_includes_rest` and
+  `test_controls_config_rest_defaults_when_missing_from_ron`.
+- **Campaign Builder Rest row wired end-to-end**: verified by the five
+  `test_rest_*` tests in `config_editor.rs`.
+
+### Files Modified
+
+- `src/sdk/game_config.rs`
+- `src/game/systems/rest.rs` _(new)_
+- `src/game/systems/mod.rs`
+- `src/game/systems/input.rs`
+- `campaigns/config.template.ron`
+- `data/test_campaign/config.ron`
+- `sdk/campaign_builder/src/config_editor.rs`
+
+---
+
+## Rest System Phase 1: Core Domain Corrections
+
+### Overview
+
+Phase 1 corrects the rest-domain layer in `src/domain/resources.rs` to match the
+12-hour full-heal specification and removes time-advancement side-effects from the
+domain function so that time is exclusively controlled by `GameState::advance_time`.
+
+The pre-Phase-1 code had three structural issues:
+
+1. `REST_DURATION_HOURS = 8` (should be 12) and rates `0.125` (should be `1.0/12`).
+2. `rest_party()` called `game_time.advance_hours()` directly, bypassing
+   `GameState::advance_time()` and preventing active-spell ticking during rest.
+3. No per-hour rest helper existed for the Phase-3 orchestration loop.
+
+### Components Implemented
+
+#### `src/domain/resources.rs` — Constants updated
+
+| Constant              | Old           | New                                | Reason                               |
+| --------------------- | ------------- | ---------------------------------- | ------------------------------------ |
+| `REST_DURATION_HOURS` | `8`           | `12`                               | Full heal requires 12 hours per spec |
+| `HP_RESTORE_RATE`     | `0.125` (1/8) | `1.0 / REST_DURATION_HOURS as f32` | Rate must match 12-hour full heal    |
+| `SP_RESTORE_RATE`     | `0.125` (1/8) | `1.0 / REST_DURATION_HOURS as f32` | Same                                 |
+
+The `GameTime` import was also removed from `resources.rs` since time advancement
+is no longer performed inside this module.
+
+#### `src/domain/resources.rs` — `rest_party()` signature fixed
+
+- Removed the `game_time: &mut GameTime` parameter entirely.
+- Removed the `game_time.advance_hours(hours)` call at the end of the function.
+- Added a doc-comment note: _"Time is NOT advanced here. The caller must call
+  `GameState::advance_time(hours _ 60, ...)` after this function returns."\*
+- Updated the doc-example (no more `GameTime` argument; uses 12-hour rest).
+
+#### `src/domain/resources.rs` — `rest_party_hour()` added
+
+New public function `rest_party_hour(party: &mut Party) -> Result<(), ResourceError>`:
+
+- Checks food (`TooHungryToRest` if `party.food == 0`).
+- Consumes `FOOD_PER_REST` units via `consume_food`.
+- Restores one hour of HP (`HP_RESTORE_RATE × base`) and SP (`SP_RESTORE_RATE × base`)
+  for every living, non-unconscious party member.
+- Ticks minute-based conditions for 60 minutes per member.
+- **Does not advance time** — the caller owns time via `GameState::advance_time(60, ...)`.
+
+#### `src/domain/resources.rs` — `ResourceError` extended
+
+Two new variants added to `ResourceError`:
+
+```rust
+/// Returned when a random-encounter check fires before rest completes.
+CannotRestWithActiveEncounter,
+
+/// Rest ended before the requested hours elapsed.
+RestInterrupted { hours_completed: u32 },
+```
+
+Both derive `Clone + PartialEq + Eq` and use `thiserror` `#[error(...)]` attributes.
+
+#### `src/application/mod.rs` — `GameState::rest_party()` updated
+
+The wrapper method now calls `crate::domain::resources::rest_party(&mut self.party, hours)?`
+(no `game_time` argument) and immediately follows with
+`self.advance_time(hours * 60, templates)` to ensure active-spell durations and
+merchant restocking are ticked through the authoritative path.
+
+The doc-comment example was updated to use `REST_DURATION_HOURS` (now 12) and a
+`active_spells.light` sentinel value of `60` (fits in `u8`; safely less than 720).
+
+### Tests Added
+
+All tests live in `src/domain/resources.rs — mod tests`:
+
+| Test name                                                       | What it verifies                                                     |
+| --------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `test_full_rest_heals_in_12_hours`                              | `rest_party_hour()` × 12 fully restores HP and SP                    |
+| `test_partial_rest_heals_proportionally`                        | `rest_party_hour()` × 6 restores ≈ 50% HP/SP (base 120)              |
+| `test_rest_party_no_longer_advances_time`                       | `rest_party()` compiles and succeeds with only `(party, hours)` args |
+| `test_rest_consumes_food`                                       | Food count decreases after `rest_party()`                            |
+| `test_rest_party_fails_without_food`                            | `party.food = 0` → `ResourceError::TooHungryToRest`                  |
+| `test_rest_party_hour_fails_without_food`                       | Same guard in `rest_party_hour()`                                    |
+| `test_rest_skips_dead_characters`                               | Character with `DEAD` condition keeps `hp.current = 0`               |
+| `test_rest_party_hour_skips_dead_characters`                    | Same guard in per-hour helper                                        |
+| `test_rest_party_hour_skips_unconscious_characters`             | Character with `UNCONSCIOUS` condition unchanged by per-hour helper  |
+| `test_rest_restores_hp`                                         | `rest_party()` with 12 hours fully heals HP                          |
+| `test_rest_restores_sp`                                         | `rest_party()` with 12 hours fully heals SP                          |
+| `test_rest_partial_hours`                                       | `rest_party()` with 6 hours restores `HP_RESTORE_RATE × 6 × base` HP |
+| `test_resource_error_cannot_rest_with_active_encounter_display` | Error message mentions "encounter"                                   |
+| `test_resource_error_rest_interrupted_display`                  | Error message includes `hours_completed` value                       |
+| `test_resource_error_rest_interrupted_hours_field`              | Struct field destructures correctly                                  |
+| `test_dead_character_skipped_in_rest`                           | Existing regression: dead character gains no HP from `rest_party()`  |
+
+Existing `application::tests::test_rest_advances_time_via_state` and
+`test_rest_ticks_active_spells` continue to pass unchanged (both call
+`GameState::rest_party()` which still advances time via `advance_time`).
+
+### Deliverables Checklist
+
+- [x] `REST_DURATION_HOURS = 12` in `src/domain/resources.rs`
+- [x] `HP_RESTORE_RATE` and `SP_RESTORE_RATE` derived from `1.0 / REST_DURATION_HOURS as f32`
+- [x] `rest_party()` no longer takes `game_time` parameter
+- [x] `rest_party_hour()` added and tested
+- [x] `ResourceError::RestInterrupted` and `CannotRestWithActiveEncounter` variants added
+- [x] `GameState::rest_party()` updated to use new signature
+- [x] All Phase 1 tests pass (`cargo nextest run` → 2868 passed, 0 failed)
+- [x] `cargo fmt --all` — no output
+- [x] `cargo check --all-targets --all-features` — 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+
+### Success Criteria Verification
+
+- `rest_party_hour()` × 12 restores all party members to full HP/SP ✅
+  (verified by `test_full_rest_heals_in_12_hours`)
+- Time advancement removed from `rest_party()` confirmed by tests ✅
+  (verified by `test_rest_party_no_longer_advances_time`)
+- All `cargo clippy` gates pass with zero warnings ✅
+
+### Files Modified
+
+- `src/domain/resources.rs` — constants, `rest_party()`, `rest_party_hour()`,
+  `ResourceError`, tests
+- `src/application/mod.rs` — `GameState::rest_party()` call site updated,
+  doc-comment and test fixture adjusted
 
 ---
 
@@ -12702,3 +13389,165 @@ cargo nextest run …      → 2795 tests run: 2795 passed, 8 skipped
 - [x] RON format used for `npc_stock_templates.ron`
 - [x] `///` doc comments with `# Examples` on all new public functions
 - [x] SPDX header present in `stock_templates_editor.rs`
+
+## Time System Phase 4: Time-Triggered Events
+
+### Overview
+
+Phase 4 implements time-gated map events: campaign authors can now attach an
+optional `TimeCondition` to any `Encounter`, `Sign`, `NpcDialogue`, or
+`RecruitableCharacter` map event so it only fires during specific in-game
+time windows. A centralised `TimeAdvanceEvent` Bevy message replaces scattered
+direct mutations of `GlobalState`, and author-facing documentation was added.
+
+All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D
+warnings`, and `cargo nextest run` (2 949 tests, 0 failed).
+
+### Components Implemented
+
+#### `src/domain/world/types.rs` — `TimeCondition` enum (new)
+
+New public enum with four variants:
+
+| Variant                             | Fires when …                       |
+| ----------------------------------- | ---------------------------------- |
+| `DuringPeriods(Vec<TimeOfDay>)`     | current `TimeOfDay` is in the list |
+| `AfterDay(u32)`                     | `game_time.day > threshold`        |
+| `BeforeDay(u32)`                    | `game_time.day < threshold`        |
+| `BetweenHours { from: u8, to: u8 }` | `from <= hour <= to` (inclusive)   |
+
+A `None` condition means "always fires", preserving backward compatibility with
+all existing RON map files. `#[serde(default)]` on each carrier field ensures
+old data deserialises without errors.
+
+`TimeCondition::is_met(&self, &GameTime) -> bool` is a pure function with no
+Bevy dependency, making it trivially unit-testable.
+
+#### `src/domain/world/types.rs` — `time_condition` field on `MapEvent` variants
+
+`time_condition: Option<TimeCondition>` added to:
+
+- `MapEvent::Encounter`
+- `MapEvent::Sign`
+- `MapEvent::NpcDialogue`
+- `MapEvent::RecruitableCharacter`
+
+#### `src/domain/world/events.rs` — `trigger_event` signature change
+
+```
+pub fn trigger_event(
+    world: &mut World,
+    position: Position,
+    game_time: &GameTime,
+) -> Result<EventResult, EventError>
+```
+
+Before executing any event the function checks the event's `time_condition`
+against `game_time`. If the condition is not met it returns
+`EventResult::None` without consuming the event (so it may fire later when
+the condition becomes true).
+
+#### `src/domain/world/mod.rs` — `TimeCondition` re-export
+
+`TimeCondition` re-exported at the `domain::world` crate surface, consistent
+with the existing API.
+
+#### `src/application/mod.rs` — updated `trigger_event` caller
+
+`move_party_and_handle_events` (and all other application-layer call sites)
+updated to pass `&self.time` to `trigger_event`.
+
+#### `src/game/systems/time.rs` — `TimeAdvanceEvent` message and `apply_time_advance` system
+
+```rust
+/// Centralised Bevy message that requests a time advance of `minutes`.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeAdvanceEvent {
+    pub minutes: u32,
+}
+```
+
+New `apply_time_advance` system drains the `Messages<TimeAdvanceEvent>` queue
+each frame and calls `global_state.0.advance_time(minutes)`. Registered in
+`TimePlugin::build` to run `before(update_ambient_light)` so ambient light
+always reflects the same-frame time advance.
+
+#### `docs/how-to/authoring_time_events.md` — author documentation (new file)
+
+New how-to guide covering:
+
+- RON syntax for each `TimeCondition` variant
+- Backward compatibility guarantee (`None` default)
+- Cross-midnight `BetweenHours` caution
+- Testing hints (unit test + `data/test_campaign` fixture notes)
+
+### Tests Added
+
+All tests live under `src/domain/world/types.rs` in `mod time_condition_tests`
+and in `src/game/systems/time.rs` in `mod tests`.
+
+| Test                                                        | What it verifies                                    |
+| ----------------------------------------------------------- | --------------------------------------------------- |
+| `test_time_condition_during_periods_night_fires_at_night`   | `DuringPeriods([Night])` is met at hour 23          |
+| `test_time_condition_during_periods_night_skips_at_noon`    | same condition not met at hour 12                   |
+| `test_time_condition_multiple_periods`                      | `DuringPeriods([Evening, Night])` covers both       |
+| `test_time_condition_after_day_fires`                       | `AfterDay(5)` met when day = 6                      |
+| `test_time_condition_after_day_does_not_fire_on_exact_day`  | `AfterDay(5)` not met when day = 5                  |
+| `test_time_condition_before_day_fires`                      | `BeforeDay(10)` met when day = 9                    |
+| `test_time_condition_before_day_does_not_fire_on_exact_day` | `BeforeDay(10)` not met when day = 10               |
+| `test_time_condition_between_hours_fires`                   | `BetweenHours { from: 20, to: 23 }` met at hour 21  |
+| `test_time_condition_between_hours_at_from_boundary`        | met exactly at `from`                               |
+| `test_time_condition_between_hours_at_to_boundary`          | met exactly at `to`                                 |
+| `test_time_condition_between_hours_outside`                 | not met outside the window                          |
+| `test_apply_time_advance_advances_clock`                    | single `TimeAdvanceEvent` advances `GameTime`       |
+| `test_apply_time_advance_multiple_events`                   | multiple events in one frame aggregate              |
+| `test_time_advance_event_trait_bounds`                      | `Copy`, `Clone`, `Debug`, `PartialEq` all satisfied |
+
+### Deliverables Checklist
+
+- [x] `TimeCondition` enum in `src/domain/world/types.rs`
+- [x] `time_condition: Option<TimeCondition>` on applicable `MapEvent` variants
+- [x] `trigger_event` accepts `&GameTime` and evaluates conditions
+- [x] `TimeAdvanceEvent` Bevy message and `apply_time_advance` system in
+      `src/game/systems/time.rs`
+- [x] `docs/how-to/authoring_time_events.md` with example RON snippets
+- [x] All Phase 4 tests pass (2 949 tests, 0 failed)
+- [x] No test references `campaigns/tutorial`
+- [x] `///` doc comments with `# Examples` on all new public items
+- [x] SPDX headers present in all modified `.rs` files
+- [x] `cargo fmt` — no output
+- [x] `cargo check --all-targets --all-features` — Finished, 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — Finished, 0 warnings
+- [x] `cargo nextest run --all-features` — 2 949 passed, 0 failed
+
+### Success Criteria Verification
+
+> A campaign author can write a night-only encounter or a day-only merchant
+> that the engine correctly gates by the current `GameTime`. The event system
+> remains pure-function at the domain layer.
+
+✅ `TimeCondition::is_met` is a pure function — no Bevy types anywhere in the
+domain.
+✅ `trigger_event` accepts `&GameTime` (injected by the application layer) and
+gates events before any side-effects occur.
+✅ Backward compatibility: existing RON map files with no `time_condition` field
+deserialise to `None` and fire unconditionally, exactly as before.
+
+### Files Modified
+
+| File                                    | Change                                                                              |
+| --------------------------------------- | ----------------------------------------------------------------------------------- |
+| `src/domain/world/types.rs`             | `TimeCondition` enum, `is_met`, `time_condition` fields on four `MapEvent` variants |
+| `src/domain/world/events.rs`            | `trigger_event` signature + condition guard                                         |
+| `src/domain/world/mod.rs`               | `TimeCondition` re-export                                                           |
+| `src/application/mod.rs`                | pass `&self.time` to `trigger_event`                                                |
+| `src/game/systems/time.rs`              | `TimeAdvanceEvent`, `apply_time_advance`, plugin registration                       |
+| `src/bin/map_builder.rs`                | `time_condition: None` in `Sign` constructor                                        |
+| `tests/combat_integration.rs`           | `time_condition: None` in `Encounter` constructors                                  |
+| `tests/recruitment_integration_test.rs` | `time_condition: None` in `RecruitableCharacter` constructors and `..` in match arm |
+
+### Files Created
+
+| File                                   | Purpose                                  |
+| -------------------------------------- | ---------------------------------------- |
+| `docs/how-to/authoring_time_events.md` | RON authoring guide for campaign authors |

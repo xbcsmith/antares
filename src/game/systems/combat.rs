@@ -7461,6 +7461,7 @@ mod tests {
                 name: "Goblins".to_string(),
                 description: "A band of goblins".to_string(),
                 monster_group: vec![1],
+                time_condition: None,
             },
         );
         assert!(map.get_event(tile_pos).is_some());
@@ -7500,6 +7501,7 @@ mod tests {
                 name: "Goblins".to_string(),
                 description: "A band of goblins".to_string(),
                 monster_group: vec![1],
+                time_condition: None,
             },
         );
         gs.world.add_map(map);
@@ -7570,6 +7572,7 @@ mod tests {
                 name: "Goblins".to_string(),
                 description: "Goblins".to_string(),
                 monster_group: vec![1],
+                time_condition: None,
             },
         );
         gs.world.add_map(map);

@@ -21,6 +21,7 @@ GameConfig(
         interact: ["Space", "E"],
         menu: ["Escape"],
         inventory: ["I"],
+        rest: ["R"],
         movement_cooldown: 0.2,
     ),
     camera: CameraConfig(
