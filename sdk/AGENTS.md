@@ -660,6 +660,78 @@ layout will be unable to find it.
 
 ---
 
+## Future Editor Standardization Pattern
+
+Use this section as the default implementation recipe when adding a new
+Campaign Builder editor or refactoring an existing one to match the standard
+left-panel list/detail pattern.
+
+### Goal
+
+Every editor should present list entries consistently, expose the same context
+menu behavior where applicable, and follow the same deferred-mutation and ID
+discipline to avoid egui state bugs.
+
+### Standard Recipe (Apply In Order)
+
+1. Import and use shared list helpers from `ui_helpers.rs`:
+    - `MetadataBadge`
+    - `StandardListItemConfig`
+    - `show_standard_list_item`
+2. Replace ad-hoc `selectable_label` + custom sub-row metadata with
+    `StandardListItemConfig` plus `MetadataBadge` values.
+3. Keep one primary label, move secondary info into badges, and include
+    `.with_id(...)` when an ID is semantically meaningful.
+4. Wrap each list-row loop body in `ui.push_id(stable_unique_key, |ui| { ... })`.
+5. Capture list actions as deferred state (`pending_*`) inside closures, then
+    apply mutations after `show_split` or other multi-closure calls return.
+6. For data lists, use context-menu actions from `show_standard_list_item`:
+    Edit/Delete/Duplicate/Export. For navigation-only lists, disable the menu
+    via `.with_context_menu(false)`.
+7. Preserve existing behavior intentionally:
+    - search/filter semantics
+    - selection highlighting
+    - right-panel preview/detail rendering
+    - existing edit/delete/duplicate/export business logic
+8. If a legacy interaction is removed (for example double-click edit), ensure
+    an equivalent path still exists (context menu and/or right-panel button),
+    and document the trade-off in a code comment.
+
+### Minimal Row Template
+
+```rust
+ui.push_id(stable_id, |ui| {
+     let mut badges = Vec::new();
+     badges.push(MetadataBadge::new("Type").with_color(egui::Color32::LIGHT_BLUE));
+
+     let config = StandardListItemConfig::new(primary_label)
+          .with_badges(badges)
+          .selected(is_selected);
+
+     let (clicked, action) = show_standard_list_item(ui, config);
+     if clicked {
+          pending_selection = Some(idx);
+          ui.ctx().request_repaint();
+     }
+     if action != ItemAction::None {
+          pending_action = Some((idx, action));
+     }
+});
+```
+
+### Acceptance Checklist For Any New Editor
+
+- [ ] List rows use `StandardListItemConfig` (no ad-hoc metadata row)
+- [ ] Row loops use `push_id` with stable keys
+- [ ] Context menu behavior is correct for the editor type
+- [ ] Navigation-only lists explicitly disable context menu
+- [ ] Selection and action mutations are deferred and applied after closures
+- [ ] `request_repaint()` is called on layout-driving state changes
+- [ ] Search/filter/detail behavior remains intact
+- [ ] `cargo fmt`, `cargo check`, `cargo clippy -D warnings`, and tests pass
+
+---
+
 ## egui ID Audit Checklist
 
 Run this checklist on every function you touch before marking any campaign

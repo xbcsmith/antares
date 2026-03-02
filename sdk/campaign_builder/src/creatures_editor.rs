@@ -535,7 +535,8 @@ impl CreaturesEditorState {
 
         // Deferred mutations collected inside closures; applied after show_split.
         let mut pending_edit: Option<(usize, String)> = None;
-        let mut pending_preview_action: Option<RegistryPreviewAction> = None;
+        let mut pending_left_action: Option<RegistryPreviewAction> = None;
+        let mut pending_right_action: Option<RegistryPreviewAction> = None;
         // Pending selection change: (new_idx, reset_delete_confirm)
         let mut pending_selection: Option<usize> = None;
         let mut pending_selection_reset_confirm = false;
@@ -640,11 +641,11 @@ impl CreaturesEditorState {
                                             pending_edit = Some((idx, file_name));
                                         }
                                         ItemAction::Delete => {
-                                            pending_preview_action =
+                                            pending_left_action =
                                                 Some(RegistryPreviewAction::Delete);
                                         }
                                         ItemAction::Duplicate => {
-                                            pending_preview_action =
+                                            pending_left_action =
                                                 Some(RegistryPreviewAction::Duplicate);
                                         }
                                         _ => {}
@@ -680,12 +681,14 @@ impl CreaturesEditorState {
                                 delete_confirm_pending,
                             );
                             if action.is_some() {
-                                pending_preview_action = action;
+                                pending_right_action = action;
                             }
                         }
                     }
                 },
             );
+
+        let pending_preview_action = pending_right_action.or(pending_left_action);
 
         // --- Apply deferred mutations (all closures have returned) ---
 
@@ -1069,7 +1072,6 @@ impl CreaturesEditorState {
     /// * `ui`      - The egui Ui region to render into.
     /// * `creature` - Read-only view of the creature to display.
     /// * `idx`     - Index of the creature in the backing `creatures` vec.
-    /// Renders the registry preview panel for the creature at `idx`.
     ///
     /// Accepts a pre-cloned `creature` snapshot (not a live borrow from the
     /// `creatures` Vec) so that the caller can hold `&mut self` and pass the

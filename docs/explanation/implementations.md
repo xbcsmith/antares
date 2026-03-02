@@ -66,6 +66,7 @@
 | **Left Panel Standardization — Phase 13 (NPC Editor)** | ✅ COMPLETE | 2026-03-02 | **NPC list migrated to `StandardListItemConfig` with Merchant, Innkeeper, Quests, Dialogue, and Faction badges; right-panel list-mode action buttons removed in favor of left-panel context menu actions** |
 | **Left Panel Standardization — Phase 14 (Creatures Editor)** | ✅ COMPLETE | 2026-03-02 | **Creature registry list migrated to `StandardListItemConfig` with category, mesh-count, and ID-warning badges; list context-menu actions wired to existing Edit/Delete/Duplicate handlers** |
 | **Left Panel Standardization — Phase 15 (Campaign Editor)** | ✅ COMPLETE | 2026-03-02 | **Campaign section navigation migrated to `StandardListItemConfig` with Overview/Gameplay/Files/Advanced icons and context menu disabled for navigation entries** |
+| **Left Panel Standardization — Stock Templates Editor** | ✅ COMPLETE | 2026-03-02 | **Stock template list migrated to `StandardListItemConfig` with Entries/Magic/Slots badges and row context-menu actions for Edit/Delete/Duplicate/Export (clipboard RON)** |
 
 ## Left Panel Standardization (Campaign Builder) [Updated]
 

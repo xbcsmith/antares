@@ -1437,6 +1437,8 @@ pub struct StandardListItemConfig<'a> {
     pub id: Option<String>,
     /// Optional icon or emoji prefix rendered before the primary label
     pub icon: Option<&'a str>,
+    /// Whether right-click context menu actions are enabled for this item
+    pub context_menu_enabled: bool,
 }
 
 impl<'a> StandardListItemConfig<'a> {
@@ -1467,6 +1469,7 @@ impl<'a> StandardListItemConfig<'a> {
             badges: Vec::new(),
             id: None,
             icon: None,
+            context_menu_enabled: true,
         }
     }
 
@@ -1551,6 +1554,16 @@ impl<'a> StandardListItemConfig<'a> {
         self.icon = Some(icon);
         self
     }
+
+    /// Enables or disables the right-click context menu for this item.
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Whether context menu actions should be available
+    pub fn with_context_menu(mut self, enabled: bool) -> Self {
+        self.context_menu_enabled = enabled;
+        self
+    }
 }
 
 /// Shows a standard list item in the left panel with badges and a context menu.
@@ -1617,25 +1630,27 @@ pub fn show_standard_list_item(
     let response = ui.selectable_label(config.selected, &label_text);
     let clicked = response.clicked();
 
-    // Wire up the right-click context menu
-    response.context_menu(|ctx_ui| {
-        if ctx_ui.button("✏️ Edit").clicked() {
-            action = ItemAction::Edit;
-            ctx_ui.close_menu();
-        }
-        if ctx_ui.button("🗑️ Delete").clicked() {
-            action = ItemAction::Delete;
-            ctx_ui.close_menu();
-        }
-        if ctx_ui.button("📋 Duplicate").clicked() {
-            action = ItemAction::Duplicate;
-            ctx_ui.close_menu();
-        }
-        if ctx_ui.button("📤 Export").clicked() {
-            action = ItemAction::Export;
-            ctx_ui.close_menu();
-        }
-    });
+    // Wire up the right-click context menu when enabled.
+    if config.context_menu_enabled {
+        response.context_menu(|ctx_ui| {
+            if ctx_ui.button("✏️ Edit").clicked() {
+                action = ItemAction::Edit;
+                ctx_ui.close();
+            }
+            if ctx_ui.button("🗑️ Delete").clicked() {
+                action = ItemAction::Delete;
+                ctx_ui.close();
+            }
+            if ctx_ui.button("📋 Duplicate").clicked() {
+                action = ItemAction::Duplicate;
+                ctx_ui.close();
+            }
+            if ctx_ui.button("📤 Export").clicked() {
+                action = ItemAction::Export;
+                ctx_ui.close();
+            }
+        });
+    }
 
     // Render the metadata badges row below the primary label
     if !config.badges.is_empty() || config.id.is_some() {
