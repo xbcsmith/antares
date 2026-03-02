@@ -98,6 +98,11 @@ GameConfig(
         // Default: "I" key
         inventory: ["I"],
 
+        // Keys for initiating a party rest sequence
+        // The party will rest for a full 12 hours, healing HP and SP
+        // Default: "R" key
+        rest: ["R"],
+
         // Movement cooldown in seconds
         // Prevents accidental double-moves or rapid movement
         // Range: 0.0+ (0.0 = no cooldown, instant movement)

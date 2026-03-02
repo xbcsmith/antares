@@ -41,6 +41,7 @@ use crate::game::resources::GlobalState;
 use crate::game::systems::dialogue::{PendingRecruitmentContext, StartDialogue};
 use crate::game::systems::events::MapEventTriggered;
 use crate::game::systems::map::{DoorOpenedEvent, NpcMarker, TileCoord};
+use crate::game::systems::rest::InitiateRestEvent;
 use crate::sdk::game_config::ControlsConfig;
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -122,6 +123,9 @@ pub enum GameAction {
 
     /// Open or close the inventory screen
     Inventory,
+
+    /// Begin a party rest sequence
+    Rest,
 }
 
 /// Key mapping structure for efficient input lookups
@@ -214,6 +218,15 @@ impl KeyMap {
                 bindings.insert(key_code, GameAction::Inventory);
             } else {
                 warn!("Invalid key code in inventory: {}", key_str);
+            }
+        }
+
+        // Map rest keys
+        for key_str in &config.rest {
+            if let Some(key_code) = parse_key_code(key_str) {
+                bindings.insert(key_code, GameAction::Rest);
+            } else {
+                warn!("Invalid key code in rest: {}", key_str);
             }
         }
 
@@ -423,6 +436,7 @@ fn handle_input(
     mut map_event_messages: MessageWriter<MapEventTriggered>,
     mut dialogue_writer: MessageWriter<StartDialogue>,
     mut recruitment_context: ResMut<PendingRecruitmentContext>,
+    mut rest_writer: MessageWriter<InitiateRestEvent>,
     time: Res<Time>,
     mut last_move_time: Local<f32>,
     victory_roots: Query<Entity, With<crate::game::systems::combat::VictorySummaryRoot>>,
@@ -502,6 +516,27 @@ fn handle_input(
             }
         }
         return; // Exit early after inventory toggle
+    }
+
+    // Check for rest action ("R" key) — fires InitiateRestEvent only during
+    // Exploration mode. All other modes silently ignore the key press.
+    if input_config
+        .key_map
+        .is_action_just_pressed(GameAction::Rest, &keyboard_input)
+    {
+        let game_state = &global_state.0;
+        if matches!(game_state.mode, crate::application::GameMode::Exploration) {
+            info!("Rest key pressed: initiating rest sequence");
+            rest_writer.write(InitiateRestEvent {
+                hours: crate::domain::resources::REST_DURATION_HOURS,
+            });
+        } else {
+            info!(
+                "Rest key pressed but mode is {:?} — ignoring",
+                game_state.mode
+            );
+        }
+        return; // Consume the key press regardless of mode
     }
 
     // Throttle movement input using cooldown. Only block when an actual movement
@@ -856,6 +891,7 @@ mod dialogue_inventory_tests {
         app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
+        app.add_message::<InitiateRestEvent>();
         app.add_systems(Update, handle_input);
         app
     }
@@ -957,6 +993,37 @@ mod dialogue_inventory_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_key_map_rest_action() {
+        let config = ControlsConfig::default();
+        let key_map = KeyMap::from_controls_config(&config);
+        assert_eq!(
+            key_map.get_action(KeyCode::KeyR),
+            Some(GameAction::Rest),
+            "KeyCode::KeyR must map to GameAction::Rest with default config"
+        );
+    }
+
+    #[test]
+    fn test_custom_rest_key() {
+        let config = ControlsConfig {
+            rest: vec!["F5".to_string()],
+            ..Default::default()
+        };
+        let key_map = KeyMap::from_controls_config(&config);
+        assert_eq!(
+            key_map.get_action(KeyCode::F5),
+            Some(GameAction::Rest),
+            "F5 must map to GameAction::Rest when configured as rest key"
+        );
+        // Default R key must not be mapped when overridden
+        assert_eq!(
+            key_map.get_action(KeyCode::KeyR),
+            None,
+            "KeyR must not be mapped when rest is overridden to F5"
+        );
+    }
 
     #[test]
     fn test_key_map_inventory_action() {
@@ -1104,6 +1171,7 @@ mod tests {
             interact: vec!["U".to_string()],
             menu: vec!["P".to_string()],
             inventory: vec!["F".to_string()],
+            rest: vec!["G".to_string()],
             movement_cooldown: 0.1,
         };
 
@@ -1146,6 +1214,7 @@ mod tests {
             interact: vec!["Space".to_string()],
             menu: vec!["Escape".to_string()],
             inventory: vec!["F".to_string()],
+            rest: vec!["R".to_string()],
             movement_cooldown: 0.2,
         };
 
@@ -1188,6 +1257,7 @@ mod tests {
             interact: vec!["Space".to_string()],
             menu: vec!["Escape".to_string()],
             inventory: vec!["I".to_string()],
+            rest: vec!["R".to_string()],
             movement_cooldown: -0.1,
         };
 
@@ -1226,6 +1296,7 @@ mod integration_tests {
         app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
+        app.add_message::<InitiateRestEvent>();
         app.add_systems(Update, handle_input);
         app
     }
@@ -1256,6 +1327,7 @@ mod integration_tests {
         app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
+        app.add_message::<InitiateRestEvent>();
 
         // Add the handle_input system (the system under test)
         app.add_systems(Update, handle_input);
@@ -1305,6 +1377,7 @@ mod integration_tests {
         app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
+        app.add_message::<InitiateRestEvent>();
 
         // Add just the input system (we want to simulate input frames)
         app.add_systems(Update, handle_input);
@@ -1349,6 +1422,7 @@ mod integration_tests {
         app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
+        app.add_message::<InitiateRestEvent>();
 
         // Add the input system so frames process input
         app.add_systems(Update, handle_input);
@@ -1458,6 +1532,181 @@ mod integration_tests {
         assert!(
             matches!(gs.0.mode, crate::application::GameMode::Menu(_)),
             "pressing I while in Menu must not switch to Inventory"
+        );
+    }
+
+    /// Pressing `R` in `GameMode::Exploration` must write one `InitiateRestEvent`
+    /// to the Bevy event bus with the default full-rest hour count.
+    #[test]
+    fn test_handle_input_r_in_exploration_fires_initiate_rest_event() {
+        let mut app = build_input_app();
+
+        // Confirm we start in Exploration mode.
+        {
+            let gs = app.world().resource::<GlobalState>();
+            assert!(
+                matches!(gs.0.mode, crate::application::GameMode::Exploration),
+                "must start in Exploration mode"
+            );
+        }
+
+        // Press R — should fire InitiateRestEvent.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyR);
+        }
+        app.update();
+
+        // Drain the event queue and verify exactly one event was written.
+        let events = app.world().resource::<Messages<InitiateRestEvent>>();
+        let mut reader = events.get_cursor();
+        let fired: Vec<&InitiateRestEvent> = reader.read(events).collect();
+        assert_eq!(
+            fired.len(),
+            1,
+            "exactly one InitiateRestEvent must be fired; got {:?}",
+            fired
+        );
+        assert_eq!(
+            fired[0].hours,
+            crate::domain::resources::REST_DURATION_HOURS,
+            "InitiateRestEvent.hours must equal REST_DURATION_HOURS"
+        );
+
+        // Mode must still be Exploration (the orchestration system handles
+        // the mode transition — that is Phase 3).
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Exploration),
+            "mode must remain Exploration after R press (Phase 3 handles transition)"
+        );
+    }
+
+    /// Pressing `R` while in `GameMode::Menu` must NOT fire `InitiateRestEvent`.
+    #[test]
+    fn test_handle_input_r_ignored_in_menu_mode() {
+        let mut app = build_input_app();
+
+        // Put game state into Menu mode directly.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.enter_menu();
+        }
+
+        // Press R.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyR);
+        }
+        app.update();
+
+        // No InitiateRestEvent must have been sent.
+        let events = app.world().resource::<Messages<InitiateRestEvent>>();
+        let mut reader = events.get_cursor();
+        let fired: Vec<&InitiateRestEvent> = reader.read(events).collect();
+        assert!(
+            fired.is_empty(),
+            "R in Menu mode must not fire InitiateRestEvent; got {:?}",
+            fired
+        );
+    }
+
+    /// Pressing `R` while in `GameMode::Inventory` must NOT fire `InitiateRestEvent`.
+    #[test]
+    fn test_handle_input_r_ignored_in_inventory_mode() {
+        let mut app = build_input_app();
+
+        // Open inventory first (without pressing I, to avoid stale key state).
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.enter_inventory();
+        }
+
+        // Press R.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyR);
+        }
+        app.update();
+
+        // No InitiateRestEvent must have been sent.
+        let events = app.world().resource::<Messages<InitiateRestEvent>>();
+        let mut reader = events.get_cursor();
+        let fired: Vec<&InitiateRestEvent> = reader.read(events).collect();
+        assert!(
+            fired.is_empty(),
+            "R in Inventory mode must not fire InitiateRestEvent; got {:?}",
+            fired
+        );
+    }
+
+    /// Pressing `R` while in `GameMode::Combat` must NOT fire `InitiateRestEvent`.
+    #[test]
+    fn test_handle_input_r_ignored_in_combat_mode() {
+        let mut app = build_input_app();
+
+        // Enter combat mode directly.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            let hero = crate::domain::character::Character::new(
+                "Rest Guard Hero".to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                crate::domain::character::Sex::Male,
+                crate::domain::character::Alignment::Good,
+            );
+            gs.0.party.add_member(hero).unwrap();
+            gs.0.enter_combat();
+        }
+
+        // Press R.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyR);
+        }
+        app.update();
+
+        // No InitiateRestEvent must have been sent.
+        let events = app.world().resource::<Messages<InitiateRestEvent>>();
+        let mut reader = events.get_cursor();
+        let fired: Vec<&InitiateRestEvent> = reader.read(events).collect();
+        assert!(
+            fired.is_empty(),
+            "R in Combat mode must not fire InitiateRestEvent; got {:?}",
+            fired
+        );
+    }
+
+    /// Pressing `R` twice in Exploration fires two separate `InitiateRestEvent`s —
+    /// one per frame, one per just_pressed edge.
+    #[test]
+    fn test_handle_input_r_in_exploration_two_frames_two_events() {
+        let mut app = build_input_app();
+
+        // Frame 1: press R.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyR);
+        }
+        app.update();
+
+        // Frame 2: release then press again to get a new just_pressed edge.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.release(KeyCode::KeyR);
+            btn.press(KeyCode::KeyR);
+        }
+        app.update();
+
+        // Both frames should have produced an event.
+        let events = app.world().resource::<Messages<InitiateRestEvent>>();
+        let mut reader = events.get_cursor();
+        let fired: Vec<&InitiateRestEvent> = reader.read(events).collect();
+        assert_eq!(
+            fired.len(),
+            2,
+            "two distinct R just_pressed edges must produce two InitiateRestEvents; got {:?}",
+            fired
         );
     }
 }
@@ -1688,6 +1937,7 @@ mod inventory_guard_tests {
         app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
+        app.add_message::<InitiateRestEvent>();
 
         app.add_systems(Update, handle_input);
 
@@ -1733,6 +1983,7 @@ mod inventory_guard_tests {
         app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
+        app.add_message::<InitiateRestEvent>();
 
         app.add_systems(Update, handle_input);
 
@@ -1792,6 +2043,7 @@ mod combat_guard_tests {
         app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
+        app.add_message::<InitiateRestEvent>();
 
         // Register the system under test.
         app.add_systems(Update, handle_input);
@@ -1839,6 +2091,7 @@ mod combat_guard_tests {
         app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
+        app.add_message::<InitiateRestEvent>();
 
         // Spawn a victory overlay marker to verify cleanup behavior.
         app.world_mut()

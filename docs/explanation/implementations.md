@@ -65,6 +65,167 @@
 
 ---
 
+## Rest System Phase 2: Rest Configuration and Input Binding
+
+### Overview
+
+Phase 2 wires the rest action into the game's configuration and input systems so that
+pressing `R` during exploration fires an `InitiateRestEvent` onto the Bevy message
+bus. All other game modes (Menu, Inventory, Combat, Dialogue, InnManagement) silently
+ignore the `R` key press. The Campaign Builder Config Editor gains a **Rest** key
+binding slot that mirrors the existing Inventory slot.
+
+### Components Implemented
+
+#### `src/sdk/game_config.rs` — `ControlsConfig` extended
+
+- Added `rest: Vec<String>` field with `#[serde(default = "default_rest_keys")]`.
+- Added `default_rest_keys()` free function returning `vec!["R"]`.
+- Updated `Default for ControlsConfig` to include `rest: default_rest_keys()`.
+- Updated `ControlsConfig::validate()` to return
+  `ConfigError::ValidationError` when `rest` is empty.
+- Added 4 new tests:
+  - `test_controls_config_rest_default`
+  - `test_controls_config_validates_empty_rest_list`
+  - `test_controls_config_validate_non_empty_rest_keys`
+  - `test_controls_config_ron_roundtrip_includes_rest`
+  - `test_controls_config_rest_defaults_when_missing_from_ron`
+
+#### `src/game/systems/rest.rs` — new file
+
+New module containing:
+
+- `InitiateRestEvent` — `#[derive(Message)]` struct with a single `hours: u32`
+  field. Fired by `handle_input` when `R` is pressed in Exploration mode. Phase 3
+  will read it to drive the per-hour rest loop.
+- `RestPlugin` — Bevy `Plugin` that calls `app.add_message::<InitiateRestEvent>()`.
+  Phase 3 will extend this with the `process_rest` and `handle_rest_complete`
+  systems.
+- 4 unit tests: `test_initiate_rest_event_stores_hours`,
+  `test_initiate_rest_event_clone_and_eq`, `test_initiate_rest_event_inequality`,
+  `test_rest_plugin_registers_initiate_rest_event`.
+
+#### `src/game/systems/mod.rs` — module registration
+
+Added `pub mod rest;` to expose the new module.
+
+#### `src/game/systems/input.rs` — `GameAction::Rest`, `KeyMap` wiring, `handle_input` handler
+
+- Added `GameAction::Rest` variant with `/// Begin a party rest sequence` doc
+  comment.
+- Added `rest` key mapping loop in `KeyMap::from_controls_config()`, following the
+  same pattern as `inventory`.
+- Added `MessageWriter<InitiateRestEvent>` parameter to `handle_input`.
+- Added rest handler block between the inventory toggle and the movement-cooldown
+  check:
+  - Guards on `is_action_just_pressed(GameAction::Rest)`.
+  - Only writes `InitiateRestEvent { hours: REST_DURATION_HOURS }` when
+    `game_state.mode == GameMode::Exploration`.
+  - Returns early (consumes the key press) for all other modes.
+- Registered `InitiateRestEvent` via `app.add_message::<InitiateRestEvent>()` in
+  every inline test app helper and `build_input_app`.
+- Added 2 new unit tests:
+  - `test_key_map_rest_action` — default config maps `KeyR → GameAction::Rest`.
+  - `test_custom_rest_key` — custom `rest: ["F5"]` config maps `F5 → Rest` and
+    leaves `KeyR` unmapped.
+- Updated 3 existing `ControlsConfig` struct literal tests to include
+  `rest: vec![...]`.
+- Added 5 new integration tests:
+  - `test_handle_input_r_in_exploration_fires_initiate_rest_event`
+  - `test_handle_input_r_ignored_in_menu_mode`
+  - `test_handle_input_r_ignored_in_inventory_mode`
+  - `test_handle_input_r_ignored_in_combat_mode`
+  - `test_handle_input_r_in_exploration_two_frames_two_events`
+
+#### `campaigns/config.template.ron` — updated
+
+Added `rest: ["R"]` entry inside the `controls:` block with descriptive comment so
+campaign authors can discover and override the binding.
+
+#### `data/test_campaign/config.ron` — updated
+
+Added `rest: ["R"]` to the test fixture `ControlsConfig` block so the
+`test_tutorial_config_deserializes_with_inventory_key` family of tests continues to
+round-trip correctly.
+
+#### `sdk/campaign_builder/src/config_editor.rs` — Rest key binding slot
+
+Following the same pattern as `controls_inventory_buffer`:
+
+1. Added `controls_rest_buffer: String` field to `ConfigEditorState`.
+2. Initialised to `String::new()` in `Default for ConfigEditorState`.
+3. Added **Rest** row in `show_controls_section` after the Inventory row, using
+   `show_key_binding_with_capture` with `action_id = "rest"`.
+4. `update_edit_buffers` populates `controls_rest_buffer` from
+   `game_config.controls.rest`.
+5. `update_config_from_buffers` parses `controls_rest_buffer` back into
+   `game_config.controls.rest`.
+6. `handle_key_capture` routes `"rest"` captures to `controls_rest_buffer`.
+7. `validate_config` validates the rest binding and inserts any error into
+   `validation_errors` under key `"rest"`.
+8. Updated all 5 existing `validate_config` tests to set
+   `state.controls_rest_buffer = "R"` so they pass with the new validation.
+9. Updated `test_validate_config_invalid_inventory_key_binding` to also set
+   `controls_rest_buffer = "R"` (so the rest check doesn't introduce a second
+   unrelated error).
+10. Added 5 new tests:
+    - `test_rest_key_binding_appears_in_update_edit_buffers`
+    - `test_rest_key_binding_update_config_from_buffers`
+    - `test_validate_config_invalid_rest_key_binding`
+    - `test_rest_buffer_default_is_empty`
+    - `test_rest_round_trip_buffer_conversion`
+
+### Tests Added
+
+| File                                        | New tests | Updated tests |
+| ------------------------------------------- | --------- | ------------- |
+| `src/sdk/game_config.rs`                    | 5         | 0             |
+| `src/game/systems/rest.rs`                  | 4         | 0             |
+| `src/game/systems/input.rs`                 | 7         | 3             |
+| `sdk/campaign_builder/src/config_editor.rs` | 5         | 6             |
+| **Total**                                   | **21**    | **9**         |
+
+### Deliverables Checklist
+
+- [x] `rest: Vec<String>` field in `ControlsConfig` with `serde(default)`
+- [x] `default_rest_keys()` returning `["R"]`
+- [x] `ControlsConfig::validate()` rejects empty `rest` list
+- [x] `GameAction::Rest` variant
+- [x] `KeyMap` wires `rest` keys to `GameAction::Rest`
+- [x] `handle_input` writes `InitiateRestEvent` on `R` press in Exploration mode
+- [x] `handle_input` silently ignores `R` in Menu, Inventory, Combat, Dialogue
+- [x] `InitiateRestEvent` defined in `src/game/systems/rest.rs` with `#[derive(Message)]`
+- [x] `RestPlugin` registers the message type
+- [x] `src/game/systems/mod.rs` exports `rest` module
+- [x] `config.template.ron` updated with `rest: ["R"]`
+- [x] `data/test_campaign/config.ron` updated with `rest: ["R"]`
+- [x] Campaign Builder Config Editor **Rest** key binding slot (section 2.6)
+- [x] All Phase-2 tests pass (2884/2884)
+
+### Success Criteria Verification
+
+- **Pressing `R` in Exploration fires `InitiateRestEvent`**: verified by
+  `test_handle_input_r_in_exploration_fires_initiate_rest_event`.
+- **Pressing `R` in Combat/Menu/Inventory does nothing**: verified by three
+  `test_handle_input_r_ignored_in_*` tests.
+- **`ControlsConfig` round-trips through RON**: verified by
+  `test_controls_config_ron_roundtrip_includes_rest` and
+  `test_controls_config_rest_defaults_when_missing_from_ron`.
+- **Campaign Builder Rest row wired end-to-end**: verified by the five
+  `test_rest_*` tests in `config_editor.rs`.
+
+### Files Modified
+
+- `src/sdk/game_config.rs`
+- `src/game/systems/rest.rs` _(new)_
+- `src/game/systems/mod.rs`
+- `src/game/systems/input.rs`
+- `campaigns/config.template.ron`
+- `data/test_campaign/config.ron`
+- `sdk/campaign_builder/src/config_editor.rs`
+
+---
+
 ## Rest System Phase 1: Core Domain Corrections
 
 ### Overview
