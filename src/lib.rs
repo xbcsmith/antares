@@ -30,4 +30,4 @@ pub mod sdk;
 
 // Re-export commonly used types for convenience
 pub use domain::types::{CharacterId, EventId, InnkeeperId, ItemId, MapId, MonsterId, SpellId};
-pub use domain::types::{DiceRoll, Direction, GameTime, Position};
+pub use domain::types::{DiceRoll, Direction, GameTime, Position, TimeOfDay};

@@ -23,7 +23,7 @@ pub mod save_game;
 use crate::application::menu::MenuState;
 use crate::domain::character::{Party, Roster};
 use crate::domain::party_manager::{PartyManagementError, PartyManager};
-use crate::domain::types::{GameTime, InnkeeperId};
+use crate::domain::types::{GameTime, InnkeeperId, TimeOfDay};
 use crate::domain::world::npc_runtime::NpcRuntimeStore;
 use crate::domain::world::World;
 use crate::sdk::campaign_loader::{Campaign, CampaignError};
@@ -63,6 +63,85 @@ pub enum GameMode {
     /// Container interaction split-screen inventory (opened with `E` when
     /// facing a chest, crate, hole in the wall, etc.).
     ContainerInventory(crate::application::container_inventory_state::ContainerInventoryState),
+    /// Party is resting — per-hour healing loop is running.
+    ///
+    /// Input is blocked during this mode (except `GameAction::Menu` which
+    /// cancels the rest in a future enhancement). The orchestration system
+    /// drives the rest sequence one hour per Bevy frame.
+    Resting(RestState),
+}
+
+// ===== Rest State =====
+
+/// Tracks progress of an in-progress party rest sequence.
+///
+/// Stored inside [`GameMode::Resting`] so that the rest orchestration system
+/// can advance the sequence one hour per Bevy frame and detect encounter
+/// interruptions.
+///
+/// A save made while resting serialises this state, so loading the save
+/// correctly resumes the rest sequence.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::RestState;
+///
+/// let state = RestState::new(12);
+/// assert_eq!(state.hours_requested, 12);
+/// assert_eq!(state.hours_completed, 0);
+/// assert!(!state.interrupted);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RestState {
+    /// Total hours of rest requested (e.g. 12 for a full rest).
+    pub hours_requested: u32,
+    /// Hours of rest completed so far.
+    pub hours_completed: u32,
+    /// Set when a random encounter interrupts the rest before completion.
+    pub interrupted: bool,
+}
+
+impl RestState {
+    /// Creates a new `RestState` for the given number of requested hours.
+    ///
+    /// # Arguments
+    ///
+    /// * `hours` — total hours of rest to attempt.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::RestState;
+    ///
+    /// let s = RestState::new(6);
+    /// assert_eq!(s.hours_requested, 6);
+    /// assert_eq!(s.hours_completed, 0);
+    /// assert!(!s.interrupted);
+    /// ```
+    pub fn new(hours: u32) -> Self {
+        Self {
+            hours_requested: hours,
+            hours_completed: 0,
+            interrupted: false,
+        }
+    }
+
+    /// Returns `true` when all requested hours have been completed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::RestState;
+    ///
+    /// let mut s = RestState::new(2);
+    /// assert!(!s.is_complete());
+    /// s.hours_completed = 2;
+    /// assert!(s.is_complete());
+    /// ```
+    pub fn is_complete(&self) -> bool {
+        self.hours_completed >= self.hours_requested
+    }
 }
 
 /// State for inn party management mode
@@ -947,6 +1026,10 @@ impl GameState {
         let position = crate::domain::world::move_party(&mut self.world, direction)
             .map_err(MoveHandleError::Movement)?;
 
+        // Each successful step costs time — advance before event resolution so
+        // that the clock ticks even when an event fires (traps, encounters, etc.).
+        self.advance_time(crate::domain::resources::TIME_COST_STEP_MINUTES, None);
+
         // If there is no explicit map event at this position, first roll for a
         // random encounter (map-level encounter tables / terrain modifiers apply).
         // Tile events take precedence: if there is an event placed on the tile,
@@ -982,7 +1065,7 @@ impl GameState {
         }
 
         // No random encounter (or a tile event exists) - handle tile event as before
-        let ev = crate::domain::world::trigger_event(&mut self.world, position)
+        let ev = crate::domain::world::trigger_event(&mut self.world, position, &self.time)
             .map_err(MoveHandleError::Event)?;
 
         match ev {
@@ -1020,6 +1103,31 @@ impl GameState {
     /// Exits combat mode and returns to exploration
     pub fn exit_combat(&mut self) {
         self.mode = GameMode::Exploration;
+    }
+
+    /// Enters resting mode for the specified number of hours.
+    ///
+    /// Transitions the game to [`GameMode::Resting`] with a fresh
+    /// [`RestState`].  The rest orchestration system (`process_rest`) drives
+    /// the per-hour loop; callers should not call this while already in
+    /// `Resting` mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `hours` — number of in-game hours to rest (typically
+    ///   [`crate::domain::resources::REST_DURATION_HOURS`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_rest(12);
+    /// assert!(matches!(state.mode, GameMode::Resting(_)));
+    /// ```
+    pub fn enter_rest(&mut self, hours: u32) {
+        self.mode = GameMode::Resting(RestState::new(hours));
     }
 
     /// Enters inventory mode, storing the current mode for resume on close.
@@ -1153,6 +1261,97 @@ impl GameState {
     ///
     /// # Arguments
     ///
+    /// Rests the party for the given number of hours, healing HP/SP and
+    /// consistently advancing game time through [`GameState::advance_time`].
+    ///
+    /// Unlike calling [`crate::domain::resources::rest_party`] directly (which
+    /// only restores HP/SP and consumes food), this method also ticks
+    /// active-spell durations and triggers daily merchant restocking for the
+    /// full rest duration via [`GameState::advance_time`].
+    ///
+    /// # Arguments
+    ///
+    /// * `hours`     - Number of hours to rest.
+    /// * `templates` - Optional merchant-stock template database.  Pass `None`
+    ///   in headless tests that do not load campaign data; restocking is silently
+    ///   skipped in that case.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`crate::domain::resources::ResourceError`] if the party cannot
+    /// rest (no food, etc.).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    ///
+    /// let mut state = GameState::new();
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    /// use antares::domain::resources::REST_DURATION_HOURS;
+    /// let mut hero = Character::new(
+    ///     "Hero".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// hero.hp.base = 20;
+    /// hero.hp.current = 10;
+    /// state.party.add_member(hero).unwrap();
+    /// state.party.food = 20;
+    /// // Use a value ≤ 255 that is fully consumed by REST_DURATION_HOURS * 60 ticks.
+    /// // REST_DURATION_HOURS * 60 = 720 > u8::MAX, so we use a smaller sentinel.
+    /// state.active_spells.light = 60; // expires after 60 minutes (< 12 hours)
+    ///
+    /// state.rest_party(REST_DURATION_HOURS, None).unwrap();
+    ///
+    /// // Active spell with only 60 ticks must expire during a 12-hour rest
+    /// assert_eq!(state.active_spells.light, 0);
+    /// // Time advanced by REST_DURATION_HOURS hours
+    /// assert_eq!(state.time.hour, REST_DURATION_HOURS as u8);
+    /// ```
+    pub fn rest_party(
+        &mut self,
+        hours: u32,
+        templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
+    ) -> Result<(), crate::domain::resources::ResourceError> {
+        // Perform HP/SP restoration and food consumption.
+        // rest_party() no longer takes a game_time parameter — time advancement
+        // is exclusively handled by advance_time() below so that active-spell
+        // ticking and merchant restocking are never bypassed.
+        crate::domain::resources::rest_party(&mut self.party, hours)?;
+
+        // Advance the authoritative clock via the GameState path so that active
+        // spells are ticked and merchant stock is restocked for the full duration.
+        self.advance_time(hours * 60, templates);
+
+        Ok(())
+    }
+
+    /// Returns the current [`TimeOfDay`] period for the game clock.
+    ///
+    /// This is a convenience wrapper around [`GameTime::time_of_day`] so that
+    /// any system with access to [`GameState`] can query the period without
+    /// having to reach into `state.time` directly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    /// use antares::domain::types::TimeOfDay;
+    ///
+    /// let mut state = GameState::new();
+    /// // Default start time is Day 1, 06:00 — Dawn
+    /// assert_eq!(state.time_of_day(), TimeOfDay::Dawn);
+    ///
+    /// state.time.advance_hours(6); // advance to 12:00
+    /// assert_eq!(state.time_of_day(), TimeOfDay::Afternoon);
+    /// ```
+    pub fn time_of_day(&self) -> TimeOfDay {
+        self.time.time_of_day()
+    }
+
     /// * `minutes`   - Number of in-game minutes to advance.
     /// * `templates` - Template database used to replenish merchant stock.
     ///   Pass `None` in contexts where the content is not available (e.g.
@@ -3068,6 +3267,236 @@ mod tests {
                 .quantity,
             2,
             "Second call to ensure_npc_runtime_initialized must not overwrite existing state"
+        );
+    }
+
+    // ===== Phase 1: Time Advancement Hook Tests =====
+
+    /// Helper: build a minimal world with a single passable 20×20 map, party at (10,10).
+    fn build_world_with_map() -> crate::domain::world::World {
+        use crate::domain::world::{Map, World};
+        let mut world = World::new();
+        let map = Map::new(1, "Test Map".to_string(), "A test map".to_string(), 20, 20);
+        world.add_map(map);
+        world.set_current_map(1);
+        world.set_party_position(crate::domain::types::Position::new(10, 10));
+        world
+    }
+
+    #[test]
+    fn test_step_advances_time() {
+        // A successful step must advance game time by exactly TIME_COST_STEP_MINUTES.
+        use crate::domain::resources::TIME_COST_STEP_MINUTES;
+        use crate::domain::types::Direction;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut state = GameState::new();
+        state.world = build_world_with_map();
+        let before = state.time.day as u64 * 24 * 60
+            + state.time.hour as u64 * 60
+            + state.time.minute as u64;
+
+        let content = ContentDatabase::new();
+        state
+            .move_party_and_handle_events(Direction::North, &content)
+            .expect("move north on clear map must succeed");
+
+        let after = state.time.day as u64 * 24 * 60
+            + state.time.hour as u64 * 60
+            + state.time.minute as u64;
+
+        assert_eq!(
+            after - before,
+            TIME_COST_STEP_MINUTES as u64,
+            "one step must advance time by exactly TIME_COST_STEP_MINUTES ({} min)",
+            TIME_COST_STEP_MINUTES
+        );
+    }
+
+    #[test]
+    fn test_blocked_step_does_not_advance_time() {
+        // Attempting to walk into a wall must NOT advance game time.
+        use crate::domain::types::{Direction, Position};
+        use crate::domain::world::{Map, WallType, World};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut state = GameState::new();
+
+        // Build a map with a wall directly north of the party's starting tile.
+        let mut world = World::new();
+        let mut map = Map::new(1, "Wall Map".to_string(), "Has a wall".to_string(), 20, 20);
+        // Place a Normal wall at (10, 9) — one step North of (10, 10).
+        if let Some(tile) = map.get_tile_mut(Position::new(10, 9)) {
+            tile.wall_type = WallType::Normal;
+            tile.blocked = true;
+        }
+        world.add_map(map);
+        world.set_current_map(1);
+        world.set_party_position(Position::new(10, 10));
+        state.world = world;
+
+        let time_before = state.time;
+        let content = ContentDatabase::new();
+
+        // Walking North should fail (blocked tile).
+        let result = state.move_party_and_handle_events(Direction::North, &content);
+        assert!(result.is_err(), "move into a wall must return an error");
+
+        assert_eq!(
+            state.time.minute, time_before.minute,
+            "blocked step must not advance minutes"
+        );
+        assert_eq!(
+            state.time.hour, time_before.hour,
+            "blocked step must not advance hours"
+        );
+        assert_eq!(
+            state.time.day, time_before.day,
+            "blocked step must not advance days"
+        );
+    }
+
+    #[test]
+    fn test_rest_advances_time_via_state() {
+        // GameState::rest_party must advance time by exactly hours * 60 minutes.
+        let mut state = GameState::new();
+        state.party.food = 20;
+
+        // Add a party member so rest_party has someone to heal.
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        let hours = 8u32;
+        let initial_minute = state.time.minute;
+        let initial_hour = state.time.hour;
+
+        state
+            .rest_party(hours, None)
+            .expect("rest_party must succeed with food");
+
+        // Total minutes elapsed since day 1, hour 0, minute 0.
+        let elapsed_minutes =
+            (state.time.day - 1) * 24 * 60 + state.time.hour as u32 * 60 + state.time.minute as u32;
+        let expected_elapsed = (initial_hour as u32) * 60 + (initial_minute as u32) + hours * 60;
+        assert_eq!(
+            elapsed_minutes,
+            expected_elapsed,
+            "rest_party must advance time by exactly {} hours ({} minutes)",
+            hours,
+            hours * 60
+        );
+    }
+
+    #[test]
+    fn test_rest_ticks_active_spells() {
+        // GameState::rest_party must tick active spells for the full rest duration
+        // (hours * 60 ticks), ensuring that active-spell durations are not bypassed.
+        use crate::domain::resources::REST_DURATION_HOURS;
+
+        let mut state = GameState::new();
+        state.party.food = 20;
+
+        let hero = Character::new(
+            "Mage".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        // Give a light spell that will expire during a full rest.
+        // REST_DURATION_HOURS * 60 = 720, which overflows u8::MAX (255).
+        // Use 240 minutes (4 hours), which is safely less than 12 * 60 and fits
+        // in a u8.  After REST_DURATION_HOURS hours the spell must be fully ticked.
+        let ticks: u8 = 240;
+        state.active_spells.light = ticks;
+
+        state
+            .rest_party(REST_DURATION_HOURS, None)
+            .expect("rest_party must succeed with food");
+
+        // After a full rest the light spell should have expired (0 ticks left).
+        assert_eq!(
+            state.active_spells.light, 0,
+            "active spell must be fully ticked after a full rest of {} hours",
+            REST_DURATION_HOURS
+        );
+    }
+
+    // ===== GameState::time_of_day() Tests =====
+
+    #[test]
+    fn test_game_state_time_of_day_default_is_dawn() {
+        // GameState::new() starts at Day 1, 06:00 — which is Dawn (05:00–07:59)
+        let state = GameState::new();
+        assert_eq!(
+            state.time_of_day(),
+            crate::domain::types::TimeOfDay::Dawn,
+            "default start time (06:00) should be Dawn"
+        );
+    }
+
+    #[test]
+    fn test_game_state_time_of_day_delegates_to_game_time() {
+        use crate::domain::types::{GameTime, TimeOfDay};
+
+        let pairs: &[(u8, TimeOfDay)] = &[
+            (5, TimeOfDay::Dawn),
+            (8, TimeOfDay::Morning),
+            (12, TimeOfDay::Afternoon),
+            (16, TimeOfDay::Dusk),
+            (19, TimeOfDay::Evening),
+            (22, TimeOfDay::Night),
+            (0, TimeOfDay::Night),
+        ];
+
+        for &(hour, ref expected) in pairs {
+            let mut state = GameState::new();
+            state.time = GameTime::new(1, hour, 0);
+            assert_eq!(
+                &state.time_of_day(),
+                expected,
+                "hour {} should map to {:?}",
+                hour,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_game_state_time_of_day_advances_correctly() {
+        use crate::domain::types::TimeOfDay;
+
+        // Start at 06:00 (Dawn), advance 6 hours → 12:00 (Afternoon)
+        let mut state = GameState::new();
+        assert_eq!(state.time_of_day(), TimeOfDay::Dawn);
+
+        state.time.advance_hours(6);
+        assert_eq!(
+            state.time_of_day(),
+            TimeOfDay::Afternoon,
+            "06:00 + 6 hours should be Afternoon"
+        );
+    }
+
+    #[test]
+    fn test_game_state_time_of_day_night_via_advance_time() {
+        use crate::domain::types::TimeOfDay;
+
+        // Start at 06:00, advance 16 hours → 22:00 (Night)
+        let mut state = GameState::new();
+        state.advance_time(16 * 60, None);
+        assert_eq!(
+            state.time_of_day(),
+            TimeOfDay::Night,
+            "06:00 + 16 hours should be Night"
         );
     }
 }

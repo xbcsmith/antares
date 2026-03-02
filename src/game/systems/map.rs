@@ -446,6 +446,13 @@ fn map_change_handler(
         if global_state.0.world.get_map(ev.target_map).is_some() {
             global_state.0.world.set_current_map(ev.target_map);
             global_state.0.world.set_party_position(ev.target_pos);
+            // Each map transition (teleport, dungeon entrance, town portal, etc.)
+            // costs time. Advance after confirming the map actually exists so that
+            // invalid/no-op events do not tick the clock.
+            global_state.0.advance_time(
+                crate::domain::resources::TIME_COST_MAP_TRANSITION_MINUTES,
+                None,
+            );
         } else {
             // Gracefully ignore invalid map changes
             warn!(
@@ -2062,6 +2069,7 @@ mod tests {
                 description: "A veteran smith".to_string(),
                 character_id: "npc_old_gareth".to_string(),
                 dialogue_id: None,
+                time_condition: None,
             },
         );
 
@@ -2152,6 +2160,7 @@ mod tests {
                 description: "A veteran smith".to_string(),
                 character_id: "npc_old_gareth".to_string(),
                 dialogue_id: None,
+                time_condition: None,
             },
         );
         game_state.world.add_map(map);
@@ -2222,6 +2231,7 @@ mod tests {
                 name: "Goblins".to_string(),
                 description: "Goblins lurk here".to_string(),
                 monster_group: vec![1],
+                time_condition: None,
             },
         );
 
@@ -2295,6 +2305,7 @@ mod tests {
                 name: "Trolls".to_string(),
                 description: "Trolls guard this tile".to_string(),
                 monster_group: vec![2],
+                time_condition: None,
             },
         );
 

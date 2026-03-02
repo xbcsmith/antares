@@ -265,6 +265,12 @@ impl Plugin for AntaresPlugin {
 
         // Core combat plugin (Phase 1: Core Combat Infrastructure)
         app.add_plugins(antares::game::systems::combat::CombatPlugin);
+
+        // Phase 2: Time-of-Day ambient lighting
+        app.add_plugins(antares::game::systems::time::TimeOfDayPlugin);
+
+        // Phase 3: Rest orchestration system
+        app.add_plugins(antares::game::systems::rest::RestPlugin);
     }
 }
 
@@ -355,6 +361,7 @@ mod tests {
                 audio: Default::default(),
                 controls: ControlsConfig::default(),
                 camera: CameraConfig::default(),
+                rest: Default::default(),
             },
         }
     }

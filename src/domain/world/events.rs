@@ -11,7 +11,7 @@
 //! See `docs/reference/architecture.md` Section 4.2 for world system specifications.
 
 use super::types::{MapEvent, World};
-use crate::domain::types::Position;
+use crate::domain::types::{GameTime, Position};
 use thiserror::Error;
 
 /// Result of triggering an event
@@ -100,17 +100,25 @@ pub enum EventError {
     InvalidEvent(String),
 }
 
-/// Triggers an event at the specified position
+/// Triggers an event at the specified position, gated by the current game time.
 ///
 /// This function checks if there's an event at the given position on the current map
 /// and processes it, returning the result. Events are typically one-time occurrences
 /// and are removed from the map after being triggered (except for repeatable events
 /// like signs and NPC dialogues).
 ///
+/// If the event carries a `time_condition`, it is evaluated against `game_time`.
+/// When the condition is not satisfied the function returns
+/// [`EventResult::None`] without consuming the event — the event remains in place
+/// and will be re-evaluated on the next visit.
+///
 /// # Arguments
 ///
-/// * `world` - The game world containing maps and events
-/// * `position` - The position to check for events
+/// * `world`     - The game world containing maps and events
+/// * `position`  - The position to check for events
+/// * `game_time` - The current in-game clock, used to evaluate [`TimeCondition`]
+///   gates on applicable event variants (`Encounter`, `Sign`, `NpcDialogue`,
+///   `RecruitableCharacter`).
 ///
 /// # Returns
 ///
@@ -125,31 +133,37 @@ pub enum EventError {
 ///
 /// ```
 /// use antares::domain::world::{World, Map, MapEvent, trigger_event, EventResult};
-/// use antares::domain::types::Position;
+/// use antares::domain::types::{GameTime, Position};
 ///
 /// let mut world = World::new();
 /// let mut map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 20, 20);
 ///
-/// // Add a sign event
+/// // Add a sign event (no time condition — always fires)
 /// let pos = Position::new(10, 10);
 /// map.add_event(pos, MapEvent::Sign {
 ///     name: "Dungeon Sign".to_string(),
 ///     description: "A weathered sign".to_string(),
 ///     text: "Welcome to the dungeon!".to_string(),
+///     time_condition: None,
 /// });
 ///
 /// world.add_map(map);
 /// world.set_current_map(1);
 ///
-/// // Trigger the event
-/// let result = trigger_event(&mut world, pos);
+/// // Trigger the event — pass the current game time
+/// let game_time = GameTime::new(1, 12, 0);
+/// let result = trigger_event(&mut world, pos, &game_time);
 /// assert!(result.is_ok());
 /// match result.unwrap() {
 ///     EventResult::Sign { text } => assert_eq!(text, "Welcome to the dungeon!"),
 ///     _ => panic!("Expected Sign event"),
 /// }
 /// ```
-pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResult, EventError> {
+pub fn trigger_event(
+    world: &mut World,
+    position: Position,
+    game_time: &GameTime,
+) -> Result<EventResult, EventError> {
     // Get current map ID
     let current_map_id = world.current_map;
 
@@ -169,9 +183,42 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
         None => return Ok(EventResult::None),
     };
 
+    // Evaluate optional time condition before processing the event.
+    // If the condition is not met we return None without consuming the event so
+    // that it can fire on a future visit when the time is right.
+    let time_condition_met = match &event {
+        MapEvent::Encounter {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        MapEvent::Sign {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        MapEvent::NpcDialogue {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        MapEvent::RecruitableCharacter {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        // All other variants, and any variant whose time_condition is None,
+        // are unconditionally allowed.
+        _ => true,
+    };
+
+    if !time_condition_met {
+        return Ok(EventResult::None);
+    }
+
     // Process the event based on its type
     let result = match event {
-        MapEvent::Encounter { monster_group, .. } => EventResult::Encounter { monster_group },
+        MapEvent::Encounter {
+            monster_group,
+            time_condition: _,
+            ..
+        } => EventResult::Encounter { monster_group },
 
         MapEvent::Treasure { loot, .. } => {
             // Remove treasure event after being collected (one-time)
@@ -208,19 +255,31 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
             EventResult::Trap { damage, effect }
         }
 
-        MapEvent::Sign { text, .. } => {
+        MapEvent::Sign {
+            text,
+            time_condition: _,
+            ..
+        } => {
             // Signs are repeatable - don't remove
             EventResult::Sign { text }
         }
 
-        MapEvent::NpcDialogue { npc_id, .. } => {
+        MapEvent::NpcDialogue {
+            npc_id,
+            time_condition: _,
+            ..
+        } => {
             // NPC dialogues are repeatable - don't remove
             EventResult::NpcDialogue {
                 npc_id: npc_id.clone(),
             }
         }
 
-        MapEvent::RecruitableCharacter { character_id, .. } => {
+        MapEvent::RecruitableCharacter {
+            character_id,
+            time_condition: _,
+            ..
+        } => {
             // Recruitment encounters are one-time - remove after triggered
             world
                 .get_current_map_mut()
@@ -311,7 +370,18 @@ pub fn random_encounter<R: rand::Rng>(world: &World, rng: &mut R) -> Option<Vec<
 mod tests {
     use super::*;
     use crate::domain::character::InventorySlot;
-    use crate::domain::world::Map;
+    use crate::domain::types::TimeOfDay;
+    use crate::domain::world::{Map, TimeCondition};
+
+    /// Convenience: a neutral daytime clock for tests that do not care about time.
+    fn noon() -> GameTime {
+        GameTime::new(1, 12, 0)
+    }
+
+    /// A night-time clock (22:00) for time-condition tests.
+    fn night() -> GameTime {
+        GameTime::new(1, 22, 0)
+    }
 
     #[test]
     fn test_no_event() {
@@ -321,7 +391,7 @@ mod tests {
         world.set_current_map(1);
 
         let pos = Position::new(10, 10);
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), EventResult::None);
     }
@@ -338,13 +408,14 @@ mod tests {
                 name: "Encounter".to_string(),
                 description: "Desc".to_string(),
                 monster_group: vec![1, 2, 3],
+                time_condition: None,
             },
         );
 
         world.add_map(map);
         world.set_current_map(1);
 
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
         match result.unwrap() {
             EventResult::Encounter { monster_group } => {
@@ -372,7 +443,7 @@ mod tests {
         world.add_map(map);
         world.set_current_map(1);
 
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
         match result.unwrap() {
             EventResult::Treasure { loot } => {
@@ -382,7 +453,7 @@ mod tests {
         }
 
         // Treasure should be removed after collection
-        let result2 = trigger_event(&mut world, pos);
+        let result2 = trigger_event(&mut world, pos, &noon());
         assert_eq!(result2.unwrap(), EventResult::None);
     }
 
@@ -409,7 +480,7 @@ mod tests {
         world.set_current_map(1);
         world.set_party_position(pos);
 
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
         match result.unwrap() {
             EventResult::Teleported { position, map_id } => {
@@ -443,7 +514,7 @@ mod tests {
         world.add_map(map);
         world.set_current_map(1);
 
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
         match result.unwrap() {
             EventResult::Trap { damage, effect } => {
@@ -454,7 +525,7 @@ mod tests {
         }
 
         // Trap should be removed after triggering
-        let result2 = trigger_event(&mut world, pos);
+        let result2 = trigger_event(&mut world, pos, &noon());
         assert_eq!(result2.unwrap(), EventResult::None);
     }
 
@@ -471,13 +542,14 @@ mod tests {
                 name: "Sign".to_string(),
                 description: "Desc".to_string(),
                 text: sign_text.clone(),
+                time_condition: None,
             },
         );
 
         world.add_map(map);
         world.set_current_map(1);
 
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
         match result.unwrap() {
             EventResult::Sign { text } => {
@@ -487,8 +559,222 @@ mod tests {
         }
     }
 
+    // ── TimeCondition integration tests ──────────────────────────────────────
+
+    /// An Encounter with DuringPeriods([Night]) must fire at night.
     #[test]
-    fn test_random_encounter_triggers() {
+    fn test_time_condition_night_fires_at_night() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
+        let pos = Position::new(5, 5);
+        map.add_event(
+            pos,
+            MapEvent::Encounter {
+                name: "Night Ambush".to_string(),
+                description: String::new(),
+                monster_group: vec![1, 2],
+                time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
+            },
+        );
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // hour=23 → Night → condition met → Encounter result
+        let result = trigger_event(&mut world, pos, &GameTime::new(1, 23, 0));
+        assert!(
+            matches!(result, Ok(EventResult::Encounter { .. })),
+            "night-only encounter must fire at hour 23, got {:?}",
+            result
+        );
+    }
+
+    /// The same Encounter must return None at noon (Afternoon period).
+    #[test]
+    fn test_time_condition_night_skips_at_noon() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
+        let pos = Position::new(5, 5);
+        map.add_event(
+            pos,
+            MapEvent::Encounter {
+                name: "Night Ambush".to_string(),
+                description: String::new(),
+                monster_group: vec![1, 2],
+                time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
+            },
+        );
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // hour=12 → Afternoon → condition NOT met → None
+        let result = trigger_event(&mut world, pos, &GameTime::new(1, 12, 0));
+        assert_eq!(
+            result.unwrap(),
+            EventResult::None,
+            "night-only encounter must return None at noon"
+        );
+    }
+
+    /// AfterDay(5) fires on day 10, does not fire on day 3.
+    #[test]
+    fn test_time_condition_after_day_fires() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
+        let pos = Position::new(3, 3);
+        map.add_event(
+            pos,
+            MapEvent::Sign {
+                name: "Ancient Warning".to_string(),
+                description: String::new(),
+                text: "Only after the fifth day shall this be revealed.".to_string(),
+                time_condition: Some(TimeCondition::AfterDay(5)),
+            },
+        );
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // Day 10 > 5 → fires
+        let ok = trigger_event(&mut world, pos, &GameTime::new(10, 12, 0));
+        assert!(
+            matches!(ok, Ok(EventResult::Sign { .. })),
+            "AfterDay(5) must fire on day 10"
+        );
+
+        // Day 3 is NOT > 5 → None
+        let skip = trigger_event(&mut world, pos, &GameTime::new(3, 12, 0));
+        assert_eq!(
+            skip.unwrap(),
+            EventResult::None,
+            "AfterDay(5) must not fire on day 3"
+        );
+
+        // Day 5 is NOT > 5 (strict) → None
+        let boundary = trigger_event(&mut world, pos, &GameTime::new(5, 12, 0));
+        assert_eq!(
+            boundary.unwrap(),
+            EventResult::None,
+            "AfterDay(5) must not fire on day 5 itself"
+        );
+    }
+
+    /// BetweenHours fires at from/to boundaries but not outside.
+    #[test]
+    fn test_time_condition_between_hours() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
+        let pos = Position::new(7, 7);
+        map.add_event(
+            pos,
+            MapEvent::NpcDialogue {
+                name: "Day Merchant".to_string(),
+                description: String::new(),
+                npc_id: "merchant_01".to_string(),
+                time_condition: Some(TimeCondition::BetweenHours { from: 8, to: 18 }),
+            },
+        );
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // At the from boundary (hour=8) → fires
+        assert!(
+            matches!(
+                trigger_event(&mut world, pos, &GameTime::new(1, 8, 0)),
+                Ok(EventResult::NpcDialogue { .. })
+            ),
+            "BetweenHours{{8,18}} must fire at hour 8 (from boundary)"
+        );
+
+        // Mid-range (hour=13) → fires
+        assert!(
+            matches!(
+                trigger_event(&mut world, pos, &GameTime::new(1, 13, 0)),
+                Ok(EventResult::NpcDialogue { .. })
+            ),
+            "BetweenHours{{8,18}} must fire at hour 13"
+        );
+
+        // At the to boundary (hour=18) → fires
+        assert!(
+            matches!(
+                trigger_event(&mut world, pos, &GameTime::new(1, 18, 0)),
+                Ok(EventResult::NpcDialogue { .. })
+            ),
+            "BetweenHours{{8,18}} must fire at hour 18 (to boundary)"
+        );
+
+        // Just outside (hour=7) → None
+        assert_eq!(
+            trigger_event(&mut world, pos, &GameTime::new(1, 7, 0)).unwrap(),
+            EventResult::None,
+            "BetweenHours{{8,18}} must return None at hour 7"
+        );
+
+        // Just outside (hour=19) → None
+        assert_eq!(
+            trigger_event(&mut world, pos, &GameTime::new(1, 19, 0)).unwrap(),
+            EventResult::None,
+            "BetweenHours{{8,18}} must return None at hour 19"
+        );
+    }
+
+    /// An event with no time_condition must always fire regardless of the clock.
+    #[test]
+    fn test_no_time_condition_always_fires() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
+        let pos = Position::new(4, 4);
+        map.add_event(
+            pos,
+            MapEvent::Sign {
+                name: "Eternal Sign".to_string(),
+                description: String::new(),
+                text: "Always visible".to_string(),
+                time_condition: None,
+            },
+        );
+        world.add_map(map);
+        world.set_current_map(1);
+
+        for hour in 0u8..24 {
+            let result = trigger_event(&mut world, pos, &GameTime::new(1, hour, 0));
+            assert!(
+                matches!(result, Ok(EventResult::Sign { .. })),
+                "unconditional Sign must fire at every hour; failed at hour {hour}"
+            );
+        }
+    }
+
+    /// A time-gated event that fails its condition must NOT be consumed —
+    /// it must still be present on the map after the failed trigger.
+    #[test]
+    fn test_time_condition_not_met_does_not_consume_event() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
+        let pos = Position::new(2, 2);
+        map.add_event(
+            pos,
+            MapEvent::Encounter {
+                name: "Night Only".to_string(),
+                description: String::new(),
+                monster_group: vec![5],
+                time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
+            },
+        );
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // Fails at noon — event must not be removed
+        let _ = trigger_event(&mut world, pos, &noon());
+        // Now succeeds at night
+        let result = trigger_event(&mut world, pos, &night());
+        assert!(
+            matches!(result, Ok(EventResult::Encounter { .. })),
+            "encounter must still be present after a failed (noon) trigger"
+        );
+    }
+
+    #[test]
+    fn test_random_encounter_triggers_standalone() {
         // Arrange: Create a map with an encounter table that guarantees an encounter
         let mut world = World::new();
         let mut map = Map::new(
@@ -582,7 +868,7 @@ mod tests {
         world.set_current_map(1);
 
         // Act: trigger the event
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
 
         // Assert: EnterInn event contains the correct innkeeper_id
@@ -594,7 +880,7 @@ mod tests {
         }
 
         // EnterInn events are repeatable; triggering again should yield the same result
-        let result2 = trigger_event(&mut world, pos);
+        let result2 = trigger_event(&mut world, pos, &noon());
         assert!(result2.is_ok());
         match result2.unwrap() {
             EventResult::EnterInn { innkeeper_id: id } => {
@@ -616,13 +902,14 @@ mod tests {
                 name: "NPC".to_string(),
                 description: "Desc".to_string(),
                 npc_id: "test_npc".to_string(),
+                time_condition: None,
             },
         );
 
         world.add_map(map);
         world.set_current_map(1);
 
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
         match result.unwrap() {
             EventResult::NpcDialogue { npc_id } => {
@@ -632,7 +919,7 @@ mod tests {
         }
 
         // NPC dialogue should still be there (repeatable)
-        let result2 = trigger_event(&mut world, pos);
+        let result2 = trigger_event(&mut world, pos, &noon());
         assert!(result2.is_ok());
         matches!(
             result2.unwrap(),
@@ -650,7 +937,7 @@ mod tests {
         world.set_current_map(1);
 
         let pos = Position::new(25, 25); // Out of bounds
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_err());
         assert!(matches!(result, Err(EventError::OutOfBounds(25, 25))));
     }
@@ -661,7 +948,7 @@ mod tests {
         world.set_current_map(99); // Non-existent map
 
         let pos = Position::new(10, 10);
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_err());
         assert!(matches!(result, Err(EventError::MapNotFound(99))));
     }
@@ -681,6 +968,7 @@ mod tests {
                 name: "Sign".to_string(),
                 description: "Desc".to_string(),
                 text: "North".to_string(),
+                time_condition: None,
             },
         );
         map.add_event(
@@ -705,22 +993,28 @@ mod tests {
         world.set_current_map(1);
 
         // Trigger each event
-        let r1 = trigger_event(&mut world, pos1);
+        let r1 = trigger_event(&mut world, pos1, &noon());
         assert!(matches!(r1, Ok(EventResult::Sign { .. })));
 
-        let r2 = trigger_event(&mut world, pos2);
+        let r2 = trigger_event(&mut world, pos2, &noon());
         assert!(matches!(r2, Ok(EventResult::Treasure { .. })));
 
-        let r3 = trigger_event(&mut world, pos3);
+        let r3 = trigger_event(&mut world, pos3, &noon());
         assert!(matches!(r3, Ok(EventResult::Trap { .. })));
 
         // Verify one-time events are removed
-        assert_eq!(trigger_event(&mut world, pos2).unwrap(), EventResult::None);
-        assert_eq!(trigger_event(&mut world, pos3).unwrap(), EventResult::None);
+        assert_eq!(
+            trigger_event(&mut world, pos2, &noon()).unwrap(),
+            EventResult::None
+        );
+        assert_eq!(
+            trigger_event(&mut world, pos3, &noon()).unwrap(),
+            EventResult::None
+        );
 
         // Verify repeatable event remains
         assert!(matches!(
-            trigger_event(&mut world, pos1),
+            trigger_event(&mut world, pos1, &noon()),
             Ok(EventResult::Sign { .. })
         ));
     }
@@ -743,7 +1037,7 @@ mod tests {
         world.add_map(map);
         world.set_current_map(1);
 
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
         match result.unwrap() {
             EventResult::EnterInn { innkeeper_id } => {
@@ -753,7 +1047,7 @@ mod tests {
         }
 
         // Inn entrance should still be there (repeatable)
-        let result2 = trigger_event(&mut world, pos);
+        let result2 = trigger_event(&mut world, pos, &noon());
         assert!(result2.is_ok());
         match result2.unwrap() {
             EventResult::EnterInn { innkeeper_id } => {
@@ -802,32 +1096,32 @@ mod tests {
         world.set_current_map(1);
 
         // Trigger each inn entrance and verify correct innkeeper_id
-        let r1 = trigger_event(&mut world, pos1);
+        let r1 = trigger_event(&mut world, pos1, &noon());
         assert!(
             matches!(r1, Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "cozy_inn")
         );
 
-        let r2 = trigger_event(&mut world, pos2);
+        let r2 = trigger_event(&mut world, pos2, &noon());
         assert!(
             matches!(r2, Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "dragons_rest")
         );
 
-        let r3 = trigger_event(&mut world, pos3);
+        let r3 = trigger_event(&mut world, pos3, &noon());
         assert!(
             matches!(r3, Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "wayfarers_lodge")
         );
 
         // Verify all inn entrances are repeatable
         assert!(matches!(
-            trigger_event(&mut world, pos1),
+            trigger_event(&mut world, pos1, &noon()),
             Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "cozy_inn"
         ));
         assert!(matches!(
-            trigger_event(&mut world, pos2),
+            trigger_event(&mut world, pos2, &noon()),
             Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "dragons_rest"
         ));
         assert!(matches!(
-            trigger_event(&mut world, pos3),
+            trigger_event(&mut world, pos3, &noon()),
             Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "wayfarers_lodge"
         ));
     }
@@ -863,7 +1157,7 @@ mod tests {
         world.set_current_map(1);
 
         // Act
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
 
         // Assert
@@ -908,11 +1202,11 @@ mod tests {
         world.set_current_map(1);
 
         // First trigger
-        let r1 = trigger_event(&mut world, pos);
+        let r1 = trigger_event(&mut world, pos, &noon());
         assert!(matches!(r1, Ok(EventResult::EnterContainer { .. })));
 
         // Second trigger: event must still be present
-        let r2 = trigger_event(&mut world, pos);
+        let r2 = trigger_event(&mut world, pos, &noon());
         assert!(
             matches!(r2, Ok(EventResult::EnterContainer { .. })),
             "Container event must be repeatable"
@@ -939,7 +1233,7 @@ mod tests {
         world.add_map(map);
         world.set_current_map(1);
 
-        let result = trigger_event(&mut world, pos);
+        let result = trigger_event(&mut world, pos, &noon());
         match result.unwrap() {
             EventResult::EnterContainer { items, .. } => {
                 assert!(items.is_empty());
