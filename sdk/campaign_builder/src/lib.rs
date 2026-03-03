@@ -2164,15 +2164,33 @@ impl CampaignBuilderApp {
     fn load_stock_templates(&mut self) {
         if let Some(dir) = &self.campaign_dir {
             let path = dir.join(&self.campaign.stock_templates_file);
-            match self.stock_templates_editor_state.load_from_file(&path) {
-                Ok(()) => {
-                    self.stock_templates = self.stock_templates_editor_state.templates.clone();
-                    self.status_message =
-                        format!("Loaded {} stock templates", self.stock_templates.len());
+            if path.exists() {
+                match self.stock_templates_editor_state.load_from_file(&path) {
+                    Ok(()) => {
+                        self.stock_templates = self.stock_templates_editor_state.templates.clone();
+                        self.logger.info(
+                            category::FILE_IO,
+                            &format!("Loaded {} stock templates", self.stock_templates.len()),
+                        );
+                        // Mark the initial-load flag as satisfied so show() does
+                        // not redundantly re-read the file on first tab render.
+                        self.stock_templates_editor_state.needs_initial_load = false;
+                    }
+                    Err(e) => {
+                        self.logger.warn(
+                            category::FILE_IO,
+                            &format!("Failed to parse stock templates: {}", e),
+                        );
+                    }
                 }
-                Err(e) => {
-                    self.status_message = format!("Warning: could not load stock templates: {}", e);
-                }
+            } else {
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!(
+                        "Stock templates file not found (will auto-load if created later): {}",
+                        path.display()
+                    ),
+                );
             }
         }
     }
@@ -2590,6 +2608,16 @@ impl CampaignBuilderApp {
     fn validate_campaign(&mut self) {
         self.logger
             .debug(category::VALIDATION, "validate_campaign() called");
+
+        // Always sync the stock_templates mirror from the editor state before
+        // validating.  validate_npc_ids() checks self.stock_templates, but that
+        // mirror is only refreshed during tab renders.  When the user clicks
+        // "Validate Campaign" directly (toolbar, Re-validate button, metadata
+        // editor) neither tab render runs first, so the mirror can be stale and
+        // cause false "unknown stock template" errors for templates that are
+        // perfectly loaded in the editor state.
+        self.stock_templates = self.stock_templates_editor_state.templates.clone();
+
         self.validation_errors.clear();
 
         // Validate data IDs for uniqueness (in EditorTab order)
@@ -2941,6 +2969,11 @@ impl CampaignBuilderApp {
     }
 
     fn do_new_campaign(&mut self) {
+        // Reset stock templates editor so it does not retain data from a
+        // previously opened campaign.  The flag inside reset_for_new_campaign
+        // tells show() to auto-load if the user adds a templates file later.
+        self.stock_templates_editor_state.reset_for_new_campaign();
+        self.stock_templates.clear();
         self.campaign = CampaignMetadata::default();
 
         // Sync the campaign editor's authoritative metadata and edit buffer with
@@ -3225,6 +3258,12 @@ impl CampaignBuilderApp {
                             .warn(category::FILE_IO, &format!("Failed to load NPCs: {}", e));
                     }
 
+                    // Reset editor state before loading so stale data from any
+                    // previously opened campaign is cleared first.  The explicit
+                    // load below will clear needs_initial_load on success; on
+                    // failure the auto-load in show() acts as a reliable fallback.
+                    self.stock_templates_editor_state.reset_for_new_campaign();
+                    self.stock_templates.clear();
                     self.load_stock_templates();
 
                     // Scan asset references and mark loaded data files
@@ -4479,6 +4518,15 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.file_load_merge_mode,
             ),
             EditorTab::NPCs => {
+                // Always sync the stock_templates mirror from the editor state before
+                // threading into the NPC editor.  The StockTemplatesEditorState::show()
+                // auto-load fires the first time the StockTemplates tab is rendered, but
+                // the NPC tab may be opened first — in that case the explicit
+                // load_stock_templates() call in do_open_campaign() has already populated
+                // stock_templates_editor_state.templates, so pulling from there guarantees
+                // the NPC editor's ComboBox and validation both see the live list.
+                self.stock_templates = self.stock_templates_editor_state.templates.clone();
+
                 // Thread available stock templates into the NPC editor before rendering
                 self.npc_editor_state.available_stock_templates = self.stock_templates.clone();
 
@@ -5651,6 +5699,19 @@ impl CampaignBuilderApp {
                                     |ui| {
                                         ui.label(asset.size_string());
                                         ui.label(asset.asset_type.display_name());
+
+                                        // Hidden-file badge — shown first so it stands out
+                                        if asset.is_hidden {
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(220, 60, 60),
+                                                "🙈 Hidden File",
+                                            )
+                                            .on_hover_text(
+                                                "This is a hidden file (filename starts with '.'). \
+                                                Hidden files such as .DS_Store and .gitkeep are \
+                                                not part of the campaign and should be removed.",
+                                            );
+                                        }
 
                                         // Show better status for assets
                                         if asset.is_referenced {

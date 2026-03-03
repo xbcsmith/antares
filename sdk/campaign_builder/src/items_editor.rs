@@ -10,7 +10,7 @@ use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
     AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
     ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Item,
-    ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
+    ItemType, MagicItemClassification, QuestData, ResistanceType, WeaponClassification, WeaponData,
 };
 use antares::domain::types::DiceRoll;
 use eframe::egui;
@@ -637,7 +637,30 @@ impl ItemsEditorState {
                         }
                         ItemType::Consumable(data) => {
                             ui.label("🧪 Consumable");
-                            ui.label(format!("  Effect: {:?}", data.effect));
+                            let effect_str = match data.effect {
+                                ConsumableEffect::HealHp(n) => format!("Heal HP ({})", n),
+                                ConsumableEffect::RestoreSp(n) => format!("Restore SP ({})", n),
+                                ConsumableEffect::CureCondition(f) => {
+                                    format!("Cure Condition (flags: {:#X})", f)
+                                }
+                                ConsumableEffect::BoostAttribute(attr, n) => {
+                                    format!(
+                                        "Boost {} ({}{})",
+                                        attr.display_name(),
+                                        if n >= 0 { "+" } else { "" },
+                                        n
+                                    )
+                                }
+                                ConsumableEffect::BoostResistance(res, n) => {
+                                    format!(
+                                        "Boost {} Resistance ({}{})",
+                                        res.display_name(),
+                                        if n >= 0 { "+" } else { "" },
+                                        n
+                                    )
+                                }
+                            };
+                            ui.label(format!("  Effect: {}", effect_str));
                             ui.label(format!("  Combat Use: {}", data.is_combat_usable));
                         }
                         ItemType::Ammo(data) => {
@@ -1237,6 +1260,7 @@ impl ItemsEditorState {
                         ConsumableEffect::RestoreSp(_) => "Restore SP",
                         ConsumableEffect::CureCondition(_) => "Cure Condition",
                         ConsumableEffect::BoostAttribute(_, _) => "Boost Attribute",
+                        ConsumableEffect::BoostResistance(_, _) => "Boost Resistance",
                     };
                     egui::ComboBox::from_id_salt("consumable_effect")
                         .selected_text(effect_type)
@@ -1269,6 +1293,16 @@ impl ItemsEditorState {
                                 data.effect =
                                     ConsumableEffect::BoostAttribute(AttributeType::Might, 1);
                             }
+                            if ui
+                                .selectable_label(
+                                    effect_type == "Boost Resistance",
+                                    "Boost Resistance",
+                                )
+                                .clicked()
+                            {
+                                data.effect =
+                                    ConsumableEffect::BoostResistance(ResistanceType::Fire, 25);
+                            }
                         });
                 });
 
@@ -1290,6 +1324,28 @@ impl ItemsEditorState {
                         ui.horizontal(|ui| {
                             ui.label("Condition Flags:");
                             ui.add(egui::DragValue::new(flags).range(0..=255));
+                        });
+                    }
+                    ConsumableEffect::BoostResistance(res_type, amount) => {
+                        ui.horizontal(|ui| {
+                            ui.label("Resistance:");
+                            egui::ComboBox::from_id_salt("boost_res_type")
+                                .selected_text(res_type.display_name())
+                                .show_ui(ui, |ui| {
+                                    for variant in ResistanceType::all() {
+                                        ui.push_id(variant.display_name(), |ui| {
+                                            ui.selectable_value(
+                                                res_type,
+                                                variant,
+                                                variant.display_name(),
+                                            );
+                                        });
+                                    }
+                                });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Amount:");
+                            ui.add(egui::DragValue::new(amount).range(1..=127));
                         });
                     }
                     ConsumableEffect::BoostAttribute(attr_type, amount) => {

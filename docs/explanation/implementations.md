@@ -1,5 +1,170 @@
 # Implementations
 
+## NPC Editor Right-Panel Preview Regression Fix
+
+### Overview
+
+The NPC Editor's right-panel preview had regressed to a minimal placeholder
+showing only the NPC's name, description, sprite path, and dialogue/quest
+counts. The portrait image and all key NPC stats were absent. This fix
+replaces the stripped-down `show_preview` implementation with a rich preview
+panel that mirrors the Character Editor's preview style.
+
+### Root Cause
+
+The `show_preview` method in `sdk/campaign_builder/src/npc_editor.rs` had
+been deliberately simplified during an earlier refactor (a `TODO` comment
+noted the intent to restore it). The method rendered its content inside a
+`vertical_centered` container with plain `ui.label` calls and never invoked
+`load_portrait_texture` or `show_portrait_placeholder`, even though both
+helpers were already present in the file and used by the edit form. As a
+result, no portrait was displayed and none of the NPC's role/identity
+properties were surfaced in the preview pane.
+
+Additionally, `show_list_view` emitted a redundant `right_ui.heading` before
+calling `show_preview`, which would have produced a duplicate NPC name
+once the preview was restored.
+
+### Files Changed
+
+#### `sdk/campaign_builder/src/npc_editor.rs`
+
+**`show_list_view`** — removed the redundant `right_ui.heading(&npc.name)`
+and `right_ui.separator()` calls that preceded `self.show_preview(...)`, since
+`show_preview` now renders its own name header.
+
+**`show_preview`** — completely rewritten to match the Character Editor's
+`show_character_preview` layout:
+
+- **Portrait display** — calls `load_portrait_texture` to attempt to load the
+  NPC's portrait and renders it at 128×128. Falls back to
+  `show_portrait_placeholder` when no portrait path is set or the file cannot
+  be loaded.
+- **Name / identity header** — rendered to the right of the portrait:
+  - NPC name as `ui.heading`
+  - ID label
+  - Portrait filename (when non-empty)
+  - Role badges with colour-coded `RichText`:
+    - `🏪 Merchant` (gold) — when `npc.is_merchant`
+    - `🛏️ Innkeeper` (light blue) — when `npc.is_innkeeper`
+    - `✝ Priest` (light purple) — when `npc.is_priest`
+    - `🧑 NPC` (grey) — when none of the above
+- **Identity grid** (faction, dialogue ID, quest count, creature ID)
+- **Sprite section** — sheet path and sprite index, shown only when
+  `npc.sprite.is_some()`
+- **Merchant section** — stock template name and buy/sell rates (formatted as
+  `%`), shown only when `npc.is_merchant`
+- **Services note** — shown when priest/innkeeper has a service catalog
+- **Quest list** — bullet list of quest IDs when non-empty
+- **Description** — shown at the bottom when non-empty
+
+The `_campaign_dir` parameter was renamed to `campaign_dir` (removed the
+leading `_`) so the portrait loader can forward it correctly.
+
+### Quality Gate Results
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings, -D warnings)
+cargo nextest run → 2953 passed, 8 skipped
+```
+
+---
+
+## Stock Templates Editor Auto-Load Regression Fix
+
+### Overview
+
+The Campaign Builder's Stock Templates tab was not automatically loading
+templates when a campaign was opened. Users had to manually click
+"📂 Load from File" every time they opened a campaign and navigated to the
+Stock Templates tab. This fix introduces a reliable two-layer load mechanism
+and corrects two additional issues found during the investigation.
+
+### Root Cause Analysis
+
+Three separate bugs combined to produce the regression:
+
+1. **`load_stock_templates` lacked a `path.exists()` guard** — unlike every
+   other data-file loader in `CampaignBuilderApp` (`load_items`,
+   `load_classes_from_campaign`, `load_npcs`, etc.), `load_stock_templates`
+   called `load_from_file` unconditionally. When the file was absent (new
+   campaigns, campaigns migrated from older versions) this wrote a
+   `"Warning: could not load stock templates: ..."` string into
+   `status_message`, overwriting the success messages of all earlier loaders
+   and making it look as though loading had failed entirely.
+
+2. **`do_new_campaign` never reset the stock templates state** — when the user
+   created a new campaign after having opened one, `stock_templates` and
+   `stock_templates_editor_state.templates` still held the previous campaign's
+   data. Every other editor (items, spells, monsters, …) was explicitly reset
+   in `do_new_campaign`; stock templates was the only exception.
+
+3. **No lazy auto-load fallback existed in `show()`** — the
+   `StockTemplatesEditorState` struct already stored `last_campaign_dir` and
+   `last_templates_file` (cached on every `show()` call), which were clearly
+   intended to support an auto-load-on-first-render pattern. That pattern was
+   never implemented, leaving the editor entirely dependent on the explicit
+   `load_stock_templates()` call — with no fallback if that call failed
+   silently (e.g. a parse error in the RON file was swallowed and only
+   written to `status_message`).
+
+### Files Changed
+
+#### `sdk/campaign_builder/src/stock_templates_editor.rs`
+
+- **Added `needs_initial_load: bool` field** to `StockTemplatesEditorState`
+  (serde-skipped, defaults to `true`). This flag drives the lazy auto-load
+  fallback in `show()`.
+- **Implemented auto-load-on-first-show** at the top of `show()`: when
+  `needs_initial_load` is `true` and `campaign_dir` is available, the method
+  attempts to load from the file if it exists, then clears the flag regardless
+  of outcome (so the retry does not re-fire every frame).
+- **Added `reset_for_new_campaign()` public method** — clears `templates`,
+  `selected_template`, `mode`, `edit_buffer`, `search_filter`,
+  `validation_errors`, `validation_warnings`, `show_delete_confirm`, and
+  sets `needs_initial_load = true`. Called from both `do_new_campaign` and
+  `do_open_campaign`.
+
+#### `sdk/campaign_builder/src/lib.rs`
+
+- **`load_stock_templates`**: Added `path.exists()` guard (matching all other
+  load functions). On success, sets
+  `stock_templates_editor_state.needs_initial_load = false` so that `show()`
+  does not re-read the file redundantly. Error and missing-file conditions are
+  now logged via `self.logger` instead of overwriting `status_message`.
+- **`do_new_campaign`**: Added `self.stock_templates_editor_state.reset_for_new_campaign()`
+  and `self.stock_templates.clear()` at the top of the function, matching the
+  reset pattern used for every other editor.
+- **`do_open_campaign`**: Added `self.stock_templates_editor_state.reset_for_new_campaign()`
+  and `self.stock_templates.clear()` immediately before the explicit
+  `self.load_stock_templates()` call. This ensures stale data from any
+  previously opened campaign is discarded before the new campaign's file is
+  read.
+
+### Tests Added
+
+Eight new tests in `stock_templates_editor::tests`:
+
+| Test                                                     | What it verifies                                                                                                                       |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_reset_for_new_campaign_clears_templates`           | Templates, selection, and unsaved-changes flag are cleared; mode resets to List                                                        |
+| `test_reset_for_new_campaign_sets_needs_initial_load`    | `needs_initial_load` is `true` after reset even when it was `false` before                                                             |
+| `test_reset_for_new_campaign_clears_edit_state`          | Mode and edit buffer are reset even when called from Edit mode                                                                         |
+| `test_reset_for_new_campaign_clears_search_filter`       | Search filter, validation warnings, and delete-confirm dialog are cleared                                                              |
+| `test_needs_initial_load_is_true_on_default`             | New `StockTemplatesEditorState` starts with `needs_initial_load = true`                                                                |
+| `test_load_from_file_does_not_mutate_needs_initial_load` | Documents that `load_from_file` itself does not touch the flag — the caller (`load_stock_templates` / `show`) owns that responsibility |
+
+### Quality Gate Results
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings, -D warnings)
+cargo nextest run → 2953 passed, 8 skipped
+```
+
 ## Phase 5: Campaign Builder — Starting Date/Time
 
 ### Overview

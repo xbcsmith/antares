@@ -122,6 +122,7 @@ pub struct CampaignMetadataEditBuffer {
     pub conditions_file: String,
     pub proficiencies_file: String,
     pub creatures_file: String,
+    pub stock_templates_file: String,
 }
 
 impl CampaignMetadataEditBuffer {
@@ -163,6 +164,7 @@ impl CampaignMetadataEditBuffer {
             conditions_file: m.conditions_file.clone(),
             proficiencies_file: m.proficiencies_file.clone(),
             creatures_file: m.creatures_file.clone(),
+            stock_templates_file: m.stock_templates_file.clone(),
         }
     }
 
@@ -205,6 +207,7 @@ impl CampaignMetadataEditBuffer {
         dest.conditions_file = self.conditions_file.clone();
         dest.proficiencies_file = self.proficiencies_file.clone();
         dest.creatures_file = self.creatures_file.clone();
+        dest.stock_templates_file = self.stock_templates_file.clone();
     }
 }
 
@@ -687,7 +690,7 @@ impl CampaignMetadataEditorState {
 
                         CampaignSection::Files => {
                             // Files grid ordered to match EditorTab sequence:
-                            // Items, Spells, Conditions, Monsters, Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies
+                            // Items, Spells, Conditions, Monsters, Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Stock Templates, Proficiencies, Creatures
                             egui::Grid::new("campaign_files_grid")
                                 .num_columns(2)
                                 .spacing([10.0, 8.0])
@@ -939,6 +942,30 @@ impl CampaignMetadataEditorState {
                                                 .pick_file()
                                             {
                                                 self.buffer.npcs_file = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    // NPC Stock Templates File
+                                    ui.label("NPC Stock Templates File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.stock_templates_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.stock_templates_file =
+                                                    p.display().to_string();
                                                 self.has_unsaved_changes = true;
                                                 *unsaved_changes = true;
                                             }
