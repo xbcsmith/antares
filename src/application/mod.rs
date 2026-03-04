@@ -63,6 +63,14 @@ pub enum GameMode {
     /// Container interaction split-screen inventory (opened with `E` when
     /// facing a chest, crate, hole in the wall, etc.).
     ContainerInventory(crate::application::container_inventory_state::ContainerInventoryState),
+    /// Rest duration selection menu.
+    ///
+    /// Shown when the player presses R in Exploration mode.  Presents three
+    /// choices: 4 hours (50% HP/SP), 8 hours (75% HP/SP), 12 hours (100%
+    /// HP/SP).  Selecting a choice fires [`InitiateRestEvent`] with the
+    /// chosen duration and transitions to [`GameMode::Resting`].
+    /// Pressing Escape or Menu while here returns to Exploration.
+    RestMenu,
     /// Party is resting — per-hour healing loop is running.
     ///
     /// Input is blocked during this mode (except `GameAction::Menu` which
@@ -100,6 +108,13 @@ pub struct RestState {
     pub hours_completed: u32,
     /// Set when a random encounter interrupts the rest before completion.
     pub interrupted: bool,
+    /// HP/SP fraction of each character's base to restore per hour tick.
+    ///
+    /// Derived from the chosen [`RestDuration`]: Short → 0.125, Long →
+    /// 0.09375, Full → 0.08333.  Stored here so the per-hour healing loop
+    /// doesn't need to recompute it and so save/load restores the correct
+    /// rate when resuming a rest in progress.
+    pub restore_fraction_per_hour: f32,
 }
 
 impl RestState {
@@ -119,11 +134,53 @@ impl RestState {
     /// assert_eq!(s.hours_completed, 0);
     /// assert!(!s.interrupted);
     /// ```
-    pub fn new(hours: u32) -> Self {
+    /// Creates a `RestState` with an explicit per-hour restore fraction.
+    ///
+    /// Use this constructor when initiating a rest from the rest-duration
+    /// menu so the correct heal rate is stored alongside the hour count.
+    ///
+    /// # Arguments
+    ///
+    /// * `hours`                    — total in-game hours to rest.
+    /// * `restore_fraction_per_hour` — HP/SP fraction to restore each hour.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::RestState;
+    /// use antares::domain::resources::RestDuration;
+    ///
+    /// let d = RestDuration::Full;
+    /// let s = RestState::with_fraction(d.hours(), d.restore_fraction_per_hour());
+    /// assert_eq!(s.hours_requested, 12);
+    /// assert!((s.restore_fraction_per_hour - d.restore_fraction_per_hour()).abs() < 1e-6);
+    /// ```
+    pub fn with_fraction(hours: u32, restore_fraction_per_hour: f32) -> Self {
         Self {
             hours_requested: hours,
             hours_completed: 0,
             interrupted: false,
+            restore_fraction_per_hour,
+        }
+    }
+
+    /// Creates a `RestState` for a full 12-hour rest (100% HP/SP).
+    ///
+    /// Convenience wrapper used by tests and legacy call sites.
+    /// Prefer [`RestState::with_fraction`] for player-initiated rests so the
+    /// chosen duration's heal rate is stored correctly.
+    pub fn new(hours: u32) -> Self {
+        use crate::domain::resources::{RestDuration, HP_RESTORE_RATE};
+        // Use the correct fraction for known durations; fall back to the
+        // full-rest rate for any other hour count.
+        let fraction = RestDuration::from_hours(hours)
+            .map(|d| d.restore_fraction_per_hour())
+            .unwrap_or(HP_RESTORE_RATE);
+        Self {
+            hours_requested: hours,
+            hours_completed: 0,
+            interrupted: false,
+            restore_fraction_per_hour: fraction,
         }
     }
 
@@ -1133,6 +1190,25 @@ impl GameState {
     /// ```
     pub fn enter_rest(&mut self, hours: u32) {
         self.mode = GameMode::Resting(RestState::new(hours));
+    }
+
+    /// Transitions to the rest-duration selection menu.
+    ///
+    /// Called when the player presses the rest key in Exploration mode.
+    /// The rest menu UI presents three choices (4 / 8 / 12 hours); selecting
+    /// one calls [`enter_rest`](Self::enter_rest) with the chosen duration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_rest_menu();
+    /// assert!(matches!(state.mode, GameMode::RestMenu));
+    /// ```
+    pub fn enter_rest_menu(&mut self) {
+        self.mode = GameMode::RestMenu;
     }
 
     /// Enters inventory mode, storing the current mode for resume on close.

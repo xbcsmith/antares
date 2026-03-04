@@ -1,5 +1,178 @@
 # Implementations
 
+## Rest System: Duration Menu, Heal Rates, and Real-Time Pacing
+
+### Overview
+
+Three separate problems were fixed in the rest system:
+
+1. **No duration choice** — pressing R immediately started a 12-hour rest with
+   no player input. The correct behaviour is to present a menu with three
+   choices: 4 hours (50% HP/SP), 8 hours (75% HP/SP), 12 hours (100% HP/SP).
+
+2. **Wrong heal rates** — `HP_RESTORE_RATE` was `1/12` per hour regardless of
+   duration. That means 4 hours = 33%, 8 hours = 67%, 12 hours = 100%. The
+   design requires 4h = 50%, 8h = 75%, 12h = 100%. Each duration has its own
+   per-hour rate derived from its target percentage divided by its hours.
+
+3. **One hour per frame** — the rest sequence completed in ~0.2 seconds at 60
+   fps with no visible progress. A real-time `RestTickTimer` now gates each
+   hour tick to once per second so the overlay and flavour text are readable.
+
+### Changes
+
+#### `src/domain/resources.rs`
+
+- **`RestDuration` enum** — new public enum with variants `Short` (4h/50%),
+  `Long` (8h/75%), `Full` (12h/100%). Methods:
+  - `hours() -> u32`
+  - `total_restore_fraction() -> f32`
+  - `restore_fraction_per_hour() -> f32` (= total / hours)
+  - `from_hours(u32) -> Option<Self>`
+  - `ALL: [RestDuration; 3]` constant
+- **`rest_party_hour`** — signature changed to
+  `rest_party_hour(party, restore_fraction_per_hour: f32)`. The function no
+  longer hard-codes `HP_RESTORE_RATE`; callers supply the rate from their
+  chosen `RestDuration`. Food check and consumption removed (done upfront).
+- **`HP_RESTORE_RATE` / `SP_RESTORE_RATE`** — kept for `rest_party` (the
+  non-interactive batch helper) but documented as full-rest-only constants.
+
+#### `src/application/mod.rs`
+
+- **`GameMode::RestMenu`** — new unit variant. Shown when the player presses R
+  in Exploration; transitions to `Resting` once a duration is chosen.
+- **`RestState.restore_fraction_per_hour: f32`** — new field. Stores the
+  chosen duration's per-hour rate so the per-hour loop uses it correctly and
+  save/load resumes at the right rate.
+- **`RestState::with_fraction(hours, fraction)`** — new constructor for
+  player-initiated rests.
+- **`RestState::new(hours)`** — updated to look up the correct fraction via
+  `RestDuration::from_hours`; falls back to `HP_RESTORE_RATE` for non-standard
+  hour counts.
+- **`GameState::enter_rest_menu()`** — new method, sets mode to `RestMenu`.
+
+#### `src/game/systems/rest.rs`
+
+- **`InitiateRestEvent`** — new field `restore_fraction_per_hour: f32`.
+  New constructor `InitiateRestEvent::from_duration(RestDuration)`.
+- **`RestMenuRoot`** — new marker component for the duration-selection overlay.
+- **`REST_HOUR_REAL_SECONDS`** — new constant (`1.0`). Controls real-time
+  pacing of the rest sequence.
+- **`RestTickTimer`** — new `Resource` wrapping a Bevy `Timer`. Each frame
+  `process_rest` ticks it; an hour of healing only fires when the timer
+  completes.
+- **`setup_rest_ui`** — now spawns two overlays: the `RestMenuRoot` panel
+  (duration choices with key hints) and the existing `RestProgressRoot` panel.
+- **`handle_rest_menu_input`** — new system. Reads `ButtonInput<KeyCode>` while
+  in `RestMenu` mode: `1`/`2`/`3` fire `InitiateRestEvent` for the chosen
+  duration; `Escape` returns to Exploration. Runs before `process_rest` in the
+  system chain.
+- **`process_rest`** — `InitiateRestEvent` handler now uses
+  `RestState::with_fraction` so the correct heal rate is stored. Timer is reset
+  at initiation. Per-hour tick gated behind `RestTickTimer`. `time: Res<Time>`
+  made `Option` so headless test apps without the resource don't panic.
+- **`update_rest_ui`** — now also shows/hides `RestMenuRoot`.
+- **`RestPlugin::build`** — inserts `RestTickTimer`, registers
+  `handle_rest_menu_input` before `process_rest`.
+
+#### `src/game/systems/input.rs`
+
+- **R key handler** — changed from firing `InitiateRestEvent` directly to
+  calling `game_state.enter_rest_menu()`. No event is fired until the player
+  picks a duration.
+- **Movement block** — extended to also block movement in `RestMenu` mode.
+- `InitiateRestEvent` import scoped to `#[cfg(test)]`.
+
+### Behaviour After Fix
+
+| Action                 | Before                      | After                                    |
+| ---------------------- | --------------------------- | ---------------------------------------- |
+| Press R in Exploration | Immediately starts 12h rest | Opens duration menu                      |
+| Choose 4h              | N/A                         | 50% HP/SP restored over 4 real seconds   |
+| Choose 8h              | N/A                         | 75% HP/SP restored over 8 real seconds   |
+| Choose 12h             | 100% HP/SP in ~0.2 s        | 100% HP/SP over 12 real seconds          |
+| Press Escape on menu   | N/A                         | Returns to Exploration, no food consumed |
+
+## Rest System: Upfront Food Check Fix
+
+### Overview
+
+The rest system had a fundamental logic error: food was being checked and
+consumed **per hour** inside `rest_party_hour`, meaning a party could be
+"interrupted by hunger" mid-sleep after already resting for several hours.
+This is wrong. The correct mechanic is:
+
+- Before rest begins, check that the party has **1 food ration per member**.
+- If they do not have enough food, **refuse rest entirely** — no food consumed,
+  no HP/SP restored, mode stays `Exploration`.
+- If they do have enough food, **consume all required rations upfront**, then
+  let the party sleep undisturbed (barring random encounters).
+
+### Root Cause
+
+`rest_party_hour` contained both a food check (`if party.food == 0 → Err`)
+and a `consume_food` call on every tick. Over a 12-hour rest this consumed
+12 rations per member rather than 1, and could abort the rest mid-sequence
+if food ran out partway through. The `process_rest` system caught the error
+and emitted a `RestCompleteEvent` labelled "party fully refreshed" even when
+the rest had been cut short by hunger — a doubly wrong outcome.
+
+Additionally, an earlier attempted fix had added an `interrupted_by_hunger`
+field to `RestCompleteEvent`, which was also wrong by design: hunger should
+never interrupt a rest that is already in progress.
+
+### Changes
+
+#### `src/domain/resources.rs`
+
+- **`FOOD_PER_REST`** — doc comment updated to clarify it means 1 ration per
+  member per full rest, consumed upfront.
+- **`food_needed_to_rest(party: &Party) -> u32`** — new public helper that
+  returns `party.members.len() as u32 * FOOD_PER_REST`. Callers use this to
+  check affordability before initiating rest.
+- **`rest_party_hour`** — food check and `consume_food` call removed entirely.
+  This function is now a **pure healing tick**. It always returns `Ok(())`.
+  Callers are responsible for consuming food before the first call.
+- **`rest_party`** — upfront check rewritten: compares `party.food` against
+  `food_needed_to_rest(party)` (i.e. `members.len()`). If insufficient,
+  returns `ResourceError::TooHungryToRest` with food and HP/SP unchanged.
+  On success, calls `consume_food(party, FOOD_PER_REST)` once before healing.
+- **Removed**: `test_rest_party_hour_fails_without_food` — this behaviour no
+  longer exists.
+- **Added tests**: `test_food_needed_to_rest_empty_party`,
+  `test_food_needed_to_rest_three_members`,
+  `test_rest_party_hour_does_not_consume_food`,
+  `test_rest_party_hour_succeeds_without_food`,
+  `test_rest_party_fails_without_enough_food`.
+
+#### `src/game/systems/rest.rs`
+
+- **`RestCompleteEvent`** — `interrupted_by_hunger` field removed. Hunger
+  can never interrupt a rest in progress; the field was incorrect by design.
+- **`process_rest`** — food check moved into the `InitiateRestEvent` handler,
+  before `game_state.enter_rest()` is called. If `party.food < needed`, the
+  system logs a `WARN` and returns without changing mode or consuming food.
+  If the check passes, `consume_food` is called once with `FOOD_PER_REST`
+  before entering `Resting` mode.
+- **`process_rest` per-hour loop** — the hunger-abort path (`rest_party_hour`
+  returning `Err`) is now treated as an unexpected/future error variant only.
+  It will never fire under normal game conditions.
+- **`handle_rest_complete`** — `interrupted_by_hunger` branch removed.
+  The "party fully refreshed" log message is now only emitted on genuine
+  normal completion.
+- **Added tests**: `test_rest_refused_when_insufficient_food` (3 members,
+  2 rations → stays Exploration, food unchanged, HP unchanged),
+  `test_rest_accepted_with_exact_food` (2 members, 2 rations → enters
+  Resting, both rations consumed).
+
+### Behaviour After Fix
+
+| Situation                     | Before                                                              | After                                            |
+| ----------------------------- | ------------------------------------------------------------------- | ------------------------------------------------ |
+| Party has enough food         | Rest starts, food consumed 1/hr × 12 = 12/member                    | Rest starts, food consumed once = 1/member       |
+| Party has insufficient food   | Rest starts, interrupted after N hours with "party fully refreshed" | Rest refused immediately, mode stays Exploration |
+| `rest_party_hour` with food=0 | Returns `Err(TooHungryToRest)`                                      | Returns `Ok(())` — food already paid             |
+
 ## NPC Editor Right-Panel Preview Regression Fix
 
 ### Overview

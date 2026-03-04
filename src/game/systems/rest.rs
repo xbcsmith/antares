@@ -68,7 +68,7 @@
 use bevy::prelude::*;
 
 use crate::application::{GameMode, GameState};
-use crate::domain::resources::rest_party_hour;
+use crate::domain::resources::{consume_food, food_needed_to_rest, rest_party_hour, RestDuration};
 use crate::domain::world::random_encounter;
 use crate::game::resources::GlobalState;
 
@@ -94,20 +94,51 @@ use crate::game::resources::GlobalState;
 /// ```
 /// use antares::game::systems::rest::InitiateRestEvent;
 ///
-/// let event = InitiateRestEvent { hours: 12 };
-/// assert_eq!(event.hours, 12);
+/// let ev = InitiateRestEvent::from_duration(antares::domain::resources::RestDuration::Full);
+/// assert_eq!(ev.hours, 12);
 /// ```
-#[derive(Message, Debug, Clone, PartialEq, Eq)]
+#[derive(Message, Debug, Clone, PartialEq)]
 pub struct InitiateRestEvent {
-    /// Number of in-game hours to rest.
+    /// Number of in-game hours to rest (4, 8, or 12).
     pub hours: u32,
+    /// HP/SP fraction of each character's base to restore per hour tick.
+    ///
+    /// Computed from the chosen [`RestDuration`].  Stored in the event so
+    /// `process_rest` can pass it straight into [`RestState`] without
+    /// recomputing.
+    pub restore_fraction_per_hour: f32,
 }
 
-/// Sent when a rest sequence ends — either completed or interrupted.
+impl InitiateRestEvent {
+    /// Construct from a [`RestDuration`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::rest::InitiateRestEvent;
+    /// use antares::domain::resources::RestDuration;
+    ///
+    /// let ev = InitiateRestEvent::from_duration(RestDuration::Full);
+    /// assert_eq!(ev.hours, 12);
+    /// ```
+    pub fn from_duration(duration: RestDuration) -> Self {
+        Self {
+            hours: duration.hours(),
+            restore_fraction_per_hour: duration.restore_fraction_per_hour(),
+        }
+    }
+}
+
+/// Sent when a rest sequence ends — either completed normally or interrupted
+/// by a random encounter.
 ///
 /// The [`handle_rest_complete`] system reads this event to initiate combat
-/// when `interrupted_by_encounter` is `true`.  UI systems (Phase 4) will also
-/// read it to display completion / interruption messages.
+/// when `interrupted_by_encounter` is `true`.  UI systems will also read it
+/// to display completion / interruption messages.
+///
+/// Note: hunger can never interrupt a rest in progress.  The food check is
+/// performed **before** rest begins; if the party lacks food the rest is
+/// refused at initiation and this event is never emitted.
 ///
 /// # Examples
 ///
@@ -122,7 +153,7 @@ pub struct InitiateRestEvent {
 /// };
 /// assert!(!done.interrupted_by_encounter);
 ///
-/// // Interrupted rest
+/// // Interrupted by encounter
 /// let interrupted = RestCompleteEvent {
 ///     hours_completed: 3,
 ///     interrupted_by_encounter: true,
@@ -169,6 +200,23 @@ pub struct RestCompleteEvent {
 /// ```
 #[derive(Component)]
 pub struct RestProgressRoot;
+
+/// Marker component for the rest-duration selection menu root node.
+///
+/// Spawned at startup by [`setup_rest_ui`] and shown (`Display::Flex`) while
+/// the game is in [`GameMode::RestMenu`](crate::application::GameMode::RestMenu).
+/// Hidden at all other times.  The player selects 4 / 8 / 12 hours using
+/// keys `1` / `2` / `3`, or presses Escape to cancel back to Exploration.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::rest::RestMenuRoot;
+///
+/// let _marker: RestMenuRoot = RestMenuRoot;
+/// ```
+#[derive(Component)]
+pub struct RestMenuRoot;
 
 /// Marker component for the "Hour X / Y" progress label inside the overlay.
 ///
@@ -248,35 +296,155 @@ impl Plugin for RestPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<InitiateRestEvent>()
             .add_message::<RestCompleteEvent>()
+            .insert_resource(RestTickTimer(Timer::from_seconds(
+                REST_HOUR_REAL_SECONDS,
+                TimerMode::Repeating,
+            )))
             .add_systems(Startup, setup_rest_ui)
             .add_systems(
                 Update,
-                (process_rest, handle_rest_complete, update_rest_ui).chain(),
+                (
+                    handle_rest_menu_input,
+                    process_rest,
+                    handle_rest_complete,
+                    update_rest_ui,
+                )
+                    .chain(),
             );
     }
 }
 
 // ---------------------------------------------------------------------------
+// Timer resource
+// ---------------------------------------------------------------------------
+
+/// How many real-time seconds each in-game rest hour takes.
+///
+/// At 1.0 s/hour a 12-hour rest takes 12 seconds — long enough to read the
+/// flavour text but not tedious.  Adjust in [`RestPlugin`] if needed.
+pub const REST_HOUR_REAL_SECONDS: f32 = 1.0;
+
+/// Bevy resource that gates the per-hour rest tick.
+///
+/// Each Bevy frame [`process_rest`] calls `tick()` on this timer.  An hour
+/// of healing is only applied when the timer fires (i.e. once every
+/// [`REST_HOUR_REAL_SECONDS`] of real time).  This makes the rest sequence
+/// visible to the player instead of blinking past in a fraction of a second.
+#[derive(Resource)]
+pub struct RestTickTimer(pub Timer);
+
+// ---------------------------------------------------------------------------
 // Systems
 // ---------------------------------------------------------------------------
 
-/// Spawns the rest-progress overlay UI hierarchy (runs once at startup).
+/// Spawns all rest-related UI hierarchies (runs once at startup).
 ///
-/// The overlay is a full-screen, centred flex container that is hidden
-/// (`Display::None`) by default.  [`update_rest_ui`] toggles visibility
-/// each frame based on the current game mode.
+/// Spawns two hidden overlays:
 ///
-/// # Node hierarchy
+/// 1. **Rest-duration menu** ([`RestMenuRoot`]) — shown in
+///    [`GameMode::RestMenu`](crate::application::GameMode::RestMenu).
+///    Displays three choices (4 / 8 / 12 hours) with their HP/SP restore
+///    percentages.  The player presses `1`, `2`, or `3` to choose, or
+///    `Escape` to cancel.
+///
+/// 2. **Rest-progress overlay** ([`RestProgressRoot`]) — shown while in
+///    [`GameMode::Resting`](crate::application::GameMode::Resting).
+///    Displays the current hour, a progress bar, and cycling flavour text.
+///
+/// # Node hierarchy (rest menu)
 ///
 /// ```text
-/// RestProgressRoot  (full-screen overlay, hidden by default)
-///   └─ column container (centred panel)
-///        ├─ title:    "Resting…"
-///        ├─ progress: "Hour X / Y"   ← RestProgressLabel
-///        └─ hint:     flavour text   ← RestHintLabel
+/// RestMenuRoot  (full-screen dim overlay)
+///   └─ panel (column)
+///        ├─ "Rest — choose duration"  (title)
+///        ├─ "[1]  4 hours  — 50% HP/SP restored"
+///        ├─ "[2]  8 hours  — 75% HP/SP restored"
+///        ├─ "[3] 12 hours  — 100% HP/SP restored"
+///        └─ "[Esc] Cancel"
+/// ```
+///
+/// # Node hierarchy (rest progress)
+///
+/// ```text
+/// RestProgressRoot  (full-screen dim overlay)
+///   └─ panel (column)
+///        ├─ "Resting…"              (title)
+///        ├─ "Hour X / Y"            ← RestProgressLabel
+///        └─ flavour text            ← RestHintLabel
 /// ```
 pub fn setup_rest_ui(mut commands: Commands) {
-    // Full-screen overlay — hidden until resting begins.
+    // ── Rest-duration menu ────────────────────────────────────────────────
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                display: Display::None,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.80)),
+            ZIndex(100),
+            RestMenuRoot,
+        ))
+        .with_children(|parent| {
+            parent
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(16.0),
+                    padding: UiRect::all(Val::Px(40.0)),
+                    ..default()
+                })
+                .with_children(|panel| {
+                    panel.spawn((
+                        Text::new("Rest \u{2014} Choose Duration"),
+                        TextFont {
+                            font_size: 28.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgba(1.0, 0.9, 0.6, 1.0)),
+                    ));
+                    panel.spawn((
+                        Text::new("[1]  4 hours  \u{2014}  50% HP/SP restored"),
+                        TextFont {
+                            font_size: 20.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgba(0.8, 1.0, 0.8, 1.0)),
+                    ));
+                    panel.spawn((
+                        Text::new("[2]  8 hours  \u{2014}  75% HP/SP restored"),
+                        TextFont {
+                            font_size: 20.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgba(0.8, 1.0, 0.8, 1.0)),
+                    ));
+                    panel.spawn((
+                        Text::new("[3] 12 hours  \u{2014} 100% HP/SP restored"),
+                        TextFont {
+                            font_size: 20.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgba(0.8, 1.0, 0.8, 1.0)),
+                    ));
+                    panel.spawn((
+                        Text::new("[Esc]  Cancel"),
+                        TextFont {
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgba(0.6, 0.6, 0.6, 1.0)),
+                    ));
+                });
+        });
+
+    // ── Rest-progress overlay ─────────────────────────────────────────────
     commands
         .spawn((
             Node {
@@ -295,7 +463,6 @@ pub fn setup_rest_ui(mut commands: Commands) {
             RestProgressRoot,
         ))
         .with_children(|parent| {
-            // Inner panel — vertically stacked labels.
             parent
                 .spawn(Node {
                     flex_direction: FlexDirection::Column,
@@ -305,7 +472,6 @@ pub fn setup_rest_ui(mut commands: Commands) {
                     ..default()
                 })
                 .with_children(|panel| {
-                    // Title label
                     panel.spawn((
                         Text::new("Resting\u{2026}"),
                         TextFont {
@@ -315,7 +481,6 @@ pub fn setup_rest_ui(mut commands: Commands) {
                         TextColor(Color::srgba(1.0, 0.9, 0.6, 1.0)),
                     ));
 
-                    // Progress label: "Hour X / Y"
                     panel.spawn((
                         Text::new("Hour 0 / 12"),
                         TextFont {
@@ -326,7 +491,6 @@ pub fn setup_rest_ui(mut commands: Commands) {
                         RestProgressLabel,
                     ));
 
-                    // Hint / flavour label
                     panel.spawn((
                         Text::new(REST_FLAVOUR_MESSAGES[0]),
                         TextFont {
@@ -337,7 +501,6 @@ pub fn setup_rest_ui(mut commands: Commands) {
                         RestHintLabel,
                     ));
 
-                    // Encounter-warning hint (static, always visible while overlay is shown)
                     panel.spawn((
                         Text::new("(encounter may interrupt)"),
                         TextFont {
@@ -350,24 +513,74 @@ pub fn setup_rest_ui(mut commands: Commands) {
         });
 }
 
-/// Shows or hides the rest-progress overlay and keeps its labels up-to-date.
+/// Handles keyboard input while the rest-duration menu is open.
 ///
-/// Runs every frame (after [`process_rest`]).  When the game is in
-/// [`GameMode::Resting`](crate::application::GameMode::Resting) the overlay
-/// root's `Display` is set to `Flex` and the progress / hint labels are
-/// updated with current values from [`RestState`](crate::application::RestState).
-/// In any other mode the overlay is hidden.
+/// Runs every frame (before [`process_rest`]).  When the game is in
+/// [`GameMode::RestMenu`](crate::application::GameMode::RestMenu):
 ///
-/// # Arguments
+/// - `1` → initiate a 4-hour (Short) rest
+/// - `2` → initiate an 8-hour (Long) rest
+/// - `3` → initiate a 12-hour (Full) rest
+/// - `Escape` → cancel and return to Exploration
 ///
-/// * `global_state`    – read-only access to [`GlobalState`] for the current
-///   [`GameMode`].
-/// * `overlay_query`   – mutable query targeting the [`RestProgressRoot`] node.
-/// * `progress_query`  – mutable query targeting the [`RestProgressLabel`] text.
-/// * `hint_query`      – mutable query targeting the [`RestHintLabel`] text.
+/// On a valid choice the system fires [`InitiateRestEvent`] and the game
+/// transitions to `Resting` on the same frame via [`process_rest`].
+pub fn handle_rest_menu_input(
+    keyboard: Option<Res<ButtonInput<KeyCode>>>,
+    mut global_state: Option<ResMut<GlobalState>>,
+    mut rest_writer: MessageWriter<InitiateRestEvent>,
+) {
+    let Some(ref mut gs) = global_state else {
+        return;
+    };
+    if !matches!(gs.0.mode, GameMode::RestMenu) {
+        return;
+    }
+
+    // If there is no keyboard resource (e.g. headless test apps that don't
+    // register ButtonInput), do nothing — the menu stays open until the
+    // caller sets the mode manually or a test fires InitiateRestEvent directly.
+    let Some(keyboard) = keyboard else {
+        return;
+    };
+
+    let chosen = if keyboard.just_pressed(KeyCode::Digit1) {
+        Some(RestDuration::Short)
+    } else if keyboard.just_pressed(KeyCode::Digit2) {
+        Some(RestDuration::Long)
+    } else if keyboard.just_pressed(KeyCode::Digit3) {
+        Some(RestDuration::Full)
+    } else {
+        None
+    };
+
+    if let Some(duration) = chosen {
+        info!(
+            "Rest menu: player chose {} hours ({:.0}% HP/SP)",
+            duration.hours(),
+            duration.total_restore_fraction() * 100.0
+        );
+        // Return to Exploration first — process_rest will re-enter Resting.
+        gs.0.mode = GameMode::Exploration;
+        rest_writer.write(InitiateRestEvent::from_duration(duration));
+        return;
+    }
+
+    if keyboard.just_pressed(KeyCode::Escape) {
+        info!("Rest menu: cancelled");
+        gs.0.mode = GameMode::Exploration;
+    }
+}
+
+/// Shows or hides the rest-duration menu and rest-progress overlays.
+///
+/// Runs every frame (after [`process_rest`]).  Toggles `Display` on both
+/// overlay roots based on the current [`GameMode`], and keeps the progress
+/// labels up-to-date while resting.
 pub fn update_rest_ui(
     global_state: Option<Res<GlobalState>>,
-    mut overlay_query: Query<&mut Node, With<RestProgressRoot>>,
+    mut menu_query: Query<&mut Node, (With<RestMenuRoot>, Without<RestProgressRoot>)>,
+    mut overlay_query: Query<&mut Node, (With<RestProgressRoot>, Without<RestMenuRoot>)>,
     mut progress_query: Query<&mut Text, (With<RestProgressLabel>, Without<RestHintLabel>)>,
     mut hint_query: Query<&mut Text, (With<RestHintLabel>, Without<RestProgressLabel>)>,
 ) {
@@ -375,9 +588,17 @@ pub fn update_rest_ui(
         return;
     };
 
+    let is_rest_menu = matches!(global_state.0.mode, GameMode::RestMenu);
     let is_resting = matches!(global_state.0.mode, GameMode::Resting(_));
 
-    // Show or hide the overlay.
+    for mut node in &mut menu_query {
+        node.display = if is_rest_menu {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+
     for mut node in &mut overlay_query {
         node.display = if is_resting {
             Display::Flex
@@ -390,7 +611,6 @@ pub fn update_rest_ui(
         return;
     }
 
-    // Update the progress and hint labels.
     if let GameMode::Resting(ref rs) = global_state.0.mode {
         let completed = rs.hours_completed;
         let requested = rs.hours_requested;
@@ -414,9 +634,13 @@ pub fn update_rest_ui(
 ///
 /// 1. If [`InitiateRestEvent`] is pending **and** the game is in
 ///    [`Exploration`](crate::application::GameMode::Exploration) mode,
-///    calls [`GameState::enter_rest`] to begin the sequence.
+///    performs the food check, consumes rations, and calls
+///    [`GameState::enter_rest`] to begin the sequence.
 /// 2. If the game is in [`GameMode::Resting`](crate::application::GameMode::Resting):
-///    - Calls [`rest_party_hour`] to heal one hour of HP/SP and consume food.
+///    - Advances the [`RestTickTimer`].  An hour tick only fires when the
+///      timer completes (once per [`REST_HOUR_REAL_SECONDS`] of real time).
+///    - Calls [`rest_party_hour`] with the stored `restore_fraction_per_hour`
+///      to heal one hour of HP/SP.
 ///    - Advances game time by 60 minutes.
 ///    - Rolls for a random encounter, scaled by
 ///      [`RestConfig::rest_encounter_rate_multiplier`].  A multiplier of
@@ -430,6 +654,8 @@ pub fn process_rest(
     global_state: Option<ResMut<GlobalState>>,
     mut initiate_reader: MessageReader<InitiateRestEvent>,
     mut complete_writer: MessageWriter<RestCompleteEvent>,
+    mut tick_timer: Option<ResMut<RestTickTimer>>,
+    time: Option<Res<Time>>,
 ) {
     let mut global_state = match global_state {
         Some(gs) => gs,
@@ -445,17 +671,52 @@ pub fn process_rest(
     // ── Step 1: consume any pending InitiateRestEvent ──────────────────────
     // Drain all pending events; only the first one in Exploration mode takes
     // effect (extras are silently discarded to avoid double-starts).
-    let mut initiate_hours: Option<u32> = None;
+    let mut initiate_event: Option<InitiateRestEvent> = None;
     for event in initiate_reader.read() {
-        if initiate_hours.is_none() {
-            initiate_hours = Some(event.hours);
+        if initiate_event.is_none() {
+            initiate_event = Some(event.clone());
         }
     }
 
-    if let Some(hours) = initiate_hours {
+    if let Some(event) = initiate_event {
         if matches!(game_state.mode, GameMode::Exploration) {
-            info!("Rest initiated: {} hours requested", hours);
-            game_state.enter_rest(hours);
+            // Check food upfront — 1 ration per party member required.
+            // If the party can't pay, refuse rest entirely: no food consumed,
+            // no HP/SP restored, no mode change.
+            let needed = food_needed_to_rest(&game_state.party);
+            if game_state.party.food < needed {
+                warn!(
+                    "Rest refused: party needs {} food ration(s) but has {} — \
+                     cannot rest while hungry",
+                    needed, game_state.party.food
+                );
+                return;
+            }
+
+            // Consume food now, before the first healing tick.
+            // SAFETY: we already verified party.food >= needed above, so this
+            // cannot fail.  The unwrap is intentional.
+            consume_food(
+                &mut game_state.party,
+                crate::domain::resources::FOOD_PER_REST,
+            )
+            .expect("consume_food must succeed after food check passed");
+
+            info!(
+                "Rest initiated: {} hours requested ({:.0}% HP/SP)",
+                event.hours,
+                event.restore_fraction_per_hour * event.hours as f32 * 100.0
+            );
+
+            // Reset the tick timer so the first hour doesn't fire immediately.
+            if let Some(ref mut timer) = tick_timer {
+                timer.0.reset();
+            }
+
+            game_state.mode = GameMode::Resting(crate::application::RestState::with_fraction(
+                event.hours,
+                event.restore_fraction_per_hour,
+            ));
             // The rest begins next frame so that the UI has one frame to show
             // the overlay before healing starts.
             return;
@@ -471,6 +732,25 @@ pub fn process_rest(
         _ => return,
     };
 
+    // ── Tick the real-time timer ────────────────────────────────────────────
+    // Only advance one hour of in-game rest when the timer fires.
+    // This paces the rest to REST_HOUR_REAL_SECONDS per hour so the player
+    // can see the progress overlay and flavour text update.
+    let timer_fired = if let Some(ref mut timer) = tick_timer {
+        // Use the real delta when available; fall back to zero (timer won't
+        // fire, but unit tests override by inserting a zero-duration timer).
+        let delta = time.as_ref().map(|t| t.delta()).unwrap_or_default();
+        timer.0.tick(delta).just_finished()
+    } else {
+        // No timer resource at all — fire every frame so legacy tests that
+        // call enter_rest directly still complete quickly.
+        true
+    };
+
+    if !timer_fired {
+        return;
+    }
+
     // All requested hours completed — emit completion event and exit.
     if rest_state_snapshot.is_complete() {
         let hours_done = rest_state_snapshot.hours_completed;
@@ -485,11 +765,15 @@ pub fn process_rest(
     }
 
     // ── Heal one hour ───────────────────────────────────────────────────────
-    if let Err(e) = rest_party_hour(&mut game_state.party) {
-        // Cannot rest (no food). Treat as an interruption so the player is
-        // notified and returned to exploration rather than being silently
-        // stuck in Resting mode.
-        warn!("rest_party_hour failed: {} — ending rest early", e);
+    // Food was already consumed upfront at initiation — rest_party_hour is a
+    // pure healing tick and will not fail under normal circumstances.
+    let restore_fraction = rest_state_snapshot.restore_fraction_per_hour;
+    if let Err(e) = rest_party_hour(&mut game_state.party, restore_fraction) {
+        // Unexpected error (future condition variants, etc.).  Log and abort.
+        warn!(
+            "rest_party_hour failed unexpectedly: {} — ending rest early",
+            e
+        );
         let hours_done = rest_state_snapshot.hours_completed;
         game_state.mode = GameMode::Exploration;
         complete_writer.write(RestCompleteEvent {
@@ -511,7 +795,11 @@ pub fn process_rest(
         rs.hours_completed += 1;
         let completed = rs.hours_completed;
         let requested = rs.hours_requested;
-        info!("Resting: hour {}/{} complete", completed, requested);
+        let pct = (restore_fraction * requested as f32 * 100.0).round() as u32;
+        info!(
+            "Resting: hour {}/{} complete ({}% HP/SP target)",
+            completed, requested, pct
+        );
     }
 
     // ── Random encounter check ──────────────────────────────────────────────
@@ -652,7 +940,7 @@ mod tests {
     use super::*;
     use crate::application::RestState;
     use crate::domain::character::{Alignment, Character, Sex};
-    use crate::domain::resources::REST_DURATION_HOURS;
+    use crate::domain::resources::{RestDuration, REST_DURATION_HOURS};
     use crate::sdk::game_config::RestConfig;
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -667,6 +955,12 @@ mod tests {
         // Give the party some food so rest doesn't fail immediately.
         game_state.party.food = 100;
         app.insert_resource(GlobalState(game_state));
+
+        // Use a zero-duration timer so every frame fires a tick in tests.
+        app.insert_resource(RestTickTimer(Timer::from_seconds(
+            0.0,
+            TimerMode::Repeating,
+        )));
         app
     }
 
@@ -680,6 +974,12 @@ mod tests {
         game_state.party.food = 1000;
         game_state.config.rest = rest_config;
         app.insert_resource(GlobalState(game_state));
+
+        // Zero-duration timer so every frame fires a tick in tests.
+        app.insert_resource(RestTickTimer(Timer::from_seconds(
+            0.0,
+            TimerMode::Repeating,
+        )));
         app
     }
 
@@ -811,7 +1111,7 @@ mod tests {
         let mut app = build_rest_app();
         add_character_with_hp(&mut app, 120, 0);
 
-        // Enter and immediately complete a 1-hour rest.
+        // Enter a 1-hour rest directly (bypasses food check; food already set to 100).
         {
             let mut gs = app.world_mut().resource_mut::<GlobalState>();
             gs.0.enter_rest(1);
@@ -848,7 +1148,7 @@ mod tests {
             .write(RestCompleteEvent {
                 hours_completed: 3,
                 interrupted_by_encounter: true,
-                encounter_group: Some(vec![1, 2]),
+                encounter_group: Some(vec![1, 2, 3]),
             });
 
         app.update();
@@ -938,27 +1238,97 @@ mod tests {
     /// [`InitiateRestEvent`] stores the requested hour count correctly.
     #[test]
     fn test_initiate_rest_event_stores_hours() {
-        let event = InitiateRestEvent { hours: 12 };
+        let event = InitiateRestEvent::from_duration(RestDuration::Full);
         assert_eq!(event.hours, 12);
     }
 
-    /// [`InitiateRestEvent`] is `Clone` and `PartialEq`.
     #[test]
-    fn test_initiate_rest_event_clone_and_eq() {
-        let a = InitiateRestEvent { hours: 8 };
-        let b = a.clone();
-        assert_eq!(a, b);
+    fn test_initiate_rest_event_from_duration_short() {
+        let ev = InitiateRestEvent::from_duration(RestDuration::Short);
+        assert_eq!(ev.hours, 4);
+        assert!(
+            (ev.restore_fraction_per_hour - RestDuration::Short.restore_fraction_per_hour()).abs()
+                < 1e-6
+        );
     }
 
-    /// [`InitiateRestEvent`] with different hour counts are not equal.
+    #[test]
+    fn test_initiate_rest_event_from_duration_long() {
+        let ev = InitiateRestEvent::from_duration(RestDuration::Long);
+        assert_eq!(ev.hours, 8);
+        assert!(
+            (ev.restore_fraction_per_hour - RestDuration::Long.restore_fraction_per_hour()).abs()
+                < 1e-6
+        );
+    }
+
+    #[test]
+    fn test_initiate_rest_event_clone_and_eq() {
+        let a = InitiateRestEvent::from_duration(RestDuration::Long);
+        let b = a.clone();
+        assert_eq!(a.hours, b.hours);
+    }
+
     #[test]
     fn test_initiate_rest_event_inequality() {
-        let a = InitiateRestEvent { hours: 6 };
-        let b = InitiateRestEvent { hours: 12 };
-        assert_ne!(a, b);
+        let a = InitiateRestEvent::from_duration(RestDuration::Short);
+        let b = InitiateRestEvent::from_duration(RestDuration::Full);
+        assert_ne!(a.hours, b.hours);
     }
 
     // ── RestCompleteEvent tests ───────────────────────────────────────────────
+
+    /// Pressing 1/2/3 in RestMenu mode fires InitiateRestEvent and exits RestMenu.
+    #[test]
+    fn test_rest_menu_key_1_fires_short_rest() {
+        let mut app = build_rest_app();
+        add_character_with_hp(&mut app, 100, 50);
+
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.mode = GameMode::RestMenu;
+        }
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Digit1);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        // Mode should have moved to Resting (process_rest consumed the event).
+        assert!(
+            matches!(gs.0.mode, GameMode::Resting(_)) || matches!(gs.0.mode, GameMode::Exploration),
+            "after pressing 1 in RestMenu mode should be Resting or Exploration; got {:?}",
+            gs.0.mode
+        );
+    }
+
+    /// Pressing Escape in RestMenu mode cancels back to Exploration.
+    #[test]
+    fn test_rest_menu_escape_cancels() {
+        let mut app = build_rest_app();
+
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.mode = GameMode::RestMenu;
+        }
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, GameMode::Exploration),
+            "Escape in RestMenu must return to Exploration; got {:?}",
+            gs.0.mode
+        );
+    }
 
     /// [`RestCompleteEvent`] stores all fields correctly for a normal completion.
     #[test]
@@ -1009,7 +1379,7 @@ mod tests {
         // Writing both messages must not panic.
         app.world_mut()
             .resource_mut::<Messages<InitiateRestEvent>>()
-            .write(InitiateRestEvent { hours: 12 });
+            .write(InitiateRestEvent::from_duration(RestDuration::Full));
         app.world_mut()
             .resource_mut::<Messages<RestCompleteEvent>>()
             .write(RestCompleteEvent {
@@ -1038,12 +1408,10 @@ mod tests {
             );
         }
 
-        // Fire InitiateRestEvent.
+        // Fire InitiateRestEvent for a Full rest.
         app.world_mut()
             .resource_mut::<Messages<InitiateRestEvent>>()
-            .write(InitiateRestEvent {
-                hours: REST_DURATION_HOURS,
-            });
+            .write(InitiateRestEvent::from_duration(RestDuration::Full));
 
         app.update();
 
@@ -1058,7 +1426,94 @@ mod tests {
             assert_eq!(rs.hours_requested, REST_DURATION_HOURS);
             assert_eq!(rs.hours_completed, 0);
             assert!(!rs.interrupted);
+            assert!(
+                (rs.restore_fraction_per_hour - RestDuration::Full.restore_fraction_per_hour())
+                    .abs()
+                    < 1e-6,
+                "Full rest must store correct per-hour fraction"
+            );
         }
+    }
+
+    /// When the party does not have enough food (< 1 ration per member),
+    /// `process_rest` must refuse the rest: mode stays `Exploration`,
+    /// no food is consumed, and the game never enters `Resting`.
+    #[test]
+    fn test_rest_refused_when_insufficient_food() {
+        let mut app = build_rest_app();
+        // Add 3 party members — they need 3 rations total.
+        add_character_with_hp(&mut app, 100, 50);
+        add_character_with_hp(&mut app, 100, 50);
+        add_character_with_hp(&mut app, 100, 50);
+
+        // Give the party only 2 rations (one short).
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.party.food = 2;
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<InitiateRestEvent>>()
+            .write(InitiateRestEvent::from_duration(RestDuration::Full));
+
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+
+        // Mode must still be Exploration — rest was refused.
+        assert!(
+            matches!(gs.0.mode, GameMode::Exploration),
+            "mode must remain Exploration when party lacks food; got {:?}",
+            gs.0.mode
+        );
+
+        // Food must be untouched — no partial consumption.
+        assert_eq!(
+            gs.0.party.food, 2,
+            "food must not be consumed when rest is refused"
+        );
+
+        // HP must be unchanged — no healing occurred.
+        assert_eq!(
+            gs.0.party.members[0].hp.current, 50,
+            "HP must not change when rest is refused"
+        );
+    }
+
+    /// When the party has exactly enough food (1 ration per member),
+    /// rest must be accepted: mode transitions to `Resting` and food is consumed.
+    #[test]
+    fn test_rest_accepted_with_exact_food() {
+        let mut app = build_rest_app();
+        add_character_with_hp(&mut app, 100, 50);
+        add_character_with_hp(&mut app, 100, 50);
+
+        // Exactly 2 rations for 2 members — just enough.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.party.food = 2;
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<InitiateRestEvent>>()
+            .write(InitiateRestEvent::from_duration(RestDuration::Full));
+
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+
+        // Mode must have transitioned to Resting.
+        assert!(
+            matches!(gs.0.mode, GameMode::Resting(_)),
+            "mode must be Resting when party has exactly enough food; got {:?}",
+            gs.0.mode
+        );
+
+        // Food must have been consumed upfront.
+        assert_eq!(
+            gs.0.party.food, 0,
+            "both rations must be consumed upfront when rest begins"
+        );
     }
 
     /// Sending [`InitiateRestEvent`] while in `Combat` mode must NOT change
@@ -1075,7 +1530,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<InitiateRestEvent>>()
-            .write(InitiateRestEvent { hours: 12 });
+            .write(InitiateRestEvent::from_duration(RestDuration::Full));
 
         app.update();
 
@@ -1157,8 +1612,12 @@ mod tests {
 
         {
             let mut gs = app.world_mut().resource_mut::<GlobalState>();
-            gs.0.party.food = 200; // Plenty of food.
-            gs.0.enter_rest(REST_DURATION_HOURS);
+            gs.0.party.food = 200;
+            // Use with_fraction so the correct heal rate is stored.
+            gs.0.mode = GameMode::Resting(crate::application::RestState::with_fraction(
+                REST_DURATION_HOURS,
+                RestDuration::Full.restore_fraction_per_hour(),
+            ));
         }
 
         // Run enough frames to complete the rest:
@@ -1214,7 +1673,25 @@ mod tests {
         if let GameMode::Resting(ref rs) = state.mode {
             assert_eq!(rs.hours_requested, 12);
             assert_eq!(rs.hours_completed, 0);
+            // enter_rest(12) should use Full rate
+            assert!(
+                (rs.restore_fraction_per_hour - RestDuration::Full.restore_fraction_per_hour())
+                    .abs()
+                    < 1e-6,
+                "enter_rest(12) must store Full duration heal rate"
+            );
         }
+    }
+
+    /// enter_rest_menu transitions to GameMode::RestMenu.
+    #[test]
+    fn test_game_state_enter_rest_menu() {
+        let mut state = crate::application::GameState::new();
+        state.enter_rest_menu();
+        assert!(
+            matches!(state.mode, GameMode::RestMenu),
+            "enter_rest_menu must set mode to RestMenu"
+        );
     }
 
     /// `InitiateRestEvent` is ignored when the game is already in `Resting`
@@ -1227,13 +1704,17 @@ mod tests {
         // Manually enter resting mode for 12 hours.
         {
             let mut gs = app.world_mut().resource_mut::<GlobalState>();
-            gs.0.enter_rest(12);
+            gs.0.mode = GameMode::Resting(crate::application::RestState::with_fraction(
+                12,
+                RestDuration::Full.restore_fraction_per_hour(),
+            ));
         }
 
-        // Send a new InitiateRestEvent for a different duration.
+        // Send a new InitiateRestEvent for a different duration — should be ignored
+        // because we are already in Resting mode, not Exploration.
         app.world_mut()
             .resource_mut::<Messages<InitiateRestEvent>>()
-            .write(InitiateRestEvent { hours: 6 });
+            .write(InitiateRestEvent::from_duration(RestDuration::Short));
 
         app.update();
 

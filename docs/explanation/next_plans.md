@@ -602,7 +602,6 @@ Write a plan with a phased approach to implementing a time system in the game en
 
 ✅ COMPLETE - [Time System Implementation Plan](./time_system_implementation_plan.md)
 
-NEED TODO PHASE 5 SDK WORK
 
 ### Rest System
 
@@ -790,3 +789,9 @@ We need to implement an automap and mini map in the game engine. The automap sho
 Write a plan with a phased approach to implementing an automap and mini map in the game engine. THINK HARD and follow the rules in @PLAN.md
 
 ✅ PLAN WRITTEN - [Automap and Mini Map Implementation Plan](./automap_and_mini_map_implementation_plan.md)
+
+### Food System
+
+Currently resting depends on food rations of the party. Currently there is no way to obtain food rations in the game. Characters start with X number of Food Rations and never get anymore. InnKeepers should sell food. The food rations will replenish the characters food ration.
+
+Food Ration should be a consumable item with a condition "can rest".
