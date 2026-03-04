@@ -25,6 +25,9 @@
 //!   state from `GlobalState` into `CombatResource` and builds participant mapping.
 //! - `sync_party_to_combat` (runs while in combat) — ensures players are present
 //!   in the combat state if they were not added earlier.
+//! - `sync_party_hp_during_combat` (runs every frame during combat) — mirrors
+//!   HP/SP/conditions from `CombatResource` participants back into `party.members`
+//!   so the HUD always reflects live combat damage without waiting for combat exit.
 //! - `sync_combat_to_party_on_exit` (runs every frame) — when combat has ended,
 //!   copies HP/SP/conditions/stat currents back into the party and clears combat data.
 //! - `setup_combat_ui` (runs on combat enter) — spawns combat UI entities
@@ -340,6 +343,18 @@ pub struct EnemyCard {
 /// Marker component for enemy HP bar fill
 #[derive(Component, Debug, Clone, Copy)]
 pub struct EnemyHpBarFill {
+    /// Index in combat participants
+    pub participant_index: usize,
+}
+
+/// Marker component for the HP bar background container node inside an [`EnemyCard`].
+///
+/// `FloatingDamage` nodes are spawned as children of this node so they are
+/// anchored to the HP bar area rather than to the whole card.  The node has a
+/// known, fixed height (`ENEMY_HP_BAR_HEIGHT`) and `overflow: visible` so the
+/// larger damage text is not clipped.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyHpBarBackground {
     /// Index in combat participants
     pub participant_index: usize,
 }
@@ -748,6 +763,17 @@ impl Plugin for CombatPlugin {
             .add_systems(Update, handle_combat_started)
             // Ensure party members exist in combat on enter
             .add_systems(Update, sync_party_to_combat)
+            // Mirror live HP/SP/conditions into party.members every frame so the HUD
+            // always shows current values — runs after all action handlers.
+            .add_systems(
+                Update,
+                sync_party_hp_during_combat
+                    .after(handle_attack_action)
+                    .after(handle_cast_spell_action)
+                    .after(handle_use_item_action)
+                    .after(handle_defend_action)
+                    .before(update_combat_ui),
+            )
             // Sync back to party when combat ends
             .add_systems(Update, sync_combat_to_party_on_exit)
             // Phase 3: Player Action Systems
@@ -993,6 +1019,56 @@ fn sync_party_to_combat(mut combat_res: ResMut<CombatResource>, global_state: Re
     crate::domain::combat::engine::start_combat(&mut combat_res.state);
 }
 
+/// Mirrors HP, SP, and conditions from [`CombatResource`] participants back into
+/// `party.members` every frame while combat is active.
+///
+/// This keeps `global_state.0.party.members[i].hp.current` in sync with what is
+/// happening inside the combat engine so that the HUD (`update_hud`) always
+/// displays live values without needing to know about `CombatResource`.
+///
+/// Only the fields that can change during a combat turn are written:
+/// - `hp.current`
+/// - `sp.current`
+/// - `conditions`
+/// - `active_conditions`
+///
+/// Base values and stats are left untouched; `sync_combat_to_party_on_exit`
+/// handles the full authoritative copy when combat ends.
+fn sync_party_hp_during_combat(
+    mut global_state: ResMut<GlobalState>,
+    combat_res: Res<CombatResource>,
+) {
+    // Only run while in combat.
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    for (participant_idx, participant) in combat_res.state.participants.iter().enumerate() {
+        if let Combatant::Player(pc) = participant {
+            // Resolve which party slot this participant maps to.
+            let party_idx = match combat_res
+                .player_orig_indices
+                .get(participant_idx)
+                .and_then(|opt| *opt)
+            {
+                Some(idx) => idx,
+                None => continue,
+            };
+
+            let Some(member) = global_state.0.party.members.get_mut(party_idx) else {
+                continue;
+            };
+
+            // Mirror only the values that change during combat turns.
+            // Use saturating arithmetic — hp/sp are u16, never go negative.
+            member.hp.current = pc.hp.current;
+            member.sp.current = pc.sp.current;
+            member.conditions = pc.conditions;
+            member.active_conditions = pc.active_conditions.clone();
+        }
+    }
+}
+
 /// System: When combat has ended (global mode is not Combat) copy combat state
 /// data (HP, SP, conditions, stat currents) back into the party members.
 fn sync_combat_to_party_on_exit(
@@ -1186,9 +1262,13 @@ fn setup_combat_ui(
                                         Node {
                                             width: Val::Percent(100.0),
                                             height: ENEMY_HP_BAR_HEIGHT,
+                                            overflow: Overflow::visible(),
                                             ..default()
                                         },
                                         BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 1.0)),
+                                        EnemyHpBarBackground {
+                                            participant_index: idx,
+                                        },
                                     ))
                                     .with_children(|bar| {
                                         // HP bar fill
@@ -4072,9 +4152,11 @@ fn reset_combat_log_on_exit(
 /// System: read `CombatFeedbackEvent` messages and spawn anchored `FloatingDamage` nodes.
 ///
 /// For monster targets the node is spawned as a **child** of the corresponding
-/// `EnemyCard` entity so it floats above the enemy's UI card.  For player
-/// targets it is spawned at an absolute position (HUD bottom area) because the
-/// player HUD layout differs per game.
+/// [`EnemyHpBarBackground`] node (not the whole card) so it sits in the
+/// lower-right corner of the HP bar area without affecting the card's flex
+/// layout.  The background node has `overflow: visible` so the text is never
+/// clipped.  For player targets it is spawned at an absolute position (HUD
+/// bottom area) because the player HUD layout differs per game.
 ///
 /// Colour is chosen from the Phase 3 constants:
 /// - Red   (`FEEDBACK_COLOR_DAMAGE`) — `Damage(_)`
@@ -4084,7 +4166,7 @@ fn reset_combat_log_on_exit(
 fn spawn_combat_feedback(
     mut reader: MessageReader<CombatFeedbackEvent>,
     mut commands: Commands,
-    enemy_cards: Query<(Entity, &EnemyCard)>,
+    hp_bar_backgrounds: Query<(Entity, &EnemyHpBarBackground)>,
 ) {
     for event in reader.read() {
         let (text, color) = match &event.effect {
@@ -4101,22 +4183,24 @@ fn spawn_combat_feedback(
 
         match event.target {
             CombatantId::Monster(idx) => {
-                // Anchor to the enemy card for this participant
-                let card_entity = enemy_cards
+                // Anchor to the HP bar background node for this participant so
+                // the damage text sits in the lower-right of the bar without
+                // disturbing the card's flex layout.
+                let bar_entity = hp_bar_backgrounds
                     .iter()
-                    .find(|(_, card)| card.participant_index == idx)
+                    .find(|(_, bg)| bg.participant_index == idx)
                     .map(|(e, _)| e);
 
-                if let Some(card) = card_entity {
-                    commands.entity(card).with_children(|parent| {
+                if let Some(bar) = bar_entity {
+                    commands.entity(bar).with_children(|parent| {
                         parent
                             .spawn((
                                 Node {
                                     position_type: PositionType::Absolute,
                                     width: Val::Auto,
                                     height: Val::Auto,
-                                    top: Val::Px(4.0),
-                                    left: Val::Px(4.0),
+                                    bottom: Val::Px(0.0),
+                                    right: Val::Px(4.0),
                                     ..default()
                                 },
                                 FloatingDamage { remaining: 1.2 },
@@ -4134,7 +4218,7 @@ fn spawn_combat_feedback(
                             });
                     });
                 } else {
-                    // Fallback: absolute-positioned if card not found yet
+                    // Fallback: absolute-positioned if bar background not found yet
                     commands
                         .spawn((
                             Node {
@@ -4523,6 +4607,102 @@ mod tests {
                 .filter(|x| x.is_some())
                 .count(),
             1
+        );
+    }
+
+    /// `sync_party_hp_during_combat` must write the combat participant's current HP
+    /// into `party.members` every frame while combat is active — so the HUD
+    /// reflects live damage before combat ends.
+    #[test]
+    fn test_sync_party_hp_during_combat_updates_party_hp() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "LiveHpHero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp.base = 30;
+        hero.hp.current = 30;
+        gs.party.add_member(hero.clone()).unwrap();
+
+        // Put the game into Combat mode.
+        gs.enter_combat();
+
+        // Build a CombatResource where the player has already taken 10 damage.
+        let mut cr = CombatResource::new();
+        let mut combat_hero = hero.clone();
+        combat_hero.hp.current = 20; // simulates 10 damage dealt
+        cr.state.add_player(combat_hero);
+        cr.player_orig_indices = vec![Some(0)];
+        // Initialise turn order so the state is consistent.
+        crate::domain::combat::engine::start_combat(&mut cr.state);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        app.insert_resource(cr);
+
+        // Run one frame — sync_party_hp_during_combat must fire.
+        app.update();
+
+        let gs_after = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+
+        // Party member HP must reflect the combat-engine value (20), not the
+        // original value (30), while combat is still active.
+        assert_eq!(
+            gs_after.0.party.members[0].hp.current, 20,
+            "sync_party_hp_during_combat must mirror combat HP into party.members \
+             so the HUD shows live values; expected 20, got {}",
+            gs_after.0.party.members[0].hp.current
+        );
+        // Must still be in combat — this sync must not end combat.
+        assert!(
+            matches!(gs_after.0.mode, GameMode::Combat(_)),
+            "combat must still be active after sync; got {:?}",
+            gs_after.0.mode
+        );
+    }
+
+    /// `sync_party_hp_during_combat` must do nothing when not in combat mode.
+    #[test]
+    fn test_sync_party_hp_during_combat_noop_in_exploration() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "SafeHero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp.base = 30;
+        hero.hp.current = 30;
+        gs.party.add_member(hero.clone()).unwrap();
+        // Mode stays Exploration — no combat.
+
+        let cr = CombatResource::new(); // empty, no participants
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        app.insert_resource(cr);
+
+        app.update();
+
+        let gs_after = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        // HP must be unchanged when not in combat.
+        assert_eq!(
+            gs_after.0.party.members[0].hp.current, 30,
+            "sync_party_hp_during_combat must not alter party HP outside combat"
         );
     }
 

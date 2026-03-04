@@ -1,5 +1,72 @@
 # Implementations
 
+## Combat: Party HP Bars Update Live During Combat
+
+### Overview
+
+Party HP bars in the HUD did not update when monsters hit characters during
+combat. The bars showed the HP values from when combat started and only
+refreshed once combat ended.
+
+### Root Cause
+
+Two compounding problems:
+
+1. **`update_hud` was gated off during combat.** `HudPlugin` registered all HUD
+   update systems — including `update_hud`, which drives `HpBarFill` — under a
+   `.run_if(not_in_combat)` condition. The comment said "hide exploration HUD
+   during combat" but it actually stopped the party HP bars from updating at
+   all.
+
+2. **`party.members[i].hp.current` is not the combat source of truth.**
+   During combat, HP lives in `CombatResource.state.participants[i]`
+   (`Combatant::Player`). The `global_state.0.party.members[i].hp.current` field
+   is only written back by `sync_combat_to_party_on_exit` when combat ends.
+   So even if `update_hud` had been running during combat, it would have read
+   stale values.
+
+### Changes
+
+#### `src/game/systems/combat.rs`
+
+- **`sync_party_hp_during_combat`** — new private system. Every frame while
+  `GameMode::Combat` is active, it iterates `CombatResource.state.participants`
+  and writes `hp.current`, `sp.current`, `conditions`, and `active_conditions`
+  from each `Combatant::Player` back into the corresponding
+  `party.members[party_idx]` slot using `player_orig_indices` for the mapping.
+  Only these four fields are mirrored — base values and stats are left for
+  `sync_combat_to_party_on_exit` to handle on exit.
+- **Registered** after all player action handlers (`handle_attack_action`,
+  `handle_cast_spell_action`, `handle_use_item_action`, `handle_defend_action`)
+  and `.before(update_combat_ui)` so the HUD always reads the final state for
+  each frame.
+- **Added tests**: `test_sync_party_hp_during_combat_updates_party_hp` (verifies
+  that a combat participant's reduced HP is visible in `party.members` within
+  the same frame, while combat is still active) and
+  `test_sync_party_hp_during_combat_noop_in_exploration` (verifies the system
+  does nothing outside combat).
+
+#### `src/game/systems/hud.rs`
+
+- **`update_hud`** removed from the `not_in_combat` run condition. It now runs
+  unconditionally every frame. Because `sync_party_hp_during_combat` keeps
+  `party.members` current during combat, `update_hud` reads correct live values
+  with no other changes.
+- **`ensure_portraits_loaded`, `update_compass`, `update_clock`,
+  `update_portraits`** remain gated by `not_in_combat` — these exploration
+  overlays should not render on top of the combat HUD.
+
+### Data Flow After Fix
+
+```
+Monster attacks → handle_attack_action / execute_monster_turn
+  → CombatResource.participants[i].hp.current updated
+  → sync_party_hp_during_combat
+  → party.members[i].hp.current updated
+  → update_hud
+  → HpBarFill[i].node.width = hp_percent  ← bar visibly narrows
+```
+
 ## Rest System: Duration Menu, Heal Rates, and Real-Time Pacing
 
 ### Overview

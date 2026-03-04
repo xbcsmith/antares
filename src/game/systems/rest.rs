@@ -767,8 +767,13 @@ pub fn process_rest(
     // ── Heal one hour ───────────────────────────────────────────────────────
     // Food was already consumed upfront at initiation — rest_party_hour is a
     // pure healing tick and will not fail under normal circumstances.
+    //
+    // Pass hours_completed_after_tick = hours_completed + 1 so the function
+    // can compute the cumulative healing target for this tick without
+    // rounding-to-zero on low base HP values.
     let restore_fraction = rest_state_snapshot.restore_fraction_per_hour;
-    if let Err(e) = rest_party_hour(&mut game_state.party, restore_fraction) {
+    let hours_after = rest_state_snapshot.hours_completed + 1;
+    if let Err(e) = rest_party_hour(&mut game_state.party, restore_fraction, hours_after) {
         // Unexpected error (future condition variants, etc.).  Log and abort.
         warn!(
             "rest_party_hour failed unexpectedly: {} — ending rest early",

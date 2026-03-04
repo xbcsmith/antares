@@ -360,15 +360,33 @@ pub fn food_needed_to_rest(party: &Party) -> u32 {
 ///
 /// No food consumption and no time advancement occur inside this function.
 ///
+/// ## Healing model — cumulative target
+///
+/// Rather than computing `floor(base × fraction)` per tick (which rounds to
+/// **zero** for characters with low base HP, e.g. `base=10` with a Full-rest
+/// fraction of `1/12 ≈ 0.083`), this function computes the **cumulative HP
+/// target** for the completed hour count and clamps to it:
+///
+/// ```text
+/// target_hp = round(base × fraction_per_hour × hours_completed_after_tick)
+/// ```
+///
+/// `hp.current` is raised to `max(current, target)` so partial healing
+/// already applied by earlier ticks is never reversed.  This guarantees that
+/// a Full 12-hour rest always restores 100% HP regardless of base HP magnitude.
+///
 /// # Arguments
 ///
-/// * `party`                    — the party resting (modified in place)
+/// * `party`                     — the party resting (modified in place)
 /// * `restore_fraction_per_hour` — fraction of each character's base HP/SP
 ///   to restore this tick.  Use [`RestDuration::restore_fraction_per_hour`]
 ///   to obtain the correct value for the chosen duration:
 ///   - `RestDuration::Short.restore_fraction_per_hour()` → 0.125 /hr (50% over 4 h)
 ///   - `RestDuration::Long.restore_fraction_per_hour()`  → 0.09375/hr (75% over 8 h)
 ///   - `RestDuration::Full.restore_fraction_per_hour()`  → 0.08333/hr (100% over 12 h)
+/// * `hours_completed_after_tick` — the number of in-game hours that will
+///   have been completed **once this tick finishes** (i.e. `hours_completed + 1`
+///   from `RestState`).  Used to compute the cumulative healing target.
 ///
 /// # Returns
 ///
@@ -392,44 +410,61 @@ pub fn food_needed_to_rest(party: &Party) -> u32 {
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
-/// hero.hp.base = 120;
+/// // Low base HP — previously truncated to 0 per tick with as u16.
+/// hero.hp.base = 10;
 /// hero.hp.current = 0;
-/// hero.sp.base = 60;
+/// hero.sp.base = 10;
 /// hero.sp.current = 0;
 /// party.add_member(hero).unwrap();
 /// party.food = 5;
 ///
-/// // Pay for rest upfront, then tick the chosen number of healing hours.
+/// // Pay for rest upfront, then tick all 12 hours.
 /// let duration = RestDuration::Full;
 /// let needed = food_needed_to_rest(&party);
 /// consume_food(&mut party, needed).unwrap();
-/// for _ in 0..duration.hours() {
-///     rest_party_hour(&mut party, duration.restore_fraction_per_hour()).unwrap();
+/// for hour in 1..=duration.hours() {
+///     rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
 /// }
+/// // Full 12-hour rest must always restore 100% HP regardless of base HP size.
 /// assert_eq!(party.members[0].hp.current, party.members[0].hp.base);
 /// assert_eq!(party.members[0].sp.current, party.members[0].sp.base);
 /// ```
 pub fn rest_party_hour(
     party: &mut Party,
     restore_fraction_per_hour: f32,
+    hours_completed_after_tick: u32,
 ) -> Result<(), ResourceError> {
     // Food was already consumed by the caller before rest began.
     // This function is a pure healing tick — no food check, no consumption.
 
     // Restore one hour of HP and SP for each living party member.
     for character in &mut party.members {
-        // Skip dead or unconscious characters — they do not benefit from rest.
+        // Only skip characters with an explicit fatal or unconscious condition.
+        // Characters at 0 HP with no condition set (the normal post-combat state
+        // before a Dead condition is introduced) are healed normally.
         if character.conditions.is_fatal() || character.conditions.is_unconscious() {
             continue;
         }
 
-        // Restore HP by the per-hour fraction of base HP.
-        let hp_to_restore = (character.hp.base as f32 * restore_fraction_per_hour) as u16;
-        character.hp.current = (character.hp.current + hp_to_restore).min(character.hp.base);
+        // Compute cumulative heal target for this tick using floating-point
+        // arithmetic, then round to the nearest integer.  Taking the target
+        // relative to the *start* of rest (not the per-tick delta) avoids
+        // accumulated rounding error and guarantees correct totals even for
+        // characters with very low base HP (e.g. base=8 with Full fraction
+        // 1/12 ≈ 0.083 would truncate to 0 per tick with naive `as u16`).
+        let hp_target = ((character.hp.base as f32
+            * restore_fraction_per_hour
+            * hours_completed_after_tick as f32)
+            .round() as u16)
+            .min(character.hp.base);
+        character.hp.current = character.hp.current.max(hp_target);
 
-        // Restore SP by the per-hour fraction of base SP.
-        let sp_to_restore = (character.sp.base as f32 * restore_fraction_per_hour) as u16;
-        character.sp.current = (character.sp.current + sp_to_restore).min(character.sp.base);
+        let sp_target = ((character.sp.base as f32
+            * restore_fraction_per_hour
+            * hours_completed_after_tick as f32)
+            .round() as u16)
+            .min(character.sp.base);
+        character.sp.current = character.sp.current.max(sp_target);
 
         // Tick minute-based conditions for one hour (60 minutes).
         for _ in 0..60 {
@@ -506,17 +541,25 @@ pub fn rest_party(party: &mut Party, hours: u32) -> Result<(), ResourceError> {
 
     // Restore HP and SP for each party member.
     for character in &mut party.members {
-        // Skip dead/unconscious characters — they do not benefit from rest.
+        // Only skip characters with an explicit fatal or unconscious condition.
+        // Characters at 0 HP with no condition set (the normal post-combat state
+        // before a Dead condition is introduced) are healed normally.
         if character.conditions.is_fatal() || character.conditions.is_unconscious() {
             continue;
         }
 
-        // Restore HP proportional to hours rested.
-        let hp_to_restore = (character.hp.base as f32 * HP_RESTORE_RATE * hours as f32) as u16;
+        // Compute total HP to restore using round() to avoid truncation to zero
+        // for characters with low base HP (e.g. base=10 with HP_RESTORE_RATE=1/12
+        // gives 0.833/hr which `as u16` truncates to 0 every tick).
+        let hp_to_restore = ((character.hp.base as f32 * HP_RESTORE_RATE * hours as f32).round()
+            as u16)
+            .min(character.hp.base);
         character.hp.current = (character.hp.current + hp_to_restore).min(character.hp.base);
 
         // Restore SP proportional to hours rested.
-        let sp_to_restore = (character.sp.base as f32 * SP_RESTORE_RATE * hours as f32) as u16;
+        let sp_to_restore = ((character.sp.base as f32 * SP_RESTORE_RATE * hours as f32).round()
+            as u16)
+            .min(character.sp.base);
         character.sp.current = (character.sp.current + sp_to_restore).min(character.sp.base);
 
         // Tick conditions for the full duration of rest.
@@ -681,7 +724,7 @@ mod tests {
 
         rest_party(&mut party, 12).unwrap();
 
-        // After 12 hours, should be fully healed
+        // After 12 hours, should be fully healed (base is 20).
         assert_eq!(party.members[0].hp.current, 20);
     }
 
@@ -693,8 +736,42 @@ mod tests {
 
         rest_party(&mut party, 12).unwrap();
 
-        // After 12 hours, should be fully restored
+        // After 12 hours, should be fully restored (base is 10).
         assert_eq!(party.members[0].sp.current, 10);
+    }
+
+    /// A character at 0 HP with no explicit DEAD/UNCONSCIOUS condition
+    /// (the normal state after combat before a death mechanic is added)
+    /// must be fully healed by a 12-hour rest.
+    #[test]
+    fn test_rest_heals_zero_hp_no_condition() {
+        let mut party = Party::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Small base HP — previously broken by truncation to 0 per tick.
+        hero.hp.base = 10;
+        hero.hp.current = 0;
+        hero.sp.base = 8;
+        hero.sp.current = 0;
+        // No DEAD condition — character has 0 HP but is not flagged dead.
+        party.add_member(hero).unwrap();
+        party.food = 5;
+
+        rest_party(&mut party, 12).unwrap();
+
+        assert_eq!(
+            party.members[0].hp.current, 10,
+            "0-HP character with no dead condition must be fully healed after 12h rest"
+        );
+        assert_eq!(
+            party.members[0].sp.current, 8,
+            "0-HP character with no dead condition must have SP fully restored after 12h rest"
+        );
     }
 
     /// `rest_party()` must NOT advance game time; that is the caller's responsibility.
@@ -766,12 +843,12 @@ mod tests {
 
         rest_party(&mut party, 6).unwrap(); // 6 hours rest
 
-        // 6 hours * (1/12 per hour) = 50% restoration
-        // Starting at 0 HP, base is 20, so 50% = 10 HP restored
-        let expected = (20.0_f32 * HP_RESTORE_RATE * 6.0) as u16;
+        // 6 hours × (1/12 per hour) = 50% restoration.
+        // round(20 × (1/12) × 6) = round(10.0) = 10 HP restored.
+        let expected = ((20.0_f32 * HP_RESTORE_RATE * 6.0).round() as u16).min(20);
         assert_eq!(
             party.members[0].hp.current, expected,
-            "6-hour rest should restore 50% of max HP"
+            "6-hour rest should restore ~50% of max HP"
         );
     }
 
@@ -869,8 +946,8 @@ mod tests {
         let duration = RestDuration::Full;
         let needed = food_needed_to_rest(&party);
         consume_food(&mut party, needed).unwrap();
-        for _ in 0..duration.hours() {
-            rest_party_hour(&mut party, duration.restore_fraction_per_hour()).unwrap();
+        for hour in 1..=duration.hours() {
+            rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
         }
 
         assert_eq!(
@@ -881,6 +958,45 @@ mod tests {
             party.members[0].sp.current, party.members[0].sp.base,
             "Full rest must fully restore SP"
         );
+    }
+
+    /// A Full rest must heal a character with very low base HP (e.g. 8 or 10)
+    /// to 100%.  Previously the per-tick `as u16` truncation rounded the
+    /// fractional amount to 0 every hour, leaving the character unhealed.
+    #[test]
+    fn test_full_rest_heals_low_base_hp() {
+        for base_hp in [8u16, 10, 11] {
+            let mut party = Party::new();
+            let mut hero = Character::new(
+                "Hero".to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            hero.hp.base = base_hp;
+            hero.hp.current = 0;
+            hero.sp.base = base_hp;
+            hero.sp.current = 0;
+            party.add_member(hero).unwrap();
+            party.food = 5;
+
+            let duration = RestDuration::Full;
+            let needed = food_needed_to_rest(&party);
+            consume_food(&mut party, needed).unwrap();
+            for hour in 1..=duration.hours() {
+                rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
+            }
+
+            assert_eq!(
+                party.members[0].hp.current, base_hp,
+                "Full rest must restore 100% HP for base_hp={base_hp}"
+            );
+            assert_eq!(
+                party.members[0].sp.current, base_hp,
+                "Full rest must restore 100% SP for base_hp={base_hp}"
+            );
+        }
     }
 
     /// A Short 4-hour rest must restore 50% HP and SP.
@@ -904,8 +1020,8 @@ mod tests {
         let duration = RestDuration::Short;
         let needed = food_needed_to_rest(&party);
         consume_food(&mut party, needed).unwrap();
-        for _ in 0..duration.hours() {
-            rest_party_hour(&mut party, duration.restore_fraction_per_hour()).unwrap();
+        for hour in 1..=duration.hours() {
+            rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
         }
 
         let hp = party.members[0].hp.current;
@@ -936,16 +1052,15 @@ mod tests {
         let duration = RestDuration::Long;
         let needed = food_needed_to_rest(&party);
         consume_food(&mut party, needed).unwrap();
-        for _ in 0..duration.hours() {
-            rest_party_hour(&mut party, duration.restore_fraction_per_hour()).unwrap();
+        for hour in 1..=duration.hours() {
+            rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
         }
 
         let hp = party.members[0].hp.current;
-        // Integer truncation per hour tick means 8 × floor(100 × 0.09375) = 8 × 9 = 72,
-        // which is within acceptable range of the 75% target.
+        // Cumulative target at hour 8: round(100 × 0.09375 × 8) = round(75.0) = 75.
         assert!(
-            (72..=76).contains(&hp),
-            "Long rest must restore ~75% HP (72–76 after truncation), got {hp}"
+            (74..=76).contains(&hp),
+            "Long rest must restore ~75% HP, got {hp}"
         );
     }
 
@@ -965,7 +1080,12 @@ mod tests {
         party.add_member(hero).unwrap();
         party.food = 3;
 
-        rest_party_hour(&mut party, RestDuration::Full.restore_fraction_per_hour()).unwrap();
+        rest_party_hour(
+            &mut party,
+            RestDuration::Full.restore_fraction_per_hour(),
+            1,
+        )
+        .unwrap();
 
         assert_eq!(party.food, 3, "rest_party_hour must not consume food");
     }
@@ -986,7 +1106,11 @@ mod tests {
         party.add_member(hero).unwrap();
         party.food = 0; // food already consumed by caller
 
-        let result = rest_party_hour(&mut party, RestDuration::Full.restore_fraction_per_hour());
+        let result = rest_party_hour(
+            &mut party,
+            RestDuration::Full.restore_fraction_per_hour(),
+            1,
+        );
         assert!(
             result.is_ok(),
             "rest_party_hour must succeed when food is zero — food was already paid upfront"
@@ -1015,13 +1139,13 @@ mod tests {
         let duration = RestDuration::Short; // 4 hours → 50%
         let needed = food_needed_to_rest(&party);
         consume_food(&mut party, needed).unwrap();
-        for _ in 0..duration.hours() {
-            rest_party_hour(&mut party, duration.restore_fraction_per_hour()).unwrap();
+        for hour in 1..=duration.hours() {
+            rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
         }
 
-        // 4 × (0.50/4) × 120 = 60 HP  (50% of 120)
-        let expected_hp = (120_f32 * duration.total_restore_fraction()) as u16;
-        let expected_sp = (120_f32 * duration.total_restore_fraction()) as u16;
+        // Cumulative target at hour 4: round(120 × 0.125 × 4) = round(60.0) = 60 (50% of 120).
+        let expected_hp = (120_f32 * duration.total_restore_fraction()).round() as u16;
+        let expected_sp = (120_f32 * duration.total_restore_fraction()).round() as u16;
 
         assert_eq!(
             party.members[0].hp.current, expected_hp,
@@ -1050,7 +1174,12 @@ mod tests {
         dead_hero.conditions.add(Condition::DEAD);
         party.add_member(dead_hero).unwrap();
 
-        rest_party_hour(&mut party, RestDuration::Full.restore_fraction_per_hour()).unwrap();
+        rest_party_hour(
+            &mut party,
+            RestDuration::Full.restore_fraction_per_hour(),
+            1,
+        )
+        .unwrap();
 
         assert_eq!(
             party.members[0].hp.current, 0,
@@ -1074,11 +1203,45 @@ mod tests {
         hero.conditions.add(Condition::UNCONSCIOUS);
         party.add_member(hero).unwrap();
 
-        rest_party_hour(&mut party, RestDuration::Full.restore_fraction_per_hour()).unwrap();
+        rest_party_hour(
+            &mut party,
+            RestDuration::Full.restore_fraction_per_hour(),
+            1,
+        )
+        .unwrap();
 
         assert_eq!(
             party.members[0].hp.current, 5,
             "unconscious character must not gain HP from rest_party_hour"
+        );
+    }
+
+    /// A character at 0 HP with no DEAD or UNCONSCIOUS condition must be
+    /// healed by `rest_party_hour()` — this is the normal post-combat state
+    /// before an explicit death mechanic is introduced.
+    #[test]
+    fn test_rest_party_hour_heals_zero_hp_no_condition() {
+        let mut party = Party::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp.base = 10;
+        hero.hp.current = 0;
+        // conditions defaults to FINE (0) — no DEAD or UNCONSCIOUS bit set.
+        party.add_member(hero).unwrap();
+
+        let frac = RestDuration::Full.restore_fraction_per_hour();
+        for hour in 1..=RestDuration::Full.hours() {
+            rest_party_hour(&mut party, frac, hour).unwrap();
+        }
+
+        assert_eq!(
+            party.members[0].hp.current, 10,
+            "0-HP character with no dead condition must be fully healed after 12 hour ticks"
         );
     }
 
