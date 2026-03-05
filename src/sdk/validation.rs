@@ -765,6 +765,7 @@ impl<'a> Validator<'a> {
     ///     allow_multiclassing: false,
     ///     starting_level: 1,
     ///     max_level: 20,
+    ///     starting_time: antares::domain::types::GameTime::new(1, 8, 0),
     /// };
     ///
     /// let errors = validator.validate_campaign_config(&config);

@@ -1389,8 +1389,8 @@ impl GameState {
     ///
     /// // Active spell with only 60 ticks must expire during a 12-hour rest
     /// assert_eq!(state.active_spells.light, 0);
-    /// // Time advanced by REST_DURATION_HOURS hours
-    /// assert_eq!(state.time.hour, REST_DURATION_HOURS as u8);
+    /// // Time advanced by REST_DURATION_HOURS hours (starting from hour 6, so 6 + 12 = 18)
+    /// assert_eq!(state.time.hour, 18);
     /// ```
     pub fn rest_party(
         &mut self,
@@ -1449,7 +1449,7 @@ impl GameState {
     /// let templates = MerchantStockTemplateDatabase::new();
     /// state.advance_time(60, Some(&templates));
     /// assert_eq!(state.time.minute, 0);
-    /// assert_eq!(state.time.hour, 1);
+    /// assert_eq!(state.time.hour, 7);
     /// ```
     pub fn advance_time(
         &mut self,
