@@ -8008,21 +8008,24 @@
     ],
     events: {
         (
-            x: 0,
-            y: 7,
+            x: 19,
+            y: 11,
         ): Sign(
-            name: "Town Exit Sign",
-            description: "A sign directing travelers to the town exit.",
-            text: "Exit to town.",
+            name: "Wizard\'s Cave Sign",
+            description: "A sign pointing the way to the Wizard\'s Cave.",
+            text: "To the Wizard\'s Cave",
             time_condition: None,
         ),
         (
-            x: 11,
-            y: 0,
-        ): Sign(
-            name: "Ruins Direction Sign",
-            description: "A sign pointing the way to the Ancient Ruins.",
-            text: "To Ancient Ruins",
+            x: 14,
+            y: 4,
+        ): Encounter(
+            name: "Hungry Wolves",
+            description: "A pack of wolves that hunts together in this region.",
+            monster_group: [
+                5,
+                4,
+            ],
             time_condition: None,
         ),
         (
@@ -8050,6 +8053,36 @@
             map_id: 5,
         ),
         (
+            x: 7,
+            y: 17,
+        ): Trap(
+            name: "Hidden Pit Trap",
+            description: "A concealed pit trap that deals heavy damage when sprung.",
+            damage: 8,
+            effect: None,
+        ),
+        (
+            x: 8,
+            y: 8,
+        ): Treasure(
+            name: "Buried Chest",
+            description: "A chest buried and hidden here containing useful items.",
+            loot: [
+                13,
+                23,
+                32,
+            ],
+        ),
+        (
+            x: 0,
+            y: 7,
+        ): Sign(
+            name: "Town Exit Sign",
+            description: "A sign directing travelers to the town exit.",
+            text: "Exit to town.",
+            time_condition: None,
+        ),
+        (
             x: 3,
             y: 11,
         ): Encounter(
@@ -8062,15 +8095,12 @@
             time_condition: None,
         ),
         (
-            x: 14,
-            y: 4,
-        ): Encounter(
-            name: "Hungry Wolves",
-            description: "A pack of wolves that hunts together in this region.",
-            monster_group: [
-                5,
-                4,
-            ],
+            x: 8,
+            y: 19,
+        ): Sign(
+            name: "Mountain Pass Sign",
+            description: "A wooden sign indicating the way to the mountain pass.",
+            text: "To the Mountain Pass",
             time_condition: None,
         ),
         (
@@ -8086,38 +8116,6 @@
             time_condition: None,
         ),
         (
-            x: 17,
-            y: 16,
-        ): Encounter(
-            name: "Bandit Patrol",
-            description: "A patrol of bandits looking for easy victims.",
-            monster_group: [
-                6,
-                6,
-            ],
-            time_condition: None,
-        ),
-        (
-            x: 7,
-            y: 17,
-        ): Trap(
-            name: "Hidden Pit Trap",
-            description: "A concealed pit trap that deals heavy damage when sprung.",
-            damage: 8,
-            effect: None,
-        ),
-        (
-            x: 16,
-            y: 2,
-        ): Treasure(
-            name: "Hidden Supplies",
-            description: "A stash of supplies tucked away among the rocks.",
-            loot: [
-                14,
-                24,
-            ],
-        ),
-        (
             x: 10,
             y: 13,
         ): Treasure(
@@ -8131,45 +8129,35 @@
             ],
         ),
         (
-            x: 19,
-            y: 11,
-        ): Sign(
-            name: "Wizard\'s Cave Sign",
-            description: "A sign pointing the way to the Wizard\'s Cave.",
-            text: "To the Wizard\'s Cave",
-            time_condition: None,
-        ),
-        (
-            x: 12,
-            y: 0,
-        ): Teleport(
-            name: "Ancient Portal",
-            description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (1,7).",
-            destination: (
-                x: 1,
-                y: 7,
-            ),
-            map_id: 3,
-        ),
-        (
-            x: 8,
-            y: 8,
+            x: 16,
+            y: 2,
         ): Treasure(
-            name: "Buried Chest",
-            description: "A chest buried and hidden here containing useful items.",
+            name: "Hidden Supplies",
+            description: "A stash of supplies tucked away among the rocks.",
             loot: [
-                13,
-                23,
-                32,
+                14,
+                24,
             ],
         ),
         (
-            x: 8,
-            y: 19,
+            x: 17,
+            y: 16,
+        ): Encounter(
+            name: "Bandit Patrol",
+            description: "A patrol of bandits looking for easy victims.",
+            monster_group: [
+                6,
+                6,
+            ],
+            time_condition: None,
+        ),
+        (
+            x: 11,
+            y: 0,
         ): Sign(
-            name: "Mountain Pass Sign",
-            description: "A wooden sign indicating the way to the mountain pass.",
-            text: "To the Mountain Pass",
+            name: "Ruins Direction Sign",
+            description: "A sign pointing the way to the Ancient Ruins.",
+            text: "To Ancient Ruins",
             time_condition: None,
         ),
         (
@@ -8183,6 +8171,18 @@
                 y: 17,
             ),
             map_id: 4,
+        ),
+        (
+            x: 12,
+            y: 0,
+        ): Teleport(
+            name: "Ancient Portal",
+            description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (1,7).",
+            destination: (
+                x: 1,
+                y: 7,
+            ),
+            map_id: 3,
         ),
     },
     allow_random_encounters: true,

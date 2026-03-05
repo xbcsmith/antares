@@ -6008,36 +6008,6 @@
     ],
     events: {
         (
-            x: 15,
-            y: 4,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store where adventurers can buy and sell goods.",
-            text: "General Store - Buy and sell items for your adventures.",
-            time_condition: None,
-        ),
-        (
-            x: 18,
-            y: 8,
-        ): Sign(
-            name: "Forest Direction Sign",
-            description: "A directional sign pointing to the nearby forest.",
-            text: "To the Forrest",
-            time_condition: None,
-        ),
-        (
-            x: 19,
-            y: 7,
-        ): Teleport(
-            name: "Portal to Dark Forrest",
-            description: "A portal that transports the party to Dark Forrest (map 4) at (10,19).",
-            destination: (
-                x: 10,
-                y: 19,
-            ),
-            map_id: 4,
-        ),
-        (
             x: 0,
             y: 7,
         ): Teleport(
@@ -6065,6 +6035,36 @@
             name: "Inn Sign",
             description: "A welcoming sign for the Cozy Inn offering rest and lodging.",
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+            time_condition: None,
+        ),
+        (
+            x: 19,
+            y: 7,
+        ): Teleport(
+            name: "Portal to Dark Forrest",
+            description: "A portal that transports the party to Dark Forrest (map 4) at (10,19).",
+            destination: (
+                x: 10,
+                y: 19,
+            ),
+            map_id: 4,
+        ),
+        (
+            x: 15,
+            y: 4,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store where adventurers can buy and sell goods.",
+            text: "General Store - Buy and sell items for your adventures.",
+            time_condition: None,
+        ),
+        (
+            x: 18,
+            y: 8,
+        ): Sign(
+            name: "Forest Direction Sign",
+            description: "A directional sign pointing to the nearby forest.",
+            text: "To the Forrest",
             time_condition: None,
         ),
     },

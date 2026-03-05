@@ -734,6 +734,10 @@ struct CampaignBuilderApp {
     show_debug_panel: bool,
     debug_panel_filter_level: LogLevel,
     debug_panel_auto_scroll: bool,
+
+    /// Cached texture handle for the Antares logo shown in the sidebar.
+    /// Loaded once on first render and reused every frame thereafter.
+    logo_texture: Option<egui::TextureHandle>,
 }
 
 #[derive(Debug, Clone)]
@@ -855,6 +859,8 @@ impl Default for CampaignBuilderApp {
             show_debug_panel: false,
             debug_panel_filter_level: LogLevel::Info,
             debug_panel_auto_scroll: true,
+
+            logo_texture: None,
         }
     }
 }
@@ -4346,8 +4352,41 @@ impl eframe::App for CampaignBuilderApp {
                 }
 
                 ui.separator();
-                ui.label("Antares Campaign Builder");
+
+                ui.label("Antares RPG");
+                ui.label("Campaign Builder");
                 ui.label("Foundation v0.2.0");
+
+                // Pin the logo to the very bottom of the sidebar using a
+                // bottom-up layout so it never overlaps the tab list above.
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    // Lazily decode and upload the logo PNG on first render,
+                    // then reuse the cached TextureHandle every subsequent frame.
+                    let logo_bytes: &[u8] = include_bytes!("../assets/antares_logo.png");
+                    let texture = self.logo_texture.get_or_insert_with(|| {
+                        let img = image::load_from_memory(logo_bytes)
+                            .expect("antares_logo.png is a valid PNG");
+                        let rgba = img.to_rgba8();
+                        let (w, h) = rgba.dimensions();
+                        let pixels: Vec<egui::Color32> = rgba
+                            .pixels()
+                            .map(|p| egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]))
+                            .collect();
+                        ctx.load_texture(
+                            "antares_logo",
+                            egui::ColorImage::new([w as usize, h as usize], pixels),
+                            egui::TextureOptions::LINEAR,
+                        )
+                    });
+
+                    // Fill the sidebar width; image is square so aspect ratio holds.
+                    let available_width = ui.available_width();
+                    let logo_size = egui::vec2(available_width, available_width);
+                    ui.add(
+                        egui::Image::new(egui::load::SizedTexture::new(texture.id(), logo_size))
+                            .maintain_aspect_ratio(true),
+                    );
+                });
             });
 
         // Bottom status bar
