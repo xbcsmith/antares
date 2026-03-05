@@ -151,7 +151,7 @@ impl Default for CombatTurnStateResource {
 
 // ===== Phase 2: Combat UI Constants =====
 
-/// Height of the combat enemy panel at the top of the screen
+/// Height of the enemy panel (monster cards + HP bars).
 pub const COMBAT_ENEMY_PANEL_HEIGHT: Val = Val::Px(200.0);
 
 /// Width of individual enemy card in the enemy panel
@@ -208,6 +208,31 @@ pub const COMBAT_LOG_BUBBLE_WIDTH: Val = Val::Px(360.0);
 /// Minimum height of the persistent combat log bubble.
 pub const COMBAT_LOG_BUBBLE_MIN_HEIGHT: Val = Val::Px(180.0);
 
+/// Maximum height of the persistent combat log bubble.
+/// The log occupies the upper portion of the screen above the enemy panel.
+pub const COMBAT_LOG_BUBBLE_MAX_HEIGHT: Val = Val::Percent(55.0);
+
+// ===== Absolute-position anchors for combat panels =====
+//
+// All three combat panels (enemy cards, turn order, action menu) are pinned
+// from the bottom of the screen so they sit in the lower half and never
+// overlap the player HUD (height 70 px, gap 24 px → top edge at bottom+94).
+//
+// Stack (bottom → top):
+//   Action menu  : bottom = HUD_HEIGHT(70) + HUD_GAP(24) + PANEL_GAP(4) =  98 px
+//   Turn order   : bottom = 98 + ACTION_MENU(60) + PANEL_GAP(4)          = 162 px
+//   Enemy panel  : bottom = 162 + TURN_ORDER(40) + PANEL_GAP(4)          = 206 px
+
+/// Distance from the bottom of the screen to the bottom edge of the action menu.
+/// Keeps the action buttons just above the player HUD (70 px tall, 24 px gap).
+pub const ACTION_MENU_BOTTOM: Val = Val::Px(120.0);
+
+/// Distance from the bottom of the screen to the bottom edge of the turn order panel.
+pub const TURN_ORDER_BOTTOM: Val = Val::Px(175.0);
+
+/// Distance from the bottom of the screen to the bottom edge of the enemy panel.
+pub const ENEMY_PANEL_BOTTOM: Val = Val::Px(206.0);
+
 /// Maximum number of log lines kept in the on-screen combat bubble.
 pub const COMBAT_LOG_MAX_LINES: usize = 14;
 
@@ -257,6 +282,14 @@ pub const MONSTER_HP_HOVER_BAR_WIDTH: Val = Val::Px(120.0);
 
 /// Height of the world-projected monster HP hover bars.
 pub const MONSTER_HP_HOVER_BAR_HEIGHT: Val = Val::Px(10.0);
+
+/// Real-time seconds to pause on the enemy's turn before the monster acts.
+///
+/// This gives the player time to read the combat log and see the turn
+/// indicator before the monster's attack resolves.  Set to 0.0 to disable
+/// the delay (useful for automated tests — insert a zero-duration
+/// `MonsterTurnTimer` resource to override the plugin default).
+pub const MONSTER_TURN_DELAY_SECS: f32 = 1.2;
 
 /// Number of top-level action buttons (Attack, Defend, Cast, Item, Flee).
 ///
@@ -738,6 +771,28 @@ impl CombatLogState {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ActiveActionHighlight;
 
+/// One-shot timer that gates [`execute_monster_turn`].
+///
+/// When the turn transitions to [`CombatTurnState::EnemyTurn`] the timer is
+/// reset and starts counting.  `execute_monster_turn` waits until
+/// `just_finished()` before resolving the monster's action, giving the player
+/// time to read the combat log entry from the previous action.
+///
+/// Insert this resource with `duration = 0.0` in tests that call
+/// `app.update()` and expect the monster to act immediately:
+///
+/// ```ignore
+/// app.insert_resource(MonsterTurnTimer(
+///     Timer::from_seconds(0.0, TimerMode::Once)
+/// ));
+/// ```
+///
+/// When the resource is absent (minimal test harnesses that do not use
+/// [`CombatPlugin`]), `execute_monster_turn` fires immediately so that
+/// existing unit tests need no changes.
+#[derive(Resource)]
+pub struct MonsterTurnTimer(pub Timer);
+
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
@@ -758,6 +813,13 @@ impl Plugin for CombatPlugin {
             .insert_resource(ActionMenuState::default())
             .insert_resource(CombatLogState::default())
             .insert_resource(CombatLogColorState::default())
+            // Monster-turn delay: start finished so the very first EnemyTurn
+            // frame arms it (see execute_monster_turn for the reset logic).
+            .insert_resource({
+                let mut t = Timer::from_seconds(MONSTER_TURN_DELAY_SECS, TimerMode::Once);
+                t.tick(std::time::Duration::from_secs_f32(MONSTER_TURN_DELAY_SECS));
+                MonsterTurnTimer(t)
+            })
             .insert_resource(ButtonInput::<KeyCode>::default())
             // Handle events that indicate combat started
             .add_systems(Update, handle_combat_started)
@@ -1189,7 +1251,8 @@ fn setup_combat_ui(
         return;
     }
 
-    // Spawn combat HUD root container
+    // Spawn combat HUD root container — a transparent full-screen anchor for
+    // all absolutely-positioned combat panels.
     commands
         .spawn((
             Node {
@@ -1198,20 +1261,22 @@ fn setup_combat_ui(
                 right: Val::Px(0.0),
                 top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::FlexStart,
-                row_gap: Val::Px(4.0),
                 ..default()
             },
             BackgroundColor(Color::NONE),
             crate::game::components::combat::CombatHudRoot,
         ))
         .with_children(|parent| {
-            // Enemy panel at top
+            // ── Enemy panel ────────────────────────────────────────────────
+            // Pinned from the bottom so it sits in the lower half of the
+            // screen, leaving the upper half clear for the combat log.
             parent
                 .spawn((
                     Node {
-                        width: Val::Percent(100.0),
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        right: Val::Px(0.0),
+                        bottom: ENEMY_PANEL_BOTTOM,
                         height: COMBAT_ENEMY_PANEL_HEIGHT,
                         flex_direction: FlexDirection::Row,
                         justify_content: JustifyContent::Center,
@@ -1318,11 +1383,14 @@ fn setup_combat_ui(
                     }
                 });
 
-            // Turn order display
+            // ── Turn order panel ───────────────────────────────────────────
             parent
                 .spawn((
                     Node {
-                        width: Val::Percent(100.0),
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        right: Val::Px(0.0),
+                        bottom: TURN_ORDER_BOTTOM,
                         height: TURN_ORDER_PANEL_HEIGHT,
                         flex_direction: FlexDirection::Row,
                         justify_content: JustifyContent::Center,
@@ -1345,11 +1413,14 @@ fn setup_combat_ui(
                     ));
                 });
 
-            // Action menu (initially visible, will be hidden during enemy turns)
+            // ── Action menu ────────────────────────────────────────────────
             parent
                 .spawn((
                     Node {
-                        width: Val::Percent(100.0),
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        right: Val::Px(0.0),
+                        bottom: ACTION_MENU_BOTTOM,
                         height: ACTION_MENU_HEIGHT,
                         flex_direction: FlexDirection::Row,
                         justify_content: JustifyContent::Center,
@@ -1406,7 +1477,7 @@ fn setup_combat_ui(
                         top: Val::Px(12.0),
                         width: COMBAT_LOG_BUBBLE_WIDTH,
                         min_height: COMBAT_LOG_BUBBLE_MIN_HEIGHT,
-                        max_height: Val::Px(300.0),
+                        max_height: COMBAT_LOG_BUBBLE_MAX_HEIGHT,
                         flex_direction: FlexDirection::Column,
                         padding: UiRect::all(Val::Px(10.0)),
                         row_gap: Val::Px(8.0),
@@ -3204,19 +3275,25 @@ pub fn perform_monster_turn_with_rng(
 ///
 /// Picks an attack and target using AI, performs the attack, and advances
 /// the turn. Uses the global RNG for in-game randomness.
+#[allow(clippy::too_many_arguments)]
 fn execute_monster_turn(
     mut combat_res: ResMut<CombatResource>,
     content: Option<Res<GameContent>>,
     mut global_state: ResMut<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
     mut feedback_writer: Option<MessageWriter<CombatFeedbackEvent>>,
+    mut monster_turn_timer: Option<ResMut<MonsterTurnTimer>>,
+    time: Option<Res<Time>>,
+    mut was_enemy_turn: Local<bool>,
 ) {
     // Only run during combat and when it's enemy turn
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        *was_enemy_turn = false;
         return;
     }
 
     if !matches!(turn_state.0, CombatTurnState::EnemyTurn) {
+        *was_enemy_turn = false;
         return;
     }
 
@@ -3239,8 +3316,9 @@ fn execute_monster_turn(
             .unwrap_or(false);
 
         if !can_act {
-            // Advance past this incapacitated / already-acted monster and update
-            // turn_state so the next actor (player or another monster) gets control.
+            // Incapacitated monsters skip immediately — no delay needed.
+            // Advance past this monster and update turn_state so the next actor
+            // (player or another monster) gets control.
             info!(
                 "Monster at participant index {} cannot act — advancing turn",
                 monster_idx
@@ -3259,8 +3337,42 @@ fn execute_monster_turn(
                 Some(CombatantId::Monster(_)) => CombatTurnState::EnemyTurn,
                 None => CombatTurnState::PlayerTurn,
             };
+            // Reset the was_enemy_turn flag so the delay arms fresh for the
+            // next monster in the same round (if any).
+            *was_enemy_turn = false;
             return;
         }
+
+        // ── Delay gate ─────────────────────────────────────────────────────
+        // The monster CAN act.  On the first frame we enter EnemyTurn for an
+        // active monster, reset the timer so the player can read the combat log
+        // before the attack resolves.  On subsequent frames, tick it.  Only
+        // proceed once the timer has just finished.
+        //
+        // If the MonsterTurnTimer resource is absent (minimal test harnesses
+        // that do not use CombatPlugin) we skip the delay entirely and act
+        // immediately so existing unit tests need no changes.
+        if let Some(ref mut timer) = monster_turn_timer {
+            if !*was_enemy_turn {
+                // First frame of this EnemyTurn — arm the timer and wait.
+                timer.0.reset();
+                *was_enemy_turn = true;
+                return;
+            }
+
+            // Subsequent frames — tick the timer and wait until it finishes.
+            let delta = time
+                .as_ref()
+                .map(|t| t.delta())
+                .unwrap_or(std::time::Duration::ZERO);
+            timer.0.tick(delta);
+
+            if !timer.0.just_finished() {
+                return;
+            }
+            // Timer just finished — fall through to execute the monster's action.
+        }
+        // If MonsterTurnTimer resource is absent, act immediately (test path).
 
         // Fallback content when none registered (tests often omit GameContent)
         let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
@@ -4479,6 +4591,11 @@ fn update_monster_hp_hover_bars(
             for (bar, mut node) in hover_bar_queries.p0().iter_mut() {
                 let card_left = start_x + (bar.stack_order as f32) * (card_width + card_gap);
                 node.left = Val::Px(card_left + 14.0);
+                // Fallback top: enemy panel bottom edge is at ENEMY_PANEL_BOTTOM
+                // (206 px from screen bottom) and is COMBAT_ENEMY_PANEL_HEIGHT
+                // (200 px) tall, so its top edge is ~406 px from the bottom.
+                // Express as a top offset; the world-projection path overrides
+                // this whenever a camera is present.
                 node.top = Val::Px(54.0);
             }
         }
