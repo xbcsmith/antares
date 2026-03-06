@@ -1047,6 +1047,7 @@ fn spawn_map(
                         Vec3::new(x + TILE_CENTER_OFFSET, 0.0, y + TILE_CENTER_OFFSET),
                         None,
                         None,
+                        None, // facing: preserve existing behaviour (North default)
                     );
 
                     commands.entity(entity).insert((
@@ -1180,6 +1181,7 @@ fn spawn_map(
                                 ),
                                 None,
                                 None,
+                                None, // facing: preserve existing behaviour (North default)
                             );
 
                             commands.entity(entity).insert((
@@ -1223,6 +1225,7 @@ fn spawn_map(
                                 Vec3::new(x + TILE_CENTER_OFFSET, 0.0, y + TILE_CENTER_OFFSET),
                                 None,
                                 None,
+                                None, // facing: preserve existing behaviour (North default)
                             );
 
                             commands.entity(entity).insert((

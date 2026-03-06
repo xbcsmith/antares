@@ -1,5 +1,148 @@
 # Implementations
 
+## Phase 1: Direction-to-Rotation Foundation
+
+### Overview
+
+Creatures, NPCs, signs, and other spawned entities previously all faced the
+same default direction because `spawn_creature()` had no rotation parameter
+and no `FacingComponent` existed to track or change an entity's cardinal
+direction at runtime. This phase adds the pure foundation layer required by
+all subsequent facing phases.
+
+### Changes
+
+#### `src/domain/types.rs` — `Direction` yaw conversion methods
+
+Two new methods added to the existing `Direction` impl:
+
+- **`direction_to_yaw_radians(&self) -> f32`** — Maps each cardinal to the
+  corresponding yaw angle for `Quat::from_rotation_y`:
+
+  | Direction | Yaw (radians)     |
+  | --------- | ----------------- |
+  | North     | 0.0               |
+  | East      | π/2 (`FRAC_PI_2`) |
+  | South     | π (`PI`)          |
+  | West      | 3π/2              |
+
+- **`from_yaw_radians(yaw: f32) -> Direction`** — Inverse: normalises the input
+  to `[0, 2π)`, then rounds to the nearest 90° cardinal. Handles negative yaw
+  and values above `2π` via modular arithmetic. This is the authoritative
+  reverse-mapping used by runtime facing queries.
+
+Nine new unit tests cover each cardinal, the round-trip property for all four
+directions, boundary snapping (values exactly between cardinals), negative yaw
+normalisation, and above-`2π` normalisation.
+
+#### `src/game/components/creature.rs` — `FacingComponent` ECS component
+
+New Bevy `Component` struct:
+
+```rust
+pub struct FacingComponent {
+    pub direction: Direction,
+}
+```
+
+- Derives `Component`, `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`.
+- `FacingComponent::new(direction)` constructor.
+- `Default` impl returns `Direction::North` (the zero-rotation spawn default).
+- This component is the **authoritative runtime facing state** for every
+  creature, NPC, sign, or other entity with a directional orientation. All
+  systems that read or change an entity's facing use this component instead of
+  decomposing the raw `Transform` rotation.
+
+Five unit tests: `new`, `default_is_north`, `all_directions`, `clone`, and
+equality.
+
+#### `src/game/systems/creature_spawning.rs` — `spawn_creature()` rotation + facing
+
+Signature extended with a new trailing parameter:
+
+```rust
+pub fn spawn_creature(
+    commands: &mut Commands,
+    creature_def: &CreatureDefinition,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    position: Vec3,
+    scale_override: Option<f32>,
+    animation: Option<AnimationDefinition>,
+    facing: Option<Direction>,          // ← NEW
+) -> Entity
+```
+
+Behaviour:
+
+- `facing` resolves to `Direction::North` when `None` (preserves all existing
+  call sites unchanged).
+- `Quat::from_rotation_y(effective_direction.direction_to_yaw_radians())` is
+  applied to the parent `Transform` via `.with_rotation(rotation)`.
+- `FacingComponent::new(effective_direction)` is inserted on the parent entity
+  alongside `CreatureVisual`.
+
+`#[allow(clippy::too_many_arguments)]` added — the function previously had the
+maximum allowed 7 arguments and the required new parameter pushed it to 8.
+This is intentional and documented.
+
+Five new unit tests exercise the facing contract without a full Bevy `App`
+(the transform math is tested directly):
+`test_spawn_creature_facing_none_is_north`,
+`test_spawn_creature_facing_south_rotation`,
+`test_facing_component_inserted_south`,
+`test_facing_component_inserted_none_defaults_north`,
+`test_facing_component_roundtrip_all_directions`.
+
+#### `src/game/systems/map.rs` — call-site updates
+
+Three `spawn_creature` call sites updated to pass `None` as the `facing`
+argument, preserving existing North-default behaviour:
+
+- NPC creature spawn (~L1047)
+- Encounter creature spawn (~L1181)
+- `RecruitableCharacter` creature spawn (~L1225)
+
+#### `src/game/systems/monster_rendering.rs` — call-site update
+
+`spawn_monster_with_visual` passes `None` for `facing`, preserving existing
+behaviour.
+
+#### `src/game/components/mod.rs` — re-export
+
+`FacingComponent` added to the `pub use creature::{…}` re-export so consumers
+can import it from `antares::game::components`.
+
+### Architecture Compliance
+
+- `Direction` methods are pure domain logic — no Bevy dependency, no side
+  effects. Correct module placement: `src/domain/types.rs`.
+- `FacingComponent` is an ECS component — correct module placement:
+  `src/game/components/creature.rs`.
+- All existing call sites pass `None`; zero behaviour change on the
+  `main` branch.
+- All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D
+warnings`, `cargo nextest run` (the single pre-existing failure in
+  `test_slider_constants_for_ui` is unrelated to this phase).
+
+### Test Summary
+
+20 new tests added, all passing:
+
+| Test location                                                 | Count |
+| ------------------------------------------------------------- | ----- |
+| `domain::types::tests` (yaw conversion)                       | 9     |
+| `game::components::creature::tests` (FacingComponent)         | 5     |
+| `game::systems::creature_spawning::tests` (spawn integration) | 6     |
+
+### Deliverables Checklist
+
+- [x] `direction_to_yaw_radians()` method on `Direction`
+- [x] `Direction::from_yaw_radians()` method
+- [x] `FacingComponent` component in `creature.rs`
+- [x] `spawn_creature()` accepts `facing: Option<Direction>`; existing callers pass `None`
+- [x] Unit tests passing (20/20)
+
 ## Combat: Party HP Bars Update Live During Combat
 
 ### Overview

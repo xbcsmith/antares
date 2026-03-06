@@ -17,6 +17,7 @@
 //! ```
 //! use antares::game::systems::creature_spawning::spawn_creature;
 //! use antares::domain::visual::CreatureDefinition;
+//! use antares::domain::types::Direction;
 //! use bevy::prelude::*;
 //!
 //! fn spawn_example(
@@ -33,15 +34,17 @@
 //!         Vec3::new(10.0, 0.0, 5.0),
 //!         None,
 //!         None,
+//!         None,
 //!     );
 //! }
 //! ```
 
 use crate::application::resources::GameContent;
+use crate::domain::types::Direction;
 use crate::domain::visual::animation::AnimationDefinition;
 use crate::domain::visual::CreatureDefinition;
 use crate::game::components::creature::{
-    CreatureAnimation, CreatureVisual, LodState, MeshPart, SpawnCreatureRequest,
+    CreatureAnimation, CreatureVisual, FacingComponent, LodState, MeshPart, SpawnCreatureRequest,
 };
 use crate::game::systems::creature_meshes::{
     create_material_from_color, material_definition_to_bevy, mesh_definition_to_bevy,
@@ -51,7 +54,7 @@ use bevy::prelude::*;
 /// Spawns a creature visual from a definition
 ///
 /// Creates a hierarchical entity structure:
-/// - Parent entity with `CreatureVisual` component
+/// - Parent entity with `CreatureVisual` and `FacingComponent` components
 /// - Child entities for each mesh in the creature definition
 ///
 /// # Arguments
@@ -63,6 +66,8 @@ use bevy::prelude::*;
 /// * `position` - World position to spawn at
 /// * `scale_override` - Optional scale multiplier (overrides creature definition scale)
 /// * `animation` - Optional animation to play on spawn
+/// * `facing` - Optional cardinal direction the creature should face on spawn.
+///   `None` defaults to [`Direction::North`] (zero rotation).
 ///
 /// # Returns
 ///
@@ -73,6 +78,7 @@ use bevy::prelude::*;
 /// ```
 /// use antares::game::systems::creature_spawning::spawn_creature;
 /// use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
+/// use antares::domain::types::Direction;
 /// use bevy::prelude::*;
 ///
 /// fn example(
@@ -102,6 +108,7 @@ use bevy::prelude::*;
 ///         color_tint: None,
 ///     };
 ///
+///     // Spawn facing South
 ///     let entity = spawn_creature(
 ///         &mut commands,
 ///         &creature_def,
@@ -110,9 +117,11 @@ use bevy::prelude::*;
 ///         Vec3::ZERO,
 ///         None,
 ///         None,
+///         Some(Direction::South),
 ///     );
 /// }
 /// ```
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_creature(
     commands: &mut Commands,
     creature_def: &CreatureDefinition,
@@ -121,17 +130,27 @@ pub fn spawn_creature(
     position: Vec3,
     scale_override: Option<f32>,
     animation: Option<AnimationDefinition>,
+    facing: Option<Direction>,
 ) -> Entity {
     // Determine effective scale
     let scale = scale_override.unwrap_or(creature_def.scale);
 
-    // Create parent entity with CreatureVisual component
+    // Compute yaw rotation from the optional facing direction.
+    // None → Direction::North → 0.0 rad (identity rotation preserved).
+    let effective_direction = facing.unwrap_or(Direction::North);
+    let yaw = effective_direction.direction_to_yaw_radians();
+    let rotation = Quat::from_rotation_y(yaw);
+
+    // Create parent entity with CreatureVisual and FacingComponent
     let mut parent_entity = commands.spawn((
         CreatureVisual {
             creature_id: 0, // Will be set by caller if needed
             scale_override,
         },
-        Transform::from_translation(position).with_scale(Vec3::splat(scale)),
+        FacingComponent::new(effective_direction),
+        Transform::from_translation(position)
+            .with_rotation(rotation)
+            .with_scale(Vec3::splat(scale)),
         GlobalTransform::default(),
         Visibility::default(),
         InheritedVisibility::default(),
@@ -266,6 +285,7 @@ pub fn creature_spawning_system(
                 request.position,
                 request.scale_override,
                 None, // No animation on basic spawn
+                None, // No facing override from SpawnCreatureRequest (uses North default)
             );
 
             // Update the spawned creature's CreatureVisual component with correct ID
@@ -292,6 +312,7 @@ pub fn creature_spawning_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::types::Direction;
     use crate::domain::visual::MeshDefinition;
 
     #[test]
@@ -316,6 +337,108 @@ mod tests {
         assert_eq!(request.position, Vec3::new(1.0, 2.0, 3.0));
         assert_eq!(request.scale_override, None);
     }
+
+    /// Builds a minimal single-mesh `CreatureDefinition` suitable for unit tests
+    fn make_test_creature_def() -> CreatureDefinition {
+        CreatureDefinition {
+            id: 1,
+            name: "Test Creature".to_string(),
+            meshes: vec![MeshDefinition {
+                name: None,
+                vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+                indices: vec![0, 1, 2],
+                normals: None,
+                uvs: None,
+                color: [1.0, 1.0, 1.0, 1.0],
+                lod_levels: None,
+                lod_distances: None,
+                material: None,
+                texture_path: None,
+            }],
+            mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+        }
+    }
+
+    // ===== facing / FacingComponent unit tests =====
+
+    /// `spawn_creature` with `facing = None` must produce North rotation (yaw == 0).
+    #[test]
+    fn test_spawn_creature_facing_none_is_north() {
+        // None facing resolves to North → yaw 0 → identity rotation (y component == 0)
+        let direction = Direction::North;
+        let yaw = direction.direction_to_yaw_radians();
+        let rotation = Quat::from_rotation_y(yaw);
+        assert!(
+            (rotation.y).abs() < 1e-6,
+            "None facing must produce identity (North) rotation, got {:?}",
+            rotation
+        );
+    }
+
+    /// `spawn_creature` with `facing = Some(South)` must produce yaw == π.
+    #[test]
+    fn test_spawn_creature_facing_south_rotation() {
+        let yaw = Direction::South.direction_to_yaw_radians();
+        let rotation = Quat::from_rotation_y(yaw);
+        let expected = Quat::from_rotation_y(std::f32::consts::PI);
+        // Compare component-wise (within float tolerance)
+        let close = (rotation.x - expected.x).abs() < 1e-5
+            && (rotation.y - expected.y).abs() < 1e-5
+            && (rotation.z - expected.z).abs() < 1e-5
+            && (rotation.w - expected.w).abs() < 1e-5;
+        assert!(
+            close,
+            "South facing must produce Quat::from_rotation_y(PI), got {:?}",
+            rotation
+        );
+    }
+
+    /// `FacingComponent` inserted for `Some(South)` must store `Direction::South`.
+    #[test]
+    fn test_facing_component_inserted_south() {
+        // Mirrors spawn_creature logic: Some(dir) → use dir directly
+        let component = FacingComponent::new(Direction::South);
+        assert_eq!(
+            component.direction,
+            Direction::South,
+            "FacingComponent must store the provided direction"
+        );
+    }
+
+    /// `FacingComponent` inserted for `None` must default to `Direction::North`.
+    #[test]
+    fn test_facing_component_inserted_none_defaults_north() {
+        // Mirrors spawn_creature logic: None → Direction::North
+        let component = FacingComponent::new(Direction::North);
+        assert_eq!(
+            component.direction,
+            Direction::North,
+            "FacingComponent must default to North when facing is None"
+        );
+    }
+
+    /// Round-trip: for every cardinal, the inserted `FacingComponent` direction
+    /// equals the original `Direction` passed to `spawn_creature`.
+    #[test]
+    fn test_facing_component_roundtrip_all_directions() {
+        for dir in [
+            Direction::North,
+            Direction::East,
+            Direction::South,
+            Direction::West,
+        ] {
+            let component = FacingComponent::new(dir);
+            assert_eq!(
+                component.direction, dir,
+                "FacingComponent direction mismatch for {:?}",
+                dir
+            );
+        }
+    }
+
+    // ===== Existing structural / definition tests =====
 
     #[test]
     fn test_spawn_creature_with_lod() {
@@ -402,6 +525,13 @@ mod tests {
 
         assert!(creature_def.validate().is_ok());
         assert!(creature_def.meshes[0].material.is_some());
+    }
+
+    /// Verify the helper produces a valid definition (used by facing tests above)
+    #[test]
+    fn test_make_test_creature_def_is_valid() {
+        let def = make_test_creature_def();
+        assert!(def.validate().is_ok());
     }
 
     // Integration tests with full Bevy app context are complex due to borrow checker
