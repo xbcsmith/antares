@@ -19,6 +19,7 @@ pub mod dialogue_choices;
 pub mod dialogue_validation;
 pub mod dialogue_visuals;
 pub mod events;
+pub mod facing;
 pub mod furniture_rendering;
 pub mod hud;
 pub mod ik;

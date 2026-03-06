@@ -1879,8 +1879,8 @@ mod tests {
 
     #[test]
     fn test_slider_constants_for_ui() {
-        assert_eq!(SLIDER_TRACK_COLOR, Color::srgb(0.2, 0.2, 0.3));
-        assert_eq!(SLIDER_FILL_COLOR, Color::srgb(0.5, 0.7, 1.0));
+        assert_eq!(SLIDER_TRACK_COLOR, Color::srgb(0.10, 0.13, 0.22));
+        assert_eq!(SLIDER_FILL_COLOR, Color::srgb(0.91, 0.60, 0.04));
     }
 
     #[test]

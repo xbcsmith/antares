@@ -183,6 +183,82 @@ impl Direction {
             },
         }
     }
+
+    /// Converts this cardinal direction to a yaw angle in radians
+    ///
+    /// The yaw is measured clockwise when viewed from above (positive Y axis),
+    /// matching Bevy's `Quat::from_rotation_y` convention:
+    ///
+    /// | Direction | Yaw (radians)          |
+    /// |-----------|------------------------|
+    /// | North     | 0.0                    |
+    /// | East      | π/2  (FRAC_PI_2)       |
+    /// | South     | π    (PI)              |
+    /// | West      | 3π/2 (3 * FRAC_PI_2)  |
+    ///
+    /// Use the result directly with `Quat::from_rotation_y(dir.direction_to_yaw_radians())`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::Direction;
+    /// use std::f32::consts::{FRAC_PI_2, PI};
+    ///
+    /// assert_eq!(Direction::North.direction_to_yaw_radians(), 0.0);
+    /// assert!((Direction::East.direction_to_yaw_radians() - FRAC_PI_2).abs() < 1e-6);
+    /// assert!((Direction::South.direction_to_yaw_radians() - PI).abs() < 1e-6);
+    /// assert!((Direction::West.direction_to_yaw_radians() - 3.0 * FRAC_PI_2).abs() < 1e-6);
+    /// ```
+    pub fn direction_to_yaw_radians(&self) -> f32 {
+        match self {
+            Direction::North => 0.0,
+            Direction::East => std::f32::consts::FRAC_PI_2,
+            Direction::South => std::f32::consts::PI,
+            Direction::West => 3.0 * std::f32::consts::FRAC_PI_2,
+        }
+    }
+
+    /// Constructs the nearest cardinal `Direction` from a yaw angle in radians
+    ///
+    /// Normalises the input to `[0, 2π)` then rounds to the closest 90° cardinal.
+    /// This is the inverse of [`Direction::direction_to_yaw_radians`].
+    ///
+    /// | Yaw range              | Result  |
+    /// |------------------------|---------|
+    /// | \[-π/4,  π/4)          | North   |
+    /// | \[ π/4,  3π/4)         | East    |
+    /// | \[3π/4,  5π/4)         | South   |
+    /// | \[5π/4,  7π/4)         | West    |
+    /// | \[7π/4,  2π) or wrap   | North   |
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::Direction;
+    /// use std::f32::consts::{FRAC_PI_2, PI};
+    ///
+    /// assert_eq!(Direction::from_yaw_radians(0.0), Direction::North);
+    /// assert_eq!(Direction::from_yaw_radians(FRAC_PI_2), Direction::East);
+    /// assert_eq!(Direction::from_yaw_radians(PI), Direction::South);
+    /// assert_eq!(Direction::from_yaw_radians(3.0 * FRAC_PI_2), Direction::West);
+    /// // Values between cardinals snap to the nearest one
+    /// assert_eq!(Direction::from_yaw_radians(FRAC_PI_2 / 2.0 - 0.01), Direction::North);
+    /// assert_eq!(Direction::from_yaw_radians(FRAC_PI_2 / 2.0 + 0.01), Direction::East);
+    /// ```
+    pub fn from_yaw_radians(yaw: f32) -> Direction {
+        use std::f32::consts::{FRAC_PI_2, TAU};
+        // Normalise to [0, 2π)
+        let normalised = ((yaw % TAU) + TAU) % TAU;
+        // Each quadrant spans π/2 radians; offset by π/4 so each cardinal is centred
+        let sector = ((normalised + FRAC_PI_2 / 2.0) / FRAC_PI_2) as u32 % 4;
+        match sector {
+            0 => Direction::North,
+            1 => Direction::East,
+            2 => Direction::South,
+            3 => Direction::West,
+            _ => Direction::North,
+        }
+    }
 }
 
 // ===== DiceRoll =====
@@ -676,6 +752,115 @@ mod tests {
         assert_eq!(Direction::East.forward(pos), Position::new(6, 5));
         assert_eq!(Direction::South.forward(pos), Position::new(5, 6));
         assert_eq!(Direction::West.forward(pos), Position::new(4, 5));
+    }
+
+    // ===== Direction yaw conversion tests =====
+
+    #[test]
+    fn test_direction_to_yaw_north() {
+        assert_eq!(
+            Direction::North.direction_to_yaw_radians(),
+            0.0,
+            "North should map to 0 radians"
+        );
+    }
+
+    #[test]
+    fn test_direction_to_yaw_east() {
+        let yaw = Direction::East.direction_to_yaw_radians();
+        let expected = std::f32::consts::FRAC_PI_2;
+        assert!(
+            (yaw - expected).abs() < 1e-6,
+            "East should map to π/2 radians, got {}",
+            yaw
+        );
+    }
+
+    #[test]
+    fn test_direction_to_yaw_south() {
+        let yaw = Direction::South.direction_to_yaw_radians();
+        let expected = std::f32::consts::PI;
+        assert!(
+            (yaw - expected).abs() < 1e-6,
+            "South should map to π radians, got {}",
+            yaw
+        );
+    }
+
+    #[test]
+    fn test_direction_to_yaw_west() {
+        let yaw = Direction::West.direction_to_yaw_radians();
+        let expected = 3.0 * std::f32::consts::FRAC_PI_2;
+        assert!(
+            (yaw - expected).abs() < 1e-6,
+            "West should map to 3π/2 radians, got {}",
+            yaw
+        );
+    }
+
+    #[test]
+    fn test_direction_roundtrip() {
+        // Every cardinal direction must survive a round-trip through yaw conversion
+        let directions = [
+            Direction::North,
+            Direction::East,
+            Direction::South,
+            Direction::West,
+        ];
+        for dir in &directions {
+            let yaw = dir.direction_to_yaw_radians();
+            let recovered = Direction::from_yaw_radians(yaw);
+            assert_eq!(
+                recovered, *dir,
+                "Round-trip failed for {:?}: yaw={}, recovered={:?}",
+                dir, yaw, recovered
+            );
+        }
+    }
+
+    #[test]
+    fn test_direction_from_yaw_cardinals() {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        assert_eq!(Direction::from_yaw_radians(0.0), Direction::North);
+        assert_eq!(Direction::from_yaw_radians(FRAC_PI_2), Direction::East);
+        assert_eq!(Direction::from_yaw_radians(PI), Direction::South);
+        assert_eq!(
+            Direction::from_yaw_radians(3.0 * FRAC_PI_2),
+            Direction::West
+        );
+    }
+
+    #[test]
+    fn test_direction_from_yaw_snaps_to_nearest() {
+        use std::f32::consts::FRAC_PI_2;
+        // Just below the North/East boundary → still North
+        assert_eq!(
+            Direction::from_yaw_radians(FRAC_PI_2 / 2.0 - 0.01),
+            Direction::North
+        );
+        // Just above the North/East boundary → East
+        assert_eq!(
+            Direction::from_yaw_radians(FRAC_PI_2 / 2.0 + 0.01),
+            Direction::East
+        );
+    }
+
+    #[test]
+    fn test_direction_from_yaw_normalises_negative() {
+        // -π/2 is equivalent to 3π/2 (West)
+        assert_eq!(
+            Direction::from_yaw_radians(-std::f32::consts::FRAC_PI_2),
+            Direction::West
+        );
+    }
+
+    #[test]
+    fn test_direction_from_yaw_normalises_above_two_pi() {
+        // 2π + π/2 should behave the same as π/2 (East)
+        assert_eq!(
+            Direction::from_yaw_radians(std::f32::consts::TAU + std::f32::consts::FRAC_PI_2),
+            Direction::East
+        );
     }
 
     #[test]

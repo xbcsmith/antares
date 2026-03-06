@@ -6008,16 +6008,14 @@
     ],
     events: {
         (
-            x: 0,
-            y: 7,
-        ): Teleport(
-            name: "Harrow Downs Portal",
-            description: "The portal to the Harrow Downs",
-            destination: (
-                x: 0,
-                y: 18,
-            ),
-            map_id: 6,
+            x: 4,
+            y: 4,
+        ): Sign(
+            name: "Inn Sign",
+            description: "A welcoming sign for the Cozy Inn offering rest and lodging.",
+            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+            time_condition: None,
+            facing: None,
         ),
         (
             x: 10,
@@ -6027,15 +6025,7 @@
             description: "A notice describing the Temple of Healing and the services it provides.",
             text: "Temple of Healing - The priests can restore your health.",
             time_condition: None,
-        ),
-        (
-            x: 4,
-            y: 4,
-        ): Sign(
-            name: "Inn Sign",
-            description: "A welcoming sign for the Cozy Inn offering rest and lodging.",
-            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
-            time_condition: None,
+            facing: None,
         ),
         (
             x: 19,
@@ -6057,6 +6047,19 @@
             description: "A sign advertising the general store where adventurers can buy and sell goods.",
             text: "General Store - Buy and sell items for your adventures.",
             time_condition: None,
+            facing: None,
+        ),
+        (
+            x: 0,
+            y: 7,
+        ): Teleport(
+            name: "Harrow Downs Portal",
+            description: "The portal to the Harrow Downs",
+            destination: (
+                x: 0,
+                y: 18,
+            ),
+            map_id: 6,
         ),
         (
             x: 18,
@@ -6066,6 +6069,7 @@
             description: "A directional sign pointing to the nearby forest.",
             text: "To the Forrest",
             time_condition: None,
+            facing: None,
         ),
     },
     allow_random_encounters: true,

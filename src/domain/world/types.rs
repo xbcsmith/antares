@@ -1851,7 +1851,7 @@ impl TimeCondition {
 /// Events are triggered when the party moves to a tile containing an event,
 /// or when the party explicitly interacts with the environment. Each event type
 /// has specific properties and effects on gameplay.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MapEvent {
     /// Random monster encounter
     Encounter {
@@ -1868,6 +1868,30 @@ pub enum MapEvent {
         /// compatible with existing RON data).
         #[serde(default)]
         time_condition: Option<TimeCondition>,
+        /// Optional cardinal direction the encounter creature visual faces on spawn.
+        ///
+        /// `None` (the default) preserves the previous behaviour of facing North
+        /// (zero yaw rotation). Existing RON files without this field remain valid
+        /// thanks to `#[serde(default)]`.
+        #[serde(default)]
+        facing: Option<Direction>,
+        /// When `true`, the map loading system inserts a `ProximityFacing` component
+        /// on the spawned encounter entity so that it automatically turns toward the
+        /// party when the party enters within 2 tiles.
+        ///
+        /// Defaults to `false` so all existing RON files remain valid.
+        #[serde(default)]
+        proximity_facing: bool,
+        /// Optional rotation speed in degrees per second for smooth proximity-facing
+        /// transitions.
+        ///
+        /// When `Some(speed)` and `proximity_facing` is `true`, the spawned entity
+        /// will rotate smoothly toward the party at `speed` degrees per second
+        /// (Phase 4 smooth rotation). When `None` (the default), rotation snaps
+        /// instantly. Existing RON files without this field remain valid thanks to
+        /// `#[serde(default)]`.
+        #[serde(default)]
+        rotation_speed: Option<f32>,
     },
     /// Treasure chest
     Treasure {
@@ -1920,6 +1944,13 @@ pub enum MapEvent {
         /// the condition is met.  `None` means always readable (default).
         #[serde(default)]
         time_condition: Option<TimeCondition>,
+        /// Optional cardinal direction the sign post faces on spawn.
+        ///
+        /// `None` (the default) preserves the previous behaviour of no yaw
+        /// rotation. Existing RON files without this field remain valid thanks
+        /// to `#[serde(default)]`.
+        #[serde(default)]
+        facing: Option<Direction>,
     },
     /// NPC dialogue trigger
     NpcDialogue {
@@ -1935,6 +1966,33 @@ pub enum MapEvent {
         /// during the specified time window.  `None` means always available.
         #[serde(default)]
         time_condition: Option<TimeCondition>,
+        /// Optional cardinal direction override for the NPC's facing at spawn.
+        ///
+        /// When `Some`, this overrides the `facing` stored in `NpcPlacement`
+        /// for this particular event tile, allowing the same NPC definition to
+        /// be placed differently on different maps.  `None` falls back to the
+        /// `NpcPlacement.facing` value (which itself defaults to `None` →
+        /// North).  Existing RON files without this field remain valid thanks
+        /// to `#[serde(default)]`.
+        #[serde(default)]
+        facing: Option<Direction>,
+        /// When `true`, the map loading system inserts a `ProximityFacing` component
+        /// on the spawned NPC entity so that it automatically turns toward the party
+        /// when the party enters within 2 tiles.
+        ///
+        /// Defaults to `false` so all existing RON files remain valid.
+        #[serde(default)]
+        proximity_facing: bool,
+        /// Optional rotation speed in degrees per second for smooth proximity-facing
+        /// transitions.
+        ///
+        /// When `Some(speed)` and `proximity_facing` is `true`, the spawned NPC
+        /// will rotate smoothly toward the party at `speed` degrees per second
+        /// (Phase 4 smooth rotation). When `None` (the default), rotation snaps
+        /// instantly. Existing RON files without this field remain valid thanks to
+        /// `#[serde(default)]`.
+        #[serde(default)]
+        rotation_speed: Option<f32>,
     },
     /// Recruitable character encounter
     RecruitableCharacter {
@@ -1954,6 +2012,13 @@ pub enum MapEvent {
         /// present (default).
         #[serde(default)]
         time_condition: Option<TimeCondition>,
+        /// Optional cardinal direction the recruitable character visual faces on spawn.
+        ///
+        /// `None` (the default) preserves the previous behaviour of facing North
+        /// (zero yaw rotation). Existing RON files without this field remain valid
+        /// thanks to `#[serde(default)]`.
+        #[serde(default)]
+        facing: Option<Direction>,
     },
     /// Enter an inn for party management
     EnterInn {
@@ -3108,6 +3173,9 @@ mod time_condition_tests {
             description: String::new(),
             monster_group: vec![1],
             time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
         match event {
             MapEvent::Encounter {
@@ -3128,6 +3196,9 @@ mod time_condition_tests {
                 TimeOfDay::Night,
                 TimeOfDay::Evening,
             ])),
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
         match event {
             MapEvent::Encounter {
@@ -3148,6 +3219,7 @@ mod time_condition_tests {
             description: String::new(),
             text: "The monsters wake at night!".to_string(),
             time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
+            facing: None,
         };
         let ron_str = ron::to_string(&event).expect("serialize");
         // Ensure the RON contains the condition
@@ -3182,6 +3254,9 @@ mod time_condition_tests {
             description: String::new(),
             npc_id: "day_merchant".to_string(),
             time_condition: Some(TimeCondition::BetweenHours { from: 8, to: 18 }),
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
         match event {
             MapEvent::NpcDialogue {
@@ -3206,6 +3281,7 @@ mod time_condition_tests {
             character_id: "warrior_01".to_string(),
             dialogue_id: None,
             time_condition: Some(TimeCondition::AfterDay(3)),
+            facing: None,
         };
         match event {
             MapEvent::RecruitableCharacter {
@@ -3646,6 +3722,7 @@ mod tests {
             description: "Desc".to_string(),
             text: "Welcome!".to_string(),
             time_condition: None,
+            facing: None,
         };
 
         map.add_event(pos, event);
@@ -3702,6 +3779,7 @@ mod tests {
             description: "A test sign".to_string(),
             text: "Hello, World!".to_string(),
             time_condition: None,
+            facing: None,
         };
         map.add_event(pos, event.clone());
 

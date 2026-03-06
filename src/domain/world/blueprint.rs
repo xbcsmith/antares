@@ -164,6 +164,7 @@ impl From<MapBlueprint> for Map {
                     description: bp_event.description,
                     text,
                     time_condition: None,
+                    facing: None,
                 },
                 BlueprintEventType::Treasure(loot) => {
                     let loot_ids: Vec<u8> = loot.iter().map(|l| l.item_id).collect();
@@ -185,6 +186,9 @@ impl From<MapBlueprint> for Map {
                         description: bp_event.description,
                         monster_group: group,
                         time_condition: None,
+                        facing: None,
+                        proximity_facing: false,
+                        rotation_speed: None,
                     }
                 }
                 BlueprintEventType::Teleport { map_id, x, y } => MapEvent::Teleport {
@@ -204,6 +208,9 @@ impl From<MapBlueprint> for Map {
                     description: bp_event.description,
                     npc_id: id,
                     time_condition: None,
+                    facing: None,
+                    proximity_facing: false,
+                    rotation_speed: None,
                 },
             };
             events.insert(bp_event.position, event);

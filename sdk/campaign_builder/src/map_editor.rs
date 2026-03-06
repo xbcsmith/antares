@@ -43,7 +43,7 @@ use crate::ui_helpers::{
 };
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
-use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
+use antares::domain::types::{Direction, EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
 use antares::domain::world::{
     FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType,
@@ -1935,6 +1935,20 @@ pub struct EventEditorState {
     pub npc_id_input_buffer: String,
     pub recruit_character_id_input_buffer: String,
 
+    // Facing / behaviour fields (Phase 5 — applies to Sign, NpcDialogue, Encounter,
+    // and RecruitableCharacter event types)
+    /// Initial facing direction for the spawned entity.
+    /// `None` means the engine default (North). Applies to Sign, NpcDialogue,
+    /// Encounter, and RecruitableCharacter.
+    pub event_facing: Option<String>,
+    /// When `true`, inserts a `ProximityFacing` component on the spawned entity so
+    /// it automatically turns toward the party when within 2 tiles.
+    /// Applies to Encounter and NpcDialogue only.
+    pub event_proximity_facing: bool,
+    /// Rotation speed in degrees per second for smooth proximity-facing transitions.
+    /// `None` means snap (instant). Applies to Encounter and NpcDialogue only.
+    pub event_rotation_speed: Option<f32>,
+
     // Container event fields
     /// Items in the container's initial inventory (item IDs)
     pub container_items: Vec<ItemId>,
@@ -1985,6 +1999,9 @@ impl Default for EventEditorState {
             teleport_map_input_buffer: String::new(),
             npc_id_input_buffer: String::new(),
             recruit_character_id_input_buffer: String::new(),
+            event_facing: None,
+            event_proximity_facing: false,
+            event_rotation_speed: None,
             container_items: Vec::new(),
             container_item_input: String::new(),
             container_locked: false,
@@ -2098,11 +2115,19 @@ impl EventEditorState {
                 if monsters.is_empty() {
                     return Err("Encounter must have at least one monster ID".to_string());
                 }
+                let facing = Self::parse_facing(self.event_facing.as_deref());
                 Ok(MapEvent::Encounter {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     monster_group: monsters,
                     time_condition: None,
+                    facing,
+                    proximity_facing: self.event_proximity_facing,
+                    rotation_speed: if self.event_proximity_facing {
+                        self.event_rotation_speed
+                    } else {
+                        None
+                    },
                 })
             }
             EventType::Treasure => {
@@ -2170,20 +2195,30 @@ impl EventEditorState {
                 if self.sign_text.is_empty() {
                     return Err("Sign text cannot be empty".to_string());
                 }
+                let facing = Self::parse_facing(self.event_facing.as_deref());
                 Ok(MapEvent::Sign {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     text: self.sign_text.clone(),
                     time_condition: None,
+                    facing,
                 })
             }
             EventType::NpcDialogue => {
                 let npc_id = self.npc_id.parse().map_err(|_| "Invalid NPC ID")?;
+                let facing = Self::parse_facing(self.event_facing.as_deref());
                 Ok(MapEvent::NpcDialogue {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     npc_id,
                     time_condition: None,
+                    facing,
+                    proximity_facing: self.event_proximity_facing,
+                    rotation_speed: if self.event_proximity_facing {
+                        self.event_rotation_speed
+                    } else {
+                        None
+                    },
                 })
             }
             EventType::RecruitableCharacter => {
@@ -2203,12 +2238,14 @@ impl EventEditorState {
                     self.recruitable_dialogue_id.parse::<u16>().ok()
                 };
 
+                let facing = Self::parse_facing(self.event_facing.as_deref());
                 Ok(MapEvent::RecruitableCharacter {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     character_id,
                     dialogue_id,
                     time_condition: None,
+                    facing,
                 })
             }
             EventType::EnterInn => {
@@ -2296,6 +2333,8 @@ impl EventEditorState {
     ///     name: "Sign".to_string(),
     ///     description: "Desc".to_string(),
     ///     text: "Hello".to_string(),
+    ///     time_condition: None,
+    ///     facing: None,
     /// };
     ///
     /// let editor = EventEditorState::from_map_event(Position::new(1, 1), &event);
@@ -2311,12 +2350,18 @@ impl EventEditorState {
                 name,
                 description,
                 monster_group,
+                facing,
+                proximity_facing,
+                rotation_speed,
                 ..
             } => {
                 s.event_type = EventType::Encounter;
                 s.name = name.clone();
                 s.description = description.clone();
                 s.encounter_monsters = monster_group.clone();
+                s.event_facing = facing.map(|d| format!("{:?}", d));
+                s.event_proximity_facing = *proximity_facing;
+                s.event_rotation_speed = *rotation_speed;
             }
             MapEvent::Treasure {
                 name,
@@ -2360,29 +2405,38 @@ impl EventEditorState {
                 name,
                 description,
                 text,
+                facing,
                 ..
             } => {
                 s.event_type = EventType::Sign;
                 s.name = name.clone();
                 s.description = description.clone();
                 s.sign_text = text.clone();
+                s.event_facing = facing.map(|d| format!("{:?}", d));
             }
             MapEvent::NpcDialogue {
                 name,
                 description,
                 npc_id,
+                facing,
+                proximity_facing,
+                rotation_speed,
                 ..
             } => {
                 s.event_type = EventType::NpcDialogue;
                 s.name = name.clone();
                 s.description = description.clone();
                 s.npc_id = npc_id.clone();
+                s.event_facing = facing.map(|d| format!("{:?}", d));
+                s.event_proximity_facing = *proximity_facing;
+                s.event_rotation_speed = *rotation_speed;
             }
             MapEvent::RecruitableCharacter {
                 name,
                 description,
                 character_id,
                 dialogue_id,
+                facing,
                 ..
             } => {
                 s.event_type = EventType::RecruitableCharacter;
@@ -2392,6 +2446,7 @@ impl EventEditorState {
                 s.recruit_character_id_input_buffer = character_id.clone();
                 s.recruitable_dialogue_id =
                     dialogue_id.map(|id| id.to_string()).unwrap_or_default();
+                s.event_facing = facing.map(|d| format!("{:?}", d));
             }
             MapEvent::EnterInn {
                 name,
@@ -2442,6 +2497,20 @@ impl EventEditorState {
             }
         }
         s
+    }
+
+    /// Parse a direction string (e.g. `"North"`) into `Option<Direction>`.
+    ///
+    /// Returns `None` for any unrecognised string (including `None` itself), so
+    /// that the engine falls back to its default North-facing behaviour.
+    fn parse_facing(s: Option<&str>) -> Option<Direction> {
+        match s {
+            Some("North") => Some(Direction::North),
+            Some("South") => Some(Direction::South),
+            Some("East") => Some(Direction::East),
+            Some("West") => Some(Direction::West),
+            _ => None,
+        }
     }
 }
 
@@ -3993,8 +4062,25 @@ impl MapsEditorState {
                     }
 
                     match &event {
-                        MapEvent::Encounter { monster_group, .. } => {
+                        MapEvent::Encounter {
+                            monster_group,
+                            facing,
+                            proximity_facing,
+                            rotation_speed,
+                            ..
+                        } => {
                             ui.label(format!("Encounter: {:?}", monster_group));
+                            if let Some(dir) = facing {
+                                ui.label(format!("Facing: {:?}", dir));
+                            }
+                            if *proximity_facing {
+                                ui.label("🔄 Turns toward party on proximity");
+                                if let Some(speed) = rotation_speed {
+                                    ui.label(format!("  Rotation speed: {:.0} deg/s", speed));
+                                } else {
+                                    ui.label("  Rotation: instant snap");
+                                }
+                            }
                         }
                         MapEvent::Treasure { loot, .. } => {
                             ui.label(format!("Treasure: {:?}", loot));
@@ -4012,16 +4098,42 @@ impl MapsEditorState {
                                 ui.label(format!("Effect: {}", eff));
                             }
                         }
-                        MapEvent::Sign { text, .. } => {
+                        MapEvent::Sign { text, facing, .. } => {
                             ui.label(format!("Sign: {}", text));
+                            if let Some(dir) = facing {
+                                ui.label(format!("Facing: {:?}", dir));
+                            }
                         }
-                        MapEvent::NpcDialogue { npc_id, .. } => {
+                        MapEvent::NpcDialogue {
+                            npc_id,
+                            facing,
+                            proximity_facing,
+                            rotation_speed,
+                            ..
+                        } => {
                             ui.label(format!("NPC Dialogue: {}", npc_id));
+                            if let Some(dir) = facing {
+                                ui.label(format!("Facing: {:?}", dir));
+                            }
+                            if *proximity_facing {
+                                ui.label("🔄 Turns toward party on proximity");
+                                if let Some(speed) = rotation_speed {
+                                    ui.label(format!("  Rotation speed: {:.0} deg/s", speed));
+                                } else {
+                                    ui.label("  Rotation: instant snap");
+                                }
+                            }
                         }
                         MapEvent::RecruitableCharacter {
-                            character_id, name, ..
+                            character_id,
+                            name,
+                            facing,
+                            ..
                         } => {
                             ui.label(format!("Recruitable: {} ({})", character_id, name));
+                            if let Some(dir) = facing {
+                                ui.label(format!("Facing: {:?}", dir));
+                            }
                         }
                         MapEvent::EnterInn {
                             innkeeper_id, name, ..
@@ -4390,6 +4502,71 @@ impl MapsEditorState {
                     if changed {
                         editor.has_changes = true;
                     }
+
+                    // Facing direction
+                    ui.horizontal(|ui| {
+                        ui.label("Facing:")
+                            .on_hover_text("Initial facing direction of the spawned entity");
+                        egui::ComboBox::from_id_salt("encounter_event_facing_combo")
+                            .selected_text(event_editor.event_facing.as_deref().unwrap_or("None"))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut event_editor.event_facing, None, "None");
+                                for dir in &["North", "East", "South", "West"] {
+                                    ui.selectable_value(
+                                        &mut event_editor.event_facing,
+                                        Some((*dir).to_string()),
+                                        *dir,
+                                    );
+                                }
+                            });
+                        if event_editor.event_facing.is_some()
+                            && ui.small_button("✖ Clear").clicked()
+                        {
+                            event_editor.event_facing = None;
+                            editor.has_changes = true;
+                        }
+                    });
+                    if event_editor.event_facing.is_some() {
+                        editor.has_changes = true;
+                    }
+
+                    // Proximity facing and rotation speed behaviour
+                    ui.separator();
+                    ui.label("🔄 Behaviour:");
+                    if ui
+                        .checkbox(
+                            &mut event_editor.event_proximity_facing,
+                            "Turn to face party on proximity",
+                        )
+                        .on_hover_text(
+                            "When enabled the entity automatically turns toward the party \
+                             when they step within 2 tiles.",
+                        )
+                        .changed()
+                    {
+                        editor.has_changes = true;
+                    }
+                    if event_editor.event_proximity_facing {
+                        ui.horizontal(|ui| {
+                            ui.label("Rotation Speed (deg/s):").on_hover_text(
+                                "Leave empty for instant snap. Enter a value for smooth rotation.",
+                            );
+                            let mut speed_str = event_editor
+                                .event_rotation_speed
+                                .map(|s| s.to_string())
+                                .unwrap_or_default();
+                            if ui.text_edit_singleline(&mut speed_str).changed() {
+                                event_editor.event_rotation_speed = speed_str.parse::<f32>().ok();
+                                editor.has_changes = true;
+                            }
+                            if event_editor.event_rotation_speed.is_some()
+                                && ui.small_button("✖ Snap").clicked()
+                            {
+                                event_editor.event_rotation_speed = None;
+                                editor.has_changes = true;
+                            }
+                        });
+                    }
                 }
                 EventType::Treasure => {
                     // Multi-select searchable list for treasure items (id+name)
@@ -4539,6 +4716,33 @@ impl MapsEditorState {
                 EventType::Sign => {
                     ui.label("Sign Text:");
                     ui.text_edit_multiline(&mut event_editor.sign_text);
+
+                    // Facing direction
+                    ui.horizontal(|ui| {
+                        ui.label("Facing:")
+                            .on_hover_text("Initial facing direction of the spawned entity");
+                        egui::ComboBox::from_id_salt("sign_event_facing_combo")
+                            .selected_text(event_editor.event_facing.as_deref().unwrap_or("None"))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut event_editor.event_facing, None, "None");
+                                for dir in &["North", "East", "South", "West"] {
+                                    ui.selectable_value(
+                                        &mut event_editor.event_facing,
+                                        Some((*dir).to_string()),
+                                        *dir,
+                                    );
+                                }
+                            });
+                        if event_editor.event_facing.is_some()
+                            && ui.small_button("✖ Clear").clicked()
+                        {
+                            event_editor.event_facing = None;
+                            editor.has_changes = true;
+                        }
+                    });
+                    if event_editor.event_facing.is_some() {
+                        editor.has_changes = true;
+                    }
                 }
                 EventType::NpcDialogue => {
                     // Use autocomplete for NPC selection
@@ -4561,6 +4765,71 @@ impl MapsEditorState {
                             editor.has_changes = true;
                         }
                     });
+
+                    // Facing direction
+                    ui.horizontal(|ui| {
+                        ui.label("Facing:")
+                            .on_hover_text("Initial facing direction of the spawned entity");
+                        egui::ComboBox::from_id_salt("npc_dialogue_event_facing_combo")
+                            .selected_text(event_editor.event_facing.as_deref().unwrap_or("None"))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut event_editor.event_facing, None, "None");
+                                for dir in &["North", "East", "South", "West"] {
+                                    ui.selectable_value(
+                                        &mut event_editor.event_facing,
+                                        Some((*dir).to_string()),
+                                        *dir,
+                                    );
+                                }
+                            });
+                        if event_editor.event_facing.is_some()
+                            && ui.small_button("✖ Clear").clicked()
+                        {
+                            event_editor.event_facing = None;
+                            editor.has_changes = true;
+                        }
+                    });
+                    if event_editor.event_facing.is_some() {
+                        editor.has_changes = true;
+                    }
+
+                    // Proximity facing and rotation speed behaviour
+                    ui.separator();
+                    ui.label("🔄 Behaviour:");
+                    if ui
+                        .checkbox(
+                            &mut event_editor.event_proximity_facing,
+                            "Turn to face party on proximity",
+                        )
+                        .on_hover_text(
+                            "When enabled the entity automatically turns toward the party \
+                             when they step within 2 tiles.",
+                        )
+                        .changed()
+                    {
+                        editor.has_changes = true;
+                    }
+                    if event_editor.event_proximity_facing {
+                        ui.horizontal(|ui| {
+                            ui.label("Rotation Speed (deg/s):").on_hover_text(
+                                "Leave empty for instant snap. Enter a value for smooth rotation.",
+                            );
+                            let mut speed_str = event_editor
+                                .event_rotation_speed
+                                .map(|s| s.to_string())
+                                .unwrap_or_default();
+                            if ui.text_edit_singleline(&mut speed_str).changed() {
+                                event_editor.event_rotation_speed = speed_str.parse::<f32>().ok();
+                                editor.has_changes = true;
+                            }
+                            if event_editor.event_rotation_speed.is_some()
+                                && ui.small_button("✖ Snap").clicked()
+                            {
+                                event_editor.event_rotation_speed = None;
+                                editor.has_changes = true;
+                            }
+                        });
+                    }
                 }
                 EventType::RecruitableCharacter => {
                     ui.horizontal(|ui| {
@@ -4587,6 +4856,33 @@ impl MapsEditorState {
 
                     if !event_editor.recruitable_dialogue_id.is_empty() {
                         ui.label("💡 Leave empty for simple yes/no recruitment");
+                    }
+
+                    // Facing direction
+                    ui.horizontal(|ui| {
+                        ui.label("Facing:")
+                            .on_hover_text("Initial facing direction of the spawned entity");
+                        egui::ComboBox::from_id_salt("recruitable_event_facing_combo")
+                            .selected_text(event_editor.event_facing.as_deref().unwrap_or("None"))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut event_editor.event_facing, None, "None");
+                                for dir in &["North", "East", "South", "West"] {
+                                    ui.selectable_value(
+                                        &mut event_editor.event_facing,
+                                        Some((*dir).to_string()),
+                                        *dir,
+                                    );
+                                }
+                            });
+                        if event_editor.event_facing.is_some()
+                            && ui.small_button("✖ Clear").clicked()
+                        {
+                            event_editor.event_facing = None;
+                            editor.has_changes = true;
+                        }
+                    });
+                    if event_editor.event_facing.is_some() {
+                        editor.has_changes = true;
                     }
                 }
                 EventType::EnterInn => {
@@ -6082,6 +6378,7 @@ mod tests {
             description: "Desc".to_string(),
             text: "Test".to_string(),
             time_condition: None,
+            facing: None,
         };
 
         state.add_event(pos, event);
@@ -6168,6 +6465,7 @@ mod tests {
             description: "Desc".to_string(),
             text: "Test".to_string(),
             time_condition: None,
+            facing: None,
         };
         state.add_event(pos, event);
 
@@ -6258,6 +6556,7 @@ mod tests {
             character_id: "whisper".to_string(),
             dialogue_id: None,
             time_condition: None,
+            facing: None,
         };
 
         let state = EventEditorState::from_map_event(Position::new(0, 0), &event);
@@ -6394,7 +6693,7 @@ mod tests {
     #[test]
     fn test_event_type_all() {
         let types = EventType::all();
-        assert_eq!(types.len(), 9);
+        assert_eq!(types.len(), 10);
         assert!(types.contains(&EventType::Encounter));
         assert!(types.contains(&EventType::Treasure));
         assert!(types.contains(&EventType::Teleport));
@@ -6404,6 +6703,7 @@ mod tests {
         assert!(types.contains(&EventType::RecruitableCharacter));
         assert!(types.contains(&EventType::EnterInn));
         assert!(types.contains(&EventType::Furniture));
+        assert!(types.contains(&EventType::Container));
     }
 
     #[test]
@@ -6807,6 +7107,7 @@ mod tests {
             description: "Desc".to_string(),
             text: "Hello UndoRedo".to_string(),
             time_condition: None,
+            facing: None,
         };
 
         // Add event
@@ -6850,6 +7151,7 @@ mod tests {
                 description: "Desc".to_string(),
                 text: "Test sign".to_string(),
                 time_condition: None,
+                facing: None,
             },
         );
 
@@ -6940,6 +7242,7 @@ mod tests {
             description: "Desc".to_string(),
             text: "Test sign".to_string(),
             time_condition: None,
+            facing: None,
         };
 
         state.add_event_at_position(5, 5, event);
@@ -6966,6 +7269,7 @@ mod tests {
             description: "Welcome".to_string(),
             text: "Welcome to town".to_string(),
             time_condition: None,
+            facing: None,
         };
 
         let editor = EventEditorState::from_map_event(pos, &event);
@@ -6999,6 +7303,7 @@ mod tests {
             description: "Welcome".to_string(),
             text: "Welcome to town".to_string(),
             time_condition: None,
+            facing: None,
         };
         state.add_event_at_position(pos.x as u32, pos.y as u32, event);
         state.selected_position = Some(pos);
@@ -7032,6 +7337,7 @@ mod tests {
             description: "Desc".to_string(),
             text: "Original".to_string(),
             time_condition: None,
+            facing: None,
         };
 
         // Add the original event
@@ -7095,6 +7401,7 @@ mod tests {
             description: "Desc".to_string(),
             text: "Welcome".to_string(),
             time_condition: None,
+            facing: None,
         };
         let event2 = MapEvent::Treasure {
             name: "Treasure".to_string(),
@@ -7314,6 +7621,7 @@ mod tests {
             description: "A test sign".to_string(),
             text: "Hello".to_string(),
             time_condition: None,
+            facing: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7342,6 +7650,9 @@ mod tests {
             description: "A dragon encounter".to_string(),
             monster_group: vec![1, 2, 3],
             time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7409,6 +7720,7 @@ mod tests {
             description: "Desc".to_string(),
             text: "Text".to_string(),
             time_condition: None,
+            facing: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7432,10 +7744,11 @@ mod tests {
 
         let pos = Position::new(2, 2);
         let event = MapEvent::Sign {
-            name: "Sign".to_string(),
-            description: "Desc".to_string(),
+            name: "Test Sign".to_string(),
+            description: "Test".to_string(),
             text: "Text".to_string(),
             time_condition: None,
+            facing: None,
         };
 
         editor.map.add_event(pos, event);
@@ -7464,6 +7777,7 @@ mod tests {
             description: "Desc1".to_string(),
             text: "Text1".to_string(),
             time_condition: None,
+            facing: None,
         };
 
         let event2 = MapEvent::Trap {
@@ -7509,6 +7823,9 @@ mod tests {
             description: "A test encounter".to_string(),
             monster_group: vec![],
             time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7572,6 +7889,7 @@ mod tests {
             time_condition: None,
             description: "A sign".to_string(),
             text: "Welcome to the dungeon!".to_string(),
+            facing: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7716,6 +8034,9 @@ mod tests {
             description: "First event".to_string(),
             monster_group: vec![],
             time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
 
         let event2 = MapEvent::Treasure {
@@ -7729,6 +8050,7 @@ mod tests {
             description: "Third event sign".to_string(),
             text: "Third event".to_string(),
             time_condition: None,
+            facing: None,
         };
 
         editor.map.add_event(pos1, event1.clone());
@@ -7763,6 +8085,7 @@ mod tests {
             description: "Original description".to_string(),
             text: "Original text".to_string(),
             time_condition: None,
+            facing: None,
         };
         state.add_event(pos, original_event.clone());
 
@@ -7819,6 +8142,7 @@ mod tests {
             description: "Test".to_string(),
             text: "Text".to_string(),
             time_condition: None,
+            facing: None,
         };
         state.add_event(pos, event.clone());
 
@@ -7859,6 +8183,7 @@ mod tests {
             description: "First sign".to_string(),
             text: "Text 1".to_string(),
             time_condition: None,
+            facing: None,
         };
         let event2 = MapEvent::Trap {
             name: "Trap 1".to_string(),
@@ -8438,6 +8763,308 @@ mod tests {
                 );
             }
             other => panic!("expected Container event, got {:?}", other),
+        }
+    }
+
+    // ===== Phase 5: Campaign Builder SDK UI — EventEditorState facing / behaviour tests =====
+
+    #[test]
+    fn test_event_editor_state_default_facing_none() {
+        let state = EventEditorState::default();
+        assert_eq!(
+            state.event_facing, None,
+            "event_facing should default to None"
+        );
+        assert!(
+            !state.event_proximity_facing,
+            "event_proximity_facing should default to false"
+        );
+        assert_eq!(
+            state.event_rotation_speed, None,
+            "event_rotation_speed should default to None"
+        );
+    }
+
+    #[test]
+    fn test_event_editor_to_sign_with_facing() {
+        use antares::domain::types::Direction;
+
+        let editor = EventEditorState {
+            event_type: EventType::Sign,
+            name: "East Sign".to_string(),
+            description: "Points east".to_string(),
+            sign_text: "Go East!".to_string(),
+            event_facing: Some("East".to_string()),
+            ..Default::default()
+        };
+
+        let result = editor.to_map_event().unwrap();
+        match result {
+            MapEvent::Sign { facing, .. } => {
+                assert_eq!(facing, Some(Direction::East), "facing should be East");
+            }
+            other => panic!("expected Sign event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_from_sign_with_facing() {
+        use antares::domain::types::Direction;
+
+        let event = MapEvent::Sign {
+            name: "West Sign".to_string(),
+            description: "Points west".to_string(),
+            text: "Go West!".to_string(),
+            time_condition: None,
+            facing: Some(Direction::West),
+        };
+
+        let editor = EventEditorState::from_map_event(Position::new(2, 3), &event);
+        assert_eq!(
+            editor.event_facing,
+            Some("West".to_string()),
+            "event_facing should be 'West'"
+        );
+    }
+
+    #[test]
+    fn test_event_editor_from_sign_no_facing() {
+        let event = MapEvent::Sign {
+            name: "Plain Sign".to_string(),
+            description: "No facing".to_string(),
+            text: "Hello".to_string(),
+            time_condition: None,
+            facing: None,
+        };
+
+        let editor = EventEditorState::from_map_event(Position::new(0, 0), &event);
+        assert_eq!(
+            editor.event_facing, None,
+            "event_facing should be None when event has no facing"
+        );
+    }
+
+    #[test]
+    fn test_event_editor_to_encounter_with_facing_and_proximity() {
+        use antares::domain::types::Direction;
+
+        let editor = EventEditorState {
+            event_type: EventType::Encounter,
+            name: "Goblin Band".to_string(),
+            description: "Nasty goblins".to_string(),
+            encounter_monsters: vec![1, 2],
+            event_facing: Some("South".to_string()),
+            event_proximity_facing: true,
+            event_rotation_speed: Some(180.0),
+            ..Default::default()
+        };
+
+        let result = editor.to_map_event().unwrap();
+        match result {
+            MapEvent::Encounter {
+                facing,
+                proximity_facing,
+                rotation_speed,
+                ..
+            } => {
+                assert_eq!(facing, Some(Direction::South), "facing should be South");
+                assert!(proximity_facing, "proximity_facing should be true");
+                assert_eq!(
+                    rotation_speed,
+                    Some(180.0),
+                    "rotation_speed should be 180.0 deg/s"
+                );
+            }
+            other => panic!("expected Encounter event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_from_encounter_with_proximity() {
+        use antares::domain::types::Direction;
+
+        let event = MapEvent::Encounter {
+            name: "Dragon".to_string(),
+            description: "A fearsome dragon".to_string(),
+            monster_group: vec![5],
+            time_condition: None,
+            facing: Some(Direction::North),
+            proximity_facing: true,
+            rotation_speed: Some(90.0),
+        };
+
+        let editor = EventEditorState::from_map_event(Position::new(4, 4), &event);
+        assert_eq!(
+            editor.event_facing,
+            Some("North".to_string()),
+            "event_facing should be 'North'"
+        );
+        assert!(
+            editor.event_proximity_facing,
+            "event_proximity_facing should be true"
+        );
+        assert_eq!(
+            editor.event_rotation_speed,
+            Some(90.0),
+            "event_rotation_speed should be 90.0"
+        );
+
+        // Round-trip: to_map_event should reproduce the same values
+        let roundtrip = editor.to_map_event().unwrap();
+        match roundtrip {
+            MapEvent::Encounter {
+                facing,
+                proximity_facing,
+                rotation_speed,
+                ..
+            } => {
+                assert_eq!(facing, Some(Direction::North));
+                assert!(proximity_facing);
+                assert_eq!(rotation_speed, Some(90.0));
+            }
+            other => panic!("expected Encounter event in round-trip, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_facing_round_trip_all_variants() {
+        use antares::domain::types::Direction;
+
+        let directions = [
+            ("North", Direction::North),
+            ("East", Direction::East),
+            ("South", Direction::South),
+            ("West", Direction::West),
+        ];
+
+        // Sign round-trip
+        for (dir_str, dir_val) in &directions {
+            let editor = EventEditorState {
+                event_type: EventType::Sign,
+                sign_text: "Test".to_string(),
+                event_facing: Some(dir_str.to_string()),
+                ..Default::default()
+            };
+            let event = editor.to_map_event().unwrap();
+            let editor2 = EventEditorState::from_map_event(Position::new(0, 0), &event);
+            assert_eq!(
+                editor2.event_facing,
+                Some(dir_str.to_string()),
+                "Sign facing round-trip failed for {:?}",
+                dir_val
+            );
+        }
+
+        // NpcDialogue round-trip
+        for (dir_str, dir_val) in &directions {
+            let editor = EventEditorState {
+                event_type: EventType::NpcDialogue,
+                npc_id: "1".to_string(),
+                event_facing: Some(dir_str.to_string()),
+                ..Default::default()
+            };
+            let event = editor.to_map_event().unwrap();
+            let editor2 = EventEditorState::from_map_event(Position::new(0, 0), &event);
+            assert_eq!(
+                editor2.event_facing,
+                Some(dir_str.to_string()),
+                "NpcDialogue facing round-trip failed for {:?}",
+                dir_val
+            );
+        }
+
+        // Encounter round-trip
+        for (dir_str, dir_val) in &directions {
+            let editor = EventEditorState {
+                event_type: EventType::Encounter,
+                encounter_monsters: vec![1],
+                event_facing: Some(dir_str.to_string()),
+                ..Default::default()
+            };
+            let event = editor.to_map_event().unwrap();
+            let editor2 = EventEditorState::from_map_event(Position::new(0, 0), &event);
+            assert_eq!(
+                editor2.event_facing,
+                Some(dir_str.to_string()),
+                "Encounter facing round-trip failed for {:?}",
+                dir_val
+            );
+        }
+
+        // RecruitableCharacter round-trip
+        for (dir_str, dir_val) in &directions {
+            let editor = EventEditorState {
+                event_type: EventType::RecruitableCharacter,
+                recruit_character_id: "hero".to_string(),
+                recruit_character_id_input_buffer: "hero".to_string(),
+                event_facing: Some(dir_str.to_string()),
+                ..Default::default()
+            };
+            let event = editor.to_map_event().unwrap();
+            let editor2 = EventEditorState::from_map_event(Position::new(0, 0), &event);
+            assert_eq!(
+                editor2.event_facing,
+                Some(dir_str.to_string()),
+                "RecruitableCharacter facing round-trip failed for {:?}",
+                dir_val
+            );
+        }
+    }
+
+    #[test]
+    fn test_event_editor_proximity_false_clears_rotation_speed_in_ui() {
+        // When event_proximity_facing is false, to_map_event must output
+        // rotation_speed: None regardless of what the buffer holds.
+        let editor = EventEditorState {
+            event_type: EventType::Encounter,
+            encounter_monsters: vec![1],
+            event_proximity_facing: false,
+            event_rotation_speed: Some(360.0), // buffer has a value but proximity is off
+            ..Default::default()
+        };
+
+        let result = editor.to_map_event().unwrap();
+        match result {
+            MapEvent::Encounter {
+                proximity_facing,
+                rotation_speed,
+                ..
+            } => {
+                assert!(
+                    !proximity_facing,
+                    "proximity_facing should be false in output"
+                );
+                assert_eq!(
+                    rotation_speed, None,
+                    "rotation_speed must be None when proximity_facing is false"
+                );
+            }
+            other => panic!("expected Encounter event, got {:?}", other),
+        }
+
+        // Same for NpcDialogue
+        let editor2 = EventEditorState {
+            event_type: EventType::NpcDialogue,
+            npc_id: "1".to_string(),
+            event_proximity_facing: false,
+            event_rotation_speed: Some(45.0),
+            ..Default::default()
+        };
+
+        let result2 = editor2.to_map_event().unwrap();
+        match result2 {
+            MapEvent::NpcDialogue {
+                proximity_facing,
+                rotation_speed,
+                ..
+            } => {
+                assert!(!proximity_facing);
+                assert_eq!(
+                    rotation_speed, None,
+                    "rotation_speed must be None when proximity_facing is false (NpcDialogue)"
+                );
+            }
+            other => panic!("expected NpcDialogue event, got {:?}", other),
         }
     }
 }

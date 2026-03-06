@@ -63,6 +63,7 @@ fn create_test_map_with_recruitment_event(
         character_id: character_id.to_string(),
         dialogue_id,
         time_condition: None,
+        facing: None,
     };
 
     map.events.insert(Position { x: 5, y: 5 }, event);
@@ -321,6 +322,7 @@ fn test_multiple_recruitable_events_on_map() {
             character_id: "knight_1".to_string(),
             dialogue_id: Some(1001),
             time_condition: None,
+            facing: None,
         },
     );
 
@@ -332,6 +334,7 @@ fn test_multiple_recruitable_events_on_map() {
             character_id: "wizard_1".to_string(),
             dialogue_id: Some(1002),
             time_condition: None,
+            facing: None,
         },
     );
 
@@ -504,6 +507,7 @@ fn test_recruitment_map_event_properties() {
         character_id: character_id.to_string(),
         dialogue_id,
         time_condition: None,
+        facing: None,
     };
 
     // Assert: Verify all event properties
