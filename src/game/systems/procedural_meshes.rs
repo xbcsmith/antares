@@ -1094,7 +1094,12 @@ pub fn spawn_portal(
 /// * `event_name` - Event name for entity label
 /// * `map_id` - Map identifier for cleanup
 /// * `cache` - Mutable reference to mesh cache for reuse
-/// * `rotation_y` - Optional rotation in degrees around Y-axis (default: 0.0)
+/// * `rotation_y` - Optional tile-level rotation in degrees around Y-axis (default: 0.0).
+///   Applied first; if `facing` is also `Some`, the cardinal facing takes precedence.
+/// * `facing` - Optional cardinal [`Direction`](crate::domain::types::Direction) the sign
+///   should face. When `Some`, this overrides `rotation_y` with the exact yaw from
+///   [`Direction::direction_to_yaw_radians`](crate::domain::types::Direction::direction_to_yaw_radians).
+///   When `None`, `rotation_y` is used unchanged.
 ///
 /// # Returns
 ///
@@ -1109,6 +1114,7 @@ pub fn spawn_sign(
     map_id: types::MapId,
     cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
+    facing: Option<types::Direction>,
 ) -> Entity {
     // Get or create post mesh from cache
     let post_mesh = cache.sign_post.clone().unwrap_or_else(|| {
@@ -1143,8 +1149,14 @@ pub fn spawn_sign(
         ..default()
     });
 
-    // Spawn parent sign entity with optional rotation
-    let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
+    // Spawn parent sign entity with optional rotation.
+    // Cardinal `facing` takes precedence over the tile-level `rotation_y` degrees.
+    let effective_direction = facing.unwrap_or(types::Direction::North);
+    let rotation_radians = if facing.is_some() {
+        effective_direction.direction_to_yaw_radians()
+    } else {
+        rotation_y.unwrap_or(0.0).to_radians()
+    };
     let transform = Transform::from_xyz(
         position.x as f32 + TILE_CENTER_OFFSET,
         0.0,
@@ -1152,6 +1164,7 @@ pub fn spawn_sign(
     )
     .with_rotation(Quat::from_rotation_y(rotation_radians));
 
+    use crate::game::components::creature::FacingComponent;
     let parent = commands
         .spawn((
             transform,
@@ -1160,6 +1173,7 @@ pub fn spawn_sign(
             MapEntity(map_id),
             TileCoord(position),
             Name::new(format!("SignMarker_{}", event_name)),
+            FacingComponent::new(effective_direction),
         ))
         .id();
 

@@ -8380,6 +8380,7 @@
             character_id: "npc_old_gareth",
             dialogue_id: Some(100),
             time_condition: None,
+            facing: Some(West),
         ),
         (
             x: 13,
@@ -8439,7 +8440,7 @@
                 x: 1,
                 y: 16,
             ),
-            facing: None,
+            facing: Some(South),
             dialogue_override: None,
         ),
         (

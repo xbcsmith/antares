@@ -510,6 +510,7 @@ impl MapBuilder {
                         description: data,
                         monster_group: vec![],
                         time_condition: None,
+                        facing: None,
                     },
                     "treasure" => MapEvent::Treasure {
                         name: format!("Treasure at ({}, {})", x, y),
@@ -521,6 +522,7 @@ impl MapBuilder {
                         description: String::new(),
                         text: data,
                         time_condition: None,
+                        facing: None,
                     },
                     "trap" => MapEvent::Trap {
                         name: format!("Trap at ({}, {})", x, y),
@@ -769,6 +771,7 @@ mod tests {
             description: String::new(),
             text: "Test sign".to_string(),
             time_condition: None,
+            facing: None,
         };
         builder.add_event(3, 3, event);
 

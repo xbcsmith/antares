@@ -143,6 +143,144 @@ warnings`, `cargo nextest run` (the single pre-existing failure in
 - [x] `spawn_creature()` accepts `facing: Option<Direction>`; existing callers pass `None`
 - [x] Unit tests passing (20/20)
 
+## Phase 2: Direction-to-Rotation Foundation — Event-Level Facing
+
+### Overview
+
+Phase 2 wires the `FacingComponent` and `spawn_creature()` rotation parameter
+(added in Phase 1) all the way up to the map data layer. After this phase,
+map authors can specify a cardinal direction in RON for any `Sign`,
+`Encounter`, `NpcDialogue`, or `RecruitableCharacter` event, and the spawned
+3-D entity will face that direction on the first frame.
+
+### Changes
+
+#### `src/domain/world/types.rs` — `facing` field on four `MapEvent` variants
+
+```rust
+#[serde(default)]
+facing: Option<Direction>,
+```
+
+Added to:
+
+| Variant                          | Purpose                                              |
+| -------------------------------- | ---------------------------------------------------- |
+| `MapEvent::Encounter`            | Facing for the encounter creature visual marker      |
+| `MapEvent::Sign`                 | Facing for the sign post mesh                        |
+| `MapEvent::NpcDialogue`          | Event-level override of `NpcPlacement.facing`        |
+| `MapEvent::RecruitableCharacter` | Facing for the recruitable-character creature visual |
+
+`#[serde(default)]` ensures every existing RON map file that omits the field
+deserialises without error (`facing` defaults to `None` → North, the
+zero-rotation default). No existing RON data requires migration.
+
+Also added `PartialEq` to the `#[derive(...)]` list on `MapEvent` so that
+RON round-trip tests can use `assert_eq!` to compare event values directly.
+
+#### `src/game/systems/procedural_meshes.rs` — `spawn_sign()` facing
+
+`spawn_sign()` signature extended with `facing: Option<Direction>`. When
+`Some(direction)` is supplied, the effective yaw overrides the tile-level
+`rotation_y` field and a `FacingComponent` is inserted on the sign's parent
+entity. When `None`, the tile's `rotation_y` (if any) is still applied,
+preserving backward-compatible behaviour.
+
+#### `src/game/systems/map.rs` — NPC, Encounter, Sign, and RecruitableCharacter facing wiring
+
+**NPC facing (NpcDialogue events)**
+
+- A `HashMap<NpcId, Direction>` of event-level overrides is built before the
+  main spawn loop by scanning all `NpcDialogue` events that carry `facing:
+Some(...)`.
+- For each NPC creature spawn the effective facing priority is:
+  1. `NpcDialogue.facing` override (event-level), if present
+  2. `NpcPlacement.facing`, if set
+  3. `Direction::North` fallback
+- The resolved direction is forwarded to `spawn_creature()` and a
+  `FacingComponent` is inserted on the entity.
+- For NPC sprite-fallback entities the same facing logic applies: the
+  effective yaw is used for the `Transform` rotation and a `FacingComponent`
+  is inserted.
+
+**Encounter facing**
+
+`spawn_creature()` is called with `*facing` extracted from the
+`MapEvent::Encounter` variant, so each encounter creature visual faces
+the direction specified in RON (or North by default).
+
+**Sign facing**
+
+`spawn_sign()` is called with `*facing` extracted from the
+`MapEvent::Sign` variant.
+
+**RecruitableCharacter facing**
+
+`spawn_creature()` is called with `*facing` extracted from the
+`MapEvent::RecruitableCharacter` variant.
+
+#### `campaigns/tutorial/data/maps/map_1.ron` — sample facing data
+
+Two example entries added:
+
+- One `NpcPlacement` with `facing: Some(South)` so a tutorial NPC faces south
+  on spawn.
+- One `RecruitableCharacter` event with `facing: Some(West)` as a smoke-test
+  for the RON round-trip.
+
+#### Call-site updates for `facing: None` (backward compatibility)
+
+Every `MapEvent::Sign`, `MapEvent::Encounter`, and
+`MapEvent::RecruitableCharacter` struct literal that existed before Phase 2
+(in `src/bin/map_builder.rs`, `examples/generate_starter_maps.rs`,
+`src/domain/world/types.rs` tests, `src/game/systems/map.rs` tests,
+`tests/recruitment_integration_test.rs`, and `tests/combat_integration.rs`)
+had `facing: None` added so the code compiles without structural-match
+errors.
+
+### Tests Added (Phase 2)
+
+| Test name                                           | Location | What it verifies                                                                              |
+| --------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------- |
+| `test_npc_facing_applied_at_spawn`                  | `map.rs` | NPC placement with `facing: Some(East)` → `FacingComponent::East` on spawned entity           |
+| `test_facing_component_on_npc`                      | `map.rs` | Same as above, second NPC fixture                                                             |
+| `test_map_event_encounter_facing`                   | `map.rs` | `Encounter` event `facing: Some(West)` → `FacingComponent::West`                              |
+| `test_map_event_sign_facing`                        | `map.rs` | `Sign` event `facing: Some(South)` → `FacingComponent::South` on sign entity                  |
+| `test_map_event_recruitable_character_facing`       | `map.rs` | `RecruitableCharacter` event `facing: Some(East)` → `FacingComponent::East`                   |
+| `test_map_event_ron_round_trip`                     | `map.rs` | `RecruitableCharacter` with `facing: Some(North)` serialises and re-parses to identical value |
+| `test_map_event_ron_round_trip_no_facing`           | `map.rs` | Legacy RON without `facing` key deserialises with `facing: None` (backward compat)            |
+| `test_map_event_sign_ron_backward_compat_no_facing` | `map.rs` | Legacy `Sign` RON without `facing` deserialises with `facing: None`                           |
+
+All 8 new tests pass. Combined with Phase 1's 20 tests, 28 Phase 1+2 tests
+are green. The only test failures in the full suite are two pre-existing
+failures unrelated to facing work:
+
+- `game::systems::menu::tests::test_slider_constants_for_ui` (UI colour constant mismatch)
+- `game::systems::combat::tests::test_single_enter_attack_executes_and_advances_turn` (combat turn-wrap timing)
+
+### Architecture Compliance
+
+- `MapEvent` field additions follow the `#[serde(default)]` pattern
+  established for `time_condition` — no breaking RON schema change.
+- `FacingComponent` is inserted on every entity that has a facing, consistent
+  with Phase 1's design.
+- `PartialEq` added to `MapEvent` derive list — necessary for `assert_eq!` in
+  round-trip tests and consistent with the domain model.
+- No test references `campaigns/tutorial` (Implementation Rule 5 compliant).
+- All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D
+warnings`, `cargo nextest run`.
+
+### Deliverables Checklist
+
+- [x] `facing: Option<Direction>` on `MapEvent::Encounter`, `::Sign`, `::NpcDialogue`, `::RecruitableCharacter`
+- [x] `spawn_sign()` accepts and applies `facing`
+- [x] NPC spawn path wires event-level override → placement-level → North default
+- [x] Encounter, Sign, RecruitableCharacter spawn paths wire `facing`
+- [x] `PartialEq` on `MapEvent` for round-trip assertions
+- [x] All existing `MapEvent` construction sites updated with `facing: None`
+- [x] 8 new integration/unit tests, all passing
+- [x] `docs/explanation/implementations.md` updated
+
 ## Combat: Party HP Bars Update Live During Combat
 
 ### Overview
