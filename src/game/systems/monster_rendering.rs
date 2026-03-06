@@ -161,6 +161,7 @@ pub fn spawn_monster_with_visual(
                 position,
                 None,
                 None,
+                None, // facing: preserve existing behaviour (North default)
             );
 
             // Update CreatureVisual with correct ID

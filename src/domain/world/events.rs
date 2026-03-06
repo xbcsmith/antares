@@ -409,6 +409,9 @@ mod tests {
                 description: "Desc".to_string(),
                 monster_group: vec![1, 2, 3],
                 time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -543,6 +546,7 @@ mod tests {
                 description: "Desc".to_string(),
                 text: sign_text.clone(),
                 time_condition: None,
+                facing: None,
             },
         );
 
@@ -574,6 +578,9 @@ mod tests {
                 description: String::new(),
                 monster_group: vec![1, 2],
                 time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
         world.add_map(map);
@@ -601,6 +608,9 @@ mod tests {
                 description: String::new(),
                 monster_group: vec![1, 2],
                 time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
         world.add_map(map);
@@ -628,6 +638,7 @@ mod tests {
                 description: String::new(),
                 text: "Only after the fifth day shall this be revealed.".to_string(),
                 time_condition: Some(TimeCondition::AfterDay(5)),
+                facing: None,
             },
         );
         world.add_map(map);
@@ -670,6 +681,9 @@ mod tests {
                 description: String::new(),
                 npc_id: "merchant_01".to_string(),
                 time_condition: Some(TimeCondition::BetweenHours { from: 8, to: 18 }),
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
         world.add_map(map);
@@ -730,6 +744,7 @@ mod tests {
                 description: String::new(),
                 text: "Always visible".to_string(),
                 time_condition: None,
+                facing: None,
             },
         );
         world.add_map(map);
@@ -758,6 +773,9 @@ mod tests {
                 description: String::new(),
                 monster_group: vec![5],
                 time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
         world.add_map(map);
@@ -903,6 +921,9 @@ mod tests {
                 description: "Desc".to_string(),
                 npc_id: "test_npc".to_string(),
                 time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -969,6 +990,7 @@ mod tests {
                 description: "Desc".to_string(),
                 text: "North".to_string(),
                 time_condition: None,
+                facing: None,
             },
         );
         map.add_event(

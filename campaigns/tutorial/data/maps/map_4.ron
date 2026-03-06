@@ -8008,25 +8008,6 @@
     ],
     events: {
         (
-            x: 9,
-            y: 7,
-        ): Sign(
-            name: "Cave Entrance Sign",
-            description: "Sign marking the entrance to the Cave of Arcturus.",
-            text: "The Cave of Arcturus!",
-            time_condition: None,
-        ),
-        (
-            x: 1,
-            y: 1,
-        ): Treasure(
-            name: "The Foo Stand",
-            description: "The Foo Stand",
-            loot: [
-                103,
-            ],
-        ),
-        (
             x: 19,
             y: 17,
         ): Teleport(
@@ -8037,6 +8018,16 @@
                 y: 10,
             ),
             map_id: 4,
+        ),
+        (
+            x: 1,
+            y: 1,
+        ): Treasure(
+            name: "The Foo Stand",
+            description: "The Foo Stand",
+            loot: [
+                103,
+            ],
         ),
         (
             x: 2,
@@ -8050,6 +8041,19 @@
                 2,
             ],
             time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
+        ),
+        (
+            x: 9,
+            y: 7,
+        ): Sign(
+            name: "Cave Entrance Sign",
+            description: "Sign marking the entrance to the Cave of Arcturus.",
+            text: "The Cave of Arcturus!",
+            time_condition: None,
+            facing: None,
         ),
         (
             x: 16,

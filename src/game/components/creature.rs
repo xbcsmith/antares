@@ -41,7 +41,7 @@
 //! }
 //! ```
 
-use crate::domain::types::CreatureId;
+use crate::domain::types::{CreatureId, Direction};
 use bevy::prelude::*;
 
 /// Component linking an entity to a creature visual definition
@@ -660,6 +660,85 @@ impl CreatureAnimation {
     }
 }
 
+/// ECS component tracking the cardinal facing direction of a spawned creature entity
+///
+/// This component is the authoritative runtime facing state for any creature,
+/// NPC, sign, or other entity that has a directional orientation. It is inserted
+/// by [`spawn_creature`](crate::game::systems::creature_spawning::spawn_creature)
+/// at spawn time and updated by the facing systems when the entity turns.
+///
+/// All systems that need to read or change an entity's direction should use this
+/// component rather than decomposing the raw `Transform` rotation.
+///
+/// # Fields
+///
+/// * `direction` - The current cardinal direction the entity is facing
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::components::creature::FacingComponent;
+/// use antares::domain::types::Direction;
+/// use bevy::prelude::*;
+///
+/// fn spawn_npc_facing_south(mut commands: Commands) {
+///     commands.spawn(FacingComponent {
+///         direction: Direction::South,
+///     });
+/// }
+///
+/// fn query_facing(query: Query<&FacingComponent>) {
+///     for facing in query.iter() {
+///         println!("Entity faces {:?}", facing.direction);
+///     }
+/// }
+/// ```
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FacingComponent {
+    /// The cardinal direction this entity is currently facing
+    pub direction: Direction,
+}
+
+impl FacingComponent {
+    /// Creates a new `FacingComponent` with the given direction
+    ///
+    /// # Arguments
+    ///
+    /// * `direction` - The cardinal direction the entity should face
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::FacingComponent;
+    /// use antares::domain::types::Direction;
+    ///
+    /// let facing = FacingComponent::new(Direction::East);
+    /// assert_eq!(facing.direction, Direction::East);
+    /// ```
+    pub fn new(direction: Direction) -> Self {
+        Self { direction }
+    }
+}
+
+impl Default for FacingComponent {
+    /// Returns a `FacingComponent` facing `North`, the default spawn direction
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::FacingComponent;
+    /// use antares::domain::types::Direction;
+    ///
+    /// let facing = FacingComponent::default();
+    /// assert_eq!(facing.direction, Direction::North);
+    /// ```
+    fn default() -> Self {
+        Self {
+            direction: Direction::North,
+        }
+    }
+}
+
 /// Marker component indicating texture has been loaded for this creature
 ///
 /// Prevents re-loading textures that have already been loaded.
@@ -689,6 +768,56 @@ pub struct CreatureAnimationState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::types::Direction;
+
+    // ===== FacingComponent tests =====
+
+    #[test]
+    fn test_facing_component_new() {
+        let facing = FacingComponent::new(Direction::South);
+        assert_eq!(facing.direction, Direction::South);
+    }
+
+    #[test]
+    fn test_facing_component_default_is_north() {
+        let facing = FacingComponent::default();
+        assert_eq!(
+            facing.direction,
+            Direction::North,
+            "Default facing direction must be North"
+        );
+    }
+
+    #[test]
+    fn test_facing_component_all_directions() {
+        for dir in [
+            Direction::North,
+            Direction::East,
+            Direction::South,
+            Direction::West,
+        ] {
+            let facing = FacingComponent::new(dir);
+            assert_eq!(facing.direction, dir);
+        }
+    }
+
+    #[test]
+    fn test_facing_component_clone() {
+        let original = FacingComponent::new(Direction::West);
+        let cloned = original;
+        assert_eq!(cloned.direction, Direction::West);
+    }
+
+    #[test]
+    fn test_facing_component_equality() {
+        let a = FacingComponent::new(Direction::East);
+        let b = FacingComponent::new(Direction::East);
+        let c = FacingComponent::new(Direction::West);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    // ===== CreatureVisual tests =====
 
     #[test]
     fn test_creature_visual_new() {

@@ -301,6 +301,7 @@ fn handle_events(
                 description,
                 dialogue_id,
                 time_condition: _,
+                facing: _,
             } => {
                 let msg = format!("{} - {}", name, description);
                 println!("{}", msg);
@@ -976,6 +977,7 @@ mod tests {
                 character_id: "some_char".to_string(),
                 dialogue_id: None,
                 time_condition: None,
+                facing: None,
             },
         );
 
@@ -1026,6 +1028,9 @@ mod tests {
                 description: "A skeleton blocks the path".to_string(),
                 monster_group: vec![1],
                 time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -1161,6 +1166,9 @@ mod tests {
                 description: "Village Elder".to_string(),
                 npc_id: "test_elder".to_string(),
                 time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -1227,6 +1235,9 @@ mod tests {
                 description: "Town Merchant".to_string(),
                 npc_id: "test_merchant".to_string(),
                 time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -1313,6 +1324,7 @@ mod tests {
                 description: "A young gnome apprentice studies a spellbook intently.".to_string(),
                 dialogue_id: Some(101u16),
                 time_condition: None,
+                facing: None,
             },
         );
 
@@ -1382,6 +1394,9 @@ mod tests {
                 description: "Unknown NPC".to_string(),
                 npc_id: "nonexistent_npc".to_string(),
                 time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 

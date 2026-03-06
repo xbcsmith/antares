@@ -8291,35 +8291,45 @@
     ],
     events: {
         (
-            x: 9,
-            y: 0,
-        ): Encounter(
-            name: "Ancient Wolf",
-            description: "Ancient Wolf",
-            monster_group: [
-                32,
-            ],
+            x: 7,
+            y: 15,
+        ): RecruitableCharacter(
+            name: "Whisper",
+            description: "A nimble elf watches from the shadows near the alley.",
+            character_id: "npc_whisper",
+            dialogue_id: Some(102),
             time_condition: None,
+            facing: None,
         ),
         (
-            x: 16,
-            y: 17,
-        ): Encounter(
-            name: "Ancient Skeleton",
-            description: "Ancient Skeleton",
-            monster_group: [
-                133,
-            ],
+            x: 9,
+            y: 9,
+        ): Trap(
+            name: "Water Trap",
+            description: "A trap in the town square fountain",
+            damage: 10,
+            effect: Some("Poison"),
+        ),
+        (
+            x: 11,
+            y: 6,
+        ): RecruitableCharacter(
+            name: "Apprentice Zara",
+            description: "A young gnome apprentice studies a spellbook intently.",
+            character_id: "npc_apprentice_zara",
+            dialogue_id: Some(101),
             time_condition: None,
+            facing: None,
         ),
         (
             x: 5,
-            y: 10,
+            y: 4,
         ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store\'s wares and services.",
-            text: "General Store - Buy and Sell items for your party!",
+            name: "Cozy Inn Entrance",
+            description: "A welcoming inn where you can rest and manage your party.",
+            text: "Welcome to the Cozy Inn",
             time_condition: None,
+            facing: None,
         ),
         (
             x: 18,
@@ -8334,25 +8344,6 @@
             map_id: 2,
         ),
         (
-            x: 7,
-            y: 15,
-        ): RecruitableCharacter(
-            name: "Whisper",
-            description: "A nimble elf watches from the shadows near the alley.",
-            character_id: "npc_whisper",
-            dialogue_id: Some(102),
-            time_condition: None,
-        ),
-        (
-            x: 9,
-            y: 9,
-        ): Trap(
-            name: "Water Trap",
-            description: "A trap in the town square fountain",
-            damage: 10,
-            effect: Some("Poison"),
-        ),
-        (
             x: 5,
             y: 17,
         ): Sign(
@@ -8360,46 +8351,7 @@
             description: "The Village Elder",
             text: "The Village Elder",
             time_condition: None,
-        ),
-        (
-            x: 11,
-            y: 6,
-        ): RecruitableCharacter(
-            name: "Apprentice Zara",
-            description: "A young gnome apprentice studies a spellbook intently.",
-            character_id: "npc_apprentice_zara",
-            dialogue_id: Some(101),
-            time_condition: None,
-        ),
-        (
-            x: 15,
-            y: 7,
-        ): RecruitableCharacter(
-            name: "Old Gareth",
-            description: "A grizzled dwarf veteran stands here, repairing armor.",
-            character_id: "npc_old_gareth",
-            dialogue_id: Some(100),
-            time_condition: None,
-        ),
-        (
-            x: 13,
-            y: 3,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice outside the temple detailing its services.",
-            text: "Temple of Healing - The priests can restore your health.",
-            time_condition: None,
-        ),
-        (
-            x: 13,
-            y: 15,
-        ): Encounter(
-            name: "Skeleton",
-            description: "Skeleton",
-            monster_group: [
-                11,
-            ],
-            time_condition: None,
+            facing: None,
         ),
         (
             x: 8,
@@ -8411,15 +8363,9 @@
                 12,
             ],
             time_condition: None,
-        ),
-        (
-            x: 5,
-            y: 4,
-        ): Sign(
-            name: "Cozy Inn Entrance",
-            description: "A welcoming inn where you can rest and manage your party.",
-            text: "Welcome to the Cozy Inn",
-            time_condition: None,
+            facing: Some(South),
+            proximity_facing: false,
+            rotation_speed: None,
         ),
         (
             x: 13,
@@ -8429,6 +8375,80 @@
             description: "A wooden sign pointing toward the Dark Forrest.",
             text: "To the Dark Forrest",
             time_condition: None,
+            facing: None,
+        ),
+        (
+            x: 16,
+            y: 17,
+        ): Encounter(
+            name: "Ancient Skeleton",
+            description: "Ancient Skeleton",
+            monster_group: [
+                133,
+            ],
+            time_condition: None,
+            facing: Some(West),
+            proximity_facing: false,
+            rotation_speed: None,
+        ),
+        (
+            x: 9,
+            y: 0,
+        ): Encounter(
+            name: "Ancient Wolf",
+            description: "Ancient Wolf",
+            monster_group: [
+                32,
+            ],
+            time_condition: None,
+            facing: Some(South),
+            proximity_facing: false,
+            rotation_speed: None,
+        ),
+        (
+            x: 15,
+            y: 7,
+        ): RecruitableCharacter(
+            name: "Old Gareth",
+            description: "A grizzled dwarf veteran stands here, repairing armor.",
+            character_id: "npc_old_gareth",
+            dialogue_id: Some(100),
+            time_condition: None,
+            facing: Some(West),
+        ),
+        (
+            x: 13,
+            y: 15,
+        ): Encounter(
+            name: "Skeleton",
+            description: "Skeleton",
+            monster_group: [
+                11,
+            ],
+            time_condition: None,
+            facing: Some(West),
+            proximity_facing: false,
+            rotation_speed: None,
+        ),
+        (
+            x: 13,
+            y: 3,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice outside the temple detailing its services.",
+            text: "Temple of Healing - The priests can restore your health.",
+            time_condition: None,
+            facing: None,
+        ),
+        (
+            x: 5,
+            y: 10,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store\'s wares and services.",
+            text: "General Store - Buy and Sell items for your party!",
+            time_condition: None,
+            facing: None,
         ),
     },
     allow_random_encounters: true,
@@ -8439,7 +8459,7 @@
                 x: 1,
                 y: 16,
             ),
-            facing: None,
+            facing: Some(South),
             dialogue_override: None,
         ),
         (

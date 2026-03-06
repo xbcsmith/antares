@@ -61,6 +61,9 @@ fn test_map_event_encounter_triggers_combat() {
             description: "A surprise encounter".to_string(),
             monster_group: vec![], // empty group is sufficient for transition test
             time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         },
     );
 
@@ -87,6 +90,9 @@ fn test_map_event_encounter_triggers_combat() {
                 description: "A surprise encounter".to_string(),
                 monster_group: vec![],
                 time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
             position: event_pos,
         });
