@@ -100,11 +100,11 @@ current behaviour.
 
 #### 1.5 Deliverables
 
-- [ ] `direction_to_yaw_radians()` method on `Direction`
-- [ ] `Direction::from_yaw_radians()` method
-- [ ] `FacingComponent` component in `creature.rs`
-- [ ] `spawn_creature()` accepts `facing: Option<Direction>`; existing callers pass `None`
-- [ ] Unit tests passing
+- [x] `direction_to_yaw_radians()` method on `Direction`
+- [x] `Direction::from_yaw_radians()` method
+- [x] `FacingComponent` component in `creature.rs`
+- [x] `spawn_creature()` accepts `facing: Option<Direction>`; existing callers pass `None`
+- [x] Unit tests passing
 
 #### 1.6 Success Criteria
 
@@ -196,14 +196,14 @@ functional smoke-test for the new feature.
 
 #### 2.6 Deliverables
 
-- [ ] `facing: Option<Direction>` added (with `#[serde(default)]`) to
+- [x] `facing: Option<Direction>` added (with `#[serde(default)]`) to
       `MapEvent::Sign`, `NpcDialogue`, `Encounter`, `RecruitableCharacter`
-- [ ] NPC creature spawn path passes `resolved_npc.facing`
-- [ ] NPC sprite fallback path applies rotation from `facing`
-- [ ] `spawn_sign()` accepts and applies `facing`
-- [ ] Encounter and `RecruitableCharacter` spawn paths pass event `facing`
-- [ ] At least one tutorial map updated with an explicit `facing` value
-- [ ] All tests passing
+- [x] NPC creature spawn path passes `resolved_npc.facing`
+- [x] NPC sprite fallback path applies rotation from `facing`
+- [x] `spawn_sign()` accepts and applies `facing`
+- [x] Encounter and `RecruitableCharacter` spawn paths pass event `facing`
+- [x] At least one tutorial map updated with an explicit `facing` value
+- [x] All tests passing
 
 #### 2.7 Success Criteria
 
@@ -305,12 +305,12 @@ when spoken to.
 
 #### 3.7 Deliverables
 
-- [ ] `SetFacing` message and `handle_set_facing` system
-- [ ] `ProximityFacing` component
-- [ ] `face_toward_player_on_proximity` system
-- [ ] `proximity_facing` RON flag on `MapEvent::Encounter` and `NpcDialogue`
-- [ ] `SetFacing` emitted from `handle_start_dialogue` for NPC speaker
-- [ ] All tests passing
+- [x] `SetFacing` message and `handle_set_facing` system
+- [x] `ProximityFacing` component
+- [x] `face_toward_player_on_proximity` system
+- [x] `proximity_facing` RON flag on `MapEvent::Encounter` and `NpcDialogue`
+- [x] `SetFacing` emitted from `handle_start_dialogue` for NPC speaker
+- [x] All tests passing
 
 #### 3.8 Success Criteria
 
@@ -368,11 +368,11 @@ Default: `None` → treated as `instant: true` (snap).
 
 #### 4.5 Deliverables
 
-- [ ] `RotatingToFacing` component
-- [ ] `apply_rotation_to_facing` slerp system
-- [ ] `rotation_speed` RON field on `Encounter` and `NpcDialogue`
-- [ ] `SetFacing.instant == false` path inserts `RotatingToFacing`
-- [ ] All tests passing
+- [x] `RotatingToFacing` component
+- [x] `apply_rotation_to_facing` slerp system
+- [x] `rotation_speed` RON field on `Encounter` and `NpcDialogue`
+- [x] `SetFacing.instant == false` path inserts `RotatingToFacing`
+- [x] All tests passing
 
 #### 4.6 Success Criteria
 

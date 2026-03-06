@@ -1029,6 +1029,8 @@ mod tests {
                 monster_group: vec![1],
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -1165,6 +1167,8 @@ mod tests {
                 npc_id: "test_elder".to_string(),
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -1232,6 +1236,8 @@ mod tests {
                 npc_id: "test_merchant".to_string(),
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -1389,6 +1395,8 @@ mod tests {
                 npc_id: "nonexistent_npc".to_string(),
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 

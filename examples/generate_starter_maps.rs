@@ -228,6 +228,8 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             monster_group: vec![1, 2],
             time_condition: None,
             facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         },
     );
     map.add_event(
@@ -238,6 +240,8 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             monster_group: vec![2, 1],
             time_condition: None,
             facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         },
     );
     map.add_event(
@@ -248,6 +252,8 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             monster_group: vec![1, 3],
             time_condition: None,
             facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         },
     );
     map.add_event(
@@ -258,6 +264,8 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             monster_group: vec![3, 3, 3],
             time_condition: None,
             facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         },
     );
 
@@ -372,6 +380,8 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             monster_group: vec![4, 4],
             time_condition: None,
             facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         },
     );
     map.add_event(
@@ -382,6 +392,8 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             monster_group: vec![5, 4],
             time_condition: None,
             facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         },
     );
     map.add_event(
@@ -392,6 +404,8 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             monster_group: vec![6, 5],
             time_condition: None,
             facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         },
     );
     map.add_event(
@@ -402,6 +416,8 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             monster_group: vec![6, 6],
             time_condition: None,
             facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         },
     );
 

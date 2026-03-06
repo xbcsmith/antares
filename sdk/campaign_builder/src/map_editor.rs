@@ -2103,6 +2103,9 @@ impl EventEditorState {
                     description: self.description.clone(),
                     monster_group: monsters,
                     time_condition: None,
+                    facing: None,
+                    proximity_facing: false,
+                    rotation_speed: None,
                 })
             }
             EventType::Treasure => {
@@ -2184,6 +2187,9 @@ impl EventEditorState {
                     description: self.description.clone(),
                     npc_id,
                     time_condition: None,
+                    facing: None,
+                    proximity_facing: false,
+                    rotation_speed: None,
                 })
             }
             EventType::RecruitableCharacter => {
@@ -7342,6 +7348,9 @@ mod tests {
             description: "A dragon encounter".to_string(),
             monster_group: vec![1, 2, 3],
             time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7509,6 +7518,9 @@ mod tests {
             description: "A test encounter".to_string(),
             monster_group: vec![],
             time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7716,6 +7728,9 @@ mod tests {
             description: "First event".to_string(),
             monster_group: vec![],
             time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
 
         let event2 = MapEvent::Treasure {

@@ -647,6 +647,8 @@ fn handle_input(
                     npc_id: npc.npc_id.clone(),
                     time_condition: None,
                     facing: None,
+                    proximity_facing: false,
+                    rotation_speed: None,
                 },
                 position: npc.position,
             });
@@ -1943,6 +1945,8 @@ mod interaction_tests {
                 monster_group: vec![1],
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 

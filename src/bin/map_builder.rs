@@ -511,6 +511,8 @@ impl MapBuilder {
                         monster_group: vec![],
                         time_condition: None,
                         facing: None,
+                        proximity_facing: false,
+                        rotation_speed: None,
                     },
                     "treasure" => MapEvent::Treasure {
                         name: format!("Treasure at ({}, {})", x, y),

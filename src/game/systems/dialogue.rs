@@ -138,6 +138,7 @@ fn dialogue_input_system(
 /// Fetches the dialogue tree from the `GameContent` resource and places the
 /// engine into `GameMode::Dialogue(DialogueState::start(...))`. If the dialogue
 /// cannot be found the event is ignored.
+#[allow(clippy::too_many_arguments)]
 fn handle_start_dialogue(
     mut ev_reader: MessageReader<StartDialogue>,
     mut global_state: ResMut<GlobalState>,
@@ -146,6 +147,10 @@ fn handle_start_dialogue(
     mut quest_system: Option<ResMut<crate::application::quests::QuestSystem>>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
     npc_query: Query<&crate::game::systems::map::NpcMarker>,
+    // Phase 3: query TileCoord on the speaker entity so we can compute facing
+    // toward the party and emit a SetFacing event.
+    tile_coord_query: Query<&crate::game::systems::map::TileCoord>,
+    mut facing_writer: Option<MessageWriter<crate::game::systems::facing::SetFacing>>,
 ) {
     for ev in ev_reader.read() {
         let db = content.db();
@@ -196,6 +201,31 @@ fn handle_start_dialogue(
                 new_state.recruitment_context = recruitment_context;
 
                 global_state.0.mode = GameMode::Dialogue(new_state);
+
+                // Phase 3: if the speaker entity has a TileCoord, determine the
+                // 4-direction from the speaker toward the party and emit SetFacing
+                // so the NPC turns to face the player at the start of dialogue.
+                if let Some(ref mut writer) = facing_writer {
+                    if let Some(speaker_entity) = ev.speaker_entity {
+                        if let Ok(tile_coord) = tile_coord_query.get(speaker_entity) {
+                            let speaker_pos = tile_coord.0;
+                            let party_pos = global_state.0.world.party_position;
+                            let direction = crate::game::systems::facing::cardinal_toward(
+                                speaker_pos,
+                                party_pos,
+                            );
+                            writer.write(crate::game::systems::facing::SetFacing {
+                                entity: speaker_entity,
+                                direction,
+                                instant: true,
+                            });
+                            info!(
+                                "Dialogue start: NPC {:?} at {:?} facing {:?} toward party at {:?}",
+                                speaker_entity, speaker_pos, direction, party_pos
+                            );
+                        }
+                    }
+                }
 
                 // Execute any actions attached to the root node and log the text
                 // Execute root node actions and log the text
@@ -3019,6 +3049,178 @@ mod tests {
         assert!(
             gs.party.gold > 0,
             "Party gold should increase after selling an item"
+        );
+    }
+
+    // ─── Phase 3: Dialogue → SetFacing integration tests ─────────────────────
+
+    /// `test_dialogue_start_emits_set_facing` – starting a dialogue with a speaker
+    /// whose entity has a `TileCoord` must cause the NPC to face the party.
+    ///
+    /// Speaker at (3,3), party at (5,3) → expected facing: East.
+    #[test]
+    fn test_dialogue_start_emits_set_facing() {
+        use crate::application::GameState;
+        use crate::domain::types::{Direction, Position};
+        use crate::game::components::creature::FacingComponent;
+        use crate::game::resources::GlobalState;
+        use crate::game::systems::facing::FacingPlugin;
+        use crate::game::systems::map::TileCoord;
+
+        // Build a dialogue tree with id=500, root=1
+        let mut tree = DialogueTree::new(500, "Facing Test", 1);
+        let node = DialogueNode::new(1, "Hello traveler!");
+        tree.add_node(node);
+
+        let mut db = ContentDatabase::new();
+        db.dialogues.add_dialogue(tree);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        // Register FacingPlugin so SetFacing message is available to DialoguePlugin
+        app.add_plugins(FacingPlugin);
+        app.add_plugins(DialoguePlugin);
+
+        // Party is to the East of the NPC speaker
+        let mut game_state = GameState::new();
+        game_state.world.set_party_position(Position::new(5, 3));
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(bevy::input::ButtonInput::<bevy::prelude::KeyCode>::default());
+
+        // Spawn the speaker NPC entity with FacingComponent and TileCoord
+        let speaker = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                GlobalTransform::default(),
+                FacingComponent::new(Direction::North),
+                TileCoord(Position::new(3, 3)),
+            ))
+            .id();
+
+        // Write a StartDialogue message targeting the speaker entity
+        app.world_mut()
+            .resource_mut::<Messages<StartDialogue>>()
+            .write(StartDialogue {
+                dialogue_id: 500,
+                speaker_entity: Some(speaker),
+                fallback_position: None,
+            });
+
+        // First frame: handle_start_dialogue processes StartDialogue and emits SetFacing.
+        // Second frame: handle_set_facing processes the emitted SetFacing event.
+        // Two updates are needed because messages written in frame N are read in frame N+1.
+        app.update();
+        app.update();
+
+        // Verify the NPC now faces East (toward the party)
+        let facing = app.world().get::<FacingComponent>(speaker).unwrap();
+        assert_eq!(
+            facing.direction,
+            Direction::East,
+            "NPC speaker at (3,3) must face East toward party at (5,3) after dialogue start"
+        );
+    }
+
+    /// `test_dialogue_start_no_speaker_entity_does_not_panic` – when `speaker_entity`
+    /// is `None`, the SetFacing path must be skipped without panic.
+    #[test]
+    fn test_dialogue_start_no_speaker_entity_does_not_panic() {
+        use crate::application::GameState;
+        use crate::domain::types::Position;
+        use crate::game::resources::GlobalState;
+        use crate::game::systems::facing::FacingPlugin;
+
+        let mut tree = DialogueTree::new(501, "No Speaker", 1);
+        let node = DialogueNode::new(1, "No speaker entity here.");
+        tree.add_node(node);
+
+        let mut db = ContentDatabase::new();
+        db.dialogues.add_dialogue(tree);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(FacingPlugin);
+        app.add_plugins(DialoguePlugin);
+
+        let mut game_state = GameState::new();
+        game_state.world.set_party_position(Position::new(5, 5));
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(bevy::input::ButtonInput::<bevy::prelude::KeyCode>::default());
+
+        // No speaker entity
+        app.world_mut()
+            .resource_mut::<Messages<StartDialogue>>()
+            .write(StartDialogue {
+                dialogue_id: 501,
+                speaker_entity: None,
+                fallback_position: Some(Position::new(3, 3)),
+            });
+
+        // Must not panic
+        app.update();
+    }
+
+    /// `test_dialogue_start_speaker_without_tile_coord_skips_facing` – when the
+    /// speaker entity exists but has no `TileCoord`, SetFacing must not be emitted.
+    #[test]
+    fn test_dialogue_start_speaker_without_tile_coord_skips_facing() {
+        use crate::application::GameState;
+        use crate::domain::types::{Direction, Position};
+        use crate::game::components::creature::FacingComponent;
+        use crate::game::resources::GlobalState;
+        use crate::game::systems::facing::FacingPlugin;
+
+        let mut tree = DialogueTree::new(502, "No TileCoord", 1);
+        let node = DialogueNode::new(1, "I have no coord!");
+        tree.add_node(node);
+
+        let mut db = ContentDatabase::new();
+        db.dialogues.add_dialogue(tree);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(FacingPlugin);
+        app.add_plugins(DialoguePlugin);
+
+        let mut game_state = GameState::new();
+        game_state.world.set_party_position(Position::new(5, 5));
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(bevy::input::ButtonInput::<bevy::prelude::KeyCode>::default());
+
+        // Speaker entity with FacingComponent but no TileCoord
+        let speaker = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                GlobalTransform::default(),
+                FacingComponent::new(Direction::West),
+                // Deliberately NO TileCoord
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<StartDialogue>>()
+            .write(StartDialogue {
+                dialogue_id: 502,
+                speaker_entity: Some(speaker),
+                fallback_position: None,
+            });
+
+        app.update();
+
+        // Facing must remain West – no SetFacing was emitted
+        let facing = app.world().get::<FacingComponent>(speaker).unwrap();
+        assert_eq!(
+            facing.direction,
+            Direction::West,
+            "FacingComponent must remain West when speaker has no TileCoord"
         );
     }
 }

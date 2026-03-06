@@ -187,6 +187,8 @@ impl From<MapBlueprint> for Map {
                         monster_group: group,
                         time_condition: None,
                         facing: None,
+                        proximity_facing: false,
+                        rotation_speed: None,
                     }
                 }
                 BlueprintEventType::Teleport { map_id, x, y } => MapEvent::Teleport {
@@ -207,6 +209,8 @@ impl From<MapBlueprint> for Map {
                     npc_id: id,
                     time_condition: None,
                     facing: None,
+                    proximity_facing: false,
+                    rotation_speed: None,
                 },
             };
             events.insert(bp_event.position, event);

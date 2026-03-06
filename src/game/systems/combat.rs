@@ -7760,6 +7760,8 @@ mod tests {
                 monster_group: vec![1],
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
         assert!(map.get_event(tile_pos).is_some());
@@ -7801,6 +7803,8 @@ mod tests {
                 monster_group: vec![1],
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
         gs.world.add_map(map);
@@ -7873,6 +7877,8 @@ mod tests {
                 monster_group: vec![1],
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
         gs.world.add_map(map);

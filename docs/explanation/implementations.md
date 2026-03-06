@@ -281,6 +281,227 @@ warnings`, `cargo nextest run`.
 - [x] 8 new integration/unit tests, all passing
 - [x] `docs/explanation/implementations.md` updated
 
+## Phase 3: Runtime Facing Change System
+
+### Overview
+
+Phase 3 adds the ECS infrastructure for changing an entity's facing direction
+at runtime. Three main mechanisms were delivered:
+
+1. `SetFacing` message — any system can write this to snap or (Phase 4) smoothly
+   rotate a spawned entity to a new cardinal direction.
+2. `handle_set_facing` system — reads `SetFacing` messages and applies the
+   requested rotation to the target entity's `Transform` and `FacingComponent`.
+3. `face_toward_player_on_proximity` system — entities with a `ProximityFacing`
+   marker component automatically emit `SetFacing` when the party steps within
+   `trigger_distance` Manhattan tiles.
+4. `FacingPlugin` — registers the message and all Phase 3 systems; included by
+   `MapManagerPlugin` so no manual registration is required in the game binary.
+
+The dialogue system (`handle_start_dialogue`) was extended to emit `SetFacing`
+for the NPC speaker whenever a conversation begins, using the speaker's
+`TileCoord` and the party position to determine the correct cardinal direction.
+
+### Changes
+
+#### `src/game/systems/facing.rs` (new file)
+
+- `SetFacing` — `#[derive(Message, Clone, Debug)]` with fields `entity: Entity`,
+  `direction: Direction`, `instant: bool`.
+- `ProximityFacing` — ECS component with `trigger_distance: u32`; inserted at
+  spawn time by the map system; never serialised.
+- `handle_set_facing` — reads `MessageReader<SetFacing>`, snaps `Transform.rotation`
+  and updates `FacingComponent.direction` for each message.
+- `face_toward_player_on_proximity` — per-frame scan; emits `SetFacing` for any
+  entity whose Manhattan distance to `GlobalState::party_position` is ≤
+  `trigger_distance` and whose current facing differs from the cardinal toward
+  the party.
+- `cardinal_toward(from, to) -> Direction` — helper using dominant-axis logic:
+  `|dx| >= |dy|` → East/West; otherwise North/South; same tile → North.
+- `FacingPlugin` — `add_message::<SetFacing>()` + `add_systems(Update, ...)`.
+
+#### `src/domain/world/types.rs`
+
+Added `#[serde(default)] proximity_facing: bool` to `MapEvent::Encounter` and
+`MapEvent::NpcDialogue`. Existing RON files without this field default to `false`
+(backward compatible).
+
+#### `src/game/systems/map.rs`
+
+- Built `npc_dialogue_proximity: HashSet<String>` from `NpcDialogue` events
+  with `proximity_facing: true` during `spawn_map`.
+- Inserted `ProximityFacing { trigger_distance: 2 }` on both the
+  creature-mesh and sprite-fallback NPC entity paths when the NPC's id is in
+  the set.
+- Destructured `proximity_facing` from `MapEvent::Encounter`; inserted
+  `ProximityFacing { trigger_distance: 2 }` on the encounter entity when true.
+- Registered `FacingPlugin` inside `MapManagerPlugin`.
+
+#### `src/game/systems/dialogue.rs`
+
+Extended `handle_start_dialogue` to accept an optional
+`MessageWriter<SetFacing>` and a `tile_coord_query`. When a speaker entity
+exists and has a `TileCoord`, the system writes `SetFacing { instant: true }`
+toward the party position using `cardinal_toward`.
+
+#### `src/game/systems/mod.rs`
+
+Added `pub mod facing;`.
+
+### Tests Added (Phase 3)
+
+| Test                                                                  | File          | What it verifies                           |
+| --------------------------------------------------------------------- | ------------- | ------------------------------------------ |
+| `test_set_facing_snaps_transform`                                     | `facing.rs`   | `instant: true` snaps `Transform.rotation` |
+| `test_set_facing_updates_facing_component`                            | `facing.rs`   | `FacingComponent.direction` updated        |
+| `test_set_facing_unknown_entity_does_not_panic`                       | `facing.rs`   | Ghost entity is silently skipped           |
+| `test_set_facing_multiple_events_last_wins`                           | `facing.rs`   | Last message per entity wins               |
+| `test_proximity_facing_emits_event`                                   | `facing.rs`   | Entity at (5,5), party at (5,7) → South    |
+| `test_proximity_facing_out_of_range_no_event`                         | `facing.rs`   | Distance > threshold → no change           |
+| `test_proximity_facing_already_correct_no_change`                     | `facing.rs`   | Stable facing → no event                   |
+| `test_proximity_facing_without_tile_coord_excluded`                   | `facing.rs`   | No TileCoord → excluded from query         |
+| `test_cardinal_toward_*` (7 tests)                                    | `facing.rs`   | All cardinal direction cases               |
+| `test_proximity_facing_inserted_on_encounter_with_flag`               | `map.rs`      | `ProximityFacing` inserted when flag true  |
+| `test_proximity_facing_not_inserted_when_flag_false`                  | `map.rs`      | No component when flag false               |
+| `test_proximity_facing_npc_inserted_when_flag_set`                    | `map.rs`      | NPC gets `ProximityFacing`                 |
+| `test_map_event_encounter_ron_backward_compat_no_proximity_facing`    | `map.rs`      | Serde default = false                      |
+| `test_map_event_npc_dialogue_ron_backward_compat_no_proximity_facing` | `map.rs`      | Serde default = false                      |
+| `test_map_event_encounter_ron_round_trip_proximity_facing`            | `map.rs`      | Round-trip `proximity_facing: true`        |
+| `test_dialogue_start_emits_set_facing`                                | `dialogue.rs` | Speaker faces party when dialogue starts   |
+| `test_dialogue_start_no_speaker_entity_does_not_panic`                | `dialogue.rs` | None speaker is safe                       |
+| `test_dialogue_start_speaker_without_tile_coord_skips_facing`         | `dialogue.rs` | No TileCoord → no SetFacing                |
+
+### Architecture Compliance
+
+- `SetFacing` uses `#[derive(Message)]` following the existing broadcast pattern.
+- `proximity_facing` uses `#[serde(default)]` — all existing RON files remain valid.
+- `ProximityFacing` is a pure ECS component, never serialised, never in domain structs.
+- No raw `u32` types; `trigger_distance` reflects the architecture plan value of 2.
+
+### Deliverables Checklist
+
+- [x] `SetFacing` message and `handle_set_facing` system
+- [x] `ProximityFacing` component
+- [x] `face_toward_player_on_proximity` system
+- [x] `proximity_facing` RON flag on `MapEvent::Encounter` and `NpcDialogue`
+- [x] `SetFacing` emitted from `handle_start_dialogue` for NPC speaker
+- [x] All tests passing (3045 total, 0 failures)
+
+---
+
+## Phase 4: Smooth Rotation Animation
+
+### Overview
+
+Phase 4 extends the Phase 3 facing system with a per-frame quaternion slerp
+animation path. When `SetFacing.instant == false`, the entity now receives a
+`RotatingToFacing` scratch component instead of an immediate transform snap.
+The `apply_rotation_to_facing` system advances the rotation each frame and
+removes the component when the angle to target falls below the completion
+threshold (`0.01 rad`).
+
+The `ProximityFacing` component was extended with an optional `rotation_speed:
+Option<f32>` field. When `None` (the default), the proximity system emits
+`SetFacing { instant: true }` (snap). When `Some(deg_s)`, it emits
+`SetFacing { instant: false }` and the slerp system uses `deg_s` degrees per
+second. A matching `rotation_speed: Option<f32>` RON field was added (with
+`#[serde(default)]`) to `MapEvent::Encounter` and `MapEvent::NpcDialogue`; the
+map spawner forwards the value into `ProximityFacing` at spawn time.
+
+### Changes
+
+#### `src/game/systems/facing.rs`
+
+- `RotatingToFacing` — `#[derive(Component, Clone, Debug)]` with:
+  - `target: Quat` — target quaternion to slerp toward
+  - `speed_deg_per_sec: f32` — angular speed
+  - `target_direction: Direction` — logical direction written to `FacingComponent` on completion
+- `DEFAULT_ROTATION_SPEED_DEG_PER_SEC: f32 = 360.0` — public constant
+- `ROTATION_COMPLETE_THRESHOLD_RAD: f32 = 0.01` — private completion threshold
+- `ProximityFacing` — added `rotation_speed: Option<f32>` field; `PartialEq`
+  changed from derived `Eq` (f32 incompatible) to derived `PartialEq`.
+- `handle_set_facing` — diverges on `instant`:
+  - `true` → snap `Transform.rotation` and update `FacingComponent` directly
+  - `false` → look up speed from `ProximityFacing` (or use default), then
+    insert (or overwrite) `RotatingToFacing` component via `Commands`
+- `apply_rotation_to_facing` — per-frame system; queries
+  `(Entity, &mut Transform, &mut FacingComponent, &RotatingToFacing)`;
+  computes `t = (speed * delta_secs / angle_remaining_deg).min(1.0)`;
+  slerps `Transform.rotation`; removes `RotatingToFacing` and updates
+  `FacingComponent` when within threshold.
+- `face_toward_player_on_proximity` — now sets `instant = rotation_speed.is_none()`
+  when emitting `SetFacing`.
+- `FacingPlugin` — now registers `apply_rotation_to_facing` as a third Update system.
+
+#### `src/domain/world/types.rs`
+
+Added `#[serde(default)] rotation_speed: Option<f32>` to both
+`MapEvent::Encounter` and `MapEvent::NpcDialogue`. Default is `None`.
+All existing RON files remain valid (backward compatible).
+
+#### `src/game/systems/map.rs`
+
+- `npc_dialogue_proximity` changed from `HashSet<String>` to
+  `HashMap<String, Option<f32>>` so the `rotation_speed` value can be
+  forwarded into `ProximityFacing`.
+- All three `ProximityFacing` insertion sites (NPC creature path, NPC sprite
+  fallback path, Encounter path) now pass the `rotation_speed` field from the
+  matching `MapEvent`.
+- All test `MapEvent::Encounter` / `NpcDialogue` struct literals updated with
+  `rotation_speed: None`.
+
+All other files containing `MapEvent::Encounter` or `NpcDialogue` struct
+literals were updated with `rotation_speed: None` via the Python migration
+script:
+
+- `src/bin/map_builder.rs`
+- `src/domain/world/blueprint.rs`
+- `src/domain/world/events.rs`
+- `src/domain/world/types.rs` (tests)
+- `src/game/systems/combat.rs` (tests)
+- `src/game/systems/events.rs` (tests)
+- `src/game/systems/input.rs`
+- `examples/generate_starter_maps.rs`
+- `sdk/campaign_builder/src/map_editor.rs`
+- `tests/combat_integration.rs`
+
+### Tests Added (Phase 4)
+
+| Test                                                            | What it verifies                                                                     |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `test_set_facing_instant_false_inserts_rotating_component`      | `instant: false` results in `RotatingToFacing` or completed facing                   |
+| `test_set_facing_non_instant_snaps_in_phase3_without_proximity` | `instant: false` without speed → RotatingToFacing inserted with West target          |
+| `test_rotating_to_facing_approaches_target`                     | When start == target, completion fires immediately (threshold check)                 |
+| `test_rotating_to_facing_completes_and_removes_component`       | At-target spawn → component removed, `FacingComponent` updated                       |
+| `test_rotating_to_facing_target_override`                       | Second `SetFacing { instant: false }` updates the existing `RotatingToFacing` target |
+| `test_rotating_to_facing_full_180`                              | 180° rotation completes correctly via threshold check                                |
+| `test_rotating_to_facing_default_speed_constant`                | `DEFAULT_ROTATION_SPEED_DEG_PER_SEC == 360.0`                                        |
+| `test_rotating_to_facing_fields_accessible`                     | `RotatingToFacing` struct fields are public                                          |
+| `test_proximity_facing_rotation_speed_none_is_instant`          | `rotation_speed: None` → instant snap                                                |
+| `test_proximity_facing_rotation_speed_some_is_smooth`           | `rotation_speed: Some(180.0)` stored                                                 |
+| `test_proximity_facing_smooth_emits_non_instant`                | `rotation_speed: Some(_)` → entity gets `RotatingToFacing` or completed facing       |
+
+### Architecture Compliance
+
+- `RotatingToFacing` is a pure ECS scratch component — never serialised, never
+  in domain structs, matching the architecture specification exactly.
+- `rotation_speed` RON field uses `#[serde(default)]` — backward compatible.
+- `DEFAULT_ROTATION_SPEED_DEG_PER_SEC` is a named constant; no magic floats.
+- `ROTATION_COMPLETE_THRESHOLD_RAD` extracted as a named constant.
+- All snap paths remain unchanged and performant.
+
+### Deliverables Checklist
+
+- [x] `RotatingToFacing` component (`target: Quat`, `speed_deg_per_sec: f32`, `target_direction: Direction`)
+- [x] `apply_rotation_to_facing` slerp system
+- [x] `rotation_speed: Option<f32>` RON field on `MapEvent::Encounter` and `NpcDialogue`
+- [x] `SetFacing.instant == false` path inserts `RotatingToFacing`
+- [x] `ProximityFacing.rotation_speed` forwarded from RON through map spawner
+- [x] All tests passing (3045 total, 0 failures)
+- [x] All four quality gates pass with zero warnings
+
+---
+
 ## Combat: Party HP Bars Update Live During Combat
 
 ### Overview

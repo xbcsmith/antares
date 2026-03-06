@@ -125,6 +125,8 @@ impl Plugin for MapManagerPlugin {
         // Register the map change message and the handler + spawn systems
         app.add_message::<MapChangeEvent>()
             .add_message::<DoorOpenedEvent>()
+            // Phase 3: register SetFacing message and proximity/facing systems
+            .add_plugins(crate::game::systems::facing::FacingPlugin)
             // Process explicit map change requests first, then let the marker
             // spawner observe the changed world state and spawn/despawn accordingly.
             .add_systems(
@@ -1049,6 +1051,31 @@ fn spawn_map(
             })
             .collect();
 
+        // Phase 3/4: Build a proximity-facing map from NpcDialogue events so that
+        // entities with `proximity_facing: true` get a `ProximityFacing` component,
+        // carrying the optional `rotation_speed` for Phase 4 smooth rotation.
+        let npc_dialogue_proximity: std::collections::HashMap<String, Option<f32>> = map
+            .events
+            .values()
+            .filter_map(|ev| {
+                if let world::MapEvent::NpcDialogue {
+                    npc_id,
+                    proximity_facing,
+                    rotation_speed,
+                    ..
+                } = ev
+                {
+                    if *proximity_facing {
+                        Some((npc_id.clone(), *rotation_speed))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         // For each resolved NPC, prefer creature mesh rendering when a creature_id
         // is configured; otherwise fall back to sprite rendering.
         for resolved_npc in resolved_npcs.iter() {
@@ -1084,6 +1111,17 @@ fn spawn_map(
                         },
                         Visibility::default(),
                     ));
+
+                    // Phase 3/4: insert ProximityFacing when the NpcDialogue event
+                    // has proximity_facing: true for this NPC.
+                    if let Some(rotation_speed) = npc_dialogue_proximity.get(&resolved_npc.npc_id) {
+                        commands.entity(entity).insert(
+                            crate::game::systems::facing::ProximityFacing {
+                                trigger_distance: 2,
+                                rotation_speed: *rotation_speed,
+                            },
+                        );
+                    }
 
                     continue;
                 }
@@ -1148,6 +1186,16 @@ fn spawn_map(
                 },
                 Visibility::default(),
             ));
+
+            // Phase 3/4: insert ProximityFacing on the sprite-fallback entity too.
+            if let Some(rotation_speed) = npc_dialogue_proximity.get(&resolved_npc.npc_id) {
+                commands
+                    .entity(entity)
+                    .insert(crate::game::systems::facing::ProximityFacing {
+                        trigger_distance: 2,
+                        rotation_speed: *rotation_speed,
+                    });
+            }
         }
 
         // Spawn procedural event markers and recruitable character visuals.
@@ -1210,6 +1258,8 @@ fn spawn_map(
                 world::MapEvent::Encounter {
                     monster_group,
                     facing,
+                    proximity_facing,
+                    rotation_speed,
                     ..
                 } => {
                     let x = position.x as f32;
@@ -1247,6 +1297,17 @@ fn spawn_map(
                                 },
                                 Visibility::default(),
                             ));
+
+                            // Phase 3/4: insert ProximityFacing when the event flag is set,
+                            // forwarding rotation_speed for smooth rotation support.
+                            if *proximity_facing {
+                                commands.entity(entity).insert(
+                                    crate::game::systems::facing::ProximityFacing {
+                                        trigger_distance: 2,
+                                        rotation_speed: *rotation_speed,
+                                    },
+                                );
+                            }
 
                             continue;
                         }
@@ -2291,6 +2352,8 @@ mod tests {
                 monster_group: vec![1],
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -2366,6 +2429,8 @@ mod tests {
                 monster_group: vec![2],
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -2625,6 +2690,8 @@ mod tests {
                 monster_group: vec![33],
                 time_condition: None,
                 facing: Some(Direction::West),
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -2860,6 +2927,291 @@ mod tests {
             results[0].0.direction,
             Direction::East,
             "RecruitableCharacter FacingComponent must store East"
+        );
+    }
+
+    // ===== Phase 3: Runtime Facing Change System tests =====
+
+    /// `test_proximity_facing_inserted_on_encounter_with_flag` – when
+    /// `MapEvent::Encounter` has `proximity_facing: true`, the spawned entity
+    /// must carry a `ProximityFacing` component with `trigger_distance == 2`.
+    #[test]
+    fn test_proximity_facing_inserted_on_encounter_with_flag() {
+        use crate::domain::types::{Direction, Position};
+        use crate::domain::world::MapEvent;
+        use crate::game::systems::facing::ProximityFacing;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        db.monsters
+            .add_monster(crate::domain::combat::database::MonsterDefinition {
+                id: 50,
+                name: "Proximity Goblin".to_string(),
+                stats: crate::domain::character::Stats::new(8, 6, 6, 8, 10, 8, 5),
+                hp: crate::domain::character::AttributePair16::new(8),
+                ac: crate::domain::character::AttributePair::new(5),
+                attacks: vec![],
+                flee_threshold: 0,
+                special_attack_threshold: 0,
+                resistances: crate::domain::combat::monster::MonsterResistances::new(),
+                can_regenerate: false,
+                can_advance: false,
+                is_undead: false,
+                magic_resistance: 0,
+                loot: crate::domain::combat::monster::LootTable::default(),
+                visual_id: Some(55),
+                conditions: crate::domain::combat::monster::MonsterCondition::Normal,
+                active_conditions: vec![],
+                has_acted: false,
+            })
+            .expect("add monster");
+        db.creatures
+            .add_creature(make_creature_def(55))
+            .expect("add creature");
+
+        let mut app = make_spawn_app(db);
+
+        let mut game_state = crate::application::GameState::new();
+        let mut map = crate::domain::world::Map::new(1, "T".to_string(), "D".to_string(), 10, 10);
+        let enc_pos = Position::new(3, 3);
+        map.events.insert(
+            enc_pos,
+            MapEvent::Encounter {
+                name: "Proximity Goblins".to_string(),
+                description: "desc".to_string(),
+                monster_group: vec![50],
+                time_condition: None,
+                facing: Some(Direction::South),
+                proximity_facing: true, // Phase 3: enable proximity tracking
+                rotation_speed: None,
+            },
+        );
+
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&ProximityFacing, &EncounterVisualMarker)>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(
+            results.len(),
+            1,
+            "encounter with proximity_facing:true must have ProximityFacing component"
+        );
+        assert_eq!(
+            results[0].0.trigger_distance, 2,
+            "default trigger_distance must be 2"
+        );
+    }
+
+    /// `test_proximity_facing_not_inserted_when_flag_false` – when
+    /// `MapEvent::Encounter` has `proximity_facing: false` (default), no
+    /// `ProximityFacing` component must be present.
+    #[test]
+    fn test_proximity_facing_not_inserted_when_flag_false() {
+        use crate::domain::world::MapEvent;
+        use crate::game::systems::facing::ProximityFacing;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        db.monsters
+            .add_monster(crate::domain::combat::database::MonsterDefinition {
+                id: 51,
+                name: "Static Goblin".to_string(),
+                stats: crate::domain::character::Stats::new(8, 6, 6, 8, 10, 8, 5),
+                hp: crate::domain::character::AttributePair16::new(8),
+                ac: crate::domain::character::AttributePair::new(5),
+                attacks: vec![],
+                flee_threshold: 0,
+                special_attack_threshold: 0,
+                resistances: crate::domain::combat::monster::MonsterResistances::new(),
+                can_regenerate: false,
+                can_advance: false,
+                is_undead: false,
+                magic_resistance: 0,
+                loot: crate::domain::combat::monster::LootTable::default(),
+                visual_id: Some(56),
+                conditions: crate::domain::combat::monster::MonsterCondition::Normal,
+                active_conditions: vec![],
+                has_acted: false,
+            })
+            .expect("add monster");
+        db.creatures
+            .add_creature(make_creature_def(56))
+            .expect("add creature");
+
+        let mut app = make_spawn_app(db);
+
+        let mut game_state = crate::application::GameState::new();
+        let mut map = crate::domain::world::Map::new(1, "T".to_string(), "D".to_string(), 10, 10);
+        let enc_pos = crate::domain::types::Position::new(4, 4);
+        map.events.insert(
+            enc_pos,
+            MapEvent::Encounter {
+                name: "Static Goblins".to_string(),
+                description: "desc".to_string(),
+                monster_group: vec![51],
+                time_condition: None,
+                facing: None,
+                proximity_facing: false, // default – no component
+                rotation_speed: None,
+            },
+        );
+
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<&ProximityFacing>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(
+            results.len(),
+            0,
+            "encounter with proximity_facing:false must NOT have ProximityFacing"
+        );
+    }
+
+    /// `test_proximity_facing_npc_inserted_when_flag_set` – NPC with an
+    /// `NpcDialogue` event whose `proximity_facing: true` must have a
+    /// `ProximityFacing` component after spawn.
+    #[test]
+    fn test_proximity_facing_npc_inserted_when_flag_set() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{npc::NpcDefinition, MapEvent};
+        use crate::game::systems::facing::ProximityFacing;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let mut npc_def = NpcDefinition::new("npc_prox_test", "Proximity NPC", "portrait");
+        npc_def.creature_id = Some(60);
+        db.npcs.add_npc(npc_def).expect("add npc");
+        db.creatures
+            .add_creature(make_creature_def(60))
+            .expect("add creature");
+
+        let mut app = make_spawn_app(db);
+
+        let mut game_state = crate::application::GameState::new();
+        let mut map = crate::domain::world::Map::new(1, "T".to_string(), "D".to_string(), 10, 10);
+
+        // Place NPC via placement
+        let npc_pos = Position::new(5, 5);
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "npc_prox_test",
+                npc_pos,
+            ));
+
+        // Add NpcDialogue event at the same tile with proximity_facing: true
+        map.events.insert(
+            npc_pos,
+            MapEvent::NpcDialogue {
+                name: "Proximity NPC".to_string(),
+                description: "desc".to_string(),
+                npc_id: "npc_prox_test".to_string(),
+                time_condition: None,
+                facing: None,
+                proximity_facing: true, // Phase 3: insert ProximityFacing
+                rotation_speed: None,
+            },
+        );
+
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&ProximityFacing, &NpcMarker)>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(
+            results.len(),
+            1,
+            "NPC with proximity_facing:true must have ProximityFacing component"
+        );
+        assert_eq!(
+            results[0].0.trigger_distance, 2,
+            "default NPC trigger_distance must be 2"
+        );
+        assert_eq!(results[0].1.npc_id, "npc_prox_test");
+    }
+
+    /// Backward compatibility: existing RON `MapEvent::Encounter` without
+    /// `proximity_facing` must deserialize with `proximity_facing: false`.
+    #[test]
+    fn test_map_event_encounter_ron_backward_compat_no_proximity_facing() {
+        use crate::domain::world::MapEvent;
+
+        let ron_str = r#"Encounter(
+            name: "Old Encounter",
+            description: "desc",
+            monster_group: [1, 2],
+            time_condition: None,
+        )"#;
+
+        let parsed: MapEvent = ron::from_str(ron_str).expect("parse from RON");
+        match parsed {
+            MapEvent::Encounter {
+                proximity_facing, ..
+            } => {
+                assert!(
+                    !proximity_facing,
+                    "Encounter missing proximity_facing must default to false"
+                );
+            }
+            other => panic!("expected Encounter, got {:?}", other),
+        }
+    }
+
+    /// Backward compatibility: existing RON `MapEvent::NpcDialogue` without
+    /// `proximity_facing` must deserialize with `proximity_facing: false`.
+    #[test]
+    fn test_map_event_npc_dialogue_ron_backward_compat_no_proximity_facing() {
+        use crate::domain::world::MapEvent;
+
+        let ron_str = r#"NpcDialogue(
+            name: "Old NPC",
+            description: "desc",
+            npc_id: "some_npc",
+            time_condition: None,
+        )"#;
+
+        let parsed: MapEvent = ron::from_str(ron_str).expect("parse from RON");
+        match parsed {
+            MapEvent::NpcDialogue {
+                proximity_facing, ..
+            } => {
+                assert!(
+                    !proximity_facing,
+                    "NpcDialogue missing proximity_facing must default to false"
+                );
+            }
+            other => panic!("expected NpcDialogue, got {:?}", other),
+        }
+    }
+
+    /// RON round-trip: `proximity_facing: true` survives serialise/deserialise.
+    #[test]
+    fn test_map_event_encounter_ron_round_trip_proximity_facing() {
+        use crate::domain::world::MapEvent;
+
+        let event = MapEvent::Encounter {
+            name: "Proximity Test".to_string(),
+            description: "desc".to_string(),
+            monster_group: vec![1],
+            time_condition: None,
+            facing: None,
+            proximity_facing: true,
+            rotation_speed: None,
+        };
+
+        let ron_str = ron::to_string(&event).expect("serialize to RON");
+        let parsed: MapEvent = ron::from_str(&ron_str).expect("parse from RON");
+
+        assert_eq!(
+            event, parsed,
+            "RON round-trip must preserve proximity_facing: true"
         );
     }
 }

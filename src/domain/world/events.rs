@@ -410,6 +410,8 @@ mod tests {
                 monster_group: vec![1, 2, 3],
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 
@@ -577,6 +579,8 @@ mod tests {
                 monster_group: vec![1, 2],
                 time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
         world.add_map(map);
@@ -605,6 +609,8 @@ mod tests {
                 monster_group: vec![1, 2],
                 time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
         world.add_map(map);
@@ -676,6 +682,8 @@ mod tests {
                 npc_id: "merchant_01".to_string(),
                 time_condition: Some(TimeCondition::BetweenHours { from: 8, to: 18 }),
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
         world.add_map(map);
@@ -766,6 +774,8 @@ mod tests {
                 monster_group: vec![5],
                 time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
         world.add_map(map);
@@ -912,6 +922,8 @@ mod tests {
                 npc_id: "test_npc".to_string(),
                 time_condition: None,
                 facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
             },
         );
 

@@ -1875,6 +1875,23 @@ pub enum MapEvent {
         /// thanks to `#[serde(default)]`.
         #[serde(default)]
         facing: Option<Direction>,
+        /// When `true`, the map loading system inserts a `ProximityFacing` component
+        /// on the spawned encounter entity so that it automatically turns toward the
+        /// party when the party enters within 2 tiles.
+        ///
+        /// Defaults to `false` so all existing RON files remain valid.
+        #[serde(default)]
+        proximity_facing: bool,
+        /// Optional rotation speed in degrees per second for smooth proximity-facing
+        /// transitions.
+        ///
+        /// When `Some(speed)` and `proximity_facing` is `true`, the spawned entity
+        /// will rotate smoothly toward the party at `speed` degrees per second
+        /// (Phase 4 smooth rotation). When `None` (the default), rotation snaps
+        /// instantly. Existing RON files without this field remain valid thanks to
+        /// `#[serde(default)]`.
+        #[serde(default)]
+        rotation_speed: Option<f32>,
     },
     /// Treasure chest
     Treasure {
@@ -1959,6 +1976,23 @@ pub enum MapEvent {
         /// to `#[serde(default)]`.
         #[serde(default)]
         facing: Option<Direction>,
+        /// When `true`, the map loading system inserts a `ProximityFacing` component
+        /// on the spawned NPC entity so that it automatically turns toward the party
+        /// when the party enters within 2 tiles.
+        ///
+        /// Defaults to `false` so all existing RON files remain valid.
+        #[serde(default)]
+        proximity_facing: bool,
+        /// Optional rotation speed in degrees per second for smooth proximity-facing
+        /// transitions.
+        ///
+        /// When `Some(speed)` and `proximity_facing` is `true`, the spawned NPC
+        /// will rotate smoothly toward the party at `speed` degrees per second
+        /// (Phase 4 smooth rotation). When `None` (the default), rotation snaps
+        /// instantly. Existing RON files without this field remain valid thanks to
+        /// `#[serde(default)]`.
+        #[serde(default)]
+        rotation_speed: Option<f32>,
     },
     /// Recruitable character encounter
     RecruitableCharacter {
@@ -3140,6 +3174,8 @@ mod time_condition_tests {
             monster_group: vec![1],
             time_condition: None,
             facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
         match event {
             MapEvent::Encounter {
@@ -3161,6 +3197,8 @@ mod time_condition_tests {
                 TimeOfDay::Evening,
             ])),
             facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
         match event {
             MapEvent::Encounter {
@@ -3217,6 +3255,8 @@ mod time_condition_tests {
             npc_id: "day_merchant".to_string(),
             time_condition: Some(TimeCondition::BetweenHours { from: 8, to: 18 }),
             facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
         };
         match event {
             MapEvent::NpcDialogue {
