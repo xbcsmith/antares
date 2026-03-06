@@ -3214,4 +3214,255 @@ mod tests {
             "RON round-trip must preserve proximity_facing: true"
         );
     }
+
+    /// Backward compatibility: existing RON `MapEvent::Encounter` without
+    /// `rotation_speed` must deserialize with `rotation_speed: None`.
+    #[test]
+    fn test_map_event_encounter_ron_backward_compat_no_rotation_speed() {
+        use crate::domain::world::MapEvent;
+
+        let ron_str = r#"Encounter(
+            name: "Legacy Encounter",
+            description: "desc",
+            monster_group: [1],
+            time_condition: None,
+            proximity_facing: true,
+        )"#;
+
+        let parsed: MapEvent = ron::from_str(ron_str).expect("parse from RON");
+        match parsed {
+            MapEvent::Encounter { rotation_speed, .. } => {
+                assert!(
+                    rotation_speed.is_none(),
+                    "Encounter missing rotation_speed must default to None (snap)"
+                );
+            }
+            other => panic!("expected Encounter, got {:?}", other),
+        }
+    }
+
+    /// Backward compatibility: existing RON `MapEvent::NpcDialogue` without
+    /// `rotation_speed` must deserialize with `rotation_speed: None`.
+    #[test]
+    fn test_map_event_npc_dialogue_ron_backward_compat_no_rotation_speed() {
+        use crate::domain::world::MapEvent;
+
+        let ron_str = r#"NpcDialogue(
+            name: "Legacy NPC",
+            description: "desc",
+            npc_id: "old_npc",
+            time_condition: None,
+            proximity_facing: true,
+        )"#;
+
+        let parsed: MapEvent = ron::from_str(ron_str).expect("parse from RON");
+        match parsed {
+            MapEvent::NpcDialogue { rotation_speed, .. } => {
+                assert!(
+                    rotation_speed.is_none(),
+                    "NpcDialogue missing rotation_speed must default to None (snap)"
+                );
+            }
+            other => panic!("expected NpcDialogue, got {:?}", other),
+        }
+    }
+
+    /// RON round-trip: `rotation_speed: Some(90.0)` on `Encounter` survives
+    /// serialise/deserialise with the exact value preserved.
+    #[test]
+    fn test_map_event_encounter_ron_round_trip_rotation_speed_some() {
+        use crate::domain::world::MapEvent;
+
+        let event = MapEvent::Encounter {
+            name: "Smooth Encounter".to_string(),
+            description: "desc".to_string(),
+            monster_group: vec![1],
+            time_condition: None,
+            facing: None,
+            proximity_facing: true,
+            rotation_speed: Some(90.0),
+        };
+
+        let ron_str = ron::to_string(&event).expect("serialize to RON");
+        let parsed: MapEvent = ron::from_str(&ron_str).expect("parse from RON");
+
+        match parsed {
+            MapEvent::Encounter { rotation_speed, .. } => {
+                assert_eq!(
+                    rotation_speed,
+                    Some(90.0),
+                    "RON round-trip must preserve rotation_speed: Some(90.0)"
+                );
+            }
+            other => panic!("expected Encounter, got {:?}", other),
+        }
+    }
+
+    /// RON round-trip: `rotation_speed: Some(180.0)` on `NpcDialogue` survives
+    /// serialise/deserialise with the exact value preserved.
+    #[test]
+    fn test_map_event_npc_dialogue_ron_round_trip_rotation_speed_some() {
+        use crate::domain::world::MapEvent;
+
+        let event = MapEvent::NpcDialogue {
+            name: "Smooth NPC".to_string(),
+            description: "desc".to_string(),
+            npc_id: "smooth_guard".to_string(),
+            time_condition: None,
+            facing: None,
+            proximity_facing: true,
+            rotation_speed: Some(180.0),
+        };
+
+        let ron_str = ron::to_string(&event).expect("serialize to RON");
+        let parsed: MapEvent = ron::from_str(&ron_str).expect("parse from RON");
+
+        match parsed {
+            MapEvent::NpcDialogue { rotation_speed, .. } => {
+                assert_eq!(
+                    rotation_speed,
+                    Some(180.0),
+                    "RON round-trip must preserve rotation_speed: Some(180.0)"
+                );
+            }
+            other => panic!("expected NpcDialogue, got {:?}", other),
+        }
+    }
+
+    /// Integration: `rotation_speed: Some(speed)` on a proximity-facing
+    /// `MapEvent::Encounter` must be forwarded into the `ProximityFacing`
+    /// component on the spawned encounter entity.
+    #[test]
+    fn test_proximity_facing_rotation_speed_forwarded_on_encounter() {
+        use crate::domain::types::{Direction, Position};
+        use crate::domain::world::MapEvent;
+        use crate::game::systems::facing::ProximityFacing;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        db.monsters
+            .add_monster(crate::domain::combat::database::MonsterDefinition {
+                id: 70,
+                name: "Smooth Goblin".to_string(),
+                stats: crate::domain::character::Stats::new(8, 6, 6, 8, 10, 8, 5),
+                hp: crate::domain::character::AttributePair16::new(8),
+                ac: crate::domain::character::AttributePair::new(5),
+                attacks: vec![],
+                flee_threshold: 0,
+                special_attack_threshold: 0,
+                resistances: crate::domain::combat::monster::MonsterResistances::new(),
+                can_regenerate: false,
+                can_advance: false,
+                is_undead: false,
+                magic_resistance: 0,
+                loot: crate::domain::combat::monster::LootTable::default(),
+                visual_id: Some(75),
+                conditions: crate::domain::combat::monster::MonsterCondition::Normal,
+                active_conditions: vec![],
+                has_acted: false,
+            })
+            .expect("add monster");
+        db.creatures
+            .add_creature(make_creature_def(75))
+            .expect("add creature");
+
+        let mut app = make_spawn_app(db);
+
+        let mut game_state = crate::application::GameState::new();
+        let mut map = crate::domain::world::Map::new(1, "T".to_string(), "D".to_string(), 10, 10);
+        let enc_pos = Position::new(4, 4);
+        map.events.insert(
+            enc_pos,
+            MapEvent::Encounter {
+                name: "Smooth Goblins".to_string(),
+                description: "desc".to_string(),
+                monster_group: vec![70],
+                time_condition: None,
+                facing: Some(Direction::South),
+                proximity_facing: true,
+                rotation_speed: Some(90.0), // Phase 4: smooth rotation
+            },
+        );
+
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&ProximityFacing, &EncounterVisualMarker)>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(
+            results.len(),
+            1,
+            "encounter with proximity_facing:true must have ProximityFacing component"
+        );
+        assert_eq!(
+            results[0].0.rotation_speed,
+            Some(90.0),
+            "rotation_speed from MapEvent::Encounter must be forwarded into ProximityFacing"
+        );
+    }
+
+    /// Integration: `rotation_speed: Some(speed)` on a proximity-facing
+    /// `MapEvent::NpcDialogue` must be forwarded into the `ProximityFacing`
+    /// component on the spawned NPC entity.
+    #[test]
+    fn test_proximity_facing_rotation_speed_forwarded_on_npc_dialogue() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{npc::NpcDefinition, MapEvent};
+        use crate::game::systems::facing::ProximityFacing;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let mut npc_def = NpcDefinition::new("npc_smooth_test", "Smooth NPC", "portrait");
+        npc_def.creature_id = Some(80);
+        db.npcs.add_npc(npc_def).expect("add npc");
+        db.creatures
+            .add_creature(make_creature_def(80))
+            .expect("add creature");
+
+        let mut app = make_spawn_app(db);
+
+        let mut game_state = crate::application::GameState::new();
+        let mut map = crate::domain::world::Map::new(1, "T".to_string(), "D".to_string(), 10, 10);
+
+        let npc_pos = Position::new(6, 6);
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "npc_smooth_test",
+                npc_pos,
+            ));
+
+        map.events.insert(
+            npc_pos,
+            MapEvent::NpcDialogue {
+                name: "Smooth NPC Dialogue".to_string(),
+                description: "desc".to_string(),
+                npc_id: "npc_smooth_test".to_string(),
+                time_condition: None,
+                facing: None,
+                proximity_facing: true,
+                rotation_speed: Some(180.0), // Phase 4: smooth rotation
+            },
+        );
+
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&ProximityFacing, &NpcMarker)>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(
+            results.len(),
+            1,
+            "NPC with proximity_facing:true must have ProximityFacing component"
+        );
+        assert_eq!(
+            results[0].0.rotation_speed,
+            Some(180.0),
+            "rotation_speed from MapEvent::NpcDialogue must be forwarded into ProximityFacing"
+        );
+        assert_eq!(results[0].1.npc_id, "npc_smooth_test");
+    }
 }

@@ -467,19 +467,25 @@ script:
 
 ### Tests Added (Phase 4)
 
-| Test                                                            | What it verifies                                                                     |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `test_set_facing_instant_false_inserts_rotating_component`      | `instant: false` results in `RotatingToFacing` or completed facing                   |
-| `test_set_facing_non_instant_snaps_in_phase3_without_proximity` | `instant: false` without speed → RotatingToFacing inserted with West target          |
-| `test_rotating_to_facing_approaches_target`                     | When start == target, completion fires immediately (threshold check)                 |
-| `test_rotating_to_facing_completes_and_removes_component`       | At-target spawn → component removed, `FacingComponent` updated                       |
-| `test_rotating_to_facing_target_override`                       | Second `SetFacing { instant: false }` updates the existing `RotatingToFacing` target |
-| `test_rotating_to_facing_full_180`                              | 180° rotation completes correctly via threshold check                                |
-| `test_rotating_to_facing_default_speed_constant`                | `DEFAULT_ROTATION_SPEED_DEG_PER_SEC == 360.0`                                        |
-| `test_rotating_to_facing_fields_accessible`                     | `RotatingToFacing` struct fields are public                                          |
-| `test_proximity_facing_rotation_speed_none_is_instant`          | `rotation_speed: None` → instant snap                                                |
-| `test_proximity_facing_rotation_speed_some_is_smooth`           | `rotation_speed: Some(180.0)` stored                                                 |
-| `test_proximity_facing_smooth_emits_non_instant`                | `rotation_speed: Some(_)` → entity gets `RotatingToFacing` or completed facing       |
+| Test                                                                | Location    | What it verifies                                                                             |
+| ------------------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------- |
+| `test_set_facing_instant_false_inserts_rotating_component`          | `facing.rs` | `instant: false` results in `RotatingToFacing` or completed facing                           |
+| `test_set_facing_non_instant_snaps_in_phase3_without_proximity`     | `facing.rs` | `instant: false` without speed → RotatingToFacing inserted with West target                  |
+| `test_rotating_to_facing_approaches_target`                         | `facing.rs` | When start == target, completion fires immediately (threshold check)                         |
+| `test_rotating_to_facing_completes_and_removes_component`           | `facing.rs` | At-target spawn → component removed, `FacingComponent` updated                               |
+| `test_rotating_to_facing_target_override`                           | `facing.rs` | Second `SetFacing { instant: false }` updates the existing `RotatingToFacing` target         |
+| `test_rotating_to_facing_full_180`                                  | `facing.rs` | 180° rotation completes correctly via threshold check                                        |
+| `test_rotating_to_facing_default_speed_constant`                    | `facing.rs` | `DEFAULT_ROTATION_SPEED_DEG_PER_SEC == 360.0`                                                |
+| `test_rotating_to_facing_fields_accessible`                         | `facing.rs` | `RotatingToFacing` struct fields are public                                                  |
+| `test_proximity_facing_rotation_speed_none_is_instant`              | `facing.rs` | `rotation_speed: None` → instant snap                                                        |
+| `test_proximity_facing_rotation_speed_some_is_smooth`               | `facing.rs` | `rotation_speed: Some(180.0)` stored                                                         |
+| `test_proximity_facing_smooth_emits_non_instant`                    | `facing.rs` | `rotation_speed: Some(_)` → entity gets `RotatingToFacing` or completed facing               |
+| `test_map_event_encounter_ron_backward_compat_no_rotation_speed`    | `map.rs`    | RON `Encounter` without `rotation_speed` deserializes as `None` (backward compatible)        |
+| `test_map_event_npc_dialogue_ron_backward_compat_no_rotation_speed` | `map.rs`    | RON `NpcDialogue` without `rotation_speed` deserializes as `None` (backward compatible)      |
+| `test_map_event_encounter_ron_round_trip_rotation_speed_some`       | `map.rs`    | `rotation_speed: Some(90.0)` on `Encounter` survives RON serialize/deserialize               |
+| `test_map_event_npc_dialogue_ron_round_trip_rotation_speed_some`    | `map.rs`    | `rotation_speed: Some(180.0)` on `NpcDialogue` survives RON serialize/deserialize            |
+| `test_proximity_facing_rotation_speed_forwarded_on_encounter`       | `map.rs`    | `rotation_speed: Some(90.0)` in `MapEvent::Encounter` is forwarded into `ProximityFacing`    |
+| `test_proximity_facing_rotation_speed_forwarded_on_npc_dialogue`    | `map.rs`    | `rotation_speed: Some(180.0)` in `MapEvent::NpcDialogue` is forwarded into `ProximityFacing` |
 
 ### Architecture Compliance
 
@@ -497,7 +503,10 @@ script:
 - [x] `rotation_speed: Option<f32>` RON field on `MapEvent::Encounter` and `NpcDialogue`
 - [x] `SetFacing.instant == false` path inserts `RotatingToFacing`
 - [x] `ProximityFacing.rotation_speed` forwarded from RON through map spawner
-- [x] All tests passing (3045 total, 0 failures)
+- [x] RON backward-compat tests: `rotation_speed` absent → `None` (both `Encounter` and `NpcDialogue`)
+- [x] RON round-trip tests: `rotation_speed: Some(f32)` preserved (both `Encounter` and `NpcDialogue`)
+- [x] Integration tests: `rotation_speed` forwarded from `MapEvent` into `ProximityFacing` at spawn time
+- [x] All tests passing (3051 total, 0 failures)
 - [x] All four quality gates pass with zero warnings
 
 ---
