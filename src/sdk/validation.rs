@@ -206,6 +206,19 @@ pub enum ValidationError {
         /// The unrecognised service ID string
         service_id: String,
     },
+
+    /// An item's auto-generated mesh descriptor produced an invalid
+    /// [`CreatureDefinition`] when validated by [`CreatureDefinition::validate`].
+    ///
+    /// This indicates a data inconsistency that would prevent the item from
+    /// being rendered as a dropped mesh in the game world.
+    #[error("Item ID {item_id} has invalid mesh descriptor: {message}")]
+    ItemMeshDescriptorInvalid {
+        /// The item ID whose mesh descriptor failed validation
+        item_id: crate::domain::types::ItemId,
+        /// Human-readable description of why the descriptor is invalid
+        message: String,
+    },
 }
 
 impl ValidationError {
@@ -238,7 +251,8 @@ impl ValidationError {
             | ValidationError::CreatureNoMeshes { .. }
             | ValidationError::CreatureMeshTopology { .. }
             | ValidationError::CreatureDuplicateMeshNames { .. }
-            | ValidationError::MissingStockTemplateItem { .. } => Severity::Error,
+            | ValidationError::MissingStockTemplateItem { .. }
+            | ValidationError::ItemMeshDescriptorInvalid { .. } => Severity::Error,
 
             ValidationError::DisconnectedMap { .. } | ValidationError::InvalidServiceId { .. } => {
                 Severity::Warning
@@ -374,6 +388,9 @@ impl<'a> Validator<'a> {
 
         // Validate service catalog entries
         errors.extend(self.validate_service_catalogs());
+
+        // Validate item mesh descriptors
+        errors.extend(self.validate_item_mesh_descriptors());
 
         Ok(errors)
     }
@@ -636,6 +653,36 @@ impl<'a> Validator<'a> {
     /// let validator = Validator::new(&db);
     /// let errors = validator.validate_all();
     /// ```
+    /// Validates that every item in the database produces a well-formed
+    /// procedural mesh descriptor.
+    ///
+    /// Calls [`ItemDatabase::validate_mesh_descriptors`] and converts any
+    /// resulting error into a [`ValidationError::ItemMeshDescriptorInvalid`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::database::ContentDatabase;
+    /// use antares::sdk::validation::Validator;
+    ///
+    /// let db = ContentDatabase::new();
+    /// let validator = Validator::new(&db);
+    /// let errors = validator.validate_item_mesh_descriptors();
+    /// // Empty database has no items to fail validation
+    /// assert!(errors.is_empty());
+    /// ```
+    pub fn validate_item_mesh_descriptors(&self) -> Vec<ValidationError> {
+        use crate::domain::items::database::ItemDatabaseError;
+
+        match self.db.items.validate_mesh_descriptors() {
+            Ok(()) => Vec::new(),
+            Err(ItemDatabaseError::InvalidMeshDescriptor { item_id, message }) => {
+                vec![ValidationError::ItemMeshDescriptorInvalid { item_id, message }]
+            }
+            Err(_) => Vec::new(),
+        }
+    }
+
     fn validate_creatures(&self) -> Vec<ValidationError> {
         let mut errors = Vec::new();
 

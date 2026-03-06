@@ -105,6 +105,7 @@ fn create_test_weapon() -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec!["martial_melee".to_string()],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -129,6 +130,7 @@ fn create_test_armor() -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec!["heavy_armor".to_string()],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -152,6 +154,7 @@ fn create_test_accessory() -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -175,6 +178,7 @@ fn create_test_consumable() -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -198,6 +202,7 @@ fn create_test_ammo() -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -221,6 +226,7 @@ fn create_test_quest_item() -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec!["quest_item".to_string()],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -580,6 +586,7 @@ fn test_item_all_classifications_preserved() {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         let ron_string = ron::ser::to_string(&item).unwrap();
@@ -849,6 +856,7 @@ fn test_item_consumable_effect_variants() {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         let ron_string = ron::ser::to_string(&item).unwrap();
@@ -892,6 +900,7 @@ fn test_armor_classifications_preserved() {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         let ron_string = ron::ser::to_string(&item).unwrap();
@@ -934,6 +943,7 @@ fn test_accessory_slots_preserved() {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         let ron_string = ron::ser::to_string(&item).unwrap();

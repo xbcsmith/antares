@@ -1,0 +1,1959 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+//! Item mesh descriptor — drives procedural 3-D world meshes for dropped items
+//!
+//! This module defines the data types and pure functions that convert an [`Item`]
+//! into a [`CreatureDefinition`] suitable for rendering by the existing
+//! `spawn_creature` pipeline.  No Bevy dependency is introduced here; the
+//! visual layer reads these types and constructs Bevy meshes separately.
+//!
+//! # Design
+//!
+//! * [`ItemMeshCategory`] — coarse visual class derived from `item_type` and
+//!   sub-type data.  One category → one distinct mesh shape.
+//! * [`ItemMeshDescriptor`] — full per-item visual specification (shape
+//!   parameters, colors, emissive flag, scale).
+//! * [`ItemMeshDescriptorOverride`] — subset of `ItemMeshDescriptor` that
+//!   campaign authors can embed in a RON item file to customise visuals
+//!   without touching gameplay data.  All fields default to `None` so
+//!   existing RON files remain valid.
+//! * [`ItemMeshDescriptor::from_item`] — pure function; no side-effects,
+//!   no Bevy types.
+//! * [`ItemMeshDescriptor::to_creature_definition`] — converts to the shared
+//!   [`CreatureDefinition`] type so `spawn_creature` can render items without
+//!   a new rendering path.
+//!
+//! # Architecture reference
+//!
+//! See `docs/explanation/items_procedural_meshes_implementation_plan.md`
+//! Phase 1, and `docs/reference/architecture.md` Section 4.5.
+
+use crate::domain::items::types::{
+    AccessorySlot, ArmorClassification, ConsumableEffect, Item, ItemType, WeaponClassification,
+};
+use crate::domain::visual::{
+    AlphaMode, CreatureDefinition, MaterialDefinition, MeshDefinition, MeshTransform,
+};
+use serde::{Deserialize, Serialize};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ItemMeshCategory
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Coarse visual category for a dropped item.
+///
+/// Each variant maps to a distinct procedural mesh shape.  The category is
+/// derived automatically from [`ItemType`] and sub-type classification data
+/// by [`ItemMeshDescriptor::from_item`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::visual::item_mesh::ItemMeshCategory;
+///
+/// let cat = ItemMeshCategory::Sword;
+/// assert_eq!(format!("{:?}", cat), "Sword");
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ItemMeshCategory {
+    /// Single-handed sword (MartialMelee with moderate blade length)
+    Sword,
+    /// Short dagger / knife (Simple weapons with very short blade)
+    Dagger,
+    /// Blunt weapon — club, mace, hammer
+    Blunt,
+    /// Staff / polearm (long two-handed weapon)
+    Staff,
+    /// Ranged bow or crossbow
+    Bow,
+    /// Chest / torso armour
+    BodyArmor,
+    /// Head protection
+    Helmet,
+    /// Hand-held defensive shield
+    Shield,
+    /// Foot armour / boots
+    Boots,
+    /// Ring accessory
+    Ring,
+    /// Amulet / necklace accessory
+    Amulet,
+    /// Belt accessory
+    Belt,
+    /// Cloak / cape accessory
+    Cloak,
+    /// Potion / vial consumable
+    Potion,
+    /// Scroll consumable
+    Scroll,
+    /// Arrow / bolt / stone ammunition
+    Ammo,
+    /// Plot-critical or unique quest artefact
+    QuestItem,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Color constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Steel-grey for swords and martial blades
+const COLOR_STEEL: [f32; 4] = [0.75, 0.75, 0.78, 1.0];
+/// Darker iron for blunt weapons
+const COLOR_IRON: [f32; 4] = [0.50, 0.50, 0.52, 1.0];
+/// Warm wood-brown for staves and bows
+const COLOR_WOOD: [f32; 4] = [0.55, 0.35, 0.15, 1.0];
+/// Leather-tan for armor and boots
+const COLOR_LEATHER: [f32; 4] = [0.72, 0.53, 0.30, 1.0];
+/// Silver-white for metal armor / helmets
+const COLOR_SILVER: [f32; 4] = [0.82, 0.83, 0.85, 1.0];
+/// Gold for rings and amulets
+const COLOR_GOLD: [f32; 4] = [1.0, 0.84, 0.0, 1.0];
+/// Ruby-red for healing potions (HealHp)
+const COLOR_RED: [f32; 4] = [0.85, 0.10, 0.10, 1.0];
+/// Sapphire-blue for mana potions (RestoreSp)
+const COLOR_BLUE: [f32; 4] = [0.10, 0.30, 0.90, 1.0];
+/// Emerald-green for cure potions (CureCondition)
+const COLOR_GREEN: [f32; 4] = [0.10, 0.75, 0.20, 1.0];
+/// Amber-yellow for attribute potions (BoostAttribute / BoostResistance)
+const COLOR_YELLOW: [f32; 4] = [0.95, 0.80, 0.05, 1.0];
+/// Parchment / cream for scrolls
+const COLOR_PARCHMENT: [f32; 4] = [0.95, 0.90, 0.72, 1.0];
+/// Feather-white for arrows / ammo bundles
+const COLOR_AMMO: [f32; 4] = [0.90, 0.88, 0.70, 1.0];
+/// Vivid magenta for quest items (stands out on any floor)
+const COLOR_QUEST: [f32; 4] = [0.85, 0.15, 0.85, 1.0];
+
+/// Dark purple tint for cursed items
+const COLOR_CURSED: [f32; 4] = [0.18, 0.05, 0.22, 1.0];
+/// Purple glow emitted by cursed items
+const EMISSIVE_CURSED: [f32; 3] = [0.30, 0.0, 0.35];
+/// Soft white glow for magical (charged) items
+const EMISSIVE_MAGIC: [f32; 3] = [0.40, 0.40, 0.60];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scale constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Base world-space scale for all dropped items (fits on a single floor tile)
+const BASE_SCALE: f32 = 0.35;
+/// Extra multiplier for two-handed / large weapons
+const TWO_HANDED_SCALE_MULT: f32 = 1.45;
+/// Extra multiplier for small items (rings, ammo)
+const SMALL_SCALE_MULT: f32 = 0.55;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shape parameter constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Blade-length factor per damage side for swords
+/// (e.g., 1d6 → 6 sides → 6 × BLADE_SIDES_FACTOR blade segments)
+const BLADE_SIDES_FACTOR: f32 = 0.08;
+/// Minimum normalised blade length (clamp low end)
+const BLADE_LENGTH_MIN: f32 = 0.25;
+/// Maximum normalised blade length (clamp high end)
+const BLADE_LENGTH_MAX: f32 = 1.0;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ItemMeshDescriptorOverride
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Campaign-author override for a subset of [`ItemMeshDescriptor`] fields.
+///
+/// Embed this in an [`Item`] RON definition to customise the visual appearance
+/// without touching gameplay data.  Every field defaults to `None`; missing
+/// fields fall back to the auto-derived value from `ItemMeshDescriptor::from_item`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::visual::item_mesh::ItemMeshDescriptorOverride;
+///
+/// // Override only the primary color
+/// let ov = ItemMeshDescriptorOverride {
+///     primary_color: Some([0.0, 0.8, 0.0, 1.0]),
+///     accent_color: None,
+///     scale: None,
+///     emissive: None,
+/// };
+/// assert!(ov.primary_color.is_some());
+/// assert!(ov.scale.is_none());
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ItemMeshDescriptorOverride {
+    /// Optional replacement primary color `[r, g, b, a]`
+    #[serde(default)]
+    pub primary_color: Option<[f32; 4]>,
+
+    /// Optional replacement accent color `[r, g, b, a]`
+    #[serde(default)]
+    pub accent_color: Option<[f32; 4]>,
+
+    /// Optional replacement world-space scale (must be positive)
+    #[serde(default)]
+    pub scale: Option<f32>,
+
+    /// Optional replacement emissive color `[r, g, b]`.
+    /// `Some([0.0, 0.0, 0.0])` disables emissive; `None` keeps default.
+    #[serde(default)]
+    pub emissive: Option<[f32; 3]>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ItemMeshDescriptor
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Full per-item visual specification used to drive procedural mesh generation.
+///
+/// Produced by [`ItemMeshDescriptor::from_item`] from an [`Item`] definition
+/// and converted to a [`CreatureDefinition`] by [`ItemMeshDescriptor::to_creature_definition`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::{Item, ItemType, WeaponData, WeaponClassification};
+/// use antares::domain::types::DiceRoll;
+/// use antares::domain::visual::item_mesh::ItemMeshDescriptor;
+///
+/// let short_sword = Item {
+///     id: 3,
+///     name: "Short Sword".to_string(),
+///     item_type: ItemType::Weapon(WeaponData {
+///         damage: DiceRoll::new(1, 6, 0),
+///         bonus: 0,
+///         hands_required: 1,
+///         classification: WeaponClassification::MartialMelee,
+///     }),
+///     base_cost: 10,
+///     sell_cost: 5,
+///     alignment_restriction: None,
+///     constant_bonus: None,
+///     temporary_bonus: None,
+///     spell_effect: None,
+///     max_charges: 0,
+///     is_cursed: false,
+///     icon_path: None,
+///     tags: vec![],
+///     mesh_descriptor_override: None,
+/// };
+///
+/// let desc = ItemMeshDescriptor::from_item(&short_sword);
+/// assert_eq!(desc.category, antares::domain::visual::item_mesh::ItemMeshCategory::Sword);
+/// assert!(!desc.emissive);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemMeshDescriptor {
+    /// Visual category → distinct mesh shape
+    pub category: ItemMeshCategory,
+
+    /// Normalised blade / shaft length in `[0.0, 1.0]`.
+    /// Used by sword/dagger/staff shapes; ignored for other categories.
+    pub blade_length: f32,
+
+    /// Primary surface color `[r, g, b, a]`
+    pub primary_color: [f32; 4],
+
+    /// Secondary / accent color `[r, g, b, a]` (e.g., handle, crossguard)
+    pub accent_color: [f32; 4],
+
+    /// Whether the material emits light (magical glow)
+    pub emissive: bool,
+
+    /// Emissive color when `emissive` is `true`
+    pub emissive_color: [f32; 3],
+
+    /// World-space scale applied to the entire item mesh
+    pub scale: f32,
+}
+
+impl ItemMeshDescriptor {
+    /// Derives an [`ItemMeshDescriptor`] from an [`Item`] definition.
+    ///
+    /// This is a **pure function** with no side-effects and no Bevy dependency.
+    /// It inspects `item.item_type`, sub-type classification fields, tags,
+    /// bonus values, and charge data to produce a complete descriptor.
+    ///
+    /// Any `mesh_descriptor_override` present on the item is applied on top of
+    /// the auto-derived values so campaign authors can customise visuals.
+    ///
+    /// # Arguments
+    ///
+    /// * `item` - Reference to the item whose mesh descriptor to derive.
+    ///
+    /// # Returns
+    ///
+    /// A fully-populated [`ItemMeshDescriptor`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::{Item, ItemType, ConsumableData, ConsumableEffect};
+    /// use antares::domain::visual::item_mesh::{ItemMeshDescriptor, ItemMeshCategory};
+    ///
+    /// let potion = Item {
+    ///     id: 50,
+    ///     name: "Healing Potion".to_string(),
+    ///     item_type: ItemType::Consumable(ConsumableData {
+    ///         effect: ConsumableEffect::HealHp(20),
+    ///         is_combat_usable: true,
+    ///     }),
+    ///     base_cost: 50,
+    ///     sell_cost: 25,
+    ///     alignment_restriction: None,
+    ///     constant_bonus: None,
+    ///     temporary_bonus: None,
+    ///     spell_effect: None,
+    ///     max_charges: 0,
+    ///     is_cursed: false,
+    ///     icon_path: None,
+    ///     tags: vec![],
+    ///     mesh_descriptor_override: None,
+    /// };
+    ///
+    /// let desc = ItemMeshDescriptor::from_item(&potion);
+    /// assert_eq!(desc.category, ItemMeshCategory::Potion);
+    /// assert_eq!(desc.primary_color, [0.85, 0.10, 0.10, 1.0]); // red = heal
+    /// ```
+    pub fn from_item(item: &Item) -> Self {
+        let is_two_handed = item.tags.iter().any(|t| t == "two_handed");
+
+        let mut desc = match &item.item_type {
+            ItemType::Weapon(wd) => Self::from_weapon(wd, is_two_handed),
+            ItemType::Armor(ad) => Self::from_armor(ad),
+            ItemType::Accessory(acc) => Self::from_accessory(acc),
+            ItemType::Consumable(cd) => Self::from_consumable(cd),
+            ItemType::Ammo(_) => Self::ammo_descriptor(),
+            ItemType::Quest(_) => Self::quest_descriptor(),
+        };
+
+        // Apply magical glow if item has charges or constant bonus
+        if item.is_magical() {
+            desc.emissive = true;
+            desc.emissive_color = EMISSIVE_MAGIC;
+        }
+
+        // Cursed items override: dark tint + purple glow (takes priority over
+        // magical glow so the player can recognise the curse visually)
+        if item.is_cursed {
+            desc.primary_color = COLOR_CURSED;
+            desc.emissive = true;
+            desc.emissive_color = EMISSIVE_CURSED;
+        }
+
+        // Apply campaign-author override (last, highest priority)
+        if let Some(ref ov) = item.mesh_descriptor_override {
+            if let Some(c) = ov.primary_color {
+                desc.primary_color = c;
+            }
+            if let Some(c) = ov.accent_color {
+                desc.accent_color = c;
+            }
+            if let Some(s) = ov.scale {
+                if s > 0.0 {
+                    desc.scale = s;
+                }
+            }
+            if let Some(e) = ov.emissive {
+                // A non-zero emissive override enables the flag
+                let nonzero = e[0] != 0.0 || e[1] != 0.0 || e[2] != 0.0;
+                desc.emissive = nonzero;
+                desc.emissive_color = e;
+            }
+        }
+
+        desc
+    }
+
+    // ── Weapon ──────────────────────────────────────────────────────────────
+
+    fn from_weapon(wd: &crate::domain::items::types::WeaponData, is_two_handed: bool) -> Self {
+        let sides = wd.damage.sides as f32;
+        let blade_length = (sides * BLADE_SIDES_FACTOR).clamp(BLADE_LENGTH_MIN, BLADE_LENGTH_MAX);
+
+        let scale_mult = if is_two_handed {
+            TWO_HANDED_SCALE_MULT
+        } else {
+            1.0
+        };
+
+        match wd.classification {
+            WeaponClassification::Simple => {
+                // Simple weapons: daggers (low sides), clubs (blunt)
+                // Use Dagger for Simple ranged/piercing, Blunt for clubs
+                if wd.damage.sides <= 4 {
+                    Self {
+                        category: ItemMeshCategory::Dagger,
+                        blade_length: blade_length * 0.7, // daggers shorter
+                        primary_color: COLOR_STEEL,
+                        accent_color: COLOR_WOOD,
+                        emissive: false,
+                        emissive_color: [0.0; 3],
+                        scale: BASE_SCALE * scale_mult,
+                    }
+                } else {
+                    // clubs, quarterstaffs tagged simple
+                    Self {
+                        category: ItemMeshCategory::Blunt,
+                        blade_length,
+                        primary_color: COLOR_WOOD,
+                        accent_color: COLOR_IRON,
+                        emissive: false,
+                        emissive_color: [0.0; 3],
+                        scale: BASE_SCALE * scale_mult,
+                    }
+                }
+            }
+            WeaponClassification::MartialMelee => {
+                // Long swords, great swords, axes
+                if is_two_handed {
+                    // Two-handed great swords / battleaxes → Staff category
+                    // (long polearm-like silhouette) or Sword with bigger scale
+                    Self {
+                        category: ItemMeshCategory::Sword,
+                        blade_length,
+                        primary_color: COLOR_STEEL,
+                        accent_color: COLOR_IRON,
+                        emissive: false,
+                        emissive_color: [0.0; 3],
+                        scale: BASE_SCALE * scale_mult,
+                    }
+                } else {
+                    Self {
+                        category: ItemMeshCategory::Sword,
+                        blade_length,
+                        primary_color: COLOR_STEEL,
+                        accent_color: COLOR_WOOD,
+                        emissive: false,
+                        emissive_color: [0.0; 3],
+                        scale: BASE_SCALE,
+                    }
+                }
+            }
+            WeaponClassification::MartialRanged => Self {
+                category: ItemMeshCategory::Bow,
+                blade_length,
+                primary_color: COLOR_WOOD,
+                accent_color: COLOR_LEATHER,
+                emissive: false,
+                emissive_color: [0.0; 3],
+                scale: BASE_SCALE * scale_mult,
+            },
+            WeaponClassification::Blunt => Self {
+                category: ItemMeshCategory::Blunt,
+                blade_length,
+                primary_color: COLOR_IRON,
+                accent_color: COLOR_WOOD,
+                emissive: false,
+                emissive_color: [0.0; 3],
+                scale: BASE_SCALE * scale_mult,
+            },
+            WeaponClassification::Unarmed => Self {
+                category: ItemMeshCategory::Blunt,
+                blade_length: BLADE_LENGTH_MIN,
+                primary_color: COLOR_LEATHER,
+                accent_color: COLOR_LEATHER,
+                emissive: false,
+                emissive_color: [0.0; 3],
+                scale: BASE_SCALE * SMALL_SCALE_MULT,
+            },
+        }
+    }
+
+    // ── Armor ────────────────────────────────────────────────────────────────
+
+    fn from_armor(ad: &crate::domain::items::types::ArmorData) -> Self {
+        match ad.classification {
+            ArmorClassification::Light => Self {
+                category: ItemMeshCategory::BodyArmor,
+                blade_length: 0.5,
+                primary_color: COLOR_LEATHER,
+                accent_color: COLOR_LEATHER,
+                emissive: false,
+                emissive_color: [0.0; 3],
+                scale: BASE_SCALE,
+            },
+            ArmorClassification::Medium => Self {
+                category: ItemMeshCategory::BodyArmor,
+                blade_length: 0.6,
+                primary_color: COLOR_IRON,
+                accent_color: COLOR_LEATHER,
+                emissive: false,
+                emissive_color: [0.0; 3],
+                scale: BASE_SCALE * 1.1,
+            },
+            ArmorClassification::Heavy => Self {
+                category: ItemMeshCategory::BodyArmor,
+                blade_length: 0.7,
+                primary_color: COLOR_SILVER,
+                accent_color: COLOR_IRON,
+                emissive: false,
+                emissive_color: [0.0; 3],
+                scale: BASE_SCALE * 1.2,
+            },
+            ArmorClassification::Shield => Self {
+                category: ItemMeshCategory::Shield,
+                blade_length: 0.5,
+                primary_color: COLOR_IRON,
+                accent_color: COLOR_WOOD,
+                emissive: false,
+                emissive_color: [0.0; 3],
+                scale: BASE_SCALE,
+            },
+        }
+    }
+
+    // ── Accessory ────────────────────────────────────────────────────────────
+
+    fn from_accessory(acc: &crate::domain::items::types::AccessoryData) -> Self {
+        let (category, primary, accent, scale_mult) = match acc.slot {
+            AccessorySlot::Ring => (
+                ItemMeshCategory::Ring,
+                COLOR_GOLD,
+                COLOR_GOLD,
+                SMALL_SCALE_MULT,
+            ),
+            AccessorySlot::Amulet => (
+                ItemMeshCategory::Amulet,
+                COLOR_GOLD,
+                COLOR_SILVER,
+                SMALL_SCALE_MULT * 1.2,
+            ),
+            AccessorySlot::Belt => (
+                ItemMeshCategory::Belt,
+                COLOR_LEATHER,
+                COLOR_IRON,
+                SMALL_SCALE_MULT * 1.5,
+            ),
+            AccessorySlot::Cloak => (ItemMeshCategory::Cloak, COLOR_LEATHER, COLOR_WOOD, 1.0),
+        };
+        Self {
+            category,
+            blade_length: 0.0,
+            primary_color: primary,
+            accent_color: accent,
+            emissive: false,
+            emissive_color: [0.0; 3],
+            scale: BASE_SCALE * scale_mult,
+        }
+    }
+
+    // ── Consumable ───────────────────────────────────────────────────────────
+
+    fn from_consumable(cd: &crate::domain::items::types::ConsumableData) -> Self {
+        // Distinguish Scroll from Potion based on effect type.
+        // Non-hp/sp effects that look more scroll-like:
+        let is_scroll = matches!(cd.effect, ConsumableEffect::CureCondition(_));
+
+        if is_scroll {
+            return Self {
+                category: ItemMeshCategory::Scroll,
+                blade_length: 0.5,
+                primary_color: COLOR_PARCHMENT,
+                accent_color: COLOR_WOOD,
+                emissive: false,
+                emissive_color: [0.0; 3],
+                scale: BASE_SCALE * SMALL_SCALE_MULT * 1.4,
+            };
+        }
+
+        let primary_color = match cd.effect {
+            ConsumableEffect::HealHp(_) => COLOR_RED,
+            ConsumableEffect::RestoreSp(_) => COLOR_BLUE,
+            ConsumableEffect::CureCondition(_) => COLOR_GREEN, // unreachable via early return above
+            ConsumableEffect::BoostAttribute(_, _) => COLOR_YELLOW,
+            ConsumableEffect::BoostResistance(_, _) => COLOR_GREEN,
+        };
+
+        Self {
+            category: ItemMeshCategory::Potion,
+            blade_length: 0.0,
+            primary_color,
+            accent_color: [
+                primary_color[0] * 0.7,
+                primary_color[1] * 0.7,
+                primary_color[2] * 0.7,
+                1.0,
+            ],
+            emissive: false,
+            emissive_color: [0.0; 3],
+            scale: BASE_SCALE * SMALL_SCALE_MULT,
+        }
+    }
+
+    // ── Ammo ─────────────────────────────────────────────────────────────────
+
+    fn ammo_descriptor() -> Self {
+        Self {
+            category: ItemMeshCategory::Ammo,
+            blade_length: 0.6,
+            primary_color: COLOR_AMMO,
+            accent_color: COLOR_WOOD,
+            emissive: false,
+            emissive_color: [0.0; 3],
+            scale: BASE_SCALE * SMALL_SCALE_MULT,
+        }
+    }
+
+    // ── Quest ────────────────────────────────────────────────────────────────
+
+    fn quest_descriptor() -> Self {
+        Self {
+            category: ItemMeshCategory::QuestItem,
+            blade_length: 0.5,
+            primary_color: COLOR_QUEST,
+            accent_color: COLOR_GOLD,
+            emissive: true,
+            emissive_color: [0.5, 0.0, 0.5],
+            scale: BASE_SCALE,
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // to_creature_definition
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Converts this descriptor into a [`CreatureDefinition`] that the
+    /// existing `spawn_creature` pipeline can render.
+    ///
+    /// The item is represented as a **flat-lying** object on the ground — a
+    /// single-mesh creature whose transform lays the geometry on the XZ plane
+    /// (Y = 0).  The exact shape is determined by [`ItemMeshCategory`].
+    ///
+    /// The returned `CreatureDefinition` has:
+    /// - `id = 0` (caller must assign a unique ID before registering)
+    /// - `name` describing the category for debugging
+    /// - exactly **one** [`MeshDefinition`] and one [`MeshTransform`]
+    /// - `scale` from `self.scale`
+    /// - `color_tint = None` (color is baked into the mesh material)
+    ///
+    /// # Errors
+    ///
+    /// This function always succeeds; call [`CreatureDefinition::validate`] on
+    /// the result to confirm well-formedness before use.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::{Item, ItemType, WeaponData, WeaponClassification};
+    /// use antares::domain::types::DiceRoll;
+    /// use antares::domain::visual::item_mesh::ItemMeshDescriptor;
+    ///
+    /// let sword = Item {
+    ///     id: 4,
+    ///     name: "Long Sword".to_string(),
+    ///     item_type: ItemType::Weapon(WeaponData {
+    ///         damage: DiceRoll::new(1, 8, 0),
+    ///         bonus: 0,
+    ///         hands_required: 1,
+    ///         classification: WeaponClassification::MartialMelee,
+    ///     }),
+    ///     base_cost: 15,
+    ///     sell_cost: 7,
+    ///     alignment_restriction: None,
+    ///     constant_bonus: None,
+    ///     temporary_bonus: None,
+    ///     spell_effect: None,
+    ///     max_charges: 0,
+    ///     is_cursed: false,
+    ///     icon_path: None,
+    ///     tags: vec![],
+    ///     mesh_descriptor_override: None,
+    /// };
+    ///
+    /// let desc = ItemMeshDescriptor::from_item(&sword);
+    /// let creature_def = desc.to_creature_definition();
+    /// assert!(creature_def.validate().is_ok());
+    /// ```
+    pub fn to_creature_definition(&self) -> CreatureDefinition {
+        let mesh = self.build_mesh();
+        let name = format!("item_mesh_{:?}", self.category).to_lowercase();
+
+        CreatureDefinition {
+            id: 0,
+            name,
+            meshes: vec![mesh],
+            mesh_transforms: vec![MeshTransform::identity()],
+            scale: self.scale,
+            color_tint: None,
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Mesh geometry builders
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Builds the [`MeshDefinition`] for this descriptor's category.
+    fn build_mesh(&self) -> MeshDefinition {
+        match self.category {
+            ItemMeshCategory::Sword | ItemMeshCategory::Dagger => self.build_blade_mesh(),
+            ItemMeshCategory::Blunt => self.build_blunt_mesh(),
+            ItemMeshCategory::Staff => self.build_staff_mesh(),
+            ItemMeshCategory::Bow => self.build_bow_mesh(),
+            ItemMeshCategory::BodyArmor => self.build_armor_mesh(),
+            ItemMeshCategory::Helmet => self.build_helmet_mesh(),
+            ItemMeshCategory::Shield => self.build_shield_mesh(),
+            ItemMeshCategory::Boots => self.build_boots_mesh(),
+            ItemMeshCategory::Ring | ItemMeshCategory::Amulet => self.build_ring_mesh(),
+            ItemMeshCategory::Belt => self.build_belt_mesh(),
+            ItemMeshCategory::Cloak => self.build_cloak_mesh(),
+            ItemMeshCategory::Potion => self.build_potion_mesh(),
+            ItemMeshCategory::Scroll => self.build_scroll_mesh(),
+            ItemMeshCategory::Ammo => self.build_ammo_mesh(),
+            ItemMeshCategory::QuestItem => self.build_quest_mesh(),
+        }
+    }
+
+    // ─── Blade (sword / dagger) ───────────────────────────────────────────
+
+    /// Flat elongated diamond silhouette lying on the XZ plane.
+    ///
+    /// ```text
+    ///    tip (0, 0, +half_len)
+    ///   / \
+    ///  L   R  (±half_width, 0, 0)
+    ///   \ /
+    ///    pommel (0, 0, -half_len * 0.3)
+    /// ```
+    fn build_blade_mesh(&self) -> MeshDefinition {
+        let half_len = (0.3 + self.blade_length * 0.7) * 0.5;
+        let half_width = half_len * 0.12; // narrow diamond
+        let pommel_z = -half_len * 0.30;
+
+        //        0: tip
+        //        1: right
+        //        2: left
+        //        3: pommel
+        let vertices: Vec<[f32; 3]> = vec![
+            [0.0, 0.0, half_len],    // 0 tip
+            [half_width, 0.0, 0.0],  // 1 right
+            [-half_width, 0.0, 0.0], // 2 left
+            [0.0, 0.0, pommel_z],    // 3 pommel
+        ];
+        let indices: Vec<u32> = vec![
+            0, 1, 3, // right face
+            0, 3, 2, // left face
+        ];
+        let normal = [0.0_f32, 1.0, 0.0];
+        let normals = Some(vec![normal; 4]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("blade".to_string()),
+            vertices,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Blunt weapon ────────────────────────────────────────────────────────
+
+    /// Flat oval lying on the XZ plane, slightly thicker than a blade.
+    fn build_blunt_mesh(&self) -> MeshDefinition {
+        let half_len = 0.25 + self.blade_length * 0.25;
+        let half_w = half_len * 0.20;
+
+        // Hexagonal flat oval: tip, r-front, r-back, pommel, l-back, l-front
+        let vertices: Vec<[f32; 3]> = vec![
+            [0.0, 0.0, half_len],            // 0 top
+            [half_w, 0.0, half_len * 0.4],   // 1 right-top
+            [half_w, 0.0, -half_len * 0.4],  // 2 right-bottom
+            [0.0, 0.0, -half_len],           // 3 bottom
+            [-half_w, 0.0, -half_len * 0.4], // 4 left-bottom
+            [-half_w, 0.0, half_len * 0.4],  // 5 left-top
+        ];
+        let indices: Vec<u32> = vec![0, 1, 5, 1, 2, 5, 2, 4, 5, 2, 3, 4];
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 6]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("blunt".to_string()),
+            vertices,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Staff / polearm ─────────────────────────────────────────────────────
+
+    /// Long thin rectangular bar on the XZ plane.
+    fn build_staff_mesh(&self) -> MeshDefinition {
+        let half_len = 0.45;
+        let half_w = 0.03;
+        let vertices: Vec<[f32; 3]> = vec![
+            [-half_w, 0.0, half_len],  // 0
+            [half_w, 0.0, half_len],   // 1
+            [half_w, 0.0, -half_len],  // 2
+            [-half_w, 0.0, -half_len], // 3
+        ];
+        let indices: Vec<u32> = vec![0, 1, 2, 0, 2, 3];
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 4]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("staff".to_string()),
+            vertices,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Bow ─────────────────────────────────────────────────────────────────
+
+    /// Arc shape approximated as a thin curved quad on the XZ plane.
+    fn build_bow_mesh(&self) -> MeshDefinition {
+        // Approximate arc with 6 vertices in an arc
+        let half_len = 0.40;
+        let curve = 0.12; // how far tips bow outward
+
+        let vertices: Vec<[f32; 3]> = vec![
+            [curve, 0.0, half_len],  // 0 top-tip
+            [0.03, 0.0, half_len],   // 1 top-inner
+            [0.0, 0.0, 0.0],         // 2 mid-inner
+            [0.03, 0.0, -half_len],  // 3 bot-inner
+            [curve, 0.0, -half_len], // 4 bot-tip
+            [-0.02, 0.0, -half_len], // 5 bot-back
+            [-0.02, 0.0, half_len],  // 6 top-back
+        ];
+        let indices: Vec<u32> = vec![0, 1, 6, 1, 2, 6, 2, 3, 5, 3, 4, 5];
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 7]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("bow".to_string()),
+            vertices,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Body armor ──────────────────────────────────────────────────────────
+
+    /// Stylised breastplate silhouette — wide trapezoid on the XZ plane.
+    fn build_armor_mesh(&self) -> MeshDefinition {
+        let top_hw = 0.20; // shoulder width (half)
+        let bot_hw = 0.14; // hip width (half)
+        let half_h = 0.28;
+        let vertices: Vec<[f32; 3]> = vec![
+            [-top_hw, 0.0, half_h],  // 0 shoulder-left
+            [top_hw, 0.0, half_h],   // 1 shoulder-right
+            [bot_hw, 0.0, -half_h],  // 2 hip-right
+            [-bot_hw, 0.0, -half_h], // 3 hip-left
+        ];
+        let indices: Vec<u32> = vec![0, 1, 2, 0, 2, 3];
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 4]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("body_armor".to_string()),
+            vertices,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Helmet ──────────────────────────────────────────────────────────────
+
+    /// Flat pentagon dome silhouette.
+    ///
+    /// Uses a centre vertex (index 5) as the fan hub to avoid degenerate
+    /// triangles.
+    fn build_helmet_mesh(&self) -> MeshDefinition {
+        let r = 0.22_f32;
+        use std::f32::consts::PI;
+        // 5 perimeter vertices + 1 centre vertex
+        let mut verts: Vec<[f32; 3]> = (0..5)
+            .map(|i| {
+                let angle = PI / 2.0 + (i as f32) * 2.0 * PI / 5.0;
+                [r * angle.cos(), 0.0, r * angle.sin()]
+            })
+            .collect();
+        // centre vertex at index 5
+        verts.push([0.0, 0.0, 0.0]);
+        let centre = 5_u32;
+        let mut indices: Vec<u32> = Vec::with_capacity(5 * 3);
+        for i in 0..5_u32 {
+            indices.push(centre);
+            indices.push(i);
+            indices.push((i + 1) % 5);
+        }
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 6]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("helmet".to_string()),
+            vertices: verts,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Shield ───────────────────────────────────────────────────────────────
+
+    /// Flat kite-shield silhouette.
+    fn build_shield_mesh(&self) -> MeshDefinition {
+        let hw = 0.18_f32;
+        let ht = 0.26_f32;
+        let vertices: Vec<[f32; 3]> = vec![
+            [0.0, 0.0, ht],              // 0 top
+            [hw, 0.0, 0.05],             // 1 right
+            [hw * 0.6, 0.0, -ht * 0.6],  // 2 bot-right
+            [0.0, 0.0, -ht],             // 3 tip
+            [-hw * 0.6, 0.0, -ht * 0.6], // 4 bot-left
+            [-hw, 0.0, 0.05],            // 5 left
+        ];
+        let indices: Vec<u32> = vec![0, 1, 5, 1, 2, 4, 1, 4, 5, 2, 3, 4];
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 6]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("shield".to_string()),
+            vertices,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Boots ───────────────────────────────────────────────────────────────
+
+    /// Flat L-shaped silhouette for boots.
+    fn build_boots_mesh(&self) -> MeshDefinition {
+        let vertices: Vec<[f32; 3]> = vec![
+            [-0.06, 0.0, 0.20],  // 0 top-left
+            [0.06, 0.0, 0.20],   // 1 top-right
+            [0.06, 0.0, -0.05],  // 2 ankle-right
+            [0.18, 0.0, -0.05],  // 3 toe-right-top
+            [0.18, 0.0, -0.18],  // 4 toe-right-bot
+            [-0.06, 0.0, -0.18], // 5 toe-left-bot
+        ];
+        let indices: Vec<u32> = vec![0, 1, 5, 1, 2, 5, 2, 4, 5, 2, 3, 4];
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 6]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("boots".to_string()),
+            vertices,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Ring / Amulet ───────────────────────────────────────────────────────
+
+    /// Flat octagon approximating a ring lying on the XZ plane.
+    ///
+    /// Uses a center vertex (index 8) as the fan hub so that no triangle
+    /// ever has duplicate indices (which would be degenerate).
+    fn build_ring_mesh(&self) -> MeshDefinition {
+        use std::f32::consts::PI;
+        let r = 0.10_f32;
+        // 8 perimeter vertices + 1 centre vertex
+        let mut verts: Vec<[f32; 3]> = (0..8)
+            .map(|i| {
+                let angle = (i as f32) * 2.0 * PI / 8.0;
+                [r * angle.cos(), 0.0, r * angle.sin()]
+            })
+            .collect();
+        // centre vertex at index 8
+        verts.push([0.0, 0.0, 0.0]);
+        let centre = 8_u32;
+        // Fan from centre: (centre, i, i+1) for i in 0..8
+        let mut indices: Vec<u32> = Vec::with_capacity(8 * 3);
+        for i in 0..8_u32 {
+            indices.push(centre);
+            indices.push(i);
+            indices.push((i + 1) % 8);
+        }
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 9]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("ring".to_string()),
+            vertices: verts,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Belt ─────────────────────────────────────────────────────────────────
+
+    /// Flat thin rectangle representing a belt.
+    fn build_belt_mesh(&self) -> MeshDefinition {
+        let hw = 0.22_f32;
+        let hh = 0.04_f32;
+        let vertices: Vec<[f32; 3]> = vec![
+            [-hw, 0.0, hh],
+            [hw, 0.0, hh],
+            [hw, 0.0, -hh],
+            [-hw, 0.0, -hh],
+        ];
+        let indices: Vec<u32> = vec![0, 1, 2, 0, 2, 3];
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 4]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("belt".to_string()),
+            vertices,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Cloak ───────────────────────────────────────────────────────────────
+
+    /// Wide arc / teardrop cloak silhouette.
+    fn build_cloak_mesh(&self) -> MeshDefinition {
+        let hw = 0.28_f32;
+        let ht = 0.32_f32;
+        let vertices: Vec<[f32; 3]> = vec![
+            [0.0, 0.0, ht * 0.5],   // 0 collar-centre
+            [-hw, 0.0, ht * 0.3],   // 1 collar-left
+            [-hw * 0.8, 0.0, -ht],  // 2 hem-left
+            [0.0, 0.0, -ht * 1.05], // 3 hem-centre
+            [hw * 0.8, 0.0, -ht],   // 4 hem-right
+            [hw, 0.0, ht * 0.3],    // 5 collar-right
+        ];
+        let indices: Vec<u32> = vec![0, 5, 1, 1, 5, 4, 1, 4, 2, 2, 4, 3];
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 6]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("cloak".to_string()),
+            vertices,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Potion ──────────────────────────────────────────────────────────────
+
+    /// Round flask silhouette — hexagonal disc.
+    ///
+    /// Uses a centre vertex (index 6) as the fan hub to avoid degenerate
+    /// triangles.
+    fn build_potion_mesh(&self) -> MeshDefinition {
+        use std::f32::consts::PI;
+        let r = 0.10_f32;
+        // 6 perimeter vertices + 1 centre vertex
+        let mut verts: Vec<[f32; 3]> = (0..6)
+            .map(|i| {
+                let angle = (i as f32) * 2.0 * PI / 6.0;
+                [r * angle.cos(), 0.0, r * angle.sin()]
+            })
+            .collect();
+        // centre vertex at index 6
+        verts.push([0.0, 0.0, 0.0]);
+        let centre = 6_u32;
+        let mut indices: Vec<u32> = Vec::with_capacity(6 * 3);
+        for i in 0..6_u32 {
+            indices.push(centre);
+            indices.push(i);
+            indices.push((i + 1) % 6);
+        }
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 7]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("potion".to_string()),
+            vertices: verts,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Scroll ──────────────────────────────────────────────────────────────
+
+    /// Rolled scroll cylinder-top: a thin elongated oval.
+    fn build_scroll_mesh(&self) -> MeshDefinition {
+        let hw = 0.06_f32;
+        let hl = 0.18_f32;
+        let vertices: Vec<[f32; 3]> = vec![
+            [0.0, 0.0, hl],        // 0 top
+            [hw, 0.0, hl * 0.5],   // 1 right-top
+            [hw, 0.0, -hl * 0.5],  // 2 right-bot
+            [0.0, 0.0, -hl],       // 3 bottom
+            [-hw, 0.0, -hl * 0.5], // 4 left-bot
+            [-hw, 0.0, hl * 0.5],  // 5 left-top
+        ];
+        let indices: Vec<u32> = vec![0, 1, 5, 1, 2, 4, 1, 4, 5, 2, 3, 4];
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 6]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("scroll".to_string()),
+            vertices,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Ammo ────────────────────────────────────────────────────────────────
+
+    /// Bundle of arrows / bolts: a thin elongated diamond.
+    fn build_ammo_mesh(&self) -> MeshDefinition {
+        let hl = 0.22_f32;
+        let hw = 0.025_f32;
+        let vertices: Vec<[f32; 3]> = vec![
+            [0.0, 0.0, hl],
+            [hw, 0.0, 0.0],
+            [0.0, 0.0, -hl],
+            [-hw, 0.0, 0.0],
+        ];
+        let indices: Vec<u32> = vec![0, 1, 3, 1, 2, 3];
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; 4]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("ammo".to_string()),
+            vertices,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─── Quest item ──────────────────────────────────────────────────────────
+
+    /// Star / gem silhouette for quest items.
+    ///
+    /// 8-pointed star via alternating outer / inner vertices.  A dedicated
+    /// centre vertex (index 16) is used as the fan hub so that no triangle
+    /// contains duplicate indices.
+    fn build_quest_mesh(&self) -> MeshDefinition {
+        use std::f32::consts::PI;
+        let outer_r = 0.15_f32;
+        let inner_r = 0.07_f32;
+        // 16 perimeter vertices (alternating outer / inner) + 1 centre
+        let mut verts: Vec<[f32; 3]> = Vec::with_capacity(17);
+        for i in 0..8 {
+            let outer_angle = PI / 2.0 + (i as f32) * 2.0 * PI / 8.0;
+            let inner_angle = outer_angle + PI / 8.0;
+            verts.push([
+                outer_r * outer_angle.cos(),
+                0.0,
+                outer_r * outer_angle.sin(),
+            ]);
+            verts.push([
+                inner_r * inner_angle.cos(),
+                0.0,
+                inner_r * inner_angle.sin(),
+            ]);
+        }
+        // centre vertex at index 16
+        verts.push([0.0, 0.0, 0.0]);
+        let centre = 16_u32;
+        let n_perimeter = 16_u32;
+        let mut indices: Vec<u32> = Vec::with_capacity(16 * 3);
+        for i in 0..n_perimeter {
+            indices.push(centre);
+            indices.push(i);
+            indices.push((i + 1) % n_perimeter);
+        }
+        let normals = Some(vec![[0.0_f32, 1.0, 0.0]; verts.len()]);
+        let material = self.make_material(self.primary_color);
+        MeshDefinition {
+            name: Some("quest_item".to_string()),
+            vertices: verts,
+            indices,
+            normals,
+            uvs: None,
+            color: self.primary_color,
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material),
+            texture_path: None,
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    fn make_material(&self, base_color: [f32; 4]) -> MaterialDefinition {
+        let emissive = if self.emissive {
+            Some(self.emissive_color)
+        } else {
+            None
+        };
+        MaterialDefinition {
+            base_color,
+            metallic: if matches!(
+                self.category,
+                ItemMeshCategory::Sword
+                    | ItemMeshCategory::Dagger
+                    | ItemMeshCategory::Blunt
+                    | ItemMeshCategory::Helmet
+                    | ItemMeshCategory::Shield
+                    | ItemMeshCategory::Ring
+                    | ItemMeshCategory::Amulet
+            ) {
+                0.6
+            } else {
+                0.0
+            },
+            roughness: 0.5,
+            emissive,
+            alpha_mode: AlphaMode::Opaque,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::items::types::{
+        AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorClassification, ArmorData, Bonus,
+        BonusAttribute, ConsumableData, ConsumableEffect, Item, ItemType, MagicItemClassification,
+        QuestData, WeaponClassification, WeaponData,
+    };
+    use crate::domain::types::{DiceRoll, ItemId};
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    fn make_weapon(
+        id: ItemId,
+        name: &str,
+        sides: u8,
+        hands: u8,
+        classification: WeaponClassification,
+        tags: Vec<String>,
+    ) -> Item {
+        Item {
+            id,
+            name: name.to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, sides, 0),
+                bonus: 0,
+                hands_required: hands,
+                classification,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags,
+            mesh_descriptor_override: None,
+        }
+    }
+
+    fn make_consumable(id: ItemId, name: &str, effect: ConsumableEffect) -> Item {
+        Item {
+            id,
+            name: name.to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect,
+                is_combat_usable: true,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        }
+    }
+
+    // ── ItemMeshCategory tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_sword_descriptor_from_short_sword() {
+        // Short sword: 1d6, MartialMelee, 1-handed
+        let short_sword = make_weapon(
+            3,
+            "Short Sword",
+            6,
+            1,
+            WeaponClassification::MartialMelee,
+            vec![],
+        );
+        let desc = ItemMeshDescriptor::from_item(&short_sword);
+
+        assert_eq!(desc.category, ItemMeshCategory::Sword);
+        // Blade length derived from 6 sides × BLADE_SIDES_FACTOR = 0.48, clamped
+        let expected_blade =
+            (6.0_f32 * BLADE_SIDES_FACTOR).clamp(BLADE_LENGTH_MIN, BLADE_LENGTH_MAX);
+        assert!((desc.blade_length - expected_blade).abs() < f32::EPSILON);
+        assert!(!desc.emissive, "non-magical short sword must not emit");
+    }
+
+    #[test]
+    fn test_dagger_descriptor_short_blade() {
+        // Dagger: 1d4, Simple, 1-handed → Dagger category (≤4 sides)
+        let dagger = make_weapon(2, "Dagger", 4, 1, WeaponClassification::Simple, vec![]);
+        let desc = ItemMeshDescriptor::from_item(&dagger);
+
+        assert_eq!(desc.category, ItemMeshCategory::Dagger);
+        // Dagger blade_length = computed * 0.7
+        let base = (4.0_f32 * BLADE_SIDES_FACTOR).clamp(BLADE_LENGTH_MIN, BLADE_LENGTH_MAX);
+        let expected = base * 0.7;
+        assert!((desc.blade_length - expected).abs() < f32::EPSILON);
+
+        // Dagger blade must be shorter than a sword of equal sides
+        let sword_desc = ItemMeshDescriptor::from_item(&make_weapon(
+            4,
+            "Sword",
+            4,
+            1,
+            WeaponClassification::MartialMelee,
+            vec![],
+        ));
+        assert!(desc.blade_length < sword_desc.blade_length);
+    }
+
+    #[test]
+    fn test_potion_color_heal_is_red() {
+        let potion = make_consumable(50, "Healing Potion", ConsumableEffect::HealHp(20));
+        let desc = ItemMeshDescriptor::from_item(&potion);
+
+        assert_eq!(desc.category, ItemMeshCategory::Potion);
+        assert_eq!(desc.primary_color, COLOR_RED);
+    }
+
+    #[test]
+    fn test_potion_color_restore_sp_is_blue() {
+        let potion = make_consumable(51, "Mana Potion", ConsumableEffect::RestoreSp(15));
+        let desc = ItemMeshDescriptor::from_item(&potion);
+
+        assert_eq!(desc.category, ItemMeshCategory::Potion);
+        assert_eq!(desc.primary_color, COLOR_BLUE);
+    }
+
+    #[test]
+    fn test_potion_color_boost_attribute_is_yellow() {
+        use crate::domain::items::types::AttributeType;
+        let potion = make_consumable(
+            52,
+            "Might Elixir",
+            ConsumableEffect::BoostAttribute(AttributeType::Might, 5),
+        );
+        let desc = ItemMeshDescriptor::from_item(&potion);
+
+        assert_eq!(desc.category, ItemMeshCategory::Potion);
+        assert_eq!(desc.primary_color, COLOR_YELLOW);
+    }
+
+    #[test]
+    fn test_cure_condition_produces_scroll() {
+        // CureCondition → Scroll category (not Potion)
+        let scroll = make_consumable(53, "Scroll of Cure", ConsumableEffect::CureCondition(0xFF));
+        let desc = ItemMeshDescriptor::from_item(&scroll);
+
+        assert_eq!(desc.category, ItemMeshCategory::Scroll);
+        assert_eq!(desc.primary_color, COLOR_PARCHMENT);
+    }
+
+    #[test]
+    fn test_magical_item_emissive() {
+        // Item with max_charges > 0 is magical → emissive glow
+        let mut wand = make_weapon(
+            100,
+            "Magic Wand",
+            4,
+            1,
+            WeaponClassification::Simple,
+            vec![],
+        );
+        wand.max_charges = 5;
+
+        let desc = ItemMeshDescriptor::from_item(&wand);
+
+        assert!(desc.emissive, "charged item must be emissive");
+        assert_eq!(desc.emissive_color, EMISSIVE_MAGIC);
+    }
+
+    #[test]
+    fn test_magical_item_emissive_via_bonus() {
+        // Item with a constant_bonus is magical via is_magical()
+        let mut magic_ring = Item {
+            id: 200,
+            name: "Ring of Might".to_string(),
+            item_type: ItemType::Accessory(AccessoryData {
+                slot: AccessorySlot::Ring,
+                classification: Some(MagicItemClassification::Arcane),
+            }),
+            base_cost: 500,
+            sell_cost: 250,
+            alignment_restriction: None,
+            constant_bonus: Some(Bonus {
+                attribute: BonusAttribute::Might,
+                value: 3,
+            }),
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        let desc = ItemMeshDescriptor::from_item(&magic_ring);
+        assert!(
+            desc.emissive,
+            "item with constant_bonus is magical → emissive"
+        );
+
+        // Verify emissive even without bonus but with charges
+        magic_ring.constant_bonus = None;
+        magic_ring.max_charges = 3;
+        let desc2 = ItemMeshDescriptor::from_item(&magic_ring);
+        assert!(desc2.emissive);
+    }
+
+    #[test]
+    fn test_cursed_item_dark_tint() {
+        let mut cursed_sword = make_weapon(
+            99,
+            "Cursed Blade",
+            8,
+            1,
+            WeaponClassification::MartialMelee,
+            vec![],
+        );
+        cursed_sword.is_cursed = true;
+
+        let desc = ItemMeshDescriptor::from_item(&cursed_sword);
+
+        assert!(desc.emissive, "cursed item must be emissive");
+        assert_eq!(
+            desc.primary_color, COLOR_CURSED,
+            "cursed item must use dark tint"
+        );
+        assert_eq!(
+            desc.emissive_color, EMISSIVE_CURSED,
+            "cursed item must emit purple"
+        );
+    }
+
+    #[test]
+    fn test_cursed_overrides_magical_glow() {
+        // When both cursed AND magical, cursed takes priority
+        let mut cursed_magic = make_weapon(
+            98,
+            "Cursed Magic Sword",
+            8,
+            1,
+            WeaponClassification::MartialMelee,
+            vec![],
+        );
+        cursed_magic.is_cursed = true;
+        cursed_magic.max_charges = 5;
+
+        let desc = ItemMeshDescriptor::from_item(&cursed_magic);
+
+        assert_eq!(
+            desc.emissive_color, EMISSIVE_CURSED,
+            "curse must override magic glow"
+        );
+        assert_eq!(desc.primary_color, COLOR_CURSED);
+    }
+
+    #[test]
+    fn test_two_handed_weapon_larger_scale() {
+        let one_handed = make_weapon(
+            10,
+            "Longsword",
+            8,
+            1,
+            WeaponClassification::MartialMelee,
+            vec![],
+        );
+        let two_handed = make_weapon(
+            11,
+            "Greatsword",
+            8,
+            2,
+            WeaponClassification::MartialMelee,
+            vec!["two_handed".to_string()],
+        );
+
+        let desc_one = ItemMeshDescriptor::from_item(&one_handed);
+        let desc_two = ItemMeshDescriptor::from_item(&two_handed);
+
+        assert!(
+            desc_two.scale > desc_one.scale,
+            "two-handed weapon ({}) must have larger scale than one-handed ({})",
+            desc_two.scale,
+            desc_one.scale
+        );
+    }
+
+    #[test]
+    fn test_descriptor_to_creature_definition_valid() {
+        // Round-trip for every category
+        let items: Vec<Item> = vec![
+            make_weapon(
+                1,
+                "Short Sword",
+                6,
+                1,
+                WeaponClassification::MartialMelee,
+                vec![],
+            ),
+            make_weapon(2, "Dagger", 4, 1, WeaponClassification::Simple, vec![]),
+            make_weapon(3, "Mace", 6, 1, WeaponClassification::Blunt, vec![]),
+            make_weapon(
+                4,
+                "Bow",
+                6,
+                2,
+                WeaponClassification::MartialRanged,
+                vec!["two_handed".to_string()],
+            ),
+            make_consumable(5, "Heal", ConsumableEffect::HealHp(10)),
+            make_consumable(6, "Cure", ConsumableEffect::CureCondition(0x01)),
+            Item {
+                id: 7,
+                name: "Iron Shield".to_string(),
+                item_type: ItemType::Armor(ArmorData {
+                    ac_bonus: 3,
+                    weight: 15,
+                    classification: ArmorClassification::Shield,
+                }),
+                base_cost: 20,
+                sell_cost: 10,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+            },
+            Item {
+                id: 8,
+                name: "Ruby Ring".to_string(),
+                item_type: ItemType::Accessory(AccessoryData {
+                    slot: AccessorySlot::Ring,
+                    classification: None,
+                }),
+                base_cost: 100,
+                sell_cost: 50,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+            },
+            Item {
+                id: 9,
+                name: "Arrows".to_string(),
+                item_type: ItemType::Ammo(AmmoData {
+                    ammo_type: AmmoType::Arrow,
+                    quantity: 20,
+                }),
+                base_cost: 2,
+                sell_cost: 1,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+            },
+            Item {
+                id: 10,
+                name: "Ancient Key".to_string(),
+                item_type: ItemType::Quest(QuestData {
+                    quest_id: "main_quest".to_string(),
+                    is_key_item: true,
+                }),
+                base_cost: 0,
+                sell_cost: 0,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+            },
+        ];
+
+        for item in &items {
+            let desc = ItemMeshDescriptor::from_item(item);
+            let creature_def = desc.to_creature_definition();
+            assert!(
+                creature_def.validate().is_ok(),
+                "item '{}' produced invalid CreatureDefinition: {:?}",
+                item.name,
+                creature_def.validate()
+            );
+        }
+    }
+
+    #[test]
+    fn test_override_color_applied() {
+        let mut sword = make_weapon(
+            20,
+            "Custom Sword",
+            8,
+            1,
+            WeaponClassification::MartialMelee,
+            vec![],
+        );
+        let custom_color = [0.0, 1.0, 0.0, 1.0]; // green override
+
+        sword.mesh_descriptor_override = Some(ItemMeshDescriptorOverride {
+            primary_color: Some(custom_color),
+            accent_color: None,
+            scale: None,
+            emissive: None,
+        });
+
+        let desc = ItemMeshDescriptor::from_item(&sword);
+        assert_eq!(
+            desc.primary_color, custom_color,
+            "override primary_color must be applied"
+        );
+    }
+
+    #[test]
+    fn test_override_scale_applied() {
+        let mut sword = make_weapon(
+            21,
+            "Giant Sword",
+            8,
+            1,
+            WeaponClassification::MartialMelee,
+            vec![],
+        );
+        sword.mesh_descriptor_override = Some(ItemMeshDescriptorOverride {
+            primary_color: None,
+            accent_color: None,
+            scale: Some(2.5),
+            emissive: None,
+        });
+
+        let desc = ItemMeshDescriptor::from_item(&sword);
+        assert!((desc.scale - 2.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_override_invalid_scale_ignored() {
+        let mut sword = make_weapon(
+            22,
+            "Sword",
+            8,
+            1,
+            WeaponClassification::MartialMelee,
+            vec![],
+        );
+        let auto_desc = ItemMeshDescriptor::from_item(&sword);
+        let auto_scale = auto_desc.scale;
+
+        sword.mesh_descriptor_override = Some(ItemMeshDescriptorOverride {
+            primary_color: None,
+            accent_color: None,
+            scale: Some(-1.0), // invalid
+            emissive: None,
+        });
+
+        let override_desc = ItemMeshDescriptor::from_item(&sword);
+        assert!(
+            (override_desc.scale - auto_scale).abs() < f32::EPSILON,
+            "negative scale override must be ignored"
+        );
+    }
+
+    #[test]
+    fn test_override_emissive_applied() {
+        let mut sword = make_weapon(
+            23,
+            "Glow Sword",
+            8,
+            1,
+            WeaponClassification::MartialMelee,
+            vec![],
+        );
+        let glow = [1.0, 0.0, 0.0]; // red glow
+        sword.mesh_descriptor_override = Some(ItemMeshDescriptorOverride {
+            primary_color: None,
+            accent_color: None,
+            scale: None,
+            emissive: Some(glow),
+        });
+
+        let desc = ItemMeshDescriptor::from_item(&sword);
+        assert!(desc.emissive, "non-zero override emissive must enable flag");
+        assert_eq!(desc.emissive_color, glow);
+    }
+
+    #[test]
+    fn test_override_zero_emissive_disables() {
+        // Override with all-zero emissive should DISABLE the flag
+        let mut magic_sword = make_weapon(
+            24,
+            "Silent Magic Sword",
+            8,
+            1,
+            WeaponClassification::MartialMelee,
+            vec![],
+        );
+        magic_sword.max_charges = 10; // normally makes it emissive
+
+        magic_sword.mesh_descriptor_override = Some(ItemMeshDescriptorOverride {
+            primary_color: None,
+            accent_color: None,
+            scale: None,
+            emissive: Some([0.0, 0.0, 0.0]),
+        });
+
+        let desc = ItemMeshDescriptor::from_item(&magic_sword);
+        assert!(
+            !desc.emissive,
+            "all-zero emissive override must disable glow"
+        );
+    }
+
+    #[test]
+    fn test_quest_item_descriptor_unique_shape() {
+        let quest_item = Item {
+            id: 99,
+            name: "Crystal of Power".to_string(),
+            item_type: ItemType::Quest(QuestData {
+                quest_id: "endgame".to_string(),
+                is_key_item: true,
+            }),
+            base_cost: 0,
+            sell_cost: 0,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+
+        let desc = ItemMeshDescriptor::from_item(&quest_item);
+
+        assert_eq!(desc.category, ItemMeshCategory::QuestItem);
+        assert!(desc.emissive, "quest items always glow");
+        // Quest item should use a star/gem mesh — validate round-trip
+        let creature_def = desc.to_creature_definition();
+        assert!(creature_def.validate().is_ok());
+    }
+
+    #[test]
+    fn test_all_accessory_slots_produce_valid_definitions() {
+        let slots = [
+            AccessorySlot::Ring,
+            AccessorySlot::Amulet,
+            AccessorySlot::Belt,
+            AccessorySlot::Cloak,
+        ];
+        for slot in &slots {
+            let item = Item {
+                id: 30,
+                name: format!("{:?}", slot),
+                item_type: ItemType::Accessory(AccessoryData {
+                    slot: *slot,
+                    classification: None,
+                }),
+                base_cost: 10,
+                sell_cost: 5,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+            };
+            let desc = ItemMeshDescriptor::from_item(&item);
+            let def = desc.to_creature_definition();
+            assert!(
+                def.validate().is_ok(),
+                "{:?} slot produced invalid definition",
+                slot
+            );
+        }
+    }
+
+    #[test]
+    fn test_all_armor_classifications_produce_valid_definitions() {
+        let classes = [
+            ArmorClassification::Light,
+            ArmorClassification::Medium,
+            ArmorClassification::Heavy,
+            ArmorClassification::Shield,
+        ];
+        for classification in &classes {
+            let item = Item {
+                id: 40,
+                name: format!("{:?}", classification),
+                item_type: ItemType::Armor(ArmorData {
+                    ac_bonus: 4,
+                    weight: 20,
+                    classification: *classification,
+                }),
+                base_cost: 50,
+                sell_cost: 25,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+            };
+            let desc = ItemMeshDescriptor::from_item(&item);
+            let def = desc.to_creature_definition();
+            assert!(
+                def.validate().is_ok(),
+                "{:?} armor produced invalid definition",
+                classification
+            );
+        }
+    }
+
+    #[test]
+    fn test_ammo_descriptor_valid() {
+        let arrows = Item {
+            id: 50,
+            name: "Arrows".to_string(),
+            item_type: ItemType::Ammo(AmmoData {
+                ammo_type: AmmoType::Arrow,
+                quantity: 20,
+            }),
+            base_cost: 2,
+            sell_cost: 1,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        let desc = ItemMeshDescriptor::from_item(&arrows);
+        assert_eq!(desc.category, ItemMeshCategory::Ammo);
+        let def = desc.to_creature_definition();
+        assert!(def.validate().is_ok());
+    }
+
+    #[test]
+    fn test_descriptor_default_override_is_identity() {
+        // An all-None override must not change the auto-derived descriptor
+        let sword = make_weapon(
+            30,
+            "Sword",
+            8,
+            1,
+            WeaponClassification::MartialMelee,
+            vec![],
+        );
+        let auto_desc = ItemMeshDescriptor::from_item(&sword);
+
+        let mut sword_with_empty_override = sword.clone();
+        sword_with_empty_override.mesh_descriptor_override =
+            Some(ItemMeshDescriptorOverride::default());
+        let override_desc = ItemMeshDescriptor::from_item(&sword_with_empty_override);
+
+        assert_eq!(
+            auto_desc, override_desc,
+            "empty override must produce identical descriptor"
+        );
+    }
+}

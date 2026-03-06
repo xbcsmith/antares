@@ -116,7 +116,6 @@ pub fn two_handed_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec!["two_handed".to_string()],
-        mesh_descriptor_override: None,
     }
 }
 

@@ -1,5 +1,174 @@
 # Implementations
 
+## Items Procedural Meshes — Phase 1: Domain Layer
+
+**Plan**: [`items_procedural_meshes_implementation_plan.md`](items_procedural_meshes_implementation_plan.md)
+
+### Overview
+
+Phase 1 adds the domain-layer types that drive procedural 3-D world-mesh
+generation for dropped items. When a player drops an item from inventory it
+will (in later phases) spawn a procedural mesh on the tile; this phase
+establishes the pure-Rust data layer that converts any `Item` definition into
+a `CreatureDefinition` that the existing `spawn_creature` pipeline can render.
+
+No Bevy dependency is introduced in Phase 1. All new code lives in
+`src/domain/` and `src/sdk/`.
+
+---
+
+### Phase 1 Deliverables
+
+**Files changed / created**:
+
+- `src/domain/visual/item_mesh.rs` _(new)_
+- `src/domain/visual/mod.rs` _(updated)_
+- `src/domain/items/types.rs` _(updated)_
+- `src/domain/items/database.rs` _(updated)_
+- `src/sdk/validation.rs` _(updated)_
+- `src/sdk/error_formatter.rs` _(updated)_
+
+**Files with `mesh_descriptor_override: None` field additions** (backward-compatible):
+
+- `src/domain/combat/item_usage.rs`
+- `src/domain/items/equipment_validation.rs`
+- `src/domain/transactions.rs`
+- `src/game/systems/combat.rs`
+- `src/game/systems/dialogue.rs`
+- `src/sdk/templates.rs`
+- `src/bin/item_editor.rs`
+- `tests/cli_editor_tests.rs`
+- `tests/merchant_transaction_integration_test.rs`
+
+---
+
+### What was built
+
+#### `ItemMeshCategory` (`src/domain/visual/item_mesh.rs`)
+
+An enum with 17 variants mapping every `ItemType` sub-classification to a
+distinct mesh silhouette: `Sword`, `Dagger`, `Blunt`, `Staff`, `Bow`,
+`BodyArmor`, `Helmet`, `Shield`, `Boots`, `Ring`, `Amulet`, `Belt`, `Cloak`,
+`Potion`, `Scroll`, `Ammo`, `QuestItem`.
+
+#### `ItemMeshDescriptor` (`src/domain/visual/item_mesh.rs`)
+
+The full per-item visual specification: `category`, `blade_length`,
+`primary_color`, `accent_color`, `emissive`, `emissive_color`, and `scale`.
+
+`ItemMeshDescriptor::from_item(item: &Item) -> Self` is a **pure function**
+that reads `item.item_type`, sub-type classification fields, `tags`, bonus
+values, and charge data:
+
+- `WeaponClassification::Simple` with `sides ≤ 4` → `Dagger`; otherwise →
+  `Blunt`. `MartialMelee` → `Sword`. `MartialRanged` → `Bow`.
+  `Blunt` → `Blunt`.
+- Blade length = `(damage.sides × 0.08).clamp(0.25, 1.0)`. Dagger blade is
+  multiplied by 0.7 (shorter).
+- `two_handed` tag → scale multiplied by `1.45`.
+- `ConsumableEffect::HealHp` → red; `RestoreSp` → blue;
+  `CureCondition` → `Scroll` category (parchment color);
+  `BoostAttribute` / `BoostResistance` → yellow.
+- `item.is_magical()` → `emissive = true`, soft white glow.
+- `item.is_cursed` → dark purple primary color, purple emissive (overrides
+  magical glow — curse takes visual priority).
+- Quest items always emit (magenta star mesh).
+
+`ItemMeshDescriptor::to_creature_definition(&self) -> CreatureDefinition`
+converts the descriptor into a single-mesh `CreatureDefinition` on the XZ
+plane (item lying flat on the ground). The returned definition always passes
+`CreatureDefinition::validate()`.
+
+Each mesh category has a dedicated geometry builder that produces a flat
+polygon on the XZ plane (Y = 0). All polygon fans use a dedicated centre
+vertex (never vertex 0 as the hub) to avoid degenerate triangles.
+
+#### `ItemMeshDescriptorOverride` (`src/domain/visual/item_mesh.rs`)
+
+A `#[serde(default)]`-annotated struct with four optional fields:
+`primary_color`, `accent_color`, `scale`, `emissive`. Campaign authors can
+embed it in a RON item file to customise the visual without touching gameplay
+data. An all-`None` override is identical to no override at all.
+
+#### `Item::mesh_descriptor_override` (`src/domain/items/types.rs`)
+
+Added `#[serde(default)] pub mesh_descriptor_override:
+Option<ItemMeshDescriptorOverride>` to the `Item` struct. All existing RON
+item files remain valid without modification because `#[serde(default)]`
+deserialises the field as `None` when absent.
+
+#### `ItemDatabase::validate_mesh_descriptors` (`src/domain/items/database.rs`)
+
+A new method that calls `ItemMeshDescriptor::from_item` for every loaded item
+and validates the resulting `CreatureDefinition`. A new error variant
+`ItemDatabaseError::InvalidMeshDescriptor { item_id, message }` is returned
+on the first failure.
+
+#### SDK plumbing (`src/sdk/validation.rs`, `src/sdk/error_formatter.rs`)
+
+- `ValidationError::ItemMeshDescriptorInvalid { item_id, message }` — new
+  `Error`-severity variant.
+- `Validator::validate_item_mesh_descriptors()` — calls
+  `ItemDatabase::validate_mesh_descriptors` and converts the result into a
+  `Vec<ValidationError>`.
+- `validate_all()` now calls `validate_item_mesh_descriptors()`.
+- `error_formatter.rs` has an actionable suggestion block for the new variant.
+
+---
+
+### Architecture compliance
+
+- `CreatureDefinition` is reused as the output type — no new rendering path.
+- `ItemId`, `ItemType` type aliases used throughout.
+- `#[serde(default)]` on `mesh_descriptor_override` preserves full backward
+  compatibility with all existing RON files.
+- All geometry builders produce non-degenerate triangles (centre-vertex fan).
+- No constants are hard-coded; all shape parameters (`BASE_SCALE`,
+  `TWO_HANDED_SCALE_MULT`, `BLADE_SIDES_FACTOR`, etc.) are named constants.
+- SPDX headers present in `item_mesh.rs`.
+- Test data uses `data/items.ron` (Implementation Rule 5 compliant).
+
+---
+
+### Test coverage
+
+**`src/domain/visual/item_mesh.rs`** (inline `mod tests`):
+
+| Test                                                       | What it verifies                                                  |
+| ---------------------------------------------------------- | ----------------------------------------------------------------- |
+| `test_sword_descriptor_from_short_sword`                   | Short sword → `Sword` category, correct blade length, no emissive |
+| `test_dagger_descriptor_short_blade`                       | Dagger → `Dagger` category, blade shorter than same-sides sword   |
+| `test_potion_color_heal_is_red`                            | `HealHp` → red primary color                                      |
+| `test_potion_color_restore_sp_is_blue`                     | `RestoreSp` → blue                                                |
+| `test_potion_color_boost_attribute_is_yellow`              | `BoostAttribute` → yellow                                         |
+| `test_cure_condition_produces_scroll`                      | `CureCondition` → `Scroll` category                               |
+| `test_magical_item_emissive`                               | `max_charges > 0` → emissive                                      |
+| `test_magical_item_emissive_via_bonus`                     | `constant_bonus` → emissive                                       |
+| `test_cursed_item_dark_tint`                               | `is_cursed` → dark purple + purple emissive                       |
+| `test_cursed_overrides_magical_glow`                       | Cursed+magical → cursed emissive wins                             |
+| `test_two_handed_weapon_larger_scale`                      | `two_handed` tag → scale > one-handed                             |
+| `test_descriptor_to_creature_definition_valid`             | Round-trip for all categories passes `validate()`                 |
+| `test_override_color_applied`                              | `primary_color` override applied                                  |
+| `test_override_scale_applied`                              | `scale` override applied                                          |
+| `test_override_invalid_scale_ignored`                      | Negative scale override ignored                                   |
+| `test_override_emissive_applied`                           | Non-zero emissive override enables flag                           |
+| `test_override_zero_emissive_disables`                     | All-zero emissive override disables flag                          |
+| `test_quest_item_descriptor_unique_shape`                  | Quest items → `QuestItem` category, always emissive               |
+| `test_all_accessory_slots_produce_valid_definitions`       | All 4 accessory slots round-trip                                  |
+| `test_all_armor_classifications_produce_valid_definitions` | All 4 armor classes round-trip                                    |
+| `test_ammo_descriptor_valid`                               | Ammo → valid definition                                           |
+| `test_descriptor_default_override_is_identity`             | Empty override = no override                                      |
+
+**`src/domain/items/database.rs`** (extended `mod tests`):
+
+| Test                                            | What it verifies                                  |
+| ----------------------------------------------- | ------------------------------------------------- |
+| `test_validate_mesh_descriptors_all_base_items` | Loads `data/items.ron`; all items pass validation |
+| `test_validate_mesh_descriptors_empty_db`       | Empty DB → `Ok(())`                               |
+| `test_validate_mesh_descriptors_all_item_types` | One item of every `ItemType` variant → `Ok(())`   |
+
+---
+
 ## Procedural Meshes Direction Control
 
 **Plan**: [`procedural_meshes_direction_control_implementation_plan.md`](procedural_meshes_direction_control_implementation_plan.md)
