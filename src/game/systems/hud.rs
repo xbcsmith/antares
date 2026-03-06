@@ -188,11 +188,14 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PortraitAssets::default())
             .add_systems(Startup, (setup_hud, setup_party_entities))
+            // update_hud must run during combat too so party HP bars reflect live
+            // damage.  The exploration-only overlays (compass, clock, portraits) stay
+            // gated so they don't render on top of the combat HUD.
+            .add_systems(Update, update_hud)
             .add_systems(
                 Update,
                 (
                     ensure_portraits_loaded,
-                    update_hud,
                     update_compass,
                     update_clock,
                     update_portraits,

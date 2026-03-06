@@ -292,6 +292,10 @@ pub struct Asset {
     pub is_referenced: bool,
     /// List of references to this asset from campaign data
     pub references: Vec<AssetReference>,
+    /// Whether this is a hidden file (filename starts with `.`).
+    /// Hidden files (e.g. `.DS_Store`, `.gitkeep`) are not part of the
+    /// campaign and should be removed.
+    pub is_hidden: bool,
 }
 
 impl Asset {
@@ -305,6 +309,11 @@ impl Asset {
     ///
     /// Returns a new Asset instance
     pub fn new(path: PathBuf) -> Self {
+        let is_hidden = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.starts_with('.'))
+            .unwrap_or(false);
         Self {
             asset_type: AssetType::from_path(&path),
             path,
@@ -312,6 +321,7 @@ impl Asset {
             modified: SystemTime::now(),
             is_referenced: false,
             references: Vec::new(),
+            is_hidden,
         }
     }
 
@@ -1528,6 +1538,33 @@ mod tests {
     }
 
     #[test]
+    fn test_asset_is_hidden_dot_file() {
+        let asset = Asset::new(PathBuf::from(".DS_Store"));
+        assert!(asset.is_hidden, ".DS_Store should be flagged as hidden");
+
+        let asset2 = Asset::new(PathBuf::from(".gitkeep"));
+        assert!(asset2.is_hidden, ".gitkeep should be flagged as hidden");
+
+        let asset3 = Asset::new(PathBuf::from("portraits/hero.png"));
+        assert!(
+            !asset3.is_hidden,
+            "hero.png should not be flagged as hidden"
+        );
+
+        let asset4 = Asset::new(PathBuf::from("data/items.ron"));
+        assert!(
+            !asset4.is_hidden,
+            "items.ron should not be flagged as hidden"
+        );
+
+        // Hidden file in a subdirectory
+        let asset5 = Asset::new(PathBuf::from("assets/.hidden_marker"));
+        assert!(
+            asset5.is_hidden,
+            ".hidden_marker in subdir should be flagged as hidden"
+        );
+    }
+
     fn test_asset_creation() {
         let asset = Asset::new(PathBuf::from("test.png"));
         assert_eq!(asset.path, PathBuf::from("test.png"));
@@ -1731,6 +1768,7 @@ mod tests {
                 modified: SystemTime::now(),
                 is_referenced: false,
                 references: Vec::new(),
+                is_hidden: false,
             },
         );
 
@@ -1784,6 +1822,7 @@ mod tests {
                 modified: SystemTime::now(),
                 is_referenced: false,
                 references: Vec::new(),
+                is_hidden: false,
             },
         );
 
@@ -1798,6 +1837,7 @@ mod tests {
                 modified: SystemTime::now(),
                 is_referenced: false,
                 references: Vec::new(),
+                is_hidden: false,
             },
         );
 
@@ -1825,6 +1865,7 @@ mod tests {
                 modified: SystemTime::now(),
                 is_referenced: false,
                 references: Vec::new(),
+                is_hidden: false,
             },
         );
 
@@ -1868,6 +1909,7 @@ mod tests {
                 modified: SystemTime::now(),
                 is_referenced: true,
                 references: vec![reference.clone()],
+                is_hidden: false,
             },
         );
 
@@ -1893,6 +1935,7 @@ mod tests {
                 modified: SystemTime::now(),
                 is_referenced: false,
                 references: Vec::new(),
+                is_hidden: false,
             },
         );
 
@@ -1943,6 +1986,7 @@ mod tests {
                 modified: SystemTime::now(),
                 is_referenced: false,
                 references: Vec::new(),
+                is_hidden: false,
             },
         );
 
@@ -1999,6 +2043,7 @@ mod tests {
                 modified: SystemTime::now(),
                 is_referenced: false,
                 references: Vec::new(),
+                is_hidden: false,
             },
         );
 
@@ -2055,6 +2100,7 @@ mod tests {
                 modified: SystemTime::now(),
                 is_referenced: false,
                 references: Vec::new(),
+                is_hidden: false,
             },
         );
 
@@ -2070,6 +2116,10 @@ mod tests {
             faction: Some("Village".to_string()),
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         manager.scan_references(&[], &[], &[], &[], &[], &[], &[npc]);
@@ -2107,6 +2157,7 @@ mod tests {
                 modified: SystemTime::now(),
                 is_referenced: false,
                 references: Vec::new(),
+                is_hidden: false,
             },
         );
 
@@ -2129,6 +2180,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         manager.scan_references(&[], &[], &[], &[], &[], &[], &[npc]);
@@ -2175,6 +2230,7 @@ mod tests {
                     modified: SystemTime::now(),
                     is_referenced: false,
                     references: Vec::new(),
+                    is_hidden: false,
                 },
             );
         }
@@ -2213,6 +2269,10 @@ mod tests {
                 faction: Some("Village".to_string()),
                 is_merchant: false,
                 is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
             },
             antares::domain::world::npc::NpcDefinition {
                 id: "tutorial_merchant_town".to_string(),
@@ -2226,6 +2286,10 @@ mod tests {
                 faction: Some("Merchants Guild".to_string()),
                 is_merchant: true,
                 is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
             },
             antares::domain::world::npc::NpcDefinition {
                 id: "tutorial_wizard_arcturus_brother".to_string(),
@@ -2239,6 +2303,10 @@ mod tests {
                 faction: Some("Village".to_string()),
                 is_merchant: false,
                 is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
             },
         ];
 
@@ -2439,6 +2507,7 @@ mod tests {
                 modified: SystemTime::now(),
                 is_referenced: false,
                 references: Vec::new(),
+                is_hidden: false,
             },
         );
 

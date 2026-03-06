@@ -801,8 +801,22 @@ impl ProficienciesEditorState {
 
         // Validation feedback
         let id_valid = !self.edit_buffer.id.is_empty();
-        let id_unique = self.mode == ProficienciesEditorMode::Add
-            || proficiencies.iter().all(|p| p.id != self.edit_buffer.id);
+        // In Edit mode the ID field is disabled so it can never change — the
+        // entry being edited will always match its own ID in the list, which
+        // must not be counted as a duplicate.  Exclude the self-match by only
+        // flagging entries whose ID matches AND that are a different entry
+        // (i.e. in Add mode every match is a true duplicate; in Edit mode we
+        // skip the one entry that IS the item being edited).
+        let id_unique = match self.mode {
+            ProficienciesEditorMode::Add => {
+                proficiencies.iter().all(|p| p.id != self.edit_buffer.id)
+            }
+            ProficienciesEditorMode::Edit => {
+                // ID is read-only in edit mode; always unique by definition.
+                true
+            }
+            ProficienciesEditorMode::List => true,
+        };
         let name_valid = !self.edit_buffer.name.is_empty();
 
         if !id_valid {
@@ -821,6 +835,11 @@ impl ProficienciesEditorState {
         ui.horizontal(|ui| {
             let save_enabled = id_valid && id_unique && name_valid;
 
+            if ui.button("⬅ Back to List").clicked() {
+                self.mode = ProficienciesEditorMode::List;
+                self.edit_buffer = Self::default_proficiency();
+            }
+
             if ui
                 .add_enabled(save_enabled, egui::Button::new("💾 Save"))
                 .clicked()
@@ -830,11 +849,6 @@ impl ProficienciesEditorState {
                     *unsaved_changes = true;
                     *status_message = format!("Saved proficiency: {}", self.edit_buffer.id);
                 }
-            }
-
-            if ui.button("❌ Cancel").clicked() {
-                self.mode = ProficienciesEditorMode::List;
-                self.edit_buffer = Self::default_proficiency();
             }
 
             if self.mode == ProficienciesEditorMode::Edit {

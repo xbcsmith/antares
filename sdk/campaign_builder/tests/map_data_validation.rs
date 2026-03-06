@@ -119,9 +119,7 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                         );
                     }
                     MapEvent::Sign {
-                        name,
-                        description,
-                        text: _,
+                        name, description, ..
                     } => {
                         assert!(
                             !name.trim().is_empty(),
@@ -137,9 +135,7 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                         );
                     }
                     MapEvent::NpcDialogue {
-                        name,
-                        description,
-                        npc_id: _,
+                        name, description, ..
                     } => {
                         assert!(
                             !name.trim().is_empty(),
@@ -260,6 +256,9 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                             path.display(),
                             pos
                         );
+                    }
+                    MapEvent::Container { .. } => {
+                        // Container events have no required name/description fields to validate here
                     }
                 }
             }

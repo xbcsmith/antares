@@ -2386,6 +2386,7 @@ impl Map {
     ///     name: "Test".to_string(),
     ///     description: "A sign".to_string(),
     ///     text: "Hello!".to_string(),
+    ///     time_condition: None,
     /// };
     /// map.add_event(pos, event);
     ///

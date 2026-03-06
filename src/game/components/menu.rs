@@ -186,14 +186,14 @@ impl SettingSlider {
 // UI Constants
 // ============================================================================
 
-/// Slider track background color (dark)
-pub const SLIDER_TRACK_COLOR: Color = Color::srgb(0.2, 0.2, 0.3);
+/// Slider track background color — dark navy matching the icon border
+pub const SLIDER_TRACK_COLOR: Color = Color::srgb(0.10, 0.13, 0.22);
 
-/// Slider fill color (active portion)
-pub const SLIDER_FILL_COLOR: Color = Color::srgb(0.5, 0.7, 1.0);
+/// Slider fill color — vivid orange-gold from the icon gradient
+pub const SLIDER_FILL_COLOR: Color = Color::srgb(0.91, 0.60, 0.04);
 
-/// Background color for menu panels (semi-transparent dark)
-pub const MENU_BACKGROUND_COLOR: Color = Color::srgba(0.1, 0.1, 0.15, 0.95);
+/// Background color for menu panels — deep navy, semi-transparent (icon background)
+pub const MENU_BACKGROUND_COLOR: Color = Color::srgba(0.08, 0.11, 0.20, 0.96);
 
 /// Menu panel width in pixels
 pub const MENU_WIDTH: f32 = 500.0;
@@ -216,17 +216,23 @@ pub const BUTTON_FONT_SIZE: f32 = 24.0;
 /// Font size for menu titles (points / px)
 pub const TITLE_FONT_SIZE: f32 = 36.0;
 
-/// Button background color when idle
-pub const BUTTON_NORMAL_COLOR: Color = Color::srgb(0.25, 0.25, 0.35);
+/// Button background color when idle — dark navy-orange tint
+pub const BUTTON_NORMAL_COLOR: Color = Color::srgb(0.14, 0.18, 0.30);
 
-/// Button background color when hovered
-pub const BUTTON_HOVER_COLOR: Color = Color::srgb(0.35, 0.35, 0.55);
+/// Button background color when hovered — warm orange-red from the icon
+pub const BUTTON_HOVER_COLOR: Color = Color::srgb(0.72, 0.22, 0.02);
 
-/// Button background color when pressed
-pub const BUTTON_PRESSED_COLOR: Color = Color::srgb(0.15, 0.15, 0.25);
+/// Button background color when pressed — deeper burnt orange
+pub const BUTTON_PRESSED_COLOR: Color = Color::srgb(0.50, 0.14, 0.01);
 
-/// Text color for button labels
-pub const BUTTON_TEXT_COLOR: Color = Color::srgb(0.9, 0.9, 0.9);
+/// Text color for button labels — warm off-white / light gold
+pub const BUTTON_TEXT_COLOR: Color = Color::srgb(0.97, 0.92, 0.82);
+
+/// Title text color — bright gold matching the icon rim
+pub const TITLE_TEXT_COLOR: Color = Color::srgb(0.96, 0.76, 0.02);
+
+/// Accent / separator color — orange-gold rim colour from the icon
+pub const MENU_ACCENT_COLOR: Color = Color::srgb(0.96, 0.76, 0.02);
 
 // ============================================================================
 // Tests
@@ -281,13 +287,15 @@ mod tests {
         assert_eq!(BUTTON_SPACING, 15.0);
         assert_eq!(BUTTON_FONT_SIZE, 24.0);
         assert_eq!(TITLE_FONT_SIZE, 36.0);
-        assert_eq!(BUTTON_NORMAL_COLOR, Color::srgb(0.25, 0.25, 0.35));
-        assert_eq!(BUTTON_HOVER_COLOR, Color::srgb(0.35, 0.35, 0.55));
-        assert_eq!(BUTTON_PRESSED_COLOR, Color::srgb(0.15, 0.15, 0.25));
-        assert_eq!(BUTTON_TEXT_COLOR, Color::srgb(0.9, 0.9, 0.9));
-        assert_eq!(MENU_BACKGROUND_COLOR, Color::srgba(0.1, 0.1, 0.15, 0.95));
-        assert_eq!(SLIDER_TRACK_COLOR, Color::srgb(0.2, 0.2, 0.3));
-        assert_eq!(SLIDER_FILL_COLOR, Color::srgb(0.5, 0.7, 1.0));
+        assert_eq!(BUTTON_NORMAL_COLOR, Color::srgb(0.14, 0.18, 0.30));
+        assert_eq!(BUTTON_HOVER_COLOR, Color::srgb(0.72, 0.22, 0.02));
+        assert_eq!(BUTTON_PRESSED_COLOR, Color::srgb(0.50, 0.14, 0.01));
+        assert_eq!(BUTTON_TEXT_COLOR, Color::srgb(0.97, 0.92, 0.82));
+        assert_eq!(MENU_BACKGROUND_COLOR, Color::srgba(0.08, 0.11, 0.20, 0.96));
+        assert_eq!(SLIDER_TRACK_COLOR, Color::srgb(0.10, 0.13, 0.22));
+        assert_eq!(SLIDER_FILL_COLOR, Color::srgb(0.91, 0.60, 0.04));
+        assert_eq!(TITLE_TEXT_COLOR, Color::srgb(0.96, 0.76, 0.02));
+        assert_eq!(MENU_ACCENT_COLOR, Color::srgb(0.96, 0.76, 0.02));
     }
 
     #[test]

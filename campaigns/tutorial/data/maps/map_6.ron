@@ -8008,21 +8008,19 @@
     ],
     events: {
         (
-            x: 14,
-            y: 1,
+            x: 1,
+            y: 3,
         ): Encounter(
-            name: "Skeletons from the Past",
-            description: "The burial cave is haunted by the skeletons of fallen warriors.",
+            name: "The Undead King",
+            description: "The Lich was once a powerful Wizard King who ruled these lands.",
             monster_group: [
+                31,
                 11,
                 11,
                 11,
                 11,
-                11,
-                11,
-                133,
-                34,
             ],
+            time_condition: None,
         ),
         (
             x: 13,
@@ -8037,20 +8035,7 @@
                 11,
                 11,
             ],
-        ),
-        (
-            x: 1,
-            y: 3,
-        ): Encounter(
-            name: "The Undead King",
-            description: "The Lich was once a powerful Wizard King who ruled these lands.",
-            monster_group: [
-                31,
-                11,
-                11,
-                11,
-                11,
-            ],
+            time_condition: None,
         ),
         (
             x: 12,
@@ -8069,6 +8054,7 @@
                 1,
                 1,
             ],
+            time_condition: None,
         ),
         (
             x: 19,
@@ -8081,6 +8067,24 @@
                 y: 11,
             ),
             map_id: 5,
+        ),
+        (
+            x: 14,
+            y: 1,
+        ): Encounter(
+            name: "Skeletons from the Past",
+            description: "The burial cave is haunted by the skeletons of fallen warriors.",
+            monster_group: [
+                11,
+                11,
+                11,
+                11,
+                11,
+                11,
+                133,
+                34,
+            ],
+            time_condition: None,
         ),
     },
     allow_random_encounters: true,

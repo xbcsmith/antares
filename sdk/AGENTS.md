@@ -660,6 +660,179 @@ layout will be unable to find it.
 
 ---
 
+### Rule 13: Every Data-File Loader Must Follow the Standard Load Pattern
+
+Every function that loads a campaign data file **must** follow the same
+defensive pattern used by `load_items`, `load_npcs`, `load_classes_from_campaign`,
+and all other established loaders. Deviating from this pattern has caused
+recurring "editor tab appears empty after opening campaign" regressions.
+
+**The four mandatory steps:**
+
+1. **Guard with `path.exists()`** before attempting any file I/O. A missing
+   file is a valid state (new campaign, optional data file); it must never
+   produce an error that overwrites `status_message`.
+2. **Log via `self.logger`, never via `self.status_message`**, for missing-file
+   and parse-error conditions. `status_message` is user-facing; clobbering it
+   with a warning from one loader hides the success messages of all later
+   loaders and makes the UI look broken.
+3. **Reset editor state before loading** when the load is triggered by opening
+   or creating a campaign. Stale data from a previously opened campaign must be
+   cleared before the new campaign's file is read. Provide a
+   `reset_for_new_campaign()` method (or equivalent) on the editor state struct
+   and call it from both `do_new_campaign` and `do_open_campaign`.
+4. **Clear the lazy-load flag on success.** If the editor state includes a
+   `needs_initial_load` (or equivalent) flag for the auto-load-on-first-show
+   fallback, set it to `false` when the explicit load succeeds so that `show()`
+   does not re-read the file redundantly on the first tab render.
+
+**WRONG — missing `path.exists()` guard, clobbers status_message:**
+
+```antares/sdk/examples/wrong_load_pattern.rs#L1-12
+fn load_stock_templates(&mut self) {
+    if let Some(dir) = &self.campaign_dir {
+        let path = dir.join(&self.campaign.stock_templates_file);
+        // ❌ No exists() check — fails loudly for new/missing-file campaigns
+        match self.stock_templates_editor_state.load_from_file(&path) {
+            Ok(()) => {
+                self.stock_templates = self.stock_templates_editor_state.templates.clone();
+                self.status_message = format!("Loaded {} stock templates", ...);
+            }
+            Err(e) => {
+                // ❌ Overwrites user-visible status_message; hides earlier successes
+                self.status_message = format!("Warning: could not load stock templates: {}", e);
+            }
+        }
+    }
+}
+```
+
+**RIGHT — exists() guard, logger for warnings, flag cleared on success:**
+
+```antares/sdk/examples/right_load_pattern.rs#L1-22
+fn load_stock_templates(&mut self) {
+    if let Some(dir) = &self.campaign_dir {
+        let path = dir.join(&self.campaign.stock_templates_file);
+        if path.exists() {                                      // ✅ guard
+            match self.stock_templates_editor_state.load_from_file(&path) {
+                Ok(()) => {
+                    self.stock_templates =
+                        self.stock_templates_editor_state.templates.clone();
+                    self.logger.info(category::FILE_IO,
+                        &format!("Loaded {} stock templates", self.stock_templates.len()));
+                    // ✅ clear lazy-load flag so show() doesn't re-read
+                    self.stock_templates_editor_state.needs_initial_load = false;
+                }
+                Err(e) => {
+                    // ✅ goes to logger, not status_message
+                    self.logger.warn(category::FILE_IO,
+                        &format!("Failed to parse stock templates: {}", e));
+                }
+            }
+        } else {
+            // ✅ silent / debug-level — missing file is valid for new campaigns
+            self.logger.debug(category::FILE_IO,
+                &format!("File not found (skipping): {}", path.display()));
+        }
+    }
+}
+```
+
+**WRONG — editor state not reset before loading, no lazy-load fallback:**
+
+```antares/sdk/examples/wrong_new_campaign.rs#L1-10
+fn do_new_campaign(&mut self) {
+    self.items.clear();
+    self.items_editor_state = ItemsEditorState::new();
+    // ... every other editor reset ...
+    // ❌ stock_templates and its editor state are NEVER reset here;
+    //    previous campaign's data leaks into the new campaign workspace.
+}
+
+fn do_open_campaign(&mut self) {
+    // ❌ load_stock_templates called with stale editor state still present
+    self.load_stock_templates();
+}
+```
+
+**RIGHT — reset before load, lazy-load fallback in `show()`:**
+
+```antares/sdk/examples/right_new_campaign.rs#L1-15
+fn do_new_campaign(&mut self) {
+    // ✅ reset BEFORE assigning new campaign
+    self.stock_templates_editor_state.reset_for_new_campaign();
+    self.stock_templates.clear();
+    // ... rest of new-campaign setup ...
+}
+
+fn do_open_campaign(&mut self) {
+    // ✅ reset first, then load; any remaining stale data is gone
+    self.stock_templates_editor_state.reset_for_new_campaign();
+    self.stock_templates.clear();
+    self.load_stock_templates();
+}
+```
+
+**Every editor state struct that owns a data file must provide:**
+
+```antares/sdk/examples/right_editor_state_reset.rs#L1-18
+impl MyEditorState {
+    /// Reset for a new or freshly-opened campaign.
+    ///
+    /// Clears all data, resets mode to List, and sets `needs_initial_load = true`
+    /// so that `show()` auto-loads the file the first time the tab is rendered.
+    pub fn reset_for_new_campaign(&mut self) {
+        self.items.clear();             // or templates, entries, etc.
+        self.selected = None;
+        self.mode = MyEditorMode::List;
+        self.edit_buffer = MyEditBuffer::default();
+        self.search_filter.clear();
+        self.has_unsaved_changes = false;
+        self.validation_errors.clear();
+        self.validation_warnings.clear();
+        self.needs_initial_load = true; // ✅ triggers auto-load on next show()
+    }
+}
+```
+
+**`show()` must include an auto-load-on-first-show guard:**
+
+```antares/sdk/examples/right_show_autoload.rs#L1-18
+pub fn show(&mut self, ui: &mut egui::Ui, campaign_dir: Option<&PathBuf>, file: &str) -> bool {
+    // Cache dir/file for load/save helpers
+    if let Some(dir) = campaign_dir { self.last_campaign_dir = Some(dir.clone()); }
+    self.last_templates_file = Some(file.to_string());
+
+    // ✅ Auto-load fallback: fires once per campaign open, not every frame.
+    if self.needs_initial_load {
+        if let Some(dir) = campaign_dir {
+            let path = dir.join(file);
+            if path.exists() {
+                if let Err(e) = self.load_from_file(&path) {
+                    self.validation_errors = vec![format!("Auto-load failed: {}", e)];
+                }
+            }
+            self.needs_initial_load = false; // clear regardless — don't retry every frame
+        }
+    }
+
+    // ... rest of show() ...
+}
+```
+
+**Checklist for every new or refactored data-file loader:**
+
+- [ ] `path.exists()` guard present — missing file is logged at `debug` level, not `warn`
+- [ ] Parse errors and I/O errors go to `self.logger`, not `self.status_message`
+- [ ] Editor state struct has a `reset_for_new_campaign()` method
+- [ ] `do_new_campaign` calls `reset_for_new_campaign()` and clears the mirror `Vec`
+- [ ] `do_open_campaign` calls `reset_for_new_campaign()` before `load_*`
+- [ ] `show()` contains an `if self.needs_initial_load` auto-load guard
+- [ ] `load_*` sets `needs_initial_load = false` on success
+- [ ] `load_from_file` itself does **not** touch `needs_initial_load` — the caller owns that
+
+---
+
 ## Future Editor Standardization Pattern
 
 Use this section as the default implementation recipe when adding a new
@@ -675,27 +848,27 @@ discipline to avoid egui state bugs.
 ### Standard Recipe (Apply In Order)
 
 1. Import and use shared list helpers from `ui_helpers.rs`:
-    - `MetadataBadge`
-    - `StandardListItemConfig`
-    - `show_standard_list_item`
+   - `MetadataBadge`
+   - `StandardListItemConfig`
+   - `show_standard_list_item`
 2. Replace ad-hoc `selectable_label` + custom sub-row metadata with
-    `StandardListItemConfig` plus `MetadataBadge` values.
+   `StandardListItemConfig` plus `MetadataBadge` values.
 3. Keep one primary label, move secondary info into badges, and include
-    `.with_id(...)` when an ID is semantically meaningful.
+   `.with_id(...)` when an ID is semantically meaningful.
 4. Wrap each list-row loop body in `ui.push_id(stable_unique_key, |ui| { ... })`.
 5. Capture list actions as deferred state (`pending_*`) inside closures, then
-    apply mutations after `show_split` or other multi-closure calls return.
+   apply mutations after `show_split` or other multi-closure calls return.
 6. For data lists, use context-menu actions from `show_standard_list_item`:
-    Edit/Delete/Duplicate/Export. For navigation-only lists, disable the menu
-    via `.with_context_menu(false)`.
+   Edit/Delete/Duplicate/Export. For navigation-only lists, disable the menu
+   via `.with_context_menu(false)`.
 7. Preserve existing behavior intentionally:
-    - search/filter semantics
-    - selection highlighting
-    - right-panel preview/detail rendering
-    - existing edit/delete/duplicate/export business logic
+   - search/filter semantics
+   - selection highlighting
+   - right-panel preview/detail rendering
+   - existing edit/delete/duplicate/export business logic
 8. If a legacy interaction is removed (for example double-click edit), ensure
-    an equivalent path still exists (context menu and/or right-panel button),
-    and document the trade-off in a code comment.
+   an equivalent path still exists (context menu and/or right-panel button),
+   and document the trade-off in a code comment.
 
 ### Minimal Row Template
 
@@ -728,6 +901,7 @@ ui.push_id(stable_id, |ui| {
 - [ ] Selection and action mutations are deferred and applied after closures
 - [ ] `request_repaint()` is called on layout-driving state changes
 - [ ] Search/filter/detail behavior remains intact
+- [ ] Data-file loader follows Rule 13 (exists guard, logger, reset, auto-load flag)
 - [ ] `cargo fmt`, `cargo check`, `cargo clippy -D warnings`, and tests pass
 
 ---
@@ -815,10 +989,21 @@ under `sdk/campaign_builder/src/`:
       - Toolbar rows with more than two buttons use horizontal_wrapped, not horizontal
       - Every contextual action present in the toolbar is also present in the
         preview panel and the edit-mode action row
+
+6b. (Campaign Builder data-file loaders only) Run the Rule 13 load-pattern checklist:
+      - path.exists() guard present in every load_* function
+      - Parse/IO errors go to self.logger, NOT self.status_message
+      - Editor state struct has reset_for_new_campaign() method
+      - do_new_campaign calls reset_for_new_campaign() + clears mirror Vec
+      - do_open_campaign calls reset_for_new_campaign() before load_*
+      - show() has an `if self.needs_initial_load` auto-load guard
+      - load_* sets needs_initial_load = false on success
+      - load_from_file itself does NOT touch needs_initial_load
 ```
 
-Do not skip this step even for "small" changes. ID collisions are invisible to
-the compiler and to the test suite; the only defence is the audit.
+Do not skip these steps even for "small" changes. ID collisions and load-pattern
+deviations are invisible to the compiler and test suite; the only defence is
+the audit.
 
 ---
 
@@ -826,6 +1011,23 @@ the compiler and to the test suite; the only defence is the audit.
 
 Add these items to the standard checklist from root `AGENTS.md` when reviewing
 campaign builder UI code:
+
+### Data-File Loading Correctness (Rule 13)
+
+- [ ] Every `load_*` function guards with `path.exists()` before any file I/O
+- [ ] Missing-file condition is logged at `debug` level via `self.logger` —
+      never written to `self.status_message`
+- [ ] Parse/IO errors are logged via `self.logger` at `warn` level —
+      never written to `self.status_message`
+- [ ] Every editor state struct that owns a data file has `reset_for_new_campaign()`
+- [ ] `do_new_campaign` calls `reset_for_new_campaign()` and clears the mirror `Vec`
+      for **every** editor, without exception
+- [ ] `do_open_campaign` calls `reset_for_new_campaign()` immediately before the
+      corresponding `load_*` call for every editor
+- [ ] Every editor's `show()` contains an `if self.needs_initial_load` guard that
+      attempts a file load on first render and clears the flag unconditionally
+- [ ] `load_*` (the `CampaignBuilderApp` method) sets `needs_initial_load = false`
+      on success; `load_from_file` (the editor state method) does not touch it
 
 ### egui Panel and Repaint Correctness
 
@@ -872,9 +1074,10 @@ Last updated: 2025
 
 ### Bugs recorded in this file
 
-| Date | File                  | Pattern                                                                                                                                                                                                                                                           | Rule             |
-| ---- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| 2025 | `template_browser.rs` | widgets in loops without `push_id`; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                         | Rules 1, 2, 3    |
-| 2025 | `creatures_editor.rs` | `SidePanel::right` wrapped in `if selected.is_some()`; no `request_repaint()` on click; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                     | Rules 2, 3, 6, 7 |
-| 2025 | `creatures_editor.rs` | `SidePanel::right.show_inside` used instead of `TwoColumnLayout`; registry list loop rows missing `push_id`; `self.id_manager` borrowed inside left closure conflicting with `&mut self` capture in right closure — fixed by pre-computing `row_valid: Vec<bool>` | Rules 1, 6       |
-| 2025 | `creatures_editor.rs` | All toolbar controls in one `ui.horizontal` — "Register Asset" and "Browse Templates" clipped invisible at standard window widths; button not present in preview panel or edit-mode row                                                                           | Rule 12          |
+| Date | File                                   | Pattern                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Rule             |
+| ---- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| 2025 | `template_browser.rs`                  | widgets in loops without `push_id`; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                                                                                                                                                                                                                      | Rules 1, 2, 3    |
+| 2025 | `creatures_editor.rs`                  | `SidePanel::right` wrapped in `if selected.is_some()`; no `request_repaint()` on click; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                                                                                                                                                                  | Rules 2, 3, 6, 7 |
+| 2025 | `creatures_editor.rs`                  | `SidePanel::right.show_inside` used instead of `TwoColumnLayout`; registry list loop rows missing `push_id`; `self.id_manager` borrowed inside left closure conflicting with `&mut self` capture in right closure — fixed by pre-computing `row_valid: Vec<bool>`                                                                                                                                                                                              | Rules 1, 6       |
+| 2025 | `creatures_editor.rs`                  | All toolbar controls in one `ui.horizontal` — "Register Asset" and "Browse Templates" clipped invisible at standard window widths; button not present in preview panel or edit-mode row                                                                                                                                                                                                                                                                        | Rule 12          |
+| 2025 | `stock_templates_editor.rs` / `lib.rs` | Stock Templates tab appeared empty after opening a campaign (recurring). Three compounding causes: (1) `load_stock_templates` had no `path.exists()` guard and clobbered `status_message` with an error on missing files; (2) `do_new_campaign` never reset `stock_templates_editor_state`, leaking previous campaign data; (3) `show()` had no `needs_initial_load` auto-load fallback when the explicit load silently failed. Fixed by Rule 13 load pattern. | Rule 13          |

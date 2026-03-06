@@ -1273,10 +1273,7 @@ impl QuestEditorState {
                             if let Some((_, quest)) =
                                 filtered_quests.iter().find(|(i, _)| *i == idx)
                             {
-                                right_ui.heading(&quest.name);
-                                right_ui.separator();
-
-                                // Show quest preview
+                                // Show quest preview (show_quest_preview_static renders its own heading)
                                 Self::show_quest_preview_static(right_ui, quest);
                             } else {
                                 right_ui.vertical_centered(|ui| {

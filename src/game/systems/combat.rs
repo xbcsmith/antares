@@ -25,6 +25,9 @@
 //!   state from `GlobalState` into `CombatResource` and builds participant mapping.
 //! - `sync_party_to_combat` (runs while in combat) — ensures players are present
 //!   in the combat state if they were not added earlier.
+//! - `sync_party_hp_during_combat` (runs every frame during combat) — mirrors
+//!   HP/SP/conditions from `CombatResource` participants back into `party.members`
+//!   so the HUD always reflects live combat damage without waiting for combat exit.
 //! - `sync_combat_to_party_on_exit` (runs every frame) — when combat has ended,
 //!   copies HP/SP/conditions/stat currents back into the party and clears combat data.
 //! - `setup_combat_ui` (runs on combat enter) — spawns combat UI entities
@@ -148,7 +151,7 @@ impl Default for CombatTurnStateResource {
 
 // ===== Phase 2: Combat UI Constants =====
 
-/// Height of the combat enemy panel at the top of the screen
+/// Height of the enemy panel (monster cards + HP bars).
 pub const COMBAT_ENEMY_PANEL_HEIGHT: Val = Val::Px(200.0);
 
 /// Width of individual enemy card in the enemy panel
@@ -205,6 +208,31 @@ pub const COMBAT_LOG_BUBBLE_WIDTH: Val = Val::Px(360.0);
 /// Minimum height of the persistent combat log bubble.
 pub const COMBAT_LOG_BUBBLE_MIN_HEIGHT: Val = Val::Px(180.0);
 
+/// Maximum height of the persistent combat log bubble.
+/// The log occupies the upper portion of the screen above the enemy panel.
+pub const COMBAT_LOG_BUBBLE_MAX_HEIGHT: Val = Val::Percent(55.0);
+
+// ===== Absolute-position anchors for combat panels =====
+//
+// All three combat panels (enemy cards, turn order, action menu) are pinned
+// from the bottom of the screen so they sit in the lower half and never
+// overlap the player HUD (height 70 px, gap 24 px → top edge at bottom+94).
+//
+// Stack (bottom → top):
+//   Action menu  : bottom = HUD_HEIGHT(70) + HUD_GAP(24) + PANEL_GAP(4) =  98 px
+//   Turn order   : bottom = 98 + ACTION_MENU(60) + PANEL_GAP(4)          = 162 px
+//   Enemy panel  : bottom = 162 + TURN_ORDER(40) + PANEL_GAP(4)          = 206 px
+
+/// Distance from the bottom of the screen to the bottom edge of the action menu.
+/// Keeps the action buttons just above the player HUD (70 px tall, 24 px gap).
+pub const ACTION_MENU_BOTTOM: Val = Val::Px(120.0);
+
+/// Distance from the bottom of the screen to the bottom edge of the turn order panel.
+pub const TURN_ORDER_BOTTOM: Val = Val::Px(175.0);
+
+/// Distance from the bottom of the screen to the bottom edge of the enemy panel.
+pub const ENEMY_PANEL_BOTTOM: Val = Val::Px(206.0);
+
 /// Maximum number of log lines kept in the on-screen combat bubble.
 pub const COMBAT_LOG_MAX_LINES: usize = 14;
 
@@ -254,6 +282,14 @@ pub const MONSTER_HP_HOVER_BAR_WIDTH: Val = Val::Px(120.0);
 
 /// Height of the world-projected monster HP hover bars.
 pub const MONSTER_HP_HOVER_BAR_HEIGHT: Val = Val::Px(10.0);
+
+/// Real-time seconds to pause on the enemy's turn before the monster acts.
+///
+/// This gives the player time to read the combat log and see the turn
+/// indicator before the monster's attack resolves.  Set to 0.0 to disable
+/// the delay (useful for automated tests — insert a zero-duration
+/// `MonsterTurnTimer` resource to override the plugin default).
+pub const MONSTER_TURN_DELAY_SECS: f32 = 1.2;
 
 /// Number of top-level action buttons (Attack, Defend, Cast, Item, Flee).
 ///
@@ -340,6 +376,18 @@ pub struct EnemyCard {
 /// Marker component for enemy HP bar fill
 #[derive(Component, Debug, Clone, Copy)]
 pub struct EnemyHpBarFill {
+    /// Index in combat participants
+    pub participant_index: usize,
+}
+
+/// Marker component for the HP bar background container node inside an [`EnemyCard`].
+///
+/// `FloatingDamage` nodes are spawned as children of this node so they are
+/// anchored to the HP bar area rather than to the whole card.  The node has a
+/// known, fixed height (`ENEMY_HP_BAR_HEIGHT`) and `overflow: visible` so the
+/// larger damage text is not clipped.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyHpBarBackground {
     /// Index in combat participants
     pub participant_index: usize,
 }
@@ -723,6 +771,28 @@ impl CombatLogState {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ActiveActionHighlight;
 
+/// One-shot timer that gates [`execute_monster_turn`].
+///
+/// When the turn transitions to [`CombatTurnState::EnemyTurn`] the timer is
+/// reset and starts counting.  `execute_monster_turn` waits until
+/// `just_finished()` before resolving the monster's action, giving the player
+/// time to read the combat log entry from the previous action.
+///
+/// Insert this resource with `duration = 0.0` in tests that call
+/// `app.update()` and expect the monster to act immediately:
+///
+/// ```ignore
+/// app.insert_resource(MonsterTurnTimer(
+///     Timer::from_seconds(0.0, TimerMode::Once)
+/// ));
+/// ```
+///
+/// When the resource is absent (minimal test harnesses that do not use
+/// [`CombatPlugin`]), `execute_monster_turn` fires immediately so that
+/// existing unit tests need no changes.
+#[derive(Resource)]
+pub struct MonsterTurnTimer(pub Timer);
+
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
@@ -743,11 +813,29 @@ impl Plugin for CombatPlugin {
             .insert_resource(ActionMenuState::default())
             .insert_resource(CombatLogState::default())
             .insert_resource(CombatLogColorState::default())
+            // Monster-turn delay: start finished so the very first EnemyTurn
+            // frame arms it (see execute_monster_turn for the reset logic).
+            .insert_resource({
+                let mut t = Timer::from_seconds(MONSTER_TURN_DELAY_SECS, TimerMode::Once);
+                t.tick(std::time::Duration::from_secs_f32(MONSTER_TURN_DELAY_SECS));
+                MonsterTurnTimer(t)
+            })
             .insert_resource(ButtonInput::<KeyCode>::default())
             // Handle events that indicate combat started
             .add_systems(Update, handle_combat_started)
             // Ensure party members exist in combat on enter
             .add_systems(Update, sync_party_to_combat)
+            // Mirror live HP/SP/conditions into party.members every frame so the HUD
+            // always shows current values — runs after all action handlers.
+            .add_systems(
+                Update,
+                sync_party_hp_during_combat
+                    .after(handle_attack_action)
+                    .after(handle_cast_spell_action)
+                    .after(handle_use_item_action)
+                    .after(handle_defend_action)
+                    .before(update_combat_ui),
+            )
             // Sync back to party when combat ends
             .add_systems(Update, sync_combat_to_party_on_exit)
             // Phase 3: Player Action Systems
@@ -993,6 +1081,56 @@ fn sync_party_to_combat(mut combat_res: ResMut<CombatResource>, global_state: Re
     crate::domain::combat::engine::start_combat(&mut combat_res.state);
 }
 
+/// Mirrors HP, SP, and conditions from [`CombatResource`] participants back into
+/// `party.members` every frame while combat is active.
+///
+/// This keeps `global_state.0.party.members[i].hp.current` in sync with what is
+/// happening inside the combat engine so that the HUD (`update_hud`) always
+/// displays live values without needing to know about `CombatResource`.
+///
+/// Only the fields that can change during a combat turn are written:
+/// - `hp.current`
+/// - `sp.current`
+/// - `conditions`
+/// - `active_conditions`
+///
+/// Base values and stats are left untouched; `sync_combat_to_party_on_exit`
+/// handles the full authoritative copy when combat ends.
+fn sync_party_hp_during_combat(
+    mut global_state: ResMut<GlobalState>,
+    combat_res: Res<CombatResource>,
+) {
+    // Only run while in combat.
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    for (participant_idx, participant) in combat_res.state.participants.iter().enumerate() {
+        if let Combatant::Player(pc) = participant {
+            // Resolve which party slot this participant maps to.
+            let party_idx = match combat_res
+                .player_orig_indices
+                .get(participant_idx)
+                .and_then(|opt| *opt)
+            {
+                Some(idx) => idx,
+                None => continue,
+            };
+
+            let Some(member) = global_state.0.party.members.get_mut(party_idx) else {
+                continue;
+            };
+
+            // Mirror only the values that change during combat turns.
+            // Use saturating arithmetic — hp/sp are u16, never go negative.
+            member.hp.current = pc.hp.current;
+            member.sp.current = pc.sp.current;
+            member.conditions = pc.conditions;
+            member.active_conditions = pc.active_conditions.clone();
+        }
+    }
+}
+
 /// System: When combat has ended (global mode is not Combat) copy combat state
 /// data (HP, SP, conditions, stat currents) back into the party members.
 fn sync_combat_to_party_on_exit(
@@ -1113,7 +1251,8 @@ fn setup_combat_ui(
         return;
     }
 
-    // Spawn combat HUD root container
+    // Spawn combat HUD root container — a transparent full-screen anchor for
+    // all absolutely-positioned combat panels.
     commands
         .spawn((
             Node {
@@ -1122,20 +1261,22 @@ fn setup_combat_ui(
                 right: Val::Px(0.0),
                 top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::FlexStart,
-                row_gap: Val::Px(4.0),
                 ..default()
             },
             BackgroundColor(Color::NONE),
             crate::game::components::combat::CombatHudRoot,
         ))
         .with_children(|parent| {
-            // Enemy panel at top
+            // ── Enemy panel ────────────────────────────────────────────────
+            // Pinned from the bottom so it sits in the lower half of the
+            // screen, leaving the upper half clear for the combat log.
             parent
                 .spawn((
                     Node {
-                        width: Val::Percent(100.0),
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        right: Val::Px(0.0),
+                        bottom: ENEMY_PANEL_BOTTOM,
                         height: COMBAT_ENEMY_PANEL_HEIGHT,
                         flex_direction: FlexDirection::Row,
                         justify_content: JustifyContent::Center,
@@ -1186,9 +1327,13 @@ fn setup_combat_ui(
                                         Node {
                                             width: Val::Percent(100.0),
                                             height: ENEMY_HP_BAR_HEIGHT,
+                                            overflow: Overflow::visible(),
                                             ..default()
                                         },
                                         BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 1.0)),
+                                        EnemyHpBarBackground {
+                                            participant_index: idx,
+                                        },
                                     ))
                                     .with_children(|bar| {
                                         // HP bar fill
@@ -1238,11 +1383,14 @@ fn setup_combat_ui(
                     }
                 });
 
-            // Turn order display
+            // ── Turn order panel ───────────────────────────────────────────
             parent
                 .spawn((
                     Node {
-                        width: Val::Percent(100.0),
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        right: Val::Px(0.0),
+                        bottom: TURN_ORDER_BOTTOM,
                         height: TURN_ORDER_PANEL_HEIGHT,
                         flex_direction: FlexDirection::Row,
                         justify_content: JustifyContent::Center,
@@ -1265,11 +1413,14 @@ fn setup_combat_ui(
                     ));
                 });
 
-            // Action menu (initially visible, will be hidden during enemy turns)
+            // ── Action menu ────────────────────────────────────────────────
             parent
                 .spawn((
                     Node {
-                        width: Val::Percent(100.0),
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        right: Val::Px(0.0),
+                        bottom: ACTION_MENU_BOTTOM,
                         height: ACTION_MENU_HEIGHT,
                         flex_direction: FlexDirection::Row,
                         justify_content: JustifyContent::Center,
@@ -1326,7 +1477,7 @@ fn setup_combat_ui(
                         top: Val::Px(12.0),
                         width: COMBAT_LOG_BUBBLE_WIDTH,
                         min_height: COMBAT_LOG_BUBBLE_MIN_HEIGHT,
-                        max_height: Val::Px(300.0),
+                        max_height: COMBAT_LOG_BUBBLE_MAX_HEIGHT,
                         flex_direction: FlexDirection::Column,
                         padding: UiRect::all(Val::Px(10.0)),
                         row_gap: Val::Px(8.0),
@@ -3124,19 +3275,25 @@ pub fn perform_monster_turn_with_rng(
 ///
 /// Picks an attack and target using AI, performs the attack, and advances
 /// the turn. Uses the global RNG for in-game randomness.
+#[allow(clippy::too_many_arguments)]
 fn execute_monster_turn(
     mut combat_res: ResMut<CombatResource>,
     content: Option<Res<GameContent>>,
     mut global_state: ResMut<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
     mut feedback_writer: Option<MessageWriter<CombatFeedbackEvent>>,
+    mut monster_turn_timer: Option<ResMut<MonsterTurnTimer>>,
+    time: Option<Res<Time>>,
+    mut was_enemy_turn: Local<bool>,
 ) {
     // Only run during combat and when it's enemy turn
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        *was_enemy_turn = false;
         return;
     }
 
     if !matches!(turn_state.0, CombatTurnState::EnemyTurn) {
+        *was_enemy_turn = false;
         return;
     }
 
@@ -3159,8 +3316,9 @@ fn execute_monster_turn(
             .unwrap_or(false);
 
         if !can_act {
-            // Advance past this incapacitated / already-acted monster and update
-            // turn_state so the next actor (player or another monster) gets control.
+            // Incapacitated monsters skip immediately — no delay needed.
+            // Advance past this monster and update turn_state so the next actor
+            // (player or another monster) gets control.
             info!(
                 "Monster at participant index {} cannot act — advancing turn",
                 monster_idx
@@ -3179,8 +3337,42 @@ fn execute_monster_turn(
                 Some(CombatantId::Monster(_)) => CombatTurnState::EnemyTurn,
                 None => CombatTurnState::PlayerTurn,
             };
+            // Reset the was_enemy_turn flag so the delay arms fresh for the
+            // next monster in the same round (if any).
+            *was_enemy_turn = false;
             return;
         }
+
+        // ── Delay gate ─────────────────────────────────────────────────────
+        // The monster CAN act.  On the first frame we enter EnemyTurn for an
+        // active monster, reset the timer so the player can read the combat log
+        // before the attack resolves.  On subsequent frames, tick it.  Only
+        // proceed once the timer has just finished.
+        //
+        // If the MonsterTurnTimer resource is absent (minimal test harnesses
+        // that do not use CombatPlugin) we skip the delay entirely and act
+        // immediately so existing unit tests need no changes.
+        if let Some(ref mut timer) = monster_turn_timer {
+            if !*was_enemy_turn {
+                // First frame of this EnemyTurn — arm the timer and wait.
+                timer.0.reset();
+                *was_enemy_turn = true;
+                return;
+            }
+
+            // Subsequent frames — tick the timer and wait until it finishes.
+            let delta = time
+                .as_ref()
+                .map(|t| t.delta())
+                .unwrap_or(std::time::Duration::ZERO);
+            timer.0.tick(delta);
+
+            if !timer.0.just_finished() {
+                return;
+            }
+            // Timer just finished — fall through to execute the monster's action.
+        }
+        // If MonsterTurnTimer resource is absent, act immediately (test path).
 
         // Fallback content when none registered (tests often omit GameContent)
         let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
@@ -4072,9 +4264,11 @@ fn reset_combat_log_on_exit(
 /// System: read `CombatFeedbackEvent` messages and spawn anchored `FloatingDamage` nodes.
 ///
 /// For monster targets the node is spawned as a **child** of the corresponding
-/// `EnemyCard` entity so it floats above the enemy's UI card.  For player
-/// targets it is spawned at an absolute position (HUD bottom area) because the
-/// player HUD layout differs per game.
+/// [`EnemyHpBarBackground`] node (not the whole card) so it sits in the
+/// lower-right corner of the HP bar area without affecting the card's flex
+/// layout.  The background node has `overflow: visible` so the text is never
+/// clipped.  For player targets it is spawned at an absolute position (HUD
+/// bottom area) because the player HUD layout differs per game.
 ///
 /// Colour is chosen from the Phase 3 constants:
 /// - Red   (`FEEDBACK_COLOR_DAMAGE`) — `Damage(_)`
@@ -4084,7 +4278,7 @@ fn reset_combat_log_on_exit(
 fn spawn_combat_feedback(
     mut reader: MessageReader<CombatFeedbackEvent>,
     mut commands: Commands,
-    enemy_cards: Query<(Entity, &EnemyCard)>,
+    hp_bar_backgrounds: Query<(Entity, &EnemyHpBarBackground)>,
 ) {
     for event in reader.read() {
         let (text, color) = match &event.effect {
@@ -4101,22 +4295,24 @@ fn spawn_combat_feedback(
 
         match event.target {
             CombatantId::Monster(idx) => {
-                // Anchor to the enemy card for this participant
-                let card_entity = enemy_cards
+                // Anchor to the HP bar background node for this participant so
+                // the damage text sits in the lower-right of the bar without
+                // disturbing the card's flex layout.
+                let bar_entity = hp_bar_backgrounds
                     .iter()
-                    .find(|(_, card)| card.participant_index == idx)
+                    .find(|(_, bg)| bg.participant_index == idx)
                     .map(|(e, _)| e);
 
-                if let Some(card) = card_entity {
-                    commands.entity(card).with_children(|parent| {
+                if let Some(bar) = bar_entity {
+                    commands.entity(bar).with_children(|parent| {
                         parent
                             .spawn((
                                 Node {
                                     position_type: PositionType::Absolute,
                                     width: Val::Auto,
                                     height: Val::Auto,
-                                    top: Val::Px(4.0),
-                                    left: Val::Px(4.0),
+                                    bottom: Val::Px(0.0),
+                                    right: Val::Px(4.0),
                                     ..default()
                                 },
                                 FloatingDamage { remaining: 1.2 },
@@ -4134,7 +4330,7 @@ fn spawn_combat_feedback(
                             });
                     });
                 } else {
-                    // Fallback: absolute-positioned if card not found yet
+                    // Fallback: absolute-positioned if bar background not found yet
                     commands
                         .spawn((
                             Node {
@@ -4395,6 +4591,11 @@ fn update_monster_hp_hover_bars(
             for (bar, mut node) in hover_bar_queries.p0().iter_mut() {
                 let card_left = start_x + (bar.stack_order as f32) * (card_width + card_gap);
                 node.left = Val::Px(card_left + 14.0);
+                // Fallback top: enemy panel bottom edge is at ENEMY_PANEL_BOTTOM
+                // (206 px from screen bottom) and is COMBAT_ENEMY_PANEL_HEIGHT
+                // (200 px) tall, so its top edge is ~406 px from the bottom.
+                // Express as a top offset; the world-projection path overrides
+                // this whenever a camera is present.
                 node.top = Val::Px(54.0);
             }
         }
@@ -4523,6 +4724,102 @@ mod tests {
                 .filter(|x| x.is_some())
                 .count(),
             1
+        );
+    }
+
+    /// `sync_party_hp_during_combat` must write the combat participant's current HP
+    /// into `party.members` every frame while combat is active — so the HUD
+    /// reflects live damage before combat ends.
+    #[test]
+    fn test_sync_party_hp_during_combat_updates_party_hp() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "LiveHpHero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp.base = 30;
+        hero.hp.current = 30;
+        gs.party.add_member(hero.clone()).unwrap();
+
+        // Put the game into Combat mode.
+        gs.enter_combat();
+
+        // Build a CombatResource where the player has already taken 10 damage.
+        let mut cr = CombatResource::new();
+        let mut combat_hero = hero.clone();
+        combat_hero.hp.current = 20; // simulates 10 damage dealt
+        cr.state.add_player(combat_hero);
+        cr.player_orig_indices = vec![Some(0)];
+        // Initialise turn order so the state is consistent.
+        crate::domain::combat::engine::start_combat(&mut cr.state);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        app.insert_resource(cr);
+
+        // Run one frame — sync_party_hp_during_combat must fire.
+        app.update();
+
+        let gs_after = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+
+        // Party member HP must reflect the combat-engine value (20), not the
+        // original value (30), while combat is still active.
+        assert_eq!(
+            gs_after.0.party.members[0].hp.current, 20,
+            "sync_party_hp_during_combat must mirror combat HP into party.members \
+             so the HUD shows live values; expected 20, got {}",
+            gs_after.0.party.members[0].hp.current
+        );
+        // Must still be in combat — this sync must not end combat.
+        assert!(
+            matches!(gs_after.0.mode, GameMode::Combat(_)),
+            "combat must still be active after sync; got {:?}",
+            gs_after.0.mode
+        );
+    }
+
+    /// `sync_party_hp_during_combat` must do nothing when not in combat mode.
+    #[test]
+    fn test_sync_party_hp_during_combat_noop_in_exploration() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "SafeHero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp.base = 30;
+        hero.hp.current = 30;
+        gs.party.add_member(hero.clone()).unwrap();
+        // Mode stays Exploration — no combat.
+
+        let cr = CombatResource::new(); // empty, no participants
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        app.insert_resource(cr);
+
+        app.update();
+
+        let gs_after = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        // HP must be unchanged when not in combat.
+        assert_eq!(
+            gs_after.0.party.members[0].hp.current, 30,
+            "sync_party_hp_during_combat must not alter party HP outside combat"
         );
     }
 

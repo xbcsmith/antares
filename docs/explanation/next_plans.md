@@ -293,6 +293,86 @@ Full domain change: Change `CharacterDefinition` to store `AttributePair`/`Attri
 
 ### Game Play
 
+Out-of-combat item use is not implemented. The inventory UI (GameMode::Menu / GameMode::Inventory) only supports Drop and Transfer actions. There is no "Use" action wired to exploration or menu mode. All ConsumableEffect variants (HealHp, RestoreSp, CureCondition, BoostAttribute, BoostResistance) can only be triggered during a combat turn via the UseItemAction message. A player cannot drink a Potion of Fire Resistance, a Healing Potion, or a stat-boosting potion from the inventory screen between fights. This gap affects every consumable type equally. To fix this, an out-of-combat item execution path is needed:
+
+- Add a `UseItemAction` (or equivalent) message type for exploration/menu mode.
+- Implement `apply_consumable_effect(character: &mut Character, effect: ConsumableEffect)` as a pure domain function that does not require a `CombatState` — mirroring the logic in `execute_item_use_by_slot` but operating directly on a `Character`.
+- Wire a "Use" keybind (e.g. Enter/U) in `inventory_input_system` that fires the new action when the focused item is a consumable.
+- Handle the action in a new Bevy system (`handle_use_item_action_exploration`) that applies the effect to the selected character and consumes the inventory charge.
+- Confirm `is_combat_usable: false` items are blocked in combat but allowed in exploration.
+- Add appropriate feedback (status message or log line) so the player knows the item was consumed.
+
+### Consumable Duration and Timed Resistance Effects
+
+Now that the time system (`GameTime`, `advance_time()`, `ActiveSpells::tick()`) is in place, consumable items that boost resistances or attributes should support a timed duration that expires as in-game time passes. Currently `BoostResistance` and `BoostAttribute` permanently modify `character.resistances.*` and `character.stats.*` current values with no expiry. This is acceptable inside combat (state resets at end of combat) but is wrong for out-of-combat use where time flows.
+
+#### What exists today
+
+- `ActiveSpells` on `GameState` already tracks party-wide timed protections (`fire_protection`, `cold_protection`, `electricity_protection`, `magic_protection`, `fear_protection`, `psychic_protection`, etc.) as `u8` minute countdowns.
+- `GameState::advance_time(minutes)` calls `active_spells.tick()` once per minute, decrementing every counter via `saturating_sub(1)`.
+- `ConditionDuration::Minutes(u16)` exists on the conditions system with `tick_minute()` already implemented, suitable for per-character timed effects.
+
+#### What needs to change
+
+**1. Add `duration_minutes: Option<u16>` to `ConsumableData`** (`src/domain/items/types.rs`)
+
+```rust
+pub struct ConsumableData {
+    pub effect: ConsumableEffect,
+    pub is_combat_usable: bool,
+    /// Duration in game-world minutes. `None` = instant / permanent.
+    /// Used by `BoostResistance` and `BoostAttribute` to expire via `advance_time`.
+    #[serde(default)]
+    pub duration_minutes: Option<u16>,
+}
+```
+
+Use `#[serde(default)]` so all existing RON item files deserialize without modification (`None` = permanent, matching current behaviour).
+
+**2. Route `BoostResistance` through `ActiveSpells` out of combat**
+
+When a resistance potion is consumed outside combat, apply the boost to the corresponding `active_spells` field rather than directly to `character.resistances`:
+
+| `ResistanceType`  | `ActiveSpells` field     |
+| ----------------- | ------------------------ |
+| Fire              | `fire_protection`        |
+| Cold              | `cold_protection`        |
+| Electricity       | `electricity_protection` |
+| Energy            | `magic_protection`       |
+| Fear              | `fear_protection`        |
+| Physical          | `magic_protection`       |
+| Paralysis / Sleep | `psychic_protection`     |
+
+Set the field to `duration_minutes` (saturating at `u8::MAX`). `advance_time` then expires it automatically — no cleanup code required.
+
+**3. Route `BoostAttribute` through per-character timed conditions out of combat**
+
+Stat-boosting potions (Might, Speed, etc.) affect individual characters, not the whole party, so `ActiveSpells` is not the right home. Instead:
+
+- Add a `timed_stat_boosts: Vec<TimedStatBoost>` field to `Character` (or reuse `ActiveCondition` with a new `ConditionEffect::BoostAttribute` variant).
+- Each entry stores `(AttributeType, i8, minutes_remaining: u16)`.
+- Wire `tick_minute()` on `Character` to decrement and remove expired boosts, reversing the `current` value change when they expire.
+- `advance_time` must call `tick_minute()` on every party member.
+
+**4. Campaign Builder — duration field in Items editor**
+
+Add a `Duration (minutes)` `DragValue` (0 = permanent) to the Consumable Properties section of `show_type_editor` in `sdk/campaign_builder/src/items_editor.rs`, visible only when the effect is `BoostResistance` or `BoostAttribute`. Update the preview panel to show `"(60 min)"` beside the effect string when a duration is set.
+
+**5. Backward compatibility**
+
+- All existing `.ron` item files omit `duration_minutes` → deserialize as `None` → permanent behaviour unchanged.
+- In-combat use of `BoostResistance` may continue to write directly to `character.resistances` (combat resets on exit); the duration field is advisory for out-of-combat use.
+
+#### Phased approach
+
+| Phase | Scope                                                                                                                                                     |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A     | Add `duration_minutes: Option<u16>` to `ConsumableData`; update all existing struct literals with `..Default::default()` or explicit `None`; update tests |
+| B     | Implement out-of-combat `apply_consumable_effect` pure domain function; route `BoostResistance` to `ActiveSpells` with duration                           |
+| C     | Per-character timed stat boosts for `BoostAttribute`; wire `tick_minute` into `advance_time`                                                              |
+| D     | Campaign Builder UI — duration field in Items editor                                                                                                      |
+| E     | Wire "Use" keybind in inventory screen (depends on out-of-combat item use plan above)                                                                     |
+
 No interaction with Doors you can walk right through them. (pressing the E key when in front of a door does nothing)
 No interaction with NPC. No description messages are displayed and there is no dialog tree. (pressing the E key when in front of an NPC does nothing)
 Signs are not implemented in world. There is no sprite or graphic to represent them and no dialog when they are triggered. They do show up in the logs when you walk over them. No description messages are displayed when the player interacts with a sign. (pressing the E key when in front of a sign does nothing)
@@ -522,13 +602,14 @@ Write a plan with a phased approach to implementing a time system in the game en
 
 ✅ COMPLETE - [Time System Implementation Plan](./time_system_implementation_plan.md)
 
+
 ### Rest System
 
 We need a party rest system to heal characters. Bind rest to the R key and make it configurable in the game config. When the player presses the rest key, the party should rest and heal a certain amount of HP. The amount of HP healed should be based on the amount of time rested. Resting for 12 hours fully heals a party. The rest system should also have a chance to trigger random encounters while resting.
 
 Write a plan with a phased approach to implementing a rest system in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Rest System Implementation Plan](./rest_system_implementation_plan.md)
+✅ COMPLETE - [Rest System Implementation Plan](./rest_system_implementation_plan.md)
 
 ### Game Log
 
@@ -597,6 +678,109 @@ Write a plan with a phased approach to implementing buying and selling in the ga
 
 ✅ COMPLETED - [Buy and Sell Plan](./buy_and_sell_plan.md)
 
+### Months and Years in the Time System
+
+The current time system tracks day, hour, and minute only (`GameTime { day, hour, minute }`).
+Many classic RPGs give the world a richer sense of history and season by also tracking months and
+years. This section describes what would need to change to add that support.
+
+#### Motivation
+
+- Campaign authors may want events that trigger "in winter" or "after year 2".
+- The HUD clock and any in-game calendar UI benefit from displaying a full date
+  (e.g. "Day 3, Month 2, Year 4" or "3rd of Frostmoon, Year 4").
+- Long-running campaigns feel more alive when the world ages alongside the player.
+
+#### Required Changes
+
+##### 1. Extend `GameTime`
+
+Add `month: u32` and `year: u32` fields to `GameTime` in `src/domain/types.rs`:
+
+```rust
+pub struct GameTime {
+    pub year:   u32,   // 1-based
+    pub month:  u32,   // 1-based
+    pub day:    u32,   // 1-based within month
+    pub hour:   u8,    // 0–23
+    pub minute: u8,    // 0–59
+}
+```
+
+Keep the existing `GameTime::new(day, hour, minute)` constructor as a convenience
+alias that defaults `year = 1, month = 1` for backward compatibility.
+
+##### 2. Add Calendar Constants
+
+Add a `Calendar` struct (or free constants) to define the shape of the in-game year:
+
+```rust
+pub const MONTHS_PER_YEAR: u32 = 12;
+pub const DAYS_PER_MONTH:  u32 = 30;   // or per-month array for unequal months
+pub const DAYS_PER_YEAR:   u32 = MONTHS_PER_YEAR * DAYS_PER_MONTH;
+```
+
+Campaign authors could override these defaults via `CampaignConfig` if they want
+a world with 13 months of 28 days, for example.
+
+Optional: add named months to `CampaignConfig` so the HUD can display
+"Frostmoon" instead of "Month 1".
+
+##### 3. Update `advance_time()`
+
+`GameState::advance_time(minutes)` currently rolls days from hours. It must also
+roll months from days, and years from months, using the calendar constants.
+
+##### 4. Extend `TimeCondition`
+
+Add year- and month-aware variants to the `TimeCondition` enum used by map events:
+
+```rust
+pub enum TimeCondition {
+    DuringPeriods(Vec<TimeOfDay>),
+    AfterDay(u32),
+    BeforeDay(u32),
+    BetweenHours { from: u8, to: u8 },
+    // New:
+    DuringMonths(Vec<u32>),    // e.g. winter = months 11, 12, 1
+    AfterYear(u32),
+    BeforeYear(u32),
+    BetweenYears { from: u32, to: u32 },
+}
+```
+
+##### 5. Update the HUD Clock
+
+`ClockDayText` would become `ClockDateText` (or split into separate components
+for day, month, year). The `update_clock` system formats a full date string.
+A `period_label`-style helper can format month names when the campaign defines them.
+
+##### 6. Campaign Builder — Starting Date
+
+`CampaignConfig::starting_time` already has `day`, `hour`, `minute`. Extend to
+include `year` and `month`. The Campaign Builder's Gameplay section and
+`CampaignMetadataEditBuffer` gain two new `DragValue` fields (`starting_year`,
+`starting_month`) following the same pattern as `starting_day`/`starting_hour`.
+
+##### 7. Save / Load
+
+`GameTime` is serialized as part of `GameState`. Adding fields with
+`#[serde(default)]` keeps existing save files loading without error (they
+deserialize `year = 0` / `month = 0` which can be clamped to 1 on load).
+
+#### Phased Approach
+
+| Phase | Scope                                                                            |
+| ----- | -------------------------------------------------------------------------------- |
+| A     | Extend `GameTime`, add calendar constants, update `advance_time()`, update tests |
+| B     | Add month/year `TimeCondition` variants, update event evaluation                 |
+| C     | Update HUD clock, add optional named-month support to `CampaignConfig`           |
+| D     | Campaign Builder UI — starting year/month drag values, Files section             |
+| E     | Named months editor in Campaign Builder (optional quality-of-life)               |
+
+Write a detailed plan before implementing. Follow the rules in PLAN.md and
+AGENTS.md. All existing tests must continue to pass; add new tests for rollover
+logic (minute→hour→day→month→year) and for each new `TimeCondition` variant.
 
 ### Automap and mini map
 
@@ -605,3 +789,9 @@ We need to implement an automap and mini map in the game engine. The automap sho
 Write a plan with a phased approach to implementing an automap and mini map in the game engine. THINK HARD and follow the rules in @PLAN.md
 
 ✅ PLAN WRITTEN - [Automap and Mini Map Implementation Plan](./automap_and_mini_map_implementation_plan.md)
+
+### Food System
+
+Currently resting depends on food rations of the party. Currently there is no way to obtain food rations in the game. Characters start with X number of Food Rations and never get anymore. InnKeepers should sell food. The food rations will replenish the characters food ration.
+
+Food Ration should be a consumable item with a condition "can rest".

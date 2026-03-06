@@ -2102,6 +2102,7 @@ impl EventEditorState {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     monster_group: monsters,
+                    time_condition: None,
                 })
             }
             EventType::Treasure => {
@@ -2173,6 +2174,7 @@ impl EventEditorState {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     text: self.sign_text.clone(),
+                    time_condition: None,
                 })
             }
             EventType::NpcDialogue => {
@@ -2181,6 +2183,7 @@ impl EventEditorState {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     npc_id,
+                    time_condition: None,
                 })
             }
             EventType::RecruitableCharacter => {
@@ -2205,6 +2208,7 @@ impl EventEditorState {
                     description: self.description.clone(),
                     character_id,
                     dialogue_id,
+                    time_condition: None,
                 })
             }
             EventType::EnterInn => {
@@ -2307,6 +2311,7 @@ impl EventEditorState {
                 name,
                 description,
                 monster_group,
+                ..
             } => {
                 s.event_type = EventType::Encounter;
                 s.name = name.clone();
@@ -2355,6 +2360,7 @@ impl EventEditorState {
                 name,
                 description,
                 text,
+                ..
             } => {
                 s.event_type = EventType::Sign;
                 s.name = name.clone();
@@ -2365,6 +2371,7 @@ impl EventEditorState {
                 name,
                 description,
                 npc_id,
+                ..
             } => {
                 s.event_type = EventType::NpcDialogue;
                 s.name = name.clone();
@@ -2376,6 +2383,7 @@ impl EventEditorState {
                 description,
                 character_id,
                 dialogue_id,
+                ..
             } => {
                 s.event_type = EventType::RecruitableCharacter;
                 s.name = name.clone();
@@ -6073,6 +6081,7 @@ mod tests {
             name: "Sign".to_string(),
             description: "Desc".to_string(),
             text: "Test".to_string(),
+            time_condition: None,
         };
 
         state.add_event(pos, event);
@@ -6158,6 +6167,7 @@ mod tests {
             name: "Sign".to_string(),
             description: "Desc".to_string(),
             text: "Test".to_string(),
+            time_condition: None,
         };
         state.add_event(pos, event);
 
@@ -6184,6 +6194,7 @@ mod tests {
                 name,
                 description,
                 monster_group,
+                ..
             } => {
                 assert_eq!(monster_group, vec![1u8, 2u8, 3u8]);
             }
@@ -6228,6 +6239,7 @@ mod tests {
                 description,
                 character_id,
                 dialogue_id,
+                ..
             } => {
                 assert_eq!(name, "Old Gareth".to_string());
                 assert_eq!(description, "A grizzled dwarf".to_string());
@@ -6245,6 +6257,7 @@ mod tests {
             description: "An elven scout".to_string(),
             character_id: "whisper".to_string(),
             dialogue_id: None,
+            time_condition: None,
         };
 
         let state = EventEditorState::from_map_event(Position::new(0, 0), &event);
@@ -6793,6 +6806,7 @@ mod tests {
             name: "Sign".to_string(),
             description: "Desc".to_string(),
             text: "Hello UndoRedo".to_string(),
+            time_condition: None,
         };
 
         // Add event
@@ -6835,6 +6849,7 @@ mod tests {
                 name: "Sign".to_string(),
                 description: "Desc".to_string(),
                 text: "Test sign".to_string(),
+                time_condition: None,
             },
         );
 
@@ -6924,6 +6939,7 @@ mod tests {
             name: "Sign".to_string(),
             description: "Desc".to_string(),
             text: "Test sign".to_string(),
+            time_condition: None,
         };
 
         state.add_event_at_position(5, 5, event);
@@ -6949,6 +6965,7 @@ mod tests {
             name: "Inn Sign".to_string(),
             description: "Welcome".to_string(),
             text: "Welcome to town".to_string(),
+            time_condition: None,
         };
 
         let editor = EventEditorState::from_map_event(pos, &event);
@@ -6981,6 +6998,7 @@ mod tests {
             name: "Inn Sign".to_string(),
             description: "Welcome".to_string(),
             text: "Welcome to town".to_string(),
+            time_condition: None,
         };
         state.add_event_at_position(pos.x as u32, pos.y as u32, event);
         state.selected_position = Some(pos);
@@ -7013,6 +7031,7 @@ mod tests {
             name: "Sign".to_string(),
             description: "Desc".to_string(),
             text: "Original".to_string(),
+            time_condition: None,
         };
 
         // Add the original event
@@ -7075,6 +7094,7 @@ mod tests {
             name: "Sign".to_string(),
             description: "Desc".to_string(),
             text: "Welcome".to_string(),
+            time_condition: None,
         };
         let event2 = MapEvent::Treasure {
             name: "Treasure".to_string(),
@@ -7293,6 +7313,7 @@ mod tests {
             name: "Test Sign".to_string(),
             description: "A test sign".to_string(),
             text: "Hello".to_string(),
+            time_condition: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7320,6 +7341,7 @@ mod tests {
             name: "Dragons".to_string(),
             description: "A dragon encounter".to_string(),
             monster_group: vec![1, 2, 3],
+            time_condition: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7386,6 +7408,7 @@ mod tests {
             name: "Sign".to_string(),
             description: "Desc".to_string(),
             text: "Text".to_string(),
+            time_condition: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7412,6 +7435,7 @@ mod tests {
             name: "Sign".to_string(),
             description: "Desc".to_string(),
             text: "Text".to_string(),
+            time_condition: None,
         };
 
         editor.map.add_event(pos, event);
@@ -7439,6 +7463,7 @@ mod tests {
             name: "Sign1".to_string(),
             description: "Desc1".to_string(),
             text: "Text1".to_string(),
+            time_condition: None,
         };
 
         let event2 = MapEvent::Trap {
@@ -7483,6 +7508,7 @@ mod tests {
             name: "Test Encounter".to_string(),
             description: "A test encounter".to_string(),
             monster_group: vec![],
+            time_condition: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7543,6 +7569,7 @@ mod tests {
         let pos = Position::new(2, 2);
         let event = MapEvent::Sign {
             name: "Welcome Sign".to_string(),
+            time_condition: None,
             description: "A sign".to_string(),
             text: "Welcome to the dungeon!".to_string(),
         };
@@ -7688,6 +7715,7 @@ mod tests {
             name: "Event 1".to_string(),
             description: "First event".to_string(),
             monster_group: vec![],
+            time_condition: None,
         };
 
         let event2 = MapEvent::Treasure {
@@ -7700,6 +7728,7 @@ mod tests {
             name: "Event 3".to_string(),
             description: "Third event sign".to_string(),
             text: "Third event".to_string(),
+            time_condition: None,
         };
 
         editor.map.add_event(pos1, event1.clone());
@@ -7733,6 +7762,7 @@ mod tests {
             name: "Original Sign".to_string(),
             description: "Original description".to_string(),
             text: "Original text".to_string(),
+            time_condition: None,
         };
         state.add_event(pos, original_event.clone());
 
@@ -7788,6 +7818,7 @@ mod tests {
             name: "Test Sign".to_string(),
             description: "Test".to_string(),
             text: "Text".to_string(),
+            time_condition: None,
         };
         state.add_event(pos, event.clone());
 
@@ -7827,6 +7858,7 @@ mod tests {
             name: "Sign 1".to_string(),
             description: "First sign".to_string(),
             text: "Text 1".to_string(),
+            time_condition: None,
         };
         let event2 = MapEvent::Trap {
             name: "Trap 1".to_string(),
@@ -8281,12 +8313,14 @@ mod tests {
 
     #[test]
     fn test_event_editor_state_to_container_empty_items() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Container;
-        editor.name = "Empty Chest".to_string();
-        editor.description = "An old chest".to_string();
-        editor.container_items = vec![];
-        editor.container_locked = false;
+        let editor = EventEditorState {
+            event_type: EventType::Container,
+            name: "Empty Chest".to_string(),
+            description: "An old chest".to_string(),
+            container_items: vec![],
+            container_locked: false,
+            ..Default::default()
+        };
 
         let result = editor.to_map_event();
         assert!(result.is_ok(), "to_map_event should succeed: {:?}", result);
@@ -8301,10 +8335,12 @@ mod tests {
 
     #[test]
     fn test_event_editor_state_to_container_with_items() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Container;
-        editor.name = "Treasure Box".to_string();
-        editor.container_items = vec![1, 2, 3];
+        let editor = EventEditorState {
+            event_type: EventType::Container,
+            name: "Treasure Box".to_string(),
+            container_items: vec![1, 2, 3],
+            ..Default::default()
+        };
 
         let result = editor.to_map_event();
         assert!(result.is_ok(), "to_map_event should succeed: {:?}", result);
@@ -8320,10 +8356,12 @@ mod tests {
 
     #[test]
     fn test_event_editor_state_to_container_locked() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Container;
-        editor.name = "Locked Box".to_string();
-        editor.container_locked = true;
+        let editor = EventEditorState {
+            event_type: EventType::Container,
+            name: "Locked Box".to_string(),
+            container_locked: true,
+            ..Default::default()
+        };
         // Note: locked is stored in editor state; the domain MapEvent::Container
         // does not have a locked field in the current domain type, so we just
         // verify to_map_event succeeds and locked is reflected in the editor state.
@@ -8363,11 +8401,13 @@ mod tests {
 
     #[test]
     fn test_event_editor_state_container_description_override() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Container;
-        editor.name = "Box".to_string();
-        editor.description = "fallback desc".to_string();
-        editor.container_description = "override desc".to_string();
+        let editor = EventEditorState {
+            event_type: EventType::Container,
+            name: "Box".to_string(),
+            description: "fallback desc".to_string(),
+            container_description: "override desc".to_string(),
+            ..Default::default()
+        };
 
         let result = editor.to_map_event().unwrap();
         match result {
@@ -8381,11 +8421,13 @@ mod tests {
         }
 
         // Empty container_description falls back to description
-        let mut editor2 = EventEditorState::default();
-        editor2.event_type = EventType::Container;
-        editor2.name = "Box2".to_string();
-        editor2.description = "fallback desc".to_string();
-        editor2.container_description = String::new();
+        let editor2 = EventEditorState {
+            event_type: EventType::Container,
+            name: "Box2".to_string(),
+            description: "fallback desc".to_string(),
+            container_description: String::new(),
+            ..Default::default()
+        };
 
         let result2 = editor2.to_map_event().unwrap();
         match result2 {

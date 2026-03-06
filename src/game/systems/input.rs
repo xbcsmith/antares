@@ -41,6 +41,7 @@ use crate::game::resources::GlobalState;
 use crate::game::systems::dialogue::{PendingRecruitmentContext, StartDialogue};
 use crate::game::systems::events::MapEventTriggered;
 use crate::game::systems::map::{DoorOpenedEvent, NpcMarker, TileCoord};
+#[cfg(test)]
 use crate::game::systems::rest::InitiateRestEvent;
 use crate::sdk::game_config::ControlsConfig;
 use bevy::prelude::*;
@@ -436,7 +437,7 @@ fn handle_input(
     mut map_event_messages: MessageWriter<MapEventTriggered>,
     mut dialogue_writer: MessageWriter<StartDialogue>,
     mut recruitment_context: ResMut<PendingRecruitmentContext>,
-    mut rest_writer: MessageWriter<InitiateRestEvent>,
+
     time: Res<Time>,
     mut last_move_time: Local<f32>,
     victory_roots: Query<Entity, With<crate::game::systems::combat::VictorySummaryRoot>>,
@@ -518,18 +519,16 @@ fn handle_input(
         return; // Exit early after inventory toggle
     }
 
-    // Check for rest action ("R" key) — fires InitiateRestEvent only during
-    // Exploration mode. All other modes silently ignore the key press.
+    // Check for rest action ("R" key) — opens the rest-duration menu only
+    // during Exploration mode.  All other modes silently ignore the key press.
     if input_config
         .key_map
         .is_action_just_pressed(GameAction::Rest, &keyboard_input)
     {
-        let game_state = &global_state.0;
+        let game_state = &mut global_state.0;
         if matches!(game_state.mode, crate::application::GameMode::Exploration) {
-            info!("Rest key pressed: initiating rest sequence");
-            rest_writer.write(InitiateRestEvent {
-                hours: crate::domain::resources::REST_DURATION_HOURS,
-            });
+            info!("Rest key pressed: opening rest menu");
+            game_state.enter_rest_menu();
         } else {
             info!(
                 "Rest key pressed but mode is {:?} — ignoring",
@@ -582,10 +581,13 @@ fn handle_input(
         return;
     }
 
-    // Block all movement/interaction input when resting.
+    // Block all movement/interaction input when resting or in the rest menu.
     // The rest orchestration system drives the rest sequence; the player
     // cannot walk away mid-rest.
-    if matches!(game_state.mode, crate::application::GameMode::Resting(_)) {
+    if matches!(
+        game_state.mode,
+        crate::application::GameMode::Resting(_) | crate::application::GameMode::RestMenu
+    ) {
         return;
     }
 
@@ -1543,8 +1545,9 @@ mod integration_tests {
         );
     }
 
-    /// Pressing `R` in `GameMode::Exploration` must write one `InitiateRestEvent`
-    /// to the Bevy event bus with the default full-rest hour count.
+    /// Pressing `R` in `GameMode::Exploration` must open the rest-duration
+    /// menu (`GameMode::RestMenu`).  No `InitiateRestEvent` is fired at this
+    /// point — that happens when the player selects a duration from the menu.
     #[test]
     fn test_handle_input_r_in_exploration_fires_initiate_rest_event() {
         let mut app = build_input_app();
@@ -1558,39 +1561,35 @@ mod integration_tests {
             );
         }
 
-        // Press R — should fire InitiateRestEvent.
+        // Press R — should open the rest menu.
         {
             let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
             btn.press(KeyCode::KeyR);
         }
         app.update();
 
-        // Drain the event queue and verify exactly one event was written.
+        // Mode must have transitioned to RestMenu.
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::RestMenu),
+            "R in Exploration must open RestMenu; got {:?}",
+            gs.0.mode
+        );
+
+        // No InitiateRestEvent must have been fired yet — the player still
+        // needs to pick a duration from the menu.
         let events = app.world().resource::<Messages<InitiateRestEvent>>();
         let mut reader = events.get_cursor();
         let fired: Vec<&InitiateRestEvent> = reader.read(events).collect();
-        assert_eq!(
-            fired.len(),
-            1,
-            "exactly one InitiateRestEvent must be fired; got {:?}",
-            fired
-        );
-        assert_eq!(
-            fired[0].hours,
-            crate::domain::resources::REST_DURATION_HOURS,
-            "InitiateRestEvent.hours must equal REST_DURATION_HOURS"
-        );
-
-        // Mode must still be Exploration (the orchestration system handles
-        // the mode transition — that is Phase 3).
-        let gs = app.world().resource::<GlobalState>();
         assert!(
-            matches!(gs.0.mode, crate::application::GameMode::Exploration),
-            "mode must remain Exploration after R press (Phase 3 handles transition)"
+            fired.is_empty(),
+            "R must not fire InitiateRestEvent before duration is chosen; got {:?}",
+            fired
         );
     }
 
-    /// Pressing `R` while in `GameMode::Menu` must NOT fire `InitiateRestEvent`.
+    /// Pressing `R` while in `GameMode::Menu` must NOT open the rest menu
+    /// and must NOT fire `InitiateRestEvent`.
     #[test]
     fn test_handle_input_r_ignored_in_menu_mode() {
         let mut app = build_input_app();
@@ -1608,6 +1607,14 @@ mod integration_tests {
         }
         app.update();
 
+        // Mode must still be Menu — R is ignored outside Exploration.
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Menu(_)),
+            "R in Menu mode must not change mode; got {:?}",
+            gs.0.mode
+        );
+
         // No InitiateRestEvent must have been sent.
         let events = app.world().resource::<Messages<InitiateRestEvent>>();
         let mut reader = events.get_cursor();
@@ -1619,7 +1626,8 @@ mod integration_tests {
         );
     }
 
-    /// Pressing `R` while in `GameMode::Inventory` must NOT fire `InitiateRestEvent`.
+    /// Pressing `R` while in `GameMode::Inventory` must NOT open the rest menu
+    /// and must NOT fire `InitiateRestEvent`.
     #[test]
     fn test_handle_input_r_ignored_in_inventory_mode() {
         let mut app = build_input_app();
@@ -1637,6 +1645,14 @@ mod integration_tests {
         }
         app.update();
 
+        // Mode must still be Inventory — R is ignored outside Exploration.
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Inventory(_)),
+            "R in Inventory mode must not change mode; got {:?}",
+            gs.0.mode
+        );
+
         // No InitiateRestEvent must have been sent.
         let events = app.world().resource::<Messages<InitiateRestEvent>>();
         let mut reader = events.get_cursor();
@@ -1648,7 +1664,8 @@ mod integration_tests {
         );
     }
 
-    /// Pressing `R` while in `GameMode::Combat` must NOT fire `InitiateRestEvent`.
+    /// Pressing `R` while in `GameMode::Combat` must NOT open the rest menu
+    /// and must NOT fire `InitiateRestEvent`.
     #[test]
     fn test_handle_input_r_ignored_in_combat_mode() {
         let mut app = build_input_app();
@@ -1674,6 +1691,14 @@ mod integration_tests {
         }
         app.update();
 
+        // Mode must still be Combat — R is ignored outside Exploration.
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Combat(_)),
+            "R in Combat mode must not change mode; got {:?}",
+            gs.0.mode
+        );
+
         // No InitiateRestEvent must have been sent.
         let events = app.world().resource::<Messages<InitiateRestEvent>>();
         let mut reader = events.get_cursor();
@@ -1685,20 +1710,29 @@ mod integration_tests {
         );
     }
 
-    /// Pressing `R` twice in Exploration fires two separate `InitiateRestEvent`s —
-    /// one per frame, one per just_pressed edge.
+    /// Pressing `R` in Exploration opens RestMenu.  Pressing `R` again while
+    /// in RestMenu must be ignored (R only acts in Exploration mode).
     #[test]
     fn test_handle_input_r_in_exploration_two_frames_two_events() {
         let mut app = build_input_app();
 
-        // Frame 1: press R.
+        // Frame 1: press R in Exploration — opens RestMenu.
         {
             let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
             btn.press(KeyCode::KeyR);
         }
         app.update();
 
-        // Frame 2: release then press again to get a new just_pressed edge.
+        {
+            let gs = app.world().resource::<GlobalState>();
+            assert!(
+                matches!(gs.0.mode, crate::application::GameMode::RestMenu),
+                "R in Exploration must open RestMenu on frame 1; got {:?}",
+                gs.0.mode
+            );
+        }
+
+        // Frame 2: release then press R again — now in RestMenu, must be ignored.
         {
             let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
             btn.release(KeyCode::KeyR);
@@ -1706,14 +1740,21 @@ mod integration_tests {
         }
         app.update();
 
-        // Both frames should have produced an event.
+        // Still in RestMenu — R has no effect while the menu is open.
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::RestMenu),
+            "R in RestMenu must be ignored; mode should stay RestMenu; got {:?}",
+            gs.0.mode
+        );
+
+        // No InitiateRestEvent should have fired at any point.
         let events = app.world().resource::<Messages<InitiateRestEvent>>();
         let mut reader = events.get_cursor();
         let fired: Vec<&InitiateRestEvent> = reader.read(events).collect();
-        assert_eq!(
-            fired.len(),
-            2,
-            "two distinct R just_pressed edges must produce two InitiateRestEvents; got {:?}",
+        assert!(
+            fired.is_empty(),
+            "R must not fire InitiateRestEvent before duration is chosen; got {:?}",
             fired
         );
     }

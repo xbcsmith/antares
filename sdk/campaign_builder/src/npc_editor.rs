@@ -476,8 +476,6 @@ impl NpcEditorState {
                 // Right panel: Detail view
                 if let Some(idx) = selected {
                     if let Some((_, npc)) = sorted_npcs.iter().find(|(i, _)| *i == idx) {
-                        right_ui.heading(&npc.name);
-                        right_ui.separator();
                         self.show_preview(right_ui, npc, campaign_dir);
                     } else {
                         right_ui.vertical_centered(|ui| {
@@ -541,50 +539,173 @@ impl NpcEditorState {
         needs_save
     }
 
-    /// Show preview of NPC with portrait
-    ///
-    /// NOTE: Temporarily simplified to a compact summary for faster iteration
-    /// and to isolate parser/formatting issues during development. The full
-    /// rich preview (images, thumbnails) will be restored once the editor's
-    /// UI parsing issues are resolved.
+    /// Show a rich preview of the selected NPC — portrait, identity badges,
+    /// and key property grid — matching the Character Editor preview style.
     fn show_preview(
         &mut self,
         ui: &mut egui::Ui,
         npc: &NpcDefinition,
-        _campaign_dir: Option<&PathBuf>,
+        campaign_dir: Option<&PathBuf>,
     ) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(8.0);
-            ui.heading(format!("{} ({})", npc.name, npc.id));
-            ui.add_space(6.0);
+        // ── Portrait + name header ────────────────────────────────────────
+        ui.horizontal(|ui| {
+            let portrait_size = egui::vec2(128.0, 128.0);
 
-            if !npc.description.is_empty() {
-                ui.label(&npc.description);
-                ui.add_space(6.0);
-            }
+            let has_texture = self.load_portrait_texture(ui.ctx(), campaign_dir, &npc.portrait_id);
 
-            if let Some(sprite) = &npc.sprite {
-                ui.label(format!(
-                    "Sprite: {} (index {})",
-                    sprite.sheet_path, sprite.sprite_index
-                ));
+            if has_texture {
+                if let Some(Some(texture)) = self.portrait_textures.get(&npc.portrait_id) {
+                    ui.add(egui::Image::new(texture).fit_to_exact_size(portrait_size));
+                } else {
+                    show_portrait_placeholder(ui, portrait_size);
+                }
             } else {
-                ui.label("Sprite: (none)");
+                show_portrait_placeholder(ui, portrait_size);
             }
 
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label(format!(
-                    "Dialogue: {}",
-                    npc.dialogue_id
-                        .as_ref()
-                        .map(|d| d.to_string())
-                        .unwrap_or_else(|| "None".to_string())
-                ));
-                ui.add_space(10.0);
-                ui.label(format!("Quests: {}", npc.quest_ids.len()));
+            ui.add_space(10.0);
+
+            ui.vertical(|ui| {
+                ui.heading(&npc.name);
+                ui.label(format!("ID: {}", npc.id));
+
+                if !npc.portrait_id.is_empty() {
+                    ui.label(format!("Portrait: {}", npc.portrait_id));
+                }
+
+                ui.add_space(4.0);
+
+                // Role badges
+                if npc.is_merchant {
+                    ui.label(egui::RichText::new("🏪 Merchant").color(egui::Color32::GOLD));
+                }
+                if npc.is_innkeeper {
+                    ui.label(egui::RichText::new("🛏️ Innkeeper").color(egui::Color32::LIGHT_BLUE));
+                }
+                if npc.is_priest {
+                    ui.label(
+                        egui::RichText::new("✝ Priest")
+                            .color(egui::Color32::from_rgb(200, 180, 255)),
+                    );
+                }
+                if !npc.is_merchant && !npc.is_innkeeper && !npc.is_priest {
+                    ui.label(egui::RichText::new("🧑 NPC").color(egui::Color32::GRAY));
+                }
             });
         });
+
+        ui.add_space(10.0);
+        ui.separator();
+
+        // ── Identity grid ─────────────────────────────────────────────────
+        egui::Grid::new("npc_preview_identity_grid")
+            .num_columns(2)
+            .spacing([20.0, 4.0])
+            .show(ui, |ui| {
+                if let Some(faction) = &npc.faction {
+                    if !faction.trim().is_empty() {
+                        ui.label("Faction:");
+                        ui.label(faction.as_str());
+                        ui.end_row();
+                    }
+                }
+
+                ui.label("Dialogue:");
+                ui.label(
+                    npc.dialogue_id
+                        .map(|d| d.to_string())
+                        .as_deref()
+                        .unwrap_or("(none)"),
+                );
+                ui.end_row();
+
+                ui.label("Quests:");
+                if npc.quest_ids.is_empty() {
+                    ui.label("(none)");
+                } else {
+                    ui.label(format!("{} assigned", npc.quest_ids.len()));
+                }
+                ui.end_row();
+
+                if let Some(creature_id) = npc.creature_id {
+                    ui.label("Creature ID:");
+                    ui.label(creature_id.to_string());
+                    ui.end_row();
+                }
+            });
+
+        // ── Sprite info ───────────────────────────────────────────────────
+        if let Some(sprite) = &npc.sprite {
+            ui.add_space(10.0);
+            ui.heading("Sprite");
+            ui.separator();
+
+            egui::Grid::new("npc_preview_sprite_grid")
+                .num_columns(2)
+                .spacing([20.0, 4.0])
+                .show(ui, |ui| {
+                    ui.label("Sheet:");
+                    ui.label(&sprite.sheet_path);
+                    ui.end_row();
+
+                    ui.label("Index:");
+                    ui.label(sprite.sprite_index.to_string());
+                    ui.end_row();
+                });
+        }
+
+        // ── Merchant info ─────────────────────────────────────────────────
+        if npc.is_merchant {
+            ui.add_space(10.0);
+            ui.heading("Merchant");
+            ui.separator();
+
+            egui::Grid::new("npc_preview_merchant_grid")
+                .num_columns(2)
+                .spacing([20.0, 4.0])
+                .show(ui, |ui| {
+                    ui.label("Stock Template:");
+                    ui.label(npc.stock_template.as_deref().unwrap_or("(none)"));
+                    ui.end_row();
+
+                    if let Some(economy) = &npc.economy {
+                        ui.label("Buy Rate:");
+                        ui.label(format!("{:.0}%", economy.buy_rate * 100.0));
+                        ui.end_row();
+
+                        ui.label("Sell Rate:");
+                        ui.label(format!("{:.0}%", economy.sell_rate * 100.0));
+                        ui.end_row();
+                    }
+                });
+        }
+
+        // ── Priest / Innkeeper services ────────────────────────────────────
+        if (npc.is_priest || npc.is_innkeeper) && npc.service_catalog.is_some() {
+            ui.add_space(10.0);
+            ui.heading("Services");
+            ui.separator();
+            ui.label("(service catalog configured)");
+        }
+
+        // ── Quest list ────────────────────────────────────────────────────
+        if !npc.quest_ids.is_empty() {
+            ui.add_space(10.0);
+            ui.heading("Quests");
+            ui.separator();
+
+            for quest_id in &npc.quest_ids {
+                ui.label(format!("• {}", quest_id));
+            }
+        }
+
+        // ── Description ───────────────────────────────────────────────────
+        if !npc.description.is_empty() {
+            ui.add_space(10.0);
+            ui.heading("Description");
+            ui.separator();
+            ui.label(&npc.description);
+        }
     }
 
     fn show_edit_view(
@@ -1718,6 +1839,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         state.start_edit_npc(0);
@@ -1754,6 +1879,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -1795,6 +1924,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         // Edit it
@@ -1824,6 +1957,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         assert!(state.matches_filters(&npc));
     }
@@ -1845,6 +1982,10 @@ mod tests {
             faction: None,
             is_merchant: true,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         assert!(state.matches_filters(&npc));
 
@@ -1860,6 +2001,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: true,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         assert!(!state.matches_filters(&npc2));
     }
@@ -1881,6 +2026,10 @@ mod tests {
             faction: None,
             is_merchant: true,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         assert!(state.matches_filters(&merchant));
 
@@ -1896,6 +2045,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         assert!(!state.matches_filters(&non_merchant));
     }
@@ -1919,6 +2072,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         let id2 = state.next_npc_id();
@@ -1963,6 +2120,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         state.start_edit_npc(0);
@@ -2024,6 +2185,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         state.mode = NpcEditorMode::Add;
@@ -2173,6 +2338,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         });
 
         // Start editing

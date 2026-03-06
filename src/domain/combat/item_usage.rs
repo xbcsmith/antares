@@ -25,7 +25,7 @@ SPDX-License-Identifier: Apache-2.0
 
 use crate::domain::combat::engine::CombatState;
 use crate::domain::combat::types::CombatantId;
-use crate::domain::items::types::{AttributeType, ConsumableEffect, ItemType};
+use crate::domain::items::types::{AttributeType, ConsumableEffect, ItemType, ResistanceType};
 use crate::domain::types::ItemId;
 use crate::sdk::database::ContentDatabase;
 use rand::Rng;
@@ -397,6 +397,45 @@ pub fn execute_item_use_by_slot<R: Rng>(
                                     pc_target.stats.accuracy.modify(amount as i16)
                                 }
                                 AttributeType::Luck => pc_target.stats.luck.modify(amount as i16),
+                            }
+                            effected_indices.push(idx);
+                        }
+                    }
+                    _ => return Err(ItemUseError::InvalidTarget),
+                }
+            }
+
+            ConsumableEffect::BoostResistance(res_type, amount) => {
+                match combat_state.get_combatant_mut(&target) {
+                    Some(Combatant::Player(pc_target)) => {
+                        if let CombatantId::Player(idx) = target {
+                            match res_type {
+                                ResistanceType::Physical => {
+                                    // No direct physical field on character Resistances;
+                                    // use magic as the closest analogue for physical warding.
+                                    pc_target.resistances.magic.modify(amount as i16);
+                                }
+                                ResistanceType::Fire => {
+                                    pc_target.resistances.fire.modify(amount as i16);
+                                }
+                                ResistanceType::Cold => {
+                                    pc_target.resistances.cold.modify(amount as i16);
+                                }
+                                ResistanceType::Electricity => {
+                                    pc_target.resistances.electricity.modify(amount as i16);
+                                }
+                                ResistanceType::Energy => {
+                                    pc_target.resistances.magic.modify(amount as i16);
+                                }
+                                ResistanceType::Paralysis => {
+                                    pc_target.resistances.psychic.modify(amount as i16);
+                                }
+                                ResistanceType::Fear => {
+                                    pc_target.resistances.fear.modify(amount as i16);
+                                }
+                                ResistanceType::Sleep => {
+                                    pc_target.resistances.psychic.modify(amount as i16);
+                                }
                             }
                             effected_indices.push(idx);
                         }

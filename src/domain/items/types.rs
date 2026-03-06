@@ -286,6 +286,9 @@ pub enum ConsumableEffect {
     RestoreSp(u16),
     CureCondition(u8), // Condition flags to clear
     BoostAttribute(AttributeType, i8),
+    /// Temporarily boost a resistance by `i8` points (positive = resist more,
+    /// negative = resist less).  Maps onto `character::Resistances` fields.
+    BoostResistance(ResistanceType, i8),
 }
 
 /// Attribute types that can be boosted
@@ -298,6 +301,87 @@ pub enum AttributeType {
     Speed,
     Accuracy,
     Luck,
+}
+
+impl AttributeType {
+    /// Returns a human-readable display name for UI labels.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            AttributeType::Might => "Might",
+            AttributeType::Intellect => "Intellect",
+            AttributeType::Personality => "Personality",
+            AttributeType::Endurance => "Endurance",
+            AttributeType::Speed => "Speed",
+            AttributeType::Accuracy => "Accuracy",
+            AttributeType::Luck => "Luck",
+        }
+    }
+}
+
+/// Resistance types that can be boosted by a consumable item.
+///
+/// Variants match the fields of `character::Resistances` and follow the
+/// same naming convention used by `MonsterResistances`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::types::{ConsumableData, ConsumableEffect, ResistanceType};
+///
+/// // Potion of Fire Resistance — grants +25 fire resistance
+/// let potion = ConsumableData {
+///     effect: ConsumableEffect::BoostResistance(ResistanceType::Fire, 25),
+///     is_combat_usable: true,
+/// };
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ResistanceType {
+    /// Physical / weapon damage resistance
+    Physical,
+    /// Fire damage resistance
+    Fire,
+    /// Cold damage resistance
+    Cold,
+    /// Electricity / lightning damage resistance
+    Electricity,
+    /// Energy / magic damage resistance (maps to `Resistances::magic`)
+    Energy,
+    /// Paralysis effect resistance (maps to `Resistances::psychic` as closest analogue)
+    Paralysis,
+    /// Fear effect resistance
+    Fear,
+    /// Sleep effect resistance (maps to `Resistances::psychic` as closest analogue)
+    Sleep,
+}
+
+impl ResistanceType {
+    /// Returns a human-readable display name for UI labels.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            ResistanceType::Physical => "Physical",
+            ResistanceType::Fire => "Fire",
+            ResistanceType::Cold => "Cold",
+            ResistanceType::Electricity => "Electricity",
+            ResistanceType::Energy => "Energy",
+            ResistanceType::Paralysis => "Paralysis",
+            ResistanceType::Fear => "Fear",
+            ResistanceType::Sleep => "Sleep",
+        }
+    }
+
+    /// All variants in display order (used by UI ComboBox).
+    pub fn all() -> [ResistanceType; 8] {
+        [
+            ResistanceType::Physical,
+            ResistanceType::Fire,
+            ResistanceType::Cold,
+            ResistanceType::Electricity,
+            ResistanceType::Energy,
+            ResistanceType::Paralysis,
+            ResistanceType::Fear,
+            ResistanceType::Sleep,
+        ]
+    }
 }
 
 // ===== Ammo Data =====

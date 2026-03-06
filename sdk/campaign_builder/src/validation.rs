@@ -1661,6 +1661,7 @@ mod tests {
                 description: "A knight".to_string(),
                 character_id: "knight_01".to_string(),
                 dialogue_id: Some(1000),
+                time_condition: None,
             },
         );
 
@@ -1689,6 +1690,7 @@ mod tests {
                 description: "Unknown".to_string(),
                 character_id: "nonexistent_char".to_string(),
                 dialogue_id: None,
+                time_condition: None,
             },
         );
 
@@ -1718,6 +1720,7 @@ mod tests {
                 description: "A knight".to_string(),
                 character_id: "knight_01".to_string(),
                 dialogue_id: Some(9999), // Invalid
+                time_condition: None,
             },
         );
 

@@ -1,5 +1,562 @@
 # Implementations
 
+## Combat: Party HP Bars Update Live During Combat
+
+### Overview
+
+Party HP bars in the HUD did not update when monsters hit characters during
+combat. The bars showed the HP values from when combat started and only
+refreshed once combat ended.
+
+### Root Cause
+
+Two compounding problems:
+
+1. **`update_hud` was gated off during combat.** `HudPlugin` registered all HUD
+   update systems — including `update_hud`, which drives `HpBarFill` — under a
+   `.run_if(not_in_combat)` condition. The comment said "hide exploration HUD
+   during combat" but it actually stopped the party HP bars from updating at
+   all.
+
+2. **`party.members[i].hp.current` is not the combat source of truth.**
+   During combat, HP lives in `CombatResource.state.participants[i]`
+   (`Combatant::Player`). The `global_state.0.party.members[i].hp.current` field
+   is only written back by `sync_combat_to_party_on_exit` when combat ends.
+   So even if `update_hud` had been running during combat, it would have read
+   stale values.
+
+### Changes
+
+#### `src/game/systems/combat.rs`
+
+- **`sync_party_hp_during_combat`** — new private system. Every frame while
+  `GameMode::Combat` is active, it iterates `CombatResource.state.participants`
+  and writes `hp.current`, `sp.current`, `conditions`, and `active_conditions`
+  from each `Combatant::Player` back into the corresponding
+  `party.members[party_idx]` slot using `player_orig_indices` for the mapping.
+  Only these four fields are mirrored — base values and stats are left for
+  `sync_combat_to_party_on_exit` to handle on exit.
+- **Registered** after all player action handlers (`handle_attack_action`,
+  `handle_cast_spell_action`, `handle_use_item_action`, `handle_defend_action`)
+  and `.before(update_combat_ui)` so the HUD always reads the final state for
+  each frame.
+- **Added tests**: `test_sync_party_hp_during_combat_updates_party_hp` (verifies
+  that a combat participant's reduced HP is visible in `party.members` within
+  the same frame, while combat is still active) and
+  `test_sync_party_hp_during_combat_noop_in_exploration` (verifies the system
+  does nothing outside combat).
+
+#### `src/game/systems/hud.rs`
+
+- **`update_hud`** removed from the `not_in_combat` run condition. It now runs
+  unconditionally every frame. Because `sync_party_hp_during_combat` keeps
+  `party.members` current during combat, `update_hud` reads correct live values
+  with no other changes.
+- **`ensure_portraits_loaded`, `update_compass`, `update_clock`,
+  `update_portraits`** remain gated by `not_in_combat` — these exploration
+  overlays should not render on top of the combat HUD.
+
+### Data Flow After Fix
+
+```
+Monster attacks → handle_attack_action / execute_monster_turn
+  → CombatResource.participants[i].hp.current updated
+  → sync_party_hp_during_combat
+  → party.members[i].hp.current updated
+  → update_hud
+  → HpBarFill[i].node.width = hp_percent  ← bar visibly narrows
+```
+
+## Rest System: Duration Menu, Heal Rates, and Real-Time Pacing
+
+### Overview
+
+Three separate problems were fixed in the rest system:
+
+1. **No duration choice** — pressing R immediately started a 12-hour rest with
+   no player input. The correct behaviour is to present a menu with three
+   choices: 4 hours (50% HP/SP), 8 hours (75% HP/SP), 12 hours (100% HP/SP).
+
+2. **Wrong heal rates** — `HP_RESTORE_RATE` was `1/12` per hour regardless of
+   duration. That means 4 hours = 33%, 8 hours = 67%, 12 hours = 100%. The
+   design requires 4h = 50%, 8h = 75%, 12h = 100%. Each duration has its own
+   per-hour rate derived from its target percentage divided by its hours.
+
+3. **One hour per frame** — the rest sequence completed in ~0.2 seconds at 60
+   fps with no visible progress. A real-time `RestTickTimer` now gates each
+   hour tick to once per second so the overlay and flavour text are readable.
+
+### Changes
+
+#### `src/domain/resources.rs`
+
+- **`RestDuration` enum** — new public enum with variants `Short` (4h/50%),
+  `Long` (8h/75%), `Full` (12h/100%). Methods:
+  - `hours() -> u32`
+  - `total_restore_fraction() -> f32`
+  - `restore_fraction_per_hour() -> f32` (= total / hours)
+  - `from_hours(u32) -> Option<Self>`
+  - `ALL: [RestDuration; 3]` constant
+- **`rest_party_hour`** — signature changed to
+  `rest_party_hour(party, restore_fraction_per_hour: f32)`. The function no
+  longer hard-codes `HP_RESTORE_RATE`; callers supply the rate from their
+  chosen `RestDuration`. Food check and consumption removed (done upfront).
+- **`HP_RESTORE_RATE` / `SP_RESTORE_RATE`** — kept for `rest_party` (the
+  non-interactive batch helper) but documented as full-rest-only constants.
+
+#### `src/application/mod.rs`
+
+- **`GameMode::RestMenu`** — new unit variant. Shown when the player presses R
+  in Exploration; transitions to `Resting` once a duration is chosen.
+- **`RestState.restore_fraction_per_hour: f32`** — new field. Stores the
+  chosen duration's per-hour rate so the per-hour loop uses it correctly and
+  save/load resumes at the right rate.
+- **`RestState::with_fraction(hours, fraction)`** — new constructor for
+  player-initiated rests.
+- **`RestState::new(hours)`** — updated to look up the correct fraction via
+  `RestDuration::from_hours`; falls back to `HP_RESTORE_RATE` for non-standard
+  hour counts.
+- **`GameState::enter_rest_menu()`** — new method, sets mode to `RestMenu`.
+
+#### `src/game/systems/rest.rs`
+
+- **`InitiateRestEvent`** — new field `restore_fraction_per_hour: f32`.
+  New constructor `InitiateRestEvent::from_duration(RestDuration)`.
+- **`RestMenuRoot`** — new marker component for the duration-selection overlay.
+- **`REST_HOUR_REAL_SECONDS`** — new constant (`1.0`). Controls real-time
+  pacing of the rest sequence.
+- **`RestTickTimer`** — new `Resource` wrapping a Bevy `Timer`. Each frame
+  `process_rest` ticks it; an hour of healing only fires when the timer
+  completes.
+- **`setup_rest_ui`** — now spawns two overlays: the `RestMenuRoot` panel
+  (duration choices with key hints) and the existing `RestProgressRoot` panel.
+- **`handle_rest_menu_input`** — new system. Reads `ButtonInput<KeyCode>` while
+  in `RestMenu` mode: `1`/`2`/`3` fire `InitiateRestEvent` for the chosen
+  duration; `Escape` returns to Exploration. Runs before `process_rest` in the
+  system chain.
+- **`process_rest`** — `InitiateRestEvent` handler now uses
+  `RestState::with_fraction` so the correct heal rate is stored. Timer is reset
+  at initiation. Per-hour tick gated behind `RestTickTimer`. `time: Res<Time>`
+  made `Option` so headless test apps without the resource don't panic.
+- **`update_rest_ui`** — now also shows/hides `RestMenuRoot`.
+- **`RestPlugin::build`** — inserts `RestTickTimer`, registers
+  `handle_rest_menu_input` before `process_rest`.
+
+#### `src/game/systems/input.rs`
+
+- **R key handler** — changed from firing `InitiateRestEvent` directly to
+  calling `game_state.enter_rest_menu()`. No event is fired until the player
+  picks a duration.
+- **Movement block** — extended to also block movement in `RestMenu` mode.
+- `InitiateRestEvent` import scoped to `#[cfg(test)]`.
+
+### Behaviour After Fix
+
+| Action                 | Before                      | After                                    |
+| ---------------------- | --------------------------- | ---------------------------------------- |
+| Press R in Exploration | Immediately starts 12h rest | Opens duration menu                      |
+| Choose 4h              | N/A                         | 50% HP/SP restored over 4 real seconds   |
+| Choose 8h              | N/A                         | 75% HP/SP restored over 8 real seconds   |
+| Choose 12h             | 100% HP/SP in ~0.2 s        | 100% HP/SP over 12 real seconds          |
+| Press Escape on menu   | N/A                         | Returns to Exploration, no food consumed |
+
+## Rest System: Upfront Food Check Fix
+
+### Overview
+
+The rest system had a fundamental logic error: food was being checked and
+consumed **per hour** inside `rest_party_hour`, meaning a party could be
+"interrupted by hunger" mid-sleep after already resting for several hours.
+This is wrong. The correct mechanic is:
+
+- Before rest begins, check that the party has **1 food ration per member**.
+- If they do not have enough food, **refuse rest entirely** — no food consumed,
+  no HP/SP restored, mode stays `Exploration`.
+- If they do have enough food, **consume all required rations upfront**, then
+  let the party sleep undisturbed (barring random encounters).
+
+### Root Cause
+
+`rest_party_hour` contained both a food check (`if party.food == 0 → Err`)
+and a `consume_food` call on every tick. Over a 12-hour rest this consumed
+12 rations per member rather than 1, and could abort the rest mid-sequence
+if food ran out partway through. The `process_rest` system caught the error
+and emitted a `RestCompleteEvent` labelled "party fully refreshed" even when
+the rest had been cut short by hunger — a doubly wrong outcome.
+
+Additionally, an earlier attempted fix had added an `interrupted_by_hunger`
+field to `RestCompleteEvent`, which was also wrong by design: hunger should
+never interrupt a rest that is already in progress.
+
+### Changes
+
+#### `src/domain/resources.rs`
+
+- **`FOOD_PER_REST`** — doc comment updated to clarify it means 1 ration per
+  member per full rest, consumed upfront.
+- **`food_needed_to_rest(party: &Party) -> u32`** — new public helper that
+  returns `party.members.len() as u32 * FOOD_PER_REST`. Callers use this to
+  check affordability before initiating rest.
+- **`rest_party_hour`** — food check and `consume_food` call removed entirely.
+  This function is now a **pure healing tick**. It always returns `Ok(())`.
+  Callers are responsible for consuming food before the first call.
+- **`rest_party`** — upfront check rewritten: compares `party.food` against
+  `food_needed_to_rest(party)` (i.e. `members.len()`). If insufficient,
+  returns `ResourceError::TooHungryToRest` with food and HP/SP unchanged.
+  On success, calls `consume_food(party, FOOD_PER_REST)` once before healing.
+- **Removed**: `test_rest_party_hour_fails_without_food` — this behaviour no
+  longer exists.
+- **Added tests**: `test_food_needed_to_rest_empty_party`,
+  `test_food_needed_to_rest_three_members`,
+  `test_rest_party_hour_does_not_consume_food`,
+  `test_rest_party_hour_succeeds_without_food`,
+  `test_rest_party_fails_without_enough_food`.
+
+#### `src/game/systems/rest.rs`
+
+- **`RestCompleteEvent`** — `interrupted_by_hunger` field removed. Hunger
+  can never interrupt a rest in progress; the field was incorrect by design.
+- **`process_rest`** — food check moved into the `InitiateRestEvent` handler,
+  before `game_state.enter_rest()` is called. If `party.food < needed`, the
+  system logs a `WARN` and returns without changing mode or consuming food.
+  If the check passes, `consume_food` is called once with `FOOD_PER_REST`
+  before entering `Resting` mode.
+- **`process_rest` per-hour loop** — the hunger-abort path (`rest_party_hour`
+  returning `Err`) is now treated as an unexpected/future error variant only.
+  It will never fire under normal game conditions.
+- **`handle_rest_complete`** — `interrupted_by_hunger` branch removed.
+  The "party fully refreshed" log message is now only emitted on genuine
+  normal completion.
+- **Added tests**: `test_rest_refused_when_insufficient_food` (3 members,
+  2 rations → stays Exploration, food unchanged, HP unchanged),
+  `test_rest_accepted_with_exact_food` (2 members, 2 rations → enters
+  Resting, both rations consumed).
+
+### Behaviour After Fix
+
+| Situation                     | Before                                                              | After                                            |
+| ----------------------------- | ------------------------------------------------------------------- | ------------------------------------------------ |
+| Party has enough food         | Rest starts, food consumed 1/hr × 12 = 12/member                    | Rest starts, food consumed once = 1/member       |
+| Party has insufficient food   | Rest starts, interrupted after N hours with "party fully refreshed" | Rest refused immediately, mode stays Exploration |
+| `rest_party_hour` with food=0 | Returns `Err(TooHungryToRest)`                                      | Returns `Ok(())` — food already paid             |
+
+## NPC Editor Right-Panel Preview Regression Fix
+
+### Overview
+
+The NPC Editor's right-panel preview had regressed to a minimal placeholder
+showing only the NPC's name, description, sprite path, and dialogue/quest
+counts. The portrait image and all key NPC stats were absent. This fix
+replaces the stripped-down `show_preview` implementation with a rich preview
+panel that mirrors the Character Editor's preview style.
+
+### Root Cause
+
+The `show_preview` method in `sdk/campaign_builder/src/npc_editor.rs` had
+been deliberately simplified during an earlier refactor (a `TODO` comment
+noted the intent to restore it). The method rendered its content inside a
+`vertical_centered` container with plain `ui.label` calls and never invoked
+`load_portrait_texture` or `show_portrait_placeholder`, even though both
+helpers were already present in the file and used by the edit form. As a
+result, no portrait was displayed and none of the NPC's role/identity
+properties were surfaced in the preview pane.
+
+Additionally, `show_list_view` emitted a redundant `right_ui.heading` before
+calling `show_preview`, which would have produced a duplicate NPC name
+once the preview was restored.
+
+### Files Changed
+
+#### `sdk/campaign_builder/src/npc_editor.rs`
+
+**`show_list_view`** — removed the redundant `right_ui.heading(&npc.name)`
+and `right_ui.separator()` calls that preceded `self.show_preview(...)`, since
+`show_preview` now renders its own name header.
+
+**`show_preview`** — completely rewritten to match the Character Editor's
+`show_character_preview` layout:
+
+- **Portrait display** — calls `load_portrait_texture` to attempt to load the
+  NPC's portrait and renders it at 128×128. Falls back to
+  `show_portrait_placeholder` when no portrait path is set or the file cannot
+  be loaded.
+- **Name / identity header** — rendered to the right of the portrait:
+  - NPC name as `ui.heading`
+  - ID label
+  - Portrait filename (when non-empty)
+  - Role badges with colour-coded `RichText`:
+    - `🏪 Merchant` (gold) — when `npc.is_merchant`
+    - `🛏️ Innkeeper` (light blue) — when `npc.is_innkeeper`
+    - `✝ Priest` (light purple) — when `npc.is_priest`
+    - `🧑 NPC` (grey) — when none of the above
+- **Identity grid** (faction, dialogue ID, quest count, creature ID)
+- **Sprite section** — sheet path and sprite index, shown only when
+  `npc.sprite.is_some()`
+- **Merchant section** — stock template name and buy/sell rates (formatted as
+  `%`), shown only when `npc.is_merchant`
+- **Services note** — shown when priest/innkeeper has a service catalog
+- **Quest list** — bullet list of quest IDs when non-empty
+- **Description** — shown at the bottom when non-empty
+
+The `_campaign_dir` parameter was renamed to `campaign_dir` (removed the
+leading `_`) so the portrait loader can forward it correctly.
+
+### Quality Gate Results
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings, -D warnings)
+cargo nextest run → 2953 passed, 8 skipped
+```
+
+---
+
+## Stock Templates Editor Auto-Load Regression Fix
+
+### Overview
+
+The Campaign Builder's Stock Templates tab was not automatically loading
+templates when a campaign was opened. Users had to manually click
+"📂 Load from File" every time they opened a campaign and navigated to the
+Stock Templates tab. This fix introduces a reliable two-layer load mechanism
+and corrects two additional issues found during the investigation.
+
+### Root Cause Analysis
+
+Three separate bugs combined to produce the regression:
+
+1. **`load_stock_templates` lacked a `path.exists()` guard** — unlike every
+   other data-file loader in `CampaignBuilderApp` (`load_items`,
+   `load_classes_from_campaign`, `load_npcs`, etc.), `load_stock_templates`
+   called `load_from_file` unconditionally. When the file was absent (new
+   campaigns, campaigns migrated from older versions) this wrote a
+   `"Warning: could not load stock templates: ..."` string into
+   `status_message`, overwriting the success messages of all earlier loaders
+   and making it look as though loading had failed entirely.
+
+2. **`do_new_campaign` never reset the stock templates state** — when the user
+   created a new campaign after having opened one, `stock_templates` and
+   `stock_templates_editor_state.templates` still held the previous campaign's
+   data. Every other editor (items, spells, monsters, …) was explicitly reset
+   in `do_new_campaign`; stock templates was the only exception.
+
+3. **No lazy auto-load fallback existed in `show()`** — the
+   `StockTemplatesEditorState` struct already stored `last_campaign_dir` and
+   `last_templates_file` (cached on every `show()` call), which were clearly
+   intended to support an auto-load-on-first-render pattern. That pattern was
+   never implemented, leaving the editor entirely dependent on the explicit
+   `load_stock_templates()` call — with no fallback if that call failed
+   silently (e.g. a parse error in the RON file was swallowed and only
+   written to `status_message`).
+
+### Files Changed
+
+#### `sdk/campaign_builder/src/stock_templates_editor.rs`
+
+- **Added `needs_initial_load: bool` field** to `StockTemplatesEditorState`
+  (serde-skipped, defaults to `true`). This flag drives the lazy auto-load
+  fallback in `show()`.
+- **Implemented auto-load-on-first-show** at the top of `show()`: when
+  `needs_initial_load` is `true` and `campaign_dir` is available, the method
+  attempts to load from the file if it exists, then clears the flag regardless
+  of outcome (so the retry does not re-fire every frame).
+- **Added `reset_for_new_campaign()` public method** — clears `templates`,
+  `selected_template`, `mode`, `edit_buffer`, `search_filter`,
+  `validation_errors`, `validation_warnings`, `show_delete_confirm`, and
+  sets `needs_initial_load = true`. Called from both `do_new_campaign` and
+  `do_open_campaign`.
+
+#### `sdk/campaign_builder/src/lib.rs`
+
+- **`load_stock_templates`**: Added `path.exists()` guard (matching all other
+  load functions). On success, sets
+  `stock_templates_editor_state.needs_initial_load = false` so that `show()`
+  does not re-read the file redundantly. Error and missing-file conditions are
+  now logged via `self.logger` instead of overwriting `status_message`.
+- **`do_new_campaign`**: Added `self.stock_templates_editor_state.reset_for_new_campaign()`
+  and `self.stock_templates.clear()` at the top of the function, matching the
+  reset pattern used for every other editor.
+- **`do_open_campaign`**: Added `self.stock_templates_editor_state.reset_for_new_campaign()`
+  and `self.stock_templates.clear()` immediately before the explicit
+  `self.load_stock_templates()` call. This ensures stale data from any
+  previously opened campaign is discarded before the new campaign's file is
+  read.
+
+### Tests Added
+
+Eight new tests in `stock_templates_editor::tests`:
+
+| Test                                                     | What it verifies                                                                                                                       |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_reset_for_new_campaign_clears_templates`           | Templates, selection, and unsaved-changes flag are cleared; mode resets to List                                                        |
+| `test_reset_for_new_campaign_sets_needs_initial_load`    | `needs_initial_load` is `true` after reset even when it was `false` before                                                             |
+| `test_reset_for_new_campaign_clears_edit_state`          | Mode and edit buffer are reset even when called from Edit mode                                                                         |
+| `test_reset_for_new_campaign_clears_search_filter`       | Search filter, validation warnings, and delete-confirm dialog are cleared                                                              |
+| `test_needs_initial_load_is_true_on_default`             | New `StockTemplatesEditorState` starts with `needs_initial_load = true`                                                                |
+| `test_load_from_file_does_not_mutate_needs_initial_load` | Documents that `load_from_file` itself does not touch the flag — the caller (`load_stock_templates` / `show`) owns that responsibility |
+
+### Quality Gate Results
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings, -D warnings)
+cargo nextest run → 2953 passed, 8 skipped
+```
+
+## Phase 5: Campaign Builder — Starting Date/Time
+
+### Overview
+
+Phase 5 adds a **Starting Date/Time** field to the campaign configuration
+system, allowing campaign authors to specify the day, hour, and minute at which
+a new game begins. A horror campaign can start at midnight; a cheerful
+adventure can start at dawn. The field defaults to Day 1, 08:00 (Morning) so
+all existing `campaign.ron` files continue to work without modification.
+
+### Files Changed
+
+#### `src/sdk/campaign_loader.rs` — `CampaignConfig` and `CampaignMetadata` updated
+
+- Added `#[serde(default = "default_starting_time")] pub starting_time: GameTime`
+  to `CampaignConfig`. Existing RON files that lack the field fall back to
+  `GameTime::new(1, 8, 0)` via `serde(default)`.
+- Added the same `starting_time: GameTime` field (with `serde(default)`) to the
+  raw `CampaignMetadata` struct so the field is preserved when the SDK reads a
+  `campaign.ron` file and converts it to a `Campaign`.
+- Added `default_starting_time() -> GameTime` helper returning `GameTime::new(1, 8, 0)`.
+- The `TryFrom<CampaignMetadata> for Campaign` conversion now forwards
+  `metadata.starting_time` into `CampaignConfig::starting_time`.
+- New tests:
+  - `test_campaign_config_starting_time_default` — default is Day 1, 08:00.
+  - `test_campaign_config_starting_time_roundtrip` — Day 3, 22:30 survives a
+    RON serialize/deserialize cycle.
+  - `test_campaign_config_missing_starting_time_uses_default` — minimal RON
+    without the field deserializes to the default.
+  - `test_test_campaign_has_explicit_starting_time` — the fixture campaign
+    carries the explicit field once updated.
+
+#### `src/application/mod.rs` — `GameState::new_game()` updated
+
+Replaced the hardcoded `time: GameTime::new(1, 6, 0)` with:
+
+```rust
+let starting_time = campaign.config.starting_time;
+// ...
+time: starting_time,
+```
+
+The game clock is now seeded from `CampaignConfig::starting_time` at game
+start. Campaign authors control the opening time from `campaign.ron`.
+
+#### `campaigns/tutorial/campaign.ron` — explicit starting time added
+
+```ron
+starting_time: (day: 1, hour: 8, minute: 0),
+```
+
+Serves as the canonical example for campaign authors.
+
+#### `data/test_campaign/campaign.ron` — explicit starting time added
+
+```ron
+starting_time: (day: 1, hour: 8, minute: 0),
+```
+
+Tests no longer rely on the `serde(default)` fallback; the fixture explicitly
+carries the field for determinism.
+
+#### `sdk/campaign_builder/src/lib.rs` — `CampaignMetadata` updated
+
+- Imported `GameTime` from `antares::domain::types`.
+- Added `#[serde(default = "default_starting_time")] pub starting_time: GameTime`
+  to `CampaignMetadata` (the SDK builder's own metadata struct).
+- Added `default_starting_time() -> GameTime` helper.
+- `impl Default for CampaignMetadata` now includes `starting_time: default_starting_time()`.
+- `validate_campaign()` builds `CampaignConfig` from `self.campaign`; updated
+  that initializer to include `starting_time: self.campaign.starting_time`.
+
+#### `sdk/campaign_builder/src/campaign_editor.rs` — buffer + UI + helper updated
+
+**`CampaignMetadataEditBuffer`** — three new fields for ergonomic drag-value editing:
+
+```rust
+pub starting_day:    u32,   // 1-based
+pub starting_hour:   u8,    // 0–23
+pub starting_minute: u8,    // 0–59
+```
+
+**`from_metadata()`** — copies `m.starting_time.{day, hour, minute}` into the
+three split buffer fields.
+
+**`apply_to()`** — reconstructs a `GameTime` with clamping:
+
+```rust
+dest.starting_time = GameTime::new(
+    self.starting_day.max(1),
+    self.starting_hour.min(23),
+    self.starting_minute.min(59),
+);
+```
+
+**Gameplay UI row** — inserted immediately after "Starting Direction" and
+before "Starting Gold" in the `CampaignSection::Gameplay` grid:
+
+- Label `"Starting Date/Time:"` with hover text.
+- Three `DragValue` spinners: **Day** (1–9999), **Hour** (0–23), **Min** (0–59).
+- Grey preview label showing the `TimeOfDay` period name, e.g. `(Morning)`.
+
+**`pub fn period_label(tod: TimeOfDay) -> &'static str`** — module-level helper
+that maps every `TimeOfDay` variant to its display string. Used by the preview
+hint and independently testable.
+
+New tests added to `mod tests`:
+
+- `test_buffer_from_metadata_copies_starting_time`
+- `test_buffer_apply_to_writes_starting_time`
+- `test_buffer_starting_time_clamps_hour` (25 → 23)
+- `test_buffer_starting_time_clamps_minute` (75 → 59)
+- `test_buffer_starting_time_clamps_day_zero` (0 → 1)
+- `test_period_label_all_variants`
+- `test_period_label_matches_game_time_time_of_day`
+- `test_buffer_default_starting_time_fields`
+- `test_buffer_starting_time_roundtrip_via_metadata`
+
+### Propagation fixes (struct initializers)
+
+All existing `CampaignConfig { … }` struct literal initializers throughout the
+codebase were updated to include `starting_time: GameTime::new(1, 8, 0)`:
+
+- `src/application/save_game.rs` (test helper)
+- `src/application/mod.rs` (two test helpers)
+- `src/sdk/campaign_packager.rs` (two test helpers)
+- `src/sdk/validation.rs` (three test helpers)
+- `tests/campaign_integration_test.rs` (integration test helper)
+- `src/bin/antares.rs` (unit-test helper)
+
+### Quality gates
+
+```
+cargo fmt --all           → clean
+cargo check --all-targets → Finished, 0 errors
+cargo clippy … -D warnings → Finished, 0 warnings
+cargo nextest run         → 2953 passed, 0 failed, 8 skipped
+```
+
+Note: The `campaign_builder` package has pre-existing compilation errors from
+Phase 4 (`time_condition` fields on `MapEvent`) that are unrelated to Phase 5.
+The `antares` crate itself compiles and tests cleanly.
+
+### Success criteria met
+
+- Campaign author can set Day 3, 22:00 in the Campaign Builder → Gameplay tab.
+- After save + launch, the game clock starts at that time.
+- A `campaign.ron` missing `starting_time` starts at Day 1, 08:00 (no error).
+- All four quality gates pass with zero warnings on the `antares` crate.
+
+---
+
 ## Rest System Phase 4: Rest UI Feedback
 
 ### Overview
@@ -13496,12 +14053,12 @@ Updated the `//!` module header in `ui_helpers.rs` to document the new
 Added to the existing `mod tests` block in `ui_helpers.rs` under the
 `// Standard List Item Component Tests` heading:
 
-| Test name | What it covers |
-|---|---|
-| `metadata_badge_new_creates_default` | Default color is `Color32::GRAY`, tooltip is `None` |
-| `metadata_badge_builder_pattern` | `.with_color()` and `.with_tooltip()` builder methods |
-| `standard_list_item_config_new_creates_default` | All fields default correctly |
-| `standard_list_item_config_builder_pattern` | All builder methods produce correct state |
+| Test name                                       | What it covers                                        |
+| ----------------------------------------------- | ----------------------------------------------------- |
+| `metadata_badge_new_creates_default`            | Default color is `Color32::GRAY`, tooltip is `None`   |
+| `metadata_badge_builder_pattern`                | `.with_color()` and `.with_tooltip()` builder methods |
+| `standard_list_item_config_new_creates_default` | All fields default correctly                          |
+| `standard_list_item_config_builder_pattern`     | All builder methods produce correct state             |
 
 ### Architecture Compliance
 
@@ -13554,17 +14111,17 @@ two-element tuple.
 Replaced the bare `selectable_label` loop with a `show_standard_list_item` call per
 item. Badges built per item:
 
-| Badge text  | Colour (RGB)       | When shown          | Tooltip                            |
-|-------------|--------------------|---------------------|------------------------------------|
-| `Weapon`    | (200, 100, 100)    | `ItemType::Weapon`  | —                                  |
-| `Armor`     | (100, 100, 200)    | `ItemType::Armor`   | —                                  |
-| `Accessory` | (200, 200, 100)    | `ItemType::Accessory` | —                                |
-| `Consumable` | (100, 200, 100)   | `ItemType::Consumable` | —                               |
-| `Ammo`      | (150, 150, 150)    | `ItemType::Ammo`    | —                                  |
-| `Quest`     | (255, 215,   0)    | `ItemType::Quest`   | —                                  |
-| `Magic`     | (138,  43, 226)    | `item.is_magical()` | "Magical item"                     |
-| `Cursed`    | (139,   0,   0)    | `item.is_cursed`    | "Cursed item - cannot be unequipped" |
-| `Quest`     | (255, 215,   0)    | `item.is_quest_item()` | "Quest item"                    |
+| Badge text   | Colour (RGB)    | When shown             | Tooltip                              |
+| ------------ | --------------- | ---------------------- | ------------------------------------ |
+| `Weapon`     | (200, 100, 100) | `ItemType::Weapon`     | —                                    |
+| `Armor`      | (100, 100, 200) | `ItemType::Armor`      | —                                    |
+| `Accessory`  | (200, 200, 100) | `ItemType::Accessory`  | —                                    |
+| `Consumable` | (100, 200, 100) | `ItemType::Consumable` | —                                    |
+| `Ammo`       | (150, 150, 150) | `ItemType::Ammo`       | —                                    |
+| `Quest`      | (255, 215, 0)   | `ItemType::Quest`      | —                                    |
+| `Magic`      | (138, 43, 226)  | `item.is_magical()`    | "Magical item"                       |
+| `Cursed`     | (139, 0, 0)     | `item.is_cursed`       | "Cursed item - cannot be unequipped" |
+| `Quest`      | (255, 215, 0)   | `item.is_quest_item()` | "Quest item"                         |
 
 The item ID is passed via `.with_id(item.id)` and rendered as `#<id>` in a muted
 small font at the right end of the badge row.
@@ -13643,12 +14200,12 @@ two-element tuple.
 Replaced the bare `selectable_label` loop with a `show_standard_list_item` call
 per monster. Badges built per monster:
 
-| Badge text              | Colour (RGB)       | When shown                   | Tooltip                   |
-|-------------------------|--------------------|------------------------------|---------------------------|
-| `HP:<base>`             | (200, 100, 100)    | Always                       | "Hit Points"              |
-| `AC:<base>`             | (100, 100, 200)    | Always                       | "Armor Class"             |
-| `Undead`                | (139,   0, 139)    | `monster.is_undead == true`  | "Undead creature"         |
-| `Attacks:<count>`       | (255, 165,   0)    | `!monster.attacks.is_empty()`| "Number of attacks"       |
+| Badge text        | Colour (RGB)    | When shown                    | Tooltip             |
+| ----------------- | --------------- | ----------------------------- | ------------------- |
+| `HP:<base>`       | (200, 100, 100) | Always                        | "Hit Points"        |
+| `AC:<base>`       | (100, 100, 200) | Always                        | "Armor Class"       |
+| `Undead`          | (139, 0, 139)   | `monster.is_undead == true`   | "Undead creature"   |
+| `Attacks:<count>` | (255, 165, 0)   | `!monster.attacks.is_empty()` | "Number of attacks" |
 
 The monster icon (`💀` for undead, `👹` for living) is passed via `.with_icon(icon)`
 and prepended to the name in the selectable label. The monster ID (`MonsterId = u8`)
@@ -13717,12 +14274,12 @@ two-element tuple.
 Replaced the bare `selectable_label` loop with a `show_standard_list_item` call
 per spell. Badges built per spell:
 
-| Badge text    | Colour (RGB)       | When shown | Tooltip              |
-|---------------|--------------------|------------|----------------------|
-| `Cleric`      | (255, 215,   0)    | Always     | "Cleric spell"       |
-| `Sorcerer`    | (138,  43, 226)    | Always     | "Sorcerer spell"     |
-| `Lv<level>`   | (100, 200, 200)    | Always     | "Spell level"        |
-| `SP:<cost>`   | (150, 150, 255)    | Always     | "Spell Point cost"   |
+| Badge text  | Colour (RGB)    | When shown | Tooltip            |
+| ----------- | --------------- | ---------- | ------------------ |
+| `Cleric`    | (255, 215, 0)   | Always     | "Cleric spell"     |
+| `Sorcerer`  | (138, 43, 226)  | Always     | "Sorcerer spell"   |
+| `Lv<level>` | (100, 200, 200) | Always     | "Spell level"      |
+| `SP:<cost>` | (150, 150, 255) | Always     | "Spell Point cost" |
 
 The school icon (`✝️` for Cleric, `🔮` for Sorcerer) is passed via
 `.with_icon(school_icon)` and prepended to the spell name in the selectable

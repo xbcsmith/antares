@@ -100,6 +100,14 @@ pub struct CampaignMetadataEditBuffer {
     pub starting_level: u8,
     pub max_level: u8,
 
+    // Starting date/time (split from GameTime for ergonomic drag-value editing)
+    /// Starting day (1-based)
+    pub starting_day: u32,
+    /// Starting hour (0–23)
+    pub starting_hour: u8,
+    /// Starting minute (0–59)
+    pub starting_minute: u8,
+
     // Data file paths
     pub items_file: String,
     pub spells_file: String,
@@ -114,6 +122,7 @@ pub struct CampaignMetadataEditBuffer {
     pub conditions_file: String,
     pub proficiencies_file: String,
     pub creatures_file: String,
+    pub stock_templates_file: String,
 }
 
 impl CampaignMetadataEditBuffer {
@@ -139,6 +148,9 @@ impl CampaignMetadataEditBuffer {
             allow_multiclassing: m.allow_multiclassing,
             starting_level: m.starting_level,
             max_level: m.max_level,
+            starting_day: m.starting_time.day,
+            starting_hour: m.starting_time.hour,
+            starting_minute: m.starting_time.minute,
             items_file: m.items_file.clone(),
             spells_file: m.spells_file.clone(),
             monsters_file: m.monsters_file.clone(),
@@ -152,6 +164,7 @@ impl CampaignMetadataEditBuffer {
             conditions_file: m.conditions_file.clone(),
             proficiencies_file: m.proficiencies_file.clone(),
             creatures_file: m.creatures_file.clone(),
+            stock_templates_file: m.stock_templates_file.clone(),
         }
     }
 
@@ -176,6 +189,11 @@ impl CampaignMetadataEditBuffer {
         dest.allow_multiclassing = self.allow_multiclassing;
         dest.starting_level = self.starting_level;
         dest.max_level = self.max_level;
+        dest.starting_time = antares::domain::types::GameTime::new(
+            self.starting_day.max(1),
+            self.starting_hour.min(23),
+            self.starting_minute.min(59),
+        );
         dest.items_file = self.items_file.clone();
         dest.spells_file = self.spells_file.clone();
         dest.monsters_file = self.monsters_file.clone();
@@ -189,6 +207,7 @@ impl CampaignMetadataEditBuffer {
         dest.conditions_file = self.conditions_file.clone();
         dest.proficiencies_file = self.proficiencies_file.clone();
         dest.creatures_file = self.creatures_file.clone();
+        dest.stock_templates_file = self.stock_templates_file.clone();
     }
 }
 
@@ -671,7 +690,7 @@ impl CampaignMetadataEditorState {
 
                         CampaignSection::Files => {
                             // Files grid ordered to match EditorTab sequence:
-                            // Items, Spells, Conditions, Monsters, Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies
+                            // Items, Spells, Conditions, Monsters, Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Stock Templates, Proficiencies, Creatures
                             egui::Grid::new("campaign_files_grid")
                                 .num_columns(2)
                                 .spacing([10.0, 8.0])
@@ -930,6 +949,30 @@ impl CampaignMetadataEditorState {
                                     });
                                     ui.end_row();
 
+                                    // NPC Stock Templates File
+                                    ui.label("NPC Stock Templates File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.stock_templates_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.stock_templates_file =
+                                                    p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
                                     // Proficiencies File
                                     ui.label("Proficiencies File:");
                                     ui.horizontal(|ui| {
@@ -1029,6 +1072,59 @@ impl CampaignMetadataEditorState {
                                                 }
                                             }
                                         });
+                                    ui.end_row();
+
+                                    ui.label("Starting Date/Time:")
+                                        .on_hover_text("Day, hour (0–23), and minute (0–59) at which the campaign begins");
+                                    ui.horizontal(|ui| {
+                                        ui.label("Day");
+                                        let mut day = self.buffer.starting_day as i32;
+                                        if ui
+                                            .add(egui::DragValue::new(&mut day).range(1..=9999))
+                                            .changed()
+                                        {
+                                            self.buffer.starting_day = day.max(1) as u32;
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+
+                                        ui.label("Hour");
+                                        let mut hour = self.buffer.starting_hour as i32;
+                                        if ui
+                                            .add(egui::DragValue::new(&mut hour).range(0..=23))
+                                            .changed()
+                                        {
+                                            self.buffer.starting_hour = hour.clamp(0, 23) as u8;
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+
+                                        ui.label("Min");
+                                        let mut minute = self.buffer.starting_minute as i32;
+                                        if ui
+                                            .add(egui::DragValue::new(&mut minute).range(0..=59))
+                                            .changed()
+                                        {
+                                            self.buffer.starting_minute =
+                                                minute.clamp(0, 59) as u8;
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+
+                                        // Preview the time-of-day period next to the spinners
+                                        let preview_time = antares::domain::types::GameTime::new(
+                                            self.buffer.starting_day.max(1),
+                                            self.buffer.starting_hour.min(23),
+                                            self.buffer.starting_minute.min(59),
+                                        );
+                                        ui.colored_label(
+                                            egui::Color32::GRAY,
+                                            format!(
+                                                "({})",
+                                                period_label(preview_time.time_of_day())
+                                            ),
+                                        );
+                                    });
                                     ui.end_row();
 
                                     ui.label("Starting Gold:");
@@ -1367,6 +1463,29 @@ impl CampaignMetadataEditorState {
     }
 }
 
+/// Returns a short display label for a [`antares::domain::types::TimeOfDay`] period,
+/// used as a preview hint next to the Starting Date/Time spinners in the Gameplay section.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::TimeOfDay;
+/// use campaign_builder::campaign_editor::period_label;
+///
+/// assert_eq!(period_label(TimeOfDay::Morning), "Morning");
+/// assert_eq!(period_label(TimeOfDay::Night),   "Night");
+/// ```
+pub fn period_label(tod: antares::domain::types::TimeOfDay) -> &'static str {
+    match tod {
+        antares::domain::types::TimeOfDay::Dawn => "Dawn",
+        antares::domain::types::TimeOfDay::Morning => "Morning",
+        antares::domain::types::TimeOfDay::Afternoon => "Afternoon",
+        antares::domain::types::TimeOfDay::Dusk => "Dusk",
+        antares::domain::types::TimeOfDay::Evening => "Evening",
+        antares::domain::types::TimeOfDay::Night => "Night",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1528,5 +1647,154 @@ mod tests {
         let joe = s.visible_innkeepers(&npcs);
         assert_eq!(joe.len(), 1);
         assert_eq!(joe[0].id, "inn_joe");
+    }
+
+    /// `from_metadata` must copy all three starting-time components into the
+    /// split buffer fields.
+    #[test]
+    fn test_buffer_from_metadata_copies_starting_time() {
+        let meta = crate::CampaignMetadata {
+            starting_time: antares::domain::types::GameTime::new(2, 20, 45),
+            ..crate::CampaignMetadata::default()
+        };
+
+        let buf = CampaignMetadataEditBuffer::from_metadata(&meta);
+
+        assert_eq!(buf.starting_day, 2, "day should be copied");
+        assert_eq!(buf.starting_hour, 20, "hour should be copied");
+        assert_eq!(buf.starting_minute, 45, "minute should be copied");
+    }
+
+    /// `apply_to` must write the three split buffer fields back into a single
+    /// `GameTime` on the destination metadata.
+    #[test]
+    fn test_buffer_apply_to_writes_starting_time() {
+        let buf = CampaignMetadataEditBuffer {
+            starting_day: 5,
+            starting_hour: 6,
+            starting_minute: 30,
+            ..CampaignMetadataEditBuffer::default()
+        };
+
+        let mut dest = crate::CampaignMetadata::default();
+        buf.apply_to(&mut dest);
+
+        assert_eq!(dest.starting_time.day, 5);
+        assert_eq!(dest.starting_time.hour, 6);
+        assert_eq!(dest.starting_time.minute, 30);
+    }
+
+    /// `apply_to` must clamp `starting_hour` to 23 when the buffer holds an
+    /// out-of-range value (e.g. set programmatically to 25).
+    #[test]
+    fn test_buffer_starting_time_clamps_hour() {
+        let buf = CampaignMetadataEditBuffer {
+            starting_day: 1,
+            starting_hour: 25, // out of range
+            starting_minute: 0,
+            ..CampaignMetadataEditBuffer::default()
+        };
+
+        let mut dest = crate::CampaignMetadata::default();
+        buf.apply_to(&mut dest);
+
+        assert_eq!(dest.starting_time.hour, 23, "hour 25 must be clamped to 23");
+    }
+
+    /// `apply_to` must clamp `starting_minute` to 59 when the buffer holds an
+    /// out-of-range value (e.g. set programmatically to 75).
+    #[test]
+    fn test_buffer_starting_time_clamps_minute() {
+        let buf = CampaignMetadataEditBuffer {
+            starting_day: 1,
+            starting_hour: 0,
+            starting_minute: 75, // out of range
+            ..CampaignMetadataEditBuffer::default()
+        };
+
+        let mut dest = crate::CampaignMetadata::default();
+        buf.apply_to(&mut dest);
+
+        assert_eq!(
+            dest.starting_time.minute, 59,
+            "minute 75 must be clamped to 59"
+        );
+    }
+
+    /// `apply_to` must clamp `starting_day` to 1 when the buffer holds zero
+    /// (day is 1-based; 0 is invalid).
+    #[test]
+    fn test_buffer_starting_time_clamps_day_zero() {
+        let buf = CampaignMetadataEditBuffer {
+            starting_day: 0, // invalid — must clamp to 1
+            starting_hour: 8,
+            starting_minute: 0,
+            ..CampaignMetadataEditBuffer::default()
+        };
+
+        let mut dest = crate::CampaignMetadata::default();
+        buf.apply_to(&mut dest);
+
+        assert_eq!(dest.starting_time.day, 1, "day 0 must be clamped to 1");
+    }
+
+    /// `period_label` must return the correct string for every `TimeOfDay` variant.
+    #[test]
+    fn test_period_label_all_variants() {
+        use antares::domain::types::TimeOfDay;
+
+        assert_eq!(period_label(TimeOfDay::Dawn), "Dawn");
+        assert_eq!(period_label(TimeOfDay::Morning), "Morning");
+        assert_eq!(period_label(TimeOfDay::Afternoon), "Afternoon");
+        assert_eq!(period_label(TimeOfDay::Dusk), "Dusk");
+        assert_eq!(period_label(TimeOfDay::Evening), "Evening");
+        assert_eq!(period_label(TimeOfDay::Night), "Night");
+    }
+
+    /// `period_label` must agree with `GameTime::time_of_day` for representative hours.
+    #[test]
+    fn test_period_label_matches_game_time_time_of_day() {
+        use antares::domain::types::GameTime;
+
+        // Hour 8 → Morning
+        assert_eq!(
+            period_label(GameTime::new(1, 8, 0).time_of_day()),
+            "Morning"
+        );
+        // Hour 22 → Night
+        assert_eq!(period_label(GameTime::new(1, 22, 0).time_of_day()), "Night");
+        // Hour 5 → Dawn
+        assert_eq!(period_label(GameTime::new(1, 5, 0).time_of_day()), "Dawn");
+    }
+
+    /// The default buffer must seed starting_day=1, starting_hour=8, starting_minute=0
+    /// (matching the `default_starting_time()` in CampaignMetadata).
+    #[test]
+    fn test_buffer_default_starting_time_fields() {
+        let buf = CampaignMetadataEditBuffer::default();
+        assert_eq!(buf.starting_day, 1, "default day should be 1");
+        assert_eq!(buf.starting_hour, 8, "default hour should be 8");
+        assert_eq!(buf.starting_minute, 0, "default minute should be 0");
+    }
+
+    /// Round-trip: set three buffer fields → apply_to → from_metadata → buffer fields
+    /// should survive unchanged.
+    #[test]
+    fn test_buffer_starting_time_roundtrip_via_metadata() {
+        let buf = CampaignMetadataEditBuffer {
+            starting_day: 7,
+            starting_hour: 19,
+            starting_minute: 45,
+            ..CampaignMetadataEditBuffer::default()
+        };
+
+        let mut meta = crate::CampaignMetadata::default();
+        buf.apply_to(&mut meta);
+
+        // Reconstruct buffer from the updated metadata
+        let buf2 = CampaignMetadataEditBuffer::from_metadata(&meta);
+        assert_eq!(buf2.starting_day, 7);
+        assert_eq!(buf2.starting_hour, 19);
+        assert_eq!(buf2.starting_minute, 45);
     }
 }
