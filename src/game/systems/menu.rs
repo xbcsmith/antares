@@ -22,6 +22,11 @@ use crate::application::GameMode;
 use crate::game::components::menu::*;
 use crate::game::resources::GlobalState;
 
+/// Path to the Antares icon, relative to the Bevy asset root (campaign directory).
+/// Bevy resolves paths relative to `BEVY_ASSET_ROOT` (the campaign dir), so the
+/// path must include the `assets/` subdirectory prefix.
+const ANTARES_ICON_PATH: &str = "assets/icons/antares_icon.png";
+
 /// Plugin for the in-game menu system
 pub struct MenuPlugin;
 
@@ -135,6 +140,7 @@ fn submenu_transition_cleanup(
 fn menu_setup(
     mut commands: Commands,
     global_state: Res<GlobalState>,
+    asset_server: Res<AssetServer>,
     existing_menu: Query<Entity, With<MenuRoot>>,
     children_query: Query<&Children>,
 ) {
@@ -187,7 +193,7 @@ fn menu_setup(
                 "menu_setup: spawning Main menu (selected_index={})",
                 menu_state.selected_index
             );
-            spawn_main_menu(&mut commands, menu_state)
+            spawn_main_menu(&mut commands, menu_state, &asset_server)
         }
         MenuType::SaveLoad => {
             debug!(
@@ -204,7 +210,8 @@ fn menu_setup(
 }
 
 /// Spawn the main menu UI
-fn spawn_main_menu(commands: &mut Commands, menu_state: &MenuState) {
+fn spawn_main_menu(commands: &mut Commands, menu_state: &MenuState, asset_server: &AssetServer) {
+    let icon_handle: Handle<Image> = asset_server.load(ANTARES_ICON_PATH);
     commands
         .spawn((
             Node {
@@ -238,27 +245,52 @@ fn spawn_main_menu(commands: &mut Commands, menu_state: &MenuState) {
                     MainMenuPanel,
                 ))
                 .with_children(|panel| {
-                    // Title
+                    // Title row: icon + "Antares RPG" text side by side
                     panel
                         .spawn(Node {
-                            width: Val::Auto,
+                            width: Val::Percent(100.0),
                             height: Val::Auto,
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            column_gap: Val::Px(12.0),
                             ..default()
                         })
-                        .with_children(|title| {
-                            title.spawn((
-                                Text::new("GAME MENU"),
+                        .with_children(|title_row| {
+                            // Icon
+                            title_row.spawn((
+                                Node {
+                                    width: Val::Px(TITLE_FONT_SIZE * 1.4),
+                                    height: Val::Px(TITLE_FONT_SIZE * 1.4),
+                                    ..default()
+                                },
+                                ImageNode::new(icon_handle),
+                            ));
+                            // "Antares RPG" text
+                            title_row.spawn((
+                                Text::new("Antares RPG"),
                                 TextFont {
                                     font_size: TITLE_FONT_SIZE,
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                TextColor(TITLE_TEXT_COLOR),
                             ));
                         });
 
+                    // Accent separator line beneath the title
+                    panel.spawn((
+                        Node {
+                            width: Val::Percent(90.0),
+                            height: Val::Px(2.0),
+                            margin: UiRect::vertical(Val::Px(10.0)),
+                            ..default()
+                        },
+                        BackgroundColor(MENU_ACCENT_COLOR),
+                    ));
+
                     // Spacing
                     panel.spawn(Node {
-                        height: Val::Px(40.0),
+                        height: Val::Px(10.0),
                         ..default()
                     });
 
