@@ -74,6 +74,14 @@ megalint: ; $(info $(M) running all the things...) @ ## Runs all the things
 		&& $(CARGO) nextest run --all-features \
 		&& $(CARGO) test --doc
 
+sdklint: ; $(info $(M) running all the SDK things...) @ ## Runs all the SDK things
+	$Q cd ./sdk/campaign_builder \
+	    && $(CARGO) fmt --all \
+	    && $(CARGO) check --all-targets --all-features \
+		&& $(CARGO) clippy --all-targets --all-features -- -D warnings \
+		&& $(CARGO) nextest run --all-features \
+		&& $(CARGO) test --doc
+
 # Generate documentation
 doc: ; $(info $(M) running cargo doc...) @ ## Runs a cargo doc
 	$Q $(CARGO) doc --open

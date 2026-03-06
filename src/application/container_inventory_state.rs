@@ -95,8 +95,8 @@ pub enum ContainerFocus {
 /// use antares::domain::character::InventorySlot;
 ///
 /// let items = vec![
-///     InventorySlot { item_id: 1, charges: None },
-///     InventorySlot { item_id: 5, charges: Some(3) },
+///     InventorySlot { item_id: 1, charges: 0 },
+///     InventorySlot { item_id: 5, charges: 3 },
 /// ];
 ///
 /// let state = ContainerInventoryState::new(
@@ -345,7 +345,7 @@ impl ContainerInventoryState {
     /// use antares::application::container_inventory_state::ContainerInventoryState;
     /// use antares::domain::character::InventorySlot;
     ///
-    /// let items = vec![InventorySlot { item_id: 1, charges: None }];
+    /// let items = vec![InventorySlot { item_id: 1, charges: 0 }];
     /// let state = ContainerInventoryState::new(
     ///     "chest".to_string(), "Chest".to_string(), items, 0, GameMode::Exploration,
     /// );
@@ -390,8 +390,8 @@ impl ContainerInventoryState {
     /// use antares::domain::character::InventorySlot;
     ///
     /// let items = vec![
-    ///     InventorySlot { item_id: 10, charges: None },
-    ///     InventorySlot { item_id: 20, charges: None },
+    ///     InventorySlot { item_id: 10, charges: 0 },
+    ///     InventorySlot { item_id: 20, charges: 0 },
     /// ];
     /// let mut state = ContainerInventoryState::new(
     ///     "chest".to_string(), "Chest".to_string(), items, 0, GameMode::Exploration,
@@ -431,8 +431,8 @@ impl ContainerInventoryState {
     /// use antares::domain::character::InventorySlot;
     ///
     /// let items = vec![
-    ///     InventorySlot { item_id: 1, charges: None },
-    ///     InventorySlot { item_id: 2, charges: None },
+    ///     InventorySlot { item_id: 1, charges: 0 },
+    ///     InventorySlot { item_id: 2, charges: 0 },
     /// ];
     /// let mut state = ContainerInventoryState::new(
     ///     "chest".to_string(), "Chest".to_string(), items, 0, GameMode::Exploration,
@@ -465,7 +465,7 @@ impl ContainerInventoryState {
     ///     "chest".to_string(), "Chest".to_string(), vec![], 0, GameMode::Exploration,
     /// );
     ///
-    /// state.stash_item(InventorySlot { item_id: 7, charges: None });
+    /// state.stash_item(InventorySlot { item_id: 7, charges: 0 });
     /// assert_eq!(state.items.len(), 1);
     /// assert_eq!(state.items[0].item_id, 7);
     /// ```

@@ -460,6 +460,7 @@ mod tests {
                 allow_multiclassing: false,
                 starting_level: 1,
                 max_level: 20,
+                starting_time: crate::domain::types::GameTime::new(1, 8, 0),
             },
             data: CampaignData {
                 items: "items.ron".to_string(),

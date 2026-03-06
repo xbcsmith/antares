@@ -124,4 +124,34 @@
         magic_slot_count: 7,
         magic_refresh_days: 7,
     ),
+    MerchantStockTemplate(
+        id: "temple_basic_stock",
+        entries: [
+            TemplateStockEntry(
+                item_id: 44,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 50,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 51,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 52,
+                quantity: 1,
+                override_price: None,
+            ),
+        ],
+        magic_item_pool: [
+            101,
+        ],
+        magic_slot_count: 1,
+        magic_refresh_days: 7,
+    ),
 ]

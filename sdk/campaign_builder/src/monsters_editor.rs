@@ -372,10 +372,8 @@ impl MonstersEditorState {
                 // Right panel: Detail view
                 if let Some(idx) = selected {
                     if let Some((_, monster)) = sorted_monsters.iter().find(|(i, _)| *i == idx) {
-                        right_ui.heading(&monster.name);
-                        right_ui.separator();
-
                         if show_preview {
+                            // show_preview_static renders its own heading
                             Self::show_preview_static(right_ui, monster);
                         } else {
                             Self::show_monster_details(right_ui, monster);
@@ -477,6 +475,8 @@ impl MonstersEditorState {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.group(|ui| {
+                    ui.heading(&monster.name);
+                    ui.separator();
                     ui.label(format!("ID: {}", monster.id));
                     ui.label(format!("HP: {}", monster.hp.base));
                     ui.label(format!("AC: {}", monster.ac.base));

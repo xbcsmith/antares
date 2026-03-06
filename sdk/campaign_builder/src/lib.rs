@@ -89,7 +89,7 @@ use antares::domain::items::types::{
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
 use antares::domain::proficiency::ProficiencyDefinition;
 use antares::domain::quest::{Quest, QuestId};
-use antares::domain::types::{CreatureId, DiceRoll, ItemId, MapId, MonsterId, SpellId};
+use antares::domain::types::{CreatureId, DiceRoll, GameTime, ItemId, MapId, MonsterId, SpellId};
 use antares::domain::visual::CreatureReference;
 use antares::domain::world::npc_runtime::MerchantStockTemplate;
 use antares::domain::world::Map;
@@ -369,6 +369,14 @@ pub struct CampaignMetadata {
     /// Relative path to the NPC stock templates RON file
     #[serde(default = "default_stock_templates_file")]
     pub stock_templates_file: String,
+
+    /// Starting game time for a new campaign (day, hour, minute).
+    ///
+    /// Defaults to Day 1, 08:00 (morning) if not specified in the RON file.
+    /// The `serde(default)` attribute ensures existing `campaign.ron` files that
+    /// lack this field continue to deserialize correctly.
+    #[serde(default = "default_starting_time")]
+    pub starting_time: GameTime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -416,6 +424,11 @@ fn default_stock_templates_file() -> String {
     "data/npc_stock_templates.ron".to_string()
 }
 
+/// Default starting time: Day 1, 08:00 — campaign begins in the morning.
+fn default_starting_time() -> GameTime {
+    GameTime::new(1, 8, 0)
+}
+
 impl Default for CampaignMetadata {
     fn default() -> Self {
         Self {
@@ -454,6 +467,7 @@ impl Default for CampaignMetadata {
             proficiencies_file: "data/proficiencies.ron".to_string(),
             creatures_file: "data/creatures.ron".to_string(),
             stock_templates_file: "data/npc_stock_templates.ron".to_string(),
+            starting_time: default_starting_time(),
         }
     }
 }
@@ -720,6 +734,10 @@ struct CampaignBuilderApp {
     show_debug_panel: bool,
     debug_panel_filter_level: LogLevel,
     debug_panel_auto_scroll: bool,
+
+    /// Cached texture handle for the Antares logo shown in the sidebar.
+    /// Loaded once on first render and reused every frame thereafter.
+    logo_texture: Option<egui::TextureHandle>,
 }
 
 #[derive(Debug, Clone)]
@@ -841,6 +859,8 @@ impl Default for CampaignBuilderApp {
             show_debug_panel: false,
             debug_panel_filter_level: LogLevel::Info,
             debug_panel_auto_scroll: true,
+
+            logo_texture: None,
         }
     }
 }
@@ -2150,15 +2170,33 @@ impl CampaignBuilderApp {
     fn load_stock_templates(&mut self) {
         if let Some(dir) = &self.campaign_dir {
             let path = dir.join(&self.campaign.stock_templates_file);
-            match self.stock_templates_editor_state.load_from_file(&path) {
-                Ok(()) => {
-                    self.stock_templates = self.stock_templates_editor_state.templates.clone();
-                    self.status_message =
-                        format!("Loaded {} stock templates", self.stock_templates.len());
+            if path.exists() {
+                match self.stock_templates_editor_state.load_from_file(&path) {
+                    Ok(()) => {
+                        self.stock_templates = self.stock_templates_editor_state.templates.clone();
+                        self.logger.info(
+                            category::FILE_IO,
+                            &format!("Loaded {} stock templates", self.stock_templates.len()),
+                        );
+                        // Mark the initial-load flag as satisfied so show() does
+                        // not redundantly re-read the file on first tab render.
+                        self.stock_templates_editor_state.needs_initial_load = false;
+                    }
+                    Err(e) => {
+                        self.logger.warn(
+                            category::FILE_IO,
+                            &format!("Failed to parse stock templates: {}", e),
+                        );
+                    }
                 }
-                Err(e) => {
-                    self.status_message = format!("Warning: could not load stock templates: {}", e);
-                }
+            } else {
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!(
+                        "Stock templates file not found (will auto-load if created later): {}",
+                        path.display()
+                    ),
+                );
             }
         }
     }
@@ -2576,6 +2614,16 @@ impl CampaignBuilderApp {
     fn validate_campaign(&mut self) {
         self.logger
             .debug(category::VALIDATION, "validate_campaign() called");
+
+        // Always sync the stock_templates mirror from the editor state before
+        // validating.  validate_npc_ids() checks self.stock_templates, but that
+        // mirror is only refreshed during tab renders.  When the user clicks
+        // "Validate Campaign" directly (toolbar, Re-validate button, metadata
+        // editor) neither tab render runs first, so the mirror can be stale and
+        // cause false "unknown stock template" errors for templates that are
+        // perfectly loaded in the editor state.
+        self.stock_templates = self.stock_templates_editor_state.templates.clone();
+
         self.validation_errors.clear();
 
         // Validate data IDs for uniqueness (in EditorTab order)
@@ -2835,6 +2883,7 @@ impl CampaignBuilderApp {
                 allow_multiclassing: self.campaign.allow_multiclassing,
                 starting_level: self.campaign.starting_level,
                 max_level: self.campaign.max_level,
+                starting_time: self.campaign.starting_time,
             };
 
             let config_errors = validator.validate_campaign_config(&config);
@@ -2926,6 +2975,11 @@ impl CampaignBuilderApp {
     }
 
     fn do_new_campaign(&mut self) {
+        // Reset stock templates editor so it does not retain data from a
+        // previously opened campaign.  The flag inside reset_for_new_campaign
+        // tells show() to auto-load if the user adds a templates file later.
+        self.stock_templates_editor_state.reset_for_new_campaign();
+        self.stock_templates.clear();
         self.campaign = CampaignMetadata::default();
 
         // Sync the campaign editor's authoritative metadata and edit buffer with
@@ -3210,6 +3264,12 @@ impl CampaignBuilderApp {
                             .warn(category::FILE_IO, &format!("Failed to load NPCs: {}", e));
                     }
 
+                    // Reset editor state before loading so stale data from any
+                    // previously opened campaign is cleared first.  The explicit
+                    // load below will clear needs_initial_load on success; on
+                    // failure the auto-load in show() acts as a reliable fallback.
+                    self.stock_templates_editor_state.reset_for_new_campaign();
+                    self.stock_templates.clear();
                     self.load_stock_templates();
 
                     // Scan asset references and mark loaded data files
@@ -4292,8 +4352,41 @@ impl eframe::App for CampaignBuilderApp {
                 }
 
                 ui.separator();
-                ui.label("Antares Campaign Builder");
+
+                ui.label("Antares RPG");
+                ui.label("Campaign Builder");
                 ui.label("Foundation v0.2.0");
+
+                // Pin the logo to the very bottom of the sidebar using a
+                // bottom-up layout so it never overlaps the tab list above.
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    // Lazily decode and upload the logo PNG on first render,
+                    // then reuse the cached TextureHandle every subsequent frame.
+                    let logo_bytes: &[u8] = include_bytes!("../assets/antares_logo.png");
+                    let texture = self.logo_texture.get_or_insert_with(|| {
+                        let img = image::load_from_memory(logo_bytes)
+                            .expect("antares_logo.png is a valid PNG");
+                        let rgba = img.to_rgba8();
+                        let (w, h) = rgba.dimensions();
+                        let pixels: Vec<egui::Color32> = rgba
+                            .pixels()
+                            .map(|p| egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]))
+                            .collect();
+                        ctx.load_texture(
+                            "antares_logo",
+                            egui::ColorImage::new([w as usize, h as usize], pixels),
+                            egui::TextureOptions::LINEAR,
+                        )
+                    });
+
+                    // Fill the sidebar width; image is square so aspect ratio holds.
+                    let available_width = ui.available_width();
+                    let logo_size = egui::vec2(available_width, available_width);
+                    ui.add(
+                        egui::Image::new(egui::load::SizedTexture::new(texture.id(), logo_size))
+                            .maintain_aspect_ratio(true),
+                    );
+                });
             });
 
         // Bottom status bar
@@ -4464,6 +4557,15 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.file_load_merge_mode,
             ),
             EditorTab::NPCs => {
+                // Always sync the stock_templates mirror from the editor state before
+                // threading into the NPC editor.  The StockTemplatesEditorState::show()
+                // auto-load fires the first time the StockTemplates tab is rendered, but
+                // the NPC tab may be opened first — in that case the explicit
+                // load_stock_templates() call in do_open_campaign() has already populated
+                // stock_templates_editor_state.templates, so pulling from there guarantees
+                // the NPC editor's ComboBox and validation both see the live list.
+                self.stock_templates = self.stock_templates_editor_state.templates.clone();
+
                 // Thread available stock templates into the NPC editor before rendering
                 self.npc_editor_state.available_stock_templates = self.stock_templates.clone();
 
@@ -5637,6 +5739,19 @@ impl CampaignBuilderApp {
                                         ui.label(asset.size_string());
                                         ui.label(asset.asset_type.display_name());
 
+                                        // Hidden-file badge — shown first so it stands out
+                                        if asset.is_hidden {
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(220, 60, 60),
+                                                "🙈 Hidden File",
+                                            )
+                                            .on_hover_text(
+                                                "This is a hidden file (filename starts with '.'). \
+                                                Hidden files such as .DS_Store and .gitkeep are \
+                                                not part of the campaign and should be removed.",
+                                            );
+                                        }
+
                                         // Show better status for assets
                                         if asset.is_referenced {
                                             ui.colored_label(
@@ -5744,6 +5859,10 @@ mod tests {
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
         };
         app.npc_editor_state.npcs.push(npc);
 
@@ -6868,6 +6987,8 @@ mod tests {
             conditions_file: "data/conditions.ron".to_string(),
             npcs_file: "data/npcs.ron".to_string(),
             proficiencies_file: "data/proficiencies.ron".to_string(),
+            stock_templates_file: "data/npc_stock_templates.ron".to_string(),
+            starting_time: default_starting_time(),
         };
 
         let ron_config = ron::ser::PrettyConfig::new()

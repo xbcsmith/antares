@@ -346,6 +346,18 @@ pub struct StockTemplatesEditorState {
     #[serde(skip)]
     pub last_templates_file: Option<String>,
 
+    /// Whether the templates have been loaded for the current campaign.
+    ///
+    /// Set to `false` whenever the campaign changes (new / open) so that
+    /// `show()` can trigger a lazy auto-load the first time the tab is
+    /// rendered, providing a reliable fallback if the explicit
+    /// `load_stock_templates()` call in `do_open_campaign` was unable to
+    /// populate data (e.g. the file didn't exist yet at open time but was
+    /// created later, or the status_message was clobbered before the user
+    /// noticed).  Skipped on serde so it resets correctly on app restart.
+    #[serde(skip)]
+    pub needs_initial_load: bool,
+
     /// Item database snapshot for name lookups. Refreshed from the caller on
     /// every `show()` call (skipped on serde).
     #[serde(skip)]
@@ -366,6 +378,7 @@ impl Default for StockTemplatesEditorState {
             show_delete_confirm: false,
             last_campaign_dir: None,
             last_templates_file: None,
+            needs_initial_load: true,
             available_items: Vec::new(),
         }
     }
@@ -407,12 +420,72 @@ impl StockTemplatesEditorState {
         }
         self.last_templates_file = Some(templates_file.to_string());
 
-        match self.mode {
+        // Auto-load on first show for the current campaign.
+        //
+        // `needs_initial_load` is set to `true` by `reset_for_new_campaign()`
+        // (called from `do_new_campaign` and at the end of `do_open_campaign`
+        // after data is populated).  The explicit `load_stock_templates()` call
+        // in `do_open_campaign` is the primary load path; this guard is a
+        // reliable fallback for the case where the user navigates to this tab
+        // before that call has had a chance to run, or the file was absent at
+        // open time but has since appeared on disk.
+        let mut auto_loaded = false;
+        if self.needs_initial_load {
+            if let Some(dir) = campaign_dir {
+                let path = dir.join(templates_file);
+                if path.exists() {
+                    match self.load_from_file(&path) {
+                        Ok(()) => {
+                            self.has_unsaved_changes = false;
+                            // Signal the caller to sync its mirror list so other
+                            // editors (e.g. NPC editor) see the freshly loaded
+                            // templates immediately, even if the StockTemplates
+                            // tab has never been visited.
+                            auto_loaded = true;
+                        }
+                        Err(e) => {
+                            self.validation_errors = vec![format!("Auto-load failed: {}", e)];
+                        }
+                    }
+                }
+                // Mark as loaded regardless of whether the file existed so we
+                // don't retry every frame.
+                self.needs_initial_load = false;
+            }
+        }
+
+        let inner_needs_save = match self.mode {
             StockTemplatesEditorMode::List => self.show_list_view(ui, campaign_dir, templates_file),
             StockTemplatesEditorMode::Add | StockTemplatesEditorMode::Edit => {
                 self.show_edit_view(ui, campaign_dir, templates_file)
             }
-        }
+        };
+
+        auto_loaded || inner_needs_save
+    }
+
+    /// Reset editor state for a new or freshly-opened campaign.
+    ///
+    /// Clears the template list, selection, edit buffer, and all transient UI
+    /// state, then sets `needs_initial_load = true` so that `show()` will
+    /// perform an auto-load the first time the Stock Templates tab is rendered.
+    ///
+    /// Call this from both `do_new_campaign` and at the end of
+    /// `do_open_campaign` (after the explicit `load_stock_templates()` call,
+    /// so the flag is only set when needed).
+    pub fn reset_for_new_campaign(&mut self) {
+        self.templates.clear();
+        self.selected_template = None;
+        self.mode = StockTemplatesEditorMode::List;
+        self.edit_buffer = StockTemplateEditBuffer::default();
+        self.search_filter.clear();
+        self.has_unsaved_changes = false;
+        self.validation_errors.clear();
+        self.validation_warnings.clear();
+        self.show_delete_confirm = false;
+        self.needs_initial_load = true;
+        // Preserve last_campaign_dir / last_templates_file / available_items —
+        // they are refreshed from the caller on the next show() call anyway.
     }
 
     // ------------------------------------------------------------------ list
@@ -1114,7 +1187,7 @@ impl StockTemplatesEditorState {
 
                 // ── Action buttons ──
                 ui.horizontal(|ui| {
-                    if ui.button("⬅ Back").clicked() {
+                    if ui.button("⬅ Back to List").clicked() {
                         self.mode = StockTemplatesEditorMode::List;
                         self.validation_errors.clear();
                         self.validation_warnings.clear();
@@ -1403,8 +1476,10 @@ mod tests {
 
     #[test]
     fn test_to_template_validates_empty_id() {
-        let mut buf = StockTemplateEditBuffer::default();
-        buf.id = String::new();
+        let buf = StockTemplateEditBuffer {
+            id: String::new(),
+            ..StockTemplateEditBuffer::default()
+        };
         let mut warnings = Vec::new();
         let result = buf.to_template(&[], StockTemplatesEditorMode::Add, &mut warnings);
         assert!(result.is_err());
@@ -1420,7 +1495,7 @@ mod tests {
 
     #[test]
     fn test_to_template_validates_invalid_item_id() {
-        let mut buf = StockTemplateEditBuffer {
+        let buf = StockTemplateEditBuffer {
             id: "test_tmpl".to_string(),
             entries: vec![TemplateEntryBuffer {
                 item_id: "not_a_number".to_string(),
@@ -1688,5 +1763,139 @@ mod tests {
             state.selected_template.is_none(),
             "selected_template should remain None"
         );
+    }
+
+    // ── reset_for_new_campaign ───────────────────────────────────────────────
+
+    #[test]
+    fn test_reset_for_new_campaign_clears_templates() {
+        let mut state = StockTemplatesEditorState::default();
+        state.templates.push(make_template("tmpl_a"));
+        state.templates.push(make_template("tmpl_b"));
+        state.selected_template = Some(1);
+        state.has_unsaved_changes = true;
+        state.needs_initial_load = false;
+
+        state.reset_for_new_campaign();
+
+        assert!(state.templates.is_empty(), "templates should be cleared");
+        assert!(
+            state.selected_template.is_none(),
+            "selection should be cleared"
+        );
+        assert!(
+            !state.has_unsaved_changes,
+            "unsaved_changes should be false"
+        );
+        assert_eq!(
+            state.mode,
+            StockTemplatesEditorMode::List,
+            "mode should be reset to List"
+        );
+    }
+
+    #[test]
+    fn test_reset_for_new_campaign_sets_needs_initial_load() {
+        let mut state = StockTemplatesEditorState {
+            needs_initial_load: false,
+            ..Default::default()
+        };
+        // Simulate a loaded campaign: flag would have been cleared after load
+        state.templates.push(make_template("stale"));
+
+        state.reset_for_new_campaign();
+
+        assert!(
+            state.needs_initial_load,
+            "needs_initial_load must be true after reset so show() auto-loads on next render"
+        );
+    }
+
+    #[test]
+    fn test_reset_for_new_campaign_clears_edit_state() {
+        let mut state = StockTemplatesEditorState::default();
+        state.templates.push(make_template("foo"));
+        state.open_template_for_edit("foo");
+        // Now in Edit mode with a populated buffer
+        assert_eq!(state.mode, StockTemplatesEditorMode::Edit);
+        assert_eq!(state.edit_buffer.id, "foo");
+
+        state.reset_for_new_campaign();
+
+        assert_eq!(
+            state.mode,
+            StockTemplatesEditorMode::List,
+            "mode should reset to List even from Edit"
+        );
+        assert!(
+            state.edit_buffer.id.is_empty(),
+            "edit buffer should be cleared"
+        );
+        assert!(
+            state.validation_errors.is_empty(),
+            "validation errors should be cleared"
+        );
+    }
+
+    #[test]
+    fn test_reset_for_new_campaign_clears_search_filter() {
+        let mut state = StockTemplatesEditorState {
+            search_filter: "blacksmith".to_string(),
+            validation_warnings: vec!["some warning".to_string()],
+            show_delete_confirm: true,
+            ..Default::default()
+        };
+
+        state.reset_for_new_campaign();
+
+        assert!(
+            state.search_filter.is_empty(),
+            "search filter should be cleared"
+        );
+        assert!(
+            state.validation_warnings.is_empty(),
+            "warnings should be cleared"
+        );
+        assert!(
+            !state.show_delete_confirm,
+            "delete confirm dialog should be dismissed"
+        );
+    }
+
+    // ── needs_initial_load default ───────────────────────────────────────────
+
+    #[test]
+    fn test_needs_initial_load_is_true_on_default() {
+        let state = StockTemplatesEditorState::default();
+        assert!(
+            state.needs_initial_load,
+            "needs_initial_load should start as true so first show() auto-loads"
+        );
+    }
+
+    // ── load_from_file clears needs_initial_load indirectly ──────────────────
+
+    #[test]
+    fn test_load_from_file_does_not_mutate_needs_initial_load() {
+        // load_from_file itself does not touch needs_initial_load — the caller
+        // (lib.rs load_stock_templates) sets it to false on success.
+        // This test documents that contract explicitly.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("npc_stock_templates.ron");
+
+        let mut writer = StockTemplatesEditorState::default();
+        writer.templates.push(make_template("contract_test"));
+        writer.save_to_file(&path).expect("save");
+
+        let mut reader = StockTemplatesEditorState::default();
+        // needs_initial_load starts true
+        assert!(reader.needs_initial_load);
+        reader.load_from_file(&path).expect("load");
+        // load_from_file does NOT clear the flag — caller responsibility
+        assert!(
+            reader.needs_initial_load,
+            "load_from_file must not clear needs_initial_load; caller owns that"
+        );
+        assert_eq!(reader.templates.len(), 1);
     }
 }
