@@ -5128,65 +5128,6 @@
     ],
     events: {
         (
-            x: 3,
-            y: 5,
-        ): Encounter(
-            name: "Monster Ambush",
-            description: "A group of monsters lying in wait to ambush unsuspecting travelers.",
-            monster_group: [
-                2,
-                1,
-            ],
-            time_condition: None,
-        ),
-        (
-            x: 10,
-            y: 6,
-        ): Trap(
-            name: "Spike Trap",
-            description: "A hidden spike trap that deals 5 points of damage when triggered.",
-            damage: 5,
-            effect: None,
-        ),
-        (
-            x: 3,
-            y: 2,
-        ): Encounter(
-            name: "Monster Patrol",
-            description: "A small patrol of monsters crossing this area.",
-            monster_group: [
-                1,
-                2,
-            ],
-            time_condition: None,
-        ),
-        (
-            x: 6,
-            y: 2,
-        ): Treasure(
-            name: "Buried Stash",
-            description: "A stash hidden in a crevice containing valuable items.",
-            loot: [
-                10,
-                20,
-                30,
-            ],
-        ),
-        (
-            x: 14,
-            y: 14,
-        ): Encounter(
-            name: "Boss Lair",
-            description: "A concentrated group of powerful monsters guarding a key location.",
-            monster_group: [
-                3,
-                3,
-                3,
-                20,
-            ],
-            time_condition: None,
-        ),
-        (
             x: 10,
             y: 12,
         ): Treasure(
@@ -5209,6 +5150,36 @@
                 3,
             ],
             time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
+        ),
+        (
+            x: 14,
+            y: 14,
+        ): Encounter(
+            name: "Boss Lair",
+            description: "A concentrated group of powerful monsters guarding a key location.",
+            monster_group: [
+                3,
+                3,
+                3,
+                20,
+            ],
+            time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
+        ),
+        (
+            x: 1,
+            y: 8,
+        ): Sign(
+            name: "Exit Sign",
+            description: "A sign marking the path back to town.",
+            text: "Exit to Town",
+            time_condition: None,
+            facing: None,
         ),
         (
             x: 13,
@@ -5222,13 +5193,55 @@
             ],
         ),
         (
-            x: 1,
-            y: 8,
-        ): Sign(
-            name: "Exit Sign",
-            description: "A sign marking the path back to town.",
-            text: "Exit to Town",
+            x: 3,
+            y: 2,
+        ): Encounter(
+            name: "Monster Patrol",
+            description: "A small patrol of monsters crossing this area.",
+            monster_group: [
+                1,
+                2,
+            ],
             time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
+        ),
+        (
+            x: 10,
+            y: 6,
+        ): Trap(
+            name: "Spike Trap",
+            description: "A hidden spike trap that deals 5 points of damage when triggered.",
+            damage: 5,
+            effect: None,
+        ),
+        (
+            x: 3,
+            y: 5,
+        ): Encounter(
+            name: "Monster Ambush",
+            description: "A group of monsters lying in wait to ambush unsuspecting travelers.",
+            monster_group: [
+                2,
+                1,
+            ],
+            time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
+        ),
+        (
+            x: 6,
+            y: 2,
+        ): Treasure(
+            name: "Buried Stash",
+            description: "A stash hidden in a crevice containing valuable items.",
+            loot: [
+                10,
+                20,
+                30,
+            ],
         ),
         (
             x: 0,
