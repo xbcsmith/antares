@@ -1,5 +1,107 @@
 # Implementations
 
+## Phase 2: Equipped Weapon Damage — Game System Integration
+
+### Overview
+
+Phase 2 wires the domain-layer work from Phase 1 into the live game system.
+`perform_attack_action_with_rng` in `src/game/systems/combat.rs` previously
+hardcoded `Attack::physical(DiceRoll::new(1, 4, 0))` for every
+`CombatantId::Player` turn. This phase replaces that single literal with a
+call to `get_character_attack` and dispatches on `MeleeAttackResult`:
+
+- `Melee(attack)` — the resolved attack (with correct weapon damage and bonus)
+  is used directly in `resolve_attack`.
+- `Ranged(_)` — the melee path is a no-op: a `warn!` is logged and the
+  function returns `Ok(())` immediately without applying any damage. The
+  ranged path (`TurnAction::RangedAttack` /
+  `perform_ranged_attack_action_with_rng`) is reserved for a future phase
+  (`combat_events_implementation_plan.md` §3).
+
+The monster path (`CombatantId::Monster`) is **not changed** by this phase.
+
+### Phase 2 Deliverables Checklist
+
+- [x] Hardcoded `DiceRoll::new(1, 4, 0)` removed from the `CombatantId::Player`
+      branch of `perform_attack_action_with_rng`
+- [x] `get_character_attack` + `MeleeAttackResult` dispatch wired in
+- [x] Ranged-weapon guard logs a `warn!` and returns `Ok(())` without damage
+- [x] `use` imports for `get_character_attack` and `MeleeAttackResult` added in
+      `src/game/systems/combat.rs`
+- [x] Four integration tests added and passing
+
+### What Was Built
+
+#### Updated imports (`src/game/systems/combat.rs`)
+
+```antares/src/game/systems/combat.rs#L59-62
+use crate::domain::combat::engine::{
+    apply_damage, choose_monster_attack, get_character_attack, initialize_combat_from_group,
+    resolve_attack, CombatState, Combatant, MeleeAttackResult,
+};
+```
+
+#### Replaced player attack branch
+
+The old hardcoded block:
+
+```antares/docs/explanation/equipped_weapon_damage_implementation_plan.md#L284-294
+CombatantId::Player(_) => {
+    crate::domain::combat::types::Attack::physical(DiceRoll::new(1, 4, 0))
+}
+```
+
+…is replaced with:
+
+```antares/src/game/systems/combat.rs#L2181-2198
+        CombatantId::Player(idx) => {
+            if let Some(Combatant::Player(pc)) = combat_res.state.participants.get(idx) {
+                match get_character_attack(pc, &content.db().items) {
+                    MeleeAttackResult::Melee(attack) => attack,
+                    MeleeAttackResult::Ranged(_) => {
+                        // Ranged weapons must be used via TurnAction::RangedAttack /
+                        // perform_ranged_attack_action_with_rng, not the melee path.
+                        // Log a warning and skip the turn rather than dealing wrong damage.
+                        warn!(
+                            "Player {:?} attempted melee attack with ranged weapon; \
+                             use TurnAction::RangedAttack instead. Turn skipped.",
+                            action.attacker
+                        );
+                        return Ok(());
+                    }
+                }
+            } else {
+                return Err(CombatError::CombatantNotFound(action.attacker));
+            }
+        }
+```
+
+#### Integration tests (`src/game/systems/combat.rs`, `mod tests`)
+
+Four pure-function tests were added that construct a `CombatResource` directly
+(no Bevy `App`) via the `make_p2_combat_fixture` helper:
+
+| Test name                                                | What it verifies                                                                                           |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `test_player_attack_uses_equipped_melee_weapon_damage`   | Longsword (1d8) deals damage in [1, 8]; at least one roll over 50 seeds exceeds 4, proving old 1d4 is gone |
+| `test_player_attack_unarmed_when_no_weapon`              | `equipment.weapon = None` → damage ≤ 2 (1d2 UNARMED_DAMAGE) across 30 seeds                                |
+| `test_player_attack_bonus_weapon_floor_at_one`           | Cursed dagger (1d4, bonus -3) never deals negative damage; any hit deals ≥ 1                               |
+| `test_player_melee_attack_with_ranged_weapon_skips_turn` | `MartialRanged` bow via melee path returns `Ok(())` and monster HP is unchanged                            |
+
+All four tests use `data/test_campaign`-independent fixtures built entirely in
+memory — no reference to `campaigns/tutorial`.
+
+### Quality Gate Results
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt         → no output (all files formatted)
+cargo check       → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run → 3180 tests run: 3180 passed, 8 skipped
+```
+
+---
+
 ## Phase 1: Equipped Weapon Damage — Domain Combat Engine Changes
 
 ### Overview

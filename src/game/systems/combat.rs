@@ -57,8 +57,8 @@ use bevy::prelude::*;
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
 use crate::domain::combat::engine::{
-    apply_damage, choose_monster_attack, initialize_combat_from_group, resolve_attack, CombatState,
-    Combatant,
+    apply_damage, choose_monster_attack, get_character_attack, initialize_combat_from_group,
+    resolve_attack, CombatState, Combatant, MeleeAttackResult,
 };
 use crate::domain::combat::types::{Attack, CombatStatus, CombatantId, Handicap, SpecialEffect};
 use crate::domain::types::{DiceRoll, ItemId};
@@ -2179,8 +2179,25 @@ pub fn perform_attack_action_with_rng(
 
     // Choose attack data
     let attack_data = match action.attacker {
-        CombatantId::Player(_) => {
-            crate::domain::combat::types::Attack::physical(DiceRoll::new(1, 4, 0))
+        CombatantId::Player(idx) => {
+            if let Some(Combatant::Player(pc)) = combat_res.state.participants.get(idx) {
+                match get_character_attack(pc, &content.db().items) {
+                    MeleeAttackResult::Melee(attack) => attack,
+                    MeleeAttackResult::Ranged(_) => {
+                        // Ranged weapons must be used via TurnAction::RangedAttack /
+                        // perform_ranged_attack_action_with_rng, not the melee path.
+                        // Log a warning and skip the turn rather than dealing wrong damage.
+                        warn!(
+                            "Player {:?} attempted melee attack with ranged weapon; \
+                             use TurnAction::RangedAttack instead. Turn skipped.",
+                            action.attacker
+                        );
+                        return Ok(());
+                    }
+                }
+            } else {
+                return Err(CombatError::CombatantNotFound(action.attacker));
+            }
         }
         CombatantId::Monster(idx) => {
             if let Some(Combatant::Monster(mon)) = combat_res.state.participants.get(idx) {
@@ -8158,5 +8175,368 @@ mod tests {
             "turn_state must be PlayerTurn after skipping incapacitated monster, got {:?}",
             ts.0
         );
+    }
+
+    // ── Phase 2 integration tests ─────────────────────────────────────────────
+    // These tests verify that `perform_attack_action_with_rng` now calls
+    // `get_character_attack` and dispatches on `MeleeAttackResult` instead of
+    // using the old hardcoded `DiceRoll::new(1, 4, 0)`.
+
+    /// Build a minimal weapon `Item` for use in Phase 2 integration tests.
+    fn make_p2_weapon_item(
+        id: u8,
+        damage: DiceRoll,
+        bonus: i8,
+        classification: crate::domain::items::WeaponClassification,
+    ) -> crate::domain::items::Item {
+        use crate::domain::items::{Item, ItemType, WeaponData};
+        Item {
+            id,
+            name: format!("P2Weapon#{}", id),
+            item_type: ItemType::Weapon(WeaponData {
+                damage,
+                bonus,
+                hands_required: 1,
+                classification,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        }
+    }
+
+    /// Build a self-contained `(CombatResource, GameContent, GlobalState,
+    /// CombatTurnStateResource)` fixture with one player (index 0) and one
+    /// goblin monster (index 1, AC 1 so the player almost always hits).
+    fn make_p2_combat_fixture(
+        player: Character,
+    ) -> (
+        CombatResource,
+        crate::application::resources::GameContent,
+        crate::game::resources::GlobalState,
+        CombatTurnStateResource,
+    ) {
+        use crate::application::GameState;
+        use crate::domain::combat::monster::LootTable;
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(player.clone());
+
+        let goblin = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 6, 6, 8, 8, 1, 6),
+            30,
+            1, // AC 1 — very easy to hit
+            vec![],
+            LootTable::default(),
+        );
+        cs.add_monster(goblin);
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+        cr.player_orig_indices = vec![Some(0), None];
+
+        let content = crate::application::resources::GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        );
+        let gs = crate::game::resources::GlobalState(GameState::new());
+        let ts = CombatTurnStateResource::default();
+        (cr, content, gs, ts)
+    }
+
+    /// Phase 2 – T1: A player with a longsword (1d8, bonus 0) must deal damage
+    /// in the range [1, 8].  Over 50 seeds at least one roll must exceed 4,
+    /// proving the old hardcoded 1d4 is gone.
+    #[test]
+    fn test_player_attack_uses_equipped_melee_weapon_damage() {
+        use crate::domain::items::{ItemDatabase, WeaponClassification};
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let longsword = make_p2_weapon_item(
+            42,
+            DiceRoll::new(1, 8, 0),
+            0,
+            WeaponClassification::MartialMelee,
+        );
+
+        let mut item_db = ItemDatabase::new();
+        item_db.add_item(longsword).unwrap();
+
+        let mut player = Character::new(
+            "Sir Lancelot".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        player.equipment.weapon = Some(42);
+        player.stats.accuracy.current = 255; // always hit
+
+        let (cr, mut content, _gs, ts) = make_p2_combat_fixture(player);
+        content.db_mut().items = item_db;
+
+        let hp_before = match cr.state.participants.get(1) {
+            Some(Combatant::Monster(m)) => m.hp.base,
+            _ => panic!("monster not found in fixture"),
+        };
+
+        let action = AttackAction {
+            attacker: CombatantId::Player(0),
+            target: CombatantId::Monster(1),
+        };
+
+        let mut any_above_four = false;
+        for seed in 0u64..50 {
+            let mut cr_clone = cr.clone();
+            let mut gs_local =
+                crate::game::resources::GlobalState(crate::application::GameState::new());
+            let mut ts_clone = ts.clone();
+            let mut rng = StdRng::seed_from_u64(seed);
+
+            let result = perform_attack_action_with_rng(
+                &mut cr_clone,
+                &action,
+                &content,
+                &mut gs_local,
+                &mut ts_clone,
+                &mut rng,
+            );
+            assert!(result.is_ok(), "attack must not error: {:?}", result);
+
+            if let Some(Combatant::Monster(m)) = cr_clone.state.participants.get(1) {
+                let damage = (hp_before as i32 - m.hp.current as i32).max(0) as u32;
+                assert!(damage <= 8, "longsword damage {} exceeded 1d8 max", damage);
+                if damage > 4 {
+                    any_above_four = true;
+                }
+            }
+        }
+
+        assert!(
+            any_above_four,
+            "longsword (1d8) never rolled above 4 over 50 seeds — old 1d4 may still be active"
+        );
+    }
+
+    /// Phase 2 – T2: An unarmed player (`equipment.weapon = None`) must deal at
+    /// most 2 damage per hit — the 1d2 UNARMED_DAMAGE fallback.
+    #[test]
+    fn test_player_attack_unarmed_when_no_weapon() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut player = Character::new(
+            "Peasant".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        player.equipment.weapon = None;
+        player.stats.accuracy.current = 255; // always hit
+
+        let (cr, content, _gs, ts) = make_p2_combat_fixture(player);
+
+        let hp_before = match cr.state.participants.get(1) {
+            Some(Combatant::Monster(m)) => m.hp.base,
+            _ => panic!("monster not found in fixture"),
+        };
+
+        let action = AttackAction {
+            attacker: CombatantId::Player(0),
+            target: CombatantId::Monster(1),
+        };
+
+        for seed in 0u64..30 {
+            let mut cr_clone = cr.clone();
+            let mut gs_local =
+                crate::game::resources::GlobalState(crate::application::GameState::new());
+            let mut ts_clone = ts.clone();
+            let mut rng = StdRng::seed_from_u64(seed);
+
+            let result = perform_attack_action_with_rng(
+                &mut cr_clone,
+                &action,
+                &content,
+                &mut gs_local,
+                &mut ts_clone,
+                &mut rng,
+            );
+            assert!(
+                result.is_ok(),
+                "unarmed attack must not error: {:?}",
+                result
+            );
+
+            if let Some(Combatant::Monster(m)) = cr_clone.state.participants.get(1) {
+                let damage = (hp_before as i32 - m.hp.current as i32).max(0) as u32;
+                assert!(
+                    damage <= 2,
+                    "unarmed damage {} exceeded 1d2 maximum (2) on seed {}",
+                    damage,
+                    seed
+                );
+            }
+        }
+    }
+
+    /// Phase 2 – T3: A cursed dagger (1d4 with bonus -3 baked into the
+    /// `DiceRoll`) must always deal at least 1 damage when it hits — the damage
+    /// floor from `DiceRoll::roll` prevents negative or zero results.
+    #[test]
+    fn test_player_attack_bonus_weapon_floor_at_one() {
+        use crate::domain::items::{ItemDatabase, WeaponClassification};
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        // 1d4 with bonus -3: worst roll is 1 + (-3) = -2, but the floor in
+        // DiceRoll::roll clamps it to 1.
+        let cursed_dagger =
+            make_p2_weapon_item(99, DiceRoll::new(1, 4, -3), 0, WeaponClassification::Simple);
+
+        let mut item_db = ItemDatabase::new();
+        item_db.add_item(cursed_dagger).unwrap();
+
+        let mut player = Character::new(
+            "Cursed Rogue".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        player.equipment.weapon = Some(99);
+        player.stats.accuracy.current = 255; // always hit
+
+        let (cr, mut content, _gs, ts) = make_p2_combat_fixture(player);
+        content.db_mut().items = item_db;
+
+        let hp_before = match cr.state.participants.get(1) {
+            Some(Combatant::Monster(m)) => m.hp.base,
+            _ => panic!("monster not found in fixture"),
+        };
+
+        let action = AttackAction {
+            attacker: CombatantId::Player(0),
+            target: CombatantId::Monster(1),
+        };
+
+        for seed in 0u64..50 {
+            let mut cr_clone = cr.clone();
+            let mut gs_local =
+                crate::game::resources::GlobalState(crate::application::GameState::new());
+            let mut ts_clone = ts.clone();
+            let mut rng = StdRng::seed_from_u64(seed);
+
+            let result = perform_attack_action_with_rng(
+                &mut cr_clone,
+                &action,
+                &content,
+                &mut gs_local,
+                &mut ts_clone,
+                &mut rng,
+            );
+            assert!(
+                result.is_ok(),
+                "cursed dagger attack must not error: {:?}",
+                result
+            );
+
+            if let Some(Combatant::Monster(m)) = cr_clone.state.participants.get(1) {
+                let damage = hp_before as i32 - m.hp.current as i32;
+                // Damage must never be negative (monster must never gain HP from a hit).
+                assert!(
+                    damage >= 0,
+                    "cursed dagger damage {} went negative on seed {} — monster healed",
+                    damage,
+                    seed
+                );
+                // When a hit lands (HP dropped), damage must be at least 1.
+                if damage > 0 {
+                    assert!(
+                        damage >= 1,
+                        "cursed dagger hit dealt {} — floor must be at least 1",
+                        damage
+                    );
+                }
+            }
+        }
+    }
+
+    /// Phase 2 – T4: A player with a `MartialRanged` bow who triggers the melee
+    /// action path must have their turn skipped — `perform_attack_action_with_rng`
+    /// returns `Ok(())` and the monster's HP is completely unchanged.
+    #[test]
+    fn test_player_melee_attack_with_ranged_weapon_skips_turn() {
+        use crate::domain::items::{ItemDatabase, WeaponClassification};
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let bow = make_p2_weapon_item(
+            77,
+            DiceRoll::new(1, 6, 0),
+            0,
+            WeaponClassification::MartialRanged,
+        );
+
+        let mut item_db = ItemDatabase::new();
+        item_db.add_item(bow).unwrap();
+
+        let mut player = Character::new(
+            "Archer".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        player.equipment.weapon = Some(77);
+        player.stats.accuracy.current = 255;
+
+        let (mut cr, mut content, mut gs, mut ts) = make_p2_combat_fixture(player);
+        content.db_mut().items = item_db;
+
+        let hp_before = match cr.state.participants.get(1) {
+            Some(Combatant::Monster(m)) => m.hp.base,
+            _ => panic!("monster not found in fixture"),
+        };
+
+        let action = AttackAction {
+            attacker: CombatantId::Player(0),
+            target: CombatantId::Monster(1),
+        };
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let result =
+            perform_attack_action_with_rng(&mut cr, &action, &content, &mut gs, &mut ts, &mut rng);
+
+        assert!(
+            result.is_ok(),
+            "ranged-weapon melee guard must return Ok(()), got {:?}",
+            result
+        );
+
+        match cr.state.participants.get(1) {
+            Some(Combatant::Monster(m)) => {
+                assert_eq!(
+                    m.hp.current, hp_before,
+                    "ranged-weapon melee guard must not deal any damage \
+                     (hp_before={hp_before}, hp_after={})",
+                    m.hp.current
+                );
+            }
+            _ => panic!("monster not found after ranged-weapon guard test"),
+        }
     }
 }
