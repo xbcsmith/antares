@@ -1,5 +1,137 @@
 # Implementations
 
+## OBJ to RON Conversion - Phase 2: Color Palette and Mesh Color Mapping
+
+**Plan**: [`obj_to_ron_implementation_plan.md`](obj_to_ron_implementation_plan.md)
+
+### Overview
+
+Phase 2 adds the importer-side color system needed for the future OBJ Importer
+tab. The campaign builder now has a built-in palette module, mesh-name based
+auto-color assignment, campaign-scoped custom palette persistence, and a
+dedicated importer state object that can load OBJ meshes and pre-populate each
+mesh row with counts, selections, and editable colors.
+
+This work stays inside `sdk/campaign_builder` and reuses the existing
+`MeshDefinition` and `CreatureId` architecture types instead of inventing SDK-
+local equivalents.
+
+---
+
+### Phase 2 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/lib.rs`
+- `docs/explanation/implementations.md`
+
+**Files created**:
+
+- `sdk/campaign_builder/src/color_palette.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+
+---
+
+### What was built
+
+#### Built-in palette module (`sdk/campaign_builder/src/color_palette.rs`)
+
+Added a new palette module containing:
+
+- `PALETTE: &[(&str, [f32; 4])]` for the built-in importer palette
+- `PaletteEntry` for UI iteration
+- `palette_entries()` to expose the built-in palette as a `Vec<PaletteEntry>`
+- `suggest_color_for_mesh(mesh_name)` for name-based color assignment
+- `CustomPalette` plus per-campaign load/save helpers for
+  `config/importer_palette.ron`
+
+The palette includes skin, hair, armor, cloth, and material colors, plus the
+required default skin tone used by the Phase 2 test expectation for
+`EM3D_Base_Body`.
+
+#### Mesh-name color assignment (`sdk/campaign_builder/src/color_palette.rs`)
+
+The matcher normalizes mesh names to lowercase underscore-delimited tokens, then
+applies ordered keyword checks so specific names such as `Hair_Pink` win before
+generic matches like `hair` or `body`.
+
+Notable mappings now covered:
+
+- `EM3D_Base_Body` -> `[0.92, 0.85, 0.78, 1.0]`
+- `Hair_Pink` -> `[0.92, 0.55, 0.70, 1.0]`
+- unknown names -> `[0.8, 0.8, 0.8, 1.0]`
+
+#### Custom palette persistence (`sdk/campaign_builder/src/color_palette.rs`)
+
+`CustomPalette` now supports:
+
+- `load_from_campaign_dir()`
+- `save_to_campaign_dir()`
+- `add_color()`
+- `remove_color()`
+
+The file path is fixed at `<campaign_dir>/config/importer_palette.ron`, ready
+for the later importer UI to add and remove user palette entries.
+
+#### Importer state module (`sdk/campaign_builder/src/obj_importer.rs`)
+
+Added `ObjImporterState`, `ImportedMesh`, `ImporterMode`, `ExportType`, and an
+`ObjImporterError` wrapper. The state object now handles:
+
+- loading OBJ meshes through the Phase 1 multi-mesh importer
+- auto-assigning per-mesh colors during load
+- preserving mesh counts and selection state for later bulk actions
+- tracking custom palette data for the active campaign
+- preserving `scale` and suggested `CreatureId` across importer resets
+
+#### Campaign builder integration (`sdk/campaign_builder/src/lib.rs`)
+
+`CampaignBuilderApp` now owns `obj_importer_state` and initializes it in
+`Default::default()`.
+
+When a campaign is opened, the app now also:
+
+- loads `config/importer_palette.ron` into `obj_importer_state.custom_palette`
+- computes the next available custom creature ID and stores it in the importer
+  state
+
+This keeps later importer UI work aligned with the currently loaded campaign.
+
+#### Fixture consistency note
+
+The Phase 2 plan references `examples/skeleton.obj` and `examples/female_1.obj`,
+but those files were not present in this checkout while implementing Phase 2.
+The importer-state tests therefore use deterministic inline OBJ content instead
+of depending on absent fixture files.
+
+---
+
+### Architecture compliance
+
+- The work is confined to `sdk/campaign_builder`, matching the SDK/editor layer
+  described in `docs/reference/architecture.md`.
+- `CreatureId` from `src/domain/types.rs` is used instead of a raw `u32`.
+- `MeshDefinition` remains the authoritative mesh type; no duplicate mesh
+  structs were introduced.
+- No core domain or application data structures were modified.
+
+---
+
+### Test coverage
+
+Added unit tests for:
+
+- `suggest_color_for_mesh("EM3D_Base_Body")`
+- `suggest_color_for_mesh("Hair_Pink")`
+- unknown mesh fallback color
+- `palette_entries()` covering all built-in palette entries
+- custom palette load/save round-trip
+- custom palette add/remove behavior
+- importer mesh auto-color assignment
+- importer state mode transitions and OBJ load behavior
+
+Validation status is recorded after the Phase 2 code and tests were added.
+
 ## OBJ to RON Conversion - Phase 1: Multi-Mesh OBJ Import
 
 **Plan**: [`obj_to_ron_implementation_plan.md`](obj_to_ron_implementation_plan.md)

@@ -28,6 +28,7 @@ pub mod auto_save;
 pub mod campaign_editor;
 pub mod characters_editor;
 pub mod classes_editor;
+pub mod color_palette;
 pub mod conditions_editor;
 pub mod config_editor;
 pub mod context_menu;
@@ -55,6 +56,7 @@ pub mod mesh_validation;
 pub mod mesh_vertex_editor;
 pub mod monsters_editor;
 pub mod npc_editor;
+pub mod obj_importer;
 pub mod packager;
 pub mod preview_features;
 pub mod preview_renderer;
@@ -226,6 +228,8 @@ pub fn run() -> Result<(), eframe::Error> {
                                         &format!("Failed to load NPCs: {}", e),
                                     );
                                 }
+
+                                app.sync_obj_importer_campaign_state();
 
                                 // Initialize AssetManager if we have a campaign directory
                                 if let Some(ref campaign_dir) = app.campaign_dir {
@@ -628,6 +632,7 @@ struct CampaignBuilderApp {
     campaign: CampaignMetadata,
     active_tab: EditorTab,
     item_mesh_editor_state: item_mesh_editor::ItemMeshEditorState,
+    obj_importer_state: obj_importer::ObjImporterState,
     campaign_path: Option<PathBuf>,
     campaign_dir: Option<PathBuf>,
     status_message: String,
@@ -768,6 +773,7 @@ impl Default for CampaignBuilderApp {
             campaign: CampaignMetadata::default(),
             active_tab: EditorTab::Metadata,
             item_mesh_editor_state: item_mesh_editor::ItemMeshEditorState::new(),
+            obj_importer_state: obj_importer::ObjImporterState::new(),
             campaign_path: None,
             campaign_dir: None,
             status_message: String::new(),
@@ -939,6 +945,45 @@ impl CampaignBuilderApp {
             0,
             false,
         )
+    }
+
+    /// Synchronize importer state that depends on the active campaign.
+    fn sync_obj_importer_campaign_state(&mut self) {
+        if let Some(campaign_dir) = self.campaign_dir.clone() {
+            match self.obj_importer_state.load_custom_palette(&campaign_dir) {
+                Ok(()) => {
+                    if !self.obj_importer_state.custom_palette.colors.is_empty() {
+                        self.logger.debug(
+                            category::FILE_IO,
+                            &format!(
+                                "Loaded {} importer palette colors",
+                                self.obj_importer_state.custom_palette.colors.len()
+                            ),
+                        );
+                    }
+                }
+                Err(error) => {
+                    self.logger.warn(
+                        category::FILE_IO,
+                        &format!("Failed to load importer palette: {}", error),
+                    );
+                    self.obj_importer_state.custom_palette =
+                        color_palette::CustomPalette::default();
+                }
+            }
+        } else {
+            self.obj_importer_state.custom_palette = color_palette::CustomPalette::default();
+        }
+
+        match self
+            .next_available_creature_id_for_category(creature_id_manager::CreatureCategory::Custom)
+        {
+            Ok(next_id) => self.obj_importer_state.set_next_creature_id(next_id),
+            Err(error) => self.logger.warn(
+                category::APP,
+                &format!("Failed to determine next importer creature ID: {}", error),
+            ),
+        }
     }
 
     /// Create a default monster for the edit buffer
@@ -3271,6 +3316,8 @@ impl CampaignBuilderApp {
                         self.logger
                             .warn(category::FILE_IO, &format!("Failed to load NPCs: {}", e));
                     }
+
+                    self.sync_obj_importer_campaign_state();
 
                     // Reset editor state before loading so stale data from any
                     // previously opened campaign is cleared first.  The explicit
