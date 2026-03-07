@@ -84,6 +84,12 @@ pub struct ObjImporterState {
     pub status_message: String,
     /// User-defined palette additions for the active campaign.
     pub custom_palette: CustomPalette,
+    /// Mesh currently focused by the color editor, if any.
+    pub active_mesh_index: Option<usize>,
+    /// Draft label used by the custom-palette add form.
+    pub new_custom_color_label: String,
+    /// Draft color used by the custom-palette add form.
+    pub new_custom_color: [f32; 4],
 }
 
 /// Errors that can occur while preparing importer state.
@@ -138,6 +144,9 @@ impl Default for ObjImporterState {
             scale: 0.01,
             status_message: String::new(),
             custom_palette: CustomPalette::default(),
+            active_mesh_index: None,
+            new_custom_color_label: String::new(),
+            new_custom_color: [0.8, 0.8, 0.8, 1.0],
         }
     }
 }
@@ -153,11 +162,15 @@ impl ObjImporterState {
         let scale = self.scale;
         let custom_palette = self.custom_palette.clone();
         let creature_id = self.creature_id;
+        let export_type = self.export_type;
+        let new_custom_color = self.new_custom_color;
 
         *self = Self {
             scale,
             custom_palette,
             creature_id,
+            export_type,
+            new_custom_color,
             ..Self::default()
         };
     }
@@ -195,6 +208,7 @@ impl ObjImporterState {
             .into_iter()
             .map(ImportedMesh::from_mesh_definition)
             .collect();
+        self.active_mesh_index = (!self.meshes.is_empty()).then_some(0);
         self.mode = if self.meshes.is_empty() {
             ImporterMode::Idle
         } else {
@@ -229,6 +243,22 @@ impl ObjImporterState {
     /// Updates the suggested creature ID shown by the importer.
     pub fn set_next_creature_id(&mut self, creature_id: CreatureId) {
         self.creature_id = creature_id;
+    }
+
+    /// Sets the mesh currently targeted by the color editor.
+    pub fn set_active_mesh(&mut self, index: Option<usize>) {
+        self.active_mesh_index = index.filter(|idx| *idx < self.meshes.len());
+    }
+
+    /// Returns the mesh currently targeted by the color editor.
+    pub fn active_mesh(&self) -> Option<&ImportedMesh> {
+        self.active_mesh_index.and_then(|idx| self.meshes.get(idx))
+    }
+
+    /// Returns the mutable mesh currently targeted by the color editor.
+    pub fn active_mesh_mut(&mut self) -> Option<&mut ImportedMesh> {
+        self.active_mesh_index
+            .and_then(move |idx| self.meshes.get_mut(idx))
     }
 }
 
@@ -322,6 +352,7 @@ mod tests {
         let mut state = ObjImporterState::new();
         state.scale = 0.05;
         state.creature_id = 4012;
+        state.new_custom_color = [0.2, 0.4, 0.6, 1.0];
         state.add_custom_color("favorite_teal", [0.1, 0.7, 0.7, 1.0]);
         state.load_mesh_definitions(None, vec![named_triangle("EM3D_Base_Body")]);
 
@@ -330,6 +361,7 @@ mod tests {
         assert_eq!(state.mode, ImporterMode::Idle);
         assert_eq!(state.scale, 0.05);
         assert_eq!(state.creature_id, 4012);
+        assert_eq!(state.new_custom_color, [0.2, 0.4, 0.6, 1.0]);
         assert_eq!(state.custom_palette.colors.len(), 1);
         assert!(state.meshes.is_empty());
     }

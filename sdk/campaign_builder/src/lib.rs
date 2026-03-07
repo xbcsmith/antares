@@ -57,6 +57,7 @@ pub mod mesh_vertex_editor;
 pub mod monsters_editor;
 pub mod npc_editor;
 pub mod obj_importer;
+pub mod obj_importer_ui;
 pub mod packager;
 pub mod preview_features;
 pub mod preview_renderer;
@@ -490,6 +491,7 @@ enum EditorTab {
     Conditions,
     Monsters,
     Creatures,
+    Importer,
     Maps,
     Quests,
     Classes,
@@ -522,6 +524,7 @@ impl EditorTab {
             EditorTab::Conditions => "Conditions",
             EditorTab::Monsters => "Monsters",
             EditorTab::Creatures => "Creatures",
+            EditorTab::Importer => "Importer",
             EditorTab::Maps => "Maps",
             EditorTab::Quests => "Quests",
             EditorTab::Classes => "Classes",
@@ -4382,6 +4385,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Conditions,
                     EditorTab::Monsters,
                     EditorTab::Creatures,
+                    EditorTab::Importer,
                     EditorTab::Maps,
                     EditorTab::Quests,
                     EditorTab::Classes,
@@ -4404,6 +4408,7 @@ impl eframe::App for CampaignBuilderApp {
                             category::EDITOR,
                             &format!("Tab changed: {} -> {}", previous_tab.name(), tab.name()),
                         );
+                        ui.ctx().request_repaint();
                     }
                 }
 
@@ -4568,6 +4573,29 @@ impl eframe::App for CampaignBuilderApp {
                     } else {
                         self.status_message = msg;
                     }
+                }
+            }
+            EditorTab::Importer => {
+                if let Some(signal) = obj_importer_ui::show_obj_importer_tab(
+                    ui,
+                    &mut self.obj_importer_state,
+                    self.campaign_dir.as_ref(),
+                    &mut self.logger,
+                ) {
+                    self.status_message = self.obj_importer_state.status_message.clone();
+                    match signal {
+                        obj_importer_ui::ObjImporterUiSignal::CreatureExported => {
+                            self.load_creatures();
+                            self.sync_obj_importer_campaign_state();
+                            self.active_tab = EditorTab::Creatures;
+                            ui.ctx().request_repaint();
+                        }
+                        obj_importer_ui::ObjImporterUiSignal::ItemExported => {
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                } else {
+                    self.status_message = self.obj_importer_state.status_message.clone();
                 }
             }
             EditorTab::Maps => {

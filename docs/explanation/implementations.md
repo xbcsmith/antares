@@ -1,5 +1,164 @@
 # Implementations
 
+## OBJ to RON Conversion - Phase 3: Importer Tab UI and RON Export
+
+**Plan**: [`obj_to_ron_implementation_plan.md`](obj_to_ron_implementation_plan.md)
+
+### Overview
+
+Phase 3 completes the Campaign Builder importer workflow. The SDK now exposes
+an `Importer` tab directly below `Creatures`, lets the user pick an OBJ file,
+inspect every imported mesh, edit colors with both the built-in palette and
+campaign-scoped custom colors, and export the result as a valid
+`CreatureDefinition` RON asset under either `assets/creatures/` or
+`assets/items/`.
+
+This phase also closes a fixture gap left by the earlier importer work:
+`examples/skeleton.obj` and `examples/female_1.obj` are now present in the
+repository, so both the existing file-based importer tests and the new importer
+workflow tests have stable OBJ inputs.
+
+---
+
+### Phase 3 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/lib.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `sdk/campaign_builder/src/creature_assets.rs`
+- `docs/explanation/implementations.md`
+
+**Files created**:
+
+- `sdk/campaign_builder/src/obj_importer_ui.rs`
+- `examples/skeleton.obj`
+- `examples/female_1.obj`
+
+---
+
+### What was built
+
+#### Importer tab UI (`sdk/campaign_builder/src/obj_importer_ui.rs`)
+
+Added a dedicated importer UI module that renders:
+
+- Idle mode with OBJ file browsing, export-type selection, scale input, and a
+  `Load OBJ` action
+- Loaded mode with importer metadata inputs (`ID`, `Name`, `Import Scale`)
+- A scrollable mesh list showing mesh name, counts, selection state, and the
+  current color swatch for each imported mesh
+- A color editor panel for the active mesh using `TwoColumnLayout` to stay
+  consistent with `sdk/AGENTS.md`
+- Built-in palette swatches plus campaign-scoped custom palette add/remove UI
+- Summary and control actions including `Auto-Assign All`, `Load Another OBJ`,
+  `Export RON`, and `Back / Clear`
+
+The importer UI follows the SDK-specific egui rules:
+
+- `TwoColumnLayout` is used for the list/detail split instead of raw panels
+- mesh rows are wrapped in `push_id`
+- all `ScrollArea`s have explicit `id_salt` values
+- layout-driving state changes request repaint immediately
+
+#### Export pipeline (`sdk/campaign_builder/src/obj_importer_ui.rs`)
+
+Added a reusable export path that:
+
+- builds a `CreatureDefinition` from the current `ObjImporterState`
+- applies the edited per-mesh colors back onto the cloned `MeshDefinition`s
+- generates `MeshTransform::identity()` entries for every exported mesh
+- preserves the importer `scale` as the exported creature scale
+
+Creature export now writes to the exact planned location:
+
+- `assets/creatures/<sanitized_name>.ron`
+
+Item export writes the same `CreatureDefinition` format to:
+
+- `assets/items/<sanitized_name>.ron`
+
+#### Creature registry integration (`sdk/campaign_builder/src/creature_assets.rs`)
+
+Added `save_creature_at_path()` so importer exports can preserve the exact
+relative asset path required by the Phase 3 plan while still updating the
+reference-backed `data/creatures.ron` registry.
+
+This keeps importer-created creature assets aligned with the existing creature
+asset manager rather than introducing separate persistence logic.
+
+#### Campaign Builder app wiring (`sdk/campaign_builder/src/lib.rs`)
+
+The app shell now:
+
+- exposes `obj_importer_ui` as a module
+- adds `EditorTab::Importer` directly below `EditorTab::Creatures`
+- dispatches the new tab from the central panel
+- refreshes the creature registry after successful creature exports
+- switches to the `Creatures` tab after creature export so the newly exported
+  asset is immediately visible in the main creature workflow
+
+#### Importer state polish (`sdk/campaign_builder/src/obj_importer.rs`)
+
+Extended importer state with lightweight UI state needed by Phase 3:
+
+- `active_mesh_index` for the currently edited mesh
+- `new_custom_color_label` and `new_custom_color` for the custom-palette form
+
+The importer `clear()` path now preserves:
+
+- current scale
+- custom palette entries
+- suggested creature ID
+- current export type
+- current custom-color draft value
+
+#### Deterministic OBJ fixtures (`examples/skeleton.obj`, `examples/female_1.obj`)
+
+Added the missing OBJ fixtures referenced by the Phase 1 and Phase 3 plans so
+the importer can be tested with real file-based inputs instead of only inline
+OBJ strings.
+
+---
+
+### Architecture compliance
+
+- The work stays inside the SDK/editor layer under `sdk/campaign_builder`.
+- Exported assets reuse `CreatureDefinition`, `MeshDefinition`, and
+  `MeshTransform` from `src/domain/visual/mod.rs` exactly as defined.
+- `CreatureId` remains the type used for importer-generated creature IDs.
+- No core gameplay, party, combat, or inventory data structures were modified.
+- All fixture data remains outside `campaigns/tutorial`, so Implementation Rule
+  5 stays satisfied.
+
+---
+
+### Test coverage
+
+Added importer workflow tests covering:
+
+- loading a real OBJ fixture into `ObjImporterState`
+- color edits propagating into the exported `CreatureDefinition`
+- creature export round-tripping through valid RON on disk
+- item export writing to `assets/items/`
+- export-path preview behavior
+
+The newly added `examples/*.obj` fixtures also satisfy the previously-added
+file-based multi-mesh importer tests in `sdk/campaign_builder/src/mesh_obj_io.rs`.
+
+Validation run status:
+
+- `cargo fmt --all` -> passed
+- `cargo check --all-targets --all-features` -> passed
+- `cargo clippy --all-targets --all-features -- -D warnings` -> passed
+- `cargo nextest run --all-features` -> blocked by existing unrelated failure:
+  `tests/campaign_integration_tests.rs:252`
+  `test_creature_database_load_performance`
+
+The isolated rerun of that performance test still measured slightly over the
+threshold on this machine (`535ms` vs expected `< 500ms`), matching the known
+timing-sensitive repository note rather than an importer-specific regression.
+
 ## OBJ to RON Conversion - Phase 2: Color Palette and Mesh Color Mapping
 
 **Plan**: [`obj_to_ron_implementation_plan.md`](obj_to_ron_implementation_plan.md)
