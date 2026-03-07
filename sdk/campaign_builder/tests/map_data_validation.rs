@@ -260,6 +260,9 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                     MapEvent::Container { .. } => {
                         // Container events have no required name/description fields to validate here
                     }
+                    MapEvent::DroppedItem { .. } => {
+                        // DroppedItem events have no required validation here
+                    }
                 }
             }
 

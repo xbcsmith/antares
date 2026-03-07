@@ -6105,6 +6105,7 @@ mod tests {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec![],
+                mesh_descriptor_override: None,
             },
             Item {
                 id: 2,
@@ -6124,6 +6125,7 @@ mod tests {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec![],
+                mesh_descriptor_override: None,
             },
         ];
 
@@ -6180,6 +6182,7 @@ mod tests {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec!["large_weapon".to_string(), "two_handed".to_string()],
+                mesh_descriptor_override: None,
             },
             Item {
                 id: 2,
@@ -6198,6 +6201,7 @@ mod tests {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec!["heavy_armor".to_string(), "two_handed".to_string()],
+                mesh_descriptor_override: None,
             },
         ];
 
@@ -6389,6 +6393,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: Vec::new(),
+            mesh_descriptor_override: None,
         }];
 
         // First call generates and caches
@@ -6424,6 +6429,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: Vec::new(),
+            mesh_descriptor_override: None,
         }];
 
         // Generate initial cache
@@ -6451,6 +6457,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: Vec::new(),
+            mesh_descriptor_override: None,
         }];
         let candidates2 = cache.get_or_generate_items(&items_new);
         assert_eq!(candidates2.len(), 1);
@@ -6517,6 +6524,7 @@ mod tests {
                 is_cursed: false,
                 icon_path: None,
                 tags: Vec::new(),
+                mesh_descriptor_override: None,
             })
             .collect();
 
@@ -6600,6 +6608,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: Vec::new(),
+            mesh_descriptor_override: None,
         }];
 
         egui::CentralPanel::default().show(&ctx, |ui| {

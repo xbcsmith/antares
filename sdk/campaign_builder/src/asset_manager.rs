@@ -1794,6 +1794,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         // Scan references

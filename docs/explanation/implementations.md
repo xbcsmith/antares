@@ -1041,3 +1041,245 @@ New tests in `src/game/systems/item_world_events.rs` (`mod tests`):
 | `test_deterministic_drop_rotation_different_items` | Different item IDs → different angle     |
 
 **Total tests added: 26** across two modules. All 3,159 tests pass.
+
+## Items Procedural Meshes — Phase 5: Campaign Builder SDK Integration
+
+### Overview
+
+Phase 5 brings the Item Mesh workflow in the Campaign Builder to parity with
+the Creature Builder (`creatures_editor.rs`). Campaign authors can now browse
+all registered item mesh RON assets, filter by `ItemMeshCategory`, edit a
+descriptor's visual properties (colors, scale, emissive), preview the result
+live, undo/redo every change, save to `assets/items/`, and register existing
+RON files. A **"Ground Mesh Preview"** collapsible was also added to the
+existing Items editor form, and a cross-tab "Open in Item Mesh Editor" signal
+was wired between the Items tab and the new **Item Meshes** tab.
+
+### Phase 5 Deliverables
+
+| File                                                | Role                                                      |
+| --------------------------------------------------- | --------------------------------------------------------- |
+| `sdk/campaign_builder/src/item_mesh_undo_redo.rs`   | `ItemMeshUndoRedo` + `ItemMeshEditAction`                 |
+| `sdk/campaign_builder/src/item_mesh_workflow.rs`    | `ItemMeshWorkflow`, `ItemMeshEditorMode`                  |
+| `sdk/campaign_builder/src/item_mesh_editor.rs`      | `ItemMeshEditorState` — full editor UI                    |
+| `sdk/campaign_builder/src/items_editor.rs`          | Ground Mesh Preview pane + `requested_open_item_mesh`     |
+| `sdk/campaign_builder/src/lib.rs`                   | `EditorTab::ItemMeshes`, module registrations, tab wiring |
+| `sdk/campaign_builder/tests/map_data_validation.rs` | `MapEvent::DroppedItem` arm                               |
+
+### What was built
+
+#### 5.1 — `item_mesh_undo_redo.rs`
+
+`ItemMeshUndoRedo` is a simple two-stack undo/redo manager owning a
+`Vec<ItemMeshEditAction>` for each direction. `ItemMeshEditAction` covers:
+
+- `SetPrimaryColor { old, new }` — RGBA primary color change
+- `SetAccentColor { old, new }` — RGBA accent color change
+- `SetScale { old, new }` — scale factor change
+- `SetEmissive { old, new }` — emissive bool toggle
+- `SetOverrideEnabled { old, new }` — override enable/disable
+- `ReplaceDescriptor { old, new }` — atomic full-descriptor swap
+
+`push()` appends to the undo stack and clears the redo stack. `undo()` pops
+from the undo stack and pushes the action to redo; `redo()` does the reverse.
+Both return the popped `ItemMeshEditAction` so the caller can apply `old` (for
+undo) or `new` (for redo) to the live descriptor.
+
+#### 5.2 — `item_mesh_workflow.rs`
+
+`ItemMeshWorkflow` tracks `ItemMeshEditorMode` (`Registry` or `Edit`),
+`current_file: Option<String>`, and `unsaved_changes: bool`.
+
+Public API:
+
+- `mode_indicator() -> String` — `"Registry Mode"` or `"Asset Editor: <file>"`
+- `breadcrumb_string() -> String` — `"Item Meshes"` or `"Item Meshes > <file>"`
+- `enter_edit(file_name)` — transitions to Edit mode, sets `current_file`, clears dirty
+- `return_to_registry()` — resets to Registry mode, clears file and dirty
+- `mark_dirty()` / `mark_clean()` — unsaved-change tracking
+- `has_unsaved_changes()` / `current_file()`
+
+#### 5.3 — `item_mesh_editor.rs`
+
+`ItemMeshEditorState` is the top-level state struct for the Item Mesh Editor
+tab. Key design decisions:
+
+**Registry mode UI** uses `TwoColumnLayout::new("item_mesh_registry")`. All
+mutations inside the two `FnOnce` closures are collected in separate
+`left_*` and `right_*` deferred-mutation locals (sdk/AGENTS.md Rule 10), then
+merged into canonical `pending_*` vars and applied after `show_split` returns.
+This avoids the E0499/E0524 double-borrow errors that arise when both closures
+capture the same `&mut` variable. The `search_query` text edit uses an owned
+clone of the value rather than a `&mut self.search_query` reference, flushed
+via `pending_new_search`.
+
+**Edit mode UI** uses `ui.columns(2, ...)` for a properties/preview split:
+
+- Left: override-enabled checkbox, primary/accent RGBA sliders, scale slider
+  (0.25–4.0), emissive checkbox, Reset to Defaults button, inline Validation
+  collapsible. Every mutation pushes an `ItemMeshEditAction`, sets
+  `preview_dirty = true`, and calls `ui.ctx().request_repaint()`.
+- Right: camera-distance slider, "Regenerate Preview" button, live
+  `PreviewRenderer` display.
+
+**Dialog windows** (`show_save_as_dialog_window`,
+`show_register_asset_dialog_window`) use the deferred-action pattern instead of
+`.open(&mut bool)` — the `still_open` double-borrow issue is avoided by
+collecting `do_save`, `do_cancel`, `do_validate`, and `do_register` booleans
+inside the closure and acting on them after it returns.
+
+**`validate_descriptor`** is a pure `(errors, warnings)` function:
+
+- Error: `scale <= 0.0`
+- Warning: `scale > 3.0`
+
+**`perform_save_as_with_path`** validates the path prefix (`assets/items/`),
+serialises the descriptor to RON via `ron::ser::to_string_pretty`, creates
+directories, writes the file, derives a display name from the file stem, and
+appends a new `ItemMeshEntry` to the registry.
+
+**`execute_register_asset_validation`** reads and deserialises the RON file,
+checks for duplicate `file_path` entries in the registry, and sets
+`register_asset_error` on failure.
+
+**`refresh_available_assets`** scans `campaign_dir/assets/items/*.ron` and
+caches results in `available_item_assets`; skips the scan if
+`last_campaign_dir` is unchanged.
+
+#### 5.4 — Items editor Ground Mesh Preview pane
+
+`ItemsEditorState` gained:
+
+- `requested_open_item_mesh: Option<ItemId>` — cross-tab navigation signal,
+  consumed by the parent `CampaignBuilderApp` to switch to `EditorTab::ItemMeshes`.
+- A `ui.collapsing("🧊 Ground Mesh Preview", ...)` section at the bottom of
+  `show_form()`. It derives an `ItemMeshDescriptor` from the current
+  `edit_buffer` via `ItemMeshDescriptor::from_item`, displays category, shape,
+  and override parameters, and provides an "✏️ Open in Item Mesh Editor" button
+  that sets `requested_open_item_mesh`.
+
+#### 5.5 — Tab wiring in `lib.rs`
+
+- Three new modules registered: `item_mesh_editor`, `item_mesh_undo_redo`,
+  `item_mesh_workflow`.
+- `EditorTab::ItemMeshes` added to the enum and the sidebar tabs array.
+- `item_mesh_editor_state: item_mesh_editor::ItemMeshEditorState` added to
+  `CampaignBuilderApp`.
+- The central panel match dispatches `EditorTab::ItemMeshes` to
+  `item_mesh_editor_state.show(ui, campaign_dir.as_ref())`.
+- `ItemMeshEditorSignal::OpenInItemsEditor(item_id)` switches to
+  `EditorTab::Items` and selects the matching item.
+- Cross-tab from Items: `requested_open_item_mesh.take()` switches to
+  `EditorTab::ItemMeshes`.
+
+#### 5.6 — `MapEvent::DroppedItem` exhaustive match arms
+
+Five `match event` blocks in `map_editor.rs` and one in
+`tests/map_data_validation.rs` were missing the `DroppedItem` variant
+(introduced in Phase 2). All were fixed:
+
+- `EventEditorState::from_map_event` — sets `event_type = Treasure`, copies name
+- Two tile-grid colour queries — maps to `EventType::Treasure`
+- The event-details tooltip panel — shows item id and charges
+- `event_name_description` helper — returns name and empty description
+- Test validation loop — empty arm (no validation required)
+
+#### Pre-existing `mesh_descriptor_override` field gap
+
+`Item::mesh_descriptor_override` (added in Phase 1) was missing from struct
+literal initialisers throughout the SDK codebase. All affected files were
+patched to add `mesh_descriptor_override: None,`:
+
+`advanced_validation.rs`, `asset_manager.rs`, `characters_editor.rs`,
+`dialogue_editor.rs`, `items_editor.rs`, `lib.rs`, `templates.rs`,
+`undo_redo.rs`, `ui_helpers.rs`.
+
+Where the Python insertion script accidentally added the field to `TemplateInfo`
+literals (which have no such field), the spurious lines were removed.
+
+### Architecture compliance
+
+- [ ] Data structures match `architecture.md` Section 4 — `ItemMeshDescriptor`,
+      `ItemMeshCategory`, `ItemMeshDescriptorOverride` used exactly as defined.
+- [ ] Module placement follows Section 3.2 — three new SDK modules in
+      `sdk/campaign_builder/src/`.
+- [ ] RON format used for all data files — descriptor serialisation via `ron`.
+- [ ] No architectural deviations without documentation.
+- [ ] egui ID rules (sdk/AGENTS.md) fully followed:
+  - Every loop body uses `ui.push_id(idx, ...)`.
+  - Every `ScrollArea` has `.id_salt("unique_string")`.
+  - Every `ComboBox` uses `ComboBox::from_id_salt("...")`.
+  - Every `Window` has a unique title.
+  - State mutations call `ui.ctx().request_repaint()`.
+  - `TwoColumnLayout` used for the registry list/detail split.
+  - No `SidePanel`/`CentralPanel` guards skipped same-frame.
+  - Deferred-mutation pattern (Rule 10) applied throughout.
+- [ ] SPDX headers present on all three new `.rs` files.
+
+### Test coverage
+
+**`item_mesh_undo_redo.rs`** (12 tests)
+
+| Test                                     | Assertion                                                  |
+| ---------------------------------------- | ---------------------------------------------------------- |
+| `test_item_mesh_undo_redo_push_and_undo` | After push + undo: `can_undo == false`, `can_redo == true` |
+| `test_item_mesh_undo_redo_redo`          | After push + undo + redo: `can_redo == false`              |
+| `test_item_mesh_undo_redo_clear`         | After clear: both stacks empty                             |
+| `test_push_clears_redo_stack`            | New push after undo wipes redo                             |
+| `test_undo_empty_returns_none`           | Undo on empty stack returns `None`                         |
+| `test_redo_empty_returns_none`           | Redo on empty stack returns `None`                         |
+| `test_multiple_pushes_lifo_order`        | LIFO semantics verified                                    |
+| `test_set_primary_color_action`          | `SetPrimaryColor` old/new fields                           |
+| `test_set_accent_color_action`           | `SetAccentColor` old/new fields                            |
+| `test_set_override_enabled_action`       | `SetOverrideEnabled` old/new fields                        |
+| `test_replace_descriptor_action`         | `ReplaceDescriptor` full descriptor swap                   |
+
+**`item_mesh_workflow.rs`** (11 tests)
+
+| Test                                                    | Assertion                             |
+| ------------------------------------------------------- | ------------------------------------- |
+| `test_workflow_default_is_registry`                     | Default mode is `Registry`            |
+| `test_item_mesh_editor_mode_indicator_registry`         | Returns `"Registry Mode"`             |
+| `test_item_mesh_editor_mode_indicator_edit`             | Returns `"Asset Editor: sword.ron"`   |
+| `test_item_mesh_editor_mode_indicator_edit_no_file`     | Returns `"Asset Editor"` with no file |
+| `test_item_mesh_editor_breadcrumb_registry`             | Returns `"Item Meshes"`               |
+| `test_item_mesh_editor_breadcrumb_edit`                 | Returns `"Item Meshes > sword.ron"`   |
+| `test_item_mesh_editor_breadcrumb_edit_no_file`         | Returns `"Item Meshes"` with no file  |
+| `test_workflow_enter_edit`                              | Mode transitions to Edit, file set    |
+| `test_workflow_enter_edit_clears_unsaved_changes`       | Dirty flag cleared on enter           |
+| `test_workflow_return_to_registry`                      | Resets mode, file, dirty              |
+| `test_workflow_mark_dirty` / `test_workflow_mark_clean` | Dirty flag round-trip                 |
+
+**`item_mesh_editor.rs`** (28 tests, including 1 in `items_editor.rs`)
+
+| Test                                                          | Assertion                                 |
+| ------------------------------------------------------------- | ----------------------------------------- |
+| `test_item_mesh_editor_state_default`                         | Mode is Registry, no selection, not dirty |
+| `test_item_mesh_editor_has_unsaved_changes_false_by_default`  | Fresh state is clean                      |
+| `test_item_mesh_editor_has_unsaved_changes_true_after_edit`   | Mutation sets dirty                       |
+| `test_item_mesh_editor_can_undo_false_by_default`             | Empty undo stack                          |
+| `test_item_mesh_editor_can_redo_false_by_default`             | Empty redo stack                          |
+| `test_item_mesh_editor_back_to_registry_clears_edit_state`    | edit_buffer cleared, mode reset           |
+| `test_available_item_assets_empty_when_no_assets_dir`         | Missing dir yields empty list             |
+| `test_available_item_assets_populated_from_campaign_dir`      | Scans `.ron` files correctly              |
+| `test_available_item_assets_not_refreshed_when_dir_unchanged` | Cache hit on same dir                     |
+| `test_available_item_assets_refreshed_when_dir_changes`       | Cache miss on dir change                  |
+| `test_register_asset_validate_duplicate_id_sets_error`        | Duplicate path sets error                 |
+| `test_register_asset_cancel_does_not_modify_registry`         | Cancel leaves registry unchanged          |
+| `test_register_asset_success_appends_entry`                   | Valid RON appended to registry            |
+| `test_perform_save_as_with_path_appends_new_entry`            | Save-as writes file and registry          |
+| `test_perform_save_as_requires_campaign_directory`            | Error with no campaign dir                |
+| `test_perform_save_as_rejects_non_item_asset_paths`           | Path outside `assets/items/` rejected     |
+| `test_revert_edit_buffer_restores_original`                   | Buffer reset from registry entry          |
+| `test_revert_edit_buffer_errors_in_registry_mode`             | Revert in Registry mode is error          |
+| `test_validate_descriptor_reports_invalid_scale`              | `scale = 0.0` → error containing "scale"  |
+| `test_validate_descriptor_reports_negative_scale`             | `scale = -1.0` → error                    |
+| `test_validate_descriptor_passes_for_default_descriptor`      | Clean descriptor → no issues              |
+| `test_validate_descriptor_warns_on_large_scale`               | `scale = 4.0` → warning                   |
+| `test_filtered_sorted_registry_empty`                         | Empty registry → empty result             |
+| `test_filtered_sorted_registry_by_name`                       | Alphabetical sort respected               |
+| `test_filtered_sorted_registry_search_filter`                 | Search query filters correctly            |
+| `test_count_by_category`                                      | Category histogram correct                |
+| `test_items_editor_requested_open_item_mesh_set_on_button`    | Signal field set + drainable              |
+
+**Total new tests: 51.** All 1,925 SDK tests and 3,159 full-suite tests pass.
