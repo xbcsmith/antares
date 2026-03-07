@@ -39,6 +39,9 @@ pub mod creatures_editor;
 pub mod creatures_manager;
 pub mod creatures_workflow;
 pub mod dialogue_editor;
+pub mod item_mesh_editor;
+pub mod item_mesh_undo_redo;
+pub mod item_mesh_workflow;
 pub mod items_editor;
 pub mod keyboard_shortcuts;
 pub mod lod_editor;
@@ -478,6 +481,7 @@ enum EditorTab {
     Metadata,
     Config,
     Items,
+    ItemMeshes,
     Spells,
     Conditions,
     Monsters,
@@ -509,6 +513,7 @@ impl EditorTab {
             EditorTab::Metadata => "Metadata",
             EditorTab::Config => "Config",
             EditorTab::Items => "Items",
+            EditorTab::ItemMeshes => "Item Meshes",
             EditorTab::Spells => "Spells",
             EditorTab::Conditions => "Conditions",
             EditorTab::Monsters => "Monsters",
@@ -622,6 +627,7 @@ pub enum CampaignError {
 struct CampaignBuilderApp {
     campaign: CampaignMetadata,
     active_tab: EditorTab,
+    item_mesh_editor_state: item_mesh_editor::ItemMeshEditorState,
     campaign_path: Option<PathBuf>,
     campaign_dir: Option<PathBuf>,
     status_message: String,
@@ -761,6 +767,7 @@ impl Default for CampaignBuilderApp {
         Self {
             campaign: CampaignMetadata::default(),
             active_tab: EditorTab::Metadata,
+            item_mesh_editor_state: item_mesh_editor::ItemMeshEditorState::new(),
             campaign_path: None,
             campaign_dir: None,
             status_message: String::new(),
@@ -912,6 +919,7 @@ impl CampaignBuilderApp {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         }
     }
 
@@ -4322,6 +4330,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Metadata,
                     EditorTab::Config,
                     EditorTab::Items,
+                    EditorTab::ItemMeshes,
                     EditorTab::Spells,
                     EditorTab::Conditions,
                     EditorTab::Monsters,
@@ -4405,22 +4414,56 @@ impl eframe::App for CampaignBuilderApp {
         // Central panel with editor content
         egui::CentralPanel::default().show(ctx, |ui| match self.active_tab {
             EditorTab::Metadata => self.show_metadata_editor(ui),
+            EditorTab::ItemMeshes => {
+                if let Some(signal) = self
+                    .item_mesh_editor_state
+                    .show(ui, self.campaign_dir.as_ref())
+                {
+                    match signal {
+                        item_mesh_editor::ItemMeshEditorSignal::OpenInItemsEditor(item_id) => {
+                            if let Some(idx) = self.items.iter().position(|it| it.id == item_id) {
+                                self.active_tab = EditorTab::Items;
+                                self.items_editor_state.selected_item = Some(idx);
+                                self.items_editor_state.mode = items_editor::ItemsEditorMode::Edit;
+                                self.items_editor_state.edit_buffer = self.items[idx].clone();
+                                self.status_message = format!("Opening item #{}", item_id);
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    }
+                }
+                // Cross-tab: items editor wants to open item mesh editor
+                if let Some(item_id) = self.items_editor_state.requested_open_item_mesh.take() {
+                    self.active_tab = EditorTab::ItemMeshes;
+                    self.status_message = format!("Opening Item Mesh Editor for item #{}", item_id);
+                    ui.ctx().request_repaint();
+                }
+            }
             EditorTab::Config => self.config_editor_state.show(
                 ui,
                 self.campaign_dir.as_ref(),
                 &mut self.unsaved_changes,
                 &mut self.status_message,
             ),
-            EditorTab::Items => self.items_editor_state.show(
-                ui,
-                &mut self.items,
-                &self.classes_editor_state.classes,
-                self.campaign_dir.as_ref(),
-                &self.campaign.items_file,
-                &mut self.unsaved_changes,
-                &mut self.status_message,
-                &mut self.file_load_merge_mode,
-            ),
+            EditorTab::Items => {
+                self.items_editor_state.show(
+                    ui,
+                    &mut self.items,
+                    &self.classes_editor_state.classes,
+                    self.campaign_dir.as_ref(),
+                    &self.campaign.items_file,
+                    &mut self.unsaved_changes,
+                    &mut self.status_message,
+                    &mut self.file_load_merge_mode,
+                );
+                // Handle cross-tab navigation: items editor wants to open the
+                // Item Mesh Editor for a specific item.
+                if let Some(item_id) = self.items_editor_state.requested_open_item_mesh.take() {
+                    self.active_tab = EditorTab::ItemMeshes;
+                    self.status_message = format!("Opening Item Mesh Editor for item #{}", item_id);
+                    ui.ctx().request_repaint();
+                }
+            }
             EditorTab::Spells => self.spells_editor_state.show(
                 ui,
                 &mut self.spells,
@@ -8402,6 +8445,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         let armor_item = Item {
@@ -8422,6 +8466,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert!(ItemTypeFilter::Weapon.matches(&weapon_item));
@@ -8537,6 +8582,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         // Export to RON
@@ -8590,6 +8636,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
         assert!(weapon.is_weapon());
 
@@ -8612,6 +8659,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec!["heavy_armor".to_string()],
+            mesh_descriptor_override: None,
         };
         assert!(armor.is_armor());
 
@@ -8633,6 +8681,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
         assert!(potion.is_consumable());
     }
@@ -8667,6 +8716,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         let cursed_armor = Item {
@@ -8687,6 +8737,7 @@ mod tests {
             is_cursed: true,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         app.items.push(magical_weapon.clone());
@@ -8785,6 +8836,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         // Verify item has all expected properties

@@ -2495,6 +2495,10 @@ impl EventEditorState {
                 s.container_items = items.iter().map(|slot| slot.item_id).collect();
                 s.container_locked = false;
             }
+            MapEvent::DroppedItem { name, .. } => {
+                s.event_type = EventType::Treasure;
+                s.name = name.clone();
+            }
         }
         s
     }
@@ -2696,6 +2700,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                             MapEvent::EnterInn { .. } => EventType::EnterInn,
                             MapEvent::Furniture { .. } => EventType::Furniture,
                             MapEvent::Container { .. } => EventType::Container,
+                            MapEvent::DroppedItem { .. } => EventType::Treasure,
                         })
                     } else {
                         None
@@ -2912,6 +2917,7 @@ impl<'a> Widget for MapPreviewWidget<'a> {
                         MapEvent::EnterInn { .. } => EventType::EnterInn,
                         MapEvent::Furniture { .. } => EventType::Furniture,
                         MapEvent::Container { .. } => EventType::Container,
+                        MapEvent::DroppedItem { .. } => EventType::Treasure,
                     });
                     let has_npc_placement =
                         self.map.npc_placements.iter().any(|p| p.position == pos);
@@ -4174,6 +4180,16 @@ impl MapsEditorState {
                             ui.label(format!("Container: {} ({} items)", name, items.len()));
                             ui.label(format!("  ID: {}", id));
                         }
+                        MapEvent::DroppedItem {
+                            name,
+                            item_id,
+                            charges,
+                        } => {
+                            ui.label(format!("Dropped Item: {} (id: {})", name, item_id));
+                            if *charges > 0 {
+                                ui.label(format!("  Charges: {}", charges));
+                            }
+                        }
                     }
 
                     ui.horizontal(|ui| {
@@ -4369,6 +4385,7 @@ impl MapsEditorState {
             MapEvent::Container {
                 name, description, ..
             } => (name.clone(), description.clone()),
+            MapEvent::DroppedItem { name, .. } => (name.clone(), String::new()),
         }
     }
 

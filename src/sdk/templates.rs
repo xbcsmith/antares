@@ -80,6 +80,7 @@ pub fn basic_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -115,6 +116,7 @@ pub fn two_handed_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec!["two_handed".to_string()],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -154,6 +156,7 @@ pub fn magical_weapon(id: ItemId, name: &str, damage: DiceRoll, bonus: i8) -> It
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -201,6 +204,7 @@ pub fn basic_armor(id: ItemId, name: &str, ac_bonus: u8) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -234,6 +238,7 @@ pub fn shield(id: ItemId, name: &str, ac_bonus: u8) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -272,6 +277,7 @@ pub fn magical_armor(id: ItemId, name: &str, ac_bonus: u8, magic_bonus: i8) -> I
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -310,6 +316,7 @@ pub fn basic_ring(id: ItemId, name: &str, bonus: Bonus) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -346,6 +353,7 @@ pub fn basic_amulet(id: ItemId, name: &str, bonus: Bonus) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -380,6 +388,7 @@ pub fn healing_potion(id: ItemId, name: &str, healing_amount: u16) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -412,6 +421,7 @@ pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -446,6 +456,7 @@ pub fn arrow_bundle(id: ItemId, count: u16) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -478,6 +489,7 @@ pub fn bolt_bundle(id: ItemId, count: u16) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 
@@ -512,6 +524,7 @@ pub fn quest_item(id: ItemId, name: &str, quest_id: &str) -> Item {
         is_cursed: false,
         icon_path: None,
         tags: vec![],
+        mesh_descriptor_override: None,
     }
 }
 

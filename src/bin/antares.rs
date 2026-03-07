@@ -271,6 +271,9 @@ impl Plugin for AntaresPlugin {
 
         // Phase 3: Rest orchestration system
         app.add_plugins(antares::game::systems::rest::RestPlugin);
+
+        // Phase 2 (item meshes): Item world spawn / despawn systems
+        app.add_plugins(antares::game::systems::item_world_events::ItemWorldPlugin);
     }
 }
 

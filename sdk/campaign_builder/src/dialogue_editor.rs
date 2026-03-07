@@ -2640,6 +2640,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec!["healing".to_string()],
+            mesh_descriptor_override: None,
         }];
 
         editor.quests = vec![quest.clone()];

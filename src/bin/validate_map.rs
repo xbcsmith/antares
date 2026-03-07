@@ -274,6 +274,10 @@ fn print_map_summary(map: &Map) {
                 // Count container events (could add separate counter if needed)
                 signs += 1
             }
+            MapEvent::DroppedItem { .. } => {
+                // Count dropped item events (static map-authored drops)
+                signs += 1
+            }
         }
     }
 

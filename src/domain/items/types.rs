@@ -13,6 +13,7 @@
 use crate::domain::character::Alignment;
 use crate::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
 use crate::domain::types::{DiceRoll, ItemId, SpellId};
+use crate::domain::visual::item_mesh::ItemMeshDescriptorOverride;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -587,6 +588,29 @@ pub struct Item {
     /// - `requires_strength` - Needs high strength
     #[serde(default)]
     pub tags: Vec<String>,
+
+    /// Optional campaign-author override for the procedural 3-D world mesh.
+    ///
+    /// When `Some`, the fields present in the override are applied on top of the
+    /// values automatically derived by [`ItemMeshDescriptor::from_item`].  Fields
+    /// set to `None` inside the override struct keep their auto-derived values.
+    ///
+    /// Use `#[serde(default)]` ensures all existing RON item files remain valid
+    /// without modification — the field simply deserialises as `None` when absent.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::Item;
+    /// use antares::domain::visual::item_mesh::ItemMeshDescriptorOverride;
+    ///
+    /// // In a RON item file you can optionally add:
+    /// // mesh_descriptor_override: Some((
+    /// //     primary_color: Some((0.0, 0.8, 0.0, 1.0)),
+    /// // ))
+    /// ```
+    #[serde(default)]
+    pub mesh_descriptor_override: Option<ItemMeshDescriptorOverride>,
 }
 
 impl Item {
@@ -803,6 +827,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert!(weapon.is_weapon());
@@ -834,6 +859,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert!(magical_sword.is_magical());
@@ -861,6 +887,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(item.to_string(), "Basic Sword");
@@ -889,6 +916,7 @@ mod tests {
             is_cursed: true,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(cursed.to_string(), "Cursed Mace (Cursed)");
@@ -918,6 +946,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(
@@ -948,6 +977,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(
@@ -978,6 +1008,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec!["large_weapon".to_string(), "two_handed".to_string()],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(
@@ -1008,6 +1039,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(
@@ -1037,6 +1069,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(
@@ -1066,6 +1099,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec!["heavy_armor".to_string()],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(
@@ -1095,6 +1129,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(shield.required_proficiency(), Some("shield".to_string()));
@@ -1120,6 +1155,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(wand.required_proficiency(), Some("arcane_item".to_string()));
@@ -1146,6 +1182,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(
@@ -1174,6 +1211,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         // Universal magic items have no proficiency requirement
@@ -1201,6 +1239,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         // Mundane accessories have no proficiency requirement
@@ -1227,6 +1266,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(potion.required_proficiency(), None);
@@ -1253,6 +1293,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(arrows.required_proficiency(), None);
@@ -1278,6 +1319,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(quest_item.required_proficiency(), None);
@@ -1307,6 +1349,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert!(item.can_use_alignment(Alignment::Good));
@@ -1336,6 +1379,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert!(holy_sword.can_use_alignment(Alignment::Good));
@@ -1365,6 +1409,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert!(!dark_blade.can_use_alignment(Alignment::Good));

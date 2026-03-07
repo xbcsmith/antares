@@ -189,6 +189,7 @@ impl TemplateManager {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec![],
+                mesh_descriptor_override: None,
             }),
             "basic_dagger" => Some(Item {
                 id,
@@ -209,6 +210,7 @@ impl TemplateManager {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec![],
+                mesh_descriptor_override: None,
             }),
             "basic_bow" => Some(Item {
                 id,
@@ -229,6 +231,7 @@ impl TemplateManager {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec!["two_handed".to_string()],
+                mesh_descriptor_override: None,
             }),
             "basic_staff" => Some(Item {
                 id,
@@ -249,6 +252,7 @@ impl TemplateManager {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec!["two_handed".to_string()],
+                mesh_descriptor_override: None,
             }),
             "leather_armor" => Some(Item {
                 id,
@@ -268,6 +272,7 @@ impl TemplateManager {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec![],
+                mesh_descriptor_override: None,
             }),
             "chain_mail" => Some(Item {
                 id,
@@ -287,6 +292,7 @@ impl TemplateManager {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec![],
+                mesh_descriptor_override: None,
             }),
             "plate_mail" => Some(Item {
                 id,
@@ -306,6 +312,7 @@ impl TemplateManager {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec!["heavy_armor".to_string()],
+                mesh_descriptor_override: None,
             }),
             "healing_potion" => Some(Item {
                 id,
@@ -324,6 +331,7 @@ impl TemplateManager {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec![],
+                mesh_descriptor_override: None,
             }),
             "mana_potion" => Some(Item {
                 id,
@@ -342,6 +350,7 @@ impl TemplateManager {
                 is_cursed: false,
                 icon_path: None,
                 tags: vec![],
+                mesh_descriptor_override: None,
             }),
             _ => {
                 // Check custom templates
@@ -929,6 +938,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         manager.add_custom_item(custom_item.clone());

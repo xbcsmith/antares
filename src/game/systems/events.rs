@@ -596,6 +596,18 @@ fn handle_events(
                     items.len()
                 );
             }
+            MapEvent::DroppedItem { item_id, name, .. } => {
+                // DroppedItem events on the map are handled by
+                // `load_map_dropped_items_system` which fires `ItemDroppedEvent`
+                // for each one on map load.  Stepping on the tile does nothing
+                // interactive — the party picks the item up via the dedicated
+                // pickup action (Phase 3+).  We log it here for diagnostics.
+                let msg = format!("Stepped on dropped item: {} (id={})", name, item_id);
+                info!("{}", msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
+            }
         }
     }
 }

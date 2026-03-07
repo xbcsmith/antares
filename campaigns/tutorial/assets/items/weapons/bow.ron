@@ -1,0 +1,56 @@
+(
+    id: 9008,
+    name: "ItemMeshBow",
+    meshes: [
+        (
+            name: Some("limb"),
+            vertices: [(0.1300, 0.0000, 0.4200), (0.0400, 0.0000, 0.4200), (0.0000, 0.0000, 0.0000), (0.0400, 0.0000, -0.4200), (0.1300, 0.0000, -0.4200), (-0.0150, 0.0000, -0.4200), (-0.0150, 0.0000, 0.4200)],
+            indices: [0, 1, 6, 1, 2, 6, 2, 3, 5, 3, 4, 5],
+            normals: Some([(0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000)]),
+            uvs: None,
+            color: (0.55, 0.35, 0.15, 1.00),
+            lod_levels: None,
+            lod_distances: None,
+            material: Some((
+                base_color: (0.55, 0.35, 0.15, 1.00),
+                metallic: 0.00,
+                roughness: 0.60,
+                emissive: None,
+                alpha_mode: Opaque,
+            )),
+            texture_path: None,
+        ),
+        (
+            name: Some("string"),
+            vertices: [(0.0000, 0.0000, 0.4200), (0.0150, 0.0000, 0.0000), (0.0000, 0.0000, -0.4200), (-0.0150, 0.0000, 0.0000)],
+            indices: [0, 1, 3, 1, 2, 3],
+            normals: Some([(0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000)]),
+            uvs: None,
+            color: (0.88, 0.82, 0.60, 1.00),
+            lod_levels: None,
+            lod_distances: None,
+            material: Some((
+                base_color: (0.88, 0.82, 0.60, 1.00),
+                metallic: 0.00,
+                roughness: 0.80,
+                emissive: None,
+                alpha_mode: Opaque,
+            )),
+            texture_path: None,
+        ),
+    ],
+    mesh_transforms: [
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+    ],
+    scale: 0.5600,
+    color_tint: None,
+)
