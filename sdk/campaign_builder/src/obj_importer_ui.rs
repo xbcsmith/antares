@@ -397,6 +397,7 @@ fn render_loaded_mode(
 
     let mut pending_active_mesh = state.active_mesh_index;
     let mut pending_select_updates: Vec<(usize, bool)> = Vec::new();
+    let mut pending_color_updates: Vec<(usize, [f32; 4])> = Vec::new();
     let mut pending_select_all = false;
     let mut pending_select_none = false;
 
@@ -440,6 +441,16 @@ fn render_loaded_mode(
                                         }
 
                                         render_color_swatch(ui, row.color, egui::vec2(18.0, 18.0));
+
+                                        let mut row_color = row.color;
+                                        let color_response =
+                                            ui.color_edit_button_rgba_unmultiplied(&mut row_color);
+                                        if color_response.changed() {
+                                            pending_color_updates.push((row.index, row_color));
+                                            pending_active_mesh = Some(row.index);
+                                            ui.ctx().request_repaint();
+                                        }
+                                        color_response.on_hover_text("Edit mesh color");
                                     });
                                     ui.small(format!(
                                         "{} vertices, {} triangles",
@@ -468,6 +479,12 @@ fn render_loaded_mode(
     for (index, selected) in pending_select_updates {
         if let Some(mesh) = state.meshes.get_mut(index) {
             mesh.selected = selected;
+        }
+    }
+    for (index, color) in pending_color_updates {
+        if let Some(mesh) = state.meshes.get_mut(index) {
+            mesh.set_color(color);
+            state.status_message = format!("Updated mesh color for {}.", mesh.name);
         }
     }
     if pending_active_mesh != state.active_mesh_index {

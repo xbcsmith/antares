@@ -47,7 +47,8 @@ Added a dedicated importer UI module that renders:
   `Load OBJ` action
 - Loaded mode with importer metadata inputs (`ID`, `Name`, `Import Scale`)
 - A scrollable mesh list showing mesh name, counts, selection state, and the
-  current color swatch for each imported mesh
+  current color swatch plus an inline per-row color edit button for each
+  imported mesh
 - A color editor panel for the active mesh using `TwoColumnLayout` to stay
   consistent with `sdk/AGENTS.md`
 - Built-in palette swatches plus campaign-scoped custom palette add/remove UI
