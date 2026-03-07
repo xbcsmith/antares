@@ -249,6 +249,13 @@ pub enum TurnAction {
     CastSpell,
     /// Use an item from inventory
     UseItem,
+    /// Internal-only: skip this combatant's turn without any action.
+    ///
+    /// Used during round 1 of an ambush encounter (the party is surprised and
+    /// cannot act) and for incapacitated combatants whose turn must be
+    /// auto-advanced. This variant is **never** shown in the player UI action
+    /// menu; it is only dispatched programmatically by the combat engine.
+    Skip,
 }
 
 // ===== CombatEventType =====

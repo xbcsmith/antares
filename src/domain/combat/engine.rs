@@ -204,6 +204,13 @@ pub struct CombatState {
     pub monsters_advance: bool,
     /// Do monsters regenerate each round?
     pub monsters_regenerate: bool,
+    /// True during round 1 of an ambush encounter.
+    ///
+    /// When set, player turns are automatically skipped (the party is surprised
+    /// and cannot act). Cleared automatically at the start of round 2, at which
+    /// point the handicap is also reset to `Handicap::Even` so that subsequent
+    /// rounds are fought on equal footing.
+    pub ambush_round_active: bool,
 }
 
 impl CombatState {
@@ -232,6 +239,7 @@ impl CombatState {
             can_bribe: true,
             monsters_advance: false,
             monsters_regenerate: false,
+            ambush_round_active: false,
         }
     }
 
@@ -298,6 +306,18 @@ impl CombatState {
         condition_defs: &[crate::domain::conditions::ConditionDefinition],
     ) -> Vec<(CombatantId, i16)> {
         self.round += 1;
+
+        // Ambush only suppresses player actions in round 1.
+        // At the start of round 2 clear the flag and reset to Even handicap so
+        // that the remainder of the fight is not permanently skewed.
+        if self.round == 2 && self.ambush_round_active {
+            self.ambush_round_active = false;
+            self.handicap = Handicap::Even;
+            // Recalculate turn order under the new (even) handicap so speed
+            // ties are resolved fairly from this round onward.
+            self.turn_order = crate::domain::combat::engine::calculate_turn_order(self);
+            self.current_turn = 0;
+        }
 
         let mut effects = Vec::new();
 
@@ -1551,6 +1571,68 @@ mod tests {
             attacks,
             LootTable::none(),
         )
+    }
+
+    // ===== Phase 2: ambush_round_active tests =====
+
+    /// `CombatState::new` must initialise `ambush_round_active` to `false`.
+    #[test]
+    fn test_combat_state_ambush_round_active_defaults_false() {
+        let cs = CombatState::new(Handicap::Even);
+        assert!(
+            !cs.ambush_round_active,
+            "ambush_round_active must be false by default"
+        );
+    }
+
+    /// After enough `advance_turn` calls to push into round 2, `ambush_round_active`
+    /// must be `false` and the handicap must be reset to `Even`.
+    #[test]
+    fn test_ambush_round_active_cleared_at_round_2() {
+        let mut cs = CombatState::new(Handicap::MonsterAdvantage);
+        cs.ambush_round_active = true;
+
+        let char = create_test_character("Ambushed", 8);
+        cs.add_player(char);
+        start_combat(&mut cs);
+
+        // With one combatant the turn order has one slot; a single advance_turn
+        // exhausts the turn order and triggers advance_round (round -> 2).
+        let _ = cs.advance_turn(&[]);
+
+        assert!(
+            !cs.ambush_round_active,
+            "ambush_round_active must be cleared at the start of round 2"
+        );
+        assert_eq!(
+            cs.handicap,
+            Handicap::Even,
+            "handicap must be reset to Even at the start of round 2"
+        );
+        assert_eq!(
+            cs.round, 2,
+            "round counter must be 2 after one full rotation"
+        );
+    }
+
+    /// When `ambush_round_active` is false the handicap must NOT be changed
+    /// when advancing to round 2 (a normal encounter must not be affected).
+    #[test]
+    fn test_non_ambush_handicap_unchanged_at_round_2() {
+        let mut cs = CombatState::new(Handicap::PartyAdvantage);
+        cs.ambush_round_active = false;
+
+        let char = create_test_character("Normal", 8);
+        cs.add_player(char);
+        start_combat(&mut cs);
+
+        let _ = cs.advance_turn(&[]);
+
+        assert_eq!(
+            cs.handicap,
+            Handicap::PartyAdvantage,
+            "handicap must not change when ambush_round_active is false"
+        );
     }
 
     #[test]

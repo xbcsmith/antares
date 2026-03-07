@@ -1,5 +1,175 @@
 # Implementations
 
+## Phase 2: Normal and Ambush Combat
+
+### Overview
+
+Phase 2 of the Combat Events Implementation Plan implements the behavioral
+differences between `Normal` and `Ambush` combat encounters. After this phase,
+an ambush encounter causes the party to miss their entire first round of actions
+(the party is surprised), monsters receive `Handicap::MonsterAdvantage` for
+round 1, and the combat log clearly announces the ambush. From round 2 onward
+the combat reverts to `Handicap::Even` and proceeds identically to a normal
+encounter. Boss combat flags (`monsters_advance`, `monsters_regenerate`,
+`can_bribe = false`, `can_surrender = false`) are also wired in this phase via
+`start_encounter()`.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `ambush_round_active: bool` field on `CombatState` (`src/domain/combat/engine.rs`)
+- [x] `TurnAction::Skip` variant in `src/domain/combat/types.rs`
+- [x] `start_encounter()` sets `ambush_round_active` and `MonsterAdvantage` handicap for Ambush
+- [x] `start_encounter()` sets boss flags (`monsters_advance`, `monsters_regenerate`, `can_bribe = false`, `can_surrender = false`) for Boss type
+- [x] `advance_round()` clears `ambush_round_active` and resets handicap to `Even` at round 2
+- [x] `handle_combat_started` forces `CombatTurnState::EnemyTurn` when `ambush_round_active` is set
+- [x] `execute_monster_turn` auto-skips surprised player slots during ambush round 1
+- [x] `combat_input_system` defence-in-depth guard blocks player input during ambush round 1
+- [x] Combat log entry "The monsters ambush the party! The party is surprised!" on ambush start
+- [x] Combat log entry "Monsters appear!" on normal encounter start
+- [x] All Phase 2 tests pass (3209 passed, 8 skipped, 0 failed)
+
+### What Was Built
+
+#### `ambush_round_active: bool` on `CombatState` (`src/domain/combat/engine.rs`)
+
+New boolean field on `CombatState`, defaulting to `false`. When `true`, it
+signals that round 1 of an ambush is active and player turns must be skipped.
+The field is cleared automatically at the start of round 2 inside
+`advance_round()`.
+
+```antares/src/domain/combat/engine.rs#L207-212
+    /// True during round 1 of an ambush encounter.
+    ///
+    /// When set, player turns are automatically skipped (the party is surprised
+    /// and cannot act). Cleared automatically at the start of round 2, at which
+    /// point the handicap is also reset to `Handicap::Even` so that subsequent
+    /// rounds are fought on equal footing.
+    pub ambush_round_active: bool,
+```
+
+#### `TurnAction::Skip` variant (`src/domain/combat/types.rs`)
+
+New internal-only variant added to `TurnAction`. It is never shown in the
+player UI action menu; it is used programmatically by the combat engine to
+represent an auto-advanced turn (ambush surprise, incapacitated combatant).
+
+#### `advance_round()` updated (`src/domain/combat/engine.rs`)
+
+At the start of round 2, if `ambush_round_active` is `true`, the engine:
+
+1. Clears `ambush_round_active = false`
+2. Resets `handicap = Handicap::Even`
+3. Recalculates turn order under the new even handicap
+4. Resets `current_turn = 0`
+
+This ensures the remainder of the fight is fair and not permanently skewed by
+the ambush initiative advantage.
+
+#### `start_encounter()` updated (`src/game/systems/combat.rs`)
+
+Phase 2 replaces the Phase 1 stub ("always use Even handicap") with the
+correct logic:
+
+- **Ambush**: `handicap = Handicap::MonsterAdvantage`, `ambush_round_active = true`
+- **Normal / Ranged / Magic**: `handicap = Handicap::Even`, `ambush_round_active = false`
+- **Boss** (any type with `applies_boss_mechanics()`): sets `monsters_advance = true`,
+  `monsters_regenerate = true`, `can_bribe = false`, `can_surrender = false`
+
+#### `handle_combat_started` updated (`src/game/systems/combat.rs`)
+
+When `combat_res.state.ambush_round_active` is `true`, the system immediately
+sets `CombatTurnStateResource` to `EnemyTurn` regardless of actual turn order
+(monsters always act first in an ambush round 1). It also emits the combat log
+line describing how the battle began:
+
+- Ambush: `"The monsters ambush the party! The party is surprised!"`
+- Normal: `"Monsters appear!"`
+
+#### `execute_monster_turn` updated (`src/game/systems/combat.rs`)
+
+At the top of `execute_monster_turn`, a new Phase 2 guard checks whether
+`ambush_round_active` is set and the current slot belongs to a player. If so,
+it:
+
+1. Pushes a `"The party is surprised and cannot act!"` log line.
+2. Calls `advance_turn()` to consume that slot.
+3. Determines the turn state for the next actor (staying on `EnemyTurn` while
+   the ambush round is still active, switching to `PlayerTurn` once it ends).
+4. Returns early without performing any player-damaging action.
+
+This loop continues until all player slots in round 1 have been skipped and
+`advance_round()` fires, clearing `ambush_round_active`.
+
+#### `combat_input_system` updated (`src/game/systems/combat.rs`)
+
+Added a defence-in-depth guard at the top of `combat_input_system`. Even if
+`CombatTurnStateResource` is somehow not `EnemyTurn` during an ambush round,
+no player input is dispatched:
+
+```antares/src/game/systems/combat.rs#L1914-1933
+    // Phase 2: During an ambush round the party is surprised and cannot act.
+    if combat_res.state.ambush_round_active
+        && matches!(
+            combat_res.state.get_current_combatant(),
+            Some(Combatant::Player(_))
+        )
+    {
+        let any_key = keyboard
+            .as_ref()
+            .is_some_and(|kb| kb.just_pressed(KeyCode::Tab) || kb.just_pressed(KeyCode::Enter));
+        if any_key {
+            info!("Combat: input blocked — party is surprised (ambush round 1)");
+        }
+        return;
+    }
+```
+
+### Phase 2 Tests
+
+#### Domain-layer tests (`src/domain/combat/engine.rs`)
+
+| Test name                                              | What it verifies                                                                       |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `test_combat_state_ambush_round_active_defaults_false` | `CombatState::new` initialises the flag to `false`                                     |
+| `test_ambush_round_active_cleared_at_round_2`          | After `advance_turn` exhausts round 1, `ambush_round_active == false` and `round == 2` |
+| `test_non_ambush_handicap_unchanged_at_round_2`        | When flag is `false`, `advance_round` does not alter handicap                          |
+
+#### Game-layer tests (`src/game/systems/combat.rs`)
+
+| Test name                                          | What it verifies                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------- |
+| `test_normal_combat_handicap_is_even`              | `start_encounter(…, Normal)` → `handicap == Even`                   |
+| `test_ambush_combat_handicap_is_monster_advantage` | `start_encounter(…, Ambush)` → `handicap == MonsterAdvantage`       |
+| `test_ambush_round_active_set_on_start`            | `start_encounter(…, Ambush)` → `ambush_round_active == true`        |
+| `test_normal_round_active_not_set`                 | `start_encounter(…, Normal)` → `ambush_round_active == false`       |
+| `test_ambush_round_active_cleared_at_round_2`      | After one `advance_turn`, flag cleared and `handicap == Even`       |
+| `test_ambush_handicap_resets_to_even_round_2`      | Dedicated handicap-reset assertion                                  |
+| `test_boss_combat_sets_boss_flags`                 | Boss type sets all four boss flags correctly                        |
+| `test_combat_log_reports_ambush`                   | Log contains "ambush" text after `CombatStarted` (Ambush)           |
+| `test_combat_log_reports_normal_encounter`         | Log contains "Monsters appear!" after `CombatStarted` (Normal)      |
+| `test_ambush_combat_started_sets_enemy_turn`       | `CombatTurnStateResource == EnemyTurn` after ambush `CombatStarted` |
+
+### Architecture Compliance
+
+- [x] `ambush_round_active` is a domain-layer field on `CombatState` (no Bevy types)
+- [x] `TurnAction::Skip` is in `src/domain/combat/types.rs` (domain layer)
+- [x] `start_encounter()` uses `gives_monster_advantage()` and `applies_boss_mechanics()` helper methods (no hardcoded literals)
+- [x] All public fields and functions have `///` doc comments
+- [x] No tests reference `campaigns/tutorial` (Implementation Rule 5)
+- [x] SPDX header present in all modified `.rs` files
+- [x] No architectural deviations from architecture.md
+
+### Quality Gate Results
+
+| Gate    | Command                                                    | Result                              |
+| ------- | ---------------------------------------------------------- | ----------------------------------- |
+| Format  | `cargo fmt --all`                                          | ✅ No output                        |
+| Compile | `cargo check --all-targets --all-features`                 | ✅ Finished, 0 errors               |
+| Lint    | `cargo clippy --all-targets --all-features -- -D warnings` | ✅ Finished, 0 warnings             |
+| Tests   | `cargo nextest run --all-features`                         | ✅ 3209 passed, 8 skipped, 0 failed |
+
+---
+
 ## Phase 1: Combat Events — `CombatEventType` Domain Type and Data Layer
 
 ### Overview

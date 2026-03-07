@@ -990,9 +990,28 @@ pub fn start_encounter(
     group: &[u8],
     combat_event_type: CombatEventType,
 ) -> Result<(), crate::domain::combat::database::MonsterDatabaseError> {
-    // Phase 1: always use Even handicap.  Phase 2 will vary based on type.
-    let handicap = Handicap::Even;
+    // Phase 2: select handicap based on combat event type.
+    // Ambush gives monsters the initiative advantage for round 1.
+    let handicap = if combat_event_type.gives_monster_advantage() {
+        Handicap::MonsterAdvantage
+    } else {
+        Handicap::Even
+    };
+
     let mut cs = CombatState::new(handicap);
+
+    // Phase 2: set the ambush flag so the game layer can suppress player
+    // actions during round 1.
+    cs.ambush_round_active = combat_event_type == CombatEventType::Ambush;
+
+    // Phase 2: Boss mechanics — monsters advance and regenerate each round;
+    // the party cannot bribe or surrender.
+    if combat_event_type.applies_boss_mechanics() {
+        cs.monsters_advance = true;
+        cs.monsters_regenerate = true;
+        cs.can_bribe = false;
+        cs.can_surrender = false;
+    }
 
     for character in &game_state.party.members {
         cs.add_player(character.clone());
@@ -1004,12 +1023,6 @@ pub fn start_encounter(
     // Enter combat with the prepared state
     game_state.enter_combat_with_state(cs);
 
-    // Store the combat event type on the resource — written here so that
-    // handle_combat_started can later forward it from the CombatStarted message.
-    // (We return Ok before the Bevy message round-trip, so we also rely on
-    //  handle_combat_started to copy it from the message into CombatResource.)
-    let _ = combat_event_type; // used by callers via CombatStarted message
-
     Ok(())
 }
 
@@ -1020,6 +1033,7 @@ fn handle_combat_started(
     mut combat_res: ResMut<CombatResource>,
     global_state: Res<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
+    mut combat_log: ResMut<CombatLogState>,
     mut music_writer: Option<MessageWriter<crate::game::systems::audio::PlayMusic>>,
 ) {
     for msg in reader.read() {
@@ -1047,14 +1061,22 @@ fn handle_combat_started(
             // Ancient Wolf speed 14 > all party speeds) would leave the resource
             // stuck on PlayerTurn, causing the action buttons to flash incorrectly
             // and the monster turn to be skipped or mishandled on the first frame.
-            turn_state.0 = match combat_res.state.turn_order.first() {
-                Some(CombatantId::Monster(_)) => {
-                    info!("Combat started: monster goes first — setting EnemyTurn");
-                    CombatTurnState::EnemyTurn
-                }
-                _ => {
-                    info!("Combat started: player goes first — setting PlayerTurn");
-                    CombatTurnState::PlayerTurn
+            //
+            // Phase 2: during an ambush round 1 the party cannot act, so force
+            // EnemyTurn regardless of the turn order — monsters always go first.
+            turn_state.0 = if combat_res.state.ambush_round_active {
+                info!("Combat started: ambush — monsters act first in round 1, setting EnemyTurn");
+                CombatTurnState::EnemyTurn
+            } else {
+                match combat_res.state.turn_order.first() {
+                    Some(CombatantId::Monster(_)) => {
+                        info!("Combat started: monster goes first — setting EnemyTurn");
+                        CombatTurnState::EnemyTurn
+                    }
+                    _ => {
+                        info!("Combat started: player goes first — setting PlayerTurn");
+                        CombatTurnState::PlayerTurn
+                    }
                 }
             };
 
@@ -1070,6 +1092,23 @@ fn handle_combat_started(
                 );
             }
             info!("Combat event type: {:?}", combat_res.combat_event_type);
+
+            // Phase 2: emit a combat log entry that describes how the battle began.
+            if msg.combat_event_type == CombatEventType::Ambush {
+                combat_log.push_line(CombatLogLine {
+                    segments: vec![CombatLogSegment {
+                        text: "The monsters ambush the party! The party is surprised!".to_string(),
+                        color: FEEDBACK_COLOR_STATUS,
+                    }],
+                });
+            } else {
+                combat_log.push_line(CombatLogLine {
+                    segments: vec![CombatLogSegment {
+                        text: "Monsters appear!".to_string(),
+                        color: FEEDBACK_COLOR_STATUS,
+                    }],
+                });
+            }
 
             // Request combat music transition (if audio plugin is registered)
             if let Some(ref mut w) = music_writer {
@@ -1870,6 +1909,26 @@ fn combat_input_system(
     mut action_menu_state: ResMut<ActionMenuState>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    // Phase 2: During an ambush round the party is surprised and cannot act.
+    // `handle_combat_started` already sets `CombatTurnState::EnemyTurn` for
+    // ambush round 1, so this guard provides defence-in-depth: even if a
+    // player-turn combatant appears in the turn order during round 1 we
+    // refuse to dispatch any player input.
+    if combat_res.state.ambush_round_active
+        && matches!(
+            combat_res.state.get_current_combatant(),
+            Some(Combatant::Player(_))
+        )
+    {
+        let any_key = keyboard
+            .as_ref()
+            .is_some_and(|kb| kb.just_pressed(KeyCode::Tab) || kb.just_pressed(KeyCode::Enter));
+        if any_key {
+            info!("Combat: input blocked — party is surprised (ambush round 1)");
+        }
         return;
     }
 
@@ -3326,6 +3385,16 @@ pub fn perform_monster_turn_with_rng(
 ///
 /// Picks an attack and target using AI, performs the attack, and advances
 /// the turn. Uses the global RNG for in-game randomness.
+///
+/// # Phase 2 — Ambush round handling
+///
+/// During round 1 of an ambush (`CombatState::ambush_round_active == true`),
+/// player-combatant slots in the turn order must be skipped automatically so
+/// that only monsters act. This function handles that case: whenever the
+/// current combatant is a *player* during an ambush round it advances the turn
+/// without performing any action, effectively consuming the player's surprised
+/// turn. Once all turns in round 1 are exhausted `advance_round` clears the
+/// flag and round 2 proceeds normally.
 #[allow(clippy::too_many_arguments)]
 fn execute_monster_turn(
     mut combat_res: ResMut<CombatResource>,
@@ -3333,10 +3402,64 @@ fn execute_monster_turn(
     mut global_state: ResMut<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
     mut feedback_writer: Option<MessageWriter<CombatFeedbackEvent>>,
+    mut combat_log: ResMut<CombatLogState>,
     mut monster_turn_timer: Option<ResMut<MonsterTurnTimer>>,
     time: Option<Res<Time>>,
     mut was_enemy_turn: Local<bool>,
 ) {
+    // Phase 2: During an ambush round, if the current slot belongs to a player,
+    // auto-skip it with a "Surprised!" log entry and advance the turn.
+    // This keeps the EnemyTurn state active until all slots are consumed and
+    // `advance_round` fires, clearing `ambush_round_active` at round 2.
+    let current_id = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+        .cloned();
+    if combat_res.state.ambush_round_active {
+        if let Some(CombatantId::Player(_)) = current_id {
+            combat_log.push_line(CombatLogLine {
+                segments: vec![CombatLogSegment {
+                    text: "The party is surprised and cannot act!".to_string(),
+                    color: FEEDBACK_COLOR_STATUS,
+                }],
+            });
+
+            let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+            let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+            let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = content_ref
+                .db()
+                .conditions
+                .all_conditions()
+                .into_iter()
+                .filter_map(|id| content_ref.db().conditions.get_condition(id).cloned())
+                .collect();
+
+            let _ = combat_res.state.advance_turn(&cond_defs);
+
+            // After advancing, determine what the next actor is.
+            if let Some(next) = combat_res
+                .state
+                .turn_order
+                .get(combat_res.state.current_turn)
+            {
+                turn_state.0 = match next {
+                    CombatantId::Player(_) => {
+                        // Still in ambush round — keep EnemyTurn so this system
+                        // fires again next frame and skips the next surprised slot.
+                        if combat_res.state.ambush_round_active {
+                            CombatTurnState::EnemyTurn
+                        } else {
+                            CombatTurnState::PlayerTurn
+                        }
+                    }
+                    CombatantId::Monster(_) => CombatTurnState::EnemyTurn,
+                };
+            }
+            return;
+        }
+    }
+
     // Only run during combat and when it's enemy turn
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
         *was_enemy_turn = false;
@@ -4999,6 +5122,384 @@ mod tests {
             combat_res.combat_event_type,
             CombatEventType::Ambush,
             "CombatResource must store the Ambush type forwarded from CombatStarted"
+        );
+    }
+
+    // ===== Phase 2: Normal and Ambush Combat Tests =====
+
+    /// `start_encounter` with `CombatEventType::Normal` must produce a
+    /// `CombatState` with `handicap == Handicap::Even`.
+    #[test]
+    fn test_normal_combat_handicap_is_even() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Normal).unwrap();
+
+        if let crate::application::GameMode::Combat(ref cs) = gs.mode {
+            assert_eq!(
+                cs.handicap,
+                Handicap::Even,
+                "Normal combat must start with Even handicap"
+            );
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
+
+    /// `start_encounter` with `CombatEventType::Ambush` must produce a
+    /// `CombatState` with `handicap == Handicap::MonsterAdvantage`.
+    #[test]
+    fn test_ambush_combat_handicap_is_monster_advantage() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Ambush).unwrap();
+
+        if let crate::application::GameMode::Combat(ref cs) = gs.mode {
+            assert_eq!(
+                cs.handicap,
+                Handicap::MonsterAdvantage,
+                "Ambush combat must start with MonsterAdvantage handicap"
+            );
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
+
+    /// `start_encounter` with `CombatEventType::Ambush` must set
+    /// `ambush_round_active = true` on the resulting `CombatState`.
+    #[test]
+    fn test_ambush_round_active_set_on_start() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Ambush).unwrap();
+
+        if let crate::application::GameMode::Combat(ref cs) = gs.mode {
+            assert!(
+                cs.ambush_round_active,
+                "ambush_round_active must be true after Ambush start_encounter"
+            );
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
+
+    /// `start_encounter` with `CombatEventType::Normal` must leave
+    /// `ambush_round_active = false`.
+    #[test]
+    fn test_normal_round_active_not_set() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Normal).unwrap();
+
+        if let crate::application::GameMode::Combat(ref cs) = gs.mode {
+            assert!(
+                !cs.ambush_round_active,
+                "ambush_round_active must be false after Normal start_encounter"
+            );
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
+
+    /// After `advance_turn` exhausts round 1 of an ambush encounter,
+    /// `ambush_round_active` must be `false` and `handicap` must be `Even`.
+    #[test]
+    fn test_ambush_round_active_cleared_at_round_2() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Ambush).unwrap();
+
+        if let crate::application::GameMode::Combat(ref mut cs) = gs.mode {
+            assert!(cs.ambush_round_active, "pre-condition: flag must be set");
+            // Exhaust all slots in round 1 to trigger advance_round.
+            // With only one combatant (player), a single advance_turn call
+            // wraps the turn order and fires advance_round (round -> 2).
+            let _ = cs.advance_turn(&[]);
+
+            assert!(
+                !cs.ambush_round_active,
+                "ambush_round_active must be cleared at the start of round 2"
+            );
+            assert_eq!(
+                cs.handicap,
+                Handicap::Even,
+                "handicap must be reset to Even at round 2"
+            );
+            assert_eq!(cs.round, 2, "round must be 2");
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
+
+    /// After round 2 starts, `handicap` must equal `Even` (ambush handicap reset).
+    #[test]
+    fn test_ambush_handicap_resets_to_even_round_2() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Ambush).unwrap();
+
+        if let crate::application::GameMode::Combat(ref mut cs) = gs.mode {
+            let _ = cs.advance_turn(&[]);
+            assert_eq!(cs.handicap, Handicap::Even);
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
+
+    /// Boss combat must set `monsters_advance`, `monsters_regenerate` and
+    /// clear `can_bribe` / `can_surrender`.
+    #[test]
+    fn test_boss_combat_sets_boss_flags() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Boss).unwrap();
+
+        if let crate::application::GameMode::Combat(ref cs) = gs.mode {
+            assert!(cs.monsters_advance, "boss: monsters_advance must be true");
+            assert!(
+                cs.monsters_regenerate,
+                "boss: monsters_regenerate must be true"
+            );
+            assert!(!cs.can_bribe, "boss: can_bribe must be false");
+            assert!(!cs.can_surrender, "boss: can_surrender must be false");
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
+
+    /// The combat log must contain "ambush" text after an ambush `CombatStarted`
+    /// message is processed.
+    #[test]
+    fn test_combat_log_reports_ambush() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Tester".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Ambush).unwrap();
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        {
+            let mut writer = app.world_mut().resource_mut::<Messages<CombatStarted>>();
+            writer.write(CombatStarted {
+                encounter_position: None,
+                encounter_map_id: None,
+                combat_event_type: CombatEventType::Ambush,
+            });
+        }
+
+        app.update();
+
+        let log = app.world().resource::<CombatLogState>();
+        let found = log
+            .lines
+            .iter()
+            .any(|line| line.plain_text().to_lowercase().contains("ambush"));
+        assert!(
+            found,
+            "combat log must contain 'ambush' text after an ambush encounter; \
+             got lines: {:?}",
+            log.lines.iter().map(|l| l.plain_text()).collect::<Vec<_>>()
+        );
+    }
+
+    /// The combat log must contain "Monsters appear!" for a Normal encounter.
+    #[test]
+    fn test_combat_log_reports_normal_encounter() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Tester".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Normal).unwrap();
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        {
+            let mut writer = app.world_mut().resource_mut::<Messages<CombatStarted>>();
+            writer.write(CombatStarted {
+                encounter_position: None,
+                encounter_map_id: None,
+                combat_event_type: CombatEventType::Normal,
+            });
+        }
+
+        app.update();
+
+        let log = app.world().resource::<CombatLogState>();
+        let found = log
+            .lines
+            .iter()
+            .any(|line| line.plain_text().contains("Monsters appear!"));
+        assert!(
+            found,
+            "combat log must contain 'Monsters appear!' for a Normal encounter; \
+             got lines: {:?}",
+            log.lines.iter().map(|l| l.plain_text()).collect::<Vec<_>>()
+        );
+    }
+
+    /// After an ambush `CombatStarted` message, the `CombatTurnStateResource`
+    /// must be set to `EnemyTurn` (monsters always act first in round 1).
+    #[test]
+    fn test_ambush_combat_started_sets_enemy_turn() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Tester".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Ambush).unwrap();
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        {
+            let mut writer = app.world_mut().resource_mut::<Messages<CombatStarted>>();
+            writer.write(CombatStarted {
+                encounter_position: None,
+                encounter_map_id: None,
+                combat_event_type: CombatEventType::Ambush,
+            });
+        }
+
+        app.update();
+
+        let turn_state = app.world().resource::<CombatTurnStateResource>();
+        assert!(
+            matches!(turn_state.0, CombatTurnState::EnemyTurn),
+            "CombatTurnStateResource must be EnemyTurn after ambush CombatStarted; \
+             got {:?}",
+            turn_state.0
         );
     }
 

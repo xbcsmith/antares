@@ -804,7 +804,7 @@ Write a plan with a phased approach to implementing an automap and mini map in t
 
 ### Food System
 
-Currently resting depends on food rations of the party. Currently there is no way to obtain food rations in the game. Characters start with X number of Food Rations and never get anymore. InnKeepers and Merchants should sell food. The food rations will replenish the characters food ration. So if you have 4 characters in your party, you will need 4 food rations to rest for 1 night. If you have 2 characters in your party, you will need 2 food rations to rest for 1 night. Food Items are regular items (like consumables) that can be marked as food in the item editor. So I could have an apple, a steak, bread, eggs, etc. All equal 1 food ration. 
+Currently resting depends on food rations of the party. Currently there is no way to obtain food rations in the game. Characters start with X number of Food Rations and never get anymore. InnKeepers and Merchants should sell food. The food rations will replenish the characters food ration. So if you have 4 characters in your party, you will need 4 food rations to rest for 1 night. If you have 2 characters in your party, you will need 2 food rations to rest for 1 night. Food Items are regular items (like consumables) that can be marked as food in the item editor. So I could have an apple, a steak, bread, eggs, etc. All equal 1 food ration.
 
 Food Ration should be a consumable item with a condition "can rest".
 
