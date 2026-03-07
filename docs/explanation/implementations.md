@@ -1603,3 +1603,146 @@ cargo check       → Finished 0 errors
 cargo clippy      → Finished 0 warnings (0 warnings)
 cargo nextest run → 3162 passed; 0 failed; 8 skipped
 ```
+
+---
+
+## Items Procedural Meshes — Phase 3.2: Python Generator Script
+
+**Plan**: [`items_procedural_meshes_implementation_plan.md`](items_procedural_meshes_implementation_plan.md)
+
+### Overview
+
+Phase 3.2 delivers `examples/generate_item_meshes.py` — the developer
+convenience script called out in the Phase 3 deliverables list. The script
+generates every `CreatureDefinition` RON file under
+`campaigns/tutorial/assets/items/` from a single authoritative Python manifest,
+making the asset files regenerable without hand-editing them one by one.
+
+---
+
+### Phase 3.2 Deliverables
+
+**Files created / updated**:
+
+- `examples/generate_item_meshes.py` _(new)_
+
+---
+
+### What Was Built
+
+#### Script structure
+
+The script is organised into four layers:
+
+1. **RON formatting helpers** — `fv()`, `fc()`, `fmat()`, `emit_mesh()`,
+   `emit_transform()`, `write_item_ron()`: pure string-building functions that
+   produce syntactically correct RON without any external library dependency.
+
+2. **Color / scale constants** — mirror `item_mesh.rs` exactly so that
+   re-generated files stay visually consistent with the runtime pipeline:
+   `COLOR_STEEL`, `COLOR_WOOD`, `COLOR_LEATHER`, `COLOR_SILVER`, `COLOR_GOLD`,
+   `COLOR_ORB`, `EMISSIVE_MAGIC`, `EMISSIVE_ORB`, `EMISSIVE_QUEST`,
+   `BASE_SCALE`, `TWO_HANDED_SCALE_MULT`, `ARMOR_MED_SCALE_MULT`,
+   `ARMOR_HEAVY_SCALE_MULT`, `SMALL_SCALE_MULT`.
+
+3. **Geometry builders** — one function per logical item type, each returning
+   `(list[mesh_str], list[transform_tuple])`. Multi-part items emit multiple
+   `MeshDefinition` blocks with correct per-part transforms:
+
+   | Builder                                                                                         | Parts | Description                                               |
+   | ----------------------------------------------------------------------------------------------- | ----- | --------------------------------------------------------- |
+   | `build_sword` / `build_dagger` / `build_short_sword` / `build_long_sword` / `build_great_sword` | 2     | Diamond blade + rectangular crossguard                    |
+   | `build_club`                                                                                    | 2     | Rectangular handle + fan-hexagon head                     |
+   | `build_staff`                                                                                   | 2     | Rectangular shaft + 8-sided orb tip (offset to shaft tip) |
+   | `build_bow`                                                                                     | 2     | Curved arc limb + thin bowstring                          |
+   | `build_plate_mail`                                                                              | 2     | Body plate + U-shaped pauldron bar                        |
+   | `build_helmet`                                                                                  | 2     | Pentagon dome + rectangular visor                         |
+   | `build_arrow`                                                                                   | 2     | Diamond shaft + V-shaped fletching                        |
+   | `build_quest_scroll`                                                                            | 2     | Hex scroll body + 16-point star seal                      |
+   | `build_leather_armor`, `build_chain_mail`, `build_shield`, `build_boots`                        | 1     | Single silhouette                                         |
+   | `build_health/mana/cure/attribute_potion`                                                       | 1     | Hexagonal disc                                            |
+   | `build_ring`                                                                                    | 1     | Flat torus (two concentric n-gons joined by quad strips)  |
+   | `build_amulet`                                                                                  | 1     | Octagon disc                                              |
+   | `build_belt`, `build_cloak`                                                                     | 1     | Rectangle / teardrop                                      |
+   | `build_bolt`, `build_stone`                                                                     | 1     | Flat diamond                                              |
+   | `build_key_item`                                                                                | 1     | 16-point star                                             |
+
+4. **Manifests** — `MANIFEST` (27 entries covering all IDs 9001–9502) and
+   `TEST_MANIFEST` (2 entries: sword + potion) for the
+   `data/test_campaign/assets/items/` fixtures.
+
+#### CLI usage
+
+```text
+# Full manifest → campaigns/tutorial/assets/items/
+python examples/generate_item_meshes.py
+
+# Test fixtures → data/test_campaign/assets/items/
+python examples/generate_item_meshes.py --test-fixtures
+
+# Custom root directory
+python examples/generate_item_meshes.py --output-dir /tmp/items
+```
+
+The script is idempotent. Re-running overwrites existing files with freshly
+generated geometry. All `.ron` files are committed; the script is not a build
+step.
+
+#### Part counts per committed file
+
+| File                               | Parts                  |
+| ---------------------------------- | ---------------------- |
+| `weapons/sword.ron`                | 2 (blade, crossguard)  |
+| `weapons/dagger.ron`               | 2 (blade, crossguard)  |
+| `weapons/short_sword.ron`          | 2 (blade, crossguard)  |
+| `weapons/long_sword.ron`           | 2 (blade, crossguard)  |
+| `weapons/great_sword.ron`          | 2 (blade, crossguard)  |
+| `weapons/club.ron`                 | 2 (handle, head)       |
+| `weapons/staff.ron`                | 2 (shaft, orb_tip)     |
+| `weapons/bow.ron`                  | 2 (limb, string)       |
+| `armor/leather_armor.ron`          | 1 (leather)            |
+| `armor/chain_mail.ron`             | 1 (chain)              |
+| `armor/plate_mail.ron`             | 2 (body, shoulders)    |
+| `armor/shield.ron`                 | 1 (shield)             |
+| `armor/helmet.ron`                 | 2 (dome, visor)        |
+| `armor/boots.ron`                  | 1 (boots)              |
+| `consumables/health_potion.ron`    | 1 (potion)             |
+| `consumables/mana_potion.ron`      | 1 (potion)             |
+| `consumables/cure_potion.ron`      | 1 (potion)             |
+| `consumables/attribute_potion.ron` | 1 (potion)             |
+| `accessories/ring.ron`             | 1 (band)               |
+| `accessories/amulet.ron`           | 1 (amulet)             |
+| `accessories/belt.ron`             | 1 (belt)               |
+| `accessories/cloak.ron`            | 1 (cloak)              |
+| `ammo/arrow.ron`                   | 2 (shaft, fletching)   |
+| `ammo/bolt.ron`                    | 1 (bolt)               |
+| `ammo/stone.ron`                   | 1 (stone)              |
+| `quest/quest_scroll.ron`           | 2 (quest_scroll, seal) |
+| `quest/key_item.ron`               | 1 (key_item)           |
+
+---
+
+### Architecture Compliance
+
+- SPDX header present: `// SPDX-FileCopyrightText: 2026 Brett Smith` +
+  `Apache-2.0` on lines 2–3.
+- File extension `.py` — developer tool, not a game data file.
+- No game data in JSON/YAML; all output files use `.ron` as required.
+- Test fixtures written to `data/test_campaign/assets/items/` — not
+  `campaigns/tutorial` — per Implementation Rule 5.
+- `--output-dir` flag allows targeting any directory, satisfying the plan's
+  §3.2 requirement verbatim.
+- Script is idempotent and not a build step.
+
+---
+
+### Quality Gates
+
+```text
+cargo fmt         → no output
+cargo check       → Finished 0 errors
+cargo clippy      → Finished 0 warnings
+cargo nextest run → 3162 passed; 0 failed; 8 skipped
+python3 examples/generate_item_meshes.py --output-dir /tmp/items → 27 files ✅
+python3 examples/generate_item_meshes.py --test-fixtures          →  2 files ✅
+```
