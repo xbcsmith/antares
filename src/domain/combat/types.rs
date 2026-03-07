@@ -433,6 +433,21 @@ impl CombatEventType {
     }
 }
 
+// ===== Phase 4: Boss Combat Constants =====
+
+/// HP regeneration per round for boss monsters when `monsters_regenerate` is true.
+///
+/// In Boss encounters every monster with `can_regenerate = true` regains this
+/// many HP at the start of each new round.  The base engine regenerates 1 HP
+/// per round; boss encounters override that at the system layer.
+pub const BOSS_REGEN_PER_ROUND: u16 = 5;
+
+/// Multiplier applied to monster stats when boss mechanics are active.
+///
+/// Currently 1.0 (no change).  Campaign data authors can adjust individual
+/// monster stats via the monsters RON file instead.
+pub const BOSS_STAT_MULTIPLIER: f32 = 1.0;
+
 // ===== CombatantId =====
 
 /// Identifier for a combatant in battle
@@ -630,6 +645,18 @@ mod tests {
         assert!(matches!(player, CombatantId::Player(2)));
         assert!(matches!(monster, CombatantId::Monster(5)));
         assert_ne!(player, monster);
+    }
+
+    // ===== Phase 4: Boss Combat Constant Tests =====
+
+    #[test]
+    fn test_boss_regen_per_round_constant() {
+        assert_eq!(BOSS_REGEN_PER_ROUND, 5);
+    }
+
+    #[test]
+    fn test_boss_stat_multiplier_constant() {
+        assert!((BOSS_STAT_MULTIPLIER - 1.0_f32).abs() < f32::EPSILON);
     }
 
     #[test]

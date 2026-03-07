@@ -1,5 +1,198 @@
 # Implementations
 
+## Phase 4: Boss Combat
+
+### Overview
+
+Phase 4 extends the combat system with a fully-featured **Boss** encounter
+mode. When `CombatEventType::Boss` is active, monsters never flee, regenerate
+at an accelerated rate (`BOSS_REGEN_PER_ROUND = 5` HP per round instead of 1),
+and a prominent HP bar is rendered at the top of the screen. Victory over a
+boss encounter sets `VictorySummary::boss_defeated = true`, causing the victory
+screen to display a `"⚔ Boss Defeated! ⚔"` header.
+
+### Phase 4 Deliverables Checklist
+
+- [x] `BOSS_REGEN_PER_ROUND` and `BOSS_STAT_MULTIPLIER` constants in `src/domain/combat/types.rs`
+- [x] Two constant unit tests in `src/domain/combat/types.rs`
+- [x] `BossHpBar`, `BossHpBarFill`, `BossHpBarText` components in `src/game/systems/combat.rs`
+- [x] Boss HP bar visual constants (`BOSS_HP_BAR_WIDTH`, `BOSS_HP_BAR_HEIGHT`, `BOSS_HP_HEALTHY_COLOR`, `BOSS_HP_INJURED_COLOR`, `BOSS_HP_CRITICAL_COLOR`)
+- [x] `setup_combat_ui` spawns the boss HP bar panel when `combat_event_type == Boss`
+- [x] `update_combat_ui` updates boss HP bar fill width and text each frame
+- [x] `perform_monster_turn_with_rng` suppresses monster fleeing for Boss encounters
+- [x] `perform_monster_turn_with_rng` applies `BOSS_REGEN_PER_ROUND` bonus regeneration after `advance_turn`
+- [x] `execute_monster_turn` captures `round_before`/`round_after` and emits regeneration log lines
+- [x] `VictorySummary::boss_defeated` field added
+- [x] `process_combat_victory_with_rng` sets `boss_defeated` from `combat_event_type`
+- [x] `handle_combat_victory` shows `"⚔ Boss Defeated! ⚔"` header when `boss_defeated == true`
+- [x] Five new Phase 4 tests in `src/game/systems/combat.rs`
+
+### What Was Built
+
+#### `BOSS_REGEN_PER_ROUND` and `BOSS_STAT_MULTIPLIER` (`src/domain/combat/types.rs`)
+
+Two public constants added immediately after the `CombatEventType` impl block:
+
+- `BOSS_REGEN_PER_ROUND: u16 = 5` — total HP regenerated per round by a boss
+  monster with `can_regenerate = true`. The base engine already adds 1 HP in
+  `advance_round`; boss logic adds the remaining 4 as a bonus in
+  `perform_monster_turn_with_rng`, giving exactly 5 total.
+- `BOSS_STAT_MULTIPLIER: f32 = 1.0` — reserved for future stat scaling;
+  currently a no-op so campaign authors can tune monsters via RON data.
+
+#### Boss HP Bar Components (`src/game/systems/combat.rs`)
+
+Three new `#[derive(Component)]` structs, each carrying a `participant_index`:
+
+- `BossHpBar` — root panel node; used as a presence marker in tests
+- `BossHpBarFill` — the colored fill node whose width tracks `hp.current / hp.base`
+- `BossHpBarText` — the `"current/base"` text label
+
+Five visual constants drive the appearance:
+
+| Constant                 | Value                                          |
+| ------------------------ | ---------------------------------------------- |
+| `BOSS_HP_BAR_WIDTH`      | `400.0` px                                     |
+| `BOSS_HP_BAR_HEIGHT`     | `20.0` px                                      |
+| `BOSS_HP_HEALTHY_COLOR`  | `srgba(0.8, 0.1, 0.1, 1.0)` (dark red)         |
+| `BOSS_HP_INJURED_COLOR`  | `srgba(0.5, 0.1, 0.1, 1.0)` (dimmer red)       |
+| `BOSS_HP_CRITICAL_COLOR` | `srgba(0.3, 0.05, 0.05, 1.0)` (near-black red) |
+
+#### `setup_combat_ui` boss bar spawn (`src/game/systems/combat.rs`)
+
+After the enemy panel's `.with_children` block closes and before the turn
+order panel, a conditional block checks `combat_res.combat_event_type ==
+CombatEventType::Boss`. For the first monster in `participants`, it spawns:
+
+1. An absolutely-positioned panel at `top: 8px`, centred horizontally.
+2. A gold `"⚔ {name} ⚔"` name label.
+3. A HP bar background → fill child (tagged `BossHpBarFill`).
+4. A `BossHpBarText` label.
+
+Only the first monster gets a boss bar (`break` after the first match).
+
+#### `update_combat_ui` boss bar update (`src/game/systems/combat.rs`)
+
+Two new query parameters were added to the function:
+
+```
+mut boss_hp_fills: Query<(&BossHpBarFill, &mut Node, &mut BackgroundColor), Without<EnemyHpBarFill>>
+mut boss_hp_texts: Query<(&BossHpBarText, &mut Text), Without<EnemyHpText>>
+```
+
+Existing queries received matching `Without<BossHpBarFill>` / `Without<BossHpBarText>`
+filters to prevent Bevy query conflicts. At the end of `update_combat_ui`, the
+fill's `node.width` is set to `Val::Percent(ratio * 100.0)` and the color
+transitions through the three threshold constants (≥50% healthy, ≥25%
+injured, <25% critical).
+
+#### Monster flee suppression (`perform_monster_turn_with_rng`)
+
+Before `resolve_attack`, a `should_flee_this_turn` boolean is computed:
+
+```rust
+let should_flee_this_turn = if combat_res.combat_event_type == CombatEventType::Boss {
+    false
+} else if let Some(Combatant::Monster(mon)) = ... {
+    mon.should_flee()
+} else { false };
+```
+
+If true (non-boss only), the monster is marked as acted, the turn is advanced,
+and the function returns `Ok(None)` without attacking — identical to what a
+fleeing monster would do. Boss monsters always proceed to the attack path.
+
+#### Boss bonus regeneration (`perform_monster_turn_with_rng`)
+
+After `advance_turn`, when `combat_event_type == Boss && monsters_regenerate`:
+
+```rust
+let bonus_regen = BOSS_REGEN_PER_ROUND.saturating_sub(1); // = 4
+```
+
+Each alive, `can_regenerate` monster calls `mon.regenerate(bonus_regen)`.
+Combined with `advance_round`'s built-in `regenerate(1)` this gives exactly
+`BOSS_REGEN_PER_ROUND = 5` HP per round.
+
+#### Boss regeneration log lines (`execute_monster_turn`)
+
+```rust
+let round_before = combat_res.state.round;
+let outcome = perform_monster_turn_with_rng(...);
+let round_after = combat_res.state.round;
+
+if round_after > round_before
+    && combat_res.combat_event_type == CombatEventType::Boss
+    && combat_res.state.monsters_regenerate
+{ ... push log line ... }
+```
+
+When a new round starts the log receives a green `"{name} regenerates {N} HP!"`
+line (color `FEEDBACK_COLOR_HEAL`) for every regenerating alive monster.
+
+#### `VictorySummary::boss_defeated` (`src/game/systems/combat.rs`)
+
+A `pub boss_defeated: bool` field was added to `VictorySummary`. It is set in
+`process_combat_victory_with_rng`:
+
+```rust
+boss_defeated: combat_res.combat_event_type == CombatEventType::Boss,
+```
+
+In `handle_combat_victory` the text is:
+
+```rust
+let header = if summary.boss_defeated { "⚔ Boss Defeated! ⚔\n".to_string() } else { String::new() };
+Text::new(format!("{}Victory! XP: {} ...", header, ...))
+```
+
+### Phase 4 Tests
+
+All five new tests live in the `mod tests` block at the bottom of
+`src/game/systems/combat.rs`:
+
+| Test                                        | What it verifies                                                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `test_boss_monster_does_not_flee`           | Monster at 1 HP (flee_threshold=50) returns `Ok(Some(...))` in Boss mode — it attacked, not fled |
+| `test_boss_monster_regenerates_each_round`  | After `advance_turn` + bonus regen, HP increases by exactly `BOSS_REGEN_PER_ROUND`               |
+| `test_boss_hp_bar_spawned`                  | After `app.update()` with Boss type, `BossHpBar` component count > 0                             |
+| `test_normal_combat_no_boss_bar`            | Normal encounter produces zero `BossHpBar` components                                            |
+| `test_boss_victory_summary_has_boss_header` | `process_combat_victory_with_rng` with Boss type sets `summary.boss_defeated = true`             |
+
+Two constant tests were also added to `src/domain/combat/types.rs`:
+`test_boss_regen_per_round_constant` and `test_boss_stat_multiplier_constant`.
+
+### Implementation Notes
+
+- **`has_acted` is reset by `advance_round`**: `advance_round` calls
+  `monster.reset_turn()` on every monster, clearing `has_acted`. The flee test
+  therefore verifies `Ok(Some(...))` (attack resolved) rather than `has_acted`,
+  which would be unreliable when the turn wraps into a new round during the test.
+- **No ECS `world().query()` borrow conflict**: Boss HP bar queries use
+  `Without<EnemyHpBarFill>` / `Without<EnemyHpBarText>` filters to satisfy
+  Bevy's disjoint-query requirement. Existing queries received matching
+  `Without<BossHpBar*>` filters.
+- **SPDX headers not duplicated**: Both files already carried SPDX headers from
+  earlier phases; none were added.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4.4 (`CombatState`, `Monster`)
+- [x] `CombatEventType::Boss` used (not a new enum, already existed from Phase 1)
+- [x] Constants extracted (`BOSS_REGEN_PER_ROUND`, `BOSS_STAT_MULTIPLIER`)
+- [x] `AttributePair16` pattern used for HP (not raw integers)
+- [x] No new RON data files required (boss mechanics are purely runtime)
+- [x] No architectural deviations from architecture.md
+
+### Quality Gate Results
+
+```
+cargo fmt         → no output (all files formatted)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 3226 passed; 0 failed; 8 skipped
+```
+
 ## Phase 3: Ranged and Magic Combat
 
 ### Overview

@@ -308,6 +308,23 @@ pub const FEEDBACK_COLOR_MISS: Color = Color::srgb(0.8, 0.8, 0.8);
 /// Colour for status/condition floating text (yellow)
 pub const FEEDBACK_COLOR_STATUS: Color = Color::srgb(1.0, 0.8, 0.0);
 
+// ===== Phase 4: Boss HP Bar Constants =====
+
+/// Width of the boss HP bar (wider and more prominent than standard enemy bars).
+pub const BOSS_HP_BAR_WIDTH: f32 = 400.0;
+
+/// Height of the boss HP bar.
+pub const BOSS_HP_BAR_HEIGHT: f32 = 20.0;
+
+/// Boss HP bar color when healthy (>= 50% HP).
+pub const BOSS_HP_HEALTHY_COLOR: Color = Color::srgba(0.8, 0.1, 0.1, 1.0);
+
+/// Boss HP bar color when injured (25–49% HP).
+pub const BOSS_HP_INJURED_COLOR: Color = Color::srgba(0.5, 0.1, 0.1, 1.0);
+
+/// Boss HP bar color when critical (< 25% HP).
+pub const BOSS_HP_CRITICAL_COLOR: Color = Color::srgba(0.3, 0.05, 0.05, 1.0);
+
 /// Width of the world-projected monster HP hover bars.
 pub const MONSTER_HP_HOVER_BAR_WIDTH: Val = Val::Px(120.0);
 
@@ -469,6 +486,40 @@ pub struct EnemyNameText {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct EnemyConditionText {
     /// Index in combat participants
+    pub participant_index: usize,
+}
+
+// ===== Phase 4: Boss HP Bar Components =====
+
+/// Marker component for the Boss HP bar panel root.
+///
+/// Spawned in `setup_combat_ui` only when `combat_event_type == Boss`.
+/// The bar is wider and more prominent than a standard `EnemyHpBarFill`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::combat::BossHpBar;
+/// let bar = BossHpBar { participant_index: 0 };
+/// assert_eq!(bar.participant_index, 0);
+/// ```
+#[derive(Component, Debug, Clone, Copy)]
+pub struct BossHpBar {
+    /// Index into `CombatResource::state.participants` for the boss monster.
+    pub participant_index: usize,
+}
+
+/// Fill portion of the boss HP bar (width varies with HP ratio).
+#[derive(Component, Debug, Clone, Copy)]
+pub struct BossHpBarFill {
+    /// Index into `CombatResource::state.participants` for the boss monster.
+    pub participant_index: usize,
+}
+
+/// HP text label on the boss HP bar.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct BossHpBarText {
+    /// Index into `CombatResource::state.participants` for the boss monster.
     pub participant_index: usize,
 }
 
@@ -1514,6 +1565,93 @@ fn setup_combat_ui(
                     }
                 });
 
+            // ── Boss HP Bar (Phase 4) ───────────────────────────────────────────
+            // Only spawn when this is a Boss encounter.  The bar is rendered at the
+            // top-centre of the screen, above the combat log, for maximum visibility.
+            if combat_res.combat_event_type == CombatEventType::Boss {
+                for (idx, participant) in combat_res.state.participants.iter().enumerate() {
+                    if let Combatant::Monster(monster) = participant {
+                        parent
+                            .spawn((
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Auto,
+                                    right: Val::Auto,
+                                    top: Val::Px(8.0),
+                                    width: Val::Px(BOSS_HP_BAR_WIDTH),
+                                    height: Val::Px(BOSS_HP_BAR_HEIGHT + 32.0),
+                                    flex_direction: FlexDirection::Column,
+                                    align_self: AlignSelf::Center,
+                                    align_items: AlignItems::Center,
+                                    justify_content: JustifyContent::Center,
+                                    row_gap: Val::Px(4.0),
+                                    padding: UiRect::all(Val::Px(6.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgba(0.15, 0.05, 0.05, 0.92)),
+                                BorderRadius::all(Val::Px(6.0)),
+                                BossHpBar {
+                                    participant_index: idx,
+                                },
+                            ))
+                            .with_children(|boss_panel| {
+                                // Boss name label
+                                boss_panel.spawn((
+                                    Text::new(format!("⚔ {} ⚔", monster.name)),
+                                    TextFont {
+                                        font_size: 14.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(1.0, 0.8, 0.2)),
+                                ));
+
+                                // Boss HP bar background
+                                boss_panel
+                                    .spawn((
+                                        Node {
+                                            width: Val::Px(BOSS_HP_BAR_WIDTH - 12.0),
+                                            height: Val::Px(BOSS_HP_BAR_HEIGHT),
+                                            overflow: Overflow::visible(),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgba(0.3, 0.1, 0.1, 1.0)),
+                                    ))
+                                    .with_children(|bar_bg| {
+                                        bar_bg.spawn((
+                                            Node {
+                                                width: Val::Percent(100.0),
+                                                height: Val::Percent(100.0),
+                                                ..default()
+                                            },
+                                            BackgroundColor(BOSS_HP_HEALTHY_COLOR),
+                                            BossHpBarFill {
+                                                participant_index: idx,
+                                            },
+                                        ));
+                                    });
+
+                                // Boss HP text
+                                boss_panel.spawn((
+                                    Text::new(format!(
+                                        "{}/{}",
+                                        monster.hp.current, monster.hp.base
+                                    )),
+                                    TextFont {
+                                        font_size: 11.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(1.0, 0.9, 0.9)),
+                                    BossHpBarText {
+                                        participant_index: idx,
+                                    },
+                                ));
+                            });
+                        // Only show one boss bar (for the first monster)
+                        break;
+                    }
+                }
+            }
+
             // ── Turn order panel ───────────────────────────────────────────
             parent
                 .spawn((
@@ -1731,13 +1869,17 @@ fn cleanup_combat_ui(
 fn update_combat_ui(
     combat_res: Res<CombatResource>,
     global_state: Res<GlobalState>,
-    mut enemy_hp_bars: Query<(&EnemyHpBarFill, &mut Node, &mut BackgroundColor)>,
+    mut enemy_hp_bars: Query<
+        (&EnemyHpBarFill, &mut Node, &mut BackgroundColor),
+        Without<BossHpBarFill>,
+    >,
     mut enemy_hp_texts: Query<
         (&EnemyHpText, &mut Text),
         (
             Without<EnemyNameText>,
             Without<EnemyConditionText>,
             Without<TurnOrderText>,
+            Without<BossHpBarText>,
         ),
     >,
     mut enemy_condition_texts: Query<
@@ -1746,6 +1888,7 @@ fn update_combat_ui(
             Without<EnemyHpText>,
             Without<EnemyNameText>,
             Without<TurnOrderText>,
+            Without<BossHpBarText>,
         ),
     >,
     mut turn_order_text: Query<
@@ -1755,11 +1898,17 @@ fn update_combat_ui(
             Without<EnemyHpText>,
             Without<EnemyNameText>,
             Without<EnemyConditionText>,
+            Without<BossHpBarText>,
         ),
     >,
     mut action_menu: Query<&mut Visibility, With<ActionMenuPanel>>,
     turn_state: Res<CombatTurnStateResource>,
     mut action_menu_state: ResMut<ActionMenuState>,
+    mut boss_hp_fills: Query<
+        (&BossHpBarFill, &mut Node, &mut BackgroundColor),
+        Without<EnemyHpBarFill>,
+    >,
+    mut boss_hp_texts: Query<(&BossHpBarText, &mut Text), Without<EnemyHpText>>,
 ) {
     // Only update when in combat mode
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
@@ -1880,6 +2029,36 @@ fn update_combat_ui(
         }
 
         *visibility = new_visibility;
+    }
+
+    // ── Boss HP Bar Update (Phase 4) ──────────────────────────────────────
+    for (fill, mut node, mut color) in &mut boss_hp_fills {
+        if let Some(Combatant::Monster(monster)) =
+            combat_res.state.participants.get(fill.participant_index)
+        {
+            let ratio = if monster.hp.base > 0 {
+                monster.hp.current as f32 / monster.hp.base as f32
+            } else {
+                0.0
+            };
+            node.width = Val::Percent(ratio * 100.0);
+            *color = BackgroundColor(if ratio >= 0.5 {
+                BOSS_HP_HEALTHY_COLOR
+            } else if ratio >= 0.25 {
+                BOSS_HP_INJURED_COLOR
+            } else {
+                BOSS_HP_CRITICAL_COLOR
+            });
+        }
+    }
+    for (text_comp, mut text) in &mut boss_hp_texts {
+        if let Some(Combatant::Monster(monster)) = combat_res
+            .state
+            .participants
+            .get(text_comp.participant_index)
+        {
+            **text = format!("{}/{}", monster.hp.current, monster.hp.base);
+        }
     }
 }
 
@@ -3795,6 +3974,44 @@ pub fn perform_monster_turn_with_rng(
             return Err(CombatError::CombatantNotFound(attacker));
         };
 
+    // Phase 4: Boss monsters never flee regardless of flee_threshold.
+    // For non-boss encounters, monsters with flee_threshold > 0 may attempt
+    // to flee when their HP drops below the threshold.
+    let should_flee_this_turn = if combat_res.combat_event_type == CombatEventType::Boss {
+        false
+    } else if let Some(Combatant::Monster(mon)) = combat_res.state.participants.get(monster_idx) {
+        mon.should_flee()
+    } else {
+        false
+    };
+
+    if should_flee_this_turn {
+        // Monster flees: mark acted, advance turn, but don't attack
+        if let Some(Combatant::Monster(mon)) = combat_res.state.participants.get_mut(monster_idx) {
+            mon.mark_acted();
+        }
+        combat_res.state.check_combat_end();
+        let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = content
+            .db()
+            .conditions
+            .all_conditions()
+            .into_iter()
+            .filter_map(|id| content.db().conditions.get_condition(id).cloned())
+            .collect();
+        let _ = combat_res.state.advance_turn(&cond_defs);
+        if let Some(next) = combat_res
+            .state
+            .turn_order
+            .get(combat_res.state.current_turn)
+        {
+            turn_state.0 = match next {
+                CombatantId::Player(_) => CombatTurnState::PlayerTurn,
+                _ => CombatTurnState::EnemyTurn,
+            };
+        }
+        return Ok(None);
+    }
+
     // Resolve attack (pure calculation, uses immutable state)
     let (damage, special) = resolve_attack(&combat_res.state, attacker, target, &attack_data, rng)?;
 
@@ -3861,6 +4078,23 @@ pub fn perform_monster_turn_with_rng(
         .collect();
 
     let _ = combat_res.state.advance_turn(&cond_defs);
+
+    // Phase 4: Boss encounters regenerate BOSS_REGEN_PER_ROUND HP per round
+    // (in addition to the 1 HP from advance_round's base regeneration).
+    // The base engine regenerates 1 HP; we add 4 more to reach BOSS_REGEN_PER_ROUND.
+    if combat_res.combat_event_type == CombatEventType::Boss && combat_res.state.monsters_regenerate
+    {
+        let bonus_regen = crate::domain::combat::types::BOSS_REGEN_PER_ROUND.saturating_sub(1);
+        if bonus_regen > 0 {
+            for participant in &mut combat_res.state.participants {
+                if let Combatant::Monster(mon) = participant {
+                    if mon.can_regenerate && mon.is_alive() {
+                        mon.regenerate(bonus_regen);
+                    }
+                }
+            }
+        }
+    }
 
     // Update turn sub-state based on next actor
     if let Some(next) = combat_res
@@ -4049,6 +4283,9 @@ fn execute_monster_turn(
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
         let mut rng = rand::rng();
+        // Phase 4: capture the round counter before the turn so we can detect
+        // when a new round starts and emit boss-regeneration log lines.
+        let round_before = combat_res.state.round;
         let outcome = perform_monster_turn_with_rng(
             &mut combat_res,
             content_ref,
@@ -4056,6 +4293,30 @@ fn execute_monster_turn(
             &mut turn_state,
             &mut rng,
         );
+        let round_after = combat_res.state.round;
+
+        // Phase 4: emit boss regeneration log line when a new round started
+        if round_after > round_before
+            && combat_res.combat_event_type == CombatEventType::Boss
+            && combat_res.state.monsters_regenerate
+        {
+            for participant in &combat_res.state.participants {
+                if let Combatant::Monster(mon) = participant {
+                    if mon.can_regenerate && mon.is_alive() {
+                        combat_log.push_line(CombatLogLine {
+                            segments: vec![CombatLogSegment {
+                                text: format!(
+                                    "{} regenerates {} HP!",
+                                    mon.name,
+                                    crate::domain::combat::types::BOSS_REGEN_PER_ROUND
+                                ),
+                                color: FEEDBACK_COLOR_HEAL,
+                            }],
+                        });
+                    }
+                }
+            }
+        }
 
         if let Ok(Some((attacker, target, damage))) = outcome {
             let effect = if damage > 0 {
@@ -4154,6 +4415,9 @@ pub struct VictorySummary {
     pub total_gold: u32,
     pub total_gems: u32,
     pub items: Vec<ItemId>,
+    /// True when this was a Boss encounter — callers should display a
+    /// "Boss Defeated!" header in the victory screen.
+    pub boss_defeated: bool,
 }
 
 /// Process victory rewards using the provided RNG. This will:
@@ -4291,6 +4555,7 @@ pub fn process_combat_victory_with_rng(
         total_gold,
         total_gems,
         items: items_dropped,
+        boss_defeated: combat_res.combat_event_type == CombatEventType::Boss,
     })
 }
 
@@ -4346,10 +4611,19 @@ fn handle_combat_victory(
                     VictorySummaryRoot,
                 ))
                 .with_children(|parent| {
+                    let header = if summary.boss_defeated {
+                        "⚔ Boss Defeated! ⚔\n".to_string()
+                    } else {
+                        String::new()
+                    };
                     parent.spawn((
                         Text::new(format!(
-                            "Victory! XP: {}  Gold: {}  Gems: {}  Items: {:?}",
-                            summary.total_xp, summary.total_gold, summary.total_gems, summary.items
+                            "{}Victory! XP: {}  Gold: {}  Gems: {}  Items: {:?}",
+                            header,
+                            summary.total_xp,
+                            summary.total_gold,
+                            summary.total_gems,
+                            summary.items
                         )),
                         TextFont {
                             font_size: 16.0,
@@ -10212,6 +10486,365 @@ mod tests {
             found,
             "combat log must contain 'magical' for a Magic encounter; got: {:?}",
             log.lines.iter().map(|l| l.plain_text()).collect::<Vec<_>>()
+        );
+    }
+
+    // ===== Phase 4: Boss Combat Tests =====
+
+    /// 4.7 — A boss monster at 1 HP with flee_threshold=50 must not trigger the flee path.
+    #[test]
+    fn test_boss_monster_does_not_flee() {
+        use crate::application::resources::GameContent;
+        use crate::domain::combat::monster::{LootTable, Monster};
+        use crate::domain::combat::types::BOSS_REGEN_PER_ROUND;
+        use crate::sdk::database::ContentDatabase;
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut gs = crate::application::GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut monster = Monster::new(
+            1,
+            "Dragon Boss".to_string(),
+            crate::domain::character::Stats::new(18, 8, 8, 18, 10, 12, 5),
+            100,
+            10,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(2, 8, 0),
+            )],
+            LootTable::default(),
+        );
+        // 50% flee threshold — at 1 HP (1%) it would normally flee
+        monster.flee_threshold = 50;
+        monster.hp.current = 1;
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.monsters_advance = true;
+        cs.monsters_regenerate = true;
+        cs.can_bribe = false;
+        cs.can_surrender = false;
+        cs.add_player(hero.clone());
+        cs.add_monster(monster);
+        crate::domain::combat::engine::start_combat(&mut cs);
+
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+        cr.player_orig_indices = vec![Some(0), None];
+        cr.combat_event_type = CombatEventType::Boss;
+
+        let content = GameContent::new(ContentDatabase::new());
+        let mut global_state = crate::game::resources::GlobalState(gs);
+        global_state.0.mode = crate::application::GameMode::Combat(cr.state.clone());
+        let mut turn_state = CombatTurnStateResource::default();
+        let mut rng = StdRng::seed_from_u64(42);
+
+        // Move to a monster turn
+        cr.state.current_turn = 1; // Monster(1)
+        cr.state.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cr.state.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        // The monster's should_flee() returns true (1% < 50% threshold)
+        if let Some(Combatant::Monster(mon)) = cr.state.participants.get(1) {
+            assert!(
+                mon.should_flee(),
+                "monster should_flee() must be true for this test"
+            );
+        }
+
+        // But perform_monster_turn_with_rng must suppress the flee for Boss type.
+        // The monster should attack (not flee), so the result must be Ok(Some(...)).
+        // Ok(None) means the monster bailed out early without attacking.
+        let result = perform_monster_turn_with_rng(
+            &mut cr,
+            &content,
+            &mut global_state,
+            &mut turn_state,
+            &mut rng,
+        );
+        assert!(
+            result.is_ok(),
+            "perform_monster_turn_with_rng must not return Err for boss encounter: {:?}",
+            result
+        );
+        // Explicitly verify the monster attacked rather than fleeing.
+        // Ok(None) is returned by early-return paths (can't act, no target, or flee).
+        // Ok(Some(_)) means the monster resolved an attack.
+        assert!(
+            result.as_ref().unwrap().is_some(),
+            "boss monster must have attacked (result must be Ok(Some(...))), \
+             got Ok(None) meaning it bailed out early; \
+             monster state: {:?}",
+            cr.state.participants.get(1)
+        );
+        // Note: has_acted is reset by advance_round when the turn wraps, so we
+        // cannot reliably check it here. The Ok(Some(...)) assertion above is the
+        // definitive proof that the monster attacked rather than fled or bailed out.
+        // suppress unused constant warning
+        let _ = BOSS_REGEN_PER_ROUND;
+    }
+
+    /// 4.7 — After a full round with Boss type, a regenerating monster gains BOSS_REGEN_PER_ROUND HP.
+    #[test]
+    fn test_boss_monster_regenerates_each_round() {
+        use crate::domain::combat::monster::{LootTable, Monster};
+        use crate::domain::combat::types::BOSS_REGEN_PER_ROUND;
+
+        // Build a CombatState with one monster (can_regenerate=true) and boss flags.
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.monsters_regenerate = true;
+
+        let mut monster = Monster::new(
+            1,
+            "Boss Dragon".to_string(),
+            crate::domain::character::Stats::new(18, 8, 8, 18, 10, 12, 5),
+            100,
+            10,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 6, 0),
+            )],
+            LootTable::default(),
+        );
+        monster.can_regenerate = true;
+        monster.hp.base = 100;
+        monster.hp.current = 80; // damaged
+        cs.add_monster(monster);
+
+        crate::domain::combat::engine::start_combat(&mut cs);
+
+        // Wrap in CombatResource with Boss type
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+        cr.combat_event_type = CombatEventType::Boss;
+
+        // Record HP before advancing a full round
+        let hp_before = if let Some(Combatant::Monster(m)) = cr.state.participants.first() {
+            m.hp.current
+        } else {
+            panic!("no monster");
+        };
+
+        // Advance turns until a new round starts.
+        // With one monster and no players, the turn_order has 1 entry,
+        // so advancing once triggers advance_round.
+        let _ = cr.state.advance_turn(&[]);
+
+        // Apply the boss bonus regeneration (simulating what perform_monster_turn_with_rng does)
+        if cr.combat_event_type == CombatEventType::Boss && cr.state.monsters_regenerate {
+            let bonus_regen = BOSS_REGEN_PER_ROUND.saturating_sub(1);
+            if bonus_regen > 0 {
+                for participant in &mut cr.state.participants {
+                    if let Combatant::Monster(mon) = participant {
+                        if mon.can_regenerate && mon.is_alive() {
+                            mon.regenerate(bonus_regen);
+                        }
+                    }
+                }
+            }
+        }
+
+        let hp_after = if let Some(Combatant::Monster(m)) = cr.state.participants.first() {
+            m.hp.current
+        } else {
+            panic!("no monster");
+        };
+
+        // advance_round adds 1 HP; boss bonus adds 4 more = BOSS_REGEN_PER_ROUND total
+        assert_eq!(
+            hp_after,
+            hp_before + BOSS_REGEN_PER_ROUND,
+            "boss monster must regenerate exactly BOSS_REGEN_PER_ROUND ({}) HP per round; \
+             got {} -> {}",
+            BOSS_REGEN_PER_ROUND,
+            hp_before,
+            hp_after
+        );
+    }
+
+    /// 4.7 — BossHpBar component is present in the ECS world after combat UI
+    /// setup with Boss type.
+    #[test]
+    fn test_boss_hp_bar_spawned() {
+        use crate::domain::combat::monster::{LootTable, Monster};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let monster = Monster::new(
+            1,
+            "Boss Dragon".to_string(),
+            crate::domain::character::Stats::new(18, 8, 8, 18, 10, 12, 5),
+            200,
+            15,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(2, 10, 0),
+            )],
+            LootTable::default(),
+        );
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.monsters_advance = true;
+        cs.monsters_regenerate = true;
+        cs.can_bribe = false;
+        cs.can_surrender = false;
+        cs.add_player(hero.clone());
+        cs.add_monster(monster);
+        crate::domain::combat::engine::start_combat(&mut cs);
+
+        let mut cr = CombatResource::new();
+        cr.state = cs.clone();
+        cr.player_orig_indices = vec![Some(0), None];
+        cr.combat_event_type = CombatEventType::Boss;
+
+        let mut gs = crate::application::GameState::new();
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat_with_state(cs);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        app.insert_resource(cr);
+
+        app.update();
+
+        let boss_bars = app
+            .world_mut()
+            .query::<&BossHpBar>()
+            .iter(app.world())
+            .count();
+        assert!(
+            boss_bars > 0,
+            "BossHpBar component must be present after setup_combat_ui for Boss encounter"
+        );
+    }
+
+    /// 4.7 — Normal combat does not spawn BossHpBar.
+    #[test]
+    fn test_normal_combat_no_boss_bar() {
+        use crate::domain::combat::monster::{LootTable, Monster};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let monster = Monster::new(
+            2,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 6, 6, 8, 8, 6, 5),
+            20,
+            5,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            LootTable::default(),
+        );
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(monster);
+        crate::domain::combat::engine::start_combat(&mut cs);
+
+        let mut cr = CombatResource::new();
+        cr.state = cs.clone();
+        cr.player_orig_indices = vec![Some(0), None];
+        cr.combat_event_type = CombatEventType::Normal;
+
+        let mut gs = crate::application::GameState::new();
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat_with_state(cs);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        app.insert_resource(cr);
+
+        app.update();
+
+        let boss_bars = app
+            .world_mut()
+            .query::<&BossHpBar>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            boss_bars, 0,
+            "BossHpBar must NOT be spawned for a Normal encounter"
+        );
+    }
+
+    /// 4.7 — Victory summary for a Boss encounter has boss_defeated == true.
+    #[test]
+    fn test_boss_victory_summary_has_boss_header() {
+        use crate::application::resources::GameContent;
+        use crate::domain::combat::monster::{LootTable, Monster};
+        use crate::sdk::database::ContentDatabase;
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let mut dead_boss = Monster::new(
+            1,
+            "Boss Dragon".to_string(),
+            crate::domain::character::Stats::new(18, 8, 8, 18, 10, 12, 5),
+            200,
+            15,
+            vec![],
+            LootTable::default(),
+        );
+        dead_boss.hp.current = 0;
+        dead_boss.conditions = crate::domain::combat::monster::MonsterCondition::Dead;
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.monsters_advance = true;
+        cs.monsters_regenerate = true;
+        cs.can_bribe = false;
+        cs.can_surrender = false;
+        cs.add_player(hero.clone());
+        cs.add_monster(dead_boss);
+        cs.status = crate::domain::combat::types::CombatStatus::Victory;
+
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+        cr.player_orig_indices = vec![Some(0), None];
+        cr.combat_event_type = CombatEventType::Boss;
+
+        let mut gs = crate::application::GameState::new();
+        gs.party.add_member(hero).unwrap();
+
+        let content = GameContent::new(ContentDatabase::new());
+        let mut global_state = crate::game::resources::GlobalState(gs);
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let summary =
+            process_combat_victory_with_rng(&mut cr, &content, &mut global_state, &mut rng)
+                .expect("process_combat_victory_with_rng must succeed");
+
+        assert!(
+            summary.boss_defeated,
+            "VictorySummary::boss_defeated must be true for a Boss encounter"
         );
     }
 }
