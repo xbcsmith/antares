@@ -189,6 +189,7 @@ impl From<MapBlueprint> for Map {
                         facing: None,
                         proximity_facing: false,
                         rotation_speed: None,
+                        combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
                     }
                 }
                 BlueprintEventType::Teleport { map_id, x, y } => MapEvent::Teleport {

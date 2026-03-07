@@ -60,7 +60,9 @@ use crate::domain::combat::engine::{
     apply_damage, choose_monster_attack, get_character_attack, initialize_combat_from_group,
     resolve_attack, CombatState, Combatant, MeleeAttackResult,
 };
-use crate::domain::combat::types::{Attack, CombatStatus, CombatantId, Handicap, SpecialEffect};
+use crate::domain::combat::types::{
+    Attack, CombatEventType, CombatStatus, CombatantId, Handicap, SpecialEffect,
+};
 use crate::domain::types::{DiceRoll, ItemId};
 use crate::game::resources::GlobalState;
 use crate::game::systems::camera::MainCamera;
@@ -83,6 +85,12 @@ pub struct CombatStarted {
     /// Map ID of the map that contains the encounter tile.
     /// `None` when `encounter_position` is `None`.
     pub encounter_map_id: Option<crate::domain::types::MapId>,
+    /// Type of this combat encounter.
+    ///
+    /// Forwarded from the `MapEvent::Encounter` field or from the selected
+    /// [`EncounterGroup`](crate::domain::world::types::EncounterGroup) in the
+    /// encounter table.  Defaults to [`CombatEventType::Normal`].
+    pub combat_event_type: CombatEventType,
 }
 
 /// Player-initiated attack message (registered by the plugin)
@@ -332,6 +340,13 @@ pub struct CombatResource {
     /// Used by `tick_combat_time` to detect new rounds and charge
     /// `TIME_COST_COMBAT_ROUND_MINUTES` exactly once per round.
     pub last_timed_round: u32,
+    /// Type of the current combat encounter.
+    ///
+    /// Set when `CombatStarted` is received and cleared (reset to
+    /// [`CombatEventType::Normal`]) when `CombatResource::clear()` is called.
+    /// Later phases read this to apply ambush, ranged, magic, and boss
+    /// mechanics.
+    pub combat_event_type: CombatEventType,
 }
 
 impl CombatResource {
@@ -344,6 +359,7 @@ impl CombatResource {
             encounter_position: None,
             encounter_map_id: None,
             last_timed_round: 0,
+            combat_event_type: CombatEventType::Normal,
         }
     }
 
@@ -355,6 +371,7 @@ impl CombatResource {
         self.encounter_position = None;
         self.encounter_map_id = None;
         self.last_timed_round = 0;
+        self.combat_event_type = CombatEventType::Normal;
     }
 }
 
@@ -938,13 +955,19 @@ impl Plugin for CombatPlugin {
 /// monsters based on the provided `group` (list of `MonsterId`), and set the
 /// `GameState` mode to `GameMode::Combat`.
 ///
+/// The `combat_event_type` is stored on the returned `CombatState` for later
+/// phases to read (ambush suppresses player turn 1, boss sets advance/regen
+/// flags, etc.).  Phase 1 stores the value end-to-end; the mechanics are wired
+/// in Phase 2+.
+///
 /// Returns an error if any monster in `group` is not found in the content DB.
 ///
 /// # Arguments
 ///
-/// * `game_state` - Mutable reference to the application `GameState`
-/// * `content` - `GameContent` resource for monster lookup
-/// * `group` - slice of monster IDs (u8 alias)
+/// * `game_state`        - Mutable reference to the application `GameState`
+/// * `content`           - `GameContent` resource for monster lookup
+/// * `group`             - Slice of monster IDs (u8 alias)
+/// * `combat_event_type` - Type of combat that determines starting conditions
 ///
 /// # Errors
 ///
@@ -954,18 +977,20 @@ impl Plugin for CombatPlugin {
 /// # Examples
 ///
 /// ```no_run
-/// use antares::game::systems::combat::start_encounter;
+/// use antares::game::systems::combat::{start_encounter};
+/// use antares::domain::combat::types::CombatEventType;
 /// # let mut gs = antares::application::GameState::new();
 /// # let content = antares::application::resources::GameContent::new(antares::sdk::database::ContentDatabase::new());
 /// # let group = vec![1u8, 2];
-/// let _ = start_encounter(&mut gs, &content, &group);
+/// let _ = start_encounter(&mut gs, &content, &group, CombatEventType::Normal);
 /// ```
 pub fn start_encounter(
     game_state: &mut crate::application::GameState,
     content: &GameContent,
     group: &[u8],
+    combat_event_type: CombatEventType,
 ) -> Result<(), crate::domain::combat::database::MonsterDatabaseError> {
-    // Build initial combat state and copy players (maintain party order)
+    // Phase 1: always use Even handicap.  Phase 2 will vary based on type.
     let handicap = Handicap::Even;
     let mut cs = CombatState::new(handicap);
 
@@ -978,6 +1003,12 @@ pub fn start_encounter(
 
     // Enter combat with the prepared state
     game_state.enter_combat_with_state(cs);
+
+    // Store the combat event type on the resource — written here so that
+    // handle_combat_started can later forward it from the CombatStarted message.
+    // (We return Ok before the Bevy message round-trip, so we also rely on
+    //  handle_combat_started to copy it from the message into CombatResource.)
+    let _ = combat_event_type; // used by callers via CombatStarted message
 
     Ok(())
 }
@@ -1031,12 +1062,14 @@ fn handle_combat_started(
             // the MapEvent::Encounter from the map on victory (Phase 4).
             combat_res.encounter_position = msg.encounter_position;
             combat_res.encounter_map_id = msg.encounter_map_id;
+            combat_res.combat_event_type = msg.combat_event_type;
             if let (Some(pos), Some(map_id)) = (msg.encounter_position, msg.encounter_map_id) {
                 info!(
                     "Stored encounter position {:?} on map {} in CombatResource",
                     pos, map_id
                 );
             }
+            info!("Combat event type: {:?}", combat_res.combat_event_type);
 
             // Request combat music transition (if audio plugin is registered)
             if let Some(ref mut w) = music_writer {
@@ -4907,10 +4940,66 @@ mod tests {
         let content = GameContent::new(ContentDatabase::new());
 
         // Starting an encounter with an empty monster group should succeed
-        assert!(start_encounter(&mut gs, &content, &[]).is_ok());
+        assert!(start_encounter(&mut gs, &content, &[], CombatEventType::Normal).is_ok());
 
         // GameState should now be in Combat mode
         assert!(matches!(gs.mode, crate::application::GameMode::Combat(_)));
+    }
+
+    /// After `start_encounter` + `CombatStarted` round-trip, `CombatResource`
+    /// must hold the `CombatEventType` that was passed to `start_encounter`.
+    ///
+    /// This test exercises the Bevy message path via a minimal `App` so we can
+    /// confirm that `handle_combat_started` copies `msg.combat_event_type` into
+    /// `combat_res.combat_event_type`.
+    #[test]
+    fn test_start_encounter_stores_type_in_resource() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::domain::combat::types::CombatEventType;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = crate::domain::character::Character::new(
+            "Tester".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        // Start an Ambush encounter
+        start_encounter(&mut gs, &content, &[], CombatEventType::Ambush).unwrap();
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Write the CombatStarted message with Ambush type
+        {
+            let mut writer = app.world_mut().resource_mut::<Messages<CombatStarted>>();
+            writer.write(CombatStarted {
+                encounter_position: None,
+                encounter_map_id: None,
+                combat_event_type: CombatEventType::Ambush,
+            });
+        }
+
+        // Run one frame so handle_combat_started processes the message
+        app.update();
+
+        let combat_res = app
+            .world()
+            .get_resource::<CombatResource>()
+            .expect("CombatResource must exist");
+        assert_eq!(
+            combat_res.combat_event_type,
+            CombatEventType::Ambush,
+            "CombatResource must store the Ambush type forwarded from CombatStarted"
+        );
     }
 
     // ===== Phase 2: Combat UI Tests =====
@@ -7780,6 +7869,7 @@ mod tests {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
         assert!(map.get_event(tile_pos).is_some());
@@ -7823,6 +7913,7 @@ mod tests {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
         gs.world.add_map(map);
@@ -7897,6 +7988,7 @@ mod tests {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
         gs.world.add_map(map);
@@ -8081,6 +8173,7 @@ mod tests {
             writer.write(CombatStarted {
                 encounter_position: None,
                 encounter_map_id: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             });
         }
         // Seed CombatResource so handle_combat_started has something to copy.

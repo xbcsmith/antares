@@ -2128,6 +2128,7 @@ impl EventEditorState {
                     } else {
                         None
                     },
+                    combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
                 })
             }
             EventType::Treasure => {
@@ -7670,6 +7671,7 @@ mod tests {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -7843,6 +7845,7 @@ mod tests {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -8054,6 +8057,7 @@ mod tests {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         };
 
         let event2 = MapEvent::Treasure {
@@ -8908,6 +8912,7 @@ mod tests {
             facing: Some(Direction::North),
             proximity_facing: true,
             rotation_speed: Some(90.0),
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(4, 4), &event);

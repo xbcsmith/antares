@@ -4,7 +4,8 @@
 //! Combat type definitions
 //!
 //! This module defines the core types used in combat, including attack types,
-//! special effects, handicap system, and combat status tracking.
+//! special effects, handicap system, combat status tracking, and the
+//! `CombatEventType` that governs how each encounter begins and behaves.
 //!
 //! # Architecture Reference
 //!
@@ -250,6 +251,173 @@ pub enum TurnAction {
     UseItem,
 }
 
+// ===== CombatEventType =====
+
+/// The type of combat event that determines how a battle begins and what
+/// special mechanics apply throughout.
+///
+/// Campaign authors set this in `map.ron` per-encounter or on the
+/// `EncounterTable` for random encounters.  The game engine uses it to
+/// configure `CombatState` before `start_combat()` is called.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::combat::types::CombatEventType;
+///
+/// let t = CombatEventType::Ambush;
+/// assert!(t.gives_monster_advantage());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum CombatEventType {
+    /// Party sees the monster before combat begins. Normal initiative order.
+    /// No special mechanics.
+    #[default]
+    Normal,
+
+    /// Party does not see the monster. Monsters act first in round 1 only
+    /// (MonsterAdvantage handicap for round 1, then Even from round 2).
+    /// The party's actions are suppressed during their first turn of round 1.
+    Ambush,
+
+    /// Party and monster can exchange ranged attacks before closing to melee.
+    /// Combatants with a ranged weapon or ranged-capable attack gain an
+    /// additional "Ranged Attack" action option. Normal initiative order.
+    Ranged,
+
+    /// Monster uses magic as its primary attack vector. The "Cast Spell"
+    /// action button is highlighted and placed first in the action menu.
+    /// Normal initiative order.
+    Magic,
+
+    /// Monster is a boss with special abilities and enhanced stats at runtime.
+    /// Bosses: advance every round, may regenerate, cannot be bribed,
+    /// cannot be surrendered to. Normal initiative order.
+    Boss,
+}
+
+impl CombatEventType {
+    /// Returns `true` if this event type gives monsters the first-round advantage.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::types::CombatEventType;
+    ///
+    /// assert!(CombatEventType::Ambush.gives_monster_advantage());
+    /// assert!(!CombatEventType::Normal.gives_monster_advantage());
+    /// assert!(!CombatEventType::Boss.gives_monster_advantage());
+    /// ```
+    pub fn gives_monster_advantage(&self) -> bool {
+        matches!(self, CombatEventType::Ambush)
+    }
+
+    /// Returns `true` if this event type enables the dedicated Ranged Attack action.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::types::CombatEventType;
+    ///
+    /// assert!(CombatEventType::Ranged.enables_ranged_action());
+    /// assert!(!CombatEventType::Normal.enables_ranged_action());
+    /// ```
+    pub fn enables_ranged_action(&self) -> bool {
+        matches!(self, CombatEventType::Ranged)
+    }
+
+    /// Returns `true` if this event type highlights the Cast Spell action.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::types::CombatEventType;
+    ///
+    /// assert!(CombatEventType::Magic.highlights_magic_action());
+    /// assert!(!CombatEventType::Normal.highlights_magic_action());
+    /// ```
+    pub fn highlights_magic_action(&self) -> bool {
+        matches!(self, CombatEventType::Magic)
+    }
+
+    /// Returns `true` if this event type applies boss mechanics to all monsters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::types::CombatEventType;
+    ///
+    /// assert!(CombatEventType::Boss.applies_boss_mechanics());
+    /// assert!(!CombatEventType::Normal.applies_boss_mechanics());
+    /// ```
+    pub fn applies_boss_mechanics(&self) -> bool {
+        matches!(self, CombatEventType::Boss)
+    }
+
+    /// Human-readable display name used in the Campaign Builder UI.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::types::CombatEventType;
+    ///
+    /// assert_eq!(CombatEventType::Normal.display_name(), "Normal");
+    /// assert_eq!(CombatEventType::Ambush.display_name(), "Ambush");
+    /// ```
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            CombatEventType::Normal => "Normal",
+            CombatEventType::Ambush => "Ambush",
+            CombatEventType::Ranged => "Ranged",
+            CombatEventType::Magic => "Magic",
+            CombatEventType::Boss => "Boss",
+        }
+    }
+
+    /// Short description used in Campaign Builder tooltips.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::types::CombatEventType;
+    ///
+    /// assert!(!CombatEventType::Ambush.description().is_empty());
+    /// ```
+    pub fn description(&self) -> &'static str {
+        match self {
+            CombatEventType::Normal => "Party sees the monster. Standard initiative order.",
+            CombatEventType::Ambush => {
+                "Party is surprised. Monsters act first; party misses round 1."
+            }
+            CombatEventType::Ranged => "Ranged weapons and ranged monster attacks are available.",
+            CombatEventType::Magic => "Monsters use magic. Cast Spell is the primary action.",
+            CombatEventType::Boss => {
+                "Boss fight. Monsters advance, may regenerate, cannot be bribed or surrendered to."
+            }
+        }
+    }
+
+    /// All variants in display order for UI combo-boxes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::types::CombatEventType;
+    ///
+    /// assert_eq!(CombatEventType::all().len(), 5);
+    /// assert_eq!(CombatEventType::all()[0], CombatEventType::Normal);
+    /// ```
+    pub fn all() -> &'static [CombatEventType] {
+        &[
+            CombatEventType::Normal,
+            CombatEventType::Ambush,
+            CombatEventType::Ranged,
+            CombatEventType::Magic,
+            CombatEventType::Boss,
+        ]
+    }
+}
+
 // ===== CombatantId =====
 
 /// Identifier for a combatant in battle
@@ -275,6 +443,87 @@ pub enum CombatantId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ===== CombatEventType tests =====
+
+    #[test]
+    fn test_combat_event_type_default_is_normal() {
+        let t = CombatEventType::default();
+        assert_eq!(t, CombatEventType::Normal);
+    }
+
+    #[test]
+    fn test_combat_event_type_flags() {
+        // gives_monster_advantage
+        assert!(CombatEventType::Ambush.gives_monster_advantage());
+        assert!(!CombatEventType::Normal.gives_monster_advantage());
+        assert!(!CombatEventType::Ranged.gives_monster_advantage());
+        assert!(!CombatEventType::Magic.gives_monster_advantage());
+        assert!(!CombatEventType::Boss.gives_monster_advantage());
+
+        // enables_ranged_action
+        assert!(CombatEventType::Ranged.enables_ranged_action());
+        assert!(!CombatEventType::Normal.enables_ranged_action());
+
+        // highlights_magic_action
+        assert!(CombatEventType::Magic.highlights_magic_action());
+        assert!(!CombatEventType::Normal.highlights_magic_action());
+
+        // applies_boss_mechanics
+        assert!(CombatEventType::Boss.applies_boss_mechanics());
+        assert!(!CombatEventType::Normal.applies_boss_mechanics());
+    }
+
+    #[test]
+    fn test_combat_event_type_display_names() {
+        assert_eq!(CombatEventType::Normal.display_name(), "Normal");
+        assert_eq!(CombatEventType::Ambush.display_name(), "Ambush");
+        assert_eq!(CombatEventType::Ranged.display_name(), "Ranged");
+        assert_eq!(CombatEventType::Magic.display_name(), "Magic");
+        assert_eq!(CombatEventType::Boss.display_name(), "Boss");
+    }
+
+    #[test]
+    fn test_combat_event_type_descriptions_non_empty() {
+        for variant in CombatEventType::all() {
+            assert!(
+                !variant.description().is_empty(),
+                "{:?} description is empty",
+                variant
+            );
+        }
+    }
+
+    #[test]
+    fn test_combat_event_type_all_has_five_variants() {
+        assert_eq!(CombatEventType::all().len(), 5);
+        assert_eq!(CombatEventType::all()[0], CombatEventType::Normal);
+        assert_eq!(CombatEventType::all()[4], CombatEventType::Boss);
+    }
+
+    #[test]
+    fn test_combat_event_type_serde_round_trip() {
+        use ron;
+        for &variant in CombatEventType::all() {
+            let serialized = ron::to_string(&variant).expect("serialize");
+            let deserialized: CombatEventType = ron::from_str(&serialized).expect("deserialize");
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_combat_event_type_default_deserializes_when_missing() {
+        // A struct that wraps CombatEventType with serde(default) — simulates
+        // what MapEvent::Encounter does.
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        struct Wrapper {
+            #[serde(default)]
+            combat_event_type: CombatEventType,
+        }
+        let ron_str = "()"; // no field present
+        let w: Wrapper = ron::from_str(ron_str).expect("deserialize with default");
+        assert_eq!(w.combat_event_type, CombatEventType::Normal);
+    }
 
     #[test]
     fn test_attack_creation() {

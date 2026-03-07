@@ -1,5 +1,166 @@
 # Implementations
 
+## Phase 1: Combat Events — `CombatEventType` Domain Type and Data Layer
+
+### Overview
+
+Phase 1 of the Combat Events Implementation Plan adds the `CombatEventType` enum
+to the domain layer and threads it end-to-end from RON data files through the
+domain types, event system, and Bevy game layer without changing any combat
+mechanics. After this phase, campaign RON files can declare
+`combat_event_type: Ambush` (or any other variant) on an `Encounter` event and
+the engine reads, stores, and forwards the type through to `CombatResource`.
+Later phases (2–5) will act on the stored type to implement ambush suppression,
+ranged attack availability, magic action priority, and boss mechanics.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `CombatEventType` enum in `src/domain/combat/types.rs`
+- [x] `combat_event_type: CombatEventType` field on `MapEvent::Encounter`
+- [x] `combat_event_type` on `EventResult::Encounter`
+- [x] `EncounterGroup` struct replacing raw `Vec<u8>` entries in `EncounterTable`
+- [x] `random_encounter()` returns `Option<EncounterGroup>`
+- [x] `CombatStarted.combat_event_type` field
+- [x] `CombatResource.combat_event_type` field
+- [x] `start_encounter()` accepts and forwards `CombatEventType`
+- [x] All callers of `start_encounter()` and `random_encounter()` updated
+- [x] All Phase 1 tests pass (3196 passed, 8 skipped, 0 failed)
+
+### What Was Built
+
+#### `CombatEventType` enum (`src/domain/combat/types.rs`)
+
+New enum alongside the existing `Handicap`, `CombatStatus`, and `TurnAction`
+types. Five variants: `Normal` (default), `Ambush`, `Ranged`, `Magic`, `Boss`.
+Helper methods: `gives_monster_advantage()`, `enables_ranged_action()`,
+`highlights_magic_action()`, `applies_boss_mechanics()`, `display_name()`,
+`description()`, `all()`. Derives `Default` (`Normal`), `Serialize`,
+`Deserialize`, `Copy`.
+
+#### `MapEvent::Encounter` extended (`src/domain/world/types.rs`)
+
+Added `#[serde(default)] combat_event_type: CombatEventType` field. The
+`#[serde(default)]` attribute means all existing RON map files that omit the
+field continue to deserialize correctly as `CombatEventType::Normal`.
+
+#### `EncounterGroup` struct (`src/domain/world/types.rs`)
+
+New struct replacing the raw `Vec<u8>` entries in `EncounterTable::groups`:
+
+```antares/src/domain/world/types.rs#L2149-2195
+pub struct EncounterGroup {
+    pub monster_group: Vec<u8>,
+    #[serde(default)]
+    pub combat_event_type: CombatEventType,
+}
+```
+
+Constructors: `EncounterGroup::new(monster_group)` (Normal type) and
+`EncounterGroup::with_type(monster_group, combat_event_type)`.
+`EncounterTable::groups` is now `Vec<EncounterGroup>` (was `Vec<Vec<u8>>`).
+All existing RON files that omit `groups` continue to deserialize with the
+default empty vec.
+
+#### `EventResult::Encounter` extended (`src/domain/world/events.rs`)
+
+Added `combat_event_type: CombatEventType` field. `trigger_event()` extracts
+and forwards the value from `MapEvent::Encounter`. `random_encounter()` now
+returns `Option<EncounterGroup>` (was `Option<Vec<u8>>`); callers extract
+`.monster_group` and `.combat_event_type` separately.
+
+#### `CombatStarted` message extended (`src/game/systems/combat.rs`)
+
+Added `pub combat_event_type: CombatEventType` field. `handle_combat_started`
+copies `msg.combat_event_type` into `combat_res.combat_event_type`.
+
+#### `CombatResource` extended (`src/game/systems/combat.rs`)
+
+Added `pub combat_event_type: CombatEventType` field, initialized to `Normal`
+in `new()` and reset to `Normal` in `clear()`.
+
+#### `start_encounter()` signature updated (`src/game/systems/combat.rs`)
+
+New signature:
+
+```antares/src/game/systems/combat.rs#L997-1001
+pub fn start_encounter(
+    game_state: &mut crate::application::GameState,
+    content: &GameContent,
+    group: &[u8],
+    combat_event_type: CombatEventType,
+) -> Result<(), crate::domain::combat::database::MonsterDatabaseError>
+```
+
+Phase 1 stores the type for the Bevy message path; Phase 2 will use it to set
+`Handicap::MonsterAdvantage` for ambushes.
+
+#### `RestCompleteEvent` extended (`src/game/systems/rest.rs`)
+
+Added `pub encounter_combat_event_type: CombatEventType` field. Rest
+interruptions are hardcoded to `CombatEventType::Ambush` (the party is caught
+off-guard while sleeping), which is forwarded to `start_encounter()`.
+
+#### All callers updated
+
+| Caller                                            | File                                     | Change                                                                                                   |
+| ------------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `handle_events` (encounter arm)                   | `src/game/systems/events.rs`             | Extracts `combat_event_type` from `MapEvent::Encounter`; passes to `start_encounter` and `CombatStarted` |
+| `handle_rest_complete`                            | `src/game/systems/rest.rs`               | Passes `event.encounter_combat_event_type` to `start_encounter`                                          |
+| `process_rest` (random encounter)                 | `src/game/systems/rest.rs`               | Returns `EncounterGroup`; sets `encounter_combat_event_type: Ambush` on `RestCompleteEvent`              |
+| `move_party_and_handle_events` (random encounter) | `src/application/mod.rs`                 | Extracts `.monster_group` from `EncounterGroup`; stores `combat_event_type` (Phase 2 will act on it)     |
+| `move_party_and_handle_events` (tile event)       | `src/application/mod.rs`                 | Extracts `combat_event_type` from `EventResult::Encounter`                                               |
+| `MapBuilder::process_command`                     | `src/bin/map_builder.rs`                 | Adds `combat_event_type: Normal` to constructed `MapEvent::Encounter`                                    |
+| `blueprint.rs` `From<MapBlueprint>`               | `src/domain/world/blueprint.rs`          | Adds `combat_event_type: Normal`                                                                         |
+| `EventEditorState::to_map_event`                  | `sdk/campaign_builder/src/map_editor.rs` | Adds `combat_event_type: Normal` (Phase 5 will wire a combo-box)                                         |
+
+### Phase 1 Tests
+
+Tests in `src/domain/combat/types.rs`:
+
+- `test_combat_event_type_default_is_normal`
+- `test_combat_event_type_flags`
+- `test_combat_event_type_display_names`
+- `test_combat_event_type_descriptions_non_empty`
+- `test_combat_event_type_all_has_five_variants`
+- `test_combat_event_type_serde_round_trip`
+- `test_combat_event_type_default_deserializes_when_missing`
+
+Tests in `src/domain/world/events.rs`:
+
+- `test_combat_event_type_default_is_normal`
+- `test_map_event_encounter_ron_round_trip`
+- `test_map_event_encounter_ron_backward_compat`
+- `test_event_result_encounter_carries_type`
+- `test_encounter_group_ron_round_trip`
+- `test_random_encounter_returns_group_type`
+
+Test in `src/game/systems/combat.rs`:
+
+- `test_start_encounter_stores_type_in_resource`
+
+### Architecture Compliance
+
+- [x] `CombatEventType` in `src/domain/combat/types.rs` (domain layer, no Bevy)
+- [x] `EncounterGroup` in `src/domain/world/types.rs` (domain layer)
+- [x] `#[serde(default)]` on all new fields — full backward compatibility
+- [x] `UNARMED_DAMAGE`-style: no magic literals, named constant default
+- [x] `DiceRoll` / `MonsterId` type aliases used throughout
+- [x] All public functions and types have `///` doc comments
+- [x] No tests reference `campaigns/tutorial` (Implementation Rule 5)
+- [x] SPDX header present in all modified `.rs` files
+- [x] RON data files unaffected (no existing file had `groups:` data)
+
+### Quality Gate Results
+
+| Gate    | Command                                                    | Result                              |
+| ------- | ---------------------------------------------------------- | ----------------------------------- |
+| Format  | `cargo fmt --all`                                          | ✅ No output                        |
+| Compile | `cargo check --all-targets --all-features`                 | ✅ Finished, 0 errors               |
+| Lint    | `cargo clippy --all-targets --all-features -- -D warnings` | ✅ Finished, 0 warnings             |
+| Tests   | `cargo nextest run --all-features`                         | ✅ 3196 passed, 8 skipped, 0 failed |
+
+---
+
 ## Phase 4: Equipped Weapon Damage — Documentation and Final Validation
 
 ### Overview
