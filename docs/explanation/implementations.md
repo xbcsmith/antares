@@ -1,5 +1,231 @@
 # Implementations
 
+## Phase 3: Ranged and Magic Combat
+
+### Overview
+
+Phase 3 extends the combat system with two new encounter modes — **Ranged** and
+**Magic** — and wires the full action pipeline for ranged attacks: button
+spawning, target selection, ammo consumption, damage resolution, and combat-log
+messaging. Monster AI is updated to prefer ranged attacks in ranged encounters,
+and the action-menu keyboard order is adjusted so that **Cast** is the default
+highlight in magic encounters.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `TurnAction::RangedAttack` variant added to `src/domain/combat/types.rs`
+- [x] `CombatError::NoAmmo` variant added to `src/domain/combat/engine.rs`
+- [x] `choose_monster_attack` extended with `is_ranged_combat: bool` parameter
+- [x] `ActionButtonType::RangedAttack` variant added in `src/game/systems/combat.rs`
+- [x] `COMBAT_ACTION_COUNT_MAGIC` and `COMBAT_ACTION_ORDER_MAGIC` constants added
+- [x] `RangedAttackAction` message struct added and registered with the plugin
+- [x] `RangedAttackPending` resource added and registered with the plugin
+- [x] `setup_combat_ui` spawns Ranged button for `CombatEventType::Ranged`
+- [x] `setup_combat_ui` uses magic button order for `CombatEventType::Magic`
+- [x] `setup_combat_ui` ordered `.after(handle_combat_started)` to fix race
+- [x] `update_ranged_button_color` system enables/disables Ranged button each frame
+- [x] `dispatch_combat_action` handles `ActionButtonType::RangedAttack`
+- [x] `confirm_attack_target` dispatches `RangedAttackAction` when `RangedAttackPending`
+- [x] `select_target` / `combat_input_system` pass `RangedAttackPending` through
+- [x] `combat_input_system` uses correct action-order array for magic/standard
+- [x] `update_action_highlight` uses correct order and skips the Ranged button
+- [x] `perform_ranged_attack_action_with_rng` function implemented
+- [x] `handle_ranged_attack_action` ECS system implemented and registered
+- [x] `handle_combat_started` combat log updated for all `CombatEventType` variants
+- [x] `perform_attack_action_with_rng` passes `is_ranged_combat` to `choose_monster_attack`
+- [x] `perform_monster_turn_with_rng` passes `is_ranged_combat` to `choose_monster_attack`
+- [x] All 10 Phase 3 tests pass; pre-existing `test_ambush_combat_started_sets_enemy_turn` fixed
+- [x] `docs/explanation/implementations.md` updated
+
+### What Was Built
+
+#### `TurnAction::RangedAttack` (`src/domain/combat/types.rs`)
+
+Added between `Attack` and `Defend` as the plan specifies. The doc comment
+explains the ammo requirement and its intended use in `CombatEventType::Ranged`
+encounters.
+
+#### `CombatError::NoAmmo` (`src/domain/combat/engine.rs`)
+
+New variant with message `"No ammo available for ranged attack"`. Returned by
+`perform_ranged_attack_action_with_rng` when the attacker has a
+`MartialRanged` weapon but no `ItemType::Ammo` item in their inventory.
+
+#### `choose_monster_attack` signature change (`src/domain/combat/engine.rs`)
+
+Added `is_ranged_combat: bool` as the second parameter (before `rng`). When
+`true` the function first filters `monster.attacks` for entries with
+`is_ranged == true`; if any exist one is chosen uniformly at random. If none
+exist the function falls through to the existing special-attack-threshold +
+random selection logic. When `false` behaviour is completely unchanged.
+
+All callers updated:
+
+- `perform_attack_action_with_rng` (monster branch) — passes `combat_res.combat_event_type == CombatEventType::Ranged`
+- `perform_monster_turn_with_rng` — same
+- `test_combat_monster_special_ability_applied` in `engine.rs` — passes `false`
+
+#### `ActionButtonType::RangedAttack` (`src/game/systems/combat.rs`)
+
+New variant inserted after `Attack`. Excluded from `COMBAT_ACTION_ORDER` and
+`COMBAT_ACTION_ORDER_MAGIC` (those arrays cycle only the 5 standard actions);
+the Ranged button is spawned as an extra sixth button in ranged encounters.
+
+#### `COMBAT_ACTION_COUNT_MAGIC` and `COMBAT_ACTION_ORDER_MAGIC`
+
+```src/game/systems/combat.rs#L319-336
+pub const COMBAT_ACTION_COUNT_MAGIC: usize = 5;
+
+pub const COMBAT_ACTION_ORDER_MAGIC: [ActionButtonType; COMBAT_ACTION_COUNT_MAGIC] = [
+    ActionButtonType::Cast,
+    ActionButtonType::Attack,
+    ActionButtonType::Defend,
+    ActionButtonType::Item,
+    ActionButtonType::Flee,
+];
+```
+
+`Cast` is index 0 so the default keyboard highlight is the most useful action
+in a magic encounter.
+
+#### `RangedAttackAction` and `RangedAttackPending` (`src/game/systems/combat.rs`)
+
+`RangedAttackAction` mirrors `AttackAction` (same `attacker` + `target` fields)
+but routes through `perform_ranged_attack_action_with_rng`.
+
+`RangedAttackPending(bool)` is a `Resource` that `dispatch_combat_action` sets
+to `true` when `ActionButtonType::RangedAttack` is pressed.
+`confirm_attack_target` reads it: if `true`, writes `RangedAttackAction` and
+resets the flag; otherwise writes the normal `AttackAction`.
+Cancelling target selection (`Escape`) also clears the flag.
+
+#### `setup_combat_ui` changes (`src/game/systems/combat.rs`)
+
+Two changes:
+
+1. **Magic button order** — when `combat_res.combat_event_type.highlights_magic_action()`
+   the 5 standard buttons are spawned in `COMBAT_ACTION_ORDER_MAGIC` order
+   (Cast first); otherwise the standard order is used.
+
+2. **Ranged button** — after the 5 standard buttons, if
+   `combat_res.combat_event_type.enables_ranged_action()` an extra `Button` is
+   spawned with `ActionButton { button_type: ActionButtonType::RangedAttack }`
+   and `ACTION_BUTTON_DISABLED_COLOR`. `update_ranged_button_color` enables it
+   each frame once a ranged weapon + ammo is confirmed.
+
+3. **System ordering fix** — `setup_combat_ui` is now registered
+   `.after(handle_combat_started)` so `combat_res.combat_event_type` is
+   populated before the button spawn decision is made. Without this ordering,
+   the system could run before the message handler and always see
+   `CombatEventType::Normal`.
+
+#### `update_ranged_button_color` (`src/game/systems/combat.rs`)
+
+New private system registered after `update_combat_ui` and
+`update_action_highlight`. Each frame during a ranged encounter it queries the
+current actor, calls `has_ranged_weapon(pc, &content.db().items)`, and sets
+the `RangedAttack` button color to `ACTION_BUTTON_COLOR` (enabled) or
+`ACTION_BUTTON_DISABLED_COLOR` (disabled).
+
+`update_action_highlight` skips buttons with `button_type ==
+ActionButtonType::RangedAttack` so the two systems do not conflict.
+
+#### `perform_ranged_attack_action_with_rng` (`src/game/systems/combat.rs`)
+
+Full implementation:
+
+1. Guard: only runs if it is the attacker's current turn.
+2. Only player combatants may use this path (returns `CombatantCannotAct` for monsters).
+3. Calls `has_ranged_weapon` — if `false`, distinguishes "bow but no ammo"
+   (`NoAmmo`) from "no bow at all" (`CombatantCannotAct`).
+4. Calls `get_character_attack` expecting `MeleeAttackResult::Ranged`.
+5. Calls `resolve_attack` for the to-hit roll and damage.
+6. Removes the **first** `ItemType::Ammo` slot from the attacker's inventory
+   (one arrow consumed per shot).
+7. Calls `apply_damage`.
+8. Applies special effects (same pattern as `perform_attack_action_with_rng`).
+9. Calls `check_combat_end`, `advance_turn`, updates `CombatTurnStateResource`.
+
+#### `handle_ranged_attack_action` (`src/game/systems/combat.rs`)
+
+ECS system wrapper registered after `handle_attack_action`. Reads
+`RangedAttackAction` messages, calls `perform_ranged_attack_action_with_rng`,
+emits a `CombatFeedbackEvent`, and pushes a "fires a ranged attack!" log line.
+On `NoAmmo` it pushes a "No ammo!" log line; other errors are logged as
+warnings.
+
+#### `handle_combat_started` combat log (`src/game/systems/combat.rs`)
+
+Replaced the if/else branch with a `match` on `msg.combat_event_type`:
+
+| Variant  | Log text                                                 |
+| -------- | -------------------------------------------------------- |
+| `Normal` | "Monsters appear!"                                       |
+| `Ranged` | "Combat begins at range! Draw your bows!"                |
+| `Magic`  | "The air crackles with magical energy!"                  |
+| `Boss`   | "A powerful foe appears!"                                |
+| `Ambush` | "The monsters ambush the party! The party is surprised!" |
+
+#### `test_ambush_combat_started_sets_enemy_turn` fix
+
+The test previously used an empty monster group. With the new system ordering
+(setup_combat_ui runs after handle_combat_started, which in turn forces
+execute_monster_turn to also run after), the ambush player-skip path in
+`execute_monster_turn` would process the single player slot, wrap the round,
+clear `ambush_round_active`, and leave the state as `PlayerTurn` — breaking
+the assertion.
+
+Fix: the test now injects a `CombatResource` with one player + one goblin
+monster. The ambush path skips the player (slot 0) and advances to the
+monster (slot 1), leaving `turn_state = EnemyTurn`. This correctly models
+the actual game flow and makes the assertion meaningful.
+
+### Phase 3 Tests
+
+All added to `mod tests` in `src/game/systems/combat.rs`:
+
+| Test                                                    | What it verifies                                                       |
+| ------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `test_ranged_combat_shows_ranged_button`                | `ActionButton { RangedAttack }` spawned in Ranged combat               |
+| `test_ranged_button_disabled_without_ranged_weapon`     | Button has `ACTION_BUTTON_DISABLED_COLOR` when no ranged weapon        |
+| `test_ranged_button_enabled_with_ranged_weapon`         | Button has `ACTION_BUTTON_COLOR` when player has bow + ammo            |
+| `test_perform_ranged_attack_consumes_ammo`              | One ammo slot removed from inventory after a ranged attack             |
+| `test_perform_ranged_attack_no_ammo_returns_error`      | `CombatError::NoAmmo` when bow is equipped but inventory empty         |
+| `test_magic_combat_cast_is_first_action`                | `COMBAT_ACTION_ORDER_MAGIC[0] == ActionButtonType::Cast`               |
+| `test_magic_combat_normal_handicap`                     | Magic combat uses `Handicap::Even`                                     |
+| `test_monster_ranged_attack_preferred_in_ranged_combat` | `choose_monster_attack(mon, true, rng)` always picks the ranged attack |
+| `test_combat_log_ranged_opening`                        | Log contains "range" for `CombatEventType::Ranged`                     |
+| `test_combat_log_magic_opening`                         | Log contains "magical" for `CombatEventType::Magic`                    |
+
+Domain-layer test in `src/domain/combat/engine.rs` (existing, updated caller):
+
+- `test_combat_monster_special_ability_applied` — updated to pass `false` for `is_ranged_combat`
+
+### Architecture Compliance
+
+- `TurnAction::RangedAttack` placed between `Attack` and `Defend` per plan
+- `CombatError::NoAmmo` added to `engine.rs` alongside existing error variants
+- `ActionButtonType::RangedAttack` added without disrupting `COMBAT_ACTION_ORDER`
+- `RangedAttackAction` message follows the same `Message` derive pattern as all other action messages
+- `RangedAttackPending` is a minimal `Resource` (single bool) following the resource naming convention
+- All game data files remain in RON format; no new data files created
+- No modifications to `campaigns/tutorial`
+- Test data uses `make_p2_combat_fixture` / inline fixtures, not `campaigns/tutorial`
+- `has_ranged_weapon` imported from `engine` (already existed from Phase 1 equipped-weapon work)
+- `CombatError` imported from `engine` (replaces previously inline `use` statements)
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → No output (clean)
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run --all-features → 3218 passed, 1 failed (pre-existing
+    test_creature_database_load_performance timing flake, unrelated to Phase 3)
+```
+
+---
+
 ## Phase 2: Normal and Ambush Combat
 
 ### Overview

@@ -239,8 +239,16 @@ pub enum CombatStatus {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TurnAction {
-    /// Physical or ranged attack
+    /// Physical melee attack
     Attack,
+    /// Ranged attack using a bow or other ranged weapon with ammo.
+    ///
+    /// Requires the acting character to have a [`WeaponClassification::MartialRanged`]
+    /// weapon equipped **and** at least one compatible ammo item in their
+    /// inventory.  Consumes one ammo item on use.  Only available during
+    /// `CombatEventType::Ranged` encounters or whenever the character has a
+    /// ranged weapon equipped.
+    RangedAttack,
     /// Defend (temporary AC/defense bonus)
     Defend,
     /// Attempt to flee the encounter

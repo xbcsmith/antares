@@ -104,6 +104,9 @@ pub enum CombatError {
 
     #[error("Invalid target {0:?}")]
     InvalidTarget(CombatantId),
+
+    #[error("No ammo available for ranged attack")]
+    NoAmmo,
 }
 
 // ===== Combatant =====
@@ -682,9 +685,41 @@ pub fn apply_damage(
 /// If the threshold triggers and the monster has attacks that include a special
 /// effect, one of those special attacks will be returned. Otherwise a random
 /// attack from the monster's attack list is returned.
-pub fn choose_monster_attack<R: Rng>(monster: &Monster, rng: &mut R) -> Option<Attack> {
+/// Choose an attack for a monster to use on its turn.
+///
+/// When `is_ranged_combat` is `true` the function first tries to find an
+/// attack that has `is_ranged == true`; if the monster has none it falls back
+/// to the normal selection logic.  When `is_ranged_combat` is `false` the
+/// original behaviour is preserved unchanged.
+///
+/// # Arguments
+///
+/// * `monster` - The monster that is about to act.
+/// * `is_ranged_combat` - Whether the current encounter is a ranged combat
+///   (`CombatEventType::Ranged`).
+/// * `rng` - Random number generator used for probabilistic selection.
+///
+/// # Returns
+///
+/// `Some(Attack)` if the monster has at least one attack, `None` if its
+/// attack list is empty.
+pub fn choose_monster_attack<R: Rng>(
+    monster: &Monster,
+    is_ranged_combat: bool,
+    rng: &mut R,
+) -> Option<Attack> {
     if monster.attacks.is_empty() {
         return None;
+    }
+
+    // In ranged combat, prefer attacks flagged as ranged.
+    if is_ranged_combat {
+        let ranged_attacks: Vec<&Attack> = monster.attacks.iter().filter(|a| a.is_ranged).collect();
+        if !ranged_attacks.is_empty() {
+            let idx = rng.random_range(0..ranged_attacks.len());
+            return Some(ranged_attacks[idx].clone());
+        }
+        // Fall through to normal selection if no ranged attacks exist.
     }
 
     // Try to use a special attack if threshold triggers
@@ -1867,7 +1902,7 @@ mod tests {
         monster.special_attack_threshold = 100; // Always trigger special attack
 
         let mut rng = rand::rng();
-        let chosen = choose_monster_attack(&monster, &mut rng);
+        let chosen = choose_monster_attack(&monster, false, &mut rng);
         assert!(chosen.is_some());
         assert!(chosen.unwrap().special_effect.is_some());
     }

@@ -35,7 +35,7 @@ Supporting custom fonts requires updates to the campaign config to allow specify
 
 Write a plan with a phased approach to implementing custom fonts. THINK HARD and follow the rules in @PLAN.md
 
-[custom fonts](./custom_fonts_plan.md)
+✅ PLAN WRITTEN - [custom fonts](./custom_fonts_plan.md)
 
 ### Consumable Items
 
@@ -50,7 +50,7 @@ Out-of-combat item use is not implemented. The inventory UI (GameMode::Menu / Ga
 
 Write a plan with a phased approach to implementing consumable items out-of-combat. THINK HARD and follow the rules in @PLAN.md
 
-[consumables outside combat](./consumables_outside_combat_plan.md)
+✅ PLAN WRITTEN - [consumables outside combat](./consumables_outside_combat_plan.md)
 
 ### Consumable Duration and Timed Resistance Effects
 
@@ -125,7 +125,7 @@ Add a `Duration (minutes)` `DragValue` (0 = permanent) to the Consumable Propert
 
 Write a plan with a phased approach to implementing consumable effects. THINK HARD and follow the rules in @PLAN.md
 
-[consumable duration effects](./consumable_duration_effects_plan.md)
+✅ PLAN WRITTEN - [consumable duration effects](./consumable_duration_effects_plan.md)
 
 ### ArmorClassification Expansion
 
