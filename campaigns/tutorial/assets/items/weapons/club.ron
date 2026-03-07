@@ -1,0 +1,33 @@
+(
+    id: 9006,
+    name: "ItemMeshClub",
+    meshes: [
+        (
+            name: Some("club"),
+            vertices: [(0.0000, 0.0000, 0.3750), (0.0750, 0.0000, 0.1500), (0.0750, 0.0000, -0.1500), (0.0000, 0.0000, -0.3750), (-0.0750, 0.0000, -0.1500), (-0.0750, 0.0000, 0.1500)],
+            indices: [0, 1, 5, 1, 2, 5, 2, 4, 5, 2, 3, 4],
+            normals: Some([(0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000)]),
+            uvs: None,
+            color: (0.55, 0.35, 0.15, 1.00),
+            lod_levels: None,
+            lod_distances: None,
+            material: Some((
+                base_color: (0.55, 0.35, 0.15, 1.00),
+                metallic: 0.30,
+                roughness: 0.50,
+                emissive: None,
+                alpha_mode: Opaque,
+            )),
+            texture_path: None,
+        ),
+    ],
+    mesh_transforms: [
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+    ],
+    scale: 0.3500,
+    color_tint: None,
+)

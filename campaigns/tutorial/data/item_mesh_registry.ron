@@ -1,0 +1,137 @@
+[
+    /*[0]*/ (
+        id: 9001,
+        name: "ItemMeshSword",
+        filepath: "assets/items/weapons/sword.ron",
+    ),
+    /*[1]*/ (
+        id: 9002,
+        name: "ItemMeshDagger",
+        filepath: "assets/items/weapons/dagger.ron",
+    ),
+    /*[2]*/ (
+        id: 9003,
+        name: "ItemMeshShortSword",
+        filepath: "assets/items/weapons/short_sword.ron",
+    ),
+    /*[3]*/ (
+        id: 9004,
+        name: "ItemMeshLongSword",
+        filepath: "assets/items/weapons/long_sword.ron",
+    ),
+    /*[4]*/ (
+        id: 9005,
+        name: "ItemMeshGreatSword",
+        filepath: "assets/items/weapons/great_sword.ron",
+    ),
+    /*[5]*/ (
+        id: 9006,
+        name: "ItemMeshClub",
+        filepath: "assets/items/weapons/club.ron",
+    ),
+    /*[6]*/ (
+        id: 9007,
+        name: "ItemMeshStaff",
+        filepath: "assets/items/weapons/staff.ron",
+    ),
+    /*[7]*/ (
+        id: 9008,
+        name: "ItemMeshBow",
+        filepath: "assets/items/weapons/bow.ron",
+    ),
+    /*[8]*/ (
+        id: 9101,
+        name: "ItemMeshLeatherArmor",
+        filepath: "assets/items/armor/leather_armor.ron",
+    ),
+    /*[9]*/ (
+        id: 9102,
+        name: "ItemMeshChainMail",
+        filepath: "assets/items/armor/chain_mail.ron",
+    ),
+    /*[10]*/ (
+        id: 9103,
+        name: "ItemMeshPlateMail",
+        filepath: "assets/items/armor/plate_mail.ron",
+    ),
+    /*[11]*/ (
+        id: 9104,
+        name: "ItemMeshShield",
+        filepath: "assets/items/armor/shield.ron",
+    ),
+    /*[12]*/ (
+        id: 9105,
+        name: "ItemMeshHelmet",
+        filepath: "assets/items/armor/helmet.ron",
+    ),
+    /*[13]*/ (
+        id: 9106,
+        name: "ItemMeshBoots",
+        filepath: "assets/items/armor/boots.ron",
+    ),
+    /*[14]*/ (
+        id: 9201,
+        name: "ItemMeshHealthPotion",
+        filepath: "assets/items/consumables/health_potion.ron",
+    ),
+    /*[15]*/ (
+        id: 9202,
+        name: "ItemMeshManaPotion",
+        filepath: "assets/items/consumables/mana_potion.ron",
+    ),
+    /*[16]*/ (
+        id: 9203,
+        name: "ItemMeshCurePotion",
+        filepath: "assets/items/consumables/cure_potion.ron",
+    ),
+    /*[17]*/ (
+        id: 9204,
+        name: "ItemMeshAttributePotion",
+        filepath: "assets/items/consumables/attribute_potion.ron",
+    ),
+    /*[18]*/ (
+        id: 9301,
+        name: "ItemMeshRing",
+        filepath: "assets/items/accessories/ring.ron",
+    ),
+    /*[19]*/ (
+        id: 9302,
+        name: "ItemMeshAmulet",
+        filepath: "assets/items/accessories/amulet.ron",
+    ),
+    /*[20]*/ (
+        id: 9303,
+        name: "ItemMeshBelt",
+        filepath: "assets/items/accessories/belt.ron",
+    ),
+    /*[21]*/ (
+        id: 9304,
+        name: "ItemMeshCloak",
+        filepath: "assets/items/accessories/cloak.ron",
+    ),
+    /*[22]*/ (
+        id: 9401,
+        name: "ItemMeshArrow",
+        filepath: "assets/items/ammo/arrow.ron",
+    ),
+    /*[23]*/ (
+        id: 9402,
+        name: "ItemMeshBolt",
+        filepath: "assets/items/ammo/bolt.ron",
+    ),
+    /*[24]*/ (
+        id: 9403,
+        name: "ItemMeshStone",
+        filepath: "assets/items/ammo/stone.ron",
+    ),
+    /*[25]*/ (
+        id: 9501,
+        name: "ItemMeshQuestScroll",
+        filepath: "assets/items/quest/quest_scroll.ron",
+    ),
+    /*[26]*/ (
+        id: 9502,
+        name: "ItemMeshKeyItem",
+        filepath: "assets/items/quest/key_item.ron",
+    ),
+]

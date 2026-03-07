@@ -1,0 +1,33 @@
+(
+    id: 9401,
+    name: "ItemMeshArrow",
+    meshes: [
+        (
+            name: Some("arrow"),
+            vertices: [(0.0000, 0.0000, 0.2200), (0.0250, 0.0000, 0.0000), (0.0000, 0.0000, -0.2200), (-0.0250, 0.0000, 0.0000)],
+            indices: [0, 1, 3, 1, 2, 3],
+            normals: Some([(0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000)]),
+            uvs: None,
+            color: (0.90, 0.88, 0.70, 1.00),
+            lod_levels: None,
+            lod_distances: None,
+            material: Some((
+                base_color: (0.90, 0.88, 0.70, 1.00),
+                metallic: 0.10,
+                roughness: 0.60,
+                emissive: None,
+                alpha_mode: Opaque,
+            )),
+            texture_path: None,
+        ),
+    ],
+    mesh_transforms: [
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+    ],
+    scale: 0.1925,
+    color_tint: None,
+)

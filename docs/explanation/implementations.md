@@ -376,6 +376,207 @@ so existing tests that do not register the message type continue to pass.
 
 ---
 
+## Items Procedural Meshes — Phase 3: Item Mesh RON Asset Files
+
+### Overview
+
+Phase 3 creates the data layer that backs Phase 2's runtime mesh generation:
+RON asset files for every dropped-item category, a `CreatureReference` registry
+so the campaign loader can discover them, a new `ItemMeshDatabase` type
+(thin `CreatureDatabase` wrapper), an extended `CampaignLoader` that loads
+the registry (opt-in; missing file is silently skipped), a
+`ItemDatabase::link_mesh_overrides` validation hook, and the Python generator
+script that keeps the asset files regenerable from a single authoritative
+manifest.
+
+### Phase 3 Deliverables
+
+| Deliverable                              | Path                                                            |
+| ---------------------------------------- | --------------------------------------------------------------- |
+| Generator script                         | `examples/generate_item_meshes.py`                              |
+| Tutorial campaign item mesh RON files    | `campaigns/tutorial/assets/items/` (27 files)                   |
+| Tutorial campaign item mesh registry     | `campaigns/tutorial/data/item_mesh_registry.ron`                |
+| Test-campaign minimal RON fixtures       | `data/test_campaign/assets/items/sword.ron`, `potion.ron`       |
+| Test-campaign item mesh registry         | `data/test_campaign/data/item_mesh_registry.ron`                |
+| `ItemMeshDatabase` type                  | `src/domain/items/database.rs`                                  |
+| `ItemDatabase::link_mesh_overrides`      | `src/domain/items/database.rs`                                  |
+| `ItemDatabaseError::UnknownMeshOverride` | `src/domain/items/database.rs`                                  |
+| `GameData::item_meshes` field            | `src/domain/campaign_loader.rs`                                 |
+| `CampaignLoader::load_item_meshes`       | `src/domain/campaign_loader.rs`                                 |
+| Integration tests                        | `src/domain/campaign_loader.rs`, `src/domain/items/database.rs` |
+
+### What was built
+
+#### `examples/generate_item_meshes.py`
+
+Developer convenience tool that generates one `CreatureDefinition` RON file per
+item mesh type. The script mirrors all color and scale constants from
+`src/domain/visual/item_mesh.rs` so the generated geometry exactly matches what
+`ItemMeshDescriptor::build_mesh` would produce at runtime.
+
+- `--output-dir <path>` writes the full 27-file manifest to a custom directory
+  (default: `campaigns/tutorial/assets/items/`).
+- `--test-fixtures` writes only the two minimal test fixtures
+  (`sword.ron`, `potion.ron`) to `data/test_campaign/assets/items/`.
+- Geometry helpers: `blade_mesh`, `blunt_mesh`, `staff_mesh`, `bow_mesh`,
+  `armor_mesh`, `helmet_mesh`, `shield_mesh`, `boots_mesh`, `ring_mesh`,
+  `belt_mesh`, `cloak_mesh`, `potion_mesh`, `scroll_mesh`, `ammo_mesh`,
+  `quest_mesh` — each produces a flat XZ-plane silhouette with correct normals
+  and an optional `MaterialDefinition` (metallic / roughness / emissive).
+- `MANIFEST` table: 27 items covering weapon (9001–9008), armor (9101–9106),
+  consumable (9201–9204), accessory (9301–9304), ammo (9401–9403), and quest
+  (9501–9502) categories. IDs start at 9000 to avoid collision with creature /
+  NPC / template IDs.
+- `TEST_MANIFEST`: 2-item subset (`sword` id=9001, `potion` id=9201) for stable
+  integration test fixtures.
+
+#### Item mesh RON asset files (`campaigns/tutorial/assets/items/`)
+
+27 `CreatureDefinition` RON files organised into six sub-directories:
+
+```
+weapons/    sword, dagger, short_sword, long_sword, great_sword, club, staff, bow
+armor/      leather_armor, chain_mail, plate_mail, shield, helmet, boots
+consumables/ health_potion, mana_potion, cure_potion, attribute_potion
+accessories/ ring, amulet, belt, cloak
+ammo/        arrow, bolt, stone
+quest/       quest_scroll (2 meshes), key_item
+```
+
+Each file is a valid `CreatureDefinition` with:
+
+- `id` in the 9000+ range matching the registry entry.
+- One (or two for quest_scroll) flat-lying `MeshDefinition` meshes with
+  per-vertex `normals: Some([...])` pointing upward.
+- A `MaterialDefinition` with correct metallic / roughness / emissive values.
+- An identity `MeshTransform` per mesh.
+- `color_tint: None`.
+
+#### `campaigns/tutorial/data/item_mesh_registry.ron`
+
+`Vec<CreatureReference>` listing all 27 tutorial campaign item meshes. The
+registry format is identical to `data/creatures.ron`; `CampaignLoader` reuses
+`CreatureDatabase::load_from_registry` internally.
+
+#### Test-campaign fixtures
+
+`data/test_campaign/assets/items/sword.ron` (id=9001) and
+`data/test_campaign/assets/items/potion.ron` (id=9201) are minimal stable
+fixtures committed to the repository. They are referenced by
+`data/test_campaign/data/item_mesh_registry.ron` and used exclusively by
+integration tests — never by the live tutorial campaign.
+
+#### `ItemMeshDatabase` (`src/domain/items/database.rs`)
+
+Thin `#[derive(Debug, Clone, Default)]` wrapper around `CreatureDatabase`:
+
+```src/domain/items/database.rs#L447-460
+pub struct ItemMeshDatabase {
+    inner: CreatureDatabase,
+}
+```
+
+Public API:
+
+| Method                                             | Description                                         |
+| -------------------------------------------------- | --------------------------------------------------- |
+| `new()` / `default()`                              | Empty database                                      |
+| `load_from_registry(registry_path, campaign_root)` | Delegates to `CreatureDatabase::load_from_registry` |
+| `as_creature_database()`                           | Returns `&CreatureDatabase` for direct queries      |
+| `is_empty()`                                       | True if no entries                                  |
+| `count()`                                          | Number of mesh entries                              |
+| `has_mesh(id: u32)`                                | True if creature ID present                         |
+| `validate()`                                       | Validates all mesh `CreatureDefinition`s            |
+
+Re-exported from `src/domain/items/mod.rs` as `antares::domain::items::ItemMeshDatabase`.
+
+#### `ItemDatabase::link_mesh_overrides` (`src/domain/items/database.rs`)
+
+Forward-compatibility validation hook:
+
+```src/domain/items/database.rs#L435-442
+pub fn link_mesh_overrides(
+    &self,
+    _registry: &ItemMeshDatabase,
+) -> Result<(), ItemDatabaseError> {
+```
+
+Walks all items that carry a `mesh_descriptor_override`, calls
+`ItemMeshDescriptor::from_item` + `CreatureDefinition::validate` to confirm
+the override does not break mesh generation. Full registry cross-linking
+(verifying that a named creature ID exists in `ItemMeshDatabase`) is reserved
+for a future extension of `ItemMeshDescriptorOverride` with an explicit
+`creature_id` field.
+
+#### `GameData::item_meshes` and `CampaignLoader::load_item_meshes`
+
+`GameData` now carries:
+
+```src/domain/campaign_loader.rs#L90-95
+pub struct GameData {
+    pub creatures: CreatureDatabase,
+    pub item_meshes: ItemMeshDatabase,
+}
+```
+
+`CampaignLoader::load_game_data` calls the new `load_item_meshes` helper which:
+
+1. Looks for `data/item_mesh_registry.ron` inside the campaign directory.
+2. If absent — returns `ItemMeshDatabase::new()` silently (opt-in per campaign).
+3. If present — calls `ItemMeshDatabase::load_from_registry`, propagating any
+   read / parse errors as `CampaignError::ReadError`.
+
+`GameData::validate` also calls `item_meshes.validate()` so malformed mesh RON
+files are caught at load time.
+
+Note: `GameData` no longer derives `Serialize`/`Deserialize` because
+`ItemMeshDatabase` wraps `CreatureDatabase` (which does) but the wrapper itself
+is `Debug + Clone` only — sufficient for all current usages.
+
+### Architecture compliance
+
+- [ ] `ItemMeshDatabase` IDs are in the 9000+ range — no collision with
+      creature IDs (1–50), NPC IDs (1000+), template IDs (2000+), variant IDs (3000+).
+- [ ] RON format used for all asset and registry files — no JSON or YAML.
+- [ ] File names follow lowercase + underscore convention (`item_mesh_registry.ron`,
+      `health_potion.ron`, etc.).
+- [ ] SPDX headers present in `generate_item_meshes.py`.
+- [ ] All test data in `data/test_campaign/` — no references to
+      `campaigns/tutorial` from tests.
+- [ ] `CampaignLoader` opt-in: missing registry file is not an error.
+- [ ] `ItemMeshDatabase` does not replace `CreatureDatabase`; it is an additive
+      type that sits alongside it.
+
+### Test coverage
+
+**`src/domain/items/database.rs`** — 11 new unit tests:
+
+| Test                                                       | What it verifies                                        |
+| ---------------------------------------------------------- | ------------------------------------------------------- |
+| `test_item_mesh_database_new_is_empty`                     | `new()` starts empty                                    |
+| `test_item_mesh_database_default_is_empty`                 | `default()` == `new()`                                  |
+| `test_item_mesh_database_has_mesh_absent`                  | `has_mesh` returns false for absent IDs                 |
+| `test_item_mesh_database_validate_empty`                   | `validate()` succeeds on empty DB                       |
+| `test_item_mesh_database_as_creature_database`             | Inner DB accessible                                     |
+| `test_item_mesh_database_load_from_registry_missing_file`  | Missing file → error                                    |
+| `test_item_mesh_database_load_from_registry_test_campaign` | Loads ≥ 2 entries from fixture; ids 9001 & 9201 present |
+| `test_item_mesh_database_validate_test_campaign`           | Loaded fixture validates without error                  |
+| `test_link_mesh_overrides_empty_item_db`                   | Empty `ItemDatabase` → ok                               |
+| `test_link_mesh_overrides_no_override_items_skipped`       | Items without override → ok                             |
+| `test_link_mesh_overrides_valid_override_passes`           | Valid override passes mesh validation                   |
+
+**`src/domain/campaign_loader.rs`** — 2 new integration tests:
+
+| Test                                            | What it verifies                                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `test_campaign_loader_loads_item_mesh_registry` | Full `load_game_data` against `data/test_campaign` populates `item_meshes` with ≥ 2 entries |
+| `test_item_mesh_registry_missing_is_ok`         | Missing registry file returns empty `ItemMeshDatabase` without error                        |
+
+All tests reference `data/test_campaign` — never `campaigns/tutorial`
+(Implementation Rule 5 compliant).
+
+---
+
 ## Procedural Meshes Direction Control
 
 **Plan**: [`procedural_meshes_direction_control_implementation_plan.md`](procedural_meshes_direction_control_implementation_plan.md)

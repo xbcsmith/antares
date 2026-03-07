@@ -1,0 +1,33 @@
+(
+    id: 9105,
+    name: "ItemMeshHelmet",
+    meshes: [
+        (
+            name: Some("helmet"),
+            vertices: [(0.0000, 0.0000, 0.2200), (-0.2092, 0.0000, 0.0680), (-0.1293, 0.0000, -0.1780), (0.1293, 0.0000, -0.1780), (0.2092, 0.0000, 0.0680), (0.0000, 0.0000, 0.0000)],
+            indices: [5, 0, 1, 5, 1, 2, 5, 2, 3, 5, 3, 4, 5, 4, 0],
+            normals: Some([(0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000), (0.0000, 1.0000, 0.0000)]),
+            uvs: None,
+            color: (0.82, 0.83, 0.85, 1.00),
+            lod_levels: None,
+            lod_distances: None,
+            material: Some((
+                base_color: (0.82, 0.83, 0.85, 1.00),
+                metallic: 0.50,
+                roughness: 0.40,
+                emissive: None,
+                alpha_mode: Opaque,
+            )),
+            texture_path: None,
+        ),
+    ],
+    mesh_transforms: [
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+    ],
+    scale: 0.3500,
+    color_tint: None,
+)

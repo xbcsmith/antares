@@ -24,9 +24,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+
 use thiserror::Error;
 
+use crate::domain::items::database::ItemMeshDatabase;
 use crate::domain::visual::creature_database::CreatureDatabase;
 
 /// Campaign validation errors
@@ -75,18 +76,22 @@ pub enum CampaignError {
 /// ```
 /// use antares::domain::campaign_loader::GameData;
 /// use antares::domain::visual::creature_database::CreatureDatabase;
+/// use antares::domain::items::database::ItemMeshDatabase;
 ///
 /// let game_data = GameData {
 ///     creatures: CreatureDatabase::new(),
+///     item_meshes: ItemMeshDatabase::new(),
 /// };
 ///
 /// assert!(game_data.creatures.is_empty());
+/// assert!(game_data.item_meshes.is_empty());
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct GameData {
     /// Creature visual database
     pub creatures: CreatureDatabase,
-    // Future: items, spells, monsters, characters, etc.
+    /// Item mesh database — visual definitions for dropped items
+    pub item_meshes: ItemMeshDatabase,
 }
 
 impl GameData {
@@ -99,10 +104,12 @@ impl GameData {
     ///
     /// let data = GameData::new();
     /// assert!(data.creatures.is_empty());
+    /// assert!(data.item_meshes.is_empty());
     /// ```
     pub fn new() -> Self {
         Self {
             creatures: CreatureDatabase::new(),
+            item_meshes: ItemMeshDatabase::new(),
         }
     }
 
@@ -116,6 +123,11 @@ impl GameData {
         self.creatures
             .validate()
             .map_err(|e| CampaignError::ValidationFailed(format!("Creature validation: {}", e)))?;
+
+        // Validate item mesh database
+        self.item_meshes
+            .validate()
+            .map_err(|e| CampaignError::ValidationFailed(format!("Item mesh validation: {}", e)))?;
 
         Ok(())
     }
@@ -201,6 +213,9 @@ impl CampaignLoader {
         // Load creatures from campaign path
         game_data.creatures = self.load_creatures()?;
 
+        // Load item mesh registry (opt-in per campaign; missing file is OK)
+        game_data.item_meshes = self.load_item_meshes()?;
+
         // Validate all loaded data
         game_data.validate()?;
 
@@ -262,6 +277,34 @@ impl CampaignLoader {
         }
     }
 
+    /// Loads item mesh database from campaign.
+    ///
+    /// Looks for `data/item_mesh_registry.ron` inside the campaign directory.
+    /// If the file does not exist the function returns an empty
+    /// [`ItemMeshDatabase`] without error — item mesh support is opt-in per
+    /// campaign.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CampaignError::ReadError` if the registry file exists but
+    /// cannot be read, or `CampaignError::ParseError` if it cannot be parsed.
+    fn load_item_meshes(&self) -> Result<ItemMeshDatabase, CampaignError> {
+        let registry_path = self.campaign_path.join("data/item_mesh_registry.ron");
+
+        if !registry_path.exists() {
+            // Missing registry is not an error — campaign simply has no item meshes
+            return Ok(ItemMeshDatabase::new());
+        }
+
+        ItemMeshDatabase::load_from_registry(&registry_path, &self.campaign_path).map_err(|e| {
+            CampaignError::ReadError(format!(
+                "Item mesh registry '{}': {}",
+                registry_path.display(),
+                e
+            ))
+        })
+    }
+
     /// Loads a data file with override support
     ///
     /// Loads from campaign path if override exists, otherwise from base path.
@@ -310,12 +353,14 @@ mod tests {
     fn test_game_data_new() {
         let data = GameData::new();
         assert!(data.creatures.is_empty());
+        assert!(data.item_meshes.is_empty());
     }
 
     #[test]
     fn test_game_data_default() {
         let data = GameData::default();
         assert!(data.creatures.is_empty());
+        assert!(data.item_meshes.is_empty());
     }
 
     #[test]
@@ -342,6 +387,49 @@ mod tests {
 
         let result = loader.load_creatures();
         assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    /// §3.5 — loads `data/test_campaign` and asserts `item_meshes` has ≥ 2 entries.
+    #[test]
+    fn test_campaign_loader_loads_item_mesh_registry() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let base = std::path::PathBuf::from(manifest_dir).join("data");
+        let campaign = base.join("test_campaign");
+
+        let mut loader = CampaignLoader::new(base, campaign);
+        let result = loader.load_game_data();
+        assert!(result.is_ok(), "load_game_data failed: {:?}", result.err());
+
+        let game_data = result.unwrap();
+        assert!(
+            game_data.item_meshes.count() >= 2,
+            "Expected ≥ 2 item mesh entries, got {}",
+            game_data.item_meshes.count()
+        );
+        assert!(
+            game_data.item_meshes.has_mesh(9001),
+            "Expected item mesh id 9001 (sword) to be present"
+        );
+        assert!(
+            game_data.item_meshes.has_mesh(9201),
+            "Expected item mesh id 9201 (potion) to be present"
+        );
+    }
+
+    /// §3.5 — a campaign without `item_mesh_registry.ron` loads without error.
+    #[test]
+    fn test_item_mesh_registry_missing_is_ok() {
+        let loader = CampaignLoader::new(
+            PathBuf::from("nonexistent_data"),
+            PathBuf::from("nonexistent_campaign"),
+        );
+
+        let result = loader.load_item_meshes();
+        assert!(
+            result.is_ok(),
+            "Expected empty ItemMeshDatabase when registry is absent"
+        );
         assert!(result.unwrap().is_empty());
     }
 }
