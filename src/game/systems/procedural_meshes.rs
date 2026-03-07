@@ -99,6 +99,30 @@ pub struct ProceduralMeshCache {
     structure_railing_bar: Option<Handle<Mesh>>,
     /// Cached mesh handles for creature visuals by (CreatureId, mesh_index)
     creature_meshes: HashMap<(CreatureId, usize), Handle<Mesh>>,
+    /// Cached mesh handle for sword / dagger blade items
+    item_sword: Option<Handle<Mesh>>,
+    /// Cached mesh handle for dagger items
+    item_dagger: Option<Handle<Mesh>>,
+    /// Cached mesh handle for blunt weapon items
+    item_blunt: Option<Handle<Mesh>>,
+    /// Cached mesh handle for staff items
+    item_staff: Option<Handle<Mesh>>,
+    /// Cached mesh handle for bow items
+    item_bow: Option<Handle<Mesh>>,
+    /// Cached mesh handle for body armour / helmet items
+    item_armor: Option<Handle<Mesh>>,
+    /// Cached mesh handle for shield items
+    item_shield: Option<Handle<Mesh>>,
+    /// Cached mesh handle for potion items
+    item_potion: Option<Handle<Mesh>>,
+    /// Cached mesh handle for scroll items
+    item_scroll: Option<Handle<Mesh>>,
+    /// Cached mesh handle for ring / amulet items
+    item_ring: Option<Handle<Mesh>>,
+    /// Cached mesh handle for ammo (arrow / bolt / stone) items
+    item_ammo: Option<Handle<Mesh>>,
+    /// Cached mesh handle for quest-item meshes
+    item_quest: Option<Handle<Mesh>>,
 }
 
 impl ProceduralMeshCache {
@@ -225,6 +249,18 @@ impl Default for ProceduralMeshCache {
             structure_railing_post: None,
             structure_railing_bar: None,
             creature_meshes: HashMap::new(),
+            item_sword: None,
+            item_dagger: None,
+            item_blunt: None,
+            item_staff: None,
+            item_bow: None,
+            item_armor: None,
+            item_shield: None,
+            item_potion: None,
+            item_scroll: None,
+            item_ring: None,
+            item_ammo: None,
+            item_quest: None,
         }
     }
 }
@@ -350,6 +386,62 @@ impl ProceduralMeshCache {
         self.structure_railing_post = None;
         self.structure_railing_bar = None;
         self.creature_meshes.clear();
+        self.item_sword = None;
+        self.item_dagger = None;
+        self.item_blunt = None;
+        self.item_staff = None;
+        self.item_bow = None;
+        self.item_armor = None;
+        self.item_shield = None;
+        self.item_potion = None;
+        self.item_scroll = None;
+        self.item_ring = None;
+        self.item_ammo = None;
+        self.item_quest = None;
+    }
+
+    /// Gets or creates a cached mesh handle for an item category.
+    ///
+    /// Follows the same pattern as [`get_or_create_furniture_mesh`].  The
+    /// `category` string is the snake-case name of the
+    /// [`ItemMeshCategory`](crate::domain::visual::item_mesh::ItemMeshCategory)
+    /// variant (e.g. `"sword"`, `"potion"`, `"ring"`).
+    ///
+    /// # Arguments
+    ///
+    /// * `category` - Snake-case item category name.
+    /// * `meshes`   - Mutable reference to Bevy's mesh asset storage.
+    /// * `creator`  - Closure that generates the mesh if it is not yet cached.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `category` is not one of the recognised item category strings.
+    pub fn get_or_create_item_mesh<F>(
+        &mut self,
+        category: &str,
+        meshes: &mut ResMut<Assets<Mesh>>,
+        creator: F,
+    ) -> Handle<Mesh>
+    where
+        F: FnOnce() -> Mesh,
+    {
+        let handle = match category {
+            "sword" => &mut self.item_sword,
+            "dagger" => &mut self.item_dagger,
+            "blunt" => &mut self.item_blunt,
+            "staff" => &mut self.item_staff,
+            "bow" => &mut self.item_bow,
+            "armor" => &mut self.item_armor,
+            "shield" => &mut self.item_shield,
+            "potion" => &mut self.item_potion,
+            "scroll" => &mut self.item_scroll,
+            "ring" => &mut self.item_ring,
+            "ammo" => &mut self.item_ammo,
+            "quest" => &mut self.item_quest,
+            _ => panic!("Unknown item cache category: {}", category),
+        };
+
+        handle.get_or_insert_with(|| meshes.add(creator())).clone()
     }
 
     /// Count the number of cached mesh handles
@@ -447,6 +539,42 @@ impl ProceduralMeshCache {
             count += 1;
         }
         if self.structure_railing_bar.is_some() {
+            count += 1;
+        }
+        if self.item_sword.is_some() {
+            count += 1;
+        }
+        if self.item_dagger.is_some() {
+            count += 1;
+        }
+        if self.item_blunt.is_some() {
+            count += 1;
+        }
+        if self.item_staff.is_some() {
+            count += 1;
+        }
+        if self.item_bow.is_some() {
+            count += 1;
+        }
+        if self.item_armor.is_some() {
+            count += 1;
+        }
+        if self.item_shield.is_some() {
+            count += 1;
+        }
+        if self.item_potion.is_some() {
+            count += 1;
+        }
+        if self.item_scroll.is_some() {
+            count += 1;
+        }
+        if self.item_ring.is_some() {
+            count += 1;
+        }
+        if self.item_ammo.is_some() {
+            count += 1;
+        }
+        if self.item_quest.is_some() {
             count += 1;
         }
         count
@@ -3537,4 +3665,1791 @@ pub fn spawn_bookshelf(
     }
 
     parent
+}
+
+// ==================== Item Mesh Config Structs ====================
+
+/// Configuration for a dropped sword mesh.
+///
+/// The sword is rendered as an elongated blade box with a short crossguard
+/// and a handle, lying flat on the XZ plane.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::SwordConfig;
+///
+/// let cfg = SwordConfig::default();
+/// assert!(cfg.blade_length > 0.0);
+/// ```
+#[derive(Clone, Debug)]
+pub struct SwordConfig {
+    /// Length of the blade in world units.
+    pub blade_length: f32,
+    /// Width of the blade at the base.
+    pub blade_width: f32,
+    /// Whether to add a crossguard quad.
+    pub has_crossguard: bool,
+    /// Blade color (None = steel grey default).
+    pub color: Option<Color>,
+}
+
+impl Default for SwordConfig {
+    fn default() -> Self {
+        Self {
+            blade_length: 0.55,
+            blade_width: 0.07,
+            has_crossguard: true,
+            color: None,
+        }
+    }
+}
+
+/// Configuration for a dropped dagger mesh.
+///
+/// Daggers have a shorter blade than swords and a small handle.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::{DaggerConfig, SwordConfig};
+///
+/// let dagger = DaggerConfig::default();
+/// let sword  = SwordConfig::default();
+/// assert!(dagger.blade_length < sword.blade_length);
+/// ```
+#[derive(Clone, Debug)]
+pub struct DaggerConfig {
+    /// Length of the blade in world units.
+    pub blade_length: f32,
+    /// Blade color (None = steel grey default).
+    pub color: Option<Color>,
+}
+
+impl Default for DaggerConfig {
+    fn default() -> Self {
+        Self {
+            blade_length: 0.28,
+            color: None,
+        }
+    }
+}
+
+/// Configuration for a dropped blunt weapon mesh (club, mace, hammer).
+///
+/// Rendered as a cylindrical head plus a thin handle.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::BluntConfig;
+///
+/// let cfg = BluntConfig::default();
+/// assert!(cfg.head_radius > 0.0);
+/// assert!(cfg.handle_length > 0.0);
+/// ```
+#[derive(Clone, Debug)]
+pub struct BluntConfig {
+    /// Radius of the weapon head.
+    pub head_radius: f32,
+    /// Length of the handle.
+    pub handle_length: f32,
+    /// Color (None = dark iron default).
+    pub color: Option<Color>,
+}
+
+impl Default for BluntConfig {
+    fn default() -> Self {
+        Self {
+            head_radius: 0.09,
+            handle_length: 0.35,
+            color: None,
+        }
+    }
+}
+
+/// Configuration for a dropped staff mesh.
+///
+/// Rendered as a long thin cylinder with an optional orb tip.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::StaffConfig;
+///
+/// let cfg = StaffConfig::default();
+/// assert!(cfg.length > 0.0);
+/// assert!(cfg.orb_radius > 0.0);
+/// ```
+#[derive(Clone, Debug)]
+pub struct StaffConfig {
+    /// Total length of the staff.
+    pub length: f32,
+    /// Radius of the orb at the top (0 = no orb).
+    pub orb_radius: f32,
+    /// Color (None = wood brown default).
+    pub color: Option<Color>,
+}
+
+impl Default for StaffConfig {
+    fn default() -> Self {
+        Self {
+            length: 0.80,
+            orb_radius: 0.06,
+            color: None,
+        }
+    }
+}
+
+/// Configuration for a dropped bow mesh.
+///
+/// Rendered as a curved arc of quads.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::BowConfig;
+///
+/// let cfg = BowConfig::default();
+/// assert!(cfg.arc_height > 0.0);
+/// ```
+#[derive(Clone, Debug)]
+pub struct BowConfig {
+    /// Peak height of the bow arc.
+    pub arc_height: f32,
+    /// Color (None = wood brown default).
+    pub color: Option<Color>,
+}
+
+impl Default for BowConfig {
+    fn default() -> Self {
+        Self {
+            arc_height: 0.35,
+            color: None,
+        }
+    }
+}
+
+/// Configuration for a dropped armour mesh (chest piece or helmet).
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::ArmorMeshConfig;
+///
+/// let cfg = ArmorMeshConfig::default();
+/// assert!(cfg.width > 0.0);
+/// assert!(cfg.height > 0.0);
+/// ```
+#[derive(Clone, Debug)]
+pub struct ArmorMeshConfig {
+    /// Width of the armour piece.
+    pub width: f32,
+    /// Height of the armour piece.
+    pub height: f32,
+    /// Color (None = dark leather default).
+    pub color: Option<Color>,
+    /// `true` = helmet dome, `false` = chest plate.
+    pub is_helmet: bool,
+}
+
+impl Default for ArmorMeshConfig {
+    fn default() -> Self {
+        Self {
+            width: 0.35,
+            height: 0.25,
+            color: None,
+            is_helmet: false,
+        }
+    }
+}
+
+/// Configuration for a dropped shield mesh.
+///
+/// Rendered as a flat hexagonal polygon disc.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::ShieldConfig;
+///
+/// let cfg = ShieldConfig::default();
+/// assert!(cfg.radius > 0.0);
+/// ```
+#[derive(Clone, Debug)]
+pub struct ShieldConfig {
+    /// Radius of the shield disc.
+    pub radius: f32,
+    /// Color (None = wood-and-metal default).
+    pub color: Option<Color>,
+}
+
+impl Default for ShieldConfig {
+    fn default() -> Self {
+        Self {
+            radius: 0.22,
+            color: None,
+        }
+    }
+}
+
+/// Configuration for a dropped potion mesh.
+///
+/// Rendered as a tapered cylinder body with a sphere stopper.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::PotionConfig;
+///
+/// let cfg = PotionConfig::default();
+/// // Colors are stored as [r, g, b, a] arrays, all non-zero
+/// assert!(cfg.liquid_color[3] > 0.0);
+/// ```
+#[derive(Clone, Debug)]
+pub struct PotionConfig {
+    /// RGBA color of the liquid inside the bottle (used for bottle body).
+    pub liquid_color: [f32; 4],
+    /// RGBA color of the glass bottle exterior.
+    pub bottle_color: [f32; 4],
+}
+
+impl Default for PotionConfig {
+    fn default() -> Self {
+        Self {
+            liquid_color: [0.8, 0.1, 0.1, 0.85], // red healing potion
+            bottle_color: [0.6, 0.6, 0.8, 0.55], // translucent glass
+        }
+    }
+}
+
+/// Configuration for a dropped scroll mesh.
+///
+/// Rendered as a rolled cylinder pair.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::ScrollConfig;
+///
+/// let cfg = ScrollConfig::default();
+/// assert!(cfg.color[3] > 0.0);
+/// ```
+#[derive(Clone, Debug)]
+pub struct ScrollConfig {
+    /// RGBA color of the parchment.
+    pub color: [f32; 4],
+}
+
+impl Default for ScrollConfig {
+    fn default() -> Self {
+        Self {
+            color: [0.85, 0.80, 0.65, 1.0], // parchment
+        }
+    }
+}
+
+/// Configuration for a dropped ring mesh.
+///
+/// Rendered as a torus approximated with an arc of thin quads.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::RingMeshConfig;
+///
+/// let cfg = RingMeshConfig::default();
+/// assert!(cfg.color[3] > 0.0);
+/// ```
+#[derive(Clone, Debug)]
+pub struct RingMeshConfig {
+    /// RGBA color of the ring band.
+    pub color: [f32; 4],
+}
+
+impl Default for RingMeshConfig {
+    fn default() -> Self {
+        Self {
+            color: [0.8, 0.65, 0.2, 1.0], // gold
+        }
+    }
+}
+
+/// Configuration for a dropped ammunition mesh (arrow, bolt, or stone).
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::AmmoConfig;
+///
+/// let cfg = AmmoConfig::default();
+/// assert!(cfg.color[3] > 0.0);
+/// ```
+#[derive(Clone, Debug)]
+pub struct AmmoConfig {
+    /// Visual sub-type: `"arrow"`, `"bolt"`, or `"stone"`.
+    pub ammo_type: String,
+    /// RGBA color for the shaft / stone.
+    pub color: [f32; 4],
+}
+
+impl Default for AmmoConfig {
+    fn default() -> Self {
+        Self {
+            ammo_type: "arrow".to_string(),
+            color: [0.55, 0.40, 0.20, 1.0], // wood-brown shaft
+        }
+    }
+}
+
+// ==================== Item Mesh Constants ====================
+
+/// Default steel-grey color for sword blades.
+const ITEM_SWORD_COLOR: Color = Color::srgb(0.75, 0.75, 0.80);
+/// Default iron-grey color for blunt weapons.
+const ITEM_BLUNT_COLOR: Color = Color::srgb(0.45, 0.45, 0.50);
+/// Default wood-brown color for staves, bows, and handles.
+const ITEM_WOOD_COLOR: Color = Color::srgb(0.55, 0.38, 0.18);
+/// Default leather color for body armour.
+const ITEM_LEATHER_COLOR: Color = Color::srgb(0.40, 0.28, 0.15);
+/// Default metallic color for helmets and shields.
+const ITEM_METAL_COLOR: Color = Color::srgb(0.60, 0.60, 0.65);
+/// Default parchment color for scrolls.
+#[allow(dead_code)]
+const ITEM_PARCHMENT_COLOR: Color = Color::srgb(0.85, 0.80, 0.65);
+/// Default gold color for rings.
+#[allow(dead_code)]
+const ITEM_GOLD_COLOR: Color = Color::srgb(0.80, 0.65, 0.20);
+
+// ==================== Item Mesh Spawn Functions ====================
+
+/// Spawns a procedural sword mesh lying flat on the ground.
+///
+/// The sword consists of:
+/// - A blade: elongated flat cuboid along X axis
+/// - A crossguard: shorter wider cuboid perpendicular to the blade
+/// - A handle: shorter narrower cuboid at the base of the blade
+///
+/// All parts are child entities of the returned parent entity.
+/// The parent is tagged with [`MapEntity`] and [`TileCoord`] for map cleanup.
+///
+/// # Arguments
+///
+/// * `commands`  - Bevy `Commands` for entity creation.
+/// * `materials` - Material asset storage.
+/// * `meshes`    - Mesh asset storage.
+/// * `position`  - Tile position in world coordinates.
+/// * `map_id`    - Map identifier (for cleanup on map change).
+/// * `config`    - Sword appearance configuration.
+/// * `cache`     - Mesh cache (reuses geometry across multiple drops).
+///
+/// # Returns
+///
+/// Entity ID of the parent sword entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_sword_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: SwordConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    let color = config.color.unwrap_or(ITEM_SWORD_COLOR);
+    let bl = config.blade_length;
+    let bw = config.blade_width;
+
+    // Blade mesh (lying on X axis, thin in Y)
+    let blade_mesh =
+        cache.get_or_create_item_mesh("sword", meshes, || Cuboid::new(bl, bw * 0.3, bw).into());
+
+    // Crossguard mesh (perpendicular, shorter)
+    let guard_mesh = meshes.add(Mesh::from(Cuboid::new(bw * 3.0, bw * 0.3, bw * 0.6)));
+
+    // Handle mesh
+    let handle_mesh = meshes.add(Mesh::from(Cuboid::new(bl * 0.25, bw * 0.3, bw * 0.7)));
+
+    let blade_mat = materials.add(StandardMaterial {
+        base_color: color,
+        metallic: 0.9,
+        perceptual_roughness: 0.2,
+        ..default()
+    });
+    let handle_mat = materials.add(StandardMaterial {
+        base_color: ITEM_WOOD_COLOR,
+        metallic: 0.0,
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                0.02,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            ),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Sword"),
+        ))
+        .id();
+
+    let blade = commands
+        .spawn((
+            Mesh3d(blade_mesh),
+            MeshMaterial3d(blade_mat.clone()),
+            Transform::from_xyz(bl * 0.1, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(blade);
+
+    if config.has_crossguard {
+        let guard = commands
+            .spawn((
+                Mesh3d(guard_mesh),
+                MeshMaterial3d(blade_mat),
+                Transform::from_xyz(-bl * 0.3, 0.0, 0.0),
+                GlobalTransform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        commands.entity(parent).add_child(guard);
+    }
+
+    let handle = commands
+        .spawn((
+            Mesh3d(handle_mesh),
+            MeshMaterial3d(handle_mat),
+            Transform::from_xyz(-bl * 0.44, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(handle);
+
+    parent
+}
+
+/// Spawns a procedural dagger mesh lying flat on the ground.
+///
+/// Similar to a sword but shorter blade, no crossguard.
+///
+/// # Returns
+///
+/// Entity ID of the parent dagger entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_dagger_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: DaggerConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    let color = config.color.unwrap_or(ITEM_SWORD_COLOR);
+    let bl = config.blade_length;
+    let bw = 0.05_f32;
+
+    let blade_mesh =
+        cache.get_or_create_item_mesh("dagger", meshes, || Cuboid::new(bl, bw * 0.3, bw).into());
+    let handle_mesh = meshes.add(Mesh::from(Cuboid::new(bl * 0.3, bw * 0.3, bw * 0.8)));
+
+    let blade_mat = materials.add(StandardMaterial {
+        base_color: color,
+        metallic: 0.9,
+        perceptual_roughness: 0.2,
+        ..default()
+    });
+    let handle_mat = materials.add(StandardMaterial {
+        base_color: ITEM_WOOD_COLOR,
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                0.02,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            ),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Dagger"),
+        ))
+        .id();
+
+    let blade = commands
+        .spawn((
+            Mesh3d(blade_mesh),
+            MeshMaterial3d(blade_mat),
+            Transform::from_xyz(bl * 0.12, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(blade);
+
+    let handle = commands
+        .spawn((
+            Mesh3d(handle_mesh),
+            MeshMaterial3d(handle_mat),
+            Transform::from_xyz(-bl * 0.38, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(handle);
+
+    parent
+}
+
+/// Spawns a procedural blunt weapon mesh lying flat on the ground.
+///
+/// Consists of a cylindrical head and a thin cuboid handle.
+///
+/// # Returns
+///
+/// Entity ID of the parent blunt-weapon entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_blunt_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: BluntConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    let color = config.color.unwrap_or(ITEM_BLUNT_COLOR);
+    let hr = config.head_radius;
+    let hl = config.handle_length;
+
+    // Head: short cylinder lying on its side (height = diameter)
+    let head_mesh =
+        cache.get_or_create_item_mesh("blunt", meshes, || Cylinder::new(hr, hr * 2.0).into());
+    let handle_mesh = meshes.add(Mesh::from(Cuboid::new(hl, hr * 0.35, hr * 0.35)));
+
+    let head_mat = materials.add(StandardMaterial {
+        base_color: color,
+        metallic: 0.7,
+        perceptual_roughness: 0.3,
+        ..default()
+    });
+    let handle_mat = materials.add(StandardMaterial {
+        base_color: ITEM_WOOD_COLOR,
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                hr,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            )
+            .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("BluntWeapon"),
+        ))
+        .id();
+
+    let head = commands
+        .spawn((
+            Mesh3d(head_mesh),
+            MeshMaterial3d(head_mat),
+            Transform::from_xyz(hl * 0.5, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(head);
+
+    let handle = commands
+        .spawn((
+            Mesh3d(handle_mesh),
+            MeshMaterial3d(handle_mat),
+            Transform::from_xyz(-hl * 0.1, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(handle);
+
+    parent
+}
+
+/// Spawns a procedural staff mesh lying flat on the ground.
+///
+/// Consists of a long thin cylinder with an orb at one end.
+///
+/// # Returns
+///
+/// Entity ID of the parent staff entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_staff_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: StaffConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    let color = config.color.unwrap_or(ITEM_WOOD_COLOR);
+    let len = config.length;
+    let orb_r = config.orb_radius;
+
+    let shaft_mesh =
+        cache.get_or_create_item_mesh("staff", meshes, || Cylinder::new(0.025, len).into());
+    let orb_mesh = meshes.add(Mesh::from(Sphere::new(orb_r)));
+
+    let shaft_mat = materials.add(StandardMaterial {
+        base_color: color,
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+    let orb_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.3, 0.0, 0.6),
+        emissive: LinearRgba::new(0.2, 0.0, 0.4, 1.0),
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                0.025,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            )
+            .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Staff"),
+        ))
+        .id();
+
+    let shaft = commands
+        .spawn((
+            Mesh3d(shaft_mesh),
+            MeshMaterial3d(shaft_mat),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(shaft);
+
+    if orb_r > 0.0 {
+        let orb = commands
+            .spawn((
+                Mesh3d(orb_mesh),
+                MeshMaterial3d(orb_mat),
+                Transform::from_xyz(len * 0.5, 0.0, 0.0),
+                GlobalTransform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        commands.entity(parent).add_child(orb);
+    }
+
+    parent
+}
+
+/// Spawns a procedural bow mesh lying flat on the ground.
+///
+/// Rendered as a pair of curved cuboid limbs representing the arc of the bow.
+///
+/// # Returns
+///
+/// Entity ID of the parent bow entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_bow_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: BowConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    let color = config.color.unwrap_or(ITEM_WOOD_COLOR);
+    let arc_h = config.arc_height;
+
+    // Approximate the arc as two angled limb pieces + centre grip
+    let limb_mesh = cache.get_or_create_item_mesh("bow", meshes, || {
+        Cuboid::new(0.04, 0.04, arc_h * 0.6).into()
+    });
+    let grip_mesh = meshes.add(Mesh::from(Cuboid::new(0.04, 0.04, arc_h * 0.3)));
+
+    let bow_mat = materials.add(StandardMaterial {
+        base_color: color,
+        perceptual_roughness: 0.85,
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                0.02,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            ),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Bow"),
+        ))
+        .id();
+
+    // Upper limb — angled outward
+    let upper = commands
+        .spawn((
+            Mesh3d(limb_mesh.clone()),
+            MeshMaterial3d(bow_mat.clone()),
+            Transform::from_xyz(0.0, 0.0, arc_h * 0.32).with_rotation(Quat::from_rotation_x(0.35)),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(upper);
+
+    // Lower limb
+    let lower = commands
+        .spawn((
+            Mesh3d(limb_mesh),
+            MeshMaterial3d(bow_mat.clone()),
+            Transform::from_xyz(0.0, 0.0, -arc_h * 0.32)
+                .with_rotation(Quat::from_rotation_x(-0.35)),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(lower);
+
+    // Centre grip
+    let grip = commands
+        .spawn((
+            Mesh3d(grip_mesh),
+            MeshMaterial3d(bow_mat),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(grip);
+
+    parent
+}
+
+/// Spawns a procedural armour mesh (chest plate or helmet dome) on the ground.
+///
+/// # Returns
+///
+/// Entity ID of the parent armour entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_armor_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: ArmorMeshConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    let color = config.color.unwrap_or(if config.is_helmet {
+        ITEM_METAL_COLOR
+    } else {
+        ITEM_LEATHER_COLOR
+    });
+
+    let body_mesh = cache.get_or_create_item_mesh("armor", meshes, || {
+        if config.is_helmet {
+            Sphere::new(config.width * 0.5).into()
+        } else {
+            Cuboid::new(config.width, config.height, config.width * 0.6).into()
+        }
+    });
+
+    let mat = materials.add(StandardMaterial {
+        base_color: color,
+        metallic: if config.is_helmet { 0.7 } else { 0.1 },
+        perceptual_roughness: if config.is_helmet { 0.3 } else { 0.8 },
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                config.height * 0.5,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            ),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new(if config.is_helmet { "Helmet" } else { "Armor" }),
+        ))
+        .id();
+
+    let body = commands
+        .spawn((
+            Mesh3d(body_mesh),
+            MeshMaterial3d(mat),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(body);
+
+    parent
+}
+
+/// Spawns a procedural shield mesh lying flat on the ground.
+///
+/// Approximated as a flat cuboid disc.
+///
+/// # Returns
+///
+/// Entity ID of the parent shield entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_shield_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: ShieldConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    let color = config.color.unwrap_or(ITEM_METAL_COLOR);
+    let r = config.radius;
+
+    // Approximate shield as a flat cylinder (disc shape)
+    let disc_mesh =
+        cache.get_or_create_item_mesh("shield", meshes, || Cylinder::new(r, 0.04).into());
+
+    let mat = materials.add(StandardMaterial {
+        base_color: color,
+        metallic: 0.6,
+        perceptual_roughness: 0.35,
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                0.02,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            ),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Shield"),
+        ))
+        .id();
+
+    let disc = commands
+        .spawn((
+            Mesh3d(disc_mesh),
+            MeshMaterial3d(mat),
+            Transform::from_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(disc);
+
+    parent
+}
+
+/// Spawns a procedural potion mesh on the ground.
+///
+/// Consists of a tapered cylinder body (the bottle) and a small sphere stopper.
+///
+/// # Returns
+///
+/// Entity ID of the parent potion entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_potion_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: PotionConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    let [lr, lg, lb, la] = config.liquid_color;
+    let [br, bg, bb, ba] = config.bottle_color;
+
+    let body_mesh =
+        cache.get_or_create_item_mesh("potion", meshes, || Cylinder::new(0.05, 0.18).into());
+    let stopper_mesh = meshes.add(Mesh::from(Sphere::new(0.028)));
+
+    let bottle_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(br, bg, bb, ba),
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.1,
+        ..default()
+    });
+    let liquid_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(lr, lg, lb, la),
+        alpha_mode: AlphaMode::Blend,
+        emissive: LinearRgba::new(lr * 0.2, lg * 0.2, lb * 0.2, 1.0),
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                0.09,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            ),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Potion"),
+        ))
+        .id();
+
+    let body = commands
+        .spawn((
+            Mesh3d(body_mesh),
+            MeshMaterial3d(bottle_mat),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(body);
+
+    // Liquid shimmer (inner slightly smaller cylinder)
+    let inner_mesh = meshes.add(Mesh::from(Cylinder::new(0.04, 0.14)));
+    let liquid = commands
+        .spawn((
+            Mesh3d(inner_mesh),
+            MeshMaterial3d(liquid_mat),
+            Transform::from_xyz(0.0, -0.01, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(liquid);
+
+    let stopper = commands
+        .spawn((
+            Mesh3d(stopper_mesh),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.3, 0.15, 0.05),
+                perceptual_roughness: 0.9,
+                ..default()
+            })),
+            Transform::from_xyz(0.0, 0.115, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(stopper);
+
+    parent
+}
+
+/// Spawns a procedural scroll mesh lying on the ground.
+///
+/// Rendered as two short cylinders (the rolled ends) flanking a flat centre.
+///
+/// # Returns
+///
+/// Entity ID of the parent scroll entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_scroll_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: ScrollConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    let [r, g, b, a] = config.color;
+
+    let roll_mesh =
+        cache.get_or_create_item_mesh("scroll", meshes, || Cylinder::new(0.03, 0.28).into());
+    let sheet_mesh = meshes.add(Mesh::from(Cuboid::new(0.28, 0.004, 0.22)));
+
+    let parchment_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(r, g, b, a),
+        perceptual_roughness: 0.95,
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                0.03,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            ),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Scroll"),
+        ))
+        .id();
+
+    // Left roll
+    let roll_l = commands
+        .spawn((
+            Mesh3d(roll_mesh.clone()),
+            MeshMaterial3d(parchment_mat.clone()),
+            Transform::from_xyz(-0.14, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(roll_l);
+
+    // Right roll
+    let roll_r = commands
+        .spawn((
+            Mesh3d(roll_mesh),
+            MeshMaterial3d(parchment_mat.clone()),
+            Transform::from_xyz(0.14, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(roll_r);
+
+    // Flat sheet
+    let sheet = commands
+        .spawn((
+            Mesh3d(sheet_mesh),
+            MeshMaterial3d(parchment_mat),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(sheet);
+
+    parent
+}
+
+/// Spawns a procedural ring mesh on the ground.
+///
+/// Approximated as a flat torus using a thin torus primitive.
+///
+/// # Returns
+///
+/// Entity ID of the parent ring entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_ring_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: RingMeshConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    let [r, g, b, a] = config.color;
+
+    let ring_mesh = cache.get_or_create_item_mesh("ring", meshes, || {
+        Torus {
+            minor_radius: 0.018,
+            major_radius: 0.065,
+        }
+        .into()
+    });
+
+    let mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(r, g, b, a),
+        metallic: 0.95,
+        perceptual_roughness: 0.15,
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                0.018,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            ),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Ring"),
+        ))
+        .id();
+
+    let ring = commands
+        .spawn((
+            Mesh3d(ring_mesh),
+            MeshMaterial3d(mat),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(ring);
+
+    parent
+}
+
+/// Spawns a procedural ammunition mesh on the ground.
+///
+/// Arrow: shaft cylinder + small arrowhead cuboid.
+/// Bolt: shorter, wider shaft.
+/// Stone: sphere.
+///
+/// # Returns
+///
+/// Entity ID of the parent ammo entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_ammo_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: AmmoConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    let [r, g, b, a] = config.color;
+
+    let mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(r, g, b, a),
+        perceptual_roughness: 0.75,
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                0.015,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            ),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Ammo"),
+        ))
+        .id();
+
+    match config.ammo_type.as_str() {
+        "stone" => {
+            let stone_mesh =
+                cache.get_or_create_item_mesh("ammo", meshes, || Sphere::new(0.045).into());
+            let stone = commands
+                .spawn((
+                    Mesh3d(stone_mesh),
+                    MeshMaterial3d(mat),
+                    Transform::default(),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                ))
+                .id();
+            commands.entity(parent).add_child(stone);
+        }
+        "bolt" => {
+            let bolt_mesh =
+                cache.get_or_create_item_mesh("ammo", meshes, || Cylinder::new(0.015, 0.22).into());
+            let bolt = commands
+                .spawn((
+                    Mesh3d(bolt_mesh),
+                    MeshMaterial3d(mat),
+                    Transform::from_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                ))
+                .id();
+            commands.entity(parent).add_child(bolt);
+        }
+        _ => {
+            // Default: arrow shaft
+            let shaft_mesh =
+                cache.get_or_create_item_mesh("ammo", meshes, || Cylinder::new(0.008, 0.35).into());
+            let tip_mesh = meshes.add(Mesh::from(Cuboid::new(0.03, 0.03, 0.04)));
+
+            let shaft = commands
+                .spawn((
+                    Mesh3d(shaft_mesh),
+                    MeshMaterial3d(mat.clone()),
+                    Transform::from_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                ))
+                .id();
+            commands.entity(parent).add_child(shaft);
+
+            let tip_mat = materials.add(StandardMaterial {
+                base_color: ITEM_METAL_COLOR,
+                metallic: 0.8,
+                perceptual_roughness: 0.25,
+                ..default()
+            });
+            let tip = commands
+                .spawn((
+                    Mesh3d(tip_mesh),
+                    MeshMaterial3d(tip_mat),
+                    Transform::from_xyz(0.175, 0.0, 0.0),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                ))
+                .id();
+            commands.entity(parent).add_child(tip);
+        }
+    }
+
+    parent
+}
+
+/// Spawns a procedural dropped item mesh, choosing the correct generator based
+/// on the [`ItemMeshCategory`] derived from the item descriptor.
+///
+/// This is the primary entry point called by the item-world spawn system
+/// (`spawn_dropped_item_system`) when `GameContent` is available and the
+/// item is found in the database.
+///
+/// # Arguments
+///
+/// * `commands`    - Bevy `Commands` for entity creation.
+/// * `materials`   - Material asset storage.
+/// * `meshes`      - Mesh asset storage.
+/// * `position`    - Tile position in world coordinates.
+/// * `map_id`      - Map identifier for cleanup tagging.
+/// * `descriptor`  - The pre-computed [`ItemMeshDescriptor`] for the item.
+/// * `cache`       - Shared mesh cache (reduces duplicate allocations).
+///
+/// # Returns
+///
+/// Entity ID of the spawned parent entity.
+///
+/// # Examples
+///
+/// ```text
+/// use antares::game::systems::procedural_meshes::{spawn_dropped_item_mesh, ProceduralMeshCache};
+/// use antares::domain::visual::item_mesh::ItemMeshDescriptor;
+/// use antares::domain::items::{Item, ItemType, WeaponData, WeaponClassification};
+/// use antares::domain::types::{DiceRoll, Position};
+///
+/// // Obtain a descriptor from an item definition:
+/// // let descriptor = ItemMeshDescriptor::from_item(&item);
+/// // let entity = spawn_dropped_item_mesh(&mut commands, &mut materials, &mut meshes,
+/// //     Position::new(5, 7), 1, &descriptor, &mut cache);
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_dropped_item_mesh(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    descriptor: &crate::domain::visual::item_mesh::ItemMeshDescriptor,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    use crate::domain::visual::item_mesh::ItemMeshCategory;
+
+    let [pr, pg, pb, pa] = descriptor.primary_color;
+    let primary = Color::srgba(pr, pg, pb, pa);
+
+    match descriptor.category {
+        ItemMeshCategory::Sword => spawn_sword_mesh(
+            commands,
+            materials,
+            meshes,
+            position,
+            map_id,
+            SwordConfig {
+                blade_length: descriptor.blade_length,
+                blade_width: 0.07,
+                has_crossguard: true,
+                color: Some(primary),
+            },
+            cache,
+        ),
+        ItemMeshCategory::Dagger => spawn_dagger_mesh(
+            commands,
+            materials,
+            meshes,
+            position,
+            map_id,
+            DaggerConfig {
+                blade_length: descriptor.blade_length,
+                color: Some(primary),
+            },
+            cache,
+        ),
+        ItemMeshCategory::Blunt => spawn_blunt_mesh(
+            commands,
+            materials,
+            meshes,
+            position,
+            map_id,
+            BluntConfig {
+                head_radius: 0.09,
+                handle_length: 0.35,
+                color: Some(primary),
+            },
+            cache,
+        ),
+        ItemMeshCategory::Staff => spawn_staff_mesh(
+            commands,
+            materials,
+            meshes,
+            position,
+            map_id,
+            StaffConfig {
+                length: descriptor.blade_length.max(0.6),
+                orb_radius: 0.06,
+                color: Some(primary),
+            },
+            cache,
+        ),
+        ItemMeshCategory::Bow => spawn_bow_mesh(
+            commands,
+            materials,
+            meshes,
+            position,
+            map_id,
+            BowConfig {
+                arc_height: 0.35,
+                color: Some(primary),
+            },
+            cache,
+        ),
+        ItemMeshCategory::BodyArmor => spawn_armor_mesh(
+            commands,
+            materials,
+            meshes,
+            position,
+            map_id,
+            ArmorMeshConfig {
+                width: 0.35,
+                height: 0.25,
+                color: Some(primary),
+                is_helmet: false,
+            },
+            cache,
+        ),
+        ItemMeshCategory::Helmet => spawn_armor_mesh(
+            commands,
+            materials,
+            meshes,
+            position,
+            map_id,
+            ArmorMeshConfig {
+                width: 0.28,
+                height: 0.28,
+                color: Some(primary),
+                is_helmet: true,
+            },
+            cache,
+        ),
+        ItemMeshCategory::Shield => spawn_shield_mesh(
+            commands,
+            materials,
+            meshes,
+            position,
+            map_id,
+            ShieldConfig {
+                radius: 0.22,
+                color: Some(primary),
+            },
+            cache,
+        ),
+        ItemMeshCategory::Boots => {
+            // Boots rendered as a low flat armour piece
+            spawn_armor_mesh(
+                commands,
+                materials,
+                meshes,
+                position,
+                map_id,
+                ArmorMeshConfig {
+                    width: 0.20,
+                    height: 0.12,
+                    color: Some(primary),
+                    is_helmet: false,
+                },
+                cache,
+            )
+        }
+        ItemMeshCategory::Ring | ItemMeshCategory::Amulet => {
+            let [rr, rg, rb, ra] = descriptor.primary_color;
+            spawn_ring_mesh(
+                commands,
+                materials,
+                meshes,
+                position,
+                map_id,
+                RingMeshConfig {
+                    color: [rr, rg, rb, ra],
+                },
+                cache,
+            )
+        }
+        ItemMeshCategory::Belt | ItemMeshCategory::Cloak => {
+            // Belt / cloak rendered as flat armour piece
+            spawn_armor_mesh(
+                commands,
+                materials,
+                meshes,
+                position,
+                map_id,
+                ArmorMeshConfig {
+                    width: 0.30,
+                    height: 0.08,
+                    color: Some(primary),
+                    is_helmet: false,
+                },
+                cache,
+            )
+        }
+        ItemMeshCategory::Potion => {
+            let [lr, lg, lb, la] = descriptor.primary_color;
+            spawn_potion_mesh(
+                commands,
+                materials,
+                meshes,
+                position,
+                map_id,
+                PotionConfig {
+                    liquid_color: [lr, lg, lb, la],
+                    bottle_color: [0.6, 0.6, 0.8, 0.55],
+                },
+                cache,
+            )
+        }
+        ItemMeshCategory::Scroll => {
+            let [sr, sg, sb, sa] = descriptor.primary_color;
+            spawn_scroll_mesh(
+                commands,
+                materials,
+                meshes,
+                position,
+                map_id,
+                ScrollConfig {
+                    color: [sr, sg, sb, sa],
+                },
+                cache,
+            )
+        }
+        ItemMeshCategory::Ammo => {
+            let [ar, ag, ab, aa] = descriptor.primary_color;
+            spawn_ammo_mesh(
+                commands,
+                materials,
+                meshes,
+                position,
+                map_id,
+                AmmoConfig {
+                    ammo_type: "arrow".to_string(),
+                    color: [ar, ag, ab, aa],
+                },
+                cache,
+            )
+        }
+        ItemMeshCategory::QuestItem => {
+            // Quest items rendered as glowing orb (ring mesh with emissive)
+            let [qr, qg, qb, qa] = descriptor.primary_color;
+            spawn_ring_mesh(
+                commands,
+                materials,
+                meshes,
+                position,
+                map_id,
+                RingMeshConfig {
+                    color: [qr, qg, qb, qa],
+                },
+                cache,
+            )
+        }
+    }
+}
+
+// ==================== Item Mesh Tests ====================
+
+#[cfg(test)]
+mod item_mesh_tests {
+    use super::*;
+
+    // §2.8 — test_sword_config_defaults
+    /// `SwordConfig::default()` must have a positive `blade_length`.
+    #[test]
+    fn test_sword_config_defaults() {
+        let cfg = SwordConfig::default();
+        assert!(
+            cfg.blade_length > 0.0,
+            "blade_length must be positive, got {}",
+            cfg.blade_length
+        );
+        assert!(cfg.blade_width > 0.0);
+        assert!(cfg.has_crossguard);
+        assert!(cfg.color.is_none());
+    }
+
+    // §2.8 — test_dagger_config_defaults
+    /// `DaggerConfig::default()` must have a shorter `blade_length` than `SwordConfig::default()`.
+    #[test]
+    fn test_dagger_config_defaults() {
+        let dagger = DaggerConfig::default();
+        let sword = SwordConfig::default();
+        assert!(
+            dagger.blade_length < sword.blade_length,
+            "dagger blade_length ({}) must be shorter than sword blade_length ({})",
+            dagger.blade_length,
+            sword.blade_length,
+        );
+        assert!(dagger.blade_length > 0.0);
+        assert!(dagger.color.is_none());
+    }
+
+    // §2.8 — test_potion_config_defaults
+    /// `PotionConfig::default()` must produce non-zero color components.
+    #[test]
+    fn test_potion_config_defaults() {
+        let cfg = PotionConfig::default();
+        // liquid_color alpha must be non-zero (visible)
+        assert!(
+            cfg.liquid_color[3] > 0.0,
+            "liquid_color alpha must be > 0, got {}",
+            cfg.liquid_color[3]
+        );
+        // bottle_color alpha must be non-zero (visible)
+        assert!(
+            cfg.bottle_color[3] > 0.0,
+            "bottle_color alpha must be > 0, got {}",
+            cfg.bottle_color[3]
+        );
+        // At least one RGB component must be non-zero for each color
+        let liquid_nonzero =
+            cfg.liquid_color[0] > 0.0 || cfg.liquid_color[1] > 0.0 || cfg.liquid_color[2] > 0.0;
+        assert!(
+            liquid_nonzero,
+            "liquid_color must have at least one non-zero RGB"
+        );
+        let bottle_nonzero =
+            cfg.bottle_color[0] > 0.0 || cfg.bottle_color[1] > 0.0 || cfg.bottle_color[2] > 0.0;
+        assert!(
+            bottle_nonzero,
+            "bottle_color must have at least one non-zero RGB"
+        );
+    }
+
+    // §2.8 — test_scroll_config_defaults
+    /// `ScrollConfig::default()` must have a valid (non-zero alpha) color.
+    #[test]
+    fn test_scroll_config_defaults() {
+        let cfg = ScrollConfig::default();
+        assert!(
+            cfg.color[3] > 0.0,
+            "scroll color alpha must be > 0, got {}",
+            cfg.color[3]
+        );
+        // Parchment should be a warm light color — R > 0.5
+        assert!(
+            cfg.color[0] > 0.5,
+            "scroll R channel expected > 0.5 for parchment, got {}",
+            cfg.color[0]
+        );
+    }
+
+    // §2.8 — test_cache_item_slots_default_none
+    /// All item mesh cache slots must be `None` when `ProceduralMeshCache::default()` is called.
+    #[test]
+    fn test_cache_item_slots_default_none() {
+        let cache = ProceduralMeshCache::default();
+        assert!(cache.item_sword.is_none(), "item_sword should be None");
+        assert!(cache.item_dagger.is_none(), "item_dagger should be None");
+        assert!(cache.item_blunt.is_none(), "item_blunt should be None");
+        assert!(cache.item_staff.is_none(), "item_staff should be None");
+        assert!(cache.item_bow.is_none(), "item_bow should be None");
+        assert!(cache.item_armor.is_none(), "item_armor should be None");
+        assert!(cache.item_shield.is_none(), "item_shield should be None");
+        assert!(cache.item_potion.is_none(), "item_potion should be None");
+        assert!(cache.item_scroll.is_none(), "item_scroll should be None");
+        assert!(cache.item_ring.is_none(), "item_ring should be None");
+        assert!(cache.item_ammo.is_none(), "item_ammo should be None");
+        assert!(cache.item_quest.is_none(), "item_quest should be None");
+    }
+
+    /// After `clear_all`, every item cache slot must be `None` again.
+    #[test]
+    fn test_cache_item_slots_cleared_after_clear_all() {
+        let mut cache = ProceduralMeshCache::default();
+        // Manually set a slot to verify clear_all resets it.
+        // We cannot create a real Handle<Mesh> without a Bevy world, but we
+        // can verify the slots start as None and remain None after clear_all.
+        cache.clear_all();
+        assert!(cache.item_sword.is_none());
+        assert!(cache.item_dagger.is_none());
+        assert!(cache.item_blunt.is_none());
+        assert!(cache.item_staff.is_none());
+        assert!(cache.item_bow.is_none());
+        assert!(cache.item_armor.is_none());
+        assert!(cache.item_shield.is_none());
+        assert!(cache.item_potion.is_none());
+        assert!(cache.item_scroll.is_none());
+        assert!(cache.item_ring.is_none());
+        assert!(cache.item_ammo.is_none());
+        assert!(cache.item_quest.is_none());
+    }
+
+    /// `BluntConfig::default()` has positive head_radius and handle_length.
+    #[test]
+    fn test_blunt_config_defaults() {
+        let cfg = BluntConfig::default();
+        assert!(cfg.head_radius > 0.0);
+        assert!(cfg.handle_length > 0.0);
+        assert!(cfg.color.is_none());
+    }
+
+    /// `StaffConfig::default()` has positive length and orb_radius.
+    #[test]
+    fn test_staff_config_defaults() {
+        let cfg = StaffConfig::default();
+        assert!(cfg.length > 0.0);
+        assert!(cfg.orb_radius > 0.0);
+        assert!(cfg.color.is_none());
+    }
+
+    /// `BowConfig::default()` has positive arc_height.
+    #[test]
+    fn test_bow_config_defaults() {
+        let cfg = BowConfig::default();
+        assert!(cfg.arc_height > 0.0);
+        assert!(cfg.color.is_none());
+    }
+
+    /// `ArmorMeshConfig::default()` has positive dimensions and is_helmet = false.
+    #[test]
+    fn test_armor_mesh_config_defaults() {
+        let cfg = ArmorMeshConfig::default();
+        assert!(cfg.width > 0.0);
+        assert!(cfg.height > 0.0);
+        assert!(!cfg.is_helmet);
+        assert!(cfg.color.is_none());
+    }
+
+    /// `ShieldConfig::default()` has positive radius.
+    #[test]
+    fn test_shield_config_defaults() {
+        let cfg = ShieldConfig::default();
+        assert!(cfg.radius > 0.0);
+        assert!(cfg.color.is_none());
+    }
+
+    /// `RingMeshConfig::default()` has non-zero alpha.
+    #[test]
+    fn test_ring_mesh_config_defaults() {
+        let cfg = RingMeshConfig::default();
+        assert!(cfg.color[3] > 0.0);
+    }
+
+    /// `AmmoConfig::default()` has non-zero alpha and "arrow" type.
+    #[test]
+    fn test_ammo_config_defaults() {
+        let cfg = AmmoConfig::default();
+        assert!(cfg.color[3] > 0.0);
+        assert_eq!(cfg.ammo_type, "arrow");
+    }
+
+    /// Item color constants must be valid sRGB (values in 0.0–1.0 range).
+    #[test]
+    fn test_item_color_constants_valid() {
+        // Each constant is an sRGB color; just verify they compile and can be
+        // converted to LinearRgba without panic.
+        let colors = [
+            ITEM_SWORD_COLOR,
+            ITEM_BLUNT_COLOR,
+            ITEM_WOOD_COLOR,
+            ITEM_LEATHER_COLOR,
+            ITEM_METAL_COLOR,
+            ITEM_PARCHMENT_COLOR,
+            ITEM_GOLD_COLOR,
+        ];
+        for color in colors {
+            // LinearRgba::from is always valid for sRGB inputs in [0,1].
+            let linear = LinearRgba::from(color);
+            assert!(linear.red >= 0.0);
+            assert!(linear.green >= 0.0);
+            assert!(linear.blue >= 0.0);
+            assert!(linear.alpha >= 0.0);
+        }
+    }
+
+    /// `SwordConfig` is `Clone` and produces an equal copy.
+    #[test]
+    fn test_sword_config_clone() {
+        let original = SwordConfig::default();
+        let cloned = original.clone();
+        assert!((cloned.blade_length - original.blade_length).abs() < f32::EPSILON);
+        assert_eq!(cloned.has_crossguard, original.has_crossguard);
+    }
+
+    /// `DaggerConfig` is `Clone`.
+    #[test]
+    fn test_dagger_config_clone() {
+        let original = DaggerConfig::default();
+        let cloned = original.clone();
+        assert!((cloned.blade_length - original.blade_length).abs() < f32::EPSILON);
+    }
+
+    /// `PotionConfig` is `Clone`.
+    #[test]
+    fn test_potion_config_clone() {
+        let original = PotionConfig::default();
+        let cloned = original.clone();
+        assert_eq!(cloned.liquid_color, original.liquid_color);
+        assert_eq!(cloned.bottle_color, original.bottle_color);
+    }
+
+    /// `ScrollConfig` is `Clone`.
+    #[test]
+    fn test_scroll_config_clone() {
+        let original = ScrollConfig::default();
+        let cloned = original.clone();
+        assert_eq!(cloned.color, original.color);
+    }
+
+    /// `AmmoConfig` is `Clone`.
+    #[test]
+    fn test_ammo_config_clone() {
+        let original = AmmoConfig::default();
+        let cloned = original.clone();
+        assert_eq!(cloned.ammo_type, original.ammo_type);
+        assert_eq!(cloned.color, original.color);
+    }
 }

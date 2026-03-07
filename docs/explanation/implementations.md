@@ -169,6 +169,213 @@ on the first failure.
 
 ---
 
+## Items Procedural Meshes — Phase 2: Game Engine — Dropped Item Mesh Generation
+
+**Plan**: [`items_procedural_meshes_implementation_plan.md`](items_procedural_meshes_implementation_plan.md)
+
+### Overview
+
+Phase 2 wires the domain-layer types from Phase 1 into the live Bevy game
+engine. Dropping an item from inventory now spawns a procedural 3-D mesh on
+the party's current tile; static `MapEvent::DroppedItem` entries in RON map
+files cause the same mesh to appear on map load; picking up an item despawns
+the mesh.
+
+---
+
+### Phase 2 Deliverables
+
+**Files created**:
+
+- `src/game/components/dropped_item.rs` — `DroppedItem` ECS marker component
+- `src/game/systems/item_world_events.rs` — `ItemDroppedEvent`, `ItemPickedUpEvent`, spawn / despawn / map-load systems, `ItemWorldPlugin`
+
+**Files modified**:
+
+- `src/domain/world/types.rs` — `MapEvent::DroppedItem` variant added
+- `src/domain/world/events.rs` — `DroppedItem` arm in `trigger_event` match
+- `src/game/components/mod.rs` — `pub mod dropped_item` + re-export
+- `src/game/resources/mod.rs` — `DroppedItemRegistry` resource
+- `src/game/systems/mod.rs` — `pub mod item_world_events`
+- `src/game/systems/procedural_meshes.rs` — 12 item mesh cache slots, `get_or_create_item_mesh`, 10 per-category spawn functions (`spawn_sword_mesh`, `spawn_dagger_mesh`, `spawn_blunt_mesh`, `spawn_staff_mesh`, `spawn_bow_mesh`, `spawn_armor_mesh`, `spawn_shield_mesh`, `spawn_potion_mesh`, `spawn_scroll_mesh`, `spawn_ring_mesh`, `spawn_ammo_mesh`), `spawn_dropped_item_mesh` dispatcher, 11 config structs
+- `src/game/systems/inventory_ui.rs` — drop action fires `ItemDroppedEvent`
+- `src/game/systems/events.rs` — `MapEvent::DroppedItem` arm in `handle_events`
+- `src/sdk/validation.rs` — `MapEvent::DroppedItem` validation arm
+- `src/bin/validate_map.rs` — `MapEvent::DroppedItem` counting arm
+- `src/bin/antares.rs` — `ItemWorldPlugin` registered
+
+---
+
+### What was built
+
+#### `DroppedItem` component (`src/game/components/dropped_item.rs`)
+
+`#[derive(Component, Clone, Debug, PartialEq, Eq)]` struct that marks any
+entity whose mesh represents an item lying on the ground. Stores `item_id`,
+`map_id`, `tile_x`, `tile_y`, and `charges`.
+
+#### `DroppedItemRegistry` resource (`src/game/resources/mod.rs`)
+
+`#[derive(Resource, Default)]` wrapping a `HashMap<(MapId, i32, i32, ItemId),
+Entity>`. Provides typed `insert`, `get`, and `remove` helpers. Used to
+correlate pickup events with ECS entities for targeted despawn.
+
+#### `MapEvent::DroppedItem` variant (`src/domain/world/types.rs`)
+
+New enum arm with `name: String`, `item_id: ItemId`, and
+`#[serde(default)] charges: u16`. All fields that are optional use
+`#[serde(default)]` so existing RON map files that pre-date this variant
+remain valid without modification.
+
+#### `ItemDroppedEvent` / `ItemPickedUpEvent` (`src/game/systems/item_world_events.rs`)
+
+`#[derive(Message, Clone, Debug)]` event structs carrying `item_id`, `charges`,
+`map_id`, `tile_x`, `tile_y` (drop) or the same minus charges (pickup).
+Registered with `app.add_message::<…>()` inside `ItemWorldPlugin`.
+
+#### `spawn_dropped_item_system`
+
+Reads `MessageReader<ItemDroppedEvent>`. For each event:
+
+1. Looks up the item from `GameContent`; skips with a warning if not found.
+2. Calls `ItemMeshDescriptor::from_item` → `to_creature_definition`.
+3. Calls `spawn_creature` at world-space `(tile_x + 0.5, 0.05, tile_y + 0.5)`.
+4. Applies a random Y-axis jitter rotation for visual variety.
+5. Inserts `DroppedItem`, `MapEntity`, `TileCoord`, and a `Name` component.
+6. Registers the entity in `DroppedItemRegistry`.
+
+`GameContent` is wrapped in `Option<Res<…>>` so the system degrades gracefully
+when content is not yet loaded.
+
+#### `despawn_picked_up_item_system`
+
+Reads `MessageReader<ItemPickedUpEvent>`. Looks up the entity in
+`DroppedItemRegistry` by the four-part key, calls
+`commands.entity(entity).despawn()` (Bevy 0.17 — recursive by default), and
+removes the registry entry. Unknown keys emit a `warn!` log.
+
+#### `load_map_dropped_items_system`
+
+Stores the last-processed map ID in a `Local<Option<MapId>>`. On map change,
+iterates all `MapEvent::DroppedItem` entries on the new map and fires
+`ItemDroppedEvent` for each so static map-authored drops share the identical
+spawn path as runtime drops.
+
+#### Item mesh config structs & generators (`src/game/systems/procedural_meshes.rs`)
+
+Eleven typed config structs (`SwordConfig`, `DaggerConfig`, `BluntConfig`,
+`StaffConfig`, `BowConfig`, `ArmorMeshConfig`, `ShieldConfig`, `PotionConfig`,
+`ScrollConfig`, `RingMeshConfig`, `AmmoConfig`) plus a `spawn_dropped_item_mesh`
+dispatcher that selects the right generator from `ItemMeshCategory`.
+
+Twelve item mesh cache slots added to `ProceduralMeshCache` (one per category
+string: `"sword"`, `"dagger"`, `"blunt"`, `"staff"`, `"bow"`, `"armor"`,
+`"shield"`, `"potion"`, `"scroll"`, `"ring"`, `"ammo"`, `"quest"`).
+`get_or_create_item_mesh` follows the same pattern as the existing
+`get_or_create_furniture_mesh`. `clear_all` and `cached_count` updated.
+
+Notable mesh details:
+
+- **Potion**: `AlphaMode::Blend` on both bottle and liquid inner cylinder;
+  liquid colour carries a faint emissive glow matching the liquid tint.
+- **Staff**: emissive orb at tip.
+- **Shield**: flat `Cylinder` disc with `FRAC_PI_2` X-rotation.
+- **Ring**: `Torus` primitive (`minor_radius` = 0.018, `major_radius` = 0.065).
+- **Ammo**: three sub-types (`"arrow"`, `"bolt"`, `"stone"`) selected from
+  `AmmoConfig::ammo_type`.
+
+#### Inventory drop integration (`src/game/systems/inventory_ui.rs`)
+
+`inventory_action_system` now accepts
+`Option<MessageWriter<ItemDroppedEvent>>` and fires it when a drop action
+removes an item from a character's inventory. The writer is `Option`-wrapped
+so existing tests that do not register the message type continue to pass.
+
+---
+
+### Architecture compliance
+
+| Check                                          | Status                                                                                          |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Data structures match architecture.md §4       | ✅ `ItemId`, `MapId` type aliases used throughout                                               |
+| Module placement follows §3.2                  | ✅ Components in `game/components/`, resources in `game/resources/`, systems in `game/systems/` |
+| No `unwrap()` without justification            | ✅ All error paths use `warn!` / `Option` guards                                                |
+| RON format for data files                      | ✅ `MapEvent::DroppedItem` serde-compatible with existing `.ron` map files                      |
+| Constants extracted, not hardcoded             | ✅ `DROPPED_ITEM_Y`, `DROP_ROTATION_JITTER`, `TILE_CENTER_OFFSET`, 7 `ITEM_*_COLOR` constants   |
+| SPDX headers on all new `.rs` files            | ✅ `2026 Brett Smith` header on `dropped_item.rs` and `item_world_events.rs`                    |
+| Test data in `data/`, not `campaigns/tutorial` | ✅ No test references campaign data                                                             |
+| Backward compatibility                         | ✅ `#[serde(default)]` on `MapEvent::DroppedItem` fields; existing RON files unaffected         |
+
+---
+
+### Test coverage
+
+**`src/game/components/dropped_item.rs`** (9 tests):
+
+| Test                                       | What it checks                                  |
+| ------------------------------------------ | ----------------------------------------------- |
+| `test_dropped_item_component_fields`       | All five fields stored correctly                |
+| `test_dropped_item_clone`                  | `Clone` produces equal copy                     |
+| `test_dropped_item_debug`                  | `Debug` output non-empty and contains type name |
+| `test_dropped_item_equality`               | `PartialEq` symmetric                           |
+| `test_dropped_item_inequality_item_id`     | Different `item_id` → not equal                 |
+| `test_dropped_item_inequality_map_id`      | Different `map_id` → not equal                  |
+| `test_dropped_item_inequality_tile_coords` | Different tiles → not equal                     |
+| `test_dropped_item_zero_charges`           | Zero charges accepted                           |
+| `test_dropped_item_max_charges`            | `u16::MAX` accepted without overflow            |
+
+**`src/game/resources/mod.rs`** (5 tests):
+
+| Test                                       | What it checks                          |
+| ------------------------------------------ | --------------------------------------- |
+| `test_dropped_item_registry_default_empty` | Default has no entries                  |
+| `test_registry_insert_and_lookup`          | Insert + `get` by key                   |
+| `test_registry_remove_on_pickup`           | Remove returns entity; key absent after |
+| `test_registry_two_entries`                | Two distinct keys coexist               |
+| `test_registry_insert_overwrites`          | Later insert replaces earlier entity    |
+
+**`src/game/systems/item_world_events.rs`** (10 tests):
+
+| Test                                       | What it checks             |
+| ------------------------------------------ | -------------------------- |
+| `test_item_dropped_event_creation`         | All five fields set        |
+| `test_item_picked_up_event_creation`       | All four fields set        |
+| `test_item_dropped_event_clone`            | `Clone`                    |
+| `test_item_picked_up_event_clone`          | `Clone`                    |
+| `test_item_dropped_event_debug`            | `Debug` contains type name |
+| `test_item_picked_up_event_debug`          | `Debug` contains type name |
+| `test_item_dropped_event_zero_charges`     | Zero charges valid         |
+| `test_item_dropped_event_max_charges`      | `u16::MAX` valid           |
+| `test_item_picked_up_event_negative_tiles` | Negative tile coords valid |
+| `test_dropped_item_y_is_positive`          | Constant assertion         |
+| `test_tile_center_offset_is_half`          | Constant assertion         |
+
+**`src/game/systems/procedural_meshes.rs`** (`item_mesh_tests` module, 18 tests):
+
+| Test                                            | What it checks                                       |
+| ----------------------------------------------- | ---------------------------------------------------- |
+| `test_sword_config_defaults`                    | `blade_length > 0`, `has_crossguard`, `color = None` |
+| `test_dagger_config_defaults`                   | `blade_length < sword blade_length`                  |
+| `test_potion_config_defaults`                   | Non-zero color components                            |
+| `test_scroll_config_defaults`                   | Non-zero alpha; R > 0.5 (parchment)                  |
+| `test_cache_item_slots_default_none`            | All 12 item slots `None` at default                  |
+| `test_cache_item_slots_cleared_after_clear_all` | `clear_all` resets item slots                        |
+| `test_blunt_config_defaults`                    | Positive dimensions                                  |
+| `test_staff_config_defaults`                    | Positive `length` and `orb_radius`                   |
+| `test_bow_config_defaults`                      | Positive `arc_height`                                |
+| `test_armor_mesh_config_defaults`               | Positive dimensions; `is_helmet = false`             |
+| `test_shield_config_defaults`                   | Positive `radius`                                    |
+| `test_ring_mesh_config_defaults`                | Non-zero alpha                                       |
+| `test_ammo_config_defaults`                     | Non-zero alpha; type = `"arrow"`                     |
+| `test_item_color_constants_valid`               | All 7 colour constants convert to valid `LinearRgba` |
+| `test_sword_config_clone`                       | `Clone`                                              |
+| `test_dagger_config_clone`                      | `Clone`                                              |
+| `test_potion_config_clone`                      | `Clone`                                              |
+| `test_scroll_config_clone`                      | `Clone`                                              |
+| `test_ammo_config_clone`                        | `Clone`                                              |
+
+---
+
 ## Procedural Meshes Direction Control
 
 **Plan**: [`procedural_meshes_direction_control_implementation_plan.md`](procedural_meshes_direction_control_implementation_plan.md)

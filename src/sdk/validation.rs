@@ -1114,6 +1114,18 @@ impl<'a> Validator<'a> {
                         }
                     }
                 }
+                crate::domain::world::MapEvent::DroppedItem { item_id, .. } => {
+                    // Validate that the item exists in the database
+                    if !self.db.items.has_item(item_id) {
+                        errors.push(ValidationError::MissingItem {
+                            context: format!(
+                                "Map {} DroppedItem event at ({}, {})",
+                                map.id, pos.x, pos.y
+                            ),
+                            item_id: *item_id,
+                        });
+                    }
+                }
             }
         }
 

@@ -313,6 +313,14 @@ pub fn trigger_event(
                 items: items.clone(),
             }
         }
+
+        MapEvent::DroppedItem { .. } => {
+            // DroppedItem events are handled by `load_map_dropped_items_system`
+            // at map load time.  Triggering the event at runtime (e.g. party
+            // steps on the tile) is a no-op here — pickup is handled via a
+            // dedicated action in a later phase.
+            EventResult::None
+        }
     };
 
     Ok(result)
