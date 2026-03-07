@@ -3110,4 +3110,106 @@ mod tests {
             );
         }
     }
+
+    // §6.4 — test_all_base_items_have_valid_mesh_descriptor
+    /// Every item in `data/items.ron` must produce a valid `ItemMeshDescriptor`
+    /// and a valid `CreatureDefinition`.
+    #[test]
+    fn test_all_base_items_have_valid_mesh_descriptor() {
+        use crate::domain::items::database::ItemDatabase;
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let items_path = std::path::PathBuf::from(manifest_dir)
+            .join("data")
+            .join("items.ron");
+
+        let db = ItemDatabase::load_from_file(&items_path).expect("Failed to load data/items.ron");
+
+        assert!(!db.is_empty(), "items.ron should have at least one item");
+
+        for item in db.all_items() {
+            let descriptor = ItemMeshDescriptor::from_item(item);
+            let creature_def = descriptor.to_creature_definition();
+            let result = creature_def.validate();
+            assert!(
+                result.is_ok(),
+                "Item id={} name='{}' produced invalid creature definition: {:?}",
+                item.id,
+                item.name,
+                result.err()
+            );
+        }
+    }
+
+    // §6.4 — test_item_mesh_registry_tutorial_coverage
+    /// The test_campaign item mesh registry is non-empty after loading.
+    #[test]
+    fn test_item_mesh_registry_tutorial_coverage() {
+        use crate::domain::campaign_loader::CampaignLoader;
+        use std::path::PathBuf;
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let base = PathBuf::from(manifest_dir).join("data");
+        let campaign = base.join("test_campaign");
+
+        let mut loader = CampaignLoader::new(base, campaign);
+        let result = loader.load_game_data();
+        assert!(result.is_ok(), "load_game_data failed: {:?}", result.err());
+
+        let game_data = result.unwrap();
+        assert!(
+            !game_data.item_meshes.is_empty(),
+            "Expected non-empty item mesh registry in test_campaign"
+        );
+        assert!(
+            game_data.item_meshes.count() >= 2,
+            "Expected at least 2 item mesh entries, got {}",
+            game_data.item_meshes.count()
+        );
+    }
+
+    // §6.4 — test_dropped_item_event_in_map_ron
+    /// A test_campaign map containing a `DroppedItem` event parses correctly.
+    #[test]
+    fn test_dropped_item_event_in_map_ron() {
+        use crate::domain::world::{Map, MapEvent};
+        use std::path::PathBuf;
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let map_path = PathBuf::from(manifest_dir).join("data/test_campaign/data/maps/map_1.ron");
+
+        assert!(
+            map_path.exists(),
+            "test_campaign map_1.ron not found at {:?}",
+            map_path
+        );
+
+        let contents =
+            std::fs::read_to_string(&map_path).expect("Failed to read test_campaign map_1.ron");
+
+        // Parse the map file — RON format with Map type
+        let map: Map = ron::from_str(&contents).expect("Failed to parse map_1.ron as Map");
+
+        // Verify there is at least one DroppedItem event
+        let dropped_items: Vec<_> = map
+            .events
+            .values()
+            .filter(|e| matches!(e, MapEvent::DroppedItem { .. }))
+            .collect();
+
+        assert!(
+            !dropped_items.is_empty(),
+            "Expected at least one DroppedItem event in test_campaign map_1.ron"
+        );
+
+        // Verify the specific Long Sword entry (item_id = 4) is present
+        let has_long_sword = map
+            .events
+            .values()
+            .any(|e| matches!(e, MapEvent::DroppedItem { item_id, .. } if *item_id == 4));
+        assert!(
+            has_long_sword,
+            "Expected a DroppedItem with item_id=4 (Long Sword) in test_campaign map_1.ron"
+        );
+    }
 }

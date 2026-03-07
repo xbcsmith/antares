@@ -1283,3 +1283,323 @@ literals (which have no such field), the spurious lines were removed.
 | `test_items_editor_requested_open_item_mesh_set_on_button`    | Signal field set + drainable              |
 
 **Total new tests: 51.** All 1,925 SDK tests and 3,159 full-suite tests pass.
+
+---
+
+## Items Procedural Meshes — Phase 6.4: Required Integration Tests
+
+### Overview
+
+Phase 6.4 adds three mandatory integration tests that close coverage gaps
+identified in the Phase 6 acceptance criteria:
+
+1. **`test_all_base_items_have_valid_mesh_descriptor`** — iterates every item
+   in `data/items.ron`, generates an `ItemMeshDescriptor` via
+   `ItemMeshDescriptor::from_item`, converts it to a `CreatureDefinition` via
+   `to_creature_definition`, and asserts `validate()` returns `Ok`. This
+   guarantees the descriptor pipeline is sound for all current base items.
+
+2. **`test_item_mesh_registry_tutorial_coverage`** — loads the
+   `data/test_campaign` campaign via `CampaignLoader`, asserts the returned
+   `GameData::item_meshes` registry is non-empty and contains at least 2
+   entries. Validates the end-to-end loader path for item mesh data.
+
+3. **`test_dropped_item_event_in_map_ron`** — reads
+   `data/test_campaign/data/maps/map_1.ron`, deserialises it as
+   `crate::domain::world::Map`, and asserts that at least one
+   `MapEvent::DroppedItem` event is present and that item_id 4 (Long Sword) is
+   among them. Validates RON round-trip for the `DroppedItem` variant.
+
+A prerequisite data fixture was also added: a `DroppedItem` entry for the
+Long Sword (item_id 4) at map position (7, 7) was inserted into
+`data/test_campaign/data/maps/map_1.ron`.
+
+### Phase 6.4 Deliverables
+
+| File                                     | Change                                           |
+| ---------------------------------------- | ------------------------------------------------ |
+| `src/domain/visual/item_mesh.rs`         | 3 new tests appended to `mod tests`              |
+| `data/test_campaign/data/maps/map_1.ron` | `DroppedItem` event added at position (x:7, y:7) |
+
+### What was built
+
+#### `test_all_base_items_have_valid_mesh_descriptor`
+
+Loads `data/items.ron` using `ItemDatabase::load_from_file`, then loops over
+every `Item` returned by `all_items()`. For each item it calls
+`ItemMeshDescriptor::from_item(item)`, then `descriptor.to_creature_definition()`,
+then `creature_def.validate()`. Any failure includes the item id and name in
+the assertion message for fast triage.
+
+#### `test_item_mesh_registry_tutorial_coverage`
+
+Constructs a `CampaignLoader` pointing at `data/` (base) and
+`data/test_campaign` (campaign), calls `load_game_data()`, and asserts:
+
+- `result.is_ok()`
+- `!game_data.item_meshes.is_empty()`
+- `game_data.item_meshes.count() >= 2`
+
+Uses `env!("CARGO_MANIFEST_DIR")` for portable paths. Does **not** reference
+`campaigns/tutorial` (Implementation Rule 5 compliant).
+
+#### `test_dropped_item_event_in_map_ron`
+
+Reads `data/test_campaign/data/maps/map_1.ron` from disk, deserialises via
+`ron::from_str::<Map>(&contents)`, then:
+
+- Asserts at least one `MapEvent::DroppedItem { .. }` variant is present.
+- Asserts a `DroppedItem` with `item_id == 4` (Long Sword) exists.
+
+#### `DroppedItem` fixture in `map_1.ron`
+
+Added at the end of the `events` block (before the closing brace):
+
+```data/test_campaign/data/maps/map_1.ron#L8384-8391
+        (
+            x: 7,
+            y: 7,
+        ): DroppedItem(
+            name: "Long Sword",
+            item_id: 4,
+            charges: 0,
+        ),
+```
+
+### Architecture compliance
+
+- [x] Data structures match `architecture.md` Section 4 — `ItemMeshDescriptor`,
+      `Map`, `MapEvent` used exactly as defined.
+- [x] Test data uses `data/test_campaign`, NOT `campaigns/tutorial`
+      (Implementation Rule 5).
+- [x] New fixture added to `data/test_campaign/data/maps/map_1.ron`, not
+      borrowed from live campaign data.
+- [x] RON format used for all data files.
+- [x] No architectural deviations without documentation.
+- [x] SPDX headers unaffected (tests appended to existing file).
+
+### Test coverage
+
+**`src/domain/visual/item_mesh.rs`** (3 new tests, inside existing `mod tests`)
+
+| Test                                             | Assertion                                                   |
+| ------------------------------------------------ | ----------------------------------------------------------- |
+| `test_all_base_items_have_valid_mesh_descriptor` | Every item in `data/items.ron` → valid `CreatureDefinition` |
+| `test_item_mesh_registry_tutorial_coverage`      | `test_campaign` item mesh registry non-empty, count ≥ 2     |
+| `test_dropped_item_event_in_map_ron`             | `map_1.ron` parses, contains `DroppedItem` with item_id=4   |
+
+**All 3 new tests pass.** All quality gates pass (fmt, check, clippy -D warnings, nextest).
+
+---
+
+## Phase 6.3 — `MapEvent::DroppedItem` Placements in Tutorial Campaign and Test Fixture
+
+### Overview
+
+Phase 6.3 populates the tutorial campaign maps and the test fixture map with
+concrete `MapEvent::DroppedItem` entries. These events represent items lying on
+the ground that the player can walk over and pick up. This phase adds 3 events
+to the live tutorial campaign and 1 to the test fixture (`data/test_campaign`),
+satisfying both the gameplay placement requirements and Implementation Rule 5
+(tests use `data/test_campaign`, never `campaigns/tutorial`).
+
+---
+
+### What Was Changed
+
+#### Tutorial Campaign Maps
+
+| File                                     | Position | Item               | item_id         | Purpose                                                          |
+| ---------------------------------------- | -------- | ------------------ | --------------- | ---------------------------------------------------------------- |
+| `campaigns/tutorial/data/maps/map_1.ron` | (3, 17)  | Dropped Sword      | 3 (Short Sword) | Near the elder NPC at (1,16) — early starting area reward        |
+| `campaigns/tutorial/data/maps/map_2.ron` | (2, 5)   | Healing Potion     | 50              | Near dungeon entrances in Dark Forrest — survival incentive      |
+| `campaigns/tutorial/data/maps/map_4.ron` | (3, 3)   | Ring of Protection | 40              | Near the `Treasure` event at (1,1) — treasure chamber floor loot |
+
+All three entries were inserted before the closing `},` of the existing
+`events: { ... }` BTreeMap block in each file. No existing events were
+modified. No duplicate positions were introduced.
+
+#### Test Fixture Map
+
+| File                                     | Position | Item                    | item_id        | Note                                                                                 |
+| ---------------------------------------- | -------- | ----------------------- | -------------- | ------------------------------------------------------------------------------------ |
+| `data/test_campaign/data/maps/map_1.ron` | (7, 7)   | Test Dropped Long Sword | 4 (Long Sword) | Entry already existed; name updated to "Test Dropped Long Sword" for fixture clarity |
+
+The `DroppedItem` at (7, 7) in `data/test_campaign/data/maps/map_1.ron` was
+pre-existing with name `"Long Sword"`. Its name was updated to
+`"Test Dropped Long Sword"` to clearly identify it as a test fixture entry
+and match the Phase 6.3 specification.
+
+---
+
+### RON Format Used
+
+Each event entry follows the `MapEvent::DroppedItem` variant structure, inserted
+into the `events` BTreeMap block:
+
+```antares/campaigns/tutorial/data/maps/map_1.ron#L8450-8459
+        (
+            x: 3,
+            y: 17,
+        ): DroppedItem(
+            name: "Dropped Sword",
+            item_id: 3,
+            charges: 0,
+        ),
+```
+
+The `name` field is `#[serde(default)]` (optional display label).
+The `charges` field is `#[serde(default)]` and set to `0` for non-charged items.
+`item_id` is the `ItemId` (`u32`) type alias referencing entries in `items.ron`.
+
+---
+
+### Architecture Compliance
+
+- `MapEvent::DroppedItem` structure used exactly as defined (Section 4, map events).
+- RON format used for all data files per Section 7.1.
+- No JSON or YAML introduced.
+- Test data placed in `data/test_campaign` per Implementation Rule 5.
+- No modifications to `campaigns/tutorial` from tests.
+
+---
+
+### Quality Gates
+
+All four gates passed after edits:
+
+```text
+cargo fmt         → no output (all files already formatted)
+cargo check       → Finished 0 errors
+cargo clippy      → Finished 0 warnings
+cargo nextest run → 3162 passed; 0 failed; 8 skipped
+```
+
+---
+
+## Phase 6.2 — Visual Quality Pass: Item Mesh RON Files
+
+### Overview
+
+Phase 6.2 improves the visual silhouette of every item mesh category so that
+dropped items on the ground are immediately recognisable at tile scale.
+Each category listed in the quality table from the plan now passes the
+corresponding check.
+
+---
+
+### What Was Changed
+
+All files are under `campaigns/tutorial/assets/items/`.
+
+#### Weapons
+
+| File                      | id   | What changed                                                                                                  |
+| ------------------------- | ---- | ------------------------------------------------------------------------------------------------------------- |
+| `weapons/dagger.ron`      | 9002 | Added `crossguard` mesh (half-width ±0.070, half-height ±0.015). Scale lowered to 0.3150 (compact).           |
+| `weapons/short_sword.ron` | 9003 | Added `crossguard` mesh (±0.090 × ±0.018). Scale 0.3500.                                                      |
+| `weapons/sword.ron`       | 9001 | Added `crossguard` mesh (±0.110 × ±0.020). Scale raised to 0.4025 — clearly longer than dagger.               |
+| `weapons/long_sword.ron`  | 9004 | Added `crossguard` mesh (±0.130 × ±0.022). Scale 0.4375.                                                      |
+| `weapons/great_sword.ron` | 9005 | Added `crossguard` mesh (±0.160 × ±0.025). Scale 0.5250 — dominant two-handed silhouette.                     |
+| `weapons/club.ron`        | 9006 | Split into `handle` (thin shaft) + `head` (wide 6-point boxy hexagon). Scale 0.4025.                          |
+| `weapons/staff.ron`       | 9007 | Renamed shaft to `shaft` (widened ±0.035). Added `orb_tip` 8-point polygon at Z+0.48 with blue emissive glow. |
+| `weapons/bow.ron`         | 9008 | Renamed limb to `limb` (tightened arc). Added `string` diamond mesh for visible bowstring. Scale 0.5600.      |
+
+**Crossguard material** (all swords): `color (0.60, 0.60, 0.64)`, `metallic 0.65`, `roughness 0.35` — slightly darker and more weathered than the polished blade.
+
+**Scale progression** ensures clear size graduation:
+
+```
+dagger(0.3150) → short_sword(0.3500) → sword(0.4025) → long_sword(0.4375) → great_sword(0.5250)
+```
+
+#### Armor
+
+| File                   | id   | What changed                                                                                                                                       |
+| ---------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `armor/plate_mail.ron` | 9103 | Split into `body` (narrower rectangle) + `shoulders` (wide U-shaped pauldron extending ±0.32 X). Scale 0.4550. High metallic 0.75, roughness 0.25. |
+| `armor/helmet.ron`     | 9105 | Added `visor` mesh (thin dark horizontal stripe) over the existing `dome`. Scale 0.3850.                                                           |
+
+`leather_armor.ron` retains its plain trapezoid — the **silhouette contrast** now comes from plate's shoulder extensions vs leather's clean trapezoidal outline.
+
+#### Accessories
+
+| File                   | id   | What changed                                                                                                                                                                 |
+| ---------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `accessories/ring.ron` | 9301 | **Complete rework** — annular washer shape. 12 outer vertices (r=0.160) + 12 inner vertices (r=0.070), 24 stitched triangles. Outer radius ≥ 0.15 as required. Scale 0.2100. |
+
+The ring now has a visible hole in the centre so it reads as a torus/ring at tile scale. The amulet retains its filled-disc shape, making the two accessories visually distinct.
+
+#### Ammo
+
+| File             | id   | What changed                                                                                             |
+| ---------------- | ---- | -------------------------------------------------------------------------------------------------------- |
+| `ammo/arrow.ron` | 9401 | Split into `shaft` (thin diamond, width 0.018) + `fletching` (triangular red fin at tail). Scale 0.2100. |
+
+---
+
+### Architecture Compliance
+
+- All RON files use `.ron` extension.
+- No SPDX headers in RON data files (only in `.rs` source files).
+- `mesh_transforms` has exactly one entry per mesh in every file.
+- Normals array has exactly as many entries as vertices in every mesh.
+- All floats have decimal points.
+- No JSON or YAML format used.
+
+---
+
+### Quality Gate Verification
+
+```text
+cargo fmt         → no output
+cargo check       → Finished 0 errors
+cargo clippy      → Finished 0 warnings
+cargo nextest run → 3162 passed; 0 failed; 8 skipped
+```
+
+---
+
+## Phase 6 — Complete: Full Item Mesh Coverage
+
+### Overview
+
+Phase 6 is the final phase of the Items Procedural Meshes implementation plan.
+It brings full coverage of all base items, a visual quality pass, authored
+in-world dropped item events, and comprehensive coverage tests.
+
+---
+
+### Deliverables Checklist
+
+- [x] All base items in `data/items.ron` (32 items, IDs 1–101) covered by a
+      valid auto-generated `ItemMeshDescriptor` — verified by
+      `test_all_base_items_have_valid_mesh_descriptor`
+- [x] Visual quality pass completed for all 13 categories (see Phase 6.2 above)
+- [x] At least three authored `DroppedItem` events in tutorial campaign maps: - `map_1.ron` (3,17): Short Sword — near starting room - `map_2.ron` (2,5): Healing Potion — first dungeon entrance - `map_4.ron` (3,3): Ring of Protection — treasure chamber
+- [x] Full coverage tests passing (see Phase 6.4 below)
+
+---
+
+### Phase 6.4 Tests
+
+Three new tests added to `src/domain/visual/item_mesh.rs` `mod tests`:
+
+| Test                                             | What it verifies                                                                                                                          |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_all_base_items_have_valid_mesh_descriptor` | Every item in `data/items.ron` → `ItemMeshDescriptor::from_item` → `to_creature_definition()` → `validate()` returns `Ok`                 |
+| `test_item_mesh_registry_tutorial_coverage`      | `CampaignLoader` on `data/test_campaign` returns non-empty item mesh registry with ≥ 2 entries                                            |
+| `test_dropped_item_event_in_map_ron`             | `data/test_campaign/data/maps/map_1.ron` deserialises as `Map`, contains ≥ 1 `MapEvent::DroppedItem`, specifically item_id=4 (Long Sword) |
+
+All tests use `data/test_campaign` — not `campaigns/tutorial` — per Implementation Rule 5.
+
+---
+
+### Quality Gates — Final
+
+```text
+cargo fmt         → no output
+cargo check       → Finished 0 errors
+cargo clippy      → Finished 0 warnings (0 warnings)
+cargo nextest run → 3162 passed; 0 failed; 8 skipped
+```
