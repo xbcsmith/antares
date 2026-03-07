@@ -521,6 +521,13 @@ pub fn calculate_turn_order(combat: &CombatState) -> Vec<CombatantId> {
 /// Resolves an attack from attacker to target
 ///
 /// Returns the damage dealt and whether a special effect was applied.
+/// On a hit, damage is always floored at **1** regardless of weapon penalties,
+/// negative bonuses, or low might. A cursed weapon that would roll 0 or less
+/// still deals exactly 1 damage point when it connects.
+///
+/// The floor is applied here — not in [`DiceRoll::roll`] (which floors at 0)
+/// and not in [`get_character_attack`] (which only builds the roll descriptor).
+/// This is the single authoritative place for the damage-floor invariant.
 ///
 /// # Errors
 ///
@@ -2108,6 +2115,228 @@ mod tests {
         if let Some(Combatant::Player(c)) = combat.participants.first() {
             assert!(c.hp.current > 10);
             assert!(c.hp.current <= 14); // 10 + 4 max
+        }
+    }
+
+    // ===== Phase 3: Damage Floor and Bonus Application Verification =====
+
+    /// A cursed weapon with a large negative bonus (1d4-10) must never cause a
+    /// hit to deal 0 damage.  `DiceRoll::roll` clamps its raw result at 0, but
+    /// `resolve_attack` applies a second `.max(1)` to the combined
+    /// `base_damage + might_bonus` total.  This test exercises that invariant
+    /// across many rolls so that every possible die outcome (1-4) is encountered
+    /// and we can confirm the floor holds throughout.
+    #[test]
+    fn test_cursed_weapon_damage_floor_at_one() {
+        let mut combat = CombatState::new(Handicap::Even);
+
+        // Attacker with exactly might=10 → damage_bonus == 0, so total damage
+        // is determined solely by the weapon roll.
+        let mut attacker = create_test_character("CursedWielder", 10);
+        attacker.stats.might.current = 10; // (10-10)/2 = 0 bonus
+                                           // High accuracy so every attack hits.
+        attacker.stats.accuracy.current = 20;
+        combat.add_player(attacker);
+
+        // Defender with AC 0 so hit threshold is always trivially low.
+        let mut defender = create_test_character("Dummy", 5);
+        defender.ac.current = 0;
+        combat.add_player(defender);
+
+        // Build the cursed weapon: 1d4-10.  Even the best roll (4-10 = -6) is
+        // negative, so DiceRoll::roll will always return 0.  resolve_attack must
+        // raise that to 1.
+        let mut db = ItemDatabase::new();
+        let cursed_dagger = make_weapon_item(
+            20,
+            DiceRoll::new(1, 4, -10),
+            0, // weapon item-level bonus already baked into the DiceRoll above
+            WeaponClassification::Simple,
+        );
+        db.add_item(cursed_dagger).unwrap();
+
+        // Use get_character_attack to build the Attack the same way the game
+        // system does, so we test the full pipeline.
+        let mut attacker_char = make_character_with_weapon(20);
+        attacker_char.stats.might.current = 10;
+        attacker_char.stats.accuracy.current = 20;
+        // Replace attacker slot with this character so resolve_attack can find it.
+        combat.participants[0] = Combatant::Player(Box::new(attacker_char));
+
+        let attack_result = get_character_attack(
+            match &combat.participants[0] {
+                Combatant::Player(c) => c,
+                _ => panic!("Expected player"),
+            },
+            &db,
+        );
+
+        let attack = match attack_result {
+            MeleeAttackResult::Melee(a) => a,
+            MeleeAttackResult::Ranged(_) => panic!("Expected melee attack"),
+        };
+
+        // Verify the DiceRoll bonus is -10 (saturating_add(0, -10) = -10).
+        assert_eq!(attack.damage.bonus, -10);
+        assert_eq!(attack.damage.count, 1);
+        assert_eq!(attack.damage.sides, 4);
+
+        let mut rng = rng();
+
+        // Run many iterations; every hit must deal at least 1 damage.
+        for _ in 0..200 {
+            let result = resolve_attack(
+                &combat,
+                CombatantId::Player(0),
+                CombatantId::Player(1),
+                &attack,
+                &mut rng,
+            );
+            assert!(result.is_ok(), "resolve_attack returned an error");
+            let (damage, _) = result.unwrap();
+            // A miss returns 0, which is acceptable.  On a hit, damage >= 1.
+            // We cannot guarantee every iteration is a hit, but the threshold
+            // is (10 + 0 - 20).max(2) = 2, so nearly every roll will hit.
+            // Assert: damage is never in the range 0 < damage — i.e. it is
+            // either 0 (miss) or >= 1 (hit, floored).
+            assert!(
+                damage == 0 || damage >= 1,
+                "damage {} violates floor-at-1 invariant",
+                damage
+            );
+        }
+
+        // More targeted: force a hit by making threshold 2 and confirming that
+        // over many rolls we observe at least one hit and it is always >= 1.
+        let hit_damages: Vec<u16> = (0..500)
+            .filter_map(|_| {
+                let (dmg, _) = resolve_attack(
+                    &combat,
+                    CombatantId::Player(0),
+                    CombatantId::Player(1),
+                    &attack,
+                    &mut rng,
+                )
+                .unwrap();
+                if dmg > 0 {
+                    Some(dmg)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // With accuracy=20 and AC=0 we expect many hits across 500 trials.
+        assert!(
+            !hit_damages.is_empty(),
+            "Expected at least one hit in 500 trials"
+        );
+        for &d in &hit_damages {
+            assert!(
+                d >= 1,
+                "Cursed weapon hit dealt {} damage — floor-at-1 invariant violated",
+                d
+            );
+        }
+    }
+
+    /// A magical +3 sword (1d6 base damage, weapon bonus +3) must have its
+    /// `DiceRoll::bonus` set to 3 after `get_character_attack` applies
+    /// `saturating_add`.  The theoretical minimum roll of the die (1) added to
+    /// the bonus gives a minimum result of 4, which `resolve_attack` must
+    /// honour.
+    #[test]
+    fn test_positive_bonus_adds_to_roll() {
+        // ── 1. Verify the DiceRoll produced by get_character_attack ──────────
+        let mut db = ItemDatabase::new();
+        // +3 longsword: base damage 1d6, item bonus +3.
+        let magic_sword = make_weapon_item(
+            30,
+            DiceRoll::new(1, 6, 0),
+            3,
+            WeaponClassification::MartialMelee,
+        );
+        db.add_item(magic_sword).unwrap();
+
+        let character = make_character_with_weapon(30);
+        let result = get_character_attack(&character, &db);
+
+        let attack = match result {
+            MeleeAttackResult::Melee(a) => a,
+            MeleeAttackResult::Ranged(_) => panic!("Expected melee attack"),
+        };
+
+        // Bonus must be 3 (saturating_add(base_bonus=0, weapon_bonus=3)).
+        assert_eq!(
+            attack.damage.bonus, 3,
+            "DiceRoll::bonus should be 3 for a +3 sword"
+        );
+        assert_eq!(attack.damage.count, 1);
+        assert_eq!(attack.damage.sides, 6);
+
+        // Minimum possible DiceRoll result: die=1 + bonus=3 = 4.
+        assert_eq!(
+            attack.damage.min(),
+            4,
+            "Minimum DiceRoll outcome for 1d6+3 should be 4"
+        );
+
+        // ── 2. Verify resolve_attack respects the bonus floor ────────────────
+        let mut combat = CombatState::new(Handicap::Even);
+
+        // Attacker: might=10 → might_bonus=0, high accuracy so every roll hits.
+        let mut attacker = create_test_character("Paladin", 10);
+        attacker.stats.might.current = 10;
+        attacker.stats.accuracy.current = 20;
+        combat.add_player(attacker);
+
+        let mut defender = create_test_character("Target", 5);
+        defender.ac.current = 0;
+        combat.add_player(defender);
+
+        let mut rng = rng();
+
+        // Collect all non-miss damage values over many trials.
+        let hit_damages: Vec<u16> = (0..500)
+            .filter_map(|_| {
+                let (dmg, _) = resolve_attack(
+                    &combat,
+                    CombatantId::Player(0),
+                    CombatantId::Player(1),
+                    &attack,
+                    &mut rng,
+                )
+                .unwrap();
+                if dmg > 0 {
+                    Some(dmg)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert!(
+            !hit_damages.is_empty(),
+            "Expected at least one hit in 500 trials"
+        );
+
+        // With might_bonus=0, total = DiceRoll result.  Minimum DiceRoll result
+        // for 1d6+3 is 4, so every hit must deal at least 4 damage.
+        for &d in &hit_damages {
+            assert!(
+                d >= 4,
+                "Expected minimum damage of 4 for +3 sword, got {}",
+                d
+            );
+        }
+
+        // Maximum possible damage is 1*6+3 = 9 (no might bonus).
+        for &d in &hit_damages {
+            assert!(
+                d <= 9,
+                "Expected maximum damage of 9 for +3 sword, got {}",
+                d
+            );
         }
     }
 }

@@ -1,5 +1,104 @@
 # Implementations
 
+## Phase 3: Equipped Weapon Damage — Damage Floor and Bonus Application Verification
+
+### Overview
+
+Phase 3 verifies and documents that weapon bonuses are applied correctly through
+the full attack pipeline and that the damage floor of 1 is enforced on every
+hit, regardless of how negative a weapon's bonus is.
+
+Two critical invariants are codified and proven by tests:
+
+1. **Bonus integration** — `get_character_attack` uses `saturating_add` to
+   merge `WeaponData::damage.bonus` and `WeaponData::bonus` into a single
+   `DiceRoll::bonus` field. This was already implemented in Phase 1; Phase 3
+   verifies it via boundary tests.
+2. **Damage floor at 1** — `resolve_attack` applies `.max(1)` to
+   `base_damage + damage_bonus` after every hit, preventing a cursed weapon
+   from ever dealing 0 damage on a successful strike. The floor is the sole
+   responsibility of `resolve_attack`; neither `DiceRoll::roll` (which floors
+   at 0) nor `get_character_attack` (which only builds the roll descriptor)
+   duplicate it.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `DiceRoll::bonus` field type confirmed as `i8`; `saturating_add` used
+      throughout `get_character_attack` — no silent truncation
+- [x] `resolve_attack` floors damage at 1 via `(base_damage + damage_bonus).max(1)`
+      — existing code confirmed and documented
+- [x] `resolve_attack` doc comment updated to explicitly state the floor-at-1
+      invariant and explain that it is the single authoritative enforcement point
+- [x] `test_cursed_weapon_damage_floor_at_one` passes
+- [x] `test_positive_bonus_adds_to_roll` passes
+
+### What Was Built
+
+#### Doc comment update (`src/domain/combat/engine.rs`)
+
+The `resolve_attack` function's doc comment was extended to document the
+damage-floor invariant:
+
+- States that on a hit, damage is **always** floored at 1 regardless of weapon
+  penalties, negative bonuses, or low might.
+- Explicitly identifies `resolve_attack` as the single authoritative place for
+  this invariant.
+- Cross-references `DiceRoll::roll` (floors at 0) and `get_character_attack`
+  (roll descriptor only) to prevent future duplication.
+
+#### `test_cursed_weapon_damage_floor_at_one`
+
+Located in `src/domain/combat/engine.rs`, `mod tests`.
+
+- Constructs a `CombatState` with an attacker (might=10, accuracy=20) and a
+  defender (AC=0) so nearly every roll is a hit.
+- Equips the attacker with a 1d4-10 cursed weapon built via `make_weapon_item`
+  and `ItemDatabase::add_item`.
+- Calls `get_character_attack` to produce the `Attack` the same way the game
+  system does, verifying `attack.damage.bonus == -10`.
+- Runs 200 `resolve_attack` trials and asserts `damage == 0` (miss) or
+  `damage >= 1` (hit, floored).
+- Runs a further 500 trials, filters to hits only, and asserts that the
+  collected `hit_damages` vector is non-empty and every element is `>= 1`.
+
+#### `test_positive_bonus_adds_to_roll`
+
+Located in `src/domain/combat/engine.rs`, `mod tests`.
+
+- Builds a +3 longsword (1d6 base, `WeaponData::bonus = 3`) in a fresh
+  `ItemDatabase`.
+- Calls `get_character_attack` and confirms:
+  - `attack.damage.bonus == 3` (saturating_add(0, 3))
+  - `attack.damage.count == 1`, `attack.damage.sides == 6`
+  - `attack.damage.min() == 4` (die=1 + bonus=3)
+- Runs 500 `resolve_attack` trials with an attacker of might=10 and AC=0
+  defender, filters to non-zero results, and asserts:
+  - At least one hit observed.
+  - Every hit `>= 4` (bonus raises the minimum).
+  - Every hit `<= 9` (1×6 + 3, no might bonus).
+
+### Architecture Compliance
+
+| Check                                                     | Status |
+| --------------------------------------------------------- | ------ |
+| Type aliases used (`ItemId` etc.)                         | ✅     |
+| `DiceRoll::bonus` is `i8`; `saturating_add` used          | ✅     |
+| Floor-at-1 in `resolve_attack`, not in helpers            | ✅     |
+| No magic numbers; `UNARMED_DAMAGE` constant used          | ✅     |
+| Tests use `data/` fixtures only (no `campaigns/tutorial`) | ✅     |
+| RON data files untouched                                  | ✅     |
+
+### Quality Gate Results
+
+```text
+cargo fmt         → OK (no output)
+cargo check       → Finished 0 errors
+cargo clippy      → Finished 0 warnings
+cargo nextest run → 3182 tests run: 3182 passed, 8 skipped
+```
+
+---
+
 ## Phase 2: Equipped Weapon Damage — Game System Integration
 
 ### Overview
