@@ -1,5 +1,119 @@
 # Implementations
 
+## OBJ to RON Conversion - Phase 1: Multi-Mesh OBJ Import
+
+**Plan**: [`obj_to_ron_implementation_plan.md`](obj_to_ron_implementation_plan.md)
+
+### Overview
+
+Phase 1 extends the Campaign Builder OBJ importer so it can read a Wavefront
+OBJ file as a list of named meshes instead of flattening every object/group
+into one `MeshDefinition`. The legacy single-mesh importer remains available,
+while a new multi-mesh API now produces one `MeshDefinition` per `o`/`g`
+section with local vertex remapping suitable for later creature/item RON
+export work.
+
+---
+
+### Phase 1 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `docs/explanation/implementations.md`
+
+**Files created**:
+
+- `examples/skeleton.obj`
+- `examples/female_1.obj`
+
+---
+
+### What was built
+
+#### Multi-mesh OBJ import APIs (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+Added four new public functions:
+
+- `import_meshes_from_obj`
+- `import_meshes_from_obj_with_options`
+- `import_meshes_from_obj_file`
+- `import_meshes_from_obj_file_with_options`
+
+These APIs parse global OBJ vertex/normal/UV pools, split meshes on `o` and
+`g` directives, then build one `MeshDefinition` per parsed section.
+
+#### Per-mesh vertex remapping (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+The new importer tracks face vertices as `(v, vt, vn)` references and remaps
+them into local mesh indices. This means each exported `MeshDefinition` only
+contains vertices actually referenced by that mesh, and every mesh gets its
+own local zero-based index buffer.
+
+Faces with more than three vertices are triangulated with a triangle-fan
+strategy, matching the existing importer behavior for quads and n-gons.
+
+#### Mesh name sanitization (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+Added a private `sanitize_mesh_name(raw: &str) -> String` helper that:
+
+- replaces non-ASCII alphanumeric / underscore characters with `_`
+- collapses repeated underscores
+- trims leading and trailing underscores
+
+If a sanitized mesh name becomes empty, the importer falls back to a stable
+generated name such as `mesh_0`.
+
+#### `ObjImportOptions::scale` (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+Extended `ObjImportOptions` with `scale: f32` and defaulted it to `1.0`.
+Imported vertex positions are multiplied by this scale in both the legacy
+single-mesh importer and the new multi-mesh importer.
+
+#### No-group fallback (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+When an OBJ has no `o` or `g` directives, the multi-mesh importer returns a
+single mesh named `mesh_0` so downstream code still receives a valid list of
+meshes.
+
+#### Deterministic OBJ fixtures (`examples/skeleton.obj`, `examples/female_1.obj`)
+
+Added two small multi-object OBJ fixtures to the repository so the importer
+tests can exercise the required filename-based paths without depending on
+external assets.
+
+---
+
+### Architecture compliance
+
+- The work is confined to the SDK importer layer under `sdk/campaign_builder`.
+- Existing `MeshDefinition` from `src/domain/visual/mod.rs` is reused exactly
+  as defined by the architecture.
+- No domain/core data structures were modified.
+- The legacy single-mesh importer remains intact for backward compatibility.
+- New test fixtures live outside `campaigns/tutorial`, so Implementation Rule 5
+  remains satisfied.
+
+---
+
+### Test coverage
+
+Added or extended unit tests in `sdk/campaign_builder/src/mesh_obj_io.rs` for:
+
+- `sanitize_mesh_name` edge cases
+- `scale` application during import
+- no-group fallback to `mesh_0`
+- file-based multi-mesh import of `examples/skeleton.obj`
+- file-based multi-mesh import of `examples/female_1.obj`
+- legacy round-trip and single-mesh import behavior remaining intact
+
+Validation run completed successfully:
+
+- `cargo fmt --all`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo nextest run --all-features` -> `3162 passed, 8 skipped`
+
 ## Items Procedural Meshes — Phase 1: Domain Layer
 
 **Plan**: [`items_procedural_meshes_implementation_plan.md`](items_procedural_meshes_implementation_plan.md)

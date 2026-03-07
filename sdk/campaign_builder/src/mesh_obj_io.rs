@@ -37,6 +37,7 @@
 //! ```
 
 use antares::domain::visual::MeshDefinition;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use thiserror::Error;
 
@@ -113,6 +114,9 @@ pub struct ObjImportOptions {
 
     /// Whether to flip texture V coordinate
     pub flip_uv_v: bool,
+
+    /// Uniform scale applied to imported vertex positions
+    pub scale: f32,
 }
 
 impl Default for ObjImportOptions {
@@ -122,8 +126,30 @@ impl Default for ObjImportOptions {
             default_color: [1.0, 1.0, 1.0, 1.0],
             flip_yz: false,
             flip_uv_v: false,
+            scale: 1.0,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ObjVertexRef {
+    vertex_index: usize,
+    texture_index: Option<usize>,
+    normal_index: Option<usize>,
+}
+
+#[derive(Debug, Default)]
+struct ParsedObjMesh {
+    raw_name: Option<String>,
+    faces: Vec<Vec<ObjVertexRef>>,
+}
+
+#[derive(Debug, Default)]
+struct ParsedObjData {
+    vertices: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    uvs: Vec<[f32; 2]>,
+    meshes: Vec<ParsedObjMesh>,
 }
 
 /// Exports a mesh to OBJ format string
@@ -400,6 +426,10 @@ pub fn import_mesh_from_obj_with_options(
                     .parse()
                     .map_err(|e| ObjError::ParseError(format!("Invalid vertex Z: {}", e)))?;
 
+                let x = x * options.scale;
+                let y = y * options.scale;
+                let z = z * options.scale;
+
                 if options.flip_yz {
                     vertices.push([x, z, -y]);
                 } else {
@@ -538,6 +568,101 @@ pub fn import_mesh_from_obj_with_options(
     })
 }
 
+/// Imports multiple meshes from an OBJ format string.
+///
+/// Each `o` or `g` block is converted into a separate [`MeshDefinition`] with
+/// per-mesh vertex remapping. If the OBJ does not contain any `o` or `g`
+/// directives, a single mesh named `mesh_0` is returned.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::mesh_obj_io::import_meshes_from_obj;
+///
+/// let obj = "o Head\n\
+///            v 0.0 0.0 0.0\n\
+///            v 1.0 0.0 0.0\n\
+///            v 0.0 1.0 0.0\n\
+///            f 1 2 3\n\
+///            o Arm\n\
+///            v 0.0 0.0 1.0\n\
+///            v 1.0 0.0 1.0\n\
+///            v 0.0 1.0 1.0\n\
+///            f 4 5 6\n";
+///
+/// let meshes = import_meshes_from_obj(obj).unwrap();
+/// assert_eq!(meshes.len(), 2);
+/// assert_eq!(meshes[0].name.as_deref(), Some("Head"));
+/// assert_eq!(meshes[1].name.as_deref(), Some("Arm"));
+/// ```
+pub fn import_meshes_from_obj(obj_string: &str) -> Result<Vec<MeshDefinition>, ObjError> {
+    import_meshes_from_obj_with_options(obj_string, &ObjImportOptions::default())
+}
+
+/// Imports multiple meshes from an OBJ format string with custom options.
+///
+/// # Arguments
+///
+/// * `obj_string` - OBJ format string to parse
+/// * `options` - Import options
+///
+/// # Returns
+///
+/// A list of imported meshes, or an error if import fails
+pub fn import_meshes_from_obj_with_options(
+    obj_string: &str,
+    options: &ObjImportOptions,
+) -> Result<Vec<MeshDefinition>, ObjError> {
+    let parsed = parse_obj_meshes(obj_string, options)?;
+
+    if parsed.meshes.is_empty() {
+        return Err(ObjError::MissingData("No faces found".to_string()));
+    }
+
+    let mut meshes = Vec::with_capacity(parsed.meshes.len());
+    for (mesh_index, parsed_mesh) in parsed.meshes.iter().enumerate() {
+        meshes.push(build_mesh_from_parsed(
+            &parsed,
+            parsed_mesh,
+            options,
+            mesh_index,
+        )?);
+    }
+
+    Ok(meshes)
+}
+
+/// Imports multiple meshes from an OBJ file.
+///
+/// # Arguments
+///
+/// * `path` - File path to read from
+///
+/// # Returns
+///
+/// Imported meshes, or an error if import fails
+pub fn import_meshes_from_obj_file(path: &str) -> Result<Vec<MeshDefinition>, ObjError> {
+    import_meshes_from_obj_file_with_options(path, &ObjImportOptions::default())
+}
+
+/// Imports multiple meshes from an OBJ file with custom options.
+///
+/// # Arguments
+///
+/// * `path` - File path to read from
+/// * `options` - Import options
+///
+/// # Returns
+///
+/// Imported meshes, or an error if import fails
+pub fn import_meshes_from_obj_file_with_options(
+    path: &str,
+    options: &ObjImportOptions,
+) -> Result<Vec<MeshDefinition>, ObjError> {
+    let obj_string = std::fs::read_to_string(path)?;
+    import_meshes_from_obj_with_options(&obj_string, options)
+}
+
 /// Imports a mesh from an OBJ file
 ///
 /// # Arguments
@@ -567,6 +692,339 @@ pub fn import_mesh_from_obj_file_with_options(
 ) -> Result<MeshDefinition, ObjError> {
     let obj_string = std::fs::read_to_string(path)?;
     import_mesh_from_obj_with_options(&obj_string, options)
+}
+
+fn parse_obj_meshes(
+    obj_string: &str,
+    options: &ObjImportOptions,
+) -> Result<ParsedObjData, ObjError> {
+    let reader = BufReader::new(obj_string.as_bytes());
+
+    let mut vertices = Vec::new();
+    let mut normals = Vec::new();
+    let mut uvs = Vec::new();
+    let mut meshes = Vec::new();
+    let mut current_name: Option<String> = None;
+    let mut current_faces: Vec<Vec<ObjVertexRef>> = Vec::new();
+    let mut saw_mesh_directive = false;
+
+    for line in reader.lines() {
+        let line = line?;
+        let line = line.trim();
+
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        match parts[0] {
+            "o" | "g" => {
+                saw_mesh_directive = true;
+                flush_parsed_mesh(&mut meshes, &mut current_name, &mut current_faces);
+                current_name = if parts.len() > 1 {
+                    Some(parts[1..].join(" "))
+                } else {
+                    None
+                };
+            }
+            "v" => vertices.push(parse_vertex(parts.as_slice(), options)?),
+            "vn" => normals.push(parse_normal(parts.as_slice(), options)?),
+            "vt" => uvs.push(parse_uv(parts.as_slice(), options)?),
+            "f" => {
+                if parts.len() < 4 {
+                    return Err(ObjError::ParseError(format!(
+                        "Invalid face definition: {}",
+                        line
+                    )));
+                }
+
+                let face = parts
+                    .iter()
+                    .skip(1)
+                    .map(|part| parse_obj_face_vertex(part))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                validate_face_vertex_indices(&face, vertices.len(), uvs.len(), normals.len())?;
+                current_faces.push(face);
+            }
+            "mtllib" | "usemtl" | "s" => {
+                // Material/smoothing directives are intentionally ignored for now.
+            }
+            _ => {
+                // Unknown directive - skip.
+            }
+        }
+    }
+
+    if vertices.is_empty() {
+        return Err(ObjError::MissingData("No vertices found".to_string()));
+    }
+
+    if saw_mesh_directive {
+        flush_parsed_mesh(&mut meshes, &mut current_name, &mut current_faces);
+    } else if !current_faces.is_empty() {
+        meshes.push(ParsedObjMesh {
+            raw_name: Some("mesh_0".to_string()),
+            faces: current_faces,
+        });
+    }
+
+    Ok(ParsedObjData {
+        vertices,
+        normals,
+        uvs,
+        meshes,
+    })
+}
+
+fn flush_parsed_mesh(
+    meshes: &mut Vec<ParsedObjMesh>,
+    current_name: &mut Option<String>,
+    current_faces: &mut Vec<Vec<ObjVertexRef>>,
+) {
+    if current_faces.is_empty() {
+        return;
+    }
+
+    meshes.push(ParsedObjMesh {
+        raw_name: current_name.take(),
+        faces: std::mem::take(current_faces),
+    });
+}
+
+fn build_mesh_from_parsed(
+    parsed: &ParsedObjData,
+    parsed_mesh: &ParsedObjMesh,
+    options: &ObjImportOptions,
+    mesh_index: usize,
+) -> Result<MeshDefinition, ObjError> {
+    let mut vertices = Vec::new();
+    let mut normals = Vec::new();
+    let mut uvs = Vec::new();
+    let mut indices = Vec::new();
+    let mut local_indices = HashMap::<ObjVertexRef, u32>::new();
+    let mut saw_normals = false;
+    let mut saw_uvs = false;
+
+    for face in &parsed_mesh.faces {
+        let mut face_indices = Vec::with_capacity(face.len());
+
+        for vertex_ref in face {
+            let local_index = if let Some(existing_index) = local_indices.get(vertex_ref) {
+                *existing_index
+            } else {
+                let vertex = parsed.vertices[vertex_ref.vertex_index - 1];
+                let next_index = vertices.len() as u32;
+                vertices.push(vertex);
+
+                if let Some(normal_index) = vertex_ref.normal_index {
+                    normals.push(parsed.normals[normal_index - 1]);
+                    saw_normals = true;
+                } else {
+                    normals.push([0.0, 0.0, 0.0]);
+                }
+
+                if let Some(texture_index) = vertex_ref.texture_index {
+                    uvs.push(parsed.uvs[texture_index - 1]);
+                    saw_uvs = true;
+                } else {
+                    uvs.push([0.0, 0.0]);
+                }
+
+                local_indices.insert(*vertex_ref, next_index);
+                next_index
+            };
+
+            face_indices.push(local_index);
+        }
+
+        triangulate_face_indices(&face_indices, &mut indices);
+    }
+
+    let raw_name = parsed_mesh.raw_name.as_deref().unwrap_or_default();
+    let sanitized_name = sanitize_mesh_name(raw_name);
+    let mesh_name = if sanitized_name.is_empty() {
+        format!("mesh_{}", mesh_index)
+    } else {
+        sanitized_name
+    };
+
+    Ok(MeshDefinition {
+        name: Some(mesh_name),
+        vertices,
+        indices,
+        normals: if saw_normals { Some(normals) } else { None },
+        uvs: if saw_uvs { Some(uvs) } else { None },
+        color: options.default_color,
+        lod_levels: None,
+        lod_distances: None,
+        material: None,
+        texture_path: None,
+    })
+}
+
+fn triangulate_face_indices(face_indices: &[u32], indices: &mut Vec<u32>) {
+    if face_indices.len() == 3 {
+        indices.extend_from_slice(face_indices);
+        return;
+    }
+
+    for triangle_index in 1..(face_indices.len() - 1) {
+        indices.push(face_indices[0]);
+        indices.push(face_indices[triangle_index]);
+        indices.push(face_indices[triangle_index + 1]);
+    }
+}
+
+fn parse_vertex(parts: &[&str], options: &ObjImportOptions) -> Result<[f32; 3], ObjError> {
+    if parts.len() < 4 {
+        return Err(ObjError::ParseError(format!(
+            "Invalid vertex definition: {}",
+            parts.join(" ")
+        )));
+    }
+
+    let x: f32 = parts[1]
+        .parse()
+        .map_err(|e| ObjError::ParseError(format!("Invalid vertex X: {}", e)))?;
+    let y: f32 = parts[2]
+        .parse()
+        .map_err(|e| ObjError::ParseError(format!("Invalid vertex Y: {}", e)))?;
+    let z: f32 = parts[3]
+        .parse()
+        .map_err(|e| ObjError::ParseError(format!("Invalid vertex Z: {}", e)))?;
+
+    let x = x * options.scale;
+    let y = y * options.scale;
+    let z = z * options.scale;
+
+    Ok(if options.flip_yz {
+        [x, z, -y]
+    } else {
+        [x, y, z]
+    })
+}
+
+fn parse_normal(parts: &[&str], options: &ObjImportOptions) -> Result<[f32; 3], ObjError> {
+    if parts.len() < 4 {
+        return Err(ObjError::ParseError(format!(
+            "Invalid normal definition: {}",
+            parts.join(" ")
+        )));
+    }
+
+    let x: f32 = parts[1]
+        .parse()
+        .map_err(|e| ObjError::ParseError(format!("Invalid normal X: {}", e)))?;
+    let y: f32 = parts[2]
+        .parse()
+        .map_err(|e| ObjError::ParseError(format!("Invalid normal Y: {}", e)))?;
+    let z: f32 = parts[3]
+        .parse()
+        .map_err(|e| ObjError::ParseError(format!("Invalid normal Z: {}", e)))?;
+
+    Ok(if options.flip_yz {
+        [x, z, -y]
+    } else {
+        [x, y, z]
+    })
+}
+
+fn parse_uv(parts: &[&str], options: &ObjImportOptions) -> Result<[f32; 2], ObjError> {
+    if parts.len() < 3 {
+        return Err(ObjError::ParseError(format!(
+            "Invalid texture coordinate definition: {}",
+            parts.join(" ")
+        )));
+    }
+
+    let u: f32 = parts[1]
+        .parse()
+        .map_err(|e| ObjError::ParseError(format!("Invalid UV U: {}", e)))?;
+    let mut v: f32 = parts[2]
+        .parse()
+        .map_err(|e| ObjError::ParseError(format!("Invalid UV V: {}", e)))?;
+
+    if options.flip_uv_v {
+        v = 1.0 - v;
+    }
+
+    Ok([u, v])
+}
+
+fn parse_obj_face_vertex(s: &str) -> Result<ObjVertexRef, ObjError> {
+    let (vertex_index, texture_index, normal_index) = parse_face_vertex(s)?;
+    Ok(ObjVertexRef {
+        vertex_index,
+        texture_index,
+        normal_index,
+    })
+}
+
+fn validate_face_vertex_indices(
+    face: &[ObjVertexRef],
+    vertex_count: usize,
+    uv_count: usize,
+    normal_count: usize,
+) -> Result<(), ObjError> {
+    for vertex_ref in face {
+        if vertex_ref.vertex_index == 0 || vertex_ref.vertex_index > vertex_count {
+            return Err(ObjError::InvalidIndex(format!(
+                "Vertex index {} out of range (1-{})",
+                vertex_ref.vertex_index, vertex_count
+            )));
+        }
+
+        if let Some(texture_index) = vertex_ref.texture_index {
+            if texture_index == 0 || texture_index > uv_count {
+                return Err(ObjError::InvalidIndex(format!(
+                    "Texture index {} out of range (1-{})",
+                    texture_index, uv_count
+                )));
+            }
+        }
+
+        if let Some(normal_index) = vertex_ref.normal_index {
+            if normal_index == 0 || normal_index > normal_count {
+                return Err(ObjError::InvalidIndex(format!(
+                    "Normal index {} out of range (1-{})",
+                    normal_index, normal_count
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn sanitize_mesh_name(raw: &str) -> String {
+    let mut sanitized = String::with_capacity(raw.len());
+    let mut last_was_underscore = false;
+
+    for ch in raw.chars() {
+        let mapped = if ch.is_ascii_alphanumeric() || ch == '_' {
+            ch
+        } else {
+            '_'
+        };
+
+        if mapped == '_' {
+            if last_was_underscore {
+                continue;
+            }
+            last_was_underscore = true;
+        } else {
+            last_was_underscore = false;
+        }
+
+        sanitized.push(mapped);
+    }
+
+    sanitized.trim_matches('_').to_string()
 }
 
 /// Parses a face vertex string (e.g., "1", "1/2", "1/2/3", "1//3")
@@ -605,6 +1063,7 @@ fn parse_face_vertex(s: &str) -> Result<(usize, Option<usize>, Option<usize>), O
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn create_test_mesh() -> MeshDefinition {
         MeshDefinition {
@@ -829,5 +1288,80 @@ mod tests {
 
         let uvs = mesh.uvs.unwrap();
         assert_eq!(uvs[0], [0.0, 0.25]); // 1.0 - 0.75
+    }
+
+    #[test]
+    fn test_import_multi_mesh_without_groups_uses_mesh_0() {
+        let obj = "v 0.0 0.0 0.0\nv 1.0 0.0 0.0\nv 0.0 1.0 0.0\nf 1 2 3\n";
+        let meshes = import_meshes_from_obj(obj).unwrap();
+
+        assert_eq!(meshes.len(), 1);
+        assert_eq!(meshes[0].name.as_deref(), Some("mesh_0"));
+        assert_eq!(meshes[0].indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_sanitize_mesh_name_edge_cases() {
+        assert_eq!(sanitize_mesh_name(""), "");
+        assert_eq!(sanitize_mesh_name("***"), "");
+        assert_eq!(sanitize_mesh_name(" Head / Torso !! "), "Head_Torso");
+        assert_eq!(sanitize_mesh_name("___left__arm___"), "left_arm");
+    }
+
+    #[test]
+    fn test_import_multi_mesh_scale_option_applies_to_vertices() {
+        let obj = "o Scaled\nv 2.0 4.0 6.0\nv 0.0 0.0 0.0\nv 1.0 0.0 0.0\nf 1 2 3\n";
+        let options = ObjImportOptions {
+            scale: 0.5,
+            ..Default::default()
+        };
+
+        let meshes = import_meshes_from_obj_with_options(obj, &options).unwrap();
+        assert_eq!(meshes[0].vertices[0], [1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_import_meshes_from_obj_file_skeleton_fixture() {
+        let path = fixture_path("examples/skeleton.obj");
+        let obj_string = std::fs::read_to_string(&path).unwrap();
+        let expected_meshes = obj_string
+            .lines()
+            .filter(|line| line.trim_start().starts_with("o "))
+            .count();
+
+        let meshes = import_meshes_from_obj_file(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(meshes.len(), expected_meshes);
+        for mesh in meshes {
+            assert!(mesh.name.as_deref().is_some_and(|name| !name.is_empty()));
+            assert!(!mesh.vertices.is_empty());
+            assert_eq!(mesh.indices.len() % 3, 0);
+        }
+    }
+
+    #[test]
+    fn test_import_meshes_from_obj_file_female_fixture() {
+        let path = fixture_path("examples/female_1.obj");
+        let obj_string = std::fs::read_to_string(&path).unwrap();
+        let expected_meshes = obj_string
+            .lines()
+            .filter(|line| line.trim_start().starts_with("o "))
+            .count();
+
+        let meshes = import_meshes_from_obj_file(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(meshes.len(), expected_meshes);
+        for mesh in meshes {
+            assert!(mesh.name.as_deref().is_some_and(|name| !name.is_empty()));
+            assert!(!mesh.vertices.is_empty());
+            assert_eq!(mesh.indices.len() % 3, 0);
+        }
+    }
+
+    fn fixture_path(relative_path: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join(relative_path)
     }
 }
