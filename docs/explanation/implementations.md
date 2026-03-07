@@ -1,5 +1,164 @@
 # Implementations
 
+## Phase 1: Equipped Weapon Damage — Domain Combat Engine Changes
+
+### Overview
+
+Player characters in combat previously always dealt 1d4 physical damage regardless
+of their equipped weapon, because `perform_attack_action_with_rng` hardcoded
+`Attack::physical(DiceRoll::new(1, 4, 0))` for every `CombatantId::Player` turn.
+This phase repairs the domain layer so that the combat engine can correctly resolve
+a character's attack from their equipped weapon, identify ranged weapons that must
+not fire through the melee path, and fall back to a correct unarmed damage value
+(1d2, not 1d4).
+
+No Bevy or game-system code was changed in this phase — all additions are
+pure-domain functions in `src/domain/combat/engine.rs` and a field addition to
+`src/domain/combat/types.rs`.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `UNARMED_DAMAGE` constant in `src/domain/combat/engine.rs`
+- [x] `MeleeAttackResult` enum in `src/domain/combat/engine.rs`
+- [x] `get_character_attack(character, item_db) -> MeleeAttackResult` in
+      `src/domain/combat/engine.rs`
+- [x] `has_ranged_weapon(character, item_db) -> bool` in
+      `src/domain/combat/engine.rs`
+- [x] `is_ranged: bool` field on `Attack` with `#[serde(default)]` in
+      `src/domain/combat/types.rs`
+- [x] `Attack::ranged(damage)` constructor in `src/domain/combat/types.rs`
+- [x] Required `use` imports added to `engine.rs`
+- [x] All 14 unit tests pass (13 specified + 1 extra coverage test)
+
+### What Was Built
+
+#### `UNARMED_DAMAGE` constant (`src/domain/combat/engine.rs`)
+
+```antares/src/domain/combat/engine.rs#L42-47
+pub const UNARMED_DAMAGE: DiceRoll = DiceRoll {
+    count: 1,
+    sides: 2,
+    bonus: 0,
+};
+```
+
+Replaces all scattered `DiceRoll::new(1, 4, 0)` literals previously used as the
+player unarmed fallback. The correct unarmed damage per spec is 1d2, not 1d4.
+
+#### `MeleeAttackResult` enum (`src/domain/combat/engine.rs`)
+
+A small discriminated union returned by `get_character_attack` that communicates
+whether the character's equipped weapon is usable in the melee path:
+
+- `Melee(Attack)` — a valid melee `Attack` ready for `resolve_attack`
+- `Ranged(Attack)` — the weapon is `MartialRanged`; the melee path must refuse
+  it and direct the player through `perform_ranged_attack_action_with_rng`
+
+The `Ranged` variant carries the fully-constructed `Attack` so callers can log or
+display weapon stats without a second item lookup — but must never apply damage
+through the melee pipeline with it.
+
+#### `get_character_attack` (`src/domain/combat/engine.rs`)
+
+Pure-domain function: `pub fn get_character_attack(character: &Character, item_db: &ItemDatabase) -> MeleeAttackResult`
+
+Logic (in order, fully infallible):
+
+1. No weapon in `character.equipment.weapon` → unarmed fallback
+2. Item ID not found in `item_db` → unarmed fallback (no panic)
+3. Item found but not `ItemType::Weapon(_)` (e.g. consumable in weapon slot) → unarmed fallback
+4. Build `DiceRoll` from `weapon_data.damage`; apply `weapon_data.bonus` via
+   `saturating_add` to the `bonus` field
+5. If `weapon_data.classification == WeaponClassification::MartialRanged` →
+   return `MeleeAttackResult::Ranged(Attack::ranged(adjusted))`
+6. Otherwise → return `MeleeAttackResult::Melee(Attack::physical(adjusted))`
+
+#### `has_ranged_weapon` (`src/domain/combat/engine.rs`)
+
+Pure-domain helper: `pub fn has_ranged_weapon(character: &Character, item_db: &ItemDatabase) -> bool`
+
+Returns `true` only when **both** conditions hold:
+
+- The equipped weapon has `WeaponClassification::MartialRanged`, **and**
+- The character's inventory contains at least one `ItemType::Ammo(_)` item
+
+A character with a bow but no arrows returns `false`.
+
+#### `is_ranged: bool` field on `Attack` (`src/domain/combat/types.rs`)
+
+Added with `#[serde(default)]` so all existing RON monster data that lacks the
+field deserialises correctly (defaults to `false`). `Attack::physical` continues
+to set `is_ranged: false`; the new `Attack::ranged` constructor sets it `true`.
+
+#### `Attack::ranged(damage)` constructor (`src/domain/combat/types.rs`)
+
+```antares/src/domain/combat/types.rs#L85-93
+pub fn ranged(damage: DiceRoll) -> Self {
+    Self {
+        damage,
+        attack_type: AttackType::Physical,
+        special_effect: None,
+        is_ranged: true,
+    }
+}
+```
+
+Used by `get_character_attack` when the equipped weapon is `MartialRanged`.
+
+#### Imports added to `engine.rs`
+
+```antares/src/domain/combat/engine.rs#L18-19
+use crate::domain::items::{ItemDatabase, ItemType, WeaponClassification};
+use crate::domain::types::DiceRoll;
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4.4 **exactly**
+- [x] Module placement follows Section 3.2 (`src/domain/combat/`)
+- [x] Type aliases used consistently (`ItemId`, `DiceRoll`, etc.)
+- [x] `UNARMED_DAMAGE` constant extracted — no magic literals
+- [x] `AttributePair` pattern untouched — no direct stat mutation
+- [x] RON format unchanged — `#[serde(default)]` preserves all existing data files
+- [x] No architectural deviations
+
+### Test Coverage
+
+14 unit tests added across two files:
+
+**`src/domain/combat/types.rs`** (3 tests):
+
+| Test                                                 | Assertion                                         |
+| ---------------------------------------------------- | ------------------------------------------------- |
+| `test_attack_physical_constructor_is_ranged_false`   | `Attack::physical(...)` sets `is_ranged = false`  |
+| `test_attack_ranged_constructor_sets_is_ranged_true` | `Attack::ranged(...)` sets `is_ranged = true`     |
+| `test_attack_ranged_damage_preserved`                | inner `damage` field is carried through unchanged |
+
+**`src/domain/combat/engine.rs`** (11 tests):
+
+| Test                                                             | Assertion                                         |
+| ---------------------------------------------------------------- | ------------------------------------------------- |
+| `test_get_character_attack_no_weapon_returns_unarmed`            | `None` weapon → `Melee(UNARMED_DAMAGE)`           |
+| `test_get_character_attack_melee_weapon_returns_melee`           | Simple sword 1d8 → `Melee(1d8)`                   |
+| `test_get_character_attack_weapon_bonus_applied`                 | +2 sword → `damage.bonus == 2`                    |
+| `test_get_character_attack_unknown_item_id_falls_back`           | item_id 99 not in db → unarmed fallback, no panic |
+| `test_get_character_attack_non_weapon_item_falls_back`           | consumable in weapon slot → unarmed fallback      |
+| `test_get_character_attack_ranged_weapon_returns_ranged_variant` | bow → `Ranged(_)` with `is_ranged = true`         |
+| `test_get_character_attack_ranged_weapon_damage_correct`         | crossbow 1d8+1 → inner `Attack` has correct dice  |
+| `test_has_ranged_weapon_false_no_weapon`                         | no weapon equipped → `false`                      |
+| `test_has_ranged_weapon_false_melee_weapon`                      | melee weapon → `false`                            |
+| `test_has_ranged_weapon_false_no_ammo`                           | bow equipped, empty inventory → `false`           |
+| `test_has_ranged_weapon_true_with_bow_and_arrows`                | bow + arrows in inventory → `true`                |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 3176 tests run: 3176 passed, 0 failed
+```
+
 ## Items Procedural Meshes — Phase 1: Domain Layer
 
 **Plan**: [`items_procedural_meshes_implementation_plan.md`](items_procedural_meshes_implementation_plan.md)

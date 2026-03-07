@@ -37,6 +37,13 @@ pub struct Attack {
     pub attack_type: AttackType,
     /// Optional special effect (poison, paralysis, etc.)
     pub special_effect: Option<SpecialEffect>,
+    /// True when this attack is ranged (bow, crossbow, thrown).
+    ///
+    /// Used by `perform_attack_action_with_rng` to reject ranged weapons
+    /// in the melee path, and by `perform_monster_turn_with_rng` to prefer
+    /// ranged monster attacks in Ranged combat events.
+    #[serde(default)]
+    pub is_ranged: bool,
 }
 
 impl Attack {
@@ -63,12 +70,38 @@ impl Attack {
             damage,
             attack_type,
             special_effect,
+            is_ranged: false,
         }
     }
 
     /// Creates a basic physical attack
+    ///
+    /// The `is_ranged` field is set to `false`.
     pub fn physical(damage: DiceRoll) -> Self {
         Self::new(damage, AttackType::Physical, None)
+    }
+
+    /// Creates a ranged physical attack
+    ///
+    /// Sets `is_ranged` to `true`. Use this constructor when building
+    /// an `Attack` for a ranged weapon (bow, crossbow, thrown weapon).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::types::Attack;
+    /// use antares::domain::types::DiceRoll;
+    ///
+    /// let arrow_shot = Attack::ranged(DiceRoll::new(1, 6, 0));
+    /// assert!(arrow_shot.is_ranged);
+    /// ```
+    pub fn ranged(damage: DiceRoll) -> Self {
+        Self {
+            damage,
+            attack_type: AttackType::Physical,
+            special_effect: None,
+            is_ranged: true,
+        }
     }
 
     /// Returns true if this attack has a special effect
@@ -249,6 +282,29 @@ mod tests {
         assert!(matches!(attack.attack_type, AttackType::Physical));
         assert!(attack.special_effect.is_none());
         assert!(!attack.has_special_effect());
+        assert!(!attack.is_ranged);
+    }
+
+    #[test]
+    fn test_attack_physical_constructor_is_ranged_false() {
+        let attack = Attack::physical(DiceRoll::new(1, 4, 0));
+        assert!(!attack.is_ranged);
+    }
+
+    #[test]
+    fn test_attack_ranged_constructor_sets_is_ranged_true() {
+        let attack = Attack::ranged(DiceRoll::new(1, 6, 0));
+        assert!(attack.is_ranged);
+        assert!(matches!(attack.attack_type, AttackType::Physical));
+        assert!(attack.special_effect.is_none());
+    }
+
+    #[test]
+    fn test_attack_ranged_damage_preserved() {
+        let dice = DiceRoll::new(1, 8, 1);
+        let attack = Attack::ranged(dice);
+        assert_eq!(attack.damage, dice);
+        assert!(attack.is_ranged);
     }
 
     #[test]

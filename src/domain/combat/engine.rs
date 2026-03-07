@@ -15,11 +15,78 @@ use crate::domain::combat::monster::Monster;
 use crate::domain::combat::types::{
     Attack, AttackType, CombatStatus, CombatantId, Handicap, SpecialEffect,
 };
+use crate::domain::items::{ItemDatabase, ItemType, WeaponClassification};
 use crate::domain::magic::types::Spell;
+use crate::domain::types::DiceRoll;
 // Condition types referenced by fully-qualified paths where needed
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+// ===== Unarmed Combat Constant =====
+
+/// Default damage roll for an unarmed character (no weapon equipped).
+///
+/// Per the game spec, unarmed strikes deal 1d2 physical damage.
+/// This constant replaces all scattered `DiceRoll::new(1, 4, 0)` literals
+/// that were previously used as the player fallback — 1d4 was wrong.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::combat::engine::UNARMED_DAMAGE;
+/// use antares::domain::types::DiceRoll;
+///
+/// assert_eq!(UNARMED_DAMAGE, DiceRoll { count: 1, sides: 2, bonus: 0 });
+/// ```
+pub const UNARMED_DAMAGE: DiceRoll = DiceRoll {
+    count: 1,
+    sides: 2,
+    bonus: 0,
+};
+
+// ===== MeleeAttackResult =====
+
+/// Outcome of resolving a character's attack from their equipped weapon.
+///
+/// `get_character_attack` returns this enum to allow callers to distinguish
+/// between a usable melee attack and a ranged weapon that must be handled
+/// via the dedicated ranged-attack path instead.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::combat::engine::{get_character_attack, MeleeAttackResult, UNARMED_DAMAGE};
+/// use antares::domain::character::{Character, Sex, Alignment};
+/// use antares::domain::items::ItemDatabase;
+///
+/// let character = Character::new(
+///     "Hero".to_string(),
+///     "human".to_string(),
+///     "knight".to_string(),
+///     Sex::Male,
+///     Alignment::Good,
+/// );
+/// let db = ItemDatabase::new();
+///
+/// match get_character_attack(&character, &db) {
+///     MeleeAttackResult::Melee(attack) => {
+///         assert_eq!(attack.damage, UNARMED_DAMAGE);
+///     }
+///     MeleeAttackResult::Ranged(_) => panic!("Expected melee result"),
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub enum MeleeAttackResult {
+    /// A valid melee `Attack` ready for `resolve_attack`.
+    Melee(Attack),
+    /// The equipped weapon is ranged; the melee path must not proceed.
+    ///
+    /// The inner `Attack` carries the weapon's stats so callers can log or
+    /// display them without a second item lookup, but MUST NOT apply damage
+    /// through the melee pipeline with it.
+    Ranged(Attack),
+}
 
 // ===== Error Types =====
 
@@ -615,7 +682,182 @@ pub fn choose_monster_attack<R: Rng>(monster: &Monster, rng: &mut R) -> Option<A
     Some(monster.attacks[idx].clone())
 }
 
-/// Rolls damage for a spell's damage dice (returns 0 if the spell has no damage).
+/// Determines the attack a character makes based on their equipped weapon.
+///
+/// This is a pure-domain function with no I/O or Bevy dependencies. It is
+/// the single canonical place to convert a character's equipped weapon into
+/// an [`Attack`].
+///
+/// # Fallback Behaviour
+///
+/// - No weapon equipped → `MeleeAttackResult::Melee` with [`UNARMED_DAMAGE`]
+/// - Weapon ID not found in `item_db` → same unarmed fallback (no panic)
+/// - Item found but not a weapon (e.g. a consumable in the weapon slot) →
+///   same unarmed fallback
+///
+/// # Ranged Weapons
+///
+/// If the equipped weapon has
+/// [`WeaponClassification::MartialRanged`][crate::domain::items::WeaponClassification],
+/// this function returns `MeleeAttackResult::Ranged`. Callers in the melee
+/// path **must** treat this as an error / early-return and direct the player
+/// through `perform_ranged_attack_action_with_rng` instead.
+///
+/// # Arguments
+///
+/// * `character` - The character whose equipped weapon slot is inspected.
+/// * `item_db` - The live item database used to look up weapon stats.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::combat::engine::{get_character_attack, MeleeAttackResult, UNARMED_DAMAGE};
+/// use antares::domain::character::{Character, Sex, Alignment};
+/// use antares::domain::items::{ItemDatabase, Item, ItemType, WeaponData, WeaponClassification};
+/// use antares::domain::types::DiceRoll;
+///
+/// // Unarmed fallback
+/// let hero = Character::new(
+///     "Hero".to_string(), "human".to_string(), "knight".to_string(),
+///     Sex::Male, Alignment::Good,
+/// );
+/// let db = ItemDatabase::new();
+/// let result = get_character_attack(&hero, &db);
+/// assert!(matches!(result, MeleeAttackResult::Melee(_)));
+/// ```
+pub fn get_character_attack(character: &Character, item_db: &ItemDatabase) -> MeleeAttackResult {
+    // Step 1: no weapon equipped — unarmed fallback.
+    let Some(weapon_id) = character.equipment.weapon else {
+        return MeleeAttackResult::Melee(Attack::physical(UNARMED_DAMAGE));
+    };
+
+    // Step 2: look up the item in the database.
+    let Some(item) = item_db.get_item(weapon_id) else {
+        // Unknown item ID — fall back gracefully rather than panicking.
+        return MeleeAttackResult::Melee(Attack::physical(UNARMED_DAMAGE));
+    };
+
+    // Step 3: confirm it is actually a weapon.
+    let ItemType::Weapon(weapon_data) = &item.item_type else {
+        // Non-weapon in the weapon slot — unarmed fallback.
+        return MeleeAttackResult::Melee(Attack::physical(UNARMED_DAMAGE));
+    };
+
+    // Step 4: apply weapon bonus to the dice roll via saturating_add.
+    let adjusted = DiceRoll {
+        count: weapon_data.damage.count,
+        sides: weapon_data.damage.sides,
+        bonus: weapon_data.damage.bonus.saturating_add(weapon_data.bonus),
+    };
+
+    // Step 5: ranged weapons must not be used in the melee path.
+    if weapon_data.classification == WeaponClassification::MartialRanged {
+        let attack = Attack::ranged(adjusted);
+        return MeleeAttackResult::Ranged(attack);
+    }
+
+    // Step 6: normal melee weapon.
+    MeleeAttackResult::Melee(Attack::physical(adjusted))
+}
+
+/// Returns `true` if `character` has a [`WeaponClassification::MartialRanged`]
+/// weapon equipped **and** at least one compatible ammo item in their inventory.
+///
+/// A character who has a bow but no arrows returns `false` — they cannot
+/// meaningfully fire a ranged attack.
+///
+/// # Arguments
+///
+/// * `character` - The character to inspect.
+/// * `item_db` - The live item database used to look up item types.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::combat::engine::has_ranged_weapon;
+/// use antares::domain::character::{Character, Sex, Alignment};
+/// use antares::domain::items::ItemDatabase;
+///
+/// let hero = Character::new(
+///     "Archer".to_string(), "human".to_string(), "archer".to_string(),
+///     Sex::Female, Alignment::Good,
+/// );
+/// let db = ItemDatabase::new();
+///
+/// // No weapon equipped → false
+/// assert!(!has_ranged_weapon(&hero, &db));
+/// ```
+pub fn has_ranged_weapon(character: &Character, item_db: &ItemDatabase) -> bool {
+    // Must have a weapon equipped.
+    let Some(weapon_id) = character.equipment.weapon else {
+        return false;
+    };
+
+    // Weapon must exist in the database.
+    let Some(item) = item_db.get_item(weapon_id) else {
+        return false;
+    };
+
+    // Must be a weapon item.
+    let ItemType::Weapon(data) = &item.item_type else {
+        return false;
+    };
+
+    // Must be classified as a ranged weapon.
+    if data.classification != WeaponClassification::MartialRanged {
+        return false;
+    }
+
+    // Must also have at least one ammo item in inventory.
+    character.inventory.items.iter().any(|slot| {
+        item_db
+            .get_item(slot.item_id)
+            .map(|i| matches!(i.item_type, ItemType::Ammo(_)))
+            .unwrap_or(false)
+    })
+}
+
+/// Determines the attack a character makes based on their equipped weapon.
+///
+/// This is a pure-domain function with no I/O or Bevy dependencies. It is
+/// the single canonical place to convert a character's equipped weapon into
+/// an [`Attack`].
+///
+/// # Fallback Behaviour
+///
+/// - No weapon equipped → `MeleeAttackResult::Melee` with [`UNARMED_DAMAGE`]
+/// - Weapon ID not found in `item_db` → same unarmed fallback (no panic)
+/// - Item found but not a weapon (e.g. a consumable in the weapon slot) →
+///   same unarmed fallback
+///
+/// # Ranged Weapons
+///
+/// If the equipped weapon has
+/// [`WeaponClassification::MartialRanged`][crate::domain::items::WeaponClassification],
+/// this function returns `MeleeAttackResult::Ranged`. Callers in the melee
+/// path **must** treat this as an error / early-return and direct the player
+/// through `perform_ranged_attack_action_with_rng` instead.
+///
+/// # Arguments
+///
+/// * `character` - The character whose equipped weapon slot is inspected.
+/// * `item_db` - The live item database used to look up weapon stats.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::combat::engine::{get_character_attack, MeleeAttackResult, UNARMED_DAMAGE};
+/// use antares::domain::character::{Character, Sex, Alignment};
+/// use antares::domain::items::ItemDatabase;
+///
+/// let hero = Character::new(
+///     "Hero".to_string(), "human".to_string(), "knight".to_string(),
+///     Sex::Male, Alignment::Good,
+/// );
+/// let db = ItemDatabase::new();
+/// let result = get_character_attack(&hero, &db);
+/// assert!(matches!(result, MeleeAttackResult::Melee(_)));
+/// ```
 pub fn roll_spell_damage<R: Rng>(spell: &Spell, rng: &mut R) -> i32 {
     if let Some(dice) = &spell.damage {
         dice.roll(rng)
@@ -950,10 +1192,332 @@ fn status_str_to_monster_condition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Alignment, Sex, Stats};
+    use crate::domain::character::{Alignment, InventorySlot, Sex, Stats};
     use crate::domain::combat::monster::LootTable;
+    use crate::domain::items::{
+        AmmoData, AmmoType, ConsumableData, ConsumableEffect, Item, ItemDatabase, ItemType,
+        WeaponClassification, WeaponData,
+    };
     use crate::domain::types::DiceRoll;
     use rand::rng;
+
+    // ===== Helpers for get_character_attack / has_ranged_weapon tests =====
+
+    /// Build a minimal `Item` for use in tests.
+    fn make_weapon_item(
+        id: u8,
+        damage: DiceRoll,
+        bonus: i8,
+        classification: WeaponClassification,
+    ) -> Item {
+        Item {
+            id,
+            name: format!("TestWeapon#{}", id),
+            item_type: ItemType::Weapon(WeaponData {
+                damage,
+                bonus,
+                hands_required: 1,
+                classification,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        }
+    }
+
+    /// Build a minimal ammo `Item`.
+    fn make_ammo_item(id: u8) -> Item {
+        Item {
+            id,
+            name: format!("Arrow#{}", id),
+            item_type: ItemType::Ammo(AmmoData {
+                ammo_type: AmmoType::Arrow,
+                quantity: 20,
+            }),
+            base_cost: 1,
+            sell_cost: 0,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        }
+    }
+
+    /// Build a minimal consumable `Item`.
+    fn make_consumable_item(id: u8) -> Item {
+        Item {
+            id,
+            name: format!("Potion#{}", id),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(10),
+                is_combat_usable: true,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        }
+    }
+
+    /// Create a fresh [`Character`] with the weapon slot set to `weapon_id`.
+    fn make_character_with_weapon(weapon_id: u8) -> Character {
+        let mut character = Character::new(
+            "Tester".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.equipment.weapon = Some(weapon_id);
+        character
+    }
+
+    /// Create a fresh [`Character`] with a weapon equipped AND an ammo item in
+    /// the first inventory slot.
+    fn make_character_with_weapon_and_ammo(weapon_id: u8, ammo_id: u8) -> Character {
+        let mut character = make_character_with_weapon(weapon_id);
+        // Place ammo in first inventory slot
+        character.inventory.items.push(InventorySlot {
+            item_id: ammo_id,
+            charges: 0,
+        });
+        character
+    }
+
+    // ===== get_character_attack tests =====
+
+    #[test]
+    fn test_get_character_attack_no_weapon_returns_unarmed() {
+        let character = Character::new(
+            "Unarmed".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let db = ItemDatabase::new();
+
+        let result = get_character_attack(&character, &db);
+        match result {
+            MeleeAttackResult::Melee(attack) => {
+                assert_eq!(attack.damage, UNARMED_DAMAGE);
+                assert!(!attack.is_ranged);
+            }
+            MeleeAttackResult::Ranged(_) => panic!("Expected MeleeAttackResult::Melee"),
+        }
+    }
+
+    #[test]
+    fn test_get_character_attack_melee_weapon_returns_melee() {
+        let mut db = ItemDatabase::new();
+        let sword = make_weapon_item(1, DiceRoll::new(1, 8, 0), 0, WeaponClassification::Simple);
+        db.add_item(sword).unwrap();
+
+        let character = make_character_with_weapon(1);
+        let result = get_character_attack(&character, &db);
+
+        match result {
+            MeleeAttackResult::Melee(attack) => {
+                assert_eq!(attack.damage, DiceRoll::new(1, 8, 0));
+                assert!(!attack.is_ranged);
+            }
+            MeleeAttackResult::Ranged(_) => panic!("Expected MeleeAttackResult::Melee"),
+        }
+    }
+
+    #[test]
+    fn test_get_character_attack_weapon_bonus_applied() {
+        let mut db = ItemDatabase::new();
+        // +2 sword: base 1d8, weapon bonus +2 → DiceRoll bonus should be 2
+        let sword = make_weapon_item(
+            2,
+            DiceRoll::new(1, 8, 0),
+            2,
+            WeaponClassification::MartialMelee,
+        );
+        db.add_item(sword).unwrap();
+
+        let character = make_character_with_weapon(2);
+        let result = get_character_attack(&character, &db);
+
+        match result {
+            MeleeAttackResult::Melee(attack) => {
+                assert_eq!(attack.damage.bonus, 2);
+                assert_eq!(attack.damage.count, 1);
+                assert_eq!(attack.damage.sides, 8);
+            }
+            MeleeAttackResult::Ranged(_) => panic!("Expected MeleeAttackResult::Melee"),
+        }
+    }
+
+    #[test]
+    fn test_get_character_attack_unknown_item_id_falls_back() {
+        // Empty database — item_id 99 does not exist
+        let db = ItemDatabase::new();
+        let character = make_character_with_weapon(99);
+
+        let result = get_character_attack(&character, &db);
+        match result {
+            MeleeAttackResult::Melee(attack) => {
+                assert_eq!(attack.damage, UNARMED_DAMAGE);
+            }
+            MeleeAttackResult::Ranged(_) => panic!("Expected unarmed fallback"),
+        }
+    }
+
+    #[test]
+    fn test_get_character_attack_non_weapon_item_falls_back() {
+        let mut db = ItemDatabase::new();
+        // Place a consumable in weapon slot
+        let potion = make_consumable_item(5);
+        db.add_item(potion).unwrap();
+
+        let character = make_character_with_weapon(5);
+        let result = get_character_attack(&character, &db);
+
+        match result {
+            MeleeAttackResult::Melee(attack) => {
+                assert_eq!(attack.damage, UNARMED_DAMAGE);
+            }
+            MeleeAttackResult::Ranged(_) => panic!("Expected unarmed fallback"),
+        }
+    }
+
+    #[test]
+    fn test_get_character_attack_ranged_weapon_returns_ranged_variant() {
+        let mut db = ItemDatabase::new();
+        let bow = make_weapon_item(
+            10,
+            DiceRoll::new(1, 6, 0),
+            0,
+            WeaponClassification::MartialRanged,
+        );
+        db.add_item(bow).unwrap();
+
+        let character = make_character_with_weapon(10);
+        let result = get_character_attack(&character, &db);
+
+        match result {
+            MeleeAttackResult::Ranged(attack) => {
+                assert!(attack.is_ranged);
+            }
+            MeleeAttackResult::Melee(_) => panic!("Expected MeleeAttackResult::Ranged"),
+        }
+    }
+
+    #[test]
+    fn test_get_character_attack_ranged_weapon_damage_correct() {
+        let mut db = ItemDatabase::new();
+        // Crossbow: 1d8, bonus +1
+        let crossbow = make_weapon_item(
+            11,
+            DiceRoll::new(1, 8, 0),
+            1,
+            WeaponClassification::MartialRanged,
+        );
+        db.add_item(crossbow).unwrap();
+
+        let character = make_character_with_weapon(11);
+        let result = get_character_attack(&character, &db);
+
+        match result {
+            MeleeAttackResult::Ranged(attack) => {
+                assert_eq!(
+                    attack.damage,
+                    DiceRoll {
+                        count: 1,
+                        sides: 8,
+                        bonus: 1
+                    }
+                );
+                assert!(attack.is_ranged);
+            }
+            MeleeAttackResult::Melee(_) => panic!("Expected MeleeAttackResult::Ranged"),
+        }
+    }
+
+    // ===== has_ranged_weapon tests =====
+
+    #[test]
+    fn test_has_ranged_weapon_false_no_weapon() {
+        let character = Character::new(
+            "NoWeapon".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let db = ItemDatabase::new();
+        assert!(!has_ranged_weapon(&character, &db));
+    }
+
+    #[test]
+    fn test_has_ranged_weapon_false_melee_weapon() {
+        let mut db = ItemDatabase::new();
+        let sword = make_weapon_item(
+            20,
+            DiceRoll::new(1, 8, 0),
+            0,
+            WeaponClassification::MartialMelee,
+        );
+        db.add_item(sword).unwrap();
+
+        let character = make_character_with_weapon(20);
+        assert!(!has_ranged_weapon(&character, &db));
+    }
+
+    #[test]
+    fn test_has_ranged_weapon_false_no_ammo() {
+        let mut db = ItemDatabase::new();
+        let bow = make_weapon_item(
+            21,
+            DiceRoll::new(1, 6, 0),
+            0,
+            WeaponClassification::MartialRanged,
+        );
+        db.add_item(bow).unwrap();
+
+        // Bow equipped but inventory is empty (no arrows)
+        let character = make_character_with_weapon(21);
+        assert!(!has_ranged_weapon(&character, &db));
+    }
+
+    #[test]
+    fn test_has_ranged_weapon_true_with_bow_and_arrows() {
+        let mut db = ItemDatabase::new();
+        let bow = make_weapon_item(
+            22,
+            DiceRoll::new(1, 6, 0),
+            0,
+            WeaponClassification::MartialRanged,
+        );
+        let arrows = make_ammo_item(23);
+        db.add_item(bow).unwrap();
+        db.add_item(arrows).unwrap();
+
+        let character = make_character_with_weapon_and_ammo(22, 23);
+        assert!(has_ranged_weapon(&character, &db));
+    }
 
     fn create_test_character(name: &str, speed: u8) -> Character {
         let mut character = Character::new(
