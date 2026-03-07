@@ -38,7 +38,7 @@ pub mod equipment_validation;
 pub mod types;
 
 // Re-export main types for convenience
-pub use database::{ItemDatabase, ItemDatabaseError};
+pub use database::{ItemDatabase, ItemDatabaseError, ItemMeshDatabase};
 pub use equipment_validation::{can_equip_item, EquipError};
 pub use types::{
     AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,

@@ -8381,6 +8381,14 @@
                 (item_id: 2, charges: 0),
             ],
         ),
+        (
+            x: 7,
+            y: 7,
+        ): DroppedItem(
+            name: "Test Dropped Long Sword",
+            item_id: 4,
+            charges: 0,
+        ),
     },
     allow_random_encounters: true,
     npc_placements: [

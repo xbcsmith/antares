@@ -10,7 +10,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.2 for complete specifications.
 
-use crate::domain::types::{Direction, GameTime, MapId, Position, TimeOfDay};
+use crate::domain::types::{Direction, GameTime, ItemId, MapId, Position, TimeOfDay};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -2079,6 +2079,29 @@ pub enum MapEvent {
         /// re-interacting within the same session shows the updated contents.
         #[serde(default)]
         items: Vec<crate::domain::character::InventorySlot>,
+    },
+    /// A single item lying on the ground, placed by a campaign author or
+    /// dropped at runtime by the party.
+    ///
+    /// On map load the `load_map_dropped_items_system` fires an
+    /// `ItemDroppedEvent` for every `DroppedItem` event found in the map RON
+    /// file so that the spawn path is identical for both static and
+    /// runtime-dropped items.
+    ///
+    /// # Backward Compatibility
+    ///
+    /// `name` and `charges` use `#[serde(default)]` so existing RON maps that
+    /// pre-date this variant are unaffected (the variant simply will not
+    /// appear in old files).
+    DroppedItem {
+        /// Optional display name (editor label only — not shown in-game).
+        #[serde(default)]
+        name: String,
+        /// Logical item identifier matching `Item::id` in the item database.
+        item_id: ItemId,
+        /// Remaining charges (0 = non-magical or fully charged).
+        #[serde(default)]
+        charges: u16,
     },
 }
 

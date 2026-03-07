@@ -34,7 +34,9 @@ use crate::application::GameMode;
 use crate::domain::character::{Inventory, PARTY_MAX_SIZE};
 use crate::domain::items::types::ItemType;
 use crate::game::resources::GlobalState;
+use crate::game::systems::item_world_events::ItemDroppedEvent;
 
+use bevy::prelude::MessageWriter;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -1192,6 +1194,7 @@ fn inventory_action_system(
     mut transfer_reader: MessageReader<TransferItemAction>,
     mut global_state: ResMut<GlobalState>,
     mut nav_state: ResMut<InventoryNavigationState>,
+    mut item_dropped_writer: Option<MessageWriter<ItemDroppedEvent>>,
 ) {
     // Collect messages upfront so we do not hold a borrow while mutating state.
     let drop_events: Vec<(usize, usize)> = drop_reader
@@ -1234,6 +1237,21 @@ fn inventory_action_system(
                 "Dropped item from party[{}] slot {} (item_id={})",
                 party_index, slot_index, dropped.item_id
             );
+
+            // Fire ItemDroppedEvent so the 3-D world mesh spawns at the party's
+            // current tile position.
+            let world = &global_state.0.world;
+            let map_id = world.current_map;
+            let pos = world.party_position;
+            if let Some(ref mut writer) = item_dropped_writer {
+                writer.write(ItemDroppedEvent {
+                    item_id: dropped.item_id,
+                    charges: dropped.charges as u16,
+                    map_id,
+                    tile_x: pos.x,
+                    tile_y: pos.y,
+                });
+            }
         }
 
         // Clear selected_slot in InventoryState and reset nav phase

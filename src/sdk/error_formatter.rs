@@ -415,6 +415,19 @@ impl ErrorFormatter {
                     "Edit 'data/npcs.ron' or the campaign npcs.ron to correct the service ID".to_string(),
                 ]
             }
+
+            ValidationError::ItemMeshDescriptorInvalid { item_id, message } => {
+                vec![
+                    format!(
+                        "Item ID {} produced an invalid procedural mesh descriptor: {}",
+                        item_id, message
+                    ),
+                    format!("Edit 'data/items.ron' and check the entry for item ID {}", item_id),
+                    "If you added a 'mesh_descriptor_override', verify that scale is positive and colors are in [0.0, 1.0] range".to_string(),
+                    "Remove the 'mesh_descriptor_override' field to fall back to auto-generated mesh settings".to_string(),
+                    "Run 'cargo nextest run --all-features' to see the full validation output".to_string(),
+                ]
+            }
         }
     }
 

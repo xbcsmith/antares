@@ -2615,6 +2615,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
         let item2 = Item {
             id: 2,
@@ -2635,6 +2636,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
         db.items.add_item(item1).unwrap();
         db.items.add_item(item2).unwrap();
@@ -2998,6 +3000,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
         db.items.add_item(item1).unwrap();
 

@@ -8200,6 +8200,14 @@
             proximity_facing: false,
             rotation_speed: None,
         ),
+        (
+            x: 2,
+            y: 5,
+        ): DroppedItem(
+            name: "Healing Potion",
+            item_id: 50,
+            charges: 0,
+        ),
     },
     allow_random_encounters: true,
     npc_placements: [

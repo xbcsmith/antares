@@ -14,6 +14,7 @@ pub mod billboard;
 pub mod combat;
 pub mod creature;
 pub mod dialogue;
+pub mod dropped_item;
 pub mod furniture;
 pub mod inventory;
 pub mod menu;
@@ -32,6 +33,7 @@ pub use dialogue::{
     DIALOGUE_BUBBLE_WIDTH, DIALOGUE_CHOICE_COLOR, DIALOGUE_TEXT_COLOR, DIALOGUE_TEXT_SIZE,
     DIALOGUE_TYPEWRITER_SPEED,
 };
+pub use dropped_item::DroppedItem;
 pub use furniture::{FurnitureEntity, Interactable, InteractionType};
 pub use inventory::{CharacterEntity, PartyEntities};
 pub use menu::*;

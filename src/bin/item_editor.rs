@@ -246,6 +246,7 @@ impl ItemEditor {
             is_cursed,
             icon_path: None,
             tags,
+            mesh_descriptor_override: None,
         };
 
         self.items.push(item);
@@ -1377,6 +1378,7 @@ mod tests {
                     is_cursed: false,
                     icon_path: None,
                     tags: vec![],
+                    mesh_descriptor_override: None,
                 },
                 Item {
                     id: 5,
@@ -1397,6 +1399,7 @@ mod tests {
                     is_cursed: false,
                     icon_path: None,
                     tags: vec![],
+                    mesh_descriptor_override: None,
                 },
             ],
             file_path: PathBuf::from("test.ron"),
@@ -1542,6 +1545,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(
@@ -1574,6 +1578,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec!["two_handed".to_string(), "large_weapon".to_string()],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(item.tags.len(), 2);
@@ -1602,6 +1607,7 @@ mod tests {
             is_cursed: true,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert!(item.is_cursed);
@@ -1629,6 +1635,7 @@ mod tests {
             is_cursed: false,
             icon_path: None,
             tags: vec![],
+            mesh_descriptor_override: None,
         };
 
         assert_eq!(item.max_charges, 10);

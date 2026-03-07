@@ -8450,6 +8450,14 @@
             time_condition: None,
             facing: None,
         ),
+        (
+            x: 3,
+            y: 17,
+        ): DroppedItem(
+            name: "Dropped Sword",
+            item_id: 3,
+            charges: 0,
+        ),
     },
     allow_random_encounters: true,
     npc_placements: [
