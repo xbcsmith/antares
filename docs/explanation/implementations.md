@@ -1,5 +1,147 @@
 # Implementations
 
+## Phase 4: Equipped Weapon Damage — Documentation and Final Validation
+
+### Overview
+
+Phase 4 is the concluding phase of the Equipped Weapon Damage in Combat
+implementation plan. Its sole deliverables are:
+
+1. A complete summary of all work done across Phases 1–3 added to
+   `docs/explanation/implementations.md` (this section).
+2. A clean run of all four mandatory quality gates with zero errors and zero
+   warnings.
+
+No new production code was written in Phase 4. Everything listed below was
+already implemented and verified in Phases 1–3.
+
+### Phase 4 Deliverables Checklist
+
+- [x] `docs/explanation/implementations.md` updated with full cross-phase summary
+- [x] `cargo fmt --all` — no output (all files already formatted)
+- [x] `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
+- [x] `cargo nextest run --all-features` — 3182 passed, 8 skipped, 0 failed
+
+### Full Cross-Phase Summary
+
+#### Phase 1 — Domain Combat Engine Changes
+
+**Files changed**: `src/domain/combat/engine.rs`, `src/domain/combat/types.rs`
+
+| Symbol                     | Location               | Purpose                                                                                                    |
+| -------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `UNARMED_DAMAGE`           | `engine.rs`            | `DiceRoll { count: 1, sides: 2, bonus: 0 }` — replaces all scattered 1d4 literals                          |
+| `MeleeAttackResult`        | `engine.rs`            | Enum returned by `get_character_attack`: `Melee(Attack)` or `Ranged(Attack)`                               |
+| `get_character_attack`     | `engine.rs`            | Pure-domain fn — resolves equipped weapon to a `MeleeAttackResult` with bonus applied via `saturating_add` |
+| `has_ranged_weapon`        | `engine.rs`            | Returns `true` only when a `MartialRanged` weapon is equipped **and** ammo exists in inventory             |
+| `is_ranged: bool`          | `types.rs` on `Attack` | `#[serde(default)]` field distinguishing ranged from melee attacks                                         |
+| `Attack::ranged(damage)`   | `types.rs`             | Constructor that sets `is_ranged = true`                                                                   |
+| `Attack::physical(damage)` | `types.rs`             | Constructor that keeps `is_ranged = false`                                                                 |
+
+Key design decisions:
+
+- `get_character_attack` is pure domain (no Bevy, no I/O) and lives entirely in the domain layer.
+- Weapon bonus composition uses `saturating_add` to merge `weapon_data.damage.bonus` with `weapon_data.bonus` into the final `DiceRoll::bonus` — preventing silent `i8` overflow.
+- Unknown item IDs and non-weapon items in the weapon slot fall back gracefully to `UNARMED_DAMAGE` rather than panicking.
+
+Phase 1 tests added to `src/domain/combat/engine.rs` test module:
+
+- `test_get_character_attack_no_weapon_returns_unarmed`
+- `test_get_character_attack_melee_weapon_returns_melee`
+- `test_get_character_attack_weapon_bonus_applied`
+- `test_get_character_attack_unknown_item_id_falls_back`
+- `test_get_character_attack_non_weapon_item_falls_back`
+- `test_get_character_attack_ranged_weapon_returns_ranged_variant`
+- `test_get_character_attack_ranged_weapon_damage_correct`
+- `test_has_ranged_weapon_false_no_weapon`
+- `test_has_ranged_weapon_false_melee_weapon`
+- `test_has_ranged_weapon_false_no_ammo`
+- `test_has_ranged_weapon_true_with_bow_and_arrows`
+
+#### Phase 2 — Game System Integration
+
+**Files changed**: `src/game/systems/combat.rs`
+
+The player attack branch inside `perform_attack_action_with_rng` was rewritten.
+Previously it used a hardcoded `DiceRoll::new(1, 4, 0)` for every player attack
+regardless of equipment. After Phase 2 it calls `get_character_attack`, matches
+on `MeleeAttackResult`, and:
+
+- **`MeleeAttackResult::Melee(attack)`** — uses the resolved attack (correct
+  weapon dice + bonus) as the input to `resolve_attack`.
+- **`MeleeAttackResult::Ranged(_)`** — emits a `warn!` log and returns `Ok(())`
+  without dealing any damage, consuming the turn and directing the player to use
+  `TurnAction::RangedAttack` instead. This is the ranged-weapon guard.
+
+The monster attack branch was left unchanged — monsters continue to use
+`choose_monster_attack`.
+
+Phase 2 helper fixtures added to `src/game/systems/combat.rs` test module:
+
+- `make_p2_weapon_item(id, damage, bonus, classification)` — builds an `Item` with a `WeaponData` payload.
+- `make_p2_combat_fixture(player)` — builds a self-contained `(CombatResource, GameContent, GlobalState, CombatTurnStateResource)` with one player (index 0) and one goblin with AC 1 (index 1, nearly always hit).
+
+Phase 2 tests:
+
+- `test_player_attack_uses_equipped_melee_weapon_damage` — equips a 1d8 longsword; asserts damage ∈ [1, 8] over 50 seeds and that at least one roll exceeded 4 (proving the old 1d4 path is gone).
+- `test_player_attack_unarmed_when_no_weapon` — no weapon equipped; asserts damage ≤ 2 (1d2 UNARMED_DAMAGE) over 30 seeds.
+- `test_player_attack_bonus_weapon_floor_at_one` — equips a cursed 1d4 −3 dagger (baked into `DiceRoll::bonus`); asserts monster HP never increases and any hit deals ≥ 1 damage.
+- `test_player_melee_attack_with_ranged_weapon_skips_turn` — equips a `MartialRanged` bow; asserts the function returns `Ok(())` and the monster's HP is completely unchanged.
+
+#### Phase 3 — Damage Floor and Bonus Application Verification
+
+**Files changed**: `src/domain/combat/engine.rs` (doc comment update + two new tests)
+
+Two invariants were verified and documented:
+
+**Invariant 1 — Bonus integration**: `get_character_attack` merges
+`weapon_data.damage.bonus` and `weapon_data.bonus` using `saturating_add` into
+the `DiceRoll::bonus` field. The `DiceRoll::bonus` field type is `i8`; the use
+of `saturating_add` prevents wraparound on extreme values.
+
+**Invariant 2 — Damage floor at 1**: `resolve_attack` computes
+`(base_damage + might_bonus).max(1)` before casting to `u16`. This is the
+authoritative damage floor — any successful hit deals at least 1 damage even
+when weapon bonuses are so negative that the raw roll is ≤ 0. `DiceRoll::roll`
+itself clamps at 0 (`total.max(0)`) as a secondary safeguard.
+
+The `resolve_attack` doc comment was updated to explicitly document:
+
+- Where the damage floor of 1 lives (`(base_damage + might_bonus).max(1)`).
+- That `DiceRoll::roll` floors at 0 (not 1) — the authoritative floor is in `resolve_attack`.
+
+Phase 3 tests added to `src/domain/combat/engine.rs` test module:
+
+- `test_cursed_weapon_damage_floor_at_one` — equips a 1d4 −10 cursed weapon; asserts every hit yields damage ≥ 1 across 100 random seeds.
+- `test_positive_bonus_adds_to_roll` — equips a +3 longsword (1d6 base, bonus 3); asserts `DiceRoll::bonus == 3`, `DiceRoll::min() == 4`, and that every observed hit damage ∈ [4, 9].
+
+### Architecture Compliance
+
+- [x] `get_character_attack` in `src/domain/combat/engine.rs` (domain layer, no Bevy)
+- [x] `MeleeAttackResult` in `src/domain/combat/engine.rs` (domain layer, no Bevy)
+- [x] `has_ranged_weapon` in `src/domain/combat/engine.rs` (domain layer, no Bevy)
+- [x] `UNARMED_DAMAGE` is a named constant — no magic literals
+- [x] `is_ranged: bool` on `Attack` with `#[serde(default)]`
+- [x] `Attack::ranged(damage)` sets `is_ranged = true`
+- [x] `Attack::physical(damage)` keeps `is_ranged = false`
+- [x] Melee path returns `Ok(())` (no damage, with `warn!`) on `MeleeAttackResult::Ranged`
+- [x] `DiceRoll` type used throughout, not raw primitives
+- [x] All public functions have `///` doc comments with runnable examples
+- [x] No tests reference `campaigns/tutorial` (Implementation Rule 5)
+- [x] SPDX header present in all modified `.rs` files
+
+### Quality Gate Results
+
+| Gate    | Command                                                    | Result                              |
+| ------- | ---------------------------------------------------------- | ----------------------------------- |
+| Format  | `cargo fmt --all`                                          | ✅ No output                        |
+| Compile | `cargo check --all-targets --all-features`                 | ✅ Finished, 0 errors               |
+| Lint    | `cargo clippy --all-targets --all-features -- -D warnings` | ✅ Finished, 0 warnings             |
+| Tests   | `cargo nextest run --all-features`                         | ✅ 3182 passed, 8 skipped, 0 failed |
+
+---
+
 ## Phase 3: Equipped Weapon Damage — Damage Floor and Bonus Application Verification
 
 ### Overview
