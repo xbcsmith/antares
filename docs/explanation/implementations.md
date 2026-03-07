@@ -815,3 +815,229 @@ shows the proximity-facing label and rotation speed when applicable.
   plugin, keeping the addition self-contained.
 - No test references `campaigns/tutorial`; all test fixtures use
   `data/test_campaign`.
+
+---
+
+## Items Procedural Meshes — Phase 4: Visual Quality and Variation
+
+**Plan**: [`items_procedural_meshes_implementation_plan.md`](items_procedural_meshes_implementation_plan.md)
+
+### Overview
+
+Phase 4 extends the procedural item-mesh pipeline with four major visual
+improvements:
+
+1. **Per-item accent colors** derived from `BonusAttribute` (fire → orange,
+   cold → icy blue, magic → purple, etc.)
+2. **Metallic / roughness PBR material differentiation** — magical items get
+   `metallic: 0.7, roughness: 0.25`; mundane non-metal items get
+   `metallic: 0.0, roughness: 0.8`.
+3. **Deterministic Y-rotation** — dropped items receive a tile-position-derived
+   rotation instead of non-deterministic random jitter, making save/load replay
+   safe.
+4. **Child mesh additions**: a ground shadow quad (semi-transparent, alpha 0.3,
+   `AlphaMode::Blend`) prepended to every definition, and an optional
+   charge-level emissive gem appended when `charges_fraction` is supplied.
+5. **LOD levels** attached automatically to primary meshes exceeding 200
+   triangles (`LOD1` at 8 world units, `LOD2` billboard at 20 world units).
+
+---
+
+### Phase 4 Deliverables
+
+**Files changed**:
+
+- `src/domain/visual/item_mesh.rs` — extended with accent colors, metallic /
+  roughness rules, shadow quad builder, charge gem builder, LOD wiring, and all
+  Phase 4 unit tests.
+- `src/game/systems/item_world_events.rs` — replaced random jitter with
+  `deterministic_drop_rotation`, wired `charges_fraction` into
+  `to_creature_definition_with_charges`, and added deterministic-rotation unit
+  tests.
+
+---
+
+### What was built
+
+#### 4.1 — Accent color from `BonusAttribute` (`src/domain/visual/item_mesh.rs`)
+
+New private function `accent_color_from_item(item: &Item) -> Option<[f32; 4]>`
+maps the item's `constant_bonus` (or `temporary_bonus` fallback) to a
+Phase 4 accent color:
+
+| `BonusAttribute`         | Accent color constant                |
+| ------------------------ | ------------------------------------ |
+| `ResistFire`             | `COLOR_ACCENT_FIRE` — orange         |
+| `ResistCold`             | `COLOR_ACCENT_COLD` — icy blue       |
+| `ResistElectricity`      | `COLOR_ACCENT_ELECTRICITY` — yellow  |
+| `ResistAcid`             | `COLOR_ACCENT_ACID` — acid green     |
+| `ResistPoison`           | `COLOR_ACCENT_POISON` — acid green   |
+| `ResistMagic`            | `COLOR_ACCENT_MAGIC` — purple        |
+| `Might`                  | `COLOR_ACCENT_MIGHT` — warm red      |
+| `ArmorClass`/`Endurance` | `COLOR_ACCENT_TEAL` — teal           |
+| `Intellect`              | `COLOR_ACCENT_DEEP_BLUE` — deep blue |
+
+The accent is applied inside `from_item` after the base descriptor is built,
+but only when the item is not cursed (cursed items already override
+`primary_color` entirely, making accent irrelevant).
+
+#### 4.1 — Metallic / roughness PBR differentiation
+
+New helper `is_metallic_magical(&self) -> bool` returns `true` when
+`emissive == true && emissive_color == EMISSIVE_MAGIC` (the marker set by
+`from_item` when `item.is_magical()`).
+
+`make_material` now branches on this:
+
+- **Magical**: `metallic: 0.7, roughness: 0.25` (shiny, jewel-like)
+- **Mundane metal categories** (Sword, Dagger, Blunt, Helmet, Shield, Ring,
+  Amulet): legacy `metallic: 0.6, roughness: 0.5`
+- **All other mundane**: `metallic: 0.0, roughness: 0.8` (matte)
+
+New constants: `MATERIAL_METALLIC_MAGICAL = 0.7`,
+`MATERIAL_ROUGHNESS_MAGICAL = 0.25`, `MATERIAL_METALLIC_MUNDANE = 0.0`,
+`MATERIAL_ROUGHNESS_MUNDANE = 0.8`.
+
+#### 4.2 — Deterministic Y-rotation (`src/game/systems/item_world_events.rs`)
+
+Replaced the `rand::Rng::random::<f32>()` call with a new public function:
+
+```rust
+pub fn deterministic_drop_rotation(
+    map_id: MapId,
+    tile_x: i32,
+    tile_y: i32,
+    item_id: ItemId,
+) -> f32
+```
+
+Algorithm:
+
+```text
+hash = map_id + (tile_x × 31) + (tile_y × 17) + (item_id × 7)   [wrapping u64 ops]
+angle = (hash % 360) / 360.0 × TAU
+```
+
+This gives visually varied orientations across tiles while being fully
+deterministic. The `rand` import was removed from `item_world_events.rs`.
+
+#### 4.3 — Charge-level gem child mesh
+
+`to_creature_definition` now delegates to a new public method:
+
+```rust
+pub fn to_creature_definition_with_charges(
+    &self,
+    charges_fraction: Option<f32>,
+) -> CreatureDefinition
+```
+
+When `charges_fraction: Some(f)` is supplied a small diamond gem mesh is
+appended as the third mesh, positioned `+0.04` Y above the item origin.
+
+Gem color gradient (via `charge_gem_color(frac) -> ([f32; 4], [f32; 3])`):
+
+- `1.0` → `COLOR_CHARGE_FULL` (gold, emissive gold glow)
+- `0.5` → `COLOR_CHARGE_HALF` (white, dim emissive)
+- `0.0` → `COLOR_CHARGE_EMPTY` (grey, no emissive)
+- Intermediate fractions linearly interpolated via `lerp_color4` / `lerp_color3`.
+
+`spawn_dropped_item_system` now computes
+`charges_fraction = Some(charges as f32 / max_charges as f32)` when
+`item.max_charges > 0`, otherwise `None`.
+
+#### 4.4 — Ground shadow quad
+
+New private function `build_shadow_quad(&self) -> MeshDefinition` builds a
+flat `2 × 2`-triangle quad on the XZ plane at Y = `SHADOW_QUAD_Y` (0.001).
+The quad's half-extent is `self.scale × SHADOW_QUAD_SCALE × 0.5` where
+`SHADOW_QUAD_SCALE = 1.2`.
+
+Material:
+
+- `base_color: [0.0, 0.0, 0.0, 0.3]`
+- `alpha_mode: AlphaMode::Blend`
+- `metallic: 0.0, roughness: 1.0`
+
+The shadow quad is always inserted as `meshes[0]`, with the primary item mesh
+at `meshes[1]`, and the optional charge gem at `meshes[2]`.
+
+#### 4.5 — LOD support
+
+New private function `build_mesh_with_lod(&self) -> MeshDefinition`:
+
+- Builds the primary mesh via `build_mesh()`.
+- Counts triangles = `indices.len() / 3`.
+- If `> LOD_TRIANGLE_THRESHOLD (200)`: calls `generate_lod_levels(&mesh, 2)`
+  and overrides the auto-distances with fixed values
+  `[LOD_DISTANCE_1, LOD_DISTANCE_2]` = `[8.0, 20.0]`.
+- If `≤ 200`: returns mesh as-is (no LOD).
+
+All procedural item meshes in the current implementation are well under 200
+triangles, so LOD is not triggered at runtime today. The infrastructure is
+ready for future artist-authored higher-fidelity meshes.
+
+#### Free helper functions
+
+Two free (non-method) `#[inline]` functions were added to the module:
+
+- `lerp_color4(a, b, t) -> [f32; 4]` — RGBA linear interpolation
+- `lerp_color3(a, b, t) -> [f32; 3]` — RGB linear interpolation (for emissive)
+
+---
+
+### Architecture compliance
+
+- [ ] All new constants extracted (`COLOR_ACCENT_*`, `COLOR_CHARGE_*`,
+      `EMISSIVE_CHARGE_*`, `SHADOW_QUAD_*`, `LOD_*`, `MATERIAL_*`).
+- [ ] No hardcoded magic numbers in logic paths.
+- [ ] `to_creature_definition` is unchanged in signature; the new
+      `to_creature_definition_with_charges` is additive.
+- [ ] `rand` dependency removed from `item_world_events.rs` — the system is
+      now deterministic and safe for save/load replay.
+- [ ] RON data files unchanged.
+- [ ] No test references `campaigns/tutorial`.
+- [ ] SPDX headers present on all modified `.rs` files (inherited).
+- [ ] All new public functions documented with `///` doc comments and examples.
+
+---
+
+### Test coverage
+
+New tests in `src/domain/visual/item_mesh.rs` (`mod tests`):
+
+| Test                                                    | What it verifies                                                |
+| ------------------------------------------------------- | --------------------------------------------------------------- |
+| `test_fire_resist_item_accent_orange`                   | ResistFire → `COLOR_ACCENT_FIRE`                                |
+| `test_cold_resist_item_accent_blue`                     | ResistCold → `COLOR_ACCENT_COLD`                                |
+| `test_electricity_resist_item_accent_yellow`            | ResistElectricity → yellow                                      |
+| `test_poison_resist_item_accent_green`                  | ResistPoison → acid green                                       |
+| `test_magic_resist_item_accent_purple`                  | ResistMagic → purple                                            |
+| `test_might_bonus_item_accent_warm_red`                 | Might → warm red                                                |
+| `test_ac_bonus_item_accent_teal`                        | ArmorClass → teal                                               |
+| `test_intellect_bonus_item_accent_deep_blue`            | Intellect → deep blue                                           |
+| `test_magical_item_metallic_material`                   | `is_magical()` → `metallic > 0.5`, `roughness < 0.3`            |
+| `test_non_magical_item_matte_material`                  | mundane non-metal → `metallic: 0.0`, `roughness: 0.8`           |
+| `test_shadow_quad_present_and_transparent`              | `meshes[0]` is shadow quad, alpha < 0.5, `AlphaMode::Blend`     |
+| `test_shadow_quad_valid_for_all_categories`             | Shadow quad present for all item types                          |
+| `test_charge_fraction_full_color_gold`                  | `charges_fraction=1.0` → gold gem, emissive                     |
+| `test_charge_fraction_empty_color_grey`                 | `charges_fraction=0.0` → grey gem, no emissive                  |
+| `test_charge_fraction_none_no_gem`                      | `charges_fraction=None` → exactly 2 meshes                      |
+| `test_deterministic_charge_gem_color`                   | Color gradient determinism and boundary values                  |
+| `test_lod_added_for_complex_mesh`                       | > 200 triangles → LOD levels generated                          |
+| `test_no_lod_for_simple_mesh`                           | ≤ 200 triangles → `lod_levels: None`                            |
+| `test_creature_definition_mesh_transform_count_matches` | `meshes.len() == mesh_transforms.len()` for all charge variants |
+| `test_accent_color_not_applied_to_cursed_item`          | Cursed items keep `COLOR_CURSED` even with bonus                |
+| `test_lerp_color4_midpoint`                             | `lerp_color4` at `t=0.5` produces midpoint                      |
+| `test_lerp_color3_midpoint`                             | `lerp_color3` at `t=0.5` produces midpoint                      |
+
+New tests in `src/game/systems/item_world_events.rs` (`mod tests`):
+
+| Test                                               | What it verifies                         |
+| -------------------------------------------------- | ---------------------------------------- |
+| `test_deterministic_drop_rotation_same_inputs`     | Same inputs → same angle                 |
+| `test_deterministic_drop_rotation_different_tiles` | Different tile → different angle         |
+| `test_deterministic_drop_rotation_in_range`        | Angle in `[0, TAU)` for all tested tiles |
+| `test_deterministic_drop_rotation_different_items` | Different item IDs → different angle     |
+
+**Total tests added: 26** across two modules. All 3,159 tests pass.

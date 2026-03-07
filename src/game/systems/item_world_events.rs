@@ -35,7 +35,6 @@ use crate::game::resources::{DroppedItemRegistry, GlobalState};
 use crate::game::systems::creature_spawning::spawn_creature;
 use crate::game::systems::map::{MapEntity, TileCoord};
 use bevy::prelude::*;
-use rand::Rng;
 
 // Re-export Bevy message types under their canonical project names.
 use bevy::prelude::MessageReader;
@@ -48,12 +47,55 @@ use bevy::prelude::MessageWriter;
 /// Y-axis height at which dropped items sit above the floor (world units).
 const DROPPED_ITEM_Y: f32 = 0.05;
 
-/// Maximum random rotation applied around the Y axis when an item is dropped
-/// (radians). Creates natural-looking scatter for multiple items.
-const DROP_ROTATION_JITTER: f32 = std::f32::consts::TAU; // full 360°
+/// Full circle in radians — used to convert the deterministic hash to an angle.
+const DROP_ROTATION_FULL_CIRCLE: f32 = std::f32::consts::TAU; // 360°
 
 /// Tile-centre offset so items sit in the middle of a 1-unit tile.
 const TILE_CENTER_OFFSET: f32 = 0.5;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deterministic rotation helper (Phase 4.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Computes a deterministic Y-axis rotation (radians) for a dropped item.
+///
+/// The rotation is derived purely from the drop coordinates so that:
+/// - The same item dropped on the same tile always has the same orientation.
+/// - Items on different tiles appear at varied orientations for visual variety.
+/// - No non-deterministic randomness is introduced (safe for save/load replay).
+///
+/// # Algorithm
+///
+/// ```text
+/// hash = map_id XOR (tile_x * 31) XOR (tile_y * 17) XOR (item_id * 7)
+/// angle_radians = (hash % 360) / 360.0 * TAU
+/// ```
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::item_world_events::deterministic_drop_rotation;
+///
+/// let r1 = deterministic_drop_rotation(1, 5, 10, 42);
+/// let r2 = deterministic_drop_rotation(1, 5, 10, 42);
+/// assert_eq!(r1, r2, "same inputs must yield same rotation");
+///
+/// let r3 = deterministic_drop_rotation(1, 6, 10, 42);
+/// assert_ne!(r1, r3, "different tile_x must yield different rotation");
+/// ```
+pub fn deterministic_drop_rotation(
+    map_id: MapId,
+    tile_x: i32,
+    tile_y: i32,
+    item_id: ItemId,
+) -> f32 {
+    let hash: u64 = (map_id as u64)
+        .wrapping_add((tile_x as u64).wrapping_mul(31))
+        .wrapping_add((tile_y as u64).wrapping_mul(17))
+        .wrapping_add((item_id as u64).wrapping_mul(7));
+    let degrees = hash % 360;
+    (degrees as f32 / 360.0) * DROP_ROTATION_FULL_CIRCLE
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Events
@@ -171,11 +213,21 @@ impl Plugin for ItemWorldPlugin {
 /// For each event the system:
 /// 1. Looks up the `Item` from `GameContent` by `item_id`.
 /// 2. Builds an [`ItemMeshDescriptor`] via [`ItemMeshDescriptor::from_item`].
-/// 3. Converts to a [`CreatureDefinition`] via `to_creature_definition`.
+/// 3. Converts to a [`CreatureDefinition`] via
+///    [`to_creature_definition_with_charges`](ItemMeshDescriptor::to_creature_definition_with_charges),
+///    passing the per-drop charge fraction for the charge-level gem.
 /// 4. Calls [`spawn_creature`] with a ground-lying transform (Y = 0.05).
 /// 5. Inserts a [`DroppedItem`] component on the spawned parent entity.
 /// 6. Inserts a [`MapEntity`] and [`TileCoord`] component for map cleanup.
 /// 7. Registers the entity in [`DroppedItemRegistry`].
+///
+/// # Phase 4.2 — Deterministic Y rotation
+///
+/// The Y-axis rotation is derived from
+/// [`deterministic_drop_rotation`] using `map_id`, `tile_x`, `tile_y`, and
+/// `item_id`.  The same item on the same tile always has the same orientation
+/// (deterministic, safe for save/load replay), while items on different tiles
+/// appear at varied orientations for visual variety.
 ///
 /// If `GameContent` is not available or the item is not found the event is
 /// silently ignored with a warning.
@@ -193,8 +245,6 @@ pub fn spawn_dropped_item_system(
         return;
     };
 
-    let mut rng = rand::rng();
-
     for ev in events.read() {
         // Look up the item definition.
         let Some(item) = content.db().items.get_item(ev.item_id) else {
@@ -205,12 +255,19 @@ pub fn spawn_dropped_item_system(
             continue;
         };
 
-        // Build mesh descriptor and creature definition.
+        // Build mesh descriptor.  Pass the charge fraction for the gem indicator
+        // (Phase 4.3): compute fraction = charges / max_charges, or None when the
+        // item has no charges.
         let descriptor = ItemMeshDescriptor::from_item(item);
-        let creature_def = descriptor.to_creature_definition();
+        let charges_fraction = if item.max_charges > 0 {
+            Some(ev.charges as f32 / item.max_charges as f32)
+        } else {
+            None
+        };
+        let creature_def = descriptor.to_creature_definition_with_charges(charges_fraction);
 
-        // Slight random rotation around Y for visual variety.
-        let jitter_y = rng.random::<f32>() * DROP_ROTATION_JITTER;
+        // Phase 4.2 — Deterministic Y-axis rotation derived from tile coords.
+        let jitter_y = deterministic_drop_rotation(ev.map_id, ev.tile_x, ev.tile_y, ev.item_id);
 
         // World-space position: tile centre, just above the floor.
         let world_pos = Vec3::new(
@@ -346,6 +403,51 @@ pub fn load_map_dropped_items_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // §4.2 — test_deterministic_drop_rotation_same_inputs
+    /// Same inputs must always produce the same rotation angle.
+    #[test]
+    fn test_deterministic_drop_rotation_same_inputs() {
+        let r1 = deterministic_drop_rotation(1, 5, 10, 42);
+        let r2 = deterministic_drop_rotation(1, 5, 10, 42);
+        assert_eq!(r1, r2, "same inputs must yield identical rotation");
+    }
+
+    // §4.2 — test_deterministic_drop_rotation_different_tiles
+    /// Different tile positions must (in practice) yield different angles.
+    #[test]
+    fn test_deterministic_drop_rotation_different_tiles() {
+        let r1 = deterministic_drop_rotation(1, 5, 10, 1);
+        let r2 = deterministic_drop_rotation(1, 6, 10, 1);
+        let r3 = deterministic_drop_rotation(1, 5, 11, 1);
+        // These should differ (they use different primes in the hash)
+        assert_ne!(r1, r2, "different tile_x must yield different rotation");
+        assert_ne!(r1, r3, "different tile_y must yield different rotation");
+    }
+
+    // §4.2 — test_deterministic_drop_rotation_in_range
+    /// Rotation must be in [0, TAU).
+    #[test]
+    fn test_deterministic_drop_rotation_in_range() {
+        for tile_x in 0..10_i32 {
+            for tile_y in 0..10_i32 {
+                let r = deterministic_drop_rotation(1, tile_x, tile_y, 5);
+                assert!(
+                    (0.0..std::f32::consts::TAU).contains(&r),
+                    "rotation {r} must be in [0, TAU) for tile ({tile_x},{tile_y})"
+                );
+            }
+        }
+    }
+
+    // §4.2 — test_deterministic_drop_rotation_different_items
+    /// Different item IDs on the same tile must yield different rotations.
+    #[test]
+    fn test_deterministic_drop_rotation_different_items() {
+        let r1 = deterministic_drop_rotation(1, 5, 5, 1);
+        let r2 = deterministic_drop_rotation(1, 5, 5, 2);
+        assert_ne!(r1, r2, "different item_id must yield different rotation");
+    }
 
     // §2.8 — test_item_dropped_event_creation
     /// `ItemDroppedEvent` stores all five fields correctly.
