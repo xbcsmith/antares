@@ -631,11 +631,12 @@ impl GameState {
         }
 
         let starting_gold = campaign.config.starting_gold;
-        let starting_food = campaign.config.starting_food;
 
         let mut party = Party::new();
         party.gold = starting_gold;
-        party.food = starting_food;
+        // NOTE: party.food is deprecated (Phase 2). Food is now tracked as
+        // ConsumableEffect::IsFood inventory items granted during character
+        // instantiation via CharacterDefinition::instantiate().
 
         // Preserve campaign-specific game configuration for state
         let campaign_config = campaign.game_config.clone();
@@ -1388,12 +1389,16 @@ impl GameState {
     /// hero.hp.base = 20;
     /// hero.hp.current = 10;
     /// state.party.add_member(hero).unwrap();
-    /// state.party.food = 20;
     /// // Use a value ≤ 255 that is fully consumed by REST_DURATION_HOURS * 60 ticks.
     /// // REST_DURATION_HOURS * 60 = 720 > u8::MAX, so we use a smaller sentinel.
     /// state.active_spells.light = 60; // expires after 60 minutes (< 12 hours)
     ///
-    /// state.rest_party(REST_DURATION_HOURS, None).unwrap();
+    /// // Phase 2: food is tracked as IsFood inventory items.  Pass an empty
+    /// // ItemDatabase here — tests that need actual food gating should add
+    /// // IsFood items to character inventories and pass a real ItemDatabase.
+    /// use antares::domain::items::ItemDatabase;
+    /// let item_db = ItemDatabase::new();
+    /// state.rest_party(REST_DURATION_HOURS, &item_db, None).unwrap();
     ///
     /// // Active spell with only 60 ticks must expire during a 12-hour rest
     /// assert_eq!(state.active_spells.light, 0);
@@ -1403,13 +1408,14 @@ impl GameState {
     pub fn rest_party(
         &mut self,
         hours: u32,
+        item_db: &crate::domain::items::ItemDatabase,
         templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
     ) -> Result<(), crate::domain::resources::ResourceError> {
-        // Perform HP/SP restoration and food consumption.
+        // Perform HP/SP restoration and food consumption from inventories.
         // rest_party() no longer takes a game_time parameter — time advancement
         // is exclusively handled by advance_time() below so that active-spell
         // ticking and merchant restocking are never bypassed.
-        crate::domain::resources::rest_party(&mut self.party, hours)?;
+        crate::domain::resources::rest_party(&mut self.party, item_db, hours)?;
 
         // Advance the authoritative clock via the GameState path so that active
         // spells are ticked and merchant stock is restocked for the full duration.
@@ -3450,17 +3456,47 @@ mod tests {
     #[test]
     fn test_rest_advances_time_via_state() {
         // GameState::rest_party must advance time by exactly hours * 60 minutes.
-        let mut state = GameState::new();
-        state.party.food = 20;
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect};
+        use crate::domain::items::{Item, ItemDatabase, ItemType};
 
-        // Add a party member so rest_party has someone to heal.
-        let hero = Character::new(
+        let mut state = GameState::new();
+
+        // Build a food item DB and give the hero a ration.
+        let mut item_db = ItemDatabase::new();
+        item_db
+            .add_item(Item {
+                id: 1,
+                name: "Food Ration".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::IsFood(1),
+                    is_combat_usable: false,
+                }),
+                base_cost: 5,
+                sell_cost: 2,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+            })
+            .unwrap();
+
+        // Add a party member with food rations so rest_party has someone to heal.
+        let mut hero = Character::new(
             "Hero".to_string(),
             "human".to_string(),
             "knight".to_string(),
             Sex::Male,
             Alignment::Good,
         );
+        // Give 5 rations — more than enough for 1 member.
+        for _ in 0..5 {
+            hero.inventory.add_item(1, 0).unwrap();
+        }
         state.party.add_member(hero).unwrap();
 
         let hours = 8u32;
@@ -3468,7 +3504,7 @@ mod tests {
         let initial_hour = state.time.hour;
 
         state
-            .rest_party(hours, None)
+            .rest_party(hours, &item_db, None)
             .expect("rest_party must succeed with food");
 
         // Total minutes elapsed since day 1, hour 0, minute 0.
@@ -3488,18 +3524,46 @@ mod tests {
     fn test_rest_ticks_active_spells() {
         // GameState::rest_party must tick active spells for the full rest duration
         // (hours * 60 ticks), ensuring that active-spell durations are not bypassed.
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect};
+        use crate::domain::items::{Item, ItemDatabase, ItemType};
         use crate::domain::resources::REST_DURATION_HOURS;
 
         let mut state = GameState::new();
-        state.party.food = 20;
 
-        let hero = Character::new(
+        // Build a food item DB and give the mage enough rations.
+        let mut item_db = ItemDatabase::new();
+        item_db
+            .add_item(Item {
+                id: 1,
+                name: "Food Ration".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::IsFood(1),
+                    is_combat_usable: false,
+                }),
+                base_cost: 5,
+                sell_cost: 2,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+            })
+            .unwrap();
+
+        let mut hero = Character::new(
             "Mage".to_string(),
             "human".to_string(),
             "sorcerer".to_string(),
             Sex::Female,
             Alignment::Good,
         );
+        for _ in 0..5 {
+            hero.inventory.add_item(1, 0).unwrap();
+        }
         state.party.add_member(hero).unwrap();
 
         // Give a light spell that will expire during a full rest.
@@ -3510,7 +3574,7 @@ mod tests {
         state.active_spells.light = ticks;
 
         state
-            .rest_party(REST_DURATION_HOURS, None)
+            .rest_party(REST_DURATION_HOURS, &item_db, None)
             .expect("rest_party must succeed with food");
 
         // After a full rest the light spell should have expired (0 ticks left).
