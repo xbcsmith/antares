@@ -269,6 +269,30 @@ impl CreatureAssetManager {
         self.write_registry_references(&references)
     }
 
+    /// Saves or updates a creature in the registry using an explicit relative asset path.
+    pub(crate) fn save_creature_at_path(
+        &self,
+        relative_path: &str,
+        creature: &CreatureDefinition,
+    ) -> Result<(), CreatureAssetError> {
+        let mut references = self.load_registry_references()?;
+        self.write_creature_asset(relative_path, creature)?;
+
+        if let Some(idx) = references.iter().position(|r| r.id == creature.id) {
+            references[idx].name = creature.name.clone();
+            references[idx].filepath = relative_path.to_string();
+        } else {
+            references.push(CreatureReference {
+                id: creature.id,
+                name: creature.name.clone(),
+                filepath: relative_path.to_string(),
+            });
+        }
+
+        references.sort_by_key(|r| r.id);
+        self.write_registry_references(&references)
+    }
+
     /// Loads a creature by ID from the reference-backed registry.
     pub fn load_creature(
         &self,
