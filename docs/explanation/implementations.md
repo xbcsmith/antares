@@ -1326,6 +1326,1572 @@ Validation run completed successfully:
 - `cargo check --all-targets --all-features`
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo nextest run --all-features` -> `3162 passed, 8 skipped`
+## Combat Events — Missing Deliverables Gap Fill
+
+### Overview
+
+After Phase 5 was completed a gap analysis against
+`docs/explanation/combat_events_implementation_plan.md` identified five
+outstanding deliverables that had not been implemented:
+
+1. **Phase 2** — `test_ambush_player_turn_is_skipped` test missing.
+2. **Phase 2** — `test_ambush_player_can_act_round_2` test missing.
+3. **Phase 4** — Four individually-named boss-flag tests missing
+   (`test_boss_combat_monsters_advance`, `test_boss_combat_monsters_regenerate`,
+   `test_boss_combat_cannot_bribe`, `test_boss_combat_cannot_surrender`); the
+   behaviour was covered by the combined `test_boss_combat_sets_boss_flags` but
+   the plan required each assertion in its own named test.
+4. **Phase 4** — Boss opening combat-log text deviated from the plan.
+   The plan specified `"A powerful foe stands before you! Prepare for a
+legendary battle!"` but the implementation emitted `"A powerful foe
+appears!"`.
+5. **Phase 2 / Section 2.7** — `src/domain/resources.rs` was missing the
+   mandatory code comment documenting that rest-interrupted encounters must use
+   `CombatEventType::Ambush`.
+
+### Deliverables Checklist
+
+- [x] `test_ambush_player_turn_is_skipped` — asserts the "surprised" log entry
+      is emitted and `CombatTurnStateResource` stays `EnemyTurn` after the player
+      slot is auto-skipped in round 1.
+- [x] `test_ambush_player_can_act_round_2` — asserts that after `advance_turn`
+      pushes the state into round 2, `ambush_round_active` is `false` and
+      `handicap` is `Even`, confirming the player would not be skipped.
+- [x] `test_boss_combat_monsters_advance` — isolated assertion on
+      `cs.monsters_advance == true`.
+- [x] `test_boss_combat_monsters_regenerate` — isolated assertion on
+      `cs.monsters_regenerate == true`.
+- [x] `test_boss_combat_cannot_bribe` — isolated assertion on
+      `cs.can_bribe == false`.
+- [x] `test_boss_combat_cannot_surrender` — isolated assertion on
+      `cs.can_surrender == false`.
+- [x] Boss opening log text corrected to
+      `"A powerful foe stands before you! Prepare for a legendary battle!"`.
+- [x] `ResourceError::CannotRestWithActiveEncounter` doc comment updated to
+      mandate `CombatEventType::Ambush` for rest-interrupted encounters.
+
+### What Was Built
+
+#### `test_ambush_player_turn_is_skipped` (`src/game/systems/combat.rs`)
+
+A Bevy app test that manually constructs a `CombatResource` with
+`ambush_round_active = true` and turn order `[Player(0), Monster(1)]`, inserts
+it into a `CombatPlugin` app with `CombatTurnState::EnemyTurn`, then calls
+`app.update()`. After the update:
+
+- `CombatLogState` must contain a line with the word "surprised" (emitted by
+  `execute_monster_turn`'s ambush-skip path).
+- `CombatTurnStateResource` must still be `EnemyTurn` (the monster on the next
+  slot has not yet acted, so the system keeps enemy turn active).
+
+#### `test_ambush_player_can_act_round_2` (`src/game/systems/combat.rs`)
+
+A pure-logic test (no Bevy app) that calls `start_encounter` with
+`CombatEventType::Ambush`, verifies `ambush_round_active == true` as a
+pre-condition, then calls `cs.advance_turn(&[])` to exhaust round 1 and
+trigger `advance_round`. After the call it asserts:
+
+- `ambush_round_active == false` — the flag is cleared.
+- `handicap == Handicap::Even` — the handicap is reset.
+- `round == 2` — we are actually in round 2.
+
+This is sufficient to prove the player would not be skipped: both guard checks
+(`combat_input_system` and `execute_monster_turn`) inspect `ambush_round_active`
+directly.
+
+#### Four individual boss-flag tests (`src/game/systems/combat.rs`)
+
+Each test calls `start_encounter(&mut gs, &content, &[], CombatEventType::Boss)`
+and asserts exactly one `CombatState` field. They are structurally identical to
+the existing `test_boss_combat_sets_boss_flags` (which remains as a combined
+sanity check) but satisfy the plan's requirement that each flag has a dedicated,
+individually-named test that can fail in isolation.
+
+| Test                                   | Field asserted                   |
+| -------------------------------------- | -------------------------------- |
+| `test_boss_combat_monsters_advance`    | `cs.monsters_advance == true`    |
+| `test_boss_combat_monsters_regenerate` | `cs.monsters_regenerate == true` |
+| `test_boss_combat_cannot_bribe`        | `cs.can_bribe == false`          |
+| `test_boss_combat_cannot_surrender`    | `cs.can_surrender == false`      |
+
+#### Boss opening log text (`src/game/systems/combat.rs`)
+
+The `CombatEventType::Boss` arm of the `opening_text` match inside
+`handle_combat_started` was updated from:
+
+```antares/src/game/systems/combat.rs#L1212-1212
+"A powerful foe appears!".to_string()
+```
+
+to:
+
+```antares/src/game/systems/combat.rs#L1212-1214
+"A powerful foe stands before you! Prepare for a legendary battle!".to_string()
+```
+
+This matches the exact text specified in plan Section 4.5.
+
+#### Rest-interruption ambush comment (`src/domain/resources.rs`)
+
+A `# Combat Event Type Requirement` doc section was added to the
+`ResourceError::CannotRestWithActiveEncounter` variant. It states:
+
+> Any encounter that fires while the party is resting **MUST** be started with
+> `CombatEventType::Ambush`. The resting party is asleep and cannot react — the
+> ambush mechanic (monsters act first in round 1, party turns suppressed)
+> correctly models this. The rest system implementation is responsible for
+> passing `CombatEventType::Ambush` to `start_encounter()` whenever it returns
+> this error variant and triggers combat.
+
+A cross-reference link to plan Section 2.7 is included.
+
+### Architecture Compliance
+
+- No architectural deviations introduced.
+- No new data structures modified.
+- All new tests use `data/test_campaign` patterns; no reference to
+  `campaigns/tutorial`.
+- RON format unchanged — no data files modified.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → no output (clean)
+cargo check --all-targets → Finished dev profile, 0 errors
+cargo clippy -D warnings  → Finished dev profile, 0 warnings
+cargo nextest run         → 3232 tests run: 3232 passed, 8 skipped
+  (campaign_builder)      → 1938 tests run: 1938 passed, 2 skipped
+```
+
+---
+
+## Phase 5: Campaign Builder UI — Combat Event Type
+
+### Overview
+
+Phase 5 wires the `CombatEventType` domain enum (introduced in Phase 1) into the
+Campaign Builder SDK so that campaign authors can select and persist the combat type
+for every map encounter event and random encounter group without hand-editing RON
+files. It also surfaces the selected type visually in the inspector panel with
+per-type colour hints.
+
+Files modified:
+
+- `sdk/campaign_builder/src/map_editor.rs` — all UI, state, and serialisation changes
+- `sdk/campaign_builder/src/lib.rs` — fixed 9 pre-existing `Attack` struct-literal
+  compilation errors (missing `is_ranged` field introduced by Phase 3)
+
+### Phase 5 Deliverables Checklist
+
+- [x] `encounter_combat_event_type: CombatEventType` field on `EventEditorState`
+- [x] `CombatEventType::Normal` default in `impl Default for EventEditorState`
+- [x] `CombatEventType` combo-box in `show_event_editor()` for Encounter type
+- [x] `to_map_event()` forwards `combat_event_type` into `MapEvent::Encounter`
+- [x] `from_map_event()` reads `combat_event_type` from `MapEvent::Encounter`
+- [x] Per-group `CombatEventType` selector in the random encounter table editor (`show_metadata_editor`)
+- [x] Combat type displayed with per-type colour in the inspector panel (`show_inspector_panel`)
+- [x] Combat type colour constants (`COMBAT_TYPE_COLOR_AMBUSH/BOSS/RANGED/MAGIC`)
+- [x] `push_id` used for all group-level combo-boxes (no egui ID clashes)
+- [x] `ComboBox::from_id_salt` used for every combo-box (SDK egui ID rule)
+- [x] `ScrollArea::id_salt` set on encounter groups scroll area
+- [x] All 12 Phase 5 tests pass
+- [x] All 4 quality gates pass (fmt / check / clippy / nextest)
+
+### What Was Built
+
+#### `encounter_combat_event_type` field on `EventEditorState` (`sdk/campaign_builder/src/map_editor.rs`)
+
+Added a new public field to `EventEditorState`:
+
+```sdk/campaign_builder/src/map_editor.rs#L1952-1953
+/// Combat event type selected for this encounter. Controls ambush, ranged,
+/// magic, and boss mechanics in the game layer.
+pub encounter_combat_event_type: CombatEventType,
+```
+
+`impl Default for EventEditorState` initialises it to `CombatEventType::Normal` so
+that existing saved events without the field continue to behave identically
+(backward-compatible via `#[serde(default)]` on the domain struct).
+
+#### `to_map_event()` — encounter arm (`sdk/campaign_builder/src/map_editor.rs`)
+
+The `EventType::Encounter` arm was extended to forward the editor field:
+
+```sdk/campaign_builder/src/map_editor.rs#L2141-2155
+Ok(MapEvent::Encounter {
+    name: self.name.clone(),
+    description: self.description.clone(),
+    monster_group: monsters,
+    time_condition: None,
+    facing,
+    proximity_facing: self.event_proximity_facing,
+    rotation_speed: ...,
+    combat_event_type: self.encounter_combat_event_type,
+})
+```
+
+#### `from_map_event()` — encounter arm (`sdk/campaign_builder/src/map_editor.rs`)
+
+The `MapEvent::Encounter` arm was extended to read `combat_event_type` back into the
+editor state, enabling lossless round-trip editing:
+
+```sdk/campaign_builder/src/map_editor.rs#L2371-2391
+MapEvent::Encounter {
+    ...,
+    combat_event_type,
+    ..
+} => {
+    ...
+    s.encounter_combat_event_type = *combat_event_type;
+}
+```
+
+#### Combat Type ComboBox in `show_event_editor()` (`sdk/campaign_builder/src/map_editor.rs`)
+
+After the monster selector for `EventType::Encounter`, a labelled combo-box is
+rendered using `ComboBox::from_id_salt("encounter_combat_event_type")`. It iterates
+`CombatEventType::all()`, uses `selectable_value` for each variant, and shows the
+variant `description()` as hover text. A small grey description label appears below
+the combo-box for the currently-selected variant. Changing the selection sets
+`editor.has_changes = true`.
+
+#### Per-group CombatEventType in `show_metadata_editor()` (`sdk/campaign_builder/src/map_editor.rs`)
+
+The random encounter table section was added to the map metadata editor. For each
+`EncounterGroup` in `EncounterTable::groups`, the UI:
+
+1. Wraps the row in `ui.push_id(group_idx, |ui| { ... })` to prevent egui ID collisions.
+2. Renders `ComboBox::from_id_salt(format!("encounter_group_combat_type_{}", group_idx))` for per-group type selection.
+3. Shows the group's `combat_event_type.description()` as a small grey hint label.
+4. Provides a "🗑️ Remove" button per group and an "➕ Add Group" button at the bottom.
+5. Wraps the group list in `ScrollArea::vertical().id_salt("encounter_groups_scroll")`.
+
+#### Inspector panel — combat type display (`sdk/campaign_builder/src/map_editor.rs`)
+
+`show_inspector_panel()` was extended so that when the selected tile has a
+`MapEvent::Encounter`, the combat type is shown with a colour-coded label:
+
+| Variant | Colour                                     |
+| ------- | ------------------------------------------ |
+| Normal  | `Color32::LIGHT_GRAY`                      |
+| Ambush  | `COMBAT_TYPE_COLOR_AMBUSH` (180, 60, 70)   |
+| Ranged  | `COMBAT_TYPE_COLOR_RANGED` (209, 154, 102) |
+| Magic   | `COMBAT_TYPE_COLOR_MAGIC` (198, 120, 221)  |
+| Boss    | `COMBAT_TYPE_COLOR_BOSS` (220, 50, 50)     |
+
+A small grey description label follows the type label.
+
+#### Combat type colour constants (`sdk/campaign_builder/src/map_editor.rs`)
+
+Four constants were added (grid tiles continue to use `EVENT_COLOR_ENCOUNTER` — the
+colour differentiation is inspector-only):
+
+```sdk/campaign_builder/src/map_editor.rs#L97-106
+const COMBAT_TYPE_COLOR_AMBUSH: Color32 = Color32::from_rgb(180, 60, 70);
+const COMBAT_TYPE_COLOR_BOSS:   Color32 = Color32::from_rgb(220, 50, 50);
+const COMBAT_TYPE_COLOR_RANGED: Color32 = Color32::from_rgb(209, 154, 102);
+const COMBAT_TYPE_COLOR_MAGIC:  Color32 = Color32::from_rgb(198, 120, 221);
+```
+
+#### `Attack` struct-literal fixes (`sdk/campaign_builder/src/lib.rs`)
+
+9 `Attack { ... }` struct literals in `lib.rs` were missing the `is_ranged: bool`
+field added by Phase 3. All 9 occurrences were updated to include `is_ranged: false`.
+This was a pre-existing compilation blocker preventing the `campaign_builder` crate
+from building; Phase 5 resolved it as part of making the full crate compile.
+
+### Phase 5 Tests
+
+All tests live in `mod tests` at the bottom of `sdk/campaign_builder/src/map_editor.rs`.
+
+| Test                                                       | Assertion                                                                          |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `test_event_editor_state_default_combat_type`              | `Default::default()` has `Normal`                                                  |
+| `test_to_map_event_preserves_combat_type_ambush`           | `to_map_event()` with Ambush → `MapEvent::Encounter { combat_event_type: Ambush }` |
+| `test_to_map_event_preserves_combat_type_boss`             | same for Boss                                                                      |
+| `test_to_map_event_preserves_combat_type_ranged`           | same for Ranged                                                                    |
+| `test_to_map_event_preserves_combat_type_magic`            | same for Magic                                                                     |
+| `test_from_map_event_reads_combat_type_boss`               | `from_map_event()` on Boss encounter sets editor field                             |
+| `test_from_map_event_reads_combat_type_ambush`             | same for Ambush                                                                    |
+| `test_from_map_event_normal_type_on_default_field`         | backward-compat: Normal field → Normal editor state                                |
+| `test_combat_type_combo_box_has_all_variants`              | `CombatEventType::all()` returns exactly 5 variants                                |
+| `test_combat_type_round_trip_all_variants`                 | every variant survives `to_map_event` → `from_map_event`                           |
+| `test_combat_type_does_not_affect_non_encounter_events`    | Sign event is unaffected by `encounter_combat_event_type`                          |
+| `test_encounter_combat_event_type_display_names_non_empty` | `display_name()` non-empty for all variants                                        |
+| `test_encounter_combat_event_type_descriptions_non_empty`  | `description()` non-empty for all variants                                         |
+
+### Architecture Compliance
+
+- `CombatEventType` used exactly as defined in `src/domain/combat/types.rs` (Section 4 of architecture).
+- `EncounterGroup::combat_event_type` uses the type alias from Phase 1 — no raw integers.
+- `ComboBox::from_id_salt`, `push_id` for loops, and `ScrollArea::id_salt` follow `sdk/AGENTS.md` egui ID rules.
+- No new documentation files created; summary placed in `docs/explanation/implementations.md` as required.
+- No `campaigns/tutorial` references in tests (Implementation Rule 5).
+- RON format used for all game data — no JSON or YAML.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → no output (clean)
+cargo check --all-targets → Finished dev profile, 0 errors
+cargo clippy -D warnings  → Finished dev profile, 0 warnings
+cargo nextest run         → 3226 tests run: 3226 passed, 8 skipped
+  (campaign_builder)      → 1938 tests run: 1938 passed, 2 skipped
+```
+
+---
+
+## Phase 4: Boss Combat
+
+### Overview
+
+Phase 4 extends the combat system with a fully-featured **Boss** encounter
+mode. When `CombatEventType::Boss` is active, monsters never flee, regenerate
+at an accelerated rate (`BOSS_REGEN_PER_ROUND = 5` HP per round instead of 1),
+and a prominent HP bar is rendered at the top of the screen. Victory over a
+boss encounter sets `VictorySummary::boss_defeated = true`, causing the victory
+screen to display a `"⚔ Boss Defeated! ⚔"` header.
+
+### Phase 4 Deliverables Checklist
+
+- [x] `BOSS_REGEN_PER_ROUND` and `BOSS_STAT_MULTIPLIER` constants in `src/domain/combat/types.rs`
+- [x] Two constant unit tests in `src/domain/combat/types.rs`
+- [x] `BossHpBar`, `BossHpBarFill`, `BossHpBarText` components in `src/game/systems/combat.rs`
+- [x] Boss HP bar visual constants (`BOSS_HP_BAR_WIDTH`, `BOSS_HP_BAR_HEIGHT`, `BOSS_HP_HEALTHY_COLOR`, `BOSS_HP_INJURED_COLOR`, `BOSS_HP_CRITICAL_COLOR`)
+- [x] `setup_combat_ui` spawns the boss HP bar panel when `combat_event_type == Boss`
+- [x] `update_combat_ui` updates boss HP bar fill width and text each frame
+- [x] `perform_monster_turn_with_rng` suppresses monster fleeing for Boss encounters
+- [x] `perform_monster_turn_with_rng` applies `BOSS_REGEN_PER_ROUND` bonus regeneration after `advance_turn`
+- [x] `execute_monster_turn` captures `round_before`/`round_after` and emits regeneration log lines
+- [x] `VictorySummary::boss_defeated` field added
+- [x] `process_combat_victory_with_rng` sets `boss_defeated` from `combat_event_type`
+- [x] `handle_combat_victory` shows `"⚔ Boss Defeated! ⚔"` header when `boss_defeated == true`
+- [x] Five new Phase 4 tests in `src/game/systems/combat.rs`
+
+### What Was Built
+
+#### `BOSS_REGEN_PER_ROUND` and `BOSS_STAT_MULTIPLIER` (`src/domain/combat/types.rs`)
+
+Two public constants added immediately after the `CombatEventType` impl block:
+
+- `BOSS_REGEN_PER_ROUND: u16 = 5` — total HP regenerated per round by a boss
+  monster with `can_regenerate = true`. The base engine already adds 1 HP in
+  `advance_round`; boss logic adds the remaining 4 as a bonus in
+  `perform_monster_turn_with_rng`, giving exactly 5 total.
+- `BOSS_STAT_MULTIPLIER: f32 = 1.0` — reserved for future stat scaling;
+  currently a no-op so campaign authors can tune monsters via RON data.
+
+#### Boss HP Bar Components (`src/game/systems/combat.rs`)
+
+Three new `#[derive(Component)]` structs, each carrying a `participant_index`:
+
+- `BossHpBar` — root panel node; used as a presence marker in tests
+- `BossHpBarFill` — the colored fill node whose width tracks `hp.current / hp.base`
+- `BossHpBarText` — the `"current/base"` text label
+
+Five visual constants drive the appearance:
+
+| Constant                 | Value                                          |
+| ------------------------ | ---------------------------------------------- |
+| `BOSS_HP_BAR_WIDTH`      | `400.0` px                                     |
+| `BOSS_HP_BAR_HEIGHT`     | `20.0` px                                      |
+| `BOSS_HP_HEALTHY_COLOR`  | `srgba(0.8, 0.1, 0.1, 1.0)` (dark red)         |
+| `BOSS_HP_INJURED_COLOR`  | `srgba(0.5, 0.1, 0.1, 1.0)` (dimmer red)       |
+| `BOSS_HP_CRITICAL_COLOR` | `srgba(0.3, 0.05, 0.05, 1.0)` (near-black red) |
+
+#### `setup_combat_ui` boss bar spawn (`src/game/systems/combat.rs`)
+
+After the enemy panel's `.with_children` block closes and before the turn
+order panel, a conditional block checks `combat_res.combat_event_type ==
+CombatEventType::Boss`. For the first monster in `participants`, it spawns:
+
+1. An absolutely-positioned panel at `top: 8px`, centred horizontally.
+2. A gold `"⚔ {name} ⚔"` name label.
+3. A HP bar background → fill child (tagged `BossHpBarFill`).
+4. A `BossHpBarText` label.
+
+Only the first monster gets a boss bar (`break` after the first match).
+
+#### `update_combat_ui` boss bar update (`src/game/systems/combat.rs`)
+
+Two new query parameters were added to the function:
+
+```
+mut boss_hp_fills: Query<(&BossHpBarFill, &mut Node, &mut BackgroundColor), Without<EnemyHpBarFill>>
+mut boss_hp_texts: Query<(&BossHpBarText, &mut Text), Without<EnemyHpText>>
+```
+
+Existing queries received matching `Without<BossHpBarFill>` / `Without<BossHpBarText>`
+filters to prevent Bevy query conflicts. At the end of `update_combat_ui`, the
+fill's `node.width` is set to `Val::Percent(ratio * 100.0)` and the color
+transitions through the three threshold constants (≥50% healthy, ≥25%
+injured, <25% critical).
+
+#### Monster flee suppression (`perform_monster_turn_with_rng`)
+
+Before `resolve_attack`, a `should_flee_this_turn` boolean is computed:
+
+```rust
+let should_flee_this_turn = if combat_res.combat_event_type == CombatEventType::Boss {
+    false
+} else if let Some(Combatant::Monster(mon)) = ... {
+    mon.should_flee()
+} else { false };
+```
+
+If true (non-boss only), the monster is marked as acted, the turn is advanced,
+and the function returns `Ok(None)` without attacking — identical to what a
+fleeing monster would do. Boss monsters always proceed to the attack path.
+
+#### Boss bonus regeneration (`perform_monster_turn_with_rng`)
+
+After `advance_turn`, when `combat_event_type == Boss && monsters_regenerate`:
+
+```rust
+let bonus_regen = BOSS_REGEN_PER_ROUND.saturating_sub(1); // = 4
+```
+
+Each alive, `can_regenerate` monster calls `mon.regenerate(bonus_regen)`.
+Combined with `advance_round`'s built-in `regenerate(1)` this gives exactly
+`BOSS_REGEN_PER_ROUND = 5` HP per round.
+
+#### Boss regeneration log lines (`execute_monster_turn`)
+
+```rust
+let round_before = combat_res.state.round;
+let outcome = perform_monster_turn_with_rng(...);
+let round_after = combat_res.state.round;
+
+if round_after > round_before
+    && combat_res.combat_event_type == CombatEventType::Boss
+    && combat_res.state.monsters_regenerate
+{ ... push log line ... }
+```
+
+When a new round starts the log receives a green `"{name} regenerates {N} HP!"`
+line (color `FEEDBACK_COLOR_HEAL`) for every regenerating alive monster.
+
+#### `VictorySummary::boss_defeated` (`src/game/systems/combat.rs`)
+
+A `pub boss_defeated: bool` field was added to `VictorySummary`. It is set in
+`process_combat_victory_with_rng`:
+
+```rust
+boss_defeated: combat_res.combat_event_type == CombatEventType::Boss,
+```
+
+In `handle_combat_victory` the text is:
+
+```rust
+let header = if summary.boss_defeated { "⚔ Boss Defeated! ⚔\n".to_string() } else { String::new() };
+Text::new(format!("{}Victory! XP: {} ...", header, ...))
+```
+
+### Phase 4 Tests
+
+All five new tests live in the `mod tests` block at the bottom of
+`src/game/systems/combat.rs`:
+
+| Test                                        | What it verifies                                                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `test_boss_monster_does_not_flee`           | Monster at 1 HP (flee_threshold=50) returns `Ok(Some(...))` in Boss mode — it attacked, not fled |
+| `test_boss_monster_regenerates_each_round`  | After `advance_turn` + bonus regen, HP increases by exactly `BOSS_REGEN_PER_ROUND`               |
+| `test_boss_hp_bar_spawned`                  | After `app.update()` with Boss type, `BossHpBar` component count > 0                             |
+| `test_normal_combat_no_boss_bar`            | Normal encounter produces zero `BossHpBar` components                                            |
+| `test_boss_victory_summary_has_boss_header` | `process_combat_victory_with_rng` with Boss type sets `summary.boss_defeated = true`             |
+
+Two constant tests were also added to `src/domain/combat/types.rs`:
+`test_boss_regen_per_round_constant` and `test_boss_stat_multiplier_constant`.
+
+### Implementation Notes
+
+- **`has_acted` is reset by `advance_round`**: `advance_round` calls
+  `monster.reset_turn()` on every monster, clearing `has_acted`. The flee test
+  therefore verifies `Ok(Some(...))` (attack resolved) rather than `has_acted`,
+  which would be unreliable when the turn wraps into a new round during the test.
+- **No ECS `world().query()` borrow conflict**: Boss HP bar queries use
+  `Without<EnemyHpBarFill>` / `Without<EnemyHpBarText>` filters to satisfy
+  Bevy's disjoint-query requirement. Existing queries received matching
+  `Without<BossHpBar*>` filters.
+- **SPDX headers not duplicated**: Both files already carried SPDX headers from
+  earlier phases; none were added.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4.4 (`CombatState`, `Monster`)
+- [x] `CombatEventType::Boss` used (not a new enum, already existed from Phase 1)
+- [x] Constants extracted (`BOSS_REGEN_PER_ROUND`, `BOSS_STAT_MULTIPLIER`)
+- [x] `AttributePair16` pattern used for HP (not raw integers)
+- [x] No new RON data files required (boss mechanics are purely runtime)
+- [x] No architectural deviations from architecture.md
+
+### Quality Gate Results
+
+```
+cargo fmt         → no output (all files formatted)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 3226 passed; 0 failed; 8 skipped
+```
+
+## Phase 3: Ranged and Magic Combat
+
+### Overview
+
+Phase 3 extends the combat system with two new encounter modes — **Ranged** and
+**Magic** — and wires the full action pipeline for ranged attacks: button
+spawning, target selection, ammo consumption, damage resolution, and combat-log
+messaging. Monster AI is updated to prefer ranged attacks in ranged encounters,
+and the action-menu keyboard order is adjusted so that **Cast** is the default
+highlight in magic encounters.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `TurnAction::RangedAttack` variant added to `src/domain/combat/types.rs`
+- [x] `CombatError::NoAmmo` variant added to `src/domain/combat/engine.rs`
+- [x] `choose_monster_attack` extended with `is_ranged_combat: bool` parameter
+- [x] `ActionButtonType::RangedAttack` variant added in `src/game/systems/combat.rs`
+- [x] `COMBAT_ACTION_COUNT_MAGIC` and `COMBAT_ACTION_ORDER_MAGIC` constants added
+- [x] `RangedAttackAction` message struct added and registered with the plugin
+- [x] `RangedAttackPending` resource added and registered with the plugin
+- [x] `setup_combat_ui` spawns Ranged button for `CombatEventType::Ranged`
+- [x] `setup_combat_ui` uses magic button order for `CombatEventType::Magic`
+- [x] `setup_combat_ui` ordered `.after(handle_combat_started)` to fix race
+- [x] `update_ranged_button_color` system enables/disables Ranged button each frame
+- [x] `dispatch_combat_action` handles `ActionButtonType::RangedAttack`
+- [x] `confirm_attack_target` dispatches `RangedAttackAction` when `RangedAttackPending`
+- [x] `select_target` / `combat_input_system` pass `RangedAttackPending` through
+- [x] `combat_input_system` uses correct action-order array for magic/standard
+- [x] `update_action_highlight` uses correct order and skips the Ranged button
+- [x] `perform_ranged_attack_action_with_rng` function implemented
+- [x] `handle_ranged_attack_action` ECS system implemented and registered
+- [x] `handle_combat_started` combat log updated for all `CombatEventType` variants
+- [x] `perform_attack_action_with_rng` passes `is_ranged_combat` to `choose_monster_attack`
+- [x] `perform_monster_turn_with_rng` passes `is_ranged_combat` to `choose_monster_attack`
+- [x] All 10 Phase 3 tests pass; pre-existing `test_ambush_combat_started_sets_enemy_turn` fixed
+- [x] `docs/explanation/implementations.md` updated
+
+### What Was Built
+
+#### `TurnAction::RangedAttack` (`src/domain/combat/types.rs`)
+
+Added between `Attack` and `Defend` as the plan specifies. The doc comment
+explains the ammo requirement and its intended use in `CombatEventType::Ranged`
+encounters.
+
+#### `CombatError::NoAmmo` (`src/domain/combat/engine.rs`)
+
+New variant with message `"No ammo available for ranged attack"`. Returned by
+`perform_ranged_attack_action_with_rng` when the attacker has a
+`MartialRanged` weapon but no `ItemType::Ammo` item in their inventory.
+
+#### `choose_monster_attack` signature change (`src/domain/combat/engine.rs`)
+
+Added `is_ranged_combat: bool` as the second parameter (before `rng`). When
+`true` the function first filters `monster.attacks` for entries with
+`is_ranged == true`; if any exist one is chosen uniformly at random. If none
+exist the function falls through to the existing special-attack-threshold +
+random selection logic. When `false` behaviour is completely unchanged.
+
+All callers updated:
+
+- `perform_attack_action_with_rng` (monster branch) — passes `combat_res.combat_event_type == CombatEventType::Ranged`
+- `perform_monster_turn_with_rng` — same
+- `test_combat_monster_special_ability_applied` in `engine.rs` — passes `false`
+
+#### `ActionButtonType::RangedAttack` (`src/game/systems/combat.rs`)
+
+New variant inserted after `Attack`. Excluded from `COMBAT_ACTION_ORDER` and
+`COMBAT_ACTION_ORDER_MAGIC` (those arrays cycle only the 5 standard actions);
+the Ranged button is spawned as an extra sixth button in ranged encounters.
+
+#### `COMBAT_ACTION_COUNT_MAGIC` and `COMBAT_ACTION_ORDER_MAGIC`
+
+```src/game/systems/combat.rs#L319-336
+pub const COMBAT_ACTION_COUNT_MAGIC: usize = 5;
+
+pub const COMBAT_ACTION_ORDER_MAGIC: [ActionButtonType; COMBAT_ACTION_COUNT_MAGIC] = [
+    ActionButtonType::Cast,
+    ActionButtonType::Attack,
+    ActionButtonType::Defend,
+    ActionButtonType::Item,
+    ActionButtonType::Flee,
+];
+```
+
+`Cast` is index 0 so the default keyboard highlight is the most useful action
+in a magic encounter.
+
+#### `RangedAttackAction` and `RangedAttackPending` (`src/game/systems/combat.rs`)
+
+`RangedAttackAction` mirrors `AttackAction` (same `attacker` + `target` fields)
+but routes through `perform_ranged_attack_action_with_rng`.
+
+`RangedAttackPending(bool)` is a `Resource` that `dispatch_combat_action` sets
+to `true` when `ActionButtonType::RangedAttack` is pressed.
+`confirm_attack_target` reads it: if `true`, writes `RangedAttackAction` and
+resets the flag; otherwise writes the normal `AttackAction`.
+Cancelling target selection (`Escape`) also clears the flag.
+
+#### `setup_combat_ui` changes (`src/game/systems/combat.rs`)
+
+Two changes:
+
+1. **Magic button order** — when `combat_res.combat_event_type.highlights_magic_action()`
+   the 5 standard buttons are spawned in `COMBAT_ACTION_ORDER_MAGIC` order
+   (Cast first); otherwise the standard order is used.
+
+2. **Ranged button** — after the 5 standard buttons, if
+   `combat_res.combat_event_type.enables_ranged_action()` an extra `Button` is
+   spawned with `ActionButton { button_type: ActionButtonType::RangedAttack }`
+   and `ACTION_BUTTON_DISABLED_COLOR`. `update_ranged_button_color` enables it
+   each frame once a ranged weapon + ammo is confirmed.
+
+3. **System ordering fix** — `setup_combat_ui` is now registered
+   `.after(handle_combat_started)` so `combat_res.combat_event_type` is
+   populated before the button spawn decision is made. Without this ordering,
+   the system could run before the message handler and always see
+   `CombatEventType::Normal`.
+
+#### `update_ranged_button_color` (`src/game/systems/combat.rs`)
+
+New private system registered after `update_combat_ui` and
+`update_action_highlight`. Each frame during a ranged encounter it queries the
+current actor, calls `has_ranged_weapon(pc, &content.db().items)`, and sets
+the `RangedAttack` button color to `ACTION_BUTTON_COLOR` (enabled) or
+`ACTION_BUTTON_DISABLED_COLOR` (disabled).
+
+`update_action_highlight` skips buttons with `button_type ==
+ActionButtonType::RangedAttack` so the two systems do not conflict.
+
+#### `perform_ranged_attack_action_with_rng` (`src/game/systems/combat.rs`)
+
+Full implementation:
+
+1. Guard: only runs if it is the attacker's current turn.
+2. Only player combatants may use this path (returns `CombatantCannotAct` for monsters).
+3. Calls `has_ranged_weapon` — if `false`, distinguishes "bow but no ammo"
+   (`NoAmmo`) from "no bow at all" (`CombatantCannotAct`).
+4. Calls `get_character_attack` expecting `MeleeAttackResult::Ranged`.
+5. Calls `resolve_attack` for the to-hit roll and damage.
+6. Removes the **first** `ItemType::Ammo` slot from the attacker's inventory
+   (one arrow consumed per shot).
+7. Calls `apply_damage`.
+8. Applies special effects (same pattern as `perform_attack_action_with_rng`).
+9. Calls `check_combat_end`, `advance_turn`, updates `CombatTurnStateResource`.
+
+#### `handle_ranged_attack_action` (`src/game/systems/combat.rs`)
+
+ECS system wrapper registered after `handle_attack_action`. Reads
+`RangedAttackAction` messages, calls `perform_ranged_attack_action_with_rng`,
+emits a `CombatFeedbackEvent`, and pushes a "fires a ranged attack!" log line.
+On `NoAmmo` it pushes a "No ammo!" log line; other errors are logged as
+warnings.
+
+#### `handle_combat_started` combat log (`src/game/systems/combat.rs`)
+
+Replaced the if/else branch with a `match` on `msg.combat_event_type`:
+
+| Variant  | Log text                                                 |
+| -------- | -------------------------------------------------------- |
+| `Normal` | "Monsters appear!"                                       |
+| `Ranged` | "Combat begins at range! Draw your bows!"                |
+| `Magic`  | "The air crackles with magical energy!"                  |
+| `Boss`   | "A powerful foe appears!"                                |
+| `Ambush` | "The monsters ambush the party! The party is surprised!" |
+
+#### `test_ambush_combat_started_sets_enemy_turn` fix
+
+The test previously used an empty monster group. With the new system ordering
+(setup_combat_ui runs after handle_combat_started, which in turn forces
+execute_monster_turn to also run after), the ambush player-skip path in
+`execute_monster_turn` would process the single player slot, wrap the round,
+clear `ambush_round_active`, and leave the state as `PlayerTurn` — breaking
+the assertion.
+
+Fix: the test now injects a `CombatResource` with one player + one goblin
+monster. The ambush path skips the player (slot 0) and advances to the
+monster (slot 1), leaving `turn_state = EnemyTurn`. This correctly models
+the actual game flow and makes the assertion meaningful.
+
+### Phase 3 Tests
+
+All added to `mod tests` in `src/game/systems/combat.rs`:
+
+| Test                                                    | What it verifies                                                       |
+| ------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `test_ranged_combat_shows_ranged_button`                | `ActionButton { RangedAttack }` spawned in Ranged combat               |
+| `test_ranged_button_disabled_without_ranged_weapon`     | Button has `ACTION_BUTTON_DISABLED_COLOR` when no ranged weapon        |
+| `test_ranged_button_enabled_with_ranged_weapon`         | Button has `ACTION_BUTTON_COLOR` when player has bow + ammo            |
+| `test_perform_ranged_attack_consumes_ammo`              | One ammo slot removed from inventory after a ranged attack             |
+| `test_perform_ranged_attack_no_ammo_returns_error`      | `CombatError::NoAmmo` when bow is equipped but inventory empty         |
+| `test_magic_combat_cast_is_first_action`                | `COMBAT_ACTION_ORDER_MAGIC[0] == ActionButtonType::Cast`               |
+| `test_magic_combat_normal_handicap`                     | Magic combat uses `Handicap::Even`                                     |
+| `test_monster_ranged_attack_preferred_in_ranged_combat` | `choose_monster_attack(mon, true, rng)` always picks the ranged attack |
+| `test_combat_log_ranged_opening`                        | Log contains "range" for `CombatEventType::Ranged`                     |
+| `test_combat_log_magic_opening`                         | Log contains "magical" for `CombatEventType::Magic`                    |
+
+Domain-layer test in `src/domain/combat/engine.rs` (existing, updated caller):
+
+- `test_combat_monster_special_ability_applied` — updated to pass `false` for `is_ranged_combat`
+
+### Architecture Compliance
+
+- `TurnAction::RangedAttack` placed between `Attack` and `Defend` per plan
+- `CombatError::NoAmmo` added to `engine.rs` alongside existing error variants
+- `ActionButtonType::RangedAttack` added without disrupting `COMBAT_ACTION_ORDER`
+- `RangedAttackAction` message follows the same `Message` derive pattern as all other action messages
+- `RangedAttackPending` is a minimal `Resource` (single bool) following the resource naming convention
+- All game data files remain in RON format; no new data files created
+- No modifications to `campaigns/tutorial`
+- Test data uses `make_p2_combat_fixture` / inline fixtures, not `campaigns/tutorial`
+- `has_ranged_weapon` imported from `engine` (already existed from Phase 1 equipped-weapon work)
+- `CombatError` imported from `engine` (replaces previously inline `use` statements)
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → No output (clean)
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run --all-features → 3218 passed, 1 failed (pre-existing
+    test_creature_database_load_performance timing flake, unrelated to Phase 3)
+```
+
+---
+
+## Phase 2: Normal and Ambush Combat
+
+### Overview
+
+Phase 2 of the Combat Events Implementation Plan implements the behavioral
+differences between `Normal` and `Ambush` combat encounters. After this phase,
+an ambush encounter causes the party to miss their entire first round of actions
+(the party is surprised), monsters receive `Handicap::MonsterAdvantage` for
+round 1, and the combat log clearly announces the ambush. From round 2 onward
+the combat reverts to `Handicap::Even` and proceeds identically to a normal
+encounter. Boss combat flags (`monsters_advance`, `monsters_regenerate`,
+`can_bribe = false`, `can_surrender = false`) are also wired in this phase via
+`start_encounter()`.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `ambush_round_active: bool` field on `CombatState` (`src/domain/combat/engine.rs`)
+- [x] `TurnAction::Skip` variant in `src/domain/combat/types.rs`
+- [x] `start_encounter()` sets `ambush_round_active` and `MonsterAdvantage` handicap for Ambush
+- [x] `start_encounter()` sets boss flags (`monsters_advance`, `monsters_regenerate`, `can_bribe = false`, `can_surrender = false`) for Boss type
+- [x] `advance_round()` clears `ambush_round_active` and resets handicap to `Even` at round 2
+- [x] `handle_combat_started` forces `CombatTurnState::EnemyTurn` when `ambush_round_active` is set
+- [x] `execute_monster_turn` auto-skips surprised player slots during ambush round 1
+- [x] `combat_input_system` defence-in-depth guard blocks player input during ambush round 1
+- [x] Combat log entry "The monsters ambush the party! The party is surprised!" on ambush start
+- [x] Combat log entry "Monsters appear!" on normal encounter start
+- [x] All Phase 2 tests pass (3209 passed, 8 skipped, 0 failed)
+
+### What Was Built
+
+#### `ambush_round_active: bool` on `CombatState` (`src/domain/combat/engine.rs`)
+
+New boolean field on `CombatState`, defaulting to `false`. When `true`, it
+signals that round 1 of an ambush is active and player turns must be skipped.
+The field is cleared automatically at the start of round 2 inside
+`advance_round()`.
+
+```antares/src/domain/combat/engine.rs#L207-212
+    /// True during round 1 of an ambush encounter.
+    ///
+    /// When set, player turns are automatically skipped (the party is surprised
+    /// and cannot act). Cleared automatically at the start of round 2, at which
+    /// point the handicap is also reset to `Handicap::Even` so that subsequent
+    /// rounds are fought on equal footing.
+    pub ambush_round_active: bool,
+```
+
+#### `TurnAction::Skip` variant (`src/domain/combat/types.rs`)
+
+New internal-only variant added to `TurnAction`. It is never shown in the
+player UI action menu; it is used programmatically by the combat engine to
+represent an auto-advanced turn (ambush surprise, incapacitated combatant).
+
+#### `advance_round()` updated (`src/domain/combat/engine.rs`)
+
+At the start of round 2, if `ambush_round_active` is `true`, the engine:
+
+1. Clears `ambush_round_active = false`
+2. Resets `handicap = Handicap::Even`
+3. Recalculates turn order under the new even handicap
+4. Resets `current_turn = 0`
+
+This ensures the remainder of the fight is fair and not permanently skewed by
+the ambush initiative advantage.
+
+#### `start_encounter()` updated (`src/game/systems/combat.rs`)
+
+Phase 2 replaces the Phase 1 stub ("always use Even handicap") with the
+correct logic:
+
+- **Ambush**: `handicap = Handicap::MonsterAdvantage`, `ambush_round_active = true`
+- **Normal / Ranged / Magic**: `handicap = Handicap::Even`, `ambush_round_active = false`
+- **Boss** (any type with `applies_boss_mechanics()`): sets `monsters_advance = true`,
+  `monsters_regenerate = true`, `can_bribe = false`, `can_surrender = false`
+
+#### `handle_combat_started` updated (`src/game/systems/combat.rs`)
+
+When `combat_res.state.ambush_round_active` is `true`, the system immediately
+sets `CombatTurnStateResource` to `EnemyTurn` regardless of actual turn order
+(monsters always act first in an ambush round 1). It also emits the combat log
+line describing how the battle began:
+
+- Ambush: `"The monsters ambush the party! The party is surprised!"`
+- Normal: `"Monsters appear!"`
+
+#### `execute_monster_turn` updated (`src/game/systems/combat.rs`)
+
+At the top of `execute_monster_turn`, a new Phase 2 guard checks whether
+`ambush_round_active` is set and the current slot belongs to a player. If so,
+it:
+
+1. Pushes a `"The party is surprised and cannot act!"` log line.
+2. Calls `advance_turn()` to consume that slot.
+3. Determines the turn state for the next actor (staying on `EnemyTurn` while
+   the ambush round is still active, switching to `PlayerTurn` once it ends).
+4. Returns early without performing any player-damaging action.
+
+This loop continues until all player slots in round 1 have been skipped and
+`advance_round()` fires, clearing `ambush_round_active`.
+
+#### `combat_input_system` updated (`src/game/systems/combat.rs`)
+
+Added a defence-in-depth guard at the top of `combat_input_system`. Even if
+`CombatTurnStateResource` is somehow not `EnemyTurn` during an ambush round,
+no player input is dispatched:
+
+```antares/src/game/systems/combat.rs#L1914-1933
+    // Phase 2: During an ambush round the party is surprised and cannot act.
+    if combat_res.state.ambush_round_active
+        && matches!(
+            combat_res.state.get_current_combatant(),
+            Some(Combatant::Player(_))
+        )
+    {
+        let any_key = keyboard
+            .as_ref()
+            .is_some_and(|kb| kb.just_pressed(KeyCode::Tab) || kb.just_pressed(KeyCode::Enter));
+        if any_key {
+            info!("Combat: input blocked — party is surprised (ambush round 1)");
+        }
+        return;
+    }
+```
+
+### Phase 2 Tests
+
+#### Domain-layer tests (`src/domain/combat/engine.rs`)
+
+| Test name                                              | What it verifies                                                                       |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `test_combat_state_ambush_round_active_defaults_false` | `CombatState::new` initialises the flag to `false`                                     |
+| `test_ambush_round_active_cleared_at_round_2`          | After `advance_turn` exhausts round 1, `ambush_round_active == false` and `round == 2` |
+| `test_non_ambush_handicap_unchanged_at_round_2`        | When flag is `false`, `advance_round` does not alter handicap                          |
+
+#### Game-layer tests (`src/game/systems/combat.rs`)
+
+| Test name                                          | What it verifies                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------- |
+| `test_normal_combat_handicap_is_even`              | `start_encounter(…, Normal)` → `handicap == Even`                   |
+| `test_ambush_combat_handicap_is_monster_advantage` | `start_encounter(…, Ambush)` → `handicap == MonsterAdvantage`       |
+| `test_ambush_round_active_set_on_start`            | `start_encounter(…, Ambush)` → `ambush_round_active == true`        |
+| `test_normal_round_active_not_set`                 | `start_encounter(…, Normal)` → `ambush_round_active == false`       |
+| `test_ambush_round_active_cleared_at_round_2`      | After one `advance_turn`, flag cleared and `handicap == Even`       |
+| `test_ambush_handicap_resets_to_even_round_2`      | Dedicated handicap-reset assertion                                  |
+| `test_boss_combat_sets_boss_flags`                 | Boss type sets all four boss flags correctly                        |
+| `test_combat_log_reports_ambush`                   | Log contains "ambush" text after `CombatStarted` (Ambush)           |
+| `test_combat_log_reports_normal_encounter`         | Log contains "Monsters appear!" after `CombatStarted` (Normal)      |
+| `test_ambush_combat_started_sets_enemy_turn`       | `CombatTurnStateResource == EnemyTurn` after ambush `CombatStarted` |
+
+### Architecture Compliance
+
+- [x] `ambush_round_active` is a domain-layer field on `CombatState` (no Bevy types)
+- [x] `TurnAction::Skip` is in `src/domain/combat/types.rs` (domain layer)
+- [x] `start_encounter()` uses `gives_monster_advantage()` and `applies_boss_mechanics()` helper methods (no hardcoded literals)
+- [x] All public fields and functions have `///` doc comments
+- [x] No tests reference `campaigns/tutorial` (Implementation Rule 5)
+- [x] SPDX header present in all modified `.rs` files
+- [x] No architectural deviations from architecture.md
+
+### Quality Gate Results
+
+| Gate    | Command                                                    | Result                              |
+| ------- | ---------------------------------------------------------- | ----------------------------------- |
+| Format  | `cargo fmt --all`                                          | ✅ No output                        |
+| Compile | `cargo check --all-targets --all-features`                 | ✅ Finished, 0 errors               |
+| Lint    | `cargo clippy --all-targets --all-features -- -D warnings` | ✅ Finished, 0 warnings             |
+| Tests   | `cargo nextest run --all-features`                         | ✅ 3209 passed, 8 skipped, 0 failed |
+
+---
+
+## Phase 1: Combat Events — `CombatEventType` Domain Type and Data Layer
+
+### Overview
+
+Phase 1 of the Combat Events Implementation Plan adds the `CombatEventType` enum
+to the domain layer and threads it end-to-end from RON data files through the
+domain types, event system, and Bevy game layer without changing any combat
+mechanics. After this phase, campaign RON files can declare
+`combat_event_type: Ambush` (or any other variant) on an `Encounter` event and
+the engine reads, stores, and forwards the type through to `CombatResource`.
+Later phases (2–5) will act on the stored type to implement ambush suppression,
+ranged attack availability, magic action priority, and boss mechanics.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `CombatEventType` enum in `src/domain/combat/types.rs`
+- [x] `combat_event_type: CombatEventType` field on `MapEvent::Encounter`
+- [x] `combat_event_type` on `EventResult::Encounter`
+- [x] `EncounterGroup` struct replacing raw `Vec<u8>` entries in `EncounterTable`
+- [x] `random_encounter()` returns `Option<EncounterGroup>`
+- [x] `CombatStarted.combat_event_type` field
+- [x] `CombatResource.combat_event_type` field
+- [x] `start_encounter()` accepts and forwards `CombatEventType`
+- [x] All callers of `start_encounter()` and `random_encounter()` updated
+- [x] All Phase 1 tests pass (3196 passed, 8 skipped, 0 failed)
+
+### What Was Built
+
+#### `CombatEventType` enum (`src/domain/combat/types.rs`)
+
+New enum alongside the existing `Handicap`, `CombatStatus`, and `TurnAction`
+types. Five variants: `Normal` (default), `Ambush`, `Ranged`, `Magic`, `Boss`.
+Helper methods: `gives_monster_advantage()`, `enables_ranged_action()`,
+`highlights_magic_action()`, `applies_boss_mechanics()`, `display_name()`,
+`description()`, `all()`. Derives `Default` (`Normal`), `Serialize`,
+`Deserialize`, `Copy`.
+
+#### `MapEvent::Encounter` extended (`src/domain/world/types.rs`)
+
+Added `#[serde(default)] combat_event_type: CombatEventType` field. The
+`#[serde(default)]` attribute means all existing RON map files that omit the
+field continue to deserialize correctly as `CombatEventType::Normal`.
+
+#### `EncounterGroup` struct (`src/domain/world/types.rs`)
+
+New struct replacing the raw `Vec<u8>` entries in `EncounterTable::groups`:
+
+```antares/src/domain/world/types.rs#L2149-2195
+pub struct EncounterGroup {
+    pub monster_group: Vec<u8>,
+    #[serde(default)]
+    pub combat_event_type: CombatEventType,
+}
+```
+
+Constructors: `EncounterGroup::new(monster_group)` (Normal type) and
+`EncounterGroup::with_type(monster_group, combat_event_type)`.
+`EncounterTable::groups` is now `Vec<EncounterGroup>` (was `Vec<Vec<u8>>`).
+All existing RON files that omit `groups` continue to deserialize with the
+default empty vec.
+
+#### `EventResult::Encounter` extended (`src/domain/world/events.rs`)
+
+Added `combat_event_type: CombatEventType` field. `trigger_event()` extracts
+and forwards the value from `MapEvent::Encounter`. `random_encounter()` now
+returns `Option<EncounterGroup>` (was `Option<Vec<u8>>`); callers extract
+`.monster_group` and `.combat_event_type` separately.
+
+#### `CombatStarted` message extended (`src/game/systems/combat.rs`)
+
+Added `pub combat_event_type: CombatEventType` field. `handle_combat_started`
+copies `msg.combat_event_type` into `combat_res.combat_event_type`.
+
+#### `CombatResource` extended (`src/game/systems/combat.rs`)
+
+Added `pub combat_event_type: CombatEventType` field, initialized to `Normal`
+in `new()` and reset to `Normal` in `clear()`.
+
+#### `start_encounter()` signature updated (`src/game/systems/combat.rs`)
+
+New signature:
+
+```antares/src/game/systems/combat.rs#L997-1001
+pub fn start_encounter(
+    game_state: &mut crate::application::GameState,
+    content: &GameContent,
+    group: &[u8],
+    combat_event_type: CombatEventType,
+) -> Result<(), crate::domain::combat::database::MonsterDatabaseError>
+```
+
+Phase 1 stores the type for the Bevy message path; Phase 2 will use it to set
+`Handicap::MonsterAdvantage` for ambushes.
+
+#### `RestCompleteEvent` extended (`src/game/systems/rest.rs`)
+
+Added `pub encounter_combat_event_type: CombatEventType` field. Rest
+interruptions are hardcoded to `CombatEventType::Ambush` (the party is caught
+off-guard while sleeping), which is forwarded to `start_encounter()`.
+
+#### All callers updated
+
+| Caller                                            | File                                     | Change                                                                                                   |
+| ------------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `handle_events` (encounter arm)                   | `src/game/systems/events.rs`             | Extracts `combat_event_type` from `MapEvent::Encounter`; passes to `start_encounter` and `CombatStarted` |
+| `handle_rest_complete`                            | `src/game/systems/rest.rs`               | Passes `event.encounter_combat_event_type` to `start_encounter`                                          |
+| `process_rest` (random encounter)                 | `src/game/systems/rest.rs`               | Returns `EncounterGroup`; sets `encounter_combat_event_type: Ambush` on `RestCompleteEvent`              |
+| `move_party_and_handle_events` (random encounter) | `src/application/mod.rs`                 | Extracts `.monster_group` from `EncounterGroup`; stores `combat_event_type` (Phase 2 will act on it)     |
+| `move_party_and_handle_events` (tile event)       | `src/application/mod.rs`                 | Extracts `combat_event_type` from `EventResult::Encounter`                                               |
+| `MapBuilder::process_command`                     | `src/bin/map_builder.rs`                 | Adds `combat_event_type: Normal` to constructed `MapEvent::Encounter`                                    |
+| `blueprint.rs` `From<MapBlueprint>`               | `src/domain/world/blueprint.rs`          | Adds `combat_event_type: Normal`                                                                         |
+| `EventEditorState::to_map_event`                  | `sdk/campaign_builder/src/map_editor.rs` | Adds `combat_event_type: Normal` (Phase 5 will wire a combo-box)                                         |
+
+### Phase 1 Tests
+
+Tests in `src/domain/combat/types.rs`:
+
+- `test_combat_event_type_default_is_normal`
+- `test_combat_event_type_flags`
+- `test_combat_event_type_display_names`
+- `test_combat_event_type_descriptions_non_empty`
+- `test_combat_event_type_all_has_five_variants`
+- `test_combat_event_type_serde_round_trip`
+- `test_combat_event_type_default_deserializes_when_missing`
+
+Tests in `src/domain/world/events.rs`:
+
+- `test_combat_event_type_default_is_normal`
+- `test_map_event_encounter_ron_round_trip`
+- `test_map_event_encounter_ron_backward_compat`
+- `test_event_result_encounter_carries_type`
+- `test_encounter_group_ron_round_trip`
+- `test_random_encounter_returns_group_type`
+
+Test in `src/game/systems/combat.rs`:
+
+- `test_start_encounter_stores_type_in_resource`
+
+### Architecture Compliance
+
+- [x] `CombatEventType` in `src/domain/combat/types.rs` (domain layer, no Bevy)
+- [x] `EncounterGroup` in `src/domain/world/types.rs` (domain layer)
+- [x] `#[serde(default)]` on all new fields — full backward compatibility
+- [x] `UNARMED_DAMAGE`-style: no magic literals, named constant default
+- [x] `DiceRoll` / `MonsterId` type aliases used throughout
+- [x] All public functions and types have `///` doc comments
+- [x] No tests reference `campaigns/tutorial` (Implementation Rule 5)
+- [x] SPDX header present in all modified `.rs` files
+- [x] RON data files unaffected (no existing file had `groups:` data)
+
+### Quality Gate Results
+
+| Gate    | Command                                                    | Result                              |
+| ------- | ---------------------------------------------------------- | ----------------------------------- |
+| Format  | `cargo fmt --all`                                          | ✅ No output                        |
+| Compile | `cargo check --all-targets --all-features`                 | ✅ Finished, 0 errors               |
+| Lint    | `cargo clippy --all-targets --all-features -- -D warnings` | ✅ Finished, 0 warnings             |
+| Tests   | `cargo nextest run --all-features`                         | ✅ 3196 passed, 8 skipped, 0 failed |
+
+---
+
+## Phase 4: Equipped Weapon Damage — Documentation and Final Validation
+
+### Overview
+
+Phase 4 is the concluding phase of the Equipped Weapon Damage in Combat
+implementation plan. Its sole deliverables are:
+
+1. A complete summary of all work done across Phases 1–3 added to
+   `docs/explanation/implementations.md` (this section).
+2. A clean run of all four mandatory quality gates with zero errors and zero
+   warnings.
+
+No new production code was written in Phase 4. Everything listed below was
+already implemented and verified in Phases 1–3.
+
+### Phase 4 Deliverables Checklist
+
+- [x] `docs/explanation/implementations.md` updated with full cross-phase summary
+- [x] `cargo fmt --all` — no output (all files already formatted)
+- [x] `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` — `Finished` with 0 warnings
+- [x] `cargo nextest run --all-features` — 3182 passed, 8 skipped, 0 failed
+
+### Full Cross-Phase Summary
+
+#### Phase 1 — Domain Combat Engine Changes
+
+**Files changed**: `src/domain/combat/engine.rs`, `src/domain/combat/types.rs`
+
+| Symbol                     | Location               | Purpose                                                                                                    |
+| -------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `UNARMED_DAMAGE`           | `engine.rs`            | `DiceRoll { count: 1, sides: 2, bonus: 0 }` — replaces all scattered 1d4 literals                          |
+| `MeleeAttackResult`        | `engine.rs`            | Enum returned by `get_character_attack`: `Melee(Attack)` or `Ranged(Attack)`                               |
+| `get_character_attack`     | `engine.rs`            | Pure-domain fn — resolves equipped weapon to a `MeleeAttackResult` with bonus applied via `saturating_add` |
+| `has_ranged_weapon`        | `engine.rs`            | Returns `true` only when a `MartialRanged` weapon is equipped **and** ammo exists in inventory             |
+| `is_ranged: bool`          | `types.rs` on `Attack` | `#[serde(default)]` field distinguishing ranged from melee attacks                                         |
+| `Attack::ranged(damage)`   | `types.rs`             | Constructor that sets `is_ranged = true`                                                                   |
+| `Attack::physical(damage)` | `types.rs`             | Constructor that keeps `is_ranged = false`                                                                 |
+
+Key design decisions:
+
+- `get_character_attack` is pure domain (no Bevy, no I/O) and lives entirely in the domain layer.
+- Weapon bonus composition uses `saturating_add` to merge `weapon_data.damage.bonus` with `weapon_data.bonus` into the final `DiceRoll::bonus` — preventing silent `i8` overflow.
+- Unknown item IDs and non-weapon items in the weapon slot fall back gracefully to `UNARMED_DAMAGE` rather than panicking.
+
+Phase 1 tests added to `src/domain/combat/engine.rs` test module:
+
+- `test_get_character_attack_no_weapon_returns_unarmed`
+- `test_get_character_attack_melee_weapon_returns_melee`
+- `test_get_character_attack_weapon_bonus_applied`
+- `test_get_character_attack_unknown_item_id_falls_back`
+- `test_get_character_attack_non_weapon_item_falls_back`
+- `test_get_character_attack_ranged_weapon_returns_ranged_variant`
+- `test_get_character_attack_ranged_weapon_damage_correct`
+- `test_has_ranged_weapon_false_no_weapon`
+- `test_has_ranged_weapon_false_melee_weapon`
+- `test_has_ranged_weapon_false_no_ammo`
+- `test_has_ranged_weapon_true_with_bow_and_arrows`
+
+#### Phase 2 — Game System Integration
+
+**Files changed**: `src/game/systems/combat.rs`
+
+The player attack branch inside `perform_attack_action_with_rng` was rewritten.
+Previously it used a hardcoded `DiceRoll::new(1, 4, 0)` for every player attack
+regardless of equipment. After Phase 2 it calls `get_character_attack`, matches
+on `MeleeAttackResult`, and:
+
+- **`MeleeAttackResult::Melee(attack)`** — uses the resolved attack (correct
+  weapon dice + bonus) as the input to `resolve_attack`.
+- **`MeleeAttackResult::Ranged(_)`** — emits a `warn!` log and returns `Ok(())`
+  without dealing any damage, consuming the turn and directing the player to use
+  `TurnAction::RangedAttack` instead. This is the ranged-weapon guard.
+
+The monster attack branch was left unchanged — monsters continue to use
+`choose_monster_attack`.
+
+Phase 2 helper fixtures added to `src/game/systems/combat.rs` test module:
+
+- `make_p2_weapon_item(id, damage, bonus, classification)` — builds an `Item` with a `WeaponData` payload.
+- `make_p2_combat_fixture(player)` — builds a self-contained `(CombatResource, GameContent, GlobalState, CombatTurnStateResource)` with one player (index 0) and one goblin with AC 1 (index 1, nearly always hit).
+
+Phase 2 tests:
+
+- `test_player_attack_uses_equipped_melee_weapon_damage` — equips a 1d8 longsword; asserts damage ∈ [1, 8] over 50 seeds and that at least one roll exceeded 4 (proving the old 1d4 path is gone).
+- `test_player_attack_unarmed_when_no_weapon` — no weapon equipped; asserts damage ≤ 2 (1d2 UNARMED_DAMAGE) over 30 seeds.
+- `test_player_attack_bonus_weapon_floor_at_one` — equips a cursed 1d4 −3 dagger (baked into `DiceRoll::bonus`); asserts monster HP never increases and any hit deals ≥ 1 damage.
+- `test_player_melee_attack_with_ranged_weapon_skips_turn` — equips a `MartialRanged` bow; asserts the function returns `Ok(())` and the monster's HP is completely unchanged.
+
+#### Phase 3 — Damage Floor and Bonus Application Verification
+
+**Files changed**: `src/domain/combat/engine.rs` (doc comment update + two new tests)
+
+Two invariants were verified and documented:
+
+**Invariant 1 — Bonus integration**: `get_character_attack` merges
+`weapon_data.damage.bonus` and `weapon_data.bonus` using `saturating_add` into
+the `DiceRoll::bonus` field. The `DiceRoll::bonus` field type is `i8`; the use
+of `saturating_add` prevents wraparound on extreme values.
+
+**Invariant 2 — Damage floor at 1**: `resolve_attack` computes
+`(base_damage + might_bonus).max(1)` before casting to `u16`. This is the
+authoritative damage floor — any successful hit deals at least 1 damage even
+when weapon bonuses are so negative that the raw roll is ≤ 0. `DiceRoll::roll`
+itself clamps at 0 (`total.max(0)`) as a secondary safeguard.
+
+The `resolve_attack` doc comment was updated to explicitly document:
+
+- Where the damage floor of 1 lives (`(base_damage + might_bonus).max(1)`).
+- That `DiceRoll::roll` floors at 0 (not 1) — the authoritative floor is in `resolve_attack`.
+
+Phase 3 tests added to `src/domain/combat/engine.rs` test module:
+
+- `test_cursed_weapon_damage_floor_at_one` — equips a 1d4 −10 cursed weapon; asserts every hit yields damage ≥ 1 across 100 random seeds.
+- `test_positive_bonus_adds_to_roll` — equips a +3 longsword (1d6 base, bonus 3); asserts `DiceRoll::bonus == 3`, `DiceRoll::min() == 4`, and that every observed hit damage ∈ [4, 9].
+
+### Architecture Compliance
+
+- [x] `get_character_attack` in `src/domain/combat/engine.rs` (domain layer, no Bevy)
+- [x] `MeleeAttackResult` in `src/domain/combat/engine.rs` (domain layer, no Bevy)
+- [x] `has_ranged_weapon` in `src/domain/combat/engine.rs` (domain layer, no Bevy)
+- [x] `UNARMED_DAMAGE` is a named constant — no magic literals
+- [x] `is_ranged: bool` on `Attack` with `#[serde(default)]`
+- [x] `Attack::ranged(damage)` sets `is_ranged = true`
+- [x] `Attack::physical(damage)` keeps `is_ranged = false`
+- [x] Melee path returns `Ok(())` (no damage, with `warn!`) on `MeleeAttackResult::Ranged`
+- [x] `DiceRoll` type used throughout, not raw primitives
+- [x] All public functions have `///` doc comments with runnable examples
+- [x] No tests reference `campaigns/tutorial` (Implementation Rule 5)
+- [x] SPDX header present in all modified `.rs` files
+
+### Quality Gate Results
+
+| Gate    | Command                                                    | Result                              |
+| ------- | ---------------------------------------------------------- | ----------------------------------- |
+| Format  | `cargo fmt --all`                                          | ✅ No output                        |
+| Compile | `cargo check --all-targets --all-features`                 | ✅ Finished, 0 errors               |
+| Lint    | `cargo clippy --all-targets --all-features -- -D warnings` | ✅ Finished, 0 warnings             |
+| Tests   | `cargo nextest run --all-features`                         | ✅ 3182 passed, 8 skipped, 0 failed |
+
+---
+
+## Phase 3: Equipped Weapon Damage — Damage Floor and Bonus Application Verification
+
+### Overview
+
+Phase 3 verifies and documents that weapon bonuses are applied correctly through
+the full attack pipeline and that the damage floor of 1 is enforced on every
+hit, regardless of how negative a weapon's bonus is.
+
+Two critical invariants are codified and proven by tests:
+
+1. **Bonus integration** — `get_character_attack` uses `saturating_add` to
+   merge `WeaponData::damage.bonus` and `WeaponData::bonus` into a single
+   `DiceRoll::bonus` field. This was already implemented in Phase 1; Phase 3
+   verifies it via boundary tests.
+2. **Damage floor at 1** — `resolve_attack` applies `.max(1)` to
+   `base_damage + damage_bonus` after every hit, preventing a cursed weapon
+   from ever dealing 0 damage on a successful strike. The floor is the sole
+   responsibility of `resolve_attack`; neither `DiceRoll::roll` (which floors
+   at 0) nor `get_character_attack` (which only builds the roll descriptor)
+   duplicate it.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `DiceRoll::bonus` field type confirmed as `i8`; `saturating_add` used
+      throughout `get_character_attack` — no silent truncation
+- [x] `resolve_attack` floors damage at 1 via `(base_damage + damage_bonus).max(1)`
+      — existing code confirmed and documented
+- [x] `resolve_attack` doc comment updated to explicitly state the floor-at-1
+      invariant and explain that it is the single authoritative enforcement point
+- [x] `test_cursed_weapon_damage_floor_at_one` passes
+- [x] `test_positive_bonus_adds_to_roll` passes
+
+### What Was Built
+
+#### Doc comment update (`src/domain/combat/engine.rs`)
+
+The `resolve_attack` function's doc comment was extended to document the
+damage-floor invariant:
+
+- States that on a hit, damage is **always** floored at 1 regardless of weapon
+  penalties, negative bonuses, or low might.
+- Explicitly identifies `resolve_attack` as the single authoritative place for
+  this invariant.
+- Cross-references `DiceRoll::roll` (floors at 0) and `get_character_attack`
+  (roll descriptor only) to prevent future duplication.
+
+#### `test_cursed_weapon_damage_floor_at_one`
+
+Located in `src/domain/combat/engine.rs`, `mod tests`.
+
+- Constructs a `CombatState` with an attacker (might=10, accuracy=20) and a
+  defender (AC=0) so nearly every roll is a hit.
+- Equips the attacker with a 1d4-10 cursed weapon built via `make_weapon_item`
+  and `ItemDatabase::add_item`.
+- Calls `get_character_attack` to produce the `Attack` the same way the game
+  system does, verifying `attack.damage.bonus == -10`.
+- Runs 200 `resolve_attack` trials and asserts `damage == 0` (miss) or
+  `damage >= 1` (hit, floored).
+- Runs a further 500 trials, filters to hits only, and asserts that the
+  collected `hit_damages` vector is non-empty and every element is `>= 1`.
+
+#### `test_positive_bonus_adds_to_roll`
+
+Located in `src/domain/combat/engine.rs`, `mod tests`.
+
+- Builds a +3 longsword (1d6 base, `WeaponData::bonus = 3`) in a fresh
+  `ItemDatabase`.
+- Calls `get_character_attack` and confirms:
+  - `attack.damage.bonus == 3` (saturating_add(0, 3))
+  - `attack.damage.count == 1`, `attack.damage.sides == 6`
+  - `attack.damage.min() == 4` (die=1 + bonus=3)
+- Runs 500 `resolve_attack` trials with an attacker of might=10 and AC=0
+  defender, filters to non-zero results, and asserts:
+  - At least one hit observed.
+  - Every hit `>= 4` (bonus raises the minimum).
+  - Every hit `<= 9` (1×6 + 3, no might bonus).
+
+### Architecture Compliance
+
+| Check                                                     | Status |
+| --------------------------------------------------------- | ------ |
+| Type aliases used (`ItemId` etc.)                         | ✅     |
+| `DiceRoll::bonus` is `i8`; `saturating_add` used          | ✅     |
+| Floor-at-1 in `resolve_attack`, not in helpers            | ✅     |
+| No magic numbers; `UNARMED_DAMAGE` constant used          | ✅     |
+| Tests use `data/` fixtures only (no `campaigns/tutorial`) | ✅     |
+| RON data files untouched                                  | ✅     |
+
+### Quality Gate Results
+
+```text
+cargo fmt         → OK (no output)
+cargo check       → Finished 0 errors
+cargo clippy      → Finished 0 warnings
+cargo nextest run → 3182 tests run: 3182 passed, 8 skipped
+```
+
+---
+
+## Phase 2: Equipped Weapon Damage — Game System Integration
+
+### Overview
+
+Phase 2 wires the domain-layer work from Phase 1 into the live game system.
+`perform_attack_action_with_rng` in `src/game/systems/combat.rs` previously
+hardcoded `Attack::physical(DiceRoll::new(1, 4, 0))` for every
+`CombatantId::Player` turn. This phase replaces that single literal with a
+call to `get_character_attack` and dispatches on `MeleeAttackResult`:
+
+- `Melee(attack)` — the resolved attack (with correct weapon damage and bonus)
+  is used directly in `resolve_attack`.
+- `Ranged(_)` — the melee path is a no-op: a `warn!` is logged and the
+  function returns `Ok(())` immediately without applying any damage. The
+  ranged path (`TurnAction::RangedAttack` /
+  `perform_ranged_attack_action_with_rng`) is reserved for a future phase
+  (`combat_events_implementation_plan.md` §3).
+
+The monster path (`CombatantId::Monster`) is **not changed** by this phase.
+
+### Phase 2 Deliverables Checklist
+
+- [x] Hardcoded `DiceRoll::new(1, 4, 0)` removed from the `CombatantId::Player`
+      branch of `perform_attack_action_with_rng`
+- [x] `get_character_attack` + `MeleeAttackResult` dispatch wired in
+- [x] Ranged-weapon guard logs a `warn!` and returns `Ok(())` without damage
+- [x] `use` imports for `get_character_attack` and `MeleeAttackResult` added in
+      `src/game/systems/combat.rs`
+- [x] Four integration tests added and passing
+
+### What Was Built
+
+#### Updated imports (`src/game/systems/combat.rs`)
+
+```antares/src/game/systems/combat.rs#L59-62
+use crate::domain::combat::engine::{
+    apply_damage, choose_monster_attack, get_character_attack, initialize_combat_from_group,
+    resolve_attack, CombatState, Combatant, MeleeAttackResult,
+};
+```
+
+#### Replaced player attack branch
+
+The old hardcoded block:
+
+```antares/docs/explanation/equipped_weapon_damage_implementation_plan.md#L284-294
+CombatantId::Player(_) => {
+    crate::domain::combat::types::Attack::physical(DiceRoll::new(1, 4, 0))
+}
+```
+
+…is replaced with:
+
+```antares/src/game/systems/combat.rs#L2181-2198
+        CombatantId::Player(idx) => {
+            if let Some(Combatant::Player(pc)) = combat_res.state.participants.get(idx) {
+                match get_character_attack(pc, &content.db().items) {
+                    MeleeAttackResult::Melee(attack) => attack,
+                    MeleeAttackResult::Ranged(_) => {
+                        // Ranged weapons must be used via TurnAction::RangedAttack /
+                        // perform_ranged_attack_action_with_rng, not the melee path.
+                        // Log a warning and skip the turn rather than dealing wrong damage.
+                        warn!(
+                            "Player {:?} attempted melee attack with ranged weapon; \
+                             use TurnAction::RangedAttack instead. Turn skipped.",
+                            action.attacker
+                        );
+                        return Ok(());
+                    }
+                }
+            } else {
+                return Err(CombatError::CombatantNotFound(action.attacker));
+            }
+        }
+```
+
+#### Integration tests (`src/game/systems/combat.rs`, `mod tests`)
+
+Four pure-function tests were added that construct a `CombatResource` directly
+(no Bevy `App`) via the `make_p2_combat_fixture` helper:
+
+| Test name                                                | What it verifies                                                                                           |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `test_player_attack_uses_equipped_melee_weapon_damage`   | Longsword (1d8) deals damage in [1, 8]; at least one roll over 50 seeds exceeds 4, proving old 1d4 is gone |
+| `test_player_attack_unarmed_when_no_weapon`              | `equipment.weapon = None` → damage ≤ 2 (1d2 UNARMED_DAMAGE) across 30 seeds                                |
+| `test_player_attack_bonus_weapon_floor_at_one`           | Cursed dagger (1d4, bonus -3) never deals negative damage; any hit deals ≥ 1                               |
+| `test_player_melee_attack_with_ranged_weapon_skips_turn` | `MartialRanged` bow via melee path returns `Ok(())` and monster HP is unchanged                            |
+
+All four tests use `data/test_campaign`-independent fixtures built entirely in
+memory — no reference to `campaigns/tutorial`.
+
+### Quality Gate Results
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt         → no output (all files formatted)
+cargo check       → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run → 3180 tests run: 3180 passed, 8 skipped
+```
+
+---
+
+## Phase 1: Equipped Weapon Damage — Domain Combat Engine Changes
+
+### Overview
+
+Player characters in combat previously always dealt 1d4 physical damage regardless
+of their equipped weapon, because `perform_attack_action_with_rng` hardcoded
+`Attack::physical(DiceRoll::new(1, 4, 0))` for every `CombatantId::Player` turn.
+This phase repairs the domain layer so that the combat engine can correctly resolve
+a character's attack from their equipped weapon, identify ranged weapons that must
+not fire through the melee path, and fall back to a correct unarmed damage value
+(1d2, not 1d4).
+
+No Bevy or game-system code was changed in this phase — all additions are
+pure-domain functions in `src/domain/combat/engine.rs` and a field addition to
+`src/domain/combat/types.rs`.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `UNARMED_DAMAGE` constant in `src/domain/combat/engine.rs`
+- [x] `MeleeAttackResult` enum in `src/domain/combat/engine.rs`
+- [x] `get_character_attack(character, item_db) -> MeleeAttackResult` in
+      `src/domain/combat/engine.rs`
+- [x] `has_ranged_weapon(character, item_db) -> bool` in
+      `src/domain/combat/engine.rs`
+- [x] `is_ranged: bool` field on `Attack` with `#[serde(default)]` in
+      `src/domain/combat/types.rs`
+- [x] `Attack::ranged(damage)` constructor in `src/domain/combat/types.rs`
+- [x] Required `use` imports added to `engine.rs`
+- [x] All 14 unit tests pass (13 specified + 1 extra coverage test)
+
+### What Was Built
+
+#### `UNARMED_DAMAGE` constant (`src/domain/combat/engine.rs`)
+
+```antares/src/domain/combat/engine.rs#L42-47
+pub const UNARMED_DAMAGE: DiceRoll = DiceRoll {
+    count: 1,
+    sides: 2,
+    bonus: 0,
+};
+```
+
+Replaces all scattered `DiceRoll::new(1, 4, 0)` literals previously used as the
+player unarmed fallback. The correct unarmed damage per spec is 1d2, not 1d4.
+
+#### `MeleeAttackResult` enum (`src/domain/combat/engine.rs`)
+
+A small discriminated union returned by `get_character_attack` that communicates
+whether the character's equipped weapon is usable in the melee path:
+
+- `Melee(Attack)` — a valid melee `Attack` ready for `resolve_attack`
+- `Ranged(Attack)` — the weapon is `MartialRanged`; the melee path must refuse
+  it and direct the player through `perform_ranged_attack_action_with_rng`
+
+The `Ranged` variant carries the fully-constructed `Attack` so callers can log or
+display weapon stats without a second item lookup — but must never apply damage
+through the melee pipeline with it.
+
+#### `get_character_attack` (`src/domain/combat/engine.rs`)
+
+Pure-domain function: `pub fn get_character_attack(character: &Character, item_db: &ItemDatabase) -> MeleeAttackResult`
+
+Logic (in order, fully infallible):
+
+1. No weapon in `character.equipment.weapon` → unarmed fallback
+2. Item ID not found in `item_db` → unarmed fallback (no panic)
+3. Item found but not `ItemType::Weapon(_)` (e.g. consumable in weapon slot) → unarmed fallback
+4. Build `DiceRoll` from `weapon_data.damage`; apply `weapon_data.bonus` via
+   `saturating_add` to the `bonus` field
+5. If `weapon_data.classification == WeaponClassification::MartialRanged` →
+   return `MeleeAttackResult::Ranged(Attack::ranged(adjusted))`
+6. Otherwise → return `MeleeAttackResult::Melee(Attack::physical(adjusted))`
+
+#### `has_ranged_weapon` (`src/domain/combat/engine.rs`)
+
+Pure-domain helper: `pub fn has_ranged_weapon(character: &Character, item_db: &ItemDatabase) -> bool`
+
+Returns `true` only when **both** conditions hold:
+
+- The equipped weapon has `WeaponClassification::MartialRanged`, **and**
+- The character's inventory contains at least one `ItemType::Ammo(_)` item
+
+A character with a bow but no arrows returns `false`.
+
+#### `is_ranged: bool` field on `Attack` (`src/domain/combat/types.rs`)
+
+Added with `#[serde(default)]` so all existing RON monster data that lacks the
+field deserialises correctly (defaults to `false`). `Attack::physical` continues
+to set `is_ranged: false`; the new `Attack::ranged` constructor sets it `true`.
+
+#### `Attack::ranged(damage)` constructor (`src/domain/combat/types.rs`)
+
+```antares/src/domain/combat/types.rs#L85-93
+pub fn ranged(damage: DiceRoll) -> Self {
+    Self {
+        damage,
+        attack_type: AttackType::Physical,
+        special_effect: None,
+        is_ranged: true,
+    }
+}
+```
+
+Used by `get_character_attack` when the equipped weapon is `MartialRanged`.
+
+#### Imports added to `engine.rs`
+
+```antares/src/domain/combat/engine.rs#L18-19
+use crate::domain::items::{ItemDatabase, ItemType, WeaponClassification};
+use crate::domain::types::DiceRoll;
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4.4 **exactly**
+- [x] Module placement follows Section 3.2 (`src/domain/combat/`)
+- [x] Type aliases used consistently (`ItemId`, `DiceRoll`, etc.)
+- [x] `UNARMED_DAMAGE` constant extracted — no magic literals
+- [x] `AttributePair` pattern untouched — no direct stat mutation
+- [x] RON format unchanged — `#[serde(default)]` preserves all existing data files
+- [x] No architectural deviations
+
+### Test Coverage
+
+14 unit tests added across two files:
+
+**`src/domain/combat/types.rs`** (3 tests):
+
+| Test                                                 | Assertion                                         |
+| ---------------------------------------------------- | ------------------------------------------------- |
+| `test_attack_physical_constructor_is_ranged_false`   | `Attack::physical(...)` sets `is_ranged = false`  |
+| `test_attack_ranged_constructor_sets_is_ranged_true` | `Attack::ranged(...)` sets `is_ranged = true`     |
+| `test_attack_ranged_damage_preserved`                | inner `damage` field is carried through unchanged |
+
+**`src/domain/combat/engine.rs`** (11 tests):
+
+| Test                                                             | Assertion                                         |
+| ---------------------------------------------------------------- | ------------------------------------------------- |
+| `test_get_character_attack_no_weapon_returns_unarmed`            | `None` weapon → `Melee(UNARMED_DAMAGE)`           |
+| `test_get_character_attack_melee_weapon_returns_melee`           | Simple sword 1d8 → `Melee(1d8)`                   |
+| `test_get_character_attack_weapon_bonus_applied`                 | +2 sword → `damage.bonus == 2`                    |
+| `test_get_character_attack_unknown_item_id_falls_back`           | item_id 99 not in db → unarmed fallback, no panic |
+| `test_get_character_attack_non_weapon_item_falls_back`           | consumable in weapon slot → unarmed fallback      |
+| `test_get_character_attack_ranged_weapon_returns_ranged_variant` | bow → `Ranged(_)` with `is_ranged = true`         |
+| `test_get_character_attack_ranged_weapon_damage_correct`         | crossbow 1d8+1 → inner `Attack` has correct dice  |
+| `test_has_ranged_weapon_false_no_weapon`                         | no weapon equipped → `false`                      |
+| `test_has_ranged_weapon_false_melee_weapon`                      | melee weapon → `false`                            |
+| `test_has_ranged_weapon_false_no_ammo`                           | bow equipped, empty inventory → `false`           |
+| `test_has_ranged_weapon_true_with_bow_and_arrows`                | bow + arrows in inventory → `true`                |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 3176 tests run: 3176 passed, 0 failed
+```
 
 ## Items Procedural Meshes — Phase 1: Domain Layer
 

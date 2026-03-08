@@ -177,7 +177,11 @@ fn handle_events(
                 }
                 // TODO: Add to inventory
             }
-            MapEvent::Encounter { monster_group, .. } => {
+            MapEvent::Encounter {
+                monster_group,
+                combat_event_type,
+                ..
+            } => {
                 let msg = format!("Monsters attack! Group IDs: {:?}", monster_group);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
@@ -192,6 +196,7 @@ fn handle_events(
                     &mut global_state.0,
                     &content,
                     monster_group,
+                    *combat_event_type,
                 ) {
                     Ok(()) => {
                         // Debug: print mode after successful attempt
@@ -202,6 +207,7 @@ fn handle_events(
                             writer.write(crate::game::systems::combat::CombatStarted {
                                 encounter_position: Some(trigger.position),
                                 encounter_map_id: Some(global_state.0.world.current_map),
+                                combat_event_type: *combat_event_type,
                             });
                         }
                     }
@@ -1043,6 +1049,7 @@ mod tests {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
 

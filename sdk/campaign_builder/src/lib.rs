@@ -1004,6 +1004,7 @@ impl CampaignBuilderApp {
                 damage: DiceRoll::new(1, 4, 0),
                 attack_type: AttackType::Physical,
                 special_effect: None,
+                is_ranged: false,
             }],
             flee_threshold: 0,
             special_attack_threshold: 0,
@@ -9207,6 +9208,7 @@ mod tests {
             damage: DiceRoll::new(2, 8, 3),
             attack_type: AttackType::Fire,
             special_effect: Some(SpecialEffect::Poison),
+            is_ranged: false,
         });
 
         assert_eq!(app.monsters_editor_state.edit_buffer.attacks.len(), 2);
@@ -9244,6 +9246,7 @@ mod tests {
             damage: DiceRoll::new(1, 6, 0),
             attack_type: AttackType::Physical,
             special_effect: None,
+            is_ranged: false,
         };
 
         // Test all attack types
@@ -9272,6 +9275,7 @@ mod tests {
             damage: DiceRoll::new(1, 6, 0),
             attack_type: AttackType::Physical,
             special_effect: None,
+            is_ranged: false,
         };
 
         // Test all special effects
@@ -9361,6 +9365,7 @@ mod tests {
                 damage: DiceRoll::new(1, 6, 0),
                 attack_type: AttackType::Physical,
                 special_effect: None,
+                is_ranged: false,
             }],
             flee_threshold: 0,
             special_attack_threshold: 0,
@@ -9407,11 +9412,13 @@ mod tests {
                     damage: DiceRoll::new(2, 8, 5),
                     attack_type: AttackType::Physical,
                     special_effect: None,
+                    is_ranged: false,
                 },
                 Attack {
                     damage: DiceRoll::new(1, 6, 2),
                     attack_type: AttackType::Fire,
                     special_effect: Some(SpecialEffect::Paralysis),
+                    is_ranged: false,
                 },
             ],
             flee_threshold: 5,
@@ -9461,6 +9468,7 @@ mod tests {
                 damage: DiceRoll::new(2, 6, 2),
                 attack_type: AttackType::Fire,
                 special_effect: Some(SpecialEffect::Paralysis),
+                is_ranged: false,
             }],
             flee_threshold: 10,
             special_attack_threshold: 25,
@@ -9514,6 +9522,7 @@ mod tests {
                 damage: DiceRoll::new(1, 4, 1),
                 attack_type: AttackType::Physical,
                 special_effect: None,
+                is_ranged: false,
             }],
             flee_threshold: 2,
             special_attack_threshold: 10,
