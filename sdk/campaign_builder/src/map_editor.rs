@@ -42,6 +42,7 @@ use crate::ui_helpers::{
     TwoColumnLayout,
 };
 use antares::domain::combat::database::MonsterDefinition;
+use antares::domain::combat::types::CombatEventType;
 use antares::domain::items::types::Item;
 use antares::domain::types::{Direction, EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
@@ -87,6 +88,22 @@ const EVENT_COLOR_FURNITURE: Color32 = Color32::from_rgb(198, 120, 221);
 
 /// Teal for Container events - rgb(0, 180, 160)
 const EVENT_COLOR_CONTAINER: Color32 = Color32::from_rgb(0, 180, 160);
+
+// ===== Combat Event Type Inspector Colors =====
+// These are used only in the inspector detail panel, NOT on the grid tiles.
+// All encounter tiles stay EVENT_COLOR_ENCOUNTER on the grid for visual consistency.
+
+/// Darker red for Ambush encounters in the inspector overlay
+const COMBAT_TYPE_COLOR_AMBUSH: Color32 = Color32::from_rgb(180, 60, 70);
+
+/// Bright red for Boss encounters in the inspector overlay
+const COMBAT_TYPE_COLOR_BOSS: Color32 = Color32::from_rgb(220, 50, 50);
+
+/// Orange for Ranged encounters in the inspector overlay - matches EVENT_COLOR_TRAP palette
+const COMBAT_TYPE_COLOR_RANGED: Color32 = Color32::from_rgb(209, 154, 102);
+
+/// Purple for Magic encounters in the inspector overlay - matches EVENT_COLOR_NPC_DIALOGUE palette
+const COMBAT_TYPE_COLOR_MAGIC: Color32 = Color32::from_rgb(198, 120, 221);
 
 // ===== Editor Mode =====
 
@@ -1930,6 +1947,10 @@ pub struct EventEditorState {
     pub furniture_color_tint: [f32; 3],
 
     // Autocomplete input buffers
+    /// Combat event type selected for this encounter. Controls ambush, ranged,
+    /// magic, and boss mechanics in the game layer.
+    pub encounter_combat_event_type: CombatEventType,
+
     pub trap_effect_input_buffer: String,
     pub teleport_map_input_buffer: String,
     pub npc_id_input_buffer: String,
@@ -1971,6 +1992,7 @@ impl Default for EventEditorState {
             description: String::new(),
             encounter_monsters: Vec::new(),
             encounter_monsters_query: String::new(),
+            encounter_combat_event_type: CombatEventType::Normal,
             treasure_items: Vec::new(),
             treasure_items_query: String::new(),
             teleport_x: String::new(),
@@ -2128,7 +2150,7 @@ impl EventEditorState {
                     } else {
                         None
                     },
-                    combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
+                    combat_event_type: self.encounter_combat_event_type,
                 })
             }
             EventType::Treasure => {
@@ -2354,6 +2376,7 @@ impl EventEditorState {
                 facing,
                 proximity_facing,
                 rotation_speed,
+                combat_event_type,
                 ..
             } => {
                 s.event_type = EventType::Encounter;
@@ -2363,6 +2386,7 @@ impl EventEditorState {
                 s.event_facing = facing.map(|d| format!("{:?}", d));
                 s.event_proximity_facing = *proximity_facing;
                 s.event_rotation_speed = *rotation_speed;
+                s.encounter_combat_event_type = *combat_event_type;
             }
             MapEvent::Treasure {
                 name,
@@ -4074,9 +4098,31 @@ impl MapsEditorState {
                             facing,
                             proximity_facing,
                             rotation_speed,
+                            combat_event_type,
                             ..
                         } => {
                             ui.label(format!("Encounter: {:?}", monster_group));
+                            // Display combat type with a color hint so authors can spot
+                            // non-Normal encounters at a glance in the inspector.
+                            let type_color = match combat_event_type {
+                                CombatEventType::Normal => egui::Color32::LIGHT_GRAY,
+                                CombatEventType::Ambush => COMBAT_TYPE_COLOR_AMBUSH,
+                                CombatEventType::Ranged => COMBAT_TYPE_COLOR_RANGED,
+                                CombatEventType::Magic => COMBAT_TYPE_COLOR_MAGIC,
+                                CombatEventType::Boss => COMBAT_TYPE_COLOR_BOSS,
+                            };
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Type: {}",
+                                    combat_event_type.display_name()
+                                ))
+                                .color(type_color),
+                            );
+                            ui.label(
+                                egui::RichText::new(combat_event_type.description())
+                                    .small()
+                                    .color(egui::Color32::GRAY),
+                            );
                             if let Some(dir) = facing {
                                 ui.label(format!("Facing: {:?}", dir));
                             }
@@ -4463,6 +4509,143 @@ impl MapsEditorState {
                 editor.has_changes = true;
             }
 
+            // ===== Random Encounter Table Editor =====
+            ui.separator();
+            ui.heading("⚔️ Random Encounter Table");
+
+            // Allow random encounters toggle
+            if ui
+                .checkbox(
+                    &mut editor.map.allow_random_encounters,
+                    "Allow Random Encounters",
+                )
+                .on_hover_text("Disable for towns, inns, or safe areas")
+                .changed()
+            {
+                editor.has_changes = true;
+            }
+
+            if editor.map.allow_random_encounters {
+                // Initialise encounter_table if not present
+                let table = editor.map.encounter_table.get_or_insert_with(|| {
+                    antares::domain::world::EncounterTable {
+                        encounter_rate: 0.05,
+                        groups: Vec::new(),
+                        terrain_modifiers: Default::default(),
+                    }
+                });
+
+                // Encounter rate slider (stored as 0.0–1.0 in EncounterTable)
+                ui.horizontal(|ui| {
+                    ui.label("Encounter Rate:");
+                    let mut rate_pct = (table.encounter_rate * 100.0).round() as u32;
+                    if ui
+                        .add(egui::Slider::new(&mut rate_pct, 0..=100).suffix("%"))
+                        .changed()
+                    {
+                        table.encounter_rate = rate_pct as f32 / 100.0;
+                        editor.has_changes = true;
+                    }
+                });
+
+                ui.separator();
+                ui.label("Monster Groups:");
+                ui.label(
+                    egui::RichText::new(
+                        "Each group is a set of monster IDs and the combat type for that group.",
+                    )
+                    .small()
+                    .color(egui::Color32::GRAY),
+                );
+
+                let mut remove_group_idx: Option<usize> = None;
+
+                egui::ScrollArea::vertical()
+                    .id_salt("encounter_groups_scroll")
+                    .max_height(200.0)
+                    .show(ui, |ui| {
+                        for (group_idx, group) in table.groups.iter_mut().enumerate() {
+                            ui.push_id(group_idx, |ui| {
+                                ui.group(|ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(format!("Group {}:", group_idx + 1));
+
+                                        // Per-group CombatEventType combo-box
+                                        egui::ComboBox::from_id_salt(format!(
+                                            "encounter_group_combat_type_{}",
+                                            group_idx
+                                        ))
+                                        .selected_text(group.combat_event_type.display_name())
+                                        .show_ui(
+                                            ui,
+                                            |ui| {
+                                                for variant in CombatEventType::all() {
+                                                    if ui
+                                                        .selectable_value(
+                                                            &mut group.combat_event_type,
+                                                            *variant,
+                                                            variant.display_name(),
+                                                        )
+                                                        .on_hover_text(variant.description())
+                                                        .changed()
+                                                    {
+                                                        editor.has_changes = true;
+                                                    }
+                                                }
+                                            },
+                                        );
+
+                                        if ui
+                                            .small_button("🗑️ Remove")
+                                            .on_hover_text("Remove this encounter group")
+                                            .clicked()
+                                        {
+                                            remove_group_idx = Some(group_idx);
+                                        }
+                                    });
+
+                                    ui.label(
+                                        egui::RichText::new(group.combat_event_type.description())
+                                            .small()
+                                            .color(egui::Color32::GRAY),
+                                    );
+
+                                    // Monster IDs for this group
+                                    let monsters_str = group
+                                        .monster_group
+                                        .iter()
+                                        .map(|id| id.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    ui.label(format!("Monsters: [{}]", monsters_str));
+                                    ui.label(
+                                        egui::RichText::new("(edit RON to change monster IDs)")
+                                            .small()
+                                            .color(egui::Color32::GRAY),
+                                    );
+                                });
+                            });
+                        }
+                    });
+
+                if let Some(idx) = remove_group_idx {
+                    if let Some(table) = editor.map.encounter_table.as_mut() {
+                        table.groups.remove(idx);
+                        editor.has_changes = true;
+                    }
+                }
+
+                // Add a new Normal group with a placeholder monster
+                if ui.button("➕ Add Group").clicked() {
+                    if let Some(table) = editor.map.encounter_table.as_mut() {
+                        table
+                            .groups
+                            .push(antares::domain::world::EncounterGroup::new(vec![1u8]));
+                        editor.has_changes = true;
+                    }
+                }
+            }
+
             ui.separator();
 
             if ui.button("Close").clicked() {
@@ -4520,6 +4703,36 @@ impl MapsEditorState {
                     if changed {
                         editor.has_changes = true;
                     }
+
+                    // Combat Event Type selector
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label("Combat Type:").on_hover_text(
+                            "Controls how this encounter begins and what special mechanics apply",
+                        );
+                        egui::ComboBox::from_id_salt("encounter_combat_event_type")
+                            .selected_text(event_editor.encounter_combat_event_type.display_name())
+                            .show_ui(ui, |ui| {
+                                for variant in CombatEventType::all() {
+                                    if ui
+                                        .selectable_value(
+                                            &mut event_editor.encounter_combat_event_type,
+                                            *variant,
+                                            variant.display_name(),
+                                        )
+                                        .on_hover_text(variant.description())
+                                        .changed()
+                                    {
+                                        editor.has_changes = true;
+                                    }
+                                }
+                            });
+                    });
+                    ui.label(
+                        egui::RichText::new(event_editor.encounter_combat_event_type.description())
+                            .small()
+                            .color(egui::Color32::GRAY),
+                    );
 
                     // Facing direction
                     ui.horizontal(|ui| {
@@ -9087,6 +9300,245 @@ mod tests {
                 );
             }
             other => panic!("expected NpcDialogue event, got {:?}", other),
+        }
+    }
+
+    // ===== Phase 5: CombatEventType UI tests =====
+
+    #[test]
+    fn test_event_editor_state_default_combat_type() {
+        // EventEditorState::default() must have encounter_combat_event_type == Normal
+        let state = EventEditorState::default();
+        assert_eq!(
+            state.encounter_combat_event_type,
+            CombatEventType::Normal,
+            "default encounter_combat_event_type must be Normal"
+        );
+    }
+
+    #[test]
+    fn test_to_map_event_preserves_combat_type_ambush() {
+        // to_map_event() on a state with Ambush produces MapEvent::Encounter with
+        // combat_event_type == Ambush.
+        let editor = EventEditorState {
+            event_type: EventType::Encounter,
+            encounter_monsters: vec![1, 2],
+            encounter_combat_event_type: CombatEventType::Ambush,
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().expect("to_map_event must succeed");
+        match event {
+            MapEvent::Encounter {
+                combat_event_type, ..
+            } => assert_eq!(
+                combat_event_type,
+                CombatEventType::Ambush,
+                "combat_event_type must be Ambush"
+            ),
+            other => panic!("expected Encounter, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_to_map_event_preserves_combat_type_boss() {
+        let editor = EventEditorState {
+            event_type: EventType::Encounter,
+            encounter_monsters: vec![5],
+            encounter_combat_event_type: CombatEventType::Boss,
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().expect("to_map_event must succeed");
+        match event {
+            MapEvent::Encounter {
+                combat_event_type, ..
+            } => assert_eq!(combat_event_type, CombatEventType::Boss),
+            other => panic!("expected Encounter, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_to_map_event_preserves_combat_type_ranged() {
+        let editor = EventEditorState {
+            event_type: EventType::Encounter,
+            encounter_monsters: vec![3],
+            encounter_combat_event_type: CombatEventType::Ranged,
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().expect("to_map_event must succeed");
+        match event {
+            MapEvent::Encounter {
+                combat_event_type, ..
+            } => assert_eq!(combat_event_type, CombatEventType::Ranged),
+            other => panic!("expected Encounter, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_to_map_event_preserves_combat_type_magic() {
+        let editor = EventEditorState {
+            event_type: EventType::Encounter,
+            encounter_monsters: vec![4],
+            encounter_combat_event_type: CombatEventType::Magic,
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().expect("to_map_event must succeed");
+        match event {
+            MapEvent::Encounter {
+                combat_event_type, ..
+            } => assert_eq!(combat_event_type, CombatEventType::Magic),
+            other => panic!("expected Encounter, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_from_map_event_reads_combat_type_boss() {
+        // from_map_event() on a Boss encounter sets encounter_combat_event_type == Boss.
+        let event = MapEvent::Encounter {
+            name: "Dragon Boss".to_string(),
+            description: "A terrifying dragon".to_string(),
+            monster_group: vec![10],
+            time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
+            combat_event_type: CombatEventType::Boss,
+        };
+
+        let editor = EventEditorState::from_map_event(Position::new(3, 3), &event);
+        assert_eq!(
+            editor.encounter_combat_event_type,
+            CombatEventType::Boss,
+            "from_map_event must load Boss combat type"
+        );
+    }
+
+    #[test]
+    fn test_from_map_event_reads_combat_type_ambush() {
+        let event = MapEvent::Encounter {
+            name: "Ambush!".to_string(),
+            description: "You were surprised!".to_string(),
+            monster_group: vec![2, 3],
+            time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
+            combat_event_type: CombatEventType::Ambush,
+        };
+
+        let editor = EventEditorState::from_map_event(Position::new(0, 0), &event);
+        assert_eq!(editor.encounter_combat_event_type, CombatEventType::Ambush);
+    }
+
+    #[test]
+    fn test_from_map_event_normal_type_on_default_field() {
+        // When the RON has no combat_event_type field (backward compat), serde(default)
+        // deserializes it as Normal.  Simulate that here by constructing with Normal.
+        let event = MapEvent::Encounter {
+            name: "Goblins".to_string(),
+            description: String::new(),
+            monster_group: vec![1],
+            time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
+            combat_event_type: CombatEventType::Normal,
+        };
+
+        let editor = EventEditorState::from_map_event(Position::new(1, 1), &event);
+        assert_eq!(
+            editor.encounter_combat_event_type,
+            CombatEventType::Normal,
+            "missing/default field must resolve to Normal"
+        );
+    }
+
+    #[test]
+    fn test_combat_type_combo_box_has_all_variants() {
+        // The combo-box list is driven by CombatEventType::all(). Verify it returns
+        // exactly 5 variants covering all enum arms.
+        let variants = CombatEventType::all();
+        assert_eq!(
+            variants.len(),
+            5,
+            "CombatEventType::all() must return exactly 5 variants"
+        );
+        assert!(variants.contains(&CombatEventType::Normal));
+        assert!(variants.contains(&CombatEventType::Ambush));
+        assert!(variants.contains(&CombatEventType::Ranged));
+        assert!(variants.contains(&CombatEventType::Magic));
+        assert!(variants.contains(&CombatEventType::Boss));
+    }
+
+    #[test]
+    fn test_combat_type_round_trip_all_variants() {
+        // Every CombatEventType variant must survive a to_map_event / from_map_event round-trip.
+        for &variant in CombatEventType::all() {
+            let editor = EventEditorState {
+                event_type: EventType::Encounter,
+                encounter_monsters: vec![1],
+                encounter_combat_event_type: variant,
+                ..Default::default()
+            };
+
+            let event = editor
+                .to_map_event()
+                .unwrap_or_else(|e| panic!("to_map_event failed for {:?}: {}", variant, e));
+            let restored = EventEditorState::from_map_event(Position::new(0, 0), &event);
+            assert_eq!(
+                restored.encounter_combat_event_type, variant,
+                "round-trip failed for {:?}",
+                variant
+            );
+        }
+    }
+
+    #[test]
+    fn test_combat_type_does_not_affect_non_encounter_events() {
+        // Setting encounter_combat_event_type on a Sign event must not bleed into
+        // the produced MapEvent (Signs have no combat type field).
+        let editor = EventEditorState {
+            event_type: EventType::Sign,
+            sign_text: "Beware!".to_string(),
+            encounter_combat_event_type: CombatEventType::Boss, // irrelevant for Sign
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().expect("Sign event must succeed");
+        assert!(
+            matches!(event, MapEvent::Sign { .. }),
+            "must produce a Sign event"
+        );
+    }
+
+    #[test]
+    fn test_encounter_combat_event_type_display_names_non_empty() {
+        // Sanity-check that display_name() returns a non-empty string for each variant
+        // (this is what the combo-box selected_text shows).
+        for variant in CombatEventType::all() {
+            let name = variant.display_name();
+            assert!(
+                !name.is_empty(),
+                "display_name() must not be empty for {:?}",
+                variant
+            );
+        }
+    }
+
+    #[test]
+    fn test_encounter_combat_event_type_descriptions_non_empty() {
+        // Sanity-check that description() returns a non-empty string for each variant
+        // (this is what the on_hover_text and the description label show).
+        for variant in CombatEventType::all() {
+            let desc = variant.description();
+            assert!(
+                !desc.is_empty(),
+                "description() must not be empty for {:?}",
+                variant
+            );
         }
     }
 }

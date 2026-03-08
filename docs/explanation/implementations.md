@@ -1,5 +1,181 @@
 # Implementations
 
+## Phase 5: Campaign Builder UI — Combat Event Type
+
+### Overview
+
+Phase 5 wires the `CombatEventType` domain enum (introduced in Phase 1) into the
+Campaign Builder SDK so that campaign authors can select and persist the combat type
+for every map encounter event and random encounter group without hand-editing RON
+files. It also surfaces the selected type visually in the inspector panel with
+per-type colour hints.
+
+Files modified:
+
+- `sdk/campaign_builder/src/map_editor.rs` — all UI, state, and serialisation changes
+- `sdk/campaign_builder/src/lib.rs` — fixed 9 pre-existing `Attack` struct-literal
+  compilation errors (missing `is_ranged` field introduced by Phase 3)
+
+### Phase 5 Deliverables Checklist
+
+- [x] `encounter_combat_event_type: CombatEventType` field on `EventEditorState`
+- [x] `CombatEventType::Normal` default in `impl Default for EventEditorState`
+- [x] `CombatEventType` combo-box in `show_event_editor()` for Encounter type
+- [x] `to_map_event()` forwards `combat_event_type` into `MapEvent::Encounter`
+- [x] `from_map_event()` reads `combat_event_type` from `MapEvent::Encounter`
+- [x] Per-group `CombatEventType` selector in the random encounter table editor (`show_metadata_editor`)
+- [x] Combat type displayed with per-type colour in the inspector panel (`show_inspector_panel`)
+- [x] Combat type colour constants (`COMBAT_TYPE_COLOR_AMBUSH/BOSS/RANGED/MAGIC`)
+- [x] `push_id` used for all group-level combo-boxes (no egui ID clashes)
+- [x] `ComboBox::from_id_salt` used for every combo-box (SDK egui ID rule)
+- [x] `ScrollArea::id_salt` set on encounter groups scroll area
+- [x] All 12 Phase 5 tests pass
+- [x] All 4 quality gates pass (fmt / check / clippy / nextest)
+
+### What Was Built
+
+#### `encounter_combat_event_type` field on `EventEditorState` (`sdk/campaign_builder/src/map_editor.rs`)
+
+Added a new public field to `EventEditorState`:
+
+```sdk/campaign_builder/src/map_editor.rs#L1952-1953
+/// Combat event type selected for this encounter. Controls ambush, ranged,
+/// magic, and boss mechanics in the game layer.
+pub encounter_combat_event_type: CombatEventType,
+```
+
+`impl Default for EventEditorState` initialises it to `CombatEventType::Normal` so
+that existing saved events without the field continue to behave identically
+(backward-compatible via `#[serde(default)]` on the domain struct).
+
+#### `to_map_event()` — encounter arm (`sdk/campaign_builder/src/map_editor.rs`)
+
+The `EventType::Encounter` arm was extended to forward the editor field:
+
+```sdk/campaign_builder/src/map_editor.rs#L2141-2155
+Ok(MapEvent::Encounter {
+    name: self.name.clone(),
+    description: self.description.clone(),
+    monster_group: monsters,
+    time_condition: None,
+    facing,
+    proximity_facing: self.event_proximity_facing,
+    rotation_speed: ...,
+    combat_event_type: self.encounter_combat_event_type,
+})
+```
+
+#### `from_map_event()` — encounter arm (`sdk/campaign_builder/src/map_editor.rs`)
+
+The `MapEvent::Encounter` arm was extended to read `combat_event_type` back into the
+editor state, enabling lossless round-trip editing:
+
+```sdk/campaign_builder/src/map_editor.rs#L2371-2391
+MapEvent::Encounter {
+    ...,
+    combat_event_type,
+    ..
+} => {
+    ...
+    s.encounter_combat_event_type = *combat_event_type;
+}
+```
+
+#### Combat Type ComboBox in `show_event_editor()` (`sdk/campaign_builder/src/map_editor.rs`)
+
+After the monster selector for `EventType::Encounter`, a labelled combo-box is
+rendered using `ComboBox::from_id_salt("encounter_combat_event_type")`. It iterates
+`CombatEventType::all()`, uses `selectable_value` for each variant, and shows the
+variant `description()` as hover text. A small grey description label appears below
+the combo-box for the currently-selected variant. Changing the selection sets
+`editor.has_changes = true`.
+
+#### Per-group CombatEventType in `show_metadata_editor()` (`sdk/campaign_builder/src/map_editor.rs`)
+
+The random encounter table section was added to the map metadata editor. For each
+`EncounterGroup` in `EncounterTable::groups`, the UI:
+
+1. Wraps the row in `ui.push_id(group_idx, |ui| { ... })` to prevent egui ID collisions.
+2. Renders `ComboBox::from_id_salt(format!("encounter_group_combat_type_{}", group_idx))` for per-group type selection.
+3. Shows the group's `combat_event_type.description()` as a small grey hint label.
+4. Provides a "🗑️ Remove" button per group and an "➕ Add Group" button at the bottom.
+5. Wraps the group list in `ScrollArea::vertical().id_salt("encounter_groups_scroll")`.
+
+#### Inspector panel — combat type display (`sdk/campaign_builder/src/map_editor.rs`)
+
+`show_inspector_panel()` was extended so that when the selected tile has a
+`MapEvent::Encounter`, the combat type is shown with a colour-coded label:
+
+| Variant | Colour                                     |
+| ------- | ------------------------------------------ |
+| Normal  | `Color32::LIGHT_GRAY`                      |
+| Ambush  | `COMBAT_TYPE_COLOR_AMBUSH` (180, 60, 70)   |
+| Ranged  | `COMBAT_TYPE_COLOR_RANGED` (209, 154, 102) |
+| Magic   | `COMBAT_TYPE_COLOR_MAGIC` (198, 120, 221)  |
+| Boss    | `COMBAT_TYPE_COLOR_BOSS` (220, 50, 50)     |
+
+A small grey description label follows the type label.
+
+#### Combat type colour constants (`sdk/campaign_builder/src/map_editor.rs`)
+
+Four constants were added (grid tiles continue to use `EVENT_COLOR_ENCOUNTER` — the
+colour differentiation is inspector-only):
+
+```sdk/campaign_builder/src/map_editor.rs#L97-106
+const COMBAT_TYPE_COLOR_AMBUSH: Color32 = Color32::from_rgb(180, 60, 70);
+const COMBAT_TYPE_COLOR_BOSS:   Color32 = Color32::from_rgb(220, 50, 50);
+const COMBAT_TYPE_COLOR_RANGED: Color32 = Color32::from_rgb(209, 154, 102);
+const COMBAT_TYPE_COLOR_MAGIC:  Color32 = Color32::from_rgb(198, 120, 221);
+```
+
+#### `Attack` struct-literal fixes (`sdk/campaign_builder/src/lib.rs`)
+
+9 `Attack { ... }` struct literals in `lib.rs` were missing the `is_ranged: bool`
+field added by Phase 3. All 9 occurrences were updated to include `is_ranged: false`.
+This was a pre-existing compilation blocker preventing the `campaign_builder` crate
+from building; Phase 5 resolved it as part of making the full crate compile.
+
+### Phase 5 Tests
+
+All tests live in `mod tests` at the bottom of `sdk/campaign_builder/src/map_editor.rs`.
+
+| Test                                                       | Assertion                                                                          |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `test_event_editor_state_default_combat_type`              | `Default::default()` has `Normal`                                                  |
+| `test_to_map_event_preserves_combat_type_ambush`           | `to_map_event()` with Ambush → `MapEvent::Encounter { combat_event_type: Ambush }` |
+| `test_to_map_event_preserves_combat_type_boss`             | same for Boss                                                                      |
+| `test_to_map_event_preserves_combat_type_ranged`           | same for Ranged                                                                    |
+| `test_to_map_event_preserves_combat_type_magic`            | same for Magic                                                                     |
+| `test_from_map_event_reads_combat_type_boss`               | `from_map_event()` on Boss encounter sets editor field                             |
+| `test_from_map_event_reads_combat_type_ambush`             | same for Ambush                                                                    |
+| `test_from_map_event_normal_type_on_default_field`         | backward-compat: Normal field → Normal editor state                                |
+| `test_combat_type_combo_box_has_all_variants`              | `CombatEventType::all()` returns exactly 5 variants                                |
+| `test_combat_type_round_trip_all_variants`                 | every variant survives `to_map_event` → `from_map_event`                           |
+| `test_combat_type_does_not_affect_non_encounter_events`    | Sign event is unaffected by `encounter_combat_event_type`                          |
+| `test_encounter_combat_event_type_display_names_non_empty` | `display_name()` non-empty for all variants                                        |
+| `test_encounter_combat_event_type_descriptions_non_empty`  | `description()` non-empty for all variants                                         |
+
+### Architecture Compliance
+
+- `CombatEventType` used exactly as defined in `src/domain/combat/types.rs` (Section 4 of architecture).
+- `EncounterGroup::combat_event_type` uses the type alias from Phase 1 — no raw integers.
+- `ComboBox::from_id_salt`, `push_id` for loops, and `ScrollArea::id_salt` follow `sdk/AGENTS.md` egui ID rules.
+- No new documentation files created; summary placed in `docs/explanation/implementations.md` as required.
+- No `campaigns/tutorial` references in tests (Implementation Rule 5).
+- RON format used for all game data — no JSON or YAML.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → no output (clean)
+cargo check --all-targets → Finished dev profile, 0 errors
+cargo clippy -D warnings  → Finished dev profile, 0 warnings
+cargo nextest run         → 3226 tests run: 3226 passed, 8 skipped
+  (campaign_builder)      → 1938 tests run: 1938 passed, 2 skipped
+```
+
+---
+
 ## Phase 4: Boss Combat
 
 ### Overview
