@@ -788,11 +788,7 @@ fn build_creature_definition(
     let meshes = state
         .meshes
         .iter()
-        .map(|mesh| {
-            let mut mesh_def = mesh.mesh_def.clone();
-            mesh_def.color = mesh.color;
-            mesh_def
-        })
+        .map(|mesh| mesh.mesh_def.clone())
         .collect::<Vec<_>>();
 
     Ok(CreatureDefinition {
@@ -885,7 +881,7 @@ mod tests {
         build_creature_definition, export_state_to_campaign, preview_export_relative_path,
     };
     use crate::obj_importer::{ExportType, ImporterMode, ObjImporterState};
-    use antares::domain::visual::CreatureDefinition;
+    use antares::domain::visual::{AlphaMode, CreatureDefinition, MaterialDefinition};
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -940,6 +936,25 @@ mod tests {
 
         assert_eq!(creature.meshes[0].color, [0.25, 0.5, 0.75, 1.0]);
         assert_eq!(creature.mesh_transforms.len(), creature.meshes.len());
+    }
+
+    #[test]
+    fn test_build_creature_definition_updates_material_base_color_from_importer_state() {
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.material = Some(MaterialDefinition {
+            base_color: [1.0, 1.0, 1.0, 1.0],
+            metallic: 0.2,
+            roughness: 0.7,
+            emissive: None,
+            alpha_mode: AlphaMode::Opaque,
+        });
+        state.meshes[0].set_color([0.25, 0.5, 0.75, 0.5]);
+
+        let creature = build_creature_definition(&state).unwrap();
+        let material = creature.meshes[0].material.as_ref().unwrap();
+
+        assert_eq!(material.base_color, [0.25, 0.5, 0.75, 0.5]);
+        assert_eq!(material.alpha_mode, AlphaMode::Blend);
     }
 
     #[test]

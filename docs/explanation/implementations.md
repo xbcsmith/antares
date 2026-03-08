@@ -325,6 +325,107 @@ required graceful-degradation behavior.
 - No gameplay data structures or campaign fixture paths were changed.
 - No new persistence format was introduced.
 
+## New MTL Support - Phase 5: Integrate With Existing Importer State
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 5 threads MTL-aware import results through `ObjImporterState` without
+changing the current importer workflow. The key fix is that importer state now
+tracks whether a mesh color came from explicit MTL color data, fallback
+auto-assignment, or a later manual edit, instead of guessing based on whether a
+mesh happened to be white.
+
+This closes the gap left by Phase 4 where explicit white `Kd` values and
+fallback candidates could be confused once they were flattened into plain
+`MeshDefinition` values.
+
+---
+
+### Phase 5 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `sdk/campaign_builder/src/obj_importer_ui.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Parser-to-importer color-source handoff
+
+Added an SDK-internal importer path in `mesh_obj_io.rs` that returns each
+imported `MeshDefinition` together with color-source metadata for importer use.
+
+The public OBJ import APIs remain unchanged, but importer state can now tell:
+
+- explicit `Kd` color from MTL -> imported material color
+- material with no diffuse color -> fallback candidate for mesh-name auto-color
+- no material data -> fallback candidate
+
+That means explicit white material colors are preserved correctly instead of
+being mistaken for "no imported color".
+
+#### Explicit importer color provenance
+
+`ImportedMesh` now records whether its current color is:
+
+- `ImportedMaterial`
+- `AutoAssigned`
+- `ManualOverride`
+
+This lets importer state preserve imported material color on initial load,
+reset to heuristic colors only when the user explicitly requests it, and mark
+later palette or picker edits as user overrides.
+
+#### Fallback auto-color behavior that preserves imported alpha
+
+When importer state falls back to mesh-name heuristics because no diffuse MTL
+color exists, it now keeps the imported alpha channel instead of always
+resetting to fully opaque colors.
+
+This keeps transparency from `d` intact while still using the branch's existing
+name-based color suggestions for RGB fallback.
+
+#### Material/base-color synchronization during edits and export
+
+Importer color edits now synchronize both:
+
+- `mesh_def.color`
+- `mesh_def.material.base_color` when material data exists
+
+and update `AlphaMode::Blend` when edited alpha drops below `1.0`.
+
+As a result, exported RON assets now keep edited importer colors consistent
+between the top-level mesh color and the nested material color.
+
+---
+
+### Test coverage
+
+Added focused importer-state coverage for:
+
+- preserving explicit white `Kd` colors during OBJ import
+- using heuristic fallback when an MTL has no diffuse color
+- preserving imported alpha during fallback auto-assignment
+- marking later manual edits as overrides
+- exporting edited material base colors consistently
+
+---
+
+### Architecture compliance
+
+- The work stays inside the SDK importer backend, importer state, and exporter
+  seam.
+- No domain structs were changed.
+- Public OBJ import APIs continue returning `MeshDefinition` values.
+- The importer tab flow, mesh list, active selection, and export flow remain
+  intact.
+
 ---
 
 ### Phase 3 Deliverables

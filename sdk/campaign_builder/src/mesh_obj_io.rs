@@ -214,6 +214,25 @@ struct ResolvedImportedMaterial {
     mesh_color: [f32; 4],
     material: MaterialDefinition,
     texture_path: Option<String>,
+    color_source: ImportedObjMeshColorSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImportedObjMeshColorSource {
+    ImportedMaterial,
+    HeuristicFallback,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ImportedObjMesh {
+    pub mesh_def: MeshDefinition,
+    pub color_source: ImportedObjMeshColorSource,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct BuiltObjMesh {
+    mesh_def: MeshDefinition,
+    color_source: ImportedObjMeshColorSource,
 }
 
 /// Exports a mesh to OBJ format string
@@ -471,6 +490,7 @@ pub fn import_mesh_from_obj_with_options(
         mesh_name.unwrap_or_else(|| "mesh_0".to_string()),
         resolved_single_mesh_material_name(&parsed),
     )
+    .map(|mesh| mesh.mesh_def)
 }
 
 /// Imports multiple meshes from an OBJ format string.
@@ -521,6 +541,18 @@ pub fn import_meshes_from_obj_with_options(
     obj_string: &str,
     options: &ObjImportOptions,
 ) -> Result<Vec<MeshDefinition>, ObjError> {
+    Ok(
+        import_meshes_for_importer_with_options(obj_string, options)?
+            .into_iter()
+            .map(|mesh| mesh.mesh_def)
+            .collect(),
+    )
+}
+
+pub(crate) fn import_meshes_for_importer_with_options(
+    obj_string: &str,
+    options: &ObjImportOptions,
+) -> Result<Vec<ImportedObjMesh>, ObjError> {
     let parsed = parse_obj_meshes(obj_string, options)?;
 
     if parsed.segments.is_empty() {
@@ -530,13 +562,17 @@ pub fn import_meshes_from_obj_with_options(
     let segment_names = resolve_segment_names(&parsed.segments);
     let mut meshes = Vec::with_capacity(parsed.segments.len());
     for (parsed_segment, mesh_name) in parsed.segments.iter().zip(segment_names) {
-        meshes.push(build_mesh_from_faces(
+        let mesh = build_mesh_from_faces(
             &parsed,
             parsed_segment.faces.iter(),
             options,
             mesh_name,
             parsed_segment.identity.material_name.as_deref(),
-        )?);
+        )?;
+        meshes.push(ImportedObjMesh {
+            mesh_def: mesh.mesh_def,
+            color_source: mesh.color_source,
+        });
     }
 
     Ok(meshes)
@@ -573,9 +609,21 @@ pub fn import_meshes_from_obj_file_with_options(
     path: &str,
     options: &ObjImportOptions,
 ) -> Result<Vec<MeshDefinition>, ObjError> {
+    Ok(
+        import_meshes_for_importer_from_obj_file_with_options(path, options)?
+            .into_iter()
+            .map(|mesh| mesh.mesh_def)
+            .collect(),
+    )
+}
+
+pub(crate) fn import_meshes_for_importer_from_obj_file_with_options(
+    path: &str,
+    options: &ObjImportOptions,
+) -> Result<Vec<ImportedObjMesh>, ObjError> {
     let obj_string = std::fs::read_to_string(path)?;
     let options = options_with_source_path(options, path);
-    import_meshes_from_obj_with_options(&obj_string, &options)
+    import_meshes_for_importer_with_options(&obj_string, &options)
 }
 
 /// Imports a mesh from an OBJ file
@@ -938,7 +986,7 @@ fn build_mesh_from_faces<'a, I>(
     options: &ObjImportOptions,
     mesh_name: String,
     material_name: Option<&str>,
-) -> Result<MeshDefinition, ObjError>
+) -> Result<BuiltObjMesh, ObjError>
 where
     I: IntoIterator<Item = &'a Vec<ObjVertexRef>>,
 {
@@ -992,27 +1040,37 @@ where
         triangulate_face_indices(&face_indices, &mut indices);
     }
 
-    let (color, material, texture_path) = if let Some(resolved_material) = resolved_material {
-        (
-            resolved_material.mesh_color,
-            Some(resolved_material.material),
-            resolved_material.texture_path,
-        )
-    } else {
-        (options.default_color, None, None)
-    };
+    let (color, material, texture_path, color_source) =
+        if let Some(resolved_material) = resolved_material {
+            (
+                resolved_material.mesh_color,
+                Some(resolved_material.material),
+                resolved_material.texture_path,
+                resolved_material.color_source,
+            )
+        } else {
+            (
+                options.default_color,
+                None,
+                None,
+                ImportedObjMeshColorSource::HeuristicFallback,
+            )
+        };
 
-    Ok(MeshDefinition {
-        name: Some(mesh_name),
-        vertices,
-        indices,
-        normals: if saw_normals { Some(normals) } else { None },
-        uvs: if saw_uvs { Some(uvs) } else { None },
-        color,
-        lod_levels: None,
-        lod_distances: None,
-        material,
-        texture_path,
+    Ok(BuiltObjMesh {
+        mesh_def: MeshDefinition {
+            name: Some(mesh_name),
+            vertices,
+            indices,
+            normals: if saw_normals { Some(normals) } else { None },
+            uvs: if saw_uvs { Some(uvs) } else { None },
+            color,
+            lod_levels: None,
+            lod_distances: None,
+            material,
+            texture_path,
+        },
+        color_source,
     })
 }
 
@@ -1051,6 +1109,11 @@ fn resolve_imported_material(material: &ParsedMtlMaterial) -> Option<ResolvedImp
             alpha_mode,
         },
         texture_path,
+        color_source: if material.diffuse_color.is_some() {
+            ImportedObjMeshColorSource::ImportedMaterial
+        } else {
+            ImportedObjMeshColorSource::HeuristicFallback
+        },
     })
 }
 

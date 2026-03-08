@@ -23,9 +23,12 @@
 //! ```
 
 use crate::color_palette::{suggest_color_for_mesh, CustomPalette, PaletteError};
-use crate::mesh_obj_io::{import_meshes_from_obj_file_with_options, ObjError, ObjImportOptions};
+use crate::mesh_obj_io::{
+    import_meshes_for_importer_from_obj_file_with_options, ImportedObjMesh,
+    ImportedObjMeshColorSource, ObjError, ObjImportOptions,
+};
 use antares::domain::types::CreatureId;
-use antares::domain::visual::MeshDefinition;
+use antares::domain::visual::{AlphaMode, MeshDefinition};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -51,6 +54,17 @@ pub enum ExportType {
     Item,
 }
 
+/// Records how the importer's current mesh color was chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportedMeshColorSource {
+    /// The current color came from explicit MTL material color data.
+    ImportedMaterial,
+    /// The current color came from the built-in mesh-name heuristic.
+    AutoAssigned,
+    /// The current color was changed by the user after import.
+    ManualOverride,
+}
+
 /// A mesh loaded into the importer, along with editable per-mesh metadata.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedMesh {
@@ -62,6 +76,8 @@ pub struct ImportedMesh {
     pub triangle_count: usize,
     /// Editable RGBA color assigned to the mesh.
     pub color: [f32; 4],
+    /// Tracks whether the current color came from MTL, fallback heuristics, or manual edits.
+    pub color_source: ImportedMeshColorSource,
     /// Selection flag used for bulk operations.
     pub selected: bool,
     /// Backing mesh definition used for export.
@@ -113,20 +129,46 @@ pub enum ObjImporterError {
 
 impl ImportedMesh {
     /// Creates an importer mesh row from a domain mesh definition.
-    pub fn from_mesh_definition(mut mesh_def: MeshDefinition) -> Self {
-        let name = mesh_def.name.clone().unwrap_or_else(|| "mesh".to_string());
-        let color = if has_imported_material_color(&mesh_def) {
-            mesh_def.color
+    pub fn from_mesh_definition(mesh_def: MeshDefinition) -> Self {
+        let color_source = if has_imported_material_color(&mesh_def) {
+            ImportedMeshColorSource::ImportedMaterial
         } else {
-            suggest_color_for_mesh(&name)
+            ImportedMeshColorSource::AutoAssigned
         };
-        mesh_def.color = color;
+
+        Self::from_mesh_definition_with_color_source(mesh_def, color_source)
+    }
+
+    fn from_imported_obj_mesh(imported_mesh: ImportedObjMesh) -> Self {
+        let color_source = match imported_mesh.color_source {
+            ImportedObjMeshColorSource::ImportedMaterial => {
+                ImportedMeshColorSource::ImportedMaterial
+            }
+            ImportedObjMeshColorSource::HeuristicFallback => ImportedMeshColorSource::AutoAssigned,
+        };
+
+        Self::from_mesh_definition_with_color_source(imported_mesh.mesh_def, color_source)
+    }
+
+    fn from_mesh_definition_with_color_source(
+        mut mesh_def: MeshDefinition,
+        color_source: ImportedMeshColorSource,
+    ) -> Self {
+        let name = mesh_def.name.clone().unwrap_or_else(|| "mesh".to_string());
+        let color = match color_source {
+            ImportedMeshColorSource::ImportedMaterial | ImportedMeshColorSource::ManualOverride => {
+                mesh_def.color
+            }
+            ImportedMeshColorSource::AutoAssigned => auto_assigned_color(&name, mesh_def.color[3]),
+        };
+        apply_color_to_mesh_definition(&mut mesh_def, color);
 
         Self {
             name,
             vertex_count: mesh_def.vertices.len(),
             triangle_count: mesh_def.indices.len() / 3,
             color,
+            color_source,
             selected: true,
             mesh_def,
         }
@@ -135,11 +177,34 @@ impl ImportedMesh {
     /// Applies a new color to the mesh and its backing definition.
     pub fn set_color(&mut self, color: [f32; 4]) {
         self.color = color;
-        self.mesh_def.color = color;
+        self.color_source = ImportedMeshColorSource::ManualOverride;
+        apply_color_to_mesh_definition(&mut self.mesh_def, color);
     }
 
     fn reapply_auto_color(&mut self) {
-        self.set_color(suggest_color_for_mesh(&self.name));
+        let color = auto_assigned_color(&self.name, self.mesh_def.color[3]);
+        self.color = color;
+        self.color_source = ImportedMeshColorSource::AutoAssigned;
+        apply_color_to_mesh_definition(&mut self.mesh_def, color);
+    }
+}
+
+fn auto_assigned_color(name: &str, alpha: f32) -> [f32; 4] {
+    let mut color = suggest_color_for_mesh(name);
+    color[3] = alpha.clamp(0.0, 1.0);
+    color
+}
+
+fn apply_color_to_mesh_definition(mesh_def: &mut MeshDefinition, color: [f32; 4]) {
+    mesh_def.color = color;
+
+    if let Some(material) = mesh_def.material.as_mut() {
+        material.base_color = color;
+        if color[3] < 1.0 {
+            material.alpha_mode = AlphaMode::Blend;
+        } else if material.alpha_mode == AlphaMode::Blend {
+            material.alpha_mode = AlphaMode::Opaque;
+        }
     }
 }
 
@@ -219,11 +284,18 @@ impl ObjImporterState {
         source_path: Option<PathBuf>,
         meshes: Vec<MeshDefinition>,
     ) {
+        self.load_imported_mesh_rows(
+            source_path,
+            meshes
+                .into_iter()
+                .map(ImportedMesh::from_mesh_definition)
+                .collect(),
+        );
+    }
+
+    fn load_imported_mesh_rows(&mut self, source_path: Option<PathBuf>, meshes: Vec<ImportedMesh>) {
         self.source_path = source_path;
-        self.meshes = meshes
-            .into_iter()
-            .map(ImportedMesh::from_mesh_definition)
-            .collect();
+        self.meshes = meshes;
         self.active_mesh_index = (!self.meshes.is_empty()).then_some(0);
         self.mode = if self.meshes.is_empty() {
             ImporterMode::Idle
@@ -239,10 +311,15 @@ impl ObjImporterState {
 
     /// Loads meshes directly from an OBJ file using the state's current scale.
     pub fn load_obj_file(&mut self, path: &Path) -> Result<(), ObjImporterError> {
-        let options = self.obj_import_options();
+        let mut options = self.obj_import_options();
+        options.source_path = Some(path.to_path_buf());
         let path_string = path.to_string_lossy().to_string();
-        let meshes = import_meshes_from_obj_file_with_options(&path_string, &options)?;
-        self.load_mesh_definitions(Some(path.to_path_buf()), meshes);
+        let meshes = import_meshes_for_importer_from_obj_file_with_options(&path_string, &options)?;
+        let imported_meshes = meshes
+            .into_iter()
+            .map(ImportedMesh::from_imported_obj_mesh)
+            .collect();
+        self.load_imported_mesh_rows(Some(path.to_path_buf()), imported_meshes);
         Ok(())
     }
 
@@ -292,8 +369,10 @@ impl ObjImporterState {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExportType, ImportedMesh, ImporterMode, ObjImporterState};
-    use antares::domain::visual::MeshDefinition;
+    use super::{
+        ExportType, ImportedMesh, ImportedMeshColorSource, ImporterMode, ObjImporterState,
+    };
+    use antares::domain::visual::{AlphaMode, MaterialDefinition, MeshDefinition};
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -327,18 +406,147 @@ mod tests {
     fn test_imported_mesh_from_mesh_definition_preserves_imported_material_color() {
         let mut mesh_def = named_triangle("EM3D_Base_Body");
         mesh_def.color = [0.2, 0.3, 0.4, 0.75];
-        mesh_def.material = Some(antares::domain::visual::MaterialDefinition {
+        mesh_def.material = Some(MaterialDefinition {
             base_color: [0.2, 0.3, 0.4, 0.75],
             metallic: 0.0,
             roughness: 0.9,
             emissive: None,
-            alpha_mode: antares::domain::visual::AlphaMode::Blend,
+            alpha_mode: AlphaMode::Blend,
         });
 
         let mesh = ImportedMesh::from_mesh_definition(mesh_def);
 
         assert_eq!(mesh.color, [0.2, 0.3, 0.4, 0.75]);
         assert_eq!(mesh.mesh_def.color, [0.2, 0.3, 0.4, 0.75]);
+        assert_eq!(mesh.color_source, ImportedMeshColorSource::ImportedMaterial);
+    }
+
+    #[test]
+    fn test_imported_mesh_set_color_marks_manual_override_and_updates_material() {
+        let mut mesh_def = named_triangle("EM3D_Base_Body");
+        mesh_def.material = Some(MaterialDefinition {
+            base_color: [1.0, 1.0, 1.0, 1.0],
+            metallic: 0.0,
+            roughness: 0.9,
+            emissive: None,
+            alpha_mode: AlphaMode::Opaque,
+        });
+
+        let mut mesh = ImportedMesh::from_mesh_definition(mesh_def);
+        mesh.set_color([0.1, 0.2, 0.3, 0.5]);
+
+        assert_eq!(mesh.color_source, ImportedMeshColorSource::ManualOverride);
+        assert_eq!(mesh.mesh_def.color, [0.1, 0.2, 0.3, 0.5]);
+        assert_eq!(
+            mesh.mesh_def.material.as_ref().unwrap().base_color,
+            [0.1, 0.2, 0.3, 0.5]
+        );
+        assert_eq!(
+            mesh.mesh_def.material.as_ref().unwrap().alpha_mode,
+            AlphaMode::Blend
+        );
+    }
+
+    #[test]
+    fn test_obj_importer_state_load_obj_file_preserves_explicit_white_mtl_color() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("models/white_hero.obj");
+        let mtl_path = temp_dir.path().join("models/white_hero.mtl");
+        fs::create_dir_all(obj_path.parent().unwrap()).unwrap();
+        fs::write(
+            &mtl_path,
+            concat!("newmtl WhiteCloth\n", "Kd 1.0 1.0 1.0\n"),
+        )
+        .unwrap();
+        fs::write(
+            &obj_path,
+            concat!(
+                "mtllib white_hero.mtl\n",
+                "o Cloth_Dress\n",
+                "usemtl WhiteCloth\n",
+                "v 0.0 0.0 0.0\n",
+                "v 1.0 0.0 0.0\n",
+                "v 0.0 1.0 0.0\n",
+                "f 1 2 3\n"
+            ),
+        )
+        .unwrap();
+
+        let mut state = ObjImporterState::new();
+        state.load_obj_file(&obj_path).unwrap();
+
+        assert_eq!(state.meshes[0].color, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(
+            state.meshes[0].color_source,
+            ImportedMeshColorSource::ImportedMaterial
+        );
+    }
+
+    #[test]
+    fn test_obj_importer_state_load_obj_file_uses_auto_color_when_mtl_has_no_diffuse() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("models/hero.obj");
+        let mtl_path = temp_dir.path().join("models/hero.mtl");
+        fs::create_dir_all(obj_path.parent().unwrap()).unwrap();
+        fs::write(
+            &mtl_path,
+            concat!("newmtl Textured\n", "d 0.5\n", "map_Kd textures/hero.png\n"),
+        )
+        .unwrap();
+        fs::write(
+            &obj_path,
+            concat!(
+                "mtllib hero.mtl\n",
+                "o EM3D_Base_Body\n",
+                "usemtl Textured\n",
+                "v 0.0 0.0 0.0\n",
+                "v 1.0 0.0 0.0\n",
+                "v 0.0 1.0 0.0\n",
+                "f 1 2 3\n"
+            ),
+        )
+        .unwrap();
+
+        let mut state = ObjImporterState::new();
+        state.load_obj_file(&obj_path).unwrap();
+
+        assert_eq!(state.meshes[0].color, [0.92, 0.85, 0.78, 0.5]);
+        assert_eq!(
+            state.meshes[0].color_source,
+            ImportedMeshColorSource::AutoAssigned
+        );
+        assert_eq!(
+            state.meshes[0]
+                .mesh_def
+                .material
+                .as_ref()
+                .unwrap()
+                .base_color,
+            [0.92, 0.85, 0.78, 0.5]
+        );
+    }
+
+    #[test]
+    fn test_obj_importer_state_auto_assign_colors_marks_imported_meshes_as_auto_assigned() {
+        let mut mesh_def = named_triangle("Hair_Pink");
+        mesh_def.color = [0.3, 0.3, 0.3, 0.75];
+        mesh_def.material = Some(MaterialDefinition {
+            base_color: [0.3, 0.3, 0.3, 0.75],
+            metallic: 0.0,
+            roughness: 0.9,
+            emissive: None,
+            alpha_mode: AlphaMode::Blend,
+        });
+        let mut state = ObjImporterState::new();
+        state.load_mesh_definitions(None, vec![mesh_def]);
+
+        state.auto_assign_colors();
+
+        assert_eq!(state.meshes[0].color, [0.92, 0.55, 0.70, 0.75]);
+        assert_eq!(
+            state.meshes[0].color_source,
+            ImportedMeshColorSource::AutoAssigned
+        );
     }
 
     #[test]
