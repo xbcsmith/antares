@@ -199,6 +199,123 @@ Existing OBJ fixture tests for `examples/skeleton.obj` and
 - The refactor prepares later MTL work without introducing new persistence or UI
   surface area prematurely.
 
+## New MTL Support - Phase 3: Add MTL Parsing And Resolution
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 3 teaches the OBJ importer backend to discover, resolve, and parse MTL
+files without yet mapping those parsed materials into `MeshDefinition.material`
+or imported mesh colors. That keeps this slice focused on the backend seam the
+later mapping and UI phases need.
+
+The parser now understands `mtllib` well enough to find sidecar material
+libraries relative to the OBJ file, honors a parser-side manual override path,
+and parses a first-pass subset of MTL directives into backend material data.
+
+---
+
+### Phase 3 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Parser-facing MTL resolution options
+
+Extended `ObjImportOptions` with:
+
+- `source_path`
+- `manual_mtl_path`
+
+This gives the parser enough context to:
+
+- resolve OBJ-declared material libraries relative to the OBJ file location
+- accept a future importer-state or UI-supplied manual MTL override
+
+The file-based OBJ import helpers now automatically populate `source_path` when
+the caller does not provide one explicitly.
+
+#### MTL library discovery and path resolution
+
+`parse_obj_meshes()` now captures `mtllib` directives and resolves them into a
+list of actual library paths.
+
+Current precedence:
+
+- if `manual_mtl_path` is set and exists, it is used as the material source
+- otherwise, the parser resolves each `mtllib` reference relative to the OBJ
+  directory
+- missing libraries are ignored instead of failing geometry import
+
+This matches the plan's graceful-degradation requirement.
+
+#### First-pass MTL parser
+
+Added parser-side support for these MTL directives:
+
+- `newmtl`
+- `Kd`
+- `Ks`
+- `Ke`
+- `Ns`
+- `d`
+- `illum`
+- `map_Kd`
+
+Parsed materials are stored in backend structures keyed by material name, with
+resolved texture paths preserved as `PathBuf` values relative to the MTL file.
+
+Unsupported directives and malformed values are ignored non-fatally so OBJ
+geometry import still succeeds even when the material file is incomplete or
+partially invalid.
+
+#### Importer-state seam for future manual override UI
+
+Extended `ObjImporterState` with `manual_mtl_path` and updated the
+`obj_import_options()` helper so importer state now forwards:
+
+- `source_path`
+- `manual_mtl_path`
+- `scale`
+
+No importer-tab UI changes land in this phase yet, but the state seam is now in
+place for the later override picker.
+
+---
+
+### Test coverage
+
+Added backend tests covering:
+
+- relative `mtllib` resolution from an OBJ source path
+- multiple `mtllib` directives loading more than one library
+- manual MTL override precedence over OBJ-declared libraries
+- missing `.mtl` files degrading gracefully while geometry still imports
+- malformed MTL values being ignored without breaking OBJ import
+- parsing of `Kd`, `Ks`, `Ke`, `Ns`, `d`, `illum`, and `map_Kd`
+
+Added importer-state coverage proving parser-facing source and manual MTL paths
+are forwarded through `ObjImportOptions`.
+
+---
+
+### Architecture compliance
+
+- The work remains inside the SDK importer/backend layer.
+- No gameplay or domain core structures were changed.
+- `MeshDefinition` output remains unchanged in this phase; material-to-domain
+  mapping is intentionally deferred to Phase 4.
+- Missing or malformed MTL data does not break OBJ geometry import.
+- No tests reference `campaigns/tutorial`.
+
 ## OBJ to RON Conversion - Phase 3: Importer Tab UI and RON Export
 
 **Plan**: [`obj_to_ron_implementation_plan.md`](obj_to_ron_implementation_plan.md)

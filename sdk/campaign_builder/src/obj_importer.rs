@@ -75,6 +75,8 @@ pub struct ObjImporterState {
     pub mode: ImporterMode,
     /// Source OBJ file path, if any.
     pub source_path: Option<PathBuf>,
+    /// Optional manual override for the MTL file path.
+    pub manual_mtl_path: Option<PathBuf>,
     /// Parsed meshes currently loaded in the importer.
     pub meshes: Vec<ImportedMesh>,
     /// Whether the export target is a creature or an item.
@@ -142,6 +144,7 @@ impl Default for ObjImporterState {
         Self {
             mode: ImporterMode::Idle,
             source_path: None,
+            manual_mtl_path: None,
             meshes: Vec::new(),
             export_type: ExportType::Creature,
             creature_id: 4000,
@@ -271,6 +274,8 @@ impl ObjImporterState {
     /// instead of assembled ad hoc in the UI layer.
     fn obj_import_options(&self) -> ObjImportOptions {
         ObjImportOptions {
+            source_path: self.source_path.clone(),
+            manual_mtl_path: self.manual_mtl_path.clone(),
             scale: self.scale,
             ..Default::default()
         }
@@ -282,6 +287,7 @@ mod tests {
     use super::{ExportType, ImportedMesh, ImporterMode, ObjImporterState};
     use antares::domain::visual::MeshDefinition;
     use std::fs;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     fn named_triangle(name: &str) -> MeshDefinition {
@@ -407,5 +413,22 @@ mod tests {
         assert_eq!(state.meshes[0].mesh_def.vertices[0], [0.5, 0.0, 0.0]);
         assert_eq!(state.meshes[0].mesh_def.vertices[1], [0.0, 0.5, 0.0]);
         assert_eq!(state.meshes[0].mesh_def.vertices[2], [0.0, 0.0, 0.5]);
+    }
+
+    #[test]
+    fn test_obj_importer_options_forward_source_and_manual_mtl_paths() {
+        let mut state = ObjImporterState::new();
+        state.source_path = Some(PathBuf::from("models/hero.obj"));
+        state.manual_mtl_path = Some(PathBuf::from("materials/hero_override.mtl"));
+        state.scale = 0.25;
+
+        let options = state.obj_import_options();
+
+        assert_eq!(options.source_path, Some(PathBuf::from("models/hero.obj")));
+        assert_eq!(
+            options.manual_mtl_path,
+            Some(PathBuf::from("materials/hero_override.mtl"))
+        );
+        assert_eq!(options.scale, 0.25);
     }
 }

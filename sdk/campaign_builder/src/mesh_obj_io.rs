@@ -45,6 +45,7 @@
 use antares::domain::visual::MeshDefinition;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 /// Errors that can occur during OBJ import/export
@@ -115,6 +116,15 @@ pub struct ObjImportOptions {
     /// Name to assign to imported mesh
     pub mesh_name: Option<String>,
 
+    /// Source OBJ path used for resolving sidecar assets such as `.mtl` files.
+    pub source_path: Option<PathBuf>,
+
+    /// Optional manual override for the material library path.
+    ///
+    /// When present, this path is preferred over any `mtllib` directives found
+    /// inside the OBJ.
+    pub manual_mtl_path: Option<PathBuf>,
+
     /// Default color to use if not specified
     pub default_color: [f32; 4],
 
@@ -132,6 +142,8 @@ impl Default for ObjImportOptions {
     fn default() -> Self {
         Self {
             mesh_name: None,
+            source_path: None,
+            manual_mtl_path: None,
             default_color: [1.0, 1.0, 1.0, 1.0],
             flip_yz: false,
             flip_uv_v: false,
@@ -179,6 +191,21 @@ struct ParsedObjData {
     normals: Vec<[f32; 3]>,
     uvs: Vec<[f32; 2]>,
     segments: Vec<ParsedObjSegment>,
+    material_library_names: Vec<String>,
+    material_library_paths: Vec<PathBuf>,
+    materials: HashMap<String, ParsedMtlMaterial>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct ParsedMtlMaterial {
+    name: String,
+    diffuse_color: Option<[f32; 3]>,
+    specular_color: Option<[f32; 3]>,
+    emissive_color: Option<[f32; 3]>,
+    specular_exponent: Option<f32>,
+    dissolve: Option<f32>,
+    illumination_model: Option<u8>,
+    diffuse_texture_path: Option<PathBuf>,
 }
 
 /// Exports a mesh to OBJ format string
@@ -537,7 +564,8 @@ pub fn import_meshes_from_obj_file_with_options(
     options: &ObjImportOptions,
 ) -> Result<Vec<MeshDefinition>, ObjError> {
     let obj_string = std::fs::read_to_string(path)?;
-    import_meshes_from_obj_with_options(&obj_string, options)
+    let options = options_with_source_path(options, path);
+    import_meshes_from_obj_with_options(&obj_string, &options)
 }
 
 /// Imports a mesh from an OBJ file
@@ -568,7 +596,16 @@ pub fn import_mesh_from_obj_file_with_options(
     options: &ObjImportOptions,
 ) -> Result<MeshDefinition, ObjError> {
     let obj_string = std::fs::read_to_string(path)?;
-    import_mesh_from_obj_with_options(&obj_string, options)
+    let options = options_with_source_path(options, path);
+    import_mesh_from_obj_with_options(&obj_string, &options)
+}
+
+fn options_with_source_path(options: &ObjImportOptions, path: &str) -> ObjImportOptions {
+    let mut resolved = options.clone();
+    if resolved.source_path.is_none() {
+        resolved.source_path = Some(PathBuf::from(path));
+    }
+    resolved
 }
 
 fn parse_obj_meshes(
@@ -581,6 +618,7 @@ fn parse_obj_meshes(
     let mut normals = Vec::new();
     let mut uvs = Vec::new();
     let mut segments = Vec::new();
+    let mut material_library_names = Vec::new();
     let mut current_identity = ObjSegmentIdentity::default();
     let mut current_faces: Vec<Vec<ObjVertexRef>> = Vec::new();
 
@@ -630,8 +668,11 @@ fn parse_obj_meshes(
                 flush_parsed_segment(&mut segments, &current_identity, &mut current_faces);
                 current_identity.material_name = parse_obj_label(parts.as_slice());
             }
-            "mtllib" | "s" => {
-                // Material-library and smoothing directives are intentionally ignored for now.
+            "mtllib" => {
+                material_library_names.extend(parse_mtllib_directive(parts.as_slice()));
+            }
+            "s" => {
+                // Smoothing directives are intentionally ignored for now.
             }
             _ => {
                 // Unknown directive - skip.
@@ -644,13 +685,213 @@ fn parse_obj_meshes(
     }
 
     flush_parsed_segment(&mut segments, &current_identity, &mut current_faces);
+    let material_library_paths = resolve_material_library_paths(options, &material_library_names);
+    let materials = load_resolved_material_libraries(&material_library_paths);
 
     Ok(ParsedObjData {
         vertices,
         normals,
         uvs,
         segments,
+        material_library_names,
+        material_library_paths,
+        materials,
     })
+}
+
+fn parse_mtllib_directive(parts: &[&str]) -> Vec<String> {
+    parts
+        .iter()
+        .skip(1)
+        .filter_map(|name| {
+            let trimmed = name.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .collect()
+}
+
+fn resolve_material_library_paths(
+    options: &ObjImportOptions,
+    material_library_names: &[String],
+) -> Vec<PathBuf> {
+    if let Some(manual_mtl_path) = options.manual_mtl_path.as_ref() {
+        return manual_mtl_path
+            .exists()
+            .then(|| vec![manual_mtl_path.clone()])
+            .unwrap_or_default();
+    }
+
+    let Some(source_path) = options.source_path.as_ref() else {
+        return Vec::new();
+    };
+
+    let Some(source_dir) = source_path.parent() else {
+        return Vec::new();
+    };
+
+    let mut resolved_paths = Vec::new();
+    for material_library_name in material_library_names {
+        let candidate_path = resolve_relative_path(source_dir, material_library_name);
+        if candidate_path.exists() {
+            resolved_paths.push(candidate_path);
+        }
+    }
+
+    resolved_paths
+}
+
+fn resolve_relative_path(base_dir: &Path, relative_path: &str) -> PathBuf {
+    let relative_path = Path::new(relative_path);
+    if relative_path.is_absolute() {
+        relative_path.to_path_buf()
+    } else {
+        base_dir.join(relative_path)
+    }
+}
+
+fn load_resolved_material_libraries(
+    material_library_paths: &[PathBuf],
+) -> HashMap<String, ParsedMtlMaterial> {
+    let mut materials = HashMap::new();
+
+    for material_library_path in material_library_paths {
+        let Ok(mtl_string) = std::fs::read_to_string(material_library_path) else {
+            continue;
+        };
+
+        let parsed_materials = parse_mtl_materials(&mtl_string, Some(material_library_path));
+        materials.extend(parsed_materials);
+    }
+
+    materials
+}
+
+fn parse_mtl_materials(
+    mtl_string: &str,
+    source_path: Option<&Path>,
+) -> HashMap<String, ParsedMtlMaterial> {
+    let reader = BufReader::new(mtl_string.as_bytes());
+    let mut materials = HashMap::new();
+    let mut current_material: Option<ParsedMtlMaterial> = None;
+
+    for line in reader.lines().map_while(Result::ok) {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        match parts[0] {
+            "newmtl" => {
+                if let Some(material) = current_material.take() {
+                    materials.insert(material.name.clone(), material);
+                }
+
+                if let Some(name) = parse_obj_label(parts.as_slice()) {
+                    current_material = Some(ParsedMtlMaterial {
+                        name,
+                        ..Default::default()
+                    });
+                }
+            }
+            "Kd" => {
+                if let (Some(material), Some(color)) =
+                    (current_material.as_mut(), parse_mtl_color(parts.as_slice()))
+                {
+                    material.diffuse_color = Some(color);
+                }
+            }
+            "Ks" => {
+                if let (Some(material), Some(color)) =
+                    (current_material.as_mut(), parse_mtl_color(parts.as_slice()))
+                {
+                    material.specular_color = Some(color);
+                }
+            }
+            "Ke" => {
+                if let (Some(material), Some(color)) =
+                    (current_material.as_mut(), parse_mtl_color(parts.as_slice()))
+                {
+                    material.emissive_color = Some(color);
+                }
+            }
+            "Ns" => {
+                if let (Some(material), Some(value)) = (
+                    current_material.as_mut(),
+                    parse_mtl_scalar::<f32>(parts.as_slice()),
+                ) {
+                    material.specular_exponent = Some(value);
+                }
+            }
+            "d" => {
+                if let (Some(material), Some(value)) = (
+                    current_material.as_mut(),
+                    parse_mtl_scalar::<f32>(parts.as_slice()),
+                ) {
+                    material.dissolve = Some(value);
+                }
+            }
+            "illum" => {
+                if let (Some(material), Some(value)) = (
+                    current_material.as_mut(),
+                    parse_mtl_scalar::<u8>(parts.as_slice()),
+                ) {
+                    material.illumination_model = Some(value);
+                }
+            }
+            "map_Kd" => {
+                if let Some(material) = current_material.as_mut() {
+                    if let Some(texture_path) = parse_obj_label(parts.as_slice()) {
+                        material.diffuse_texture_path =
+                            resolve_texture_path(source_path, &texture_path);
+                    }
+                }
+            }
+            _ => {
+                // Unsupported or malformed directives are ignored so geometry import still succeeds.
+            }
+        }
+    }
+
+    if let Some(material) = current_material {
+        materials.insert(material.name.clone(), material);
+    }
+
+    materials
+}
+
+fn parse_mtl_color(parts: &[&str]) -> Option<[f32; 3]> {
+    if parts.len() < 4 {
+        return None;
+    }
+
+    Some([
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+        parts[3].parse().ok()?,
+    ])
+}
+
+fn parse_mtl_scalar<T>(parts: &[&str]) -> Option<T>
+where
+    T: std::str::FromStr,
+{
+    (parts.len() >= 2).then_some(())?;
+    parts[1].parse().ok()
+}
+
+fn resolve_texture_path(source_path: Option<&Path>, texture_path: &str) -> Option<PathBuf> {
+    let texture_path = Path::new(texture_path);
+    if texture_path.is_absolute() {
+        return Some(texture_path.to_path_buf());
+    }
+
+    let source_dir = source_path.and_then(Path::parent)?;
+    Some(source_dir.join(texture_path))
 }
 
 fn flush_parsed_segment(
@@ -969,7 +1210,9 @@ fn parse_face_vertex(s: &str) -> Result<(usize, Option<usize>, Option<usize>), O
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::PathBuf;
+    use tempfile::tempdir;
 
     fn create_test_mesh() -> MeshDefinition {
         MeshDefinition {
@@ -1305,6 +1548,201 @@ mod tests {
 
         assert_eq!(mesh.name.as_deref(), Some("Body_Torso"));
         assert_eq!(mesh.indices.len(), 6);
+    }
+
+    #[test]
+    fn test_parse_obj_meshes_resolves_relative_mtllib_and_parses_material_fields() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("models/hero.obj");
+        let mtl_path = temp_dir.path().join("models/materials/hero.mtl");
+        fs::create_dir_all(mtl_path.parent().unwrap()).unwrap();
+        fs::write(
+            &mtl_path,
+            concat!(
+                "newmtl HeroSkin\n",
+                "Kd 0.1 0.2 0.3\n",
+                "Ks 0.4 0.5 0.6\n",
+                "Ke 0.7 0.8 0.9\n",
+                "Ns 128.0\n",
+                "d 0.75\n",
+                "illum 2\n",
+                "map_Kd textures/hero.png\n"
+            ),
+        )
+        .unwrap();
+
+        let obj = concat!(
+            "mtllib materials/hero.mtl\n",
+            "o Body\n",
+            "usemtl HeroSkin\n",
+            "v 0.0 0.0 0.0\n",
+            "v 1.0 0.0 0.0\n",
+            "v 0.0 1.0 0.0\n",
+            "f 1 2 3\n"
+        );
+        let options = ObjImportOptions {
+            source_path: Some(obj_path.clone()),
+            ..Default::default()
+        };
+
+        let parsed = parse_obj_meshes(obj, &options).unwrap();
+
+        assert_eq!(parsed.material_library_names, vec!["materials/hero.mtl"]);
+        assert_eq!(parsed.material_library_paths, vec![mtl_path.clone()]);
+
+        let material = parsed.materials.get("HeroSkin").unwrap();
+        assert_eq!(material.diffuse_color, Some([0.1, 0.2, 0.3]));
+        assert_eq!(material.specular_color, Some([0.4, 0.5, 0.6]));
+        assert_eq!(material.emissive_color, Some([0.7, 0.8, 0.9]));
+        assert_eq!(material.specular_exponent, Some(128.0));
+        assert_eq!(material.dissolve, Some(0.75));
+        assert_eq!(material.illumination_model, Some(2));
+        assert_eq!(
+            material.diffuse_texture_path,
+            Some(mtl_path.parent().unwrap().join("textures/hero.png"))
+        );
+    }
+
+    #[test]
+    fn test_parse_obj_meshes_loads_multiple_mtllib_directives() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("models/hero.obj");
+        let base_mtl_path = temp_dir.path().join("models/base.mtl");
+        let accent_mtl_path = temp_dir.path().join("models/accent.mtl");
+        fs::create_dir_all(base_mtl_path.parent().unwrap()).unwrap();
+        fs::write(&base_mtl_path, "newmtl Base\nKd 0.1 0.1 0.1\n").unwrap();
+        fs::write(&accent_mtl_path, "newmtl Accent\nKd 0.9 0.2 0.2\n").unwrap();
+
+        let obj = concat!(
+            "mtllib base.mtl\n",
+            "mtllib accent.mtl\n",
+            "o Body\n",
+            "usemtl Accent\n",
+            "v 0.0 0.0 0.0\n",
+            "v 1.0 0.0 0.0\n",
+            "v 0.0 1.0 0.0\n",
+            "f 1 2 3\n"
+        );
+        let options = ObjImportOptions {
+            source_path: Some(obj_path),
+            ..Default::default()
+        };
+
+        let parsed = parse_obj_meshes(obj, &options).unwrap();
+
+        assert_eq!(
+            parsed.material_library_paths,
+            vec![base_mtl_path, accent_mtl_path]
+        );
+        assert!(parsed.materials.contains_key("Base"));
+        assert!(parsed.materials.contains_key("Accent"));
+    }
+
+    #[test]
+    fn test_parse_obj_meshes_prefers_manual_mtl_override() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("models/hero.obj");
+        let auto_mtl_path = temp_dir.path().join("models/auto.mtl");
+        let override_mtl_path = temp_dir.path().join("overrides/manual.mtl");
+        fs::create_dir_all(auto_mtl_path.parent().unwrap()).unwrap();
+        fs::create_dir_all(override_mtl_path.parent().unwrap()).unwrap();
+        fs::write(&auto_mtl_path, "newmtl Auto\nKd 0.1 0.1 0.1\n").unwrap();
+        fs::write(&override_mtl_path, "newmtl Override\nKd 0.8 0.7 0.6\n").unwrap();
+
+        let obj = concat!(
+            "mtllib auto.mtl\n",
+            "o Body\n",
+            "usemtl Override\n",
+            "v 0.0 0.0 0.0\n",
+            "v 1.0 0.0 0.0\n",
+            "v 0.0 1.0 0.0\n",
+            "f 1 2 3\n"
+        );
+        let options = ObjImportOptions {
+            source_path: Some(obj_path),
+            manual_mtl_path: Some(override_mtl_path.clone()),
+            ..Default::default()
+        };
+
+        let parsed = parse_obj_meshes(obj, &options).unwrap();
+
+        assert_eq!(parsed.material_library_paths, vec![override_mtl_path]);
+        assert!(!parsed.materials.contains_key("Auto"));
+        assert!(parsed.materials.contains_key("Override"));
+    }
+
+    #[test]
+    fn test_import_meshes_from_obj_file_missing_mtl_is_non_fatal() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("missing_material.obj");
+        fs::write(
+            &obj_path,
+            concat!(
+                "mtllib missing.mtl\n",
+                "o Body\n",
+                "usemtl Missing\n",
+                "v 0.0 0.0 0.0\n",
+                "v 1.0 0.0 0.0\n",
+                "v 0.0 1.0 0.0\n",
+                "f 1 2 3\n"
+            ),
+        )
+        .unwrap();
+
+        let meshes = import_meshes_from_obj_file_with_options(
+            obj_path.to_str().unwrap(),
+            &ObjImportOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(meshes.len(), 1);
+        assert_eq!(meshes[0].name.as_deref(), Some("Body"));
+        assert_eq!(meshes[0].indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_parse_obj_meshes_tolerates_malformed_mtl_data() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("models/hero.obj");
+        let mtl_path = temp_dir.path().join("models/broken.mtl");
+        fs::create_dir_all(mtl_path.parent().unwrap()).unwrap();
+        fs::write(
+            &mtl_path,
+            concat!(
+                "newmtl Broken\n",
+                "Kd nope nope nope\n",
+                "Ns ???\n",
+                "d 0.5\n",
+                "illum 1\n"
+            ),
+        )
+        .unwrap();
+
+        let obj = concat!(
+            "mtllib broken.mtl\n",
+            "o Body\n",
+            "usemtl Broken\n",
+            "v 0.0 0.0 0.0\n",
+            "v 1.0 0.0 0.0\n",
+            "v 0.0 1.0 0.0\n",
+            "f 1 2 3\n"
+        );
+        let options = ObjImportOptions {
+            source_path: Some(obj_path),
+            ..Default::default()
+        };
+
+        let parsed = parse_obj_meshes(obj, &options).unwrap();
+        let material = parsed.materials.get("Broken").unwrap();
+
+        assert_eq!(material.diffuse_color, None);
+        assert_eq!(material.specular_exponent, None);
+        assert_eq!(material.dissolve, Some(0.5));
+        assert_eq!(material.illumination_model, Some(1));
+
+        let meshes = import_meshes_from_obj_with_options(obj, &options).unwrap();
+        assert_eq!(meshes.len(), 1);
+        assert_eq!(meshes[0].indices, vec![0, 1, 2]);
     }
 
     #[test]
