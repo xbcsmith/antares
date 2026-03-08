@@ -147,9 +147,29 @@ struct ObjVertexRef {
     normal_index: Option<usize>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ObjSegmentIdentity {
+    object_name: Option<String>,
+    group_name: Option<String>,
+    material_name: Option<String>,
+}
+
+impl ObjSegmentIdentity {
+    fn display_name(&self) -> Option<String> {
+        match (&self.object_name, &self.group_name) {
+            (Some(object_name), Some(group_name)) if object_name != group_name => {
+                Some(format!("{}_{}", object_name, group_name))
+            }
+            (Some(object_name), _) => Some(object_name.clone()),
+            (None, Some(group_name)) => Some(group_name.clone()),
+            (None, None) => None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
-struct ParsedObjMesh {
-    raw_name: Option<String>,
+struct ParsedObjSegment {
+    identity: ObjSegmentIdentity,
     faces: Vec<Vec<ObjVertexRef>>,
 }
 
@@ -158,7 +178,7 @@ struct ParsedObjData {
     vertices: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
     uvs: Vec<[f32; 2]>,
-    meshes: Vec<ParsedObjMesh>,
+    segments: Vec<ParsedObjSegment>,
 }
 
 /// Exports a mesh to OBJ format string
@@ -375,6 +395,10 @@ pub fn import_mesh_from_obj(obj_string: &str) -> Result<MeshDefinition, ObjError
 
 /// Imports a mesh from OBJ format string with custom options
 ///
+/// If the OBJ contains multiple object, group, or material segments, they are
+/// combined into a single mesh for this API. Use
+/// [`import_meshes_from_obj_with_options`] to preserve per-segment output.
+///
 /// # Arguments
 ///
 /// * `obj_string` - OBJ format string to parse
@@ -387,201 +411,37 @@ pub fn import_mesh_from_obj_with_options(
     obj_string: &str,
     options: &ObjImportOptions,
 ) -> Result<MeshDefinition, ObjError> {
-    let reader = BufReader::new(obj_string.as_bytes());
+    let parsed = parse_obj_meshes(obj_string, options)?;
 
-    let mut vertices = Vec::new();
-    let mut normals = Vec::new();
-    let mut uvs = Vec::new();
-    let mut indices = Vec::new();
-    let mut mesh_name = options.mesh_name.clone();
-
-    for line in reader.lines() {
-        let line = line?;
-        let line = line.trim();
-
-        // Skip empty lines and comments
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.is_empty() {
-            continue;
-        }
-
-        match parts[0] {
-            "o" | "g" => {
-                // Object or group name
-                if parts.len() > 1 && mesh_name.is_none() {
-                    mesh_name = Some(parts[1..].join(" "));
-                }
-            }
-            "v" => {
-                // Vertex
-                if parts.len() < 4 {
-                    return Err(ObjError::ParseError(format!(
-                        "Invalid vertex definition: {}",
-                        line
-                    )));
-                }
-
-                let x: f32 = parts[1]
-                    .parse()
-                    .map_err(|e| ObjError::ParseError(format!("Invalid vertex X: {}", e)))?;
-                let y: f32 = parts[2]
-                    .parse()
-                    .map_err(|e| ObjError::ParseError(format!("Invalid vertex Y: {}", e)))?;
-                let z: f32 = parts[3]
-                    .parse()
-                    .map_err(|e| ObjError::ParseError(format!("Invalid vertex Z: {}", e)))?;
-
-                let x = x * options.scale;
-                let y = y * options.scale;
-                let z = z * options.scale;
-
-                if options.flip_yz {
-                    vertices.push([x, z, -y]);
-                } else {
-                    vertices.push([x, y, z]);
-                }
-            }
-            "vn" => {
-                // Normal
-                if parts.len() < 4 {
-                    return Err(ObjError::ParseError(format!(
-                        "Invalid normal definition: {}",
-                        line
-                    )));
-                }
-
-                let x: f32 = parts[1]
-                    .parse()
-                    .map_err(|e| ObjError::ParseError(format!("Invalid normal X: {}", e)))?;
-                let y: f32 = parts[2]
-                    .parse()
-                    .map_err(|e| ObjError::ParseError(format!("Invalid normal Y: {}", e)))?;
-                let z: f32 = parts[3]
-                    .parse()
-                    .map_err(|e| ObjError::ParseError(format!("Invalid normal Z: {}", e)))?;
-
-                if options.flip_yz {
-                    normals.push([x, z, -y]);
-                } else {
-                    normals.push([x, y, z]);
-                }
-            }
-            "vt" => {
-                // Texture coordinate
-                if parts.len() < 3 {
-                    return Err(ObjError::ParseError(format!(
-                        "Invalid texture coordinate definition: {}",
-                        line
-                    )));
-                }
-
-                let u: f32 = parts[1]
-                    .parse()
-                    .map_err(|e| ObjError::ParseError(format!("Invalid UV U: {}", e)))?;
-                let mut v: f32 = parts[2]
-                    .parse()
-                    .map_err(|e| ObjError::ParseError(format!("Invalid UV V: {}", e)))?;
-
-                if options.flip_uv_v {
-                    v = 1.0 - v;
-                }
-
-                uvs.push([u, v]);
-            }
-            "f" => {
-                // Face
-                if parts.len() < 4 {
-                    return Err(ObjError::ParseError(format!(
-                        "Invalid face definition: {}",
-                        line
-                    )));
-                }
-
-                // Parse face indices (OBJ uses 1-based indexing)
-                let mut face_indices = Vec::new();
-                for part in parts.iter().skip(1) {
-                    let index = parse_face_vertex(part)?;
-                    if index.0 == 0 || index.0 > vertices.len() {
-                        return Err(ObjError::InvalidIndex(format!(
-                            "Vertex index {} out of range (1-{})",
-                            index.0,
-                            vertices.len()
-                        )));
-                    }
-                    face_indices.push(index.0 - 1); // Convert to 0-based
-                }
-
-                // Triangulate face if necessary
-                if face_indices.len() == 3 {
-                    indices.extend_from_slice(&face_indices);
-                } else if face_indices.len() == 4 {
-                    // Quad -> two triangles
-                    indices.push(face_indices[0]);
-                    indices.push(face_indices[1]);
-                    indices.push(face_indices[2]);
-                    indices.push(face_indices[0]);
-                    indices.push(face_indices[2]);
-                    indices.push(face_indices[3]);
-                } else if face_indices.len() > 4 {
-                    // N-gon -> triangle fan
-                    for i in 1..(face_indices.len() - 1) {
-                        indices.push(face_indices[0]);
-                        indices.push(face_indices[i]);
-                        indices.push(face_indices[i + 1]);
-                    }
-                }
-            }
-            "mtllib" | "usemtl" => {
-                // Material library/usage - not yet supported
-            }
-            "s" => {
-                // Smoothing group - not yet supported
-            }
-            _ => {
-                // Unknown directive - skip
-            }
-        }
-    }
-
-    // Validate we have required data
-    if vertices.is_empty() {
-        return Err(ObjError::MissingData("No vertices found".to_string()));
-    }
-
-    if indices.is_empty() {
+    if parsed.segments.is_empty() {
         return Err(ObjError::MissingData("No faces found".to_string()));
     }
 
-    // Convert indices to u32
-    let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
+    let mesh_name = options.mesh_name.clone().or_else(|| {
+        parsed
+            .segments
+            .iter()
+            .find_map(|segment| segment.identity.display_name())
+            .map(|name| sanitize_mesh_name(&name))
+            .filter(|name| !name.is_empty())
+    });
 
-    Ok(MeshDefinition {
-        name: mesh_name,
-        vertices,
-        indices: indices_u32,
-        normals: if normals.is_empty() {
-            None
-        } else {
-            Some(normals)
-        },
-        uvs: if uvs.is_empty() { None } else { Some(uvs) },
-        color: options.default_color,
-        lod_levels: None,
-        lod_distances: None,
-        material: None,
-        texture_path: None,
-    })
+    build_mesh_from_faces(
+        &parsed,
+        parsed
+            .segments
+            .iter()
+            .flat_map(|segment| segment.faces.iter()),
+        options,
+        mesh_name.unwrap_or_else(|| "mesh_0".to_string()),
+    )
 }
 
 /// Imports multiple meshes from an OBJ format string.
 ///
-/// Each `o` or `g` block is converted into a separate [`MeshDefinition`] with
-/// per-mesh vertex remapping. If the OBJ does not contain any `o` or `g`
-/// directives, a single mesh named `mesh_0` is returned.
+/// Each object, group, or material segment is converted into a separate
+/// [`MeshDefinition`] with per-mesh vertex remapping. If the OBJ does not
+/// contain any naming directives, a single mesh named `mesh_0` is returned.
 ///
 /// # Examples
 ///
@@ -627,17 +487,18 @@ pub fn import_meshes_from_obj_with_options(
 ) -> Result<Vec<MeshDefinition>, ObjError> {
     let parsed = parse_obj_meshes(obj_string, options)?;
 
-    if parsed.meshes.is_empty() {
+    if parsed.segments.is_empty() {
         return Err(ObjError::MissingData("No faces found".to_string()));
     }
 
-    let mut meshes = Vec::with_capacity(parsed.meshes.len());
-    for (mesh_index, parsed_mesh) in parsed.meshes.iter().enumerate() {
-        meshes.push(build_mesh_from_parsed(
+    let segment_names = resolve_segment_names(&parsed.segments);
+    let mut meshes = Vec::with_capacity(parsed.segments.len());
+    for (parsed_segment, mesh_name) in parsed.segments.iter().zip(segment_names) {
+        meshes.push(build_mesh_from_faces(
             &parsed,
-            parsed_mesh,
+            parsed_segment.faces.iter(),
             options,
-            mesh_index,
+            mesh_name,
         )?);
     }
 
@@ -719,10 +580,9 @@ fn parse_obj_meshes(
     let mut vertices = Vec::new();
     let mut normals = Vec::new();
     let mut uvs = Vec::new();
-    let mut meshes = Vec::new();
-    let mut current_name: Option<String> = None;
+    let mut segments = Vec::new();
+    let mut current_identity = ObjSegmentIdentity::default();
     let mut current_faces: Vec<Vec<ObjVertexRef>> = Vec::new();
-    let mut saw_mesh_directive = false;
 
     for line in reader.lines() {
         let line = line?;
@@ -738,14 +598,13 @@ fn parse_obj_meshes(
         }
 
         match parts[0] {
-            "o" | "g" => {
-                saw_mesh_directive = true;
-                flush_parsed_mesh(&mut meshes, &mut current_name, &mut current_faces);
-                current_name = if parts.len() > 1 {
-                    Some(parts[1..].join(" "))
-                } else {
-                    None
-                };
+            "o" => {
+                flush_parsed_segment(&mut segments, &current_identity, &mut current_faces);
+                current_identity.object_name = parse_obj_label(parts.as_slice());
+            }
+            "g" => {
+                flush_parsed_segment(&mut segments, &current_identity, &mut current_faces);
+                current_identity.group_name = parse_obj_label(parts.as_slice());
             }
             "v" => vertices.push(parse_vertex(parts.as_slice(), options)?),
             "vn" => normals.push(parse_normal(parts.as_slice(), options)?),
@@ -767,8 +626,12 @@ fn parse_obj_meshes(
                 validate_face_vertex_indices(&face, vertices.len(), uvs.len(), normals.len())?;
                 current_faces.push(face);
             }
-            "mtllib" | "usemtl" | "s" => {
-                // Material/smoothing directives are intentionally ignored for now.
+            "usemtl" => {
+                flush_parsed_segment(&mut segments, &current_identity, &mut current_faces);
+                current_identity.material_name = parse_obj_label(parts.as_slice());
+            }
+            "mtllib" | "s" => {
+                // Material-library and smoothing directives are intentionally ignored for now.
             }
             _ => {
                 // Unknown directive - skip.
@@ -780,44 +643,40 @@ fn parse_obj_meshes(
         return Err(ObjError::MissingData("No vertices found".to_string()));
     }
 
-    if saw_mesh_directive {
-        flush_parsed_mesh(&mut meshes, &mut current_name, &mut current_faces);
-    } else if !current_faces.is_empty() {
-        meshes.push(ParsedObjMesh {
-            raw_name: Some("mesh_0".to_string()),
-            faces: current_faces,
-        });
-    }
+    flush_parsed_segment(&mut segments, &current_identity, &mut current_faces);
 
     Ok(ParsedObjData {
         vertices,
         normals,
         uvs,
-        meshes,
+        segments,
     })
 }
 
-fn flush_parsed_mesh(
-    meshes: &mut Vec<ParsedObjMesh>,
-    current_name: &mut Option<String>,
+fn flush_parsed_segment(
+    segments: &mut Vec<ParsedObjSegment>,
+    current_identity: &ObjSegmentIdentity,
     current_faces: &mut Vec<Vec<ObjVertexRef>>,
 ) {
     if current_faces.is_empty() {
         return;
     }
 
-    meshes.push(ParsedObjMesh {
-        raw_name: current_name.take(),
+    segments.push(ParsedObjSegment {
+        identity: current_identity.clone(),
         faces: std::mem::take(current_faces),
     });
 }
 
-fn build_mesh_from_parsed(
+fn build_mesh_from_faces<'a, I>(
     parsed: &ParsedObjData,
-    parsed_mesh: &ParsedObjMesh,
+    faces: I,
     options: &ObjImportOptions,
-    mesh_index: usize,
-) -> Result<MeshDefinition, ObjError> {
+    mesh_name: String,
+) -> Result<MeshDefinition, ObjError>
+where
+    I: IntoIterator<Item = &'a Vec<ObjVertexRef>>,
+{
     let mut vertices = Vec::new();
     let mut normals = Vec::new();
     let mut uvs = Vec::new();
@@ -826,7 +685,7 @@ fn build_mesh_from_parsed(
     let mut saw_normals = false;
     let mut saw_uvs = false;
 
-    for face in &parsed_mesh.faces {
+    for face in faces {
         let mut face_indices = Vec::with_capacity(face.len());
 
         for vertex_ref in face {
@@ -861,14 +720,6 @@ fn build_mesh_from_parsed(
         triangulate_face_indices(&face_indices, &mut indices);
     }
 
-    let raw_name = parsed_mesh.raw_name.as_deref().unwrap_or_default();
-    let sanitized_name = sanitize_mesh_name(raw_name);
-    let mesh_name = if sanitized_name.is_empty() {
-        format!("mesh_{}", mesh_index)
-    } else {
-        sanitized_name
-    };
-
     Ok(MeshDefinition {
         name: Some(mesh_name),
         vertices,
@@ -881,6 +732,45 @@ fn build_mesh_from_parsed(
         material: None,
         texture_path: None,
     })
+}
+
+fn resolve_segment_names(segments: &[ParsedObjSegment]) -> Vec<String> {
+    let mut total_counts = HashMap::<String, usize>::new();
+    let mut base_names = Vec::with_capacity(segments.len());
+
+    for (segment_index, segment) in segments.iter().enumerate() {
+        let base_name = segment
+            .identity
+            .display_name()
+            .map(|name| sanitize_mesh_name(&name))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| format!("mesh_{}", segment_index));
+        *total_counts.entry(base_name.clone()).or_insert(0) += 1;
+        base_names.push(base_name);
+    }
+
+    let mut seen_counts = HashMap::<String, usize>::new();
+    base_names
+        .into_iter()
+        .map(|base_name| {
+            let occurrence_index = seen_counts.entry(base_name.clone()).or_insert(0);
+            let resolved_name = if total_counts.get(&base_name).copied().unwrap_or_default() > 1
+                && *occurrence_index > 0
+            {
+                format!("{}_segment_{}", base_name, *occurrence_index)
+            } else {
+                base_name
+            };
+            *occurrence_index += 1;
+            resolved_name
+        })
+        .collect()
+}
+
+fn parse_obj_label(parts: &[&str]) -> Option<String> {
+    (parts.len() > 1)
+        .then(|| parts[1..].join(" "))
+        .filter(|label| !label.trim().is_empty())
 }
 
 fn triangulate_face_indices(face_indices: &[u32], indices: &mut Vec<u32>) {
@@ -1314,6 +1204,107 @@ mod tests {
         assert_eq!(meshes.len(), 1);
         assert_eq!(meshes[0].name.as_deref(), Some("mesh_0"));
         assert_eq!(meshes[0].indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_parse_obj_meshes_preserves_object_group_and_material_segments() {
+        let obj = "o Body\n\
+                   g Torso\n\
+                   usemtl Skin\n\
+                   v 0.0 0.0 0.0\n\
+                   v 1.0 0.0 0.0\n\
+                   v 0.0 1.0 0.0\n\
+                   v 1.0 1.0 0.0\n\
+                   f 1 2 3\n\
+                   usemtl Armor\n\
+                   f 2 4 3\n\
+                   g Cape\n\
+                   usemtl Cloth\n\
+                   f 1 3 4\n";
+
+        let parsed = parse_obj_meshes(obj, &ObjImportOptions::default()).unwrap();
+
+        assert_eq!(parsed.segments.len(), 3);
+
+        assert_eq!(
+            parsed.segments[0].identity.object_name.as_deref(),
+            Some("Body")
+        );
+        assert_eq!(
+            parsed.segments[0].identity.group_name.as_deref(),
+            Some("Torso")
+        );
+        assert_eq!(
+            parsed.segments[0].identity.material_name.as_deref(),
+            Some("Skin")
+        );
+
+        assert_eq!(
+            parsed.segments[1].identity.object_name.as_deref(),
+            Some("Body")
+        );
+        assert_eq!(
+            parsed.segments[1].identity.group_name.as_deref(),
+            Some("Torso")
+        );
+        assert_eq!(
+            parsed.segments[1].identity.material_name.as_deref(),
+            Some("Armor")
+        );
+
+        assert_eq!(
+            parsed.segments[2].identity.object_name.as_deref(),
+            Some("Body")
+        );
+        assert_eq!(
+            parsed.segments[2].identity.group_name.as_deref(),
+            Some("Cape")
+        );
+        assert_eq!(
+            parsed.segments[2].identity.material_name.as_deref(),
+            Some("Cloth")
+        );
+    }
+
+    #[test]
+    fn test_import_multi_mesh_splits_material_boundaries_without_losing_identity() {
+        let obj = "o Body\n\
+                   g Torso\n\
+                   usemtl Skin\n\
+                   v 0.0 0.0 0.0\n\
+                   v 1.0 0.0 0.0\n\
+                   v 0.0 1.0 0.0\n\
+                   v 1.0 1.0 0.0\n\
+                   f 1 2 3\n\
+                   usemtl Armor\n\
+                   f 2 4 3\n";
+
+        let meshes = import_meshes_from_obj(obj).unwrap();
+
+        assert_eq!(meshes.len(), 2);
+        assert_eq!(meshes[0].name.as_deref(), Some("Body_Torso"));
+        assert_eq!(meshes[1].name.as_deref(), Some("Body_Torso_segment_1"));
+        assert_eq!(meshes[0].indices, vec![0, 1, 2]);
+        assert_eq!(meshes[1].indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_import_single_mesh_combines_material_segments() {
+        let obj = "o Body\n\
+                   g Torso\n\
+                   usemtl Skin\n\
+                   v 0.0 0.0 0.0\n\
+                   v 1.0 0.0 0.0\n\
+                   v 0.0 1.0 0.0\n\
+                   v 1.0 1.0 0.0\n\
+                   f 1 2 3\n\
+                   usemtl Armor\n\
+                   f 2 4 3\n";
+
+        let mesh = import_mesh_from_obj(obj).unwrap();
+
+        assert_eq!(mesh.name.as_deref(), Some("Body_Torso"));
+        assert_eq!(mesh.indices.len(), 6);
     }
 
     #[test]

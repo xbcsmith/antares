@@ -85,6 +85,120 @@ phases will extend.
 Validation was rerun after the Phase 1 rebaseline changes using the required
 repo commands.
 
+## New MTL Support - Phase 2: Refactor OBJ Parsing For Material-Aware Segments
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 2 refactors the OBJ parser backend so it no longer treats `o`, `g`, and
+future material boundaries as one overwriteable mesh name. The importer now
+parses low-level OBJ data into explicit segments that preserve object name,
+group name, and active material name separately before any `MeshDefinition`
+values are built.
+
+This is the structural groundwork Phase 3 needs for real MTL resolution.
+Nothing in the importer UI changes yet, but the parser can now represent a
+multi-material OBJ deterministically instead of flattening those boundaries
+away.
+
+---
+
+### Phase 2 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Material-aware segment parsing (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+Replaced the old parsed-mesh placeholder with explicit parser-side segment
+identity metadata:
+
+- `object_name`
+- `group_name`
+- `material_name`
+
+The parser now flushes segment geometry on:
+
+- `o`
+- `g`
+- `usemtl`
+
+That means one logical object can now produce multiple parsed segments when the
+source OBJ changes materials mid-stream, which is required because
+`MeshDefinition` still has only one material slot.
+
+#### Separation between parse-time structure and mesh construction
+
+The low-level parse path and the mesh-building path are now more clearly split:
+
+- `parse_obj_meshes()` gathers global vertices, normals, UVs, and parsed
+  segments
+- `build_mesh_from_faces()` constructs a `MeshDefinition` from a chosen segment
+  or a combined face stream
+- `resolve_segment_names()` assigns deterministic exported mesh names after the
+  parser has preserved object and group identity
+
+This keeps parse-time identity available long enough for later MTL resolution
+instead of discarding it during the first pass.
+
+#### Identity-preserving mesh naming
+
+Segment display names now prefer object/group identity instead of letting
+material switches rename meshes.
+
+Current naming behavior:
+
+- object + distinct group -> `<object>_<group>`
+- object only -> `<object>`
+- group only -> `<group>`
+- unnamed segment -> `mesh_<index>`
+- repeated object/group identity caused by `usemtl` splits -> first segment keeps
+  the base name, later segments receive `_segment_<n>` suffixes
+
+This preserves the source model's structural identity while still producing
+unique `MeshDefinition.name` values for export and editor display.
+
+#### Single-mesh import compatibility
+
+`import_mesh_from_obj_with_options()` now reuses the segment-aware parser and
+then combines all parsed segments back into one mesh for callers that still
+want a single mesh result.
+
+That preserves the existing single-mesh API contract while moving the parsing
+logic onto the same internal representation used by the multi-mesh importer.
+
+---
+
+### Test coverage
+
+Added parser-focused tests for:
+
+- preservation of object, group, and material identity across parsed segments
+- mesh splitting on `usemtl` boundaries without losing object/group naming
+- single-mesh import continuing to combine multi-segment OBJ input
+
+Existing OBJ fixture tests for `examples/skeleton.obj` and
+`examples/female_1.obj` continue to pass against the new segment model.
+
+---
+
+### Architecture compliance
+
+- The work stays inside the SDK importer backend under
+  `sdk/campaign_builder/src/mesh_obj_io.rs`.
+- No domain data structures were changed.
+- `MeshDefinition` remains the parser output type used by importer state.
+- No test fixtures were moved under `campaigns/tutorial`.
+- The refactor prepares later MTL work without introducing new persistence or UI
+  surface area prematurely.
+
 ## OBJ to RON Conversion - Phase 3: Importer Tab UI and RON Export
 
 **Plan**: [`obj_to_ron_implementation_plan.md`](obj_to_ron_implementation_plan.md)
