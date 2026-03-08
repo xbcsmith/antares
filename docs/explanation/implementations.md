@@ -1,5 +1,98 @@
 # Implementations
 
+## Phase 1: Rename `visual_id` → `creature_id` on Monster Types
+
+### Overview
+
+Renamed the `visual_id` field to `creature_id` on both `MonsterDefinition` (domain
+data struct) and `Monster` (runtime struct) to align naming with `NpcDefinition`,
+which already used `creature_id`. Updated every call-site across source files, SDK
+files, RON data files, and integration tests. Added a new RON round-trip test.
+
+### Deliverables Checklist
+
+- [x] `src/domain/combat/database.rs` — `visual_id` → `creature_id` on `MonsterDefinition`; doc comment updated; `to_monster()` updated; `create_test_monster` helper updated; `test_monster_visual_id_parsing` renamed to `test_monster_creature_id_parsing`; `test_load_tutorial_monsters_visual_ids` renamed to `test_load_tutorial_monsters_creature_ids`; new `test_monster_definition_creature_id_field_roundtrips_ron` added
+- [x] `src/domain/combat/monster.rs` — `visual_id` → `creature_id` on `Monster`; `Monster::new()` initialiser updated; `set_visual` parameter renamed from `visual_id` to `creature_id`; doc comments updated
+- [x] `src/game/systems/map.rs` — `resolve_encounter_creature_id` doc comment and `monster_def.visual_id` field access updated; all six inline test `MonsterDefinition` literals updated (`visual_id` → `creature_id`)
+- [x] `src/game/systems/monster_rendering.rs` — module-level doc comments, `spawn_monster_with_visual` doc comment and logic, `spawn_fallback_visual` doc comment updated; local binding renamed from `visual_id` to `creature_id`; `CreatureVisual` construction updated to use shorthand `creature_id`; warn message updated
+- [x] `src/domain/combat/engine.rs` — test helper `MonsterDefinition` literal updated
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — `default_monster()` updated
+- [x] `sdk/campaign_builder/src/advanced_validation.rs` — `create_test_monster()` updated
+- [x] `sdk/campaign_builder/src/lib.rs` — all five `MonsterDefinition` literals updated (`default_monster`, `test_monster_xp_calculation_basic`, `test_monster_xp_calculation_with_abilities`, `test_monster_import_export_roundtrip`, `test_monster_preview_fields`)
+- [x] `sdk/campaign_builder/src/templates.rs` — all four `create_monster()` literals updated
+- [x] `sdk/campaign_builder/src/ui_helpers.rs` — both test-helper `MonsterDefinition` literals updated
+- [x] `data/test_campaign/data/monsters.ron` — all `visual_id:` occurrences replaced with `creature_id:`
+- [x] `campaigns/tutorial/data/monsters.ron` — all `visual_id:` occurrences replaced with `creature_id:`
+- [x] `tests/campaign_integration_tests.rs` — `test_all_monsters_have_visual_id_mapping` renamed to `test_all_monsters_have_creature_id_mapping`; `test_fallback_mechanism_for_missing_visual_id` renamed to `test_fallback_mechanism_for_monster_missing_creature_id`; `test_creature_visual_id_ranges_follow_convention` renamed to `test_creature_id_ranges_follow_convention`; all `.visual_id` field accesses updated; all assertion messages updated
+- [x] `tests/tutorial_campaign_loading_integration.rs` — `test_monster_spawning_with_missing_visual_id` renamed to `test_monster_spawning_with_missing_creature_id`; comments updated
+- [x] `tests/tutorial_monster_creature_mapping.rs` — module doc comment updated; all `.visual_id` field accesses updated; all assertion messages updated
+- [x] `grep -r "visual_id" . --include="*.rs" --include="*.ron"` returns zero matches
+- [x] All four quality gates pass with zero errors/warnings (`cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`)
+
+### What Was Built
+
+#### Field Rename — `MonsterDefinition` and `Monster`
+
+The field `pub visual_id: Option<CreatureId>` was renamed to
+`pub creature_id: Option<CreatureId>` on both structs. The doc comment was updated
+from `"Optional visual creature ID for 3D representation"` to the more precise
+`"Optional creature asset binding — links this monster to a CreatureDefinition in
+the creature registry."` mirroring the language used in `NpcDefinition`.
+
+The `#[serde(default)]` attribute was preserved unchanged. Because backwards
+compatibility is not required, no `#[serde(rename)]` alias was added; the RON
+data files were updated directly.
+
+#### `set_visual` Method
+
+The parameter of `Monster::set_visual` was renamed from `visual_id` to `creature_id`
+for consistency. The body now reads `self.creature_id = Some(creature_id);`.
+
+#### `to_monster()` Conversion
+
+The single assignment `monster.visual_id = self.visual_id;` in
+`MonsterDefinition::to_monster()` became `monster.creature_id = self.creature_id;`.
+
+#### `resolve_encounter_creature_id` in `map.rs`
+
+The field read `monster_def.visual_id` in the loop body was updated to
+`monster_def.creature_id`. The function's leading doc comment was also updated.
+
+#### `spawn_monster_with_visual` in `monster_rendering.rs`
+
+The local binding `if let Some(visual_id) = monster.visual_id` became
+`if let Some(creature_id) = monster.creature_id`. The `CreatureVisual` struct
+construction was simplified from `creature_id: visual_id` to shorthand `creature_id`
+after the binding rename. The `warn!` message and all comments referencing
+`visual_id` were updated.
+
+#### RON Data Files
+
+A `sed` substitution replaced every `visual_id:` token with `creature_id:` in:
+
+- `data/test_campaign/data/monsters.ron` (11 occurrences)
+- `campaigns/tutorial/data/monsters.ron` (17 occurrences)
+
+No numeric values changed.
+
+#### New Test: `test_monster_definition_creature_id_field_roundtrips_ron`
+
+Added to `src/domain/combat/database.rs` `mod tests`. Serialises a
+`MonsterDefinition` with `creature_id: Some(42)` to RON using
+`ron::ser::to_string_pretty`, deserialises it back, and asserts the value is
+preserved — directly satisfying the Phase 1 success criterion.
+
+### Success Criteria Verification
+
+| Criterion                                                                            | Result                  |
+| ------------------------------------------------------------------------------------ | ----------------------- |
+| `grep -r "visual_id" . --include="*.rs" --include="*.ron"` returns zero matches      | ✓ Verified              |
+| `cargo nextest run --all-features` reports zero failures                             | ✓ 3319 passed, 0 failed |
+| `test_monster_definition_creature_id_field_roundtrips_ron` passes RON round-trip     | ✓ Passes                |
+| All existing rendering and combat tests use `creature_id` and produce same behaviour | ✓ Verified              |
+
+---
+
 ## Terrain Quality Improvement — Phase 3: High-Quality Tree Models
 
 ### Overview

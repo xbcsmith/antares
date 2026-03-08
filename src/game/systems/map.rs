@@ -438,14 +438,14 @@ fn resolve_recruitable_creature_id(
 
 /// Resolves a creature id for an encounter marker from a monster group.
 ///
-/// Uses the first monster entry that has a configured `visual_id`.
+/// Uses the first monster entry that has a configured `creature_id`.
 fn resolve_encounter_creature_id(
     monster_group: &[types::MonsterId],
     content: &crate::application::resources::GameContent,
 ) -> Option<types::CreatureId> {
     for monster_id in monster_group {
         if let Some(monster_def) = content.0.monsters.get_monster(*monster_id) {
-            if let Some(creature_id) = monster_def.visual_id {
+            if let Some(creature_id) = monster_def.creature_id {
                 return Some(creature_id);
             }
         }
@@ -1910,7 +1910,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: crate::domain::combat::monster::LootTable::default(),
-            visual_id: Some(7),
+            creature_id: Some(7),
             conditions: crate::domain::combat::monster::MonsterCondition::Normal,
             active_conditions: Vec::new(),
             has_acted: false,
@@ -1945,7 +1945,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: crate::domain::combat::monster::LootTable::default(),
-            visual_id: None,
+            creature_id: None,
             conditions: crate::domain::combat::monster::MonsterCondition::Normal,
             active_conditions: Vec::new(),
             has_acted: false,
@@ -1968,7 +1968,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: crate::domain::combat::monster::LootTable::default(),
-            visual_id: Some(99),
+            creature_id: Some(99),
             conditions: crate::domain::combat::monster::MonsterCondition::Normal,
             active_conditions: Vec::new(),
             has_acted: false,
@@ -2717,7 +2717,7 @@ mod tests {
 
         let mut db = crate::sdk::database::ContentDatabase::new();
 
-        // Build a MonsterDefinition with visual_id pre-set so add_monster converts it correctly.
+        // Build a MonsterDefinition with creature_id pre-set so add_monster converts it correctly.
         let monster_def = MonsterDefinition {
             id: 33,
             name: "Test Monster".to_string(),
@@ -2733,7 +2733,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: MDLootTable::new(0, 0, 0, 0, 0),
-            visual_id: Some(20),
+            creature_id: Some(20),
             conditions: crate::domain::combat::monster::MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -3026,7 +3026,7 @@ mod tests {
                 is_undead: false,
                 magic_resistance: 0,
                 loot: crate::domain::combat::monster::LootTable::default(),
-                visual_id: Some(55),
+                creature_id: Some(55),
                 conditions: crate::domain::combat::monster::MonsterCondition::Normal,
                 active_conditions: vec![],
                 has_acted: false,
@@ -3099,7 +3099,7 @@ mod tests {
                 is_undead: false,
                 magic_resistance: 0,
                 loot: crate::domain::combat::monster::LootTable::default(),
-                visual_id: Some(56),
+                creature_id: Some(56),
                 conditions: crate::domain::combat::monster::MonsterCondition::Normal,
                 active_conditions: vec![],
                 has_acted: false,
@@ -3427,7 +3427,7 @@ mod tests {
                 is_undead: false,
                 magic_resistance: 0,
                 loot: crate::domain::combat::monster::LootTable::default(),
-                visual_id: Some(75),
+                creature_id: Some(75),
                 conditions: crate::domain::combat::monster::MonsterCondition::Normal,
                 active_conditions: vec![],
                 has_acted: false,

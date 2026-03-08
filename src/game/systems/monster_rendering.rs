@@ -9,12 +9,12 @@
 //!
 //! # Architecture
 //!
-//! When a monster has a `visual_id`, the system:
+//! When a monster has a `creature_id`, the system:
 //! 1. Looks up the `CreatureDefinition` from the game data resource
 //! 2. Spawns the creature visual hierarchy
 //! 3. Attaches a `MonsterMarker` to link the visual to the combat entity
 //!
-//! If no `visual_id` is present, a fallback representation is used (billboard/sprite).
+//! If no `creature_id` is present, a fallback representation is used (billboard/sprite).
 //!
 //! # Examples
 //!
@@ -89,7 +89,7 @@ pub struct MonsterMarker {
 
 /// Spawns a visual representation for a monster
 ///
-/// This function checks if the monster has a `visual_id`. If present, it spawns
+/// This function checks if the monster has a `creature_id`. If present, it spawns
 /// the corresponding creature visual. If not, it spawns a fallback representation.
 ///
 /// # Arguments
@@ -149,9 +149,9 @@ pub fn spawn_monster_with_visual(
     materials: &mut Assets<StandardMaterial>,
     position: Vec3,
 ) -> Entity {
-    if let Some(visual_id) = monster.visual_id {
+    if let Some(creature_id) = monster.creature_id {
         // Look up creature definition
-        if let Some(creature_def) = game_data.get_creature(visual_id) {
+        if let Some(creature_def) = game_data.get_creature(creature_id) {
             // Spawn creature visual
             let visual_entity = spawn_creature(
                 commands,
@@ -166,28 +166,28 @@ pub fn spawn_monster_with_visual(
 
             // Update CreatureVisual with correct ID
             commands.entity(visual_entity).insert(CreatureVisual {
-                creature_id: visual_id,
+                creature_id,
                 scale_override: None,
             });
 
             visual_entity
         } else {
-            // Visual ID is invalid, spawn fallback
+            // creature_id is invalid, spawn fallback
             warn!(
-                "Monster '{}' has invalid visual_id {}, using fallback",
-                monster.name, visual_id
+                "Monster '{}' has invalid creature_id {}, using fallback",
+                monster.name, creature_id
             );
             spawn_fallback_visual(commands, monster, materials, meshes, position)
         }
     } else {
-        // No visual_id, spawn fallback
+        // No creature_id, spawn fallback
         spawn_fallback_visual(commands, monster, materials, meshes, position)
     }
 }
 
 /// Spawns a fallback visual representation for a monster
 ///
-/// Used when a monster has no `visual_id` or the visual_id is invalid.
+/// Used when a monster has no `creature_id` or the creature_id is invalid.
 /// Creates a simple colored cube as a placeholder.
 ///
 /// # Arguments

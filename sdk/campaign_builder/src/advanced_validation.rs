@@ -779,7 +779,7 @@ mod tests {
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
-            visual_id: Some(id),
+            creature_id: Some(id),
         }
     }
 

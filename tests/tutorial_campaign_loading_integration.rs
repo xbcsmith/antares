@@ -162,7 +162,7 @@ fn test_monster_spawning_with_game_data_resource() {
 
     app.insert_resource(GameDataResource::new(game_data));
 
-    // Create test monster with visual_id
+    // Create test monster with creature_id
     let _monster = Monster::new(
         1,
         "Goblin".to_string(),
@@ -173,7 +173,7 @@ fn test_monster_spawning_with_game_data_resource() {
         LootTable::new(5, 15, 0, 1, 25),
     );
 
-    // Set visual_id (need to access field directly or use a builder)
+    // Set creature_id (need to access field directly or use a builder)
     // This test verifies the integration point exists
 
     app.update();
@@ -182,14 +182,14 @@ fn test_monster_spawning_with_game_data_resource() {
 }
 
 #[test]
-fn test_monster_spawning_with_missing_visual_id() {
+fn test_monster_spawning_with_missing_creature_id() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
 
     // Empty game data (no creatures)
     app.insert_resource(GameDataResource::new(GameData::new()));
 
-    // Create monster without visual_id
+    // Create monster without creature_id
     let _monster = Monster::new(
         1,
         "Orc".to_string(),
@@ -200,7 +200,7 @@ fn test_monster_spawning_with_missing_visual_id() {
         LootTable::new(10, 25, 0, 2, 30),
     );
 
-    // Monster without visual_id should fall back to placeholder
+    // Monster without creature_id should fall back to placeholder
     // Test that the system can handle this gracefully
 
     app.update();

@@ -282,7 +282,7 @@ pub enum AiBehavior {
 ///     is_undead: false,
 ///     magic_resistance: 0,
 ///     ai_behavior: AiBehavior::Random,
-///     visual_id: None,
+///     creature_id: None,
 ///     conditions: MonsterCondition::Normal,
 ///     active_conditions: Vec::new(),
 ///     has_acted: false,
@@ -328,9 +328,10 @@ pub struct Monster {
     /// AI behavior preference for the monster (affects target selection/decision making)
     #[serde(default)]
     pub ai_behavior: AiBehavior,
-    /// Optional visual creature ID for 3D representation
+    /// Optional creature asset binding — links this monster to a `CreatureDefinition`
+    /// in the creature registry.
     #[serde(default)]
-    pub visual_id: Option<CreatureId>,
+    pub creature_id: Option<CreatureId>,
     /// Current condition (paralyzed, asleep, etc.) - runtime state, defaults to Normal
     #[serde(default)]
     pub conditions: MonsterCondition,
@@ -370,7 +371,7 @@ impl Monster {
             is_undead: false,
             magic_resistance: 0,
             ai_behavior: AiBehavior::default(),
-            visual_id: None,
+            creature_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: Vec::new(),
             has_acted: false,
@@ -397,10 +398,10 @@ impl Monster {
     /// );
     ///
     /// monster.set_visual(42);
-    /// assert_eq!(monster.visual_id, Some(42));
+    /// assert_eq!(monster.creature_id, Some(42));
     /// ```
-    pub fn set_visual(&mut self, visual_id: CreatureId) {
-        self.visual_id = Some(visual_id);
+    pub fn set_visual(&mut self, creature_id: CreatureId) {
+        self.creature_id = Some(creature_id);
     }
 
     /// Returns true if the monster is alive
