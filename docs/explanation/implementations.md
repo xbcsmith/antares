@@ -1,5 +1,101 @@
 # Implementations
 
+## Food System — Phase 1: Core Item Foundation
+
+### Overview
+
+Phase 1 converts food from an abstract numeric counter into a proper inventory
+item by adding the `ConsumableEffect::IsFood(u8)` variant to the item type
+system and defining canonical food items in the game's data files. This is the
+foundation for Phases 2–4 which will rewrite the rest system, wire up merchant
+stock, and update the SDK editor.
+
+### Deliverables Checklist
+
+- [x] `ConsumableEffect::IsFood(u8)` variant added to `src/domain/items/types.rs`
+- [x] Base food items added to `data/items.ron` (ids 53 "Food Ration", 54 "Trail Ration")
+- [x] Food items added to `data/test_campaign/data/items.ron` (ids 108 "Food Ration", 109 "Trail Ration")
+- [x] Serialization / deserialization tests passed (10 new tests in `types.rs`)
+- [x] Exhaustive match sites updated (`combat/item_usage.rs`, `visual/item_mesh.rs`)
+
+### What Was Built
+
+#### `ConsumableEffect::IsFood(u8)` — `src/domain/items/types.rs`
+
+A new variant appended to the existing `ConsumableEffect` enum. The inner
+`u8` is the **ration count** supplied by a single unit of the item — almost
+always `1` for a standard ration, but higher values are valid for multi-serving
+items such as a "Trail Ration" (3 rations).
+
+The variant is `Copy + PartialEq + Serialize + Deserialize`, consistent with
+all other `ConsumableEffect` variants, so it round-trips cleanly through RON
+without any schema migration.
+
+#### `data/items.ron` additions
+
+Two food items were appended in a new `// ===== Food Items =====` section
+between the existing Consumables block and the Ammunition block:
+
+| id  | name         | effect    | base_cost | sell_cost | combat_usable |
+| --- | ------------ | --------- | --------- | --------- | ------------- |
+| 53  | Food Ration  | IsFood(1) | 2         | 1         | false         |
+| 54  | Trail Ration | IsFood(3) | 5         | 2         | false         |
+
+Food items are intentionally **not** combat-usable (`is_combat_usable: false`).
+
+#### `data/test_campaign/data/items.ron` additions
+
+Identical items at ids 108 / 109 (offset to avoid id collisions with the
+test-campaign's existing item numbering).
+
+#### Exhaustive match updates
+
+Two sites in the codebase perform exhaustive matches over `ConsumableEffect`
+and required new arms:
+
+- **`src/domain/combat/item_usage.rs`** — `execute_item_use_by_slot`: the
+  `IsFood(_)` arm returns `Err(ItemUseError::NotUsableInCombat)`. The
+  `validate_item_use_slot` gate already blocks food items via
+  `is_combat_usable: false`, so this arm is a safety net for callers that
+  bypass validation.
+- **`src/domain/visual/item_mesh.rs`** — consumable colour selector: food items
+  are assigned an earthy brown `[0.55, 0.35, 0.10, 1.0]` to visually
+  distinguish them from magical potions.
+
+#### Tests — `src/domain/items/types.rs` (10 new)
+
+| Test name                                     | What it verifies                                               |
+| --------------------------------------------- | -------------------------------------------------------------- |
+| `test_is_food_effect_equality`                | `IsFood(1) == IsFood(1)`, `IsFood(1) != IsFood(3)`             |
+| `test_is_food_ration_count_extracted`         | Pattern-match extracts inner `u8`                              |
+| `test_is_food_trail_pack_ration_count`        | Pack of 3 extracts correctly                                   |
+| `test_is_food_serializes_correctly`           | RON output contains `"IsFood"` and the count                   |
+| `test_is_food_deserializes_correctly`         | `"IsFood(1)"` parses to correct variant                        |
+| `test_is_food_roundtrip_serde`                | Full serialize → deserialize identity                          |
+| `test_consumable_data_with_is_food_roundtrip` | `ConsumableData` struct round-trips                            |
+| `test_food_ration_item_loads_from_ron_string` | `ItemDatabase::load_from_string` succeeds with Food Ration RON |
+| `test_food_ration_not_combat_usable`          | `is_combat_usable` is `false`                                  |
+| `test_is_food_no_required_proficiency`        | `required_proficiency()` returns `None`                        |
+
+### Architecture Compliance
+
+- Data structures match architecture.md Section 4.5 (`ConsumableData`, `ConsumableEffect`) **exactly**.
+- Type aliases (`ItemId`) used throughout; no raw `u32` introduced.
+- RON format used for all data files; no JSON/YAML.
+- Test fixtures live in `data/test_campaign/` — no reference to `campaigns/tutorial`.
+- SPDX headers present in all modified `.rs` files (pre-existing headers unchanged).
+
+### Quality Gates
+
+```text
+cargo fmt         → no output
+cargo check       → Finished 0 errors
+cargo clippy      → Finished 0 warnings
+cargo nextest run → 3242 passed; 0 failed; 8 skipped
+```
+
+---
+
 ## Combat Events — Missing Deliverables Gap Fill
 
 ### Overview
