@@ -1,5 +1,134 @@
 # Implementations
 
+## Terrain Quality Improvement — Phase 1: Terrain Texture Foundation
+
+### Overview
+
+Phase 1 of the terrain quality improvement plan introduces PBR texture support for ground
+tiles. Before this phase every terrain tile in `spawn_map` rendered with a flat
+`StandardMaterial { base_color: Color::srgb(...) }` — no textures, no `base_color_texture`.
+Phase 1 replaces those inline flat-colour materials with cached, textured `StandardMaterial`
+handles loaded at startup.
+
+The work is split into four parts:
+
+1. **Asset directory + placeholder textures** — nine 64×64 RGBA PNGs written to
+   `assets/textures/terrain/` by a new `generate_terrain_textures` binary.
+2. **`TerrainMaterialCache` resource** — a new Bevy `Resource` that stores one
+   `Handle<StandardMaterial>` per `TerrainType` variant.
+3. **`load_terrain_materials_system`** — a `Startup` system that loads each texture via
+   `AssetServer`, creates a `StandardMaterial` with correct `perceptual_roughness`, and
+   populates the cache.
+4. **`spawn_map` wiring** — `spawn_map` (and every call-site that forwards to it) now
+   accepts a `&TerrainMaterialCache` parameter and looks up the cached handle for each
+   tile instead of allocating a new material per tile. The existing `color_tint` logic
+   is preserved: tinted tiles still create one-off materials; the cached handle is never
+   mutated.
+
+### Deliverables Checklist
+
+- [x] `src/bin/generate_terrain_textures.rs` — binary that generates deterministic 64×64 RGBA PNGs with ±10 per-channel noise
+- [x] `assets/textures/terrain/ground.png` — placeholder ground texture (grey)
+- [x] `assets/textures/terrain/grass.png` — placeholder grass texture (green)
+- [x] `assets/textures/terrain/stone.png` — placeholder stone texture (light grey)
+- [x] `assets/textures/terrain/mountain.png` — placeholder mountain texture (dark grey)
+- [x] `assets/textures/terrain/dirt.png` — placeholder dirt texture (brown)
+- [x] `assets/textures/terrain/water.png` — placeholder water texture (blue)
+- [x] `assets/textures/terrain/lava.png` — placeholder lava texture (red-orange)
+- [x] `assets/textures/terrain/swamp.png` — placeholder swamp texture (olive-green)
+- [x] `assets/textures/terrain/forest_floor.png` — placeholder forest floor texture (dark green)
+- [x] `Cargo.toml` — `image = { version = "0.25", features = ["png"] }` dependency added
+- [x] `Cargo.toml` — `[[bin]] name = "generate_terrain_textures"` entry added
+- [x] `src/game/resources/terrain_material_cache.rs` — `TerrainMaterialCache` resource with `get`, `set`, `is_fully_loaded` impl and 11 unit tests
+- [x] `src/game/resources/mod.rs` — `pub mod terrain_material_cache` + `pub use terrain_material_cache::TerrainMaterialCache`
+- [x] `src/game/systems/terrain_materials.rs` — `load_terrain_materials_system`, `texture_path_for`, `roughness_for`, nine `TEXTURE_*` constants, 8 unit tests
+- [x] `src/game/systems/mod.rs` — `pub mod terrain_materials` added
+- [x] `src/game/systems/map.rs` — `MapRenderingPlugin::build` chains `load_terrain_materials_system` before `spawn_map_system`
+- [x] `src/game/systems/map.rs` — `spawn_map` accepts `terrain_cache: &TerrainMaterialCache` and uses it for Ground, Water, Grass, Mountain, and all other terrain types via the catch-all fallback
+- [x] `src/game/systems/map.rs` — `spawn_map_system`, `handle_door_opened`, `spawn_map_markers` each accept `Option<Res<TerrainMaterialCache>>` so existing tests that do not insert the resource continue to work
+- [x] All four quality gates passed: `cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run` (3290 passed, 8 skipped)
+
+### What Was Built
+
+#### `src/bin/generate_terrain_textures.rs` — Texture Generator Binary
+
+A standalone binary that creates all nine placeholder terrain PNGs. Key design choices:
+
+- **Deterministic output**: A custom `xorshift64` PRNG is seeded with a unique `u64` per
+  texture so the output is bit-identical across runs (reproducible builds). No external
+  randomness crate is needed.
+- **Correct unsigned modulo**: The offset calculation uses `next % range` on `u64` before
+  casting to `i32`, avoiding the negative-remainder bug that signed modulo would introduce.
+- **Clamped channels**: `clamp_channel(i32) -> u8` saturates at `[0, 255]` so extreme base
+  values (0 or 255) near the boundary never overflow.
+- **Base colours from spec**: Each `TerrainTextureSpec` carries the RGBA base values from
+  the implementation plan Section 1.1 table exactly.
+
+The binary is run once at development time (`cargo run --bin generate_terrain_textures`) and
+the resulting PNGs are committed to the repository. Bevy's `AssetServer` then serves them at
+runtime without any further build step.
+
+#### `src/game/resources/terrain_material_cache.rs` — `TerrainMaterialCache`
+
+A simple `#[derive(Resource, Default)]` struct with nine `Option<Handle<StandardMaterial>>`
+fields, one per `TerrainType` variant. The three impl methods follow the pattern established
+by the plan:
+
+| Method                 | Behaviour                                                                  |
+| ---------------------- | -------------------------------------------------------------------------- |
+| `get(terrain)`         | Returns `Option<&Handle<StandardMaterial>>` via a `match` on `TerrainType` |
+| `set(terrain, handle)` | Inserts / overwrites the handle for the given variant                      |
+| `is_fully_loaded()`    | Returns `true` only when all nine fields are `Some`                        |
+
+`TerrainType::Forest` maps to the `forest_floor` field (the forest floor texture is used for
+the ground plane under forest tiles; tree meshes are spawned separately on top).
+
+#### `src/game/systems/terrain_materials.rs` — Startup System
+
+`load_terrain_materials_system` iterates all nine `TerrainType` variants in a single loop,
+calling `asset_server.load::<Image>(texture_path_for(terrain))` and then
+`materials.add(StandardMaterial { base_color_texture: Some(handle), perceptual_roughness: roughness_for(terrain), ..default() })`.
+The finished cache is inserted with `commands.insert_resource(cache)`.
+
+The nine `TEXTURE_*` path constants are `pub` so other systems (e.g. future Phase 2 grass
+work) can reference them without hard-coding strings.
+
+`roughness_for` encodes the per-terrain values from the plan (Water = 0.10 for reflective
+appearance; Ground = 0.95 for rough matte; Stone = 0.75, etc.).
+
+#### `src/game/systems/map.rs` — `spawn_map` Wiring
+
+Three changes were made to `map.rs`:
+
+1. **Startup ordering**: The `Startup` schedule now chains
+   `load_terrain_materials_system → register_sprite_sheets_system → spawn_map_system`
+   so the cache is populated before the first map is rendered.
+
+2. **Cache lookups in `spawn_map`**: The three pre-built materials (`floor_material`,
+   `water_material`, `grass_material`) are now resolved from the cache with an
+   `unwrap_or_else` fallback to a flat-colour material. The Mountain branch and the
+   wildcard `_` branch (Ground, Stone, Dirt, Lava, Swamp) similarly look up the cache.
+   The `color_tint` logic is untouched: tinted tiles always produce a one-off material.
+
+3. **`Option<Res<TerrainMaterialCache>>` in Update systems**: `handle_door_opened` and
+   `spawn_map_markers` use `Option<Res<TerrainMaterialCache>>` so that test apps that add
+   `MapManagerPlugin` without inserting the resource do not panic. When the resource is
+   absent a local `TerrainMaterialCache::default()` is used as a transparent fallback (all
+   fields `None` → the flat-colour fallback path in `spawn_map` activates automatically).
+
+### Architecture Compliance
+
+- [x] `TerrainMaterialCache` derives `Resource` and `Default` as required.
+- [x] `TerrainType` variants used exactly as defined in `src/domain/world/types.rs` — no new variants introduced.
+- [x] RON data files untouched — no game data was changed.
+- [x] `color_tint` behaviour preserved — tinted tiles still create one-off materials.
+- [x] `TEXTURE_*` constants defined at module level — no magic strings in system logic.
+- [x] All roughness values match the plan table (Section 1.3) exactly.
+- [x] SPDX headers added to all new `.rs` files (`2026 Brett Smith`).
+- [x] `///` doc comments on every public item.
+
+---
+
 ## Food System — Phase 4: UI and SDK Editor Updates
 
 ### Overview
@@ -1871,6 +2000,7 @@ Validation run completed successfully:
 - `cargo check --all-targets --all-features`
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo nextest run --all-features` -> `3162 passed, 8 skipped`
+
 ## Combat Events — Missing Deliverables Gap Fill
 
 ### Overview

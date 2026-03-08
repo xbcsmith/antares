@@ -8,6 +8,7 @@ use crate::game::components::creature::CreatureVisual;
 use crate::game::components::sprite::{ActorType, AnimatedSprite, TileSprite};
 use crate::game::resources::sprite_assets::SpriteAssets;
 use crate::game::resources::GlobalState;
+use crate::game::resources::TerrainMaterialCache;
 use crate::game::systems::actor::spawn_actor_sprite;
 use crate::game::systems::creature_spawning::spawn_creature;
 use crate::game::systems::procedural_meshes;
@@ -208,8 +209,14 @@ impl Plugin for MapRenderingPlugin {
             .init_resource::<super::advanced_grass::GrassInstanceConfig>()
             .add_systems(
                 Startup,
-                // Ensure registration happens before the map spawn system runs
-                (register_sprite_sheets_system, spawn_map_system),
+                // Load terrain textures/materials before map spawn runs so the
+                // cache is populated when spawn_map_system executes.
+                (
+                    super::terrain_materials::load_terrain_materials_system,
+                    register_sprite_sheets_system,
+                    spawn_map_system,
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
@@ -239,6 +246,7 @@ fn spawn_map_system(
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
     quality_settings: Res<crate::game::resources::GrassQualitySettings>,
+    terrain_cache: Res<TerrainMaterialCache>,
     mut cache: Local<super::procedural_meshes::ProceduralMeshCache>,
 ) {
     spawn_map(
@@ -250,6 +258,7 @@ fn spawn_map_system(
         global_state,
         content,
         quality_settings,
+        &terrain_cache,
         &mut cache,
     );
 }
@@ -310,6 +319,7 @@ fn handle_door_opened(
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
     quality_settings: Res<crate::game::resources::GrassQualitySettings>,
+    terrain_cache: Option<Res<TerrainMaterialCache>>,
 ) {
     // Only refresh if a door was actually opened
     if door_messages.read().count() == 0 {
@@ -323,6 +333,11 @@ fn handle_door_opened(
         commands.entity(entity).despawn();
     }
 
+    // Use the cached resource when available; fall back to an empty default so
+    // tests that don't insert TerrainMaterialCache still work correctly.
+    let default_cache = TerrainMaterialCache::default();
+    let cache_ref: &TerrainMaterialCache = terrain_cache.as_deref().unwrap_or(&default_cache);
+
     // Respawn the map with updated door states
     let mut procedural_cache = super::procedural_meshes::ProceduralMeshCache::default();
     spawn_map(
@@ -334,6 +349,7 @@ fn handle_door_opened(
         global_state,
         content,
         quality_settings,
+        cache_ref,
         &mut procedural_cache,
     );
 }
@@ -478,6 +494,7 @@ fn spawn_map_markers(
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
     quality_settings: Res<crate::game::resources::GrassQualitySettings>,
+    terrain_cache: Option<Res<TerrainMaterialCache>>,
     query_existing: Query<(Entity, &MapEntity)>,
     mut last_map: Local<Option<types::MapId>>,
 ) {
@@ -528,6 +545,11 @@ fn spawn_map_markers(
 
     // Spawn visuals (tiles + markers) for the new map (if it exists)
     if global_state.0.world.get_current_map().is_some() {
+        // Use the cached resource when available; fall back to an empty default
+        // so tests that don't insert TerrainMaterialCache still work correctly.
+        let default_cache = TerrainMaterialCache::default();
+        let cache_ref: &TerrainMaterialCache = terrain_cache.as_deref().unwrap_or(&default_cache);
+
         let mut procedural_cache = super::procedural_meshes::ProceduralMeshCache::default();
         spawn_map(
             commands,
@@ -538,6 +560,7 @@ fn spawn_map_markers(
             global_state,
             content,
             quality_settings,
+            cache_ref,
             &mut procedural_cache,
         );
     } else {
@@ -590,6 +613,7 @@ fn spawn_map(
     global_state: Res<crate::game::resources::GlobalState>,
     content: Res<crate::application::resources::GameContent>,
     quality_settings: Res<crate::game::resources::GrassQualitySettings>,
+    terrain_cache: &TerrainMaterialCache,
     procedural_cache: &mut super::procedural_meshes::ProceduralMeshCache,
 ) {
     debug!("spawn_map system called");
@@ -624,23 +648,41 @@ fn spawn_map(
         let _forest_color = Color::srgb(forest_rgb.0, forest_rgb.1, forest_rgb.2);
         let grass_color = Color::srgb(grass_rgb.0, grass_rgb.1, grass_rgb.2);
 
-        let floor_material = materials.add(StandardMaterial {
-            base_color: floor_color,
-            perceptual_roughness: 0.9,
-            ..default()
-        });
+        // Look up cached textured materials, falling back to flat-colour
+        // materials if the cache is not yet populated (e.g. in tests that do
+        // not run the terrain-materials startup system).
+        let floor_material = terrain_cache
+            .get(world::TerrainType::Ground)
+            .cloned()
+            .unwrap_or_else(|| {
+                materials.add(StandardMaterial {
+                    base_color: floor_color,
+                    perceptual_roughness: 0.95,
+                    ..default()
+                })
+            });
 
-        let water_material = materials.add(StandardMaterial {
-            base_color: water_color, // Blue
-            perceptual_roughness: 0.3,
-            ..default()
-        });
+        let water_material = terrain_cache
+            .get(world::TerrainType::Water)
+            .cloned()
+            .unwrap_or_else(|| {
+                materials.add(StandardMaterial {
+                    base_color: water_color,
+                    perceptual_roughness: 0.10,
+                    ..default()
+                })
+            });
 
-        let grass_material = materials.add(StandardMaterial {
-            base_color: grass_color, // Darker green floor
-            perceptual_roughness: 0.9,
-            ..default()
-        });
+        let grass_material = terrain_cache
+            .get(world::TerrainType::Grass)
+            .cloned()
+            .unwrap_or_else(|| {
+                materials.add(StandardMaterial {
+                    base_color: grass_color,
+                    perceptual_roughness: 0.90,
+                    ..default()
+                })
+            });
 
         // Standard meshes for flat terrain (no height)
         let floor_mesh = meshes.add(Plane3d::default().mesh().size(1.0, 1.0));
@@ -682,21 +724,32 @@ fn spawn_map(
                             );
                             let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
 
-                            // Apply color tint if specified
-                            let mut base_color = mountain_color;
-                            if let Some((r, g, b)) = tile.visual.color_tint {
-                                base_color = Color::srgb(
+                            // Apply color tint if specified.  When tinting is
+                            // requested we create a one-off material so the
+                            // cached handle is never mutated.
+                            let material = if let Some((r, g, b)) = tile.visual.color_tint {
+                                let tinted = Color::srgb(
                                     mountain_rgb.0 * r,
                                     mountain_rgb.1 * g,
                                     mountain_rgb.2 * b,
                                 );
-                            }
-
-                            let material = materials.add(StandardMaterial {
-                                base_color,
-                                perceptual_roughness: 0.8,
-                                ..default()
-                            });
+                                materials.add(StandardMaterial {
+                                    base_color: tinted,
+                                    perceptual_roughness: 0.85,
+                                    ..default()
+                                })
+                            } else {
+                                terrain_cache
+                                    .get(world::TerrainType::Mountain)
+                                    .cloned()
+                                    .unwrap_or_else(|| {
+                                        materials.add(StandardMaterial {
+                                            base_color: mountain_color,
+                                            perceptual_roughness: 0.85,
+                                            ..default()
+                                        })
+                                    })
+                            };
 
                             // Apply rotation if specified
                             let rotation = bevy::prelude::Quat::from_rotation_y(
@@ -831,10 +884,18 @@ fn spawn_map(
                             );
                         }
                         _ => {
-                            // Spawn regular floor for Ground, Stone, etc.
+                            // Spawn regular floor for Ground, Stone, Dirt, Lava,
+                            // Swamp and any future terrain types.  Use the cached
+                            // textured material when available; fall back to the
+                            // flat-colour floor material otherwise.
+                            let tile_material = terrain_cache
+                                .get(tile.terrain)
+                                .cloned()
+                                .unwrap_or_else(|| floor_material.clone());
+
                             commands.spawn((
                                 Mesh3d(floor_mesh.clone()),
-                                MeshMaterial3d(floor_material.clone()),
+                                MeshMaterial3d(tile_material),
                                 Transform::from_xyz(
                                     x as f32 + TILE_CENTER_OFFSET,
                                     0.0,
