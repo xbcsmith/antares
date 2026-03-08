@@ -1,5 +1,148 @@
 # Implementations
 
+## Food System — Phase 3: Merchant and Innkeeper Integration
+
+### Overview
+
+Phase 3 of the food system migration makes food purchasable in the world by updating merchant
+and innkeeper stock templates to include Food Ration and Trail Ration items. Before this phase,
+the party could start with food rations (granted during character initialization in Phase 2) but
+had no way to replenish them — merchants had no food in their inventories and innkeepers sold
+no provisions. Phase 3 closes that loop: every general-goods merchant and innkeeper now stocks
+food so the player can always buy rations to enable resting.
+
+No Rust code changes were required — the entire work is data-driven, with new and updated RON
+stock template files plus integration tests to verify the templates load and populate runtime
+merchant stock correctly.
+
+### Deliverables Checklist
+
+- [x] Core `data/npc_stock_templates.ron` — `general_store_basic` updated with Food Ration (53) and Trail Ration (54)
+- [x] Core `data/npc_stock_templates.ron` — new `general_goods` template alias added with food items
+- [x] Core `data/npc_stock_templates.ron` — new `innkeeper_basic` template added with food items and markup prices
+- [x] Core `data/npc_stock_templates.ron` — `magic_item_pool / magic_slot_count / magic_refresh_days` fields added to all templates (previously missing)
+- [x] Test campaign `data/test_campaign/data/npc_stock_templates.ron` — `tutorial_merchant_stock` updated with Food Ration (108) and Trail Ration (109)
+- [x] Test campaign `data/test_campaign/data/npc_stock_templates.ron` — new `tutorial_general_store` template added
+- [x] Test campaign `data/test_campaign/data/npc_stock_templates.ron` — new `tutorial_innkeeper_stock` template added with override prices
+- [x] Tutorial campaign `campaigns/tutorial/data/items.ron` — Food Ration (id 111, IsFood 1) and Trail Ration (id 112, IsFood 3) added
+- [x] Tutorial campaign `campaigns/tutorial/data/npc_stock_templates.ron` — filled with `town_merchant_basic` and `mountain_pass_merchant` templates (previously empty `[]`)
+- [x] 7 new integration tests in `src/sdk/database.rs` — all passing
+
+### What Was Built
+
+#### `data/npc_stock_templates.ron` — core template updates
+
+Three templates were modified or added:
+
+**`general_store_basic`** (modified): Food Ration (item_id 53, quantity 20) and Trail Ration
+(item_id 54, quantity 10) added to the entries list. The `magic_item_pool`, `magic_slot_count`,
+and `magic_refresh_days` fields were also added to this and all other templates in the file,
+which were previously omitted (they have `#[serde(default)]` in Rust so they round-tripped
+silently, but making them explicit improves data legibility).
+
+**`general_goods`** (new): A named alias for general merchants who primarily sell provisions
+rather than weapons. Campaign authors can reference `"general_goods"` in `npcs.ron` without
+coupling to the internal `general_store_basic` name. Stocks the same selection including food.
+
+**`innkeeper_basic`** (new): Innkeepers provide rest services but also sell food provisions.
+This template stocks only food items (no weapons or potions) with a slight price markup via
+`override_price` to reflect the innkeeper's convenience premium:
+
+- Food Ration (item_id 53): quantity 30, override_price Some(3) (base cost is 2)
+- Trail Ration (item_id 54): quantity 15, override_price Some(6) (base cost is 5)
+
+#### `data/test_campaign/data/npc_stock_templates.ron` — test fixture updates
+
+**`tutorial_merchant_stock`** (modified): Food Ration (item_id 108, quantity 10) and Trail
+Ration (item_id 109, quantity 5) added. These item IDs match the test campaign's `items.ron`
+where food was placed at ids 108 and 109 during Phase 1.
+
+**`tutorial_general_store`** (new): A self-contained test fixture template used by the Phase 3
+acceptance tests. Stocks Healing Potion (50), Food Ration (108, qty 20), Trail Ration (109,
+qty 10), Arrows (60), and Crossbow Bolts (61). The comment in the file marks this as the
+canonical fixture for Phase 3 merchant integration tests.
+
+**`tutorial_innkeeper_stock`** (new): Mirrors `innkeeper_basic` but uses test-campaign item IDs
+(108, 109) and carries `override_price` values to allow tests to verify markup pricing is
+preserved through the template → `MerchantStock` initialization path.
+
+#### `campaigns/tutorial/data/items.ron` — food item additions
+
+Items 108–110 were already occupied in the tutorial campaign (Healing Scroll, Cure Disease
+Potion, Resurrection Scroll), so food items were appended with the next available IDs:
+
+- **id 111 — Food Ration**: `ConsumableEffect::IsFood(1)`, base_cost 2, sell_cost 1, max_charges 1
+- **id 112 — Trail Ration**: `ConsumableEffect::IsFood(3)`, base_cost 5, sell_cost 2, max_charges 1
+
+Both items are non-combat-usable (`is_combat_usable: false`) consistent with Phase 1 definitions.
+
+#### `campaigns/tutorial/data/npc_stock_templates.ron` — tutorial campaign templates
+
+This file was previously empty (`[]`), meaning the two merchants in `npcs.ron` that reference
+`stock_template: Some("town_merchant_basic")` and `stock_template: Some("mountain_pass_merchant")`
+would silently initialize with no stock. Both templates are now defined:
+
+**`town_merchant_basic`**: Full general-goods merchant for the starting town. Stocks Club (1),
+Dagger (2), Short Sword (3), Mace (5), Leather Armor (20), Wooden Shield (23), Healing Potion (50),
+Cure Poison Potion (52), Arrows (60), Crossbow Bolts (61), and food: Food Ration (111, qty 20)
+and Trail Ration (112, qty 10). Magic rotation: 2 slots from pool [10, 11, 12].
+
+**`mountain_pass_merchant`**: Expanded merchant for the mid-game area. Broader weapon and armor
+selection (adds Long Sword (4), Battle Axe (6), Chain Mail (21), Magic Potion (51)). Food stocked
+at slightly lower quantities (qty 15 / 8) reflecting the party being better provisioned by that
+point. Same magic rotation pool.
+
+### Tests
+
+Seven new integration tests were added to `src/sdk/database.rs`:
+
+| Test                                                                | What it verifies                                                                                                                                                          |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_general_store_basic_contains_food_rations`                    | `general_store_basic` in core data has item_id 53 and 54 with qty > 0                                                                                                     |
+| `test_innkeeper_basic_template_contains_food_rations`               | `innkeeper_basic` in core data has item_id 53 and 54; food ration qty >= 10                                                                                               |
+| `test_general_goods_template_contains_food_rations`                 | `general_goods` alias in core data has item_id 53 and 54                                                                                                                  |
+| `test_test_campaign_merchant_stock_contains_food_rations`           | `tutorial_merchant_stock` in test campaign has item_id 108 and 109 with qty > 0                                                                                           |
+| `test_test_campaign_general_store_template_contains_food_rations`   | `tutorial_general_store` in test campaign has item_id 108 and 109 with qty > 0                                                                                            |
+| `test_test_campaign_innkeeper_stock_template_contains_food_rations` | `tutorial_innkeeper_stock` has item*id 108 and 109 with `override_price: Some(*)`                                                                                         |
+| `test_stock_template_populates_merchant_runtime_with_food`          | End-to-end: loads `tutorial_general_store`, calls `NpcRuntimeState::initialize_stock_from_template`, asserts resulting `MerchantStock` contains food entries with qty > 0 |
+
+All tests use `data/test_campaign` fixtures, not `campaigns/tutorial`, in compliance with
+Implementation Rule 5.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 — no new types introduced; all changes are data-only
+- [x] RON format used for all data files
+- [x] `ItemId` type aliases used consistently in `TemplateStockEntry::item_id`
+- [x] No magic numbers hardcoded — item IDs documented with inline comments
+- [x] Test data lives in `data/test_campaign`, never in `campaigns/tutorial`
+- [x] `campaigns/tutorial` modified only to populate the previously-empty `npc_stock_templates.ron` (legitimate: runtime game binary default campaign data)
+- [x] No architectural deviations
+
+### Quality Gates
+
+```text
+cargo fmt --all         → clean (no output)
+cargo check             → Finished, 0 errors
+cargo clippy -- -D warnings → Finished, 0 warnings
+cargo nextest run       → 3254 passed, 8 skipped, 0 failed
+```
+
+Phase 3 acceptance test run (filtered):
+
+```text
+11 tests run: 11 passed, 3251 skipped
+  PASS antares sdk::database::tests::test_general_store_basic_contains_food_rations
+  PASS antares sdk::database::tests::test_innkeeper_basic_template_contains_food_rations
+  PASS antares sdk::database::tests::test_general_goods_template_contains_food_rations
+  PASS antares sdk::database::tests::test_test_campaign_merchant_stock_contains_food_rations
+  PASS antares sdk::database::tests::test_test_campaign_general_store_template_contains_food_rations
+  PASS antares sdk::database::tests::test_test_campaign_innkeeper_stock_template_contains_food_rations
+  PASS antares sdk::database::tests::test_stock_template_populates_merchant_runtime_with_food
+```
+
+---
+
 ## Food System — Phase 2: Rest System Migration
 
 ### Overview
