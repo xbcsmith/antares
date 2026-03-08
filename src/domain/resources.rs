@@ -6,11 +6,26 @@
 //! This module implements party-wide resource management including food
 //! consumption, light tracking, and rest/recovery mechanics.
 //!
+//! # Food System (Phase 2)
+//!
+//! As of Phase 2, food is tracked as inventory items (e.g. "Food Ration") carrying
+//! `ConsumableEffect::IsFood(n)`, not as the legacy `Character.food` numeric counter.
+//!
+//! - [`count_food_in_party`] — counts total ration-units across all inventories.
+//! - [`consume_food`] — removes `IsFood` items from inventories, sharing across members.
+//! - [`check_starvation`] — returns `true` when no `IsFood` items remain.
+//! - [`food_needed_to_rest`] — 1 ration per living member (unchanged semantics).
+//!
+//! The `ItemDatabase` is passed into food functions so that item IDs can be resolved
+//! to their `ConsumableEffect` without coupling the resource layer to specific IDs.
+//!
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 5.4 for complete specifications.
 
 use crate::domain::character::Party;
+use crate::domain::items::database::ItemDatabase;
+use crate::domain::items::types::{ConsumableEffect, ItemType};
 use thiserror::Error;
 
 // ===== Error Types =====
@@ -67,12 +82,14 @@ pub const TIME_COST_COMBAT_ROUND_MINUTES: u32 = 5;
 /// Minutes of game time consumed when transitioning between maps (same-world).
 pub const TIME_COST_MAP_TRANSITION_MINUTES: u32 = 30;
 
-/// Food consumed per party member for a full rest period.
+/// Food ration-units consumed per party member for a full rest period.
 ///
-/// Before a rest begins the system checks that `party.food >= party.members.len()`.
-/// If the check passes, exactly `party.members.len() * FOOD_PER_REST` rations are
-/// consumed upfront and the party sleeps undisturbed.  If it fails, rest is
-/// refused entirely — no food is consumed and no HP/SP is restored.
+/// Before a rest begins the system calls [`count_food_in_party`] to verify that
+/// the total `IsFood` ration-units across all character inventories is at least
+/// `party.members.len() * FOOD_PER_REST`.  If the check passes, exactly
+/// `party.members.len() * FOOD_PER_REST` ration-units are consumed from
+/// inventories upfront and the party sleeps undisturbed.  If it fails, rest is
+/// refused entirely — no items are consumed and no HP/SP is restored.
 pub const FOOD_PER_REST: u32 = 1;
 
 /// Food consumption per day of travel
@@ -194,76 +211,233 @@ impl RestDuration {
 
 // ===== Food Management =====
 
-/// Consumes food for the party
+/// Returns the total number of ration-units available across all party member
+/// inventories by summing the `IsFood(n)` values of every food item found.
 ///
-/// Each party member consumes food. If there isn't enough food for
-/// everyone, consumes what's available and returns an error.
+/// Each `InventorySlot` is resolved against `item_db` to retrieve its
+/// `ConsumableEffect`.  Items that are not found in the database (e.g. during
+/// tests using a sparse DB) are silently skipped.
 ///
 /// # Arguments
 ///
-/// * `party` - The party consuming food
-/// * `amount_per_member` - Amount of food each member consumes
-///
-/// # Returns
-///
-/// Returns `Ok(total_consumed)` with the amount consumed, or an error
-/// if there wasn't enough food.
+/// * `party`   - The party whose inventories are inspected.
+/// * `item_db` - The item database used to resolve item IDs to their effects.
 ///
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::{Party, Character, Sex, Alignment};
+/// use antares::domain::character::{Party, Character, Sex, Alignment, Inventory, InventorySlot};
+/// use antares::domain::items::ItemDatabase;
+/// use antares::domain::resources::count_food_in_party;
+///
+/// let item_db = ItemDatabase::new();
+/// let party = Party::new();
+/// assert_eq!(count_food_in_party(&party, &item_db), 0);
+/// ```
+pub fn count_food_in_party(party: &Party, item_db: &ItemDatabase) -> u32 {
+    party
+        .members
+        .iter()
+        .flat_map(|c| c.inventory.items.iter())
+        .fold(0u32, |acc, slot| {
+            if let Some(item) = item_db.get_item(slot.item_id) {
+                if let ItemType::Consumable(ref data) = item.item_type {
+                    if let ConsumableEffect::IsFood(rations) = data.effect {
+                        return acc + rations as u32;
+                    }
+                }
+            }
+            acc
+        })
+}
+
+/// Consumes food for the party by removing `IsFood` items from character
+/// inventories.
+///
+/// The function needs `total_needed = amount_per_member × members.len()` ration
+/// units.  It iterates over every party member's inventory (in member order,
+/// slot order) and removes items one slot at a time until the requirement is
+/// satisfied.  If one member has no food, another member's surplus is used
+/// (pooling / sharing).
+///
+/// # Arguments
+///
+/// * `party`            - The party whose inventories are modified.
+/// * `item_db`          - Item database for resolving `ConsumableEffect`.
+/// * `amount_per_member` - Number of ration units required per member.
+///
+/// # Returns
+///
+/// Returns `Ok(total_consumed)` — the total ration units removed from
+/// inventories — on success.
+///
+/// # Errors
+///
+/// * [`ResourceError::NoFoodRemaining`] — not enough `IsFood` units across all
+///   inventories.  No items are removed when this error is returned.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Party, Character, Sex, Alignment, InventorySlot};
+/// use antares::domain::items::{ItemDatabase, Item, ItemType};
+/// use antares::domain::items::types::{ConsumableData, ConsumableEffect};
 /// use antares::domain::resources::consume_food;
 ///
+/// // Build a minimal item database with one food item (id=1, IsFood(1)).
+/// let mut item_db = ItemDatabase::new();
+/// let food_item = Item {
+///     id: 1,
+///     name: "Food Ration".to_string(),
+///     item_type: ItemType::Consumable(ConsumableData {
+///         effect: ConsumableEffect::IsFood(1),
+///         is_combat_usable: false,
+///     }),
+///     base_cost: 5,
+///     sell_cost: 2,
+///     alignment_restriction: None,
+///     constant_bonus: None,
+///     temporary_bonus: None,
+///     spell_effect: None,
+///     max_charges: 0,
+///     is_cursed: false,
+///     icon_path: None,
+///     tags: vec![],
+///     mesh_descriptor_override: None,
+/// };
+/// item_db.add_item(food_item).unwrap();
+///
 /// let mut party = Party::new();
-/// let character = Character::new(
+/// let mut hero = Character::new(
 ///     "Hero".to_string(),
 ///     "human".to_string(),
 ///     "knight".to_string(),
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
-/// party.add_member(character).unwrap();
-/// party.food = 10;
+/// // Give hero 3 food rations (item id=1).
+/// hero.inventory.add_item(1, 0).unwrap();
+/// hero.inventory.add_item(1, 0).unwrap();
+/// hero.inventory.add_item(1, 0).unwrap();
+/// party.add_member(hero).unwrap();
 ///
-/// let consumed = consume_food(&mut party, 1).unwrap();
+/// let consumed = consume_food(&mut party, &item_db, 1).unwrap();
 /// assert_eq!(consumed, 1);
-/// assert_eq!(party.food, 9);
+/// assert_eq!(party.members[0].inventory.items.len(), 2);
 /// ```
-pub fn consume_food(party: &mut Party, amount_per_member: u32) -> Result<u32, ResourceError> {
+pub fn consume_food(
+    party: &mut Party,
+    item_db: &ItemDatabase,
+    amount_per_member: u32,
+) -> Result<u32, ResourceError> {
     let total_needed = amount_per_member * party.members.len() as u32;
 
-    if party.food < total_needed {
-        // Consume what we have and return error
-        let _consumed = party.food;
-        party.food = 0;
+    // Pre-check: count total available rations without modifying anything.
+    let available = count_food_in_party(party, item_db);
+    if available < total_needed {
         return Err(ResourceError::NoFoodRemaining);
     }
 
-    party.food = party.food.saturating_sub(total_needed);
-    Ok(total_needed)
+    // ── Pass 1: member-first consumption ──────────────────────────────────
+    // Each member pays `amount_per_member` ration-units from their own
+    // inventory.  We track `total_pass1_consumed` — the sum of ration values
+    // of all items actually removed.  A multi-ration item (e.g. Trail Ration,
+    // IsFood(3)) may provide more units than the member individually needed;
+    // that overpayment counts toward other members' needs, which is accounted
+    // for when computing the shortfall after this pass.
+    let mut total_pass1_consumed: u32 = 0;
+
+    for character in &mut party.members {
+        let mut needed = amount_per_member;
+        let mut slot_index = 0;
+
+        while slot_index < character.inventory.items.len() && needed > 0 {
+            let item_id = character.inventory.items[slot_index].item_id;
+            let ration_value = ration_value_of(item_id, item_db);
+
+            if ration_value > 0 {
+                character.inventory.remove_item(slot_index);
+                total_pass1_consumed += ration_value;
+                needed = needed.saturating_sub(ration_value);
+                // Do NOT advance slot_index — removal shifts items down.
+            } else {
+                slot_index += 1;
+            }
+        }
+    }
+
+    // The net shortfall after Pass 1 accounts for overpayments: if a
+    // multi-ration item removed by one member covered more than that member's
+    // individual need, those extra units offset other members' gaps.
+    let shortfall = total_needed.saturating_sub(total_pass1_consumed);
+
+    // ── Pass 2: pool surplus to cover shortfalls ───────────────────────────
+    // If some members had no food of their own, consume from whoever still has
+    // food items (the party pools its surplus).
+    let mut total_pass2_consumed: u32 = 0;
+    if shortfall > 0 {
+        let mut remaining_shortfall = shortfall;
+        'pool: for character in &mut party.members {
+            let mut slot_index = 0;
+            while slot_index < character.inventory.items.len() && remaining_shortfall > 0 {
+                let item_id = character.inventory.items[slot_index].item_id;
+                let ration_value = ration_value_of(item_id, item_db);
+
+                if ration_value > 0 {
+                    character.inventory.remove_item(slot_index);
+                    total_pass2_consumed += ration_value;
+                    remaining_shortfall = remaining_shortfall.saturating_sub(ration_value);
+                    if remaining_shortfall == 0 {
+                        break 'pool;
+                    }
+                    // Do NOT advance slot_index — removal shifts items down.
+                } else {
+                    slot_index += 1;
+                }
+            }
+        }
+    }
+
+    Ok(total_pass1_consumed + total_pass2_consumed)
 }
 
-/// Checks if the party is starving
+/// Returns the ration value of the item with `item_id` in `item_db`, or 0
+/// if the item is not found or is not an `IsFood` consumable.
+fn ration_value_of(item_id: crate::domain::types::ItemId, item_db: &ItemDatabase) -> u32 {
+    if let Some(item) = item_db.get_item(item_id) {
+        if let ItemType::Consumable(ref data) = item.item_type {
+            if let ConsumableEffect::IsFood(rations) = data.effect {
+                return rations as u32;
+            }
+        }
+    }
+    0
+}
+
+/// Checks if the party is starving (no `IsFood` items in any inventory).
 ///
-/// Returns true if the party has no food remaining.
+/// Returns `true` when the total ration count across all party member inventories
+/// is zero.
+///
+/// # Arguments
+///
+/// * `party`   - The party to check.
+/// * `item_db` - Item database for resolving `ConsumableEffect`.
 ///
 /// # Examples
 ///
 /// ```
 /// use antares::domain::character::Party;
+/// use antares::domain::items::ItemDatabase;
 /// use antares::domain::resources::check_starvation;
 ///
-/// let mut party = Party::new();
-/// party.food = 0;
-///
-/// assert!(check_starvation(&party));
-///
-/// party.food = 5;
-/// assert!(!check_starvation(&party));
+/// let item_db = ItemDatabase::new();
+/// let party = Party::new();
+/// // Empty party with no food items is considered starving.
+/// assert!(check_starvation(&party, &item_db));
 /// ```
-pub fn check_starvation(party: &Party) -> bool {
-    party.food == 0
+pub fn check_starvation(party: &Party, item_db: &ItemDatabase) -> bool {
+    count_food_in_party(party, item_db) == 0
 }
 
 // ===== Light Management =====
@@ -328,7 +502,7 @@ pub fn is_dark(party: &Party) -> bool {
 
 // ===== Rest and Recovery =====
 
-/// Returns the number of food rations the party needs to begin a rest.
+/// Returns the number of food ration-units the party needs to begin a rest.
 ///
 /// The rule is **1 ration per living party member**.  This must be satisfied
 /// in full before rest begins; partial food is never consumed.
@@ -408,10 +582,35 @@ pub fn food_needed_to_rest(party: &Party) -> u32 {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::{Party, Character, Sex, Alignment};
+/// use antares::domain::character::{Party, Character, Sex, Alignment, InventorySlot};
+/// use antares::domain::items::{ItemDatabase, Item, ItemType};
+/// use antares::domain::items::types::{ConsumableData, ConsumableEffect};
 /// use antares::domain::resources::{
 ///     food_needed_to_rest, consume_food, rest_party_hour, RestDuration,
 /// };
+///
+/// // Build item DB with food ration (id=1).
+/// let mut item_db = ItemDatabase::new();
+/// let food_item = Item {
+///     id: 1,
+///     name: "Food Ration".to_string(),
+///     item_type: ItemType::Consumable(ConsumableData {
+///         effect: ConsumableEffect::IsFood(1),
+///         is_combat_usable: false,
+///     }),
+///     base_cost: 5,
+///     sell_cost: 2,
+///     alignment_restriction: None,
+///     constant_bonus: None,
+///     temporary_bonus: None,
+///     spell_effect: None,
+///     max_charges: 0,
+///     is_cursed: false,
+///     icon_path: None,
+///     tags: vec![],
+///     mesh_descriptor_override: None,
+/// };
+/// item_db.add_item(food_item).unwrap();
 ///
 /// let mut party = Party::new();
 /// let mut hero = Character::new(
@@ -426,13 +625,14 @@ pub fn food_needed_to_rest(party: &Party) -> u32 {
 /// hero.hp.current = 0;
 /// hero.sp.base = 10;
 /// hero.sp.current = 0;
+/// // Give hero enough food rations for a rest.
+/// hero.inventory.add_item(1, 0).unwrap();
 /// party.add_member(hero).unwrap();
-/// party.food = 5;
 ///
 /// // Pay for rest upfront, then tick all 12 hours.
 /// let duration = RestDuration::Full;
 /// let needed = food_needed_to_rest(&party);
-/// consume_food(&mut party, needed).unwrap();
+/// consume_food(&mut party, &item_db, needed).unwrap();
 /// for hour in 1..=duration.hours() {
 ///     rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
 /// }
@@ -509,14 +709,40 @@ pub fn rest_party_hour(
 ///
 /// # Errors
 ///
-/// * [`ResourceError::TooHungryToRest`] — `party.food < party.members.len()`.
-///   No food is consumed and no healing is applied.
+/// * [`ResourceError::TooHungryToRest`] — total `IsFood` ration-units across
+///   all character inventories is less than `party.members.len()`.
+///   No items are consumed and no healing is applied.
 ///
 /// # Examples
 ///
 /// ```
 /// use antares::domain::character::{Party, Character, Sex, Alignment};
+/// use antares::domain::items::{ItemDatabase, Item, ItemType};
+/// use antares::domain::items::types::{ConsumableData, ConsumableEffect};
 /// use antares::domain::resources::rest_party;
+///
+/// // Build item DB with food ration (id=1).
+/// let mut item_db = ItemDatabase::new();
+/// let food_item = Item {
+///     id: 1,
+///     name: "Food Ration".to_string(),
+///     item_type: ItemType::Consumable(ConsumableData {
+///         effect: ConsumableEffect::IsFood(1),
+///         is_combat_usable: false,
+///     }),
+///     base_cost: 5,
+///     sell_cost: 2,
+///     alignment_restriction: None,
+///     constant_bonus: None,
+///     temporary_bonus: None,
+///     spell_effect: None,
+///     max_charges: 0,
+///     is_cursed: false,
+///     icon_path: None,
+///     tags: vec![],
+///     mesh_descriptor_override: None,
+/// };
+/// item_db.add_item(food_item).unwrap();
 ///
 /// let mut party = Party::new();
 /// let mut character = Character::new(
@@ -528,24 +754,29 @@ pub fn rest_party_hour(
 /// );
 /// character.hp.current = 5;
 /// character.hp.base = 20;
+/// // Give 1 ration — enough for 1 member.
+/// character.inventory.add_item(1, 0).unwrap();
 /// party.add_member(character).unwrap();
-/// party.food = 5; // 1 member needs 1 ration — this is enough
 ///
-/// rest_party(&mut party, 12).unwrap();
+/// rest_party(&mut party, &item_db, 12).unwrap();
 ///
 /// assert_eq!(party.members[0].hp.current, 20); // fully healed after 12 hours
-/// assert_eq!(party.food, 4);                   // 1 ration consumed
+/// assert_eq!(party.members[0].inventory.items.len(), 0); // ration consumed
 /// ```
-pub fn rest_party(party: &mut Party, hours: u32) -> Result<(), ResourceError> {
+pub fn rest_party(
+    party: &mut Party,
+    item_db: &ItemDatabase,
+    hours: u32,
+) -> Result<(), ResourceError> {
     // Upfront food check: every member needs FOOD_PER_REST rations.
     // If the party cannot fully pay, refuse rest — no food consumed, no healing.
     let needed = food_needed_to_rest(party);
-    if party.food < needed {
+    if count_food_in_party(party, item_db) < needed {
         return Err(ResourceError::TooHungryToRest);
     }
 
-    // Consume all required food now, before any healing occurs.
-    consume_food(party, FOOD_PER_REST)?;
+    // Consume all required food now (from inventories), before any healing occurs.
+    consume_food(party, item_db, FOOD_PER_REST)?;
 
     // Calculate total minutes of rest for condition ticking.
     let total_minutes = hours * 60;
@@ -600,7 +831,8 @@ pub fn rest_party(party: &mut Party, hours: u32) -> Result<(), ResourceError> {
 ///
 /// ```
 /// use antares::domain::character::{Party, Character, Sex, Alignment};
-/// use antares::domain::resources::apply_starvation_damage;
+/// use antares::domain::resources::{apply_starvation_damage, check_starvation};
+/// use antares::domain::items::ItemDatabase;
 ///
 /// let mut party = Party::new();
 /// let mut character = Character::new(
@@ -638,7 +870,65 @@ pub fn apply_starvation_damage(party: &mut Party, damage_per_member: u16) {
 mod tests {
     use super::*;
     use crate::domain::character::{Alignment, Character, Condition, Sex};
+    use crate::domain::items::types::{ConsumableData, ConsumableEffect};
+    use crate::domain::items::{Item, ItemDatabase, ItemType};
 
+    /// Build a minimal `ItemDatabase` containing a single "Food Ration" item
+    /// with id=1 that provides `IsFood(1)`.
+    fn make_food_db() -> ItemDatabase {
+        let mut db = ItemDatabase::new();
+        db.add_item(Item {
+            id: 1,
+            name: "Food Ration".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::IsFood(1),
+                is_combat_usable: false,
+            }),
+            base_cost: 5,
+            sell_cost: 2,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        })
+        .unwrap();
+        db
+    }
+
+    /// Build a minimal `ItemDatabase` containing a "Trail Ration" item
+    /// with id=2 that provides `IsFood(3)` — used for multi-ration tests.
+    fn make_trail_ration_db() -> ItemDatabase {
+        let mut db = make_food_db();
+        db.add_item(Item {
+            id: 2,
+            name: "Trail Ration".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::IsFood(3),
+                is_combat_usable: false,
+            }),
+            base_cost: 12,
+            sell_cost: 4,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        })
+        .unwrap();
+        db
+    }
+
+    /// Create a 3-member test party.  No food is added to inventories — callers
+    /// add food items themselves to exercise exactly the scenario they want.
     fn create_test_party() -> Party {
         let mut party = Party::new();
         for i in 0..3 {
@@ -658,37 +948,139 @@ mod tests {
         party
     }
 
+    /// Give each member of `party` the specified number of food ration items
+    /// (item id=1, IsFood(1)).
+    fn give_food(party: &mut Party, rations_per_member: usize) {
+        for member in &mut party.members {
+            for _ in 0..rations_per_member {
+                member.inventory.add_item(1, 0).unwrap();
+            }
+        }
+    }
+
     // ===== Food Tests =====
 
     #[test]
     fn test_consume_food() {
+        let item_db = make_food_db();
         let mut party = create_test_party();
-        party.food = 10;
+        // Give each of the 3 members 4 rations.
+        give_food(&mut party, 4);
 
-        let consumed = consume_food(&mut party, 1).unwrap();
-        assert_eq!(consumed, 3); // 3 party members
-        assert_eq!(party.food, 7);
+        // Consuming 1 ration per member = 3 total consumed.
+        let consumed = consume_food(&mut party, &item_db, 1).unwrap();
+        assert_eq!(consumed, 3, "consume_food must consume 1 ration per member");
+        // Each member should now have 3 rations left.
+        for member in &party.members {
+            assert_eq!(
+                member.inventory.items.len(),
+                3,
+                "each member should have 3 rations remaining"
+            );
+        }
     }
 
     #[test]
     fn test_consume_food_not_enough() {
+        let item_db = make_food_db();
         let mut party = create_test_party();
-        party.food = 2; // Not enough for 3 members
+        // Give only 2 rations total (split: member 0 gets 1, member 1 gets 1).
+        party.members[0].inventory.add_item(1, 0).unwrap();
+        party.members[1].inventory.add_item(1, 0).unwrap();
+        // 3 members need 3 rations — only 2 available.
 
-        let result = consume_food(&mut party, 1);
-        assert!(matches!(result, Err(ResourceError::NoFoodRemaining)));
-        assert_eq!(party.food, 0);
+        let result = consume_food(&mut party, &item_db, 1);
+        assert!(
+            matches!(result, Err(ResourceError::NoFoodRemaining)),
+            "consume_food must return NoFoodRemaining when not enough food"
+        );
+        // Inventories must be untouched on failure.
+        assert_eq!(
+            party.members[0].inventory.items.len(),
+            1,
+            "inventory must be unchanged on failure"
+        );
+        assert_eq!(
+            party.members[1].inventory.items.len(),
+            1,
+            "inventory must be unchanged on failure"
+        );
     }
 
     #[test]
     fn test_check_starvation() {
+        let item_db = make_food_db();
         let mut party = create_test_party();
-        party.food = 0;
 
-        assert!(check_starvation(&party));
+        // No food items — starving.
+        assert!(check_starvation(&party, &item_db));
 
-        party.food = 5;
-        assert!(!check_starvation(&party));
+        // Add a food ration to first member.
+        party.members[0].inventory.add_item(1, 0).unwrap();
+        assert!(!check_starvation(&party, &item_db));
+    }
+
+    #[test]
+    fn test_count_food_in_party_empty() {
+        let item_db = make_food_db();
+        let party = create_test_party();
+        assert_eq!(count_food_in_party(&party, &item_db), 0);
+    }
+
+    #[test]
+    fn test_count_food_in_party_multiple_members() {
+        let item_db = make_food_db();
+        let mut party = create_test_party();
+        // 3 members × 2 rations each = 6 total.
+        give_food(&mut party, 2);
+        assert_eq!(count_food_in_party(&party, &item_db), 6);
+    }
+
+    #[test]
+    fn test_count_food_multi_ration_item() {
+        let item_db = make_trail_ration_db();
+        let mut party = create_test_party();
+        // Give member 0 one Trail Ration (IsFood(3)).
+        party.members[0].inventory.add_item(2, 0).unwrap();
+        assert_eq!(count_food_in_party(&party, &item_db), 3);
+    }
+
+    #[test]
+    fn test_consume_food_sharing_across_members() {
+        let item_db = make_food_db();
+        let mut party = create_test_party();
+        // Member 0 has 3 rations, members 1 and 2 have none.
+        for _ in 0..3 {
+            party.members[0].inventory.add_item(1, 0).unwrap();
+        }
+
+        // 3 members need 3 rations total — all from member 0's inventory.
+        let consumed = consume_food(&mut party, &item_db, 1).unwrap();
+        assert_eq!(consumed, 3, "all 3 rations consumed via sharing");
+        assert_eq!(
+            party.members[0].inventory.items.len(),
+            0,
+            "member 0 inventory emptied"
+        );
+    }
+
+    #[test]
+    fn test_consume_food_trail_ration_counts_as_three() {
+        let item_db = make_trail_ration_db();
+        let mut party = create_test_party();
+        // Give member 0 one Trail Ration (IsFood(3)) — satisfies all 3 members.
+        party.members[0].inventory.add_item(2, 0).unwrap();
+
+        let consumed = consume_food(&mut party, &item_db, 1).unwrap();
+        assert_eq!(
+            consumed, 3,
+            "trail ration provides 3 ration units for 3 members"
+        );
+        assert_eq!(
+            party.members[0].inventory.items.len(),
+            0,
+            "trail ration slot removed"
+        );
     }
 
     // ===== Light Tests =====
@@ -729,11 +1121,13 @@ mod tests {
 
     #[test]
     fn test_rest_restores_hp() {
+        let item_db = make_food_db();
         let mut party = create_test_party();
         party.members[0].hp.current = 0; // Depleted HP
-        party.food = 10;
+                                         // Give all 3 members food so rest succeeds.
+        give_food(&mut party, 3);
 
-        rest_party(&mut party, 12).unwrap();
+        rest_party(&mut party, &item_db, 12).unwrap();
 
         // After 12 hours, should be fully healed (base is 20).
         assert_eq!(party.members[0].hp.current, 20);
@@ -741,11 +1135,12 @@ mod tests {
 
     #[test]
     fn test_rest_restores_sp() {
+        let item_db = make_food_db();
         let mut party = create_test_party();
         party.members[0].sp.current = 0; // Depleted SP
-        party.food = 10;
+        give_food(&mut party, 3);
 
-        rest_party(&mut party, 12).unwrap();
+        rest_party(&mut party, &item_db, 12).unwrap();
 
         // After 12 hours, should be fully restored (base is 10).
         assert_eq!(party.members[0].sp.current, 10);
@@ -756,6 +1151,7 @@ mod tests {
     /// must be fully healed by a 12-hour rest.
     #[test]
     fn test_rest_heals_zero_hp_no_condition() {
+        let item_db = make_food_db();
         let mut party = Party::new();
         let mut hero = Character::new(
             "Hero".to_string(),
@@ -770,10 +1166,11 @@ mod tests {
         hero.sp.base = 8;
         hero.sp.current = 0;
         // No DEAD condition — character has 0 HP but is not flagged dead.
+        // Give 1 food ration (sufficient for 1 member).
+        hero.inventory.add_item(1, 0).unwrap();
         party.add_member(hero).unwrap();
-        party.food = 5;
 
-        rest_party(&mut party, 12).unwrap();
+        rest_party(&mut party, &item_db, 12).unwrap();
 
         assert_eq!(
             party.members[0].hp.current, 10,
@@ -788,16 +1185,12 @@ mod tests {
     /// `rest_party()` must NOT advance game time; that is the caller's responsibility.
     #[test]
     fn test_rest_party_no_longer_advances_time() {
-        // rest_party() no longer accepts a game_time parameter; time advancement
-        // is exclusively the caller's responsibility (GameState::rest_party).
-        // This test verifies that the function compiles and succeeds without
-        // requiring a GameTime argument.
+        let item_db = make_food_db();
         let mut party = create_test_party();
-        party.food = 10;
+        give_food(&mut party, 3);
 
-        // If this compiles with only (party, hours) it confirms the old
-        // game_time parameter has been removed.
-        let result = rest_party(&mut party, 12);
+        // If this compiles with (party, &item_db, hours) it confirms the signature is correct.
+        let result = rest_party(&mut party, &item_db, 12);
         assert!(
             result.is_ok(),
             "rest_party() must succeed with food available"
@@ -807,38 +1200,56 @@ mod tests {
     /// `rest_party()` must consume exactly 1 ration per party member upfront.
     #[test]
     fn test_rest_consumes_food() {
+        let item_db = make_food_db();
         let mut party = create_test_party(); // 3 members
-        party.food = 10;
+                                             // Give 5 rations to member 0 (sharing satisfies all 3 members).
+        for _ in 0..5 {
+            party.members[0].inventory.add_item(1, 0).unwrap();
+        }
 
-        rest_party(&mut party, 12).unwrap();
+        rest_party(&mut party, &item_db, 12).unwrap();
 
-        // 3 members × FOOD_PER_REST(1) = 3 rations consumed
-        assert_eq!(party.food, 7);
+        // 3 rations consumed (1 per member), 2 remain in member 0's inventory.
+        let total_remaining: usize = party.members.iter().map(|m| m.inventory.items.len()).sum();
+        assert_eq!(total_remaining, 2, "3 of 5 rations consumed; 2 remain");
     }
 
-    /// `rest_party()` must refuse when food < members.len(), leaving food unchanged.
+    /// `rest_party()` must refuse when food < members.len(), leaving inventories unchanged.
     #[test]
     fn test_rest_party_fails_without_enough_food() {
+        let item_db = make_food_db();
         let mut party = create_test_party(); // 3 members need 3 rations
-        party.food = 2; // one short
+                                             // Give only 2 rations — one short.
+        party.members[0].inventory.add_item(1, 0).unwrap();
+        party.members[1].inventory.add_item(1, 0).unwrap();
 
-        let result = rest_party(&mut party, 12);
+        let result = rest_party(&mut party, &item_db, 12);
 
         assert!(
             matches!(result, Err(ResourceError::TooHungryToRest)),
             "rest_party must fail with TooHungryToRest when party lacks food; got: {result:?}"
         );
-        // Food must be untouched — no partial consumption
-        assert_eq!(party.food, 2, "food must not be consumed on a failed rest");
+        // Inventories must be untouched on failure.
+        assert_eq!(
+            party.members[0].inventory.items.len(),
+            1,
+            "food must not be consumed on failed rest"
+        );
+        assert_eq!(
+            party.members[1].inventory.items.len(),
+            1,
+            "food must not be consumed on failed rest"
+        );
     }
 
     /// `rest_party()` must refuse when food is zero.
     #[test]
     fn test_rest_party_fails_without_food() {
+        let item_db = make_food_db();
         let mut party = create_test_party();
-        party.food = 0;
+        // No food added.
 
-        let result = rest_party(&mut party, 12);
+        let result = rest_party(&mut party, &item_db, 12);
 
         assert!(
             matches!(result, Err(ResourceError::TooHungryToRest)),
@@ -848,11 +1259,12 @@ mod tests {
 
     #[test]
     fn test_rest_partial_hours() {
+        let item_db = make_food_db();
         let mut party = create_test_party();
         party.members[0].hp.current = 0; // Depleted HP
-        party.food = 10;
+        give_food(&mut party, 3);
 
-        rest_party(&mut party, 6).unwrap(); // 6 hours rest
+        rest_party(&mut party, &item_db, 6).unwrap(); // 6 hours rest
 
         // 6 hours × (1/12 per hour) = 50% restoration.
         // round(20 × (1/12) × 6) = round(10.0) = 10 HP restored.
@@ -866,13 +1278,14 @@ mod tests {
     /// Dead characters must not receive any HP restoration during rest.
     #[test]
     fn test_rest_skips_dead_characters() {
+        let item_db = make_food_db();
         let mut party = create_test_party();
         party.members[0].hp.current = 0;
         party.members[0].conditions.add(Condition::DEAD);
-        party.food = 10;
+        give_food(&mut party, 3);
 
         let initial_hp = party.members[0].hp.current;
-        rest_party(&mut party, 12).unwrap();
+        rest_party(&mut party, &item_db, 12).unwrap();
 
         // Dead character should not heal
         assert_eq!(
@@ -939,6 +1352,7 @@ mod tests {
     /// Food is paid upfront by the caller — rest_party_hour does not touch food.
     #[test]
     fn test_full_rest_heals_in_12_hours() {
+        let item_db = make_food_db();
         let mut party = Party::new();
         let mut hero = Character::new(
             "Hero".to_string(),
@@ -951,12 +1365,15 @@ mod tests {
         hero.hp.current = 0;
         hero.sp.base = 60;
         hero.sp.current = 0;
+        // Add enough food rations for 1 member.
+        for _ in 0..5 {
+            hero.inventory.add_item(1, 0).unwrap();
+        }
         party.add_member(hero).unwrap();
-        party.food = 5;
 
         let duration = RestDuration::Full;
         let needed = food_needed_to_rest(&party);
-        consume_food(&mut party, needed).unwrap();
+        consume_food(&mut party, &item_db, needed).unwrap();
         for hour in 1..=duration.hours() {
             rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
         }
@@ -976,6 +1393,7 @@ mod tests {
     /// fractional amount to 0 every hour, leaving the character unhealed.
     #[test]
     fn test_full_rest_heals_low_base_hp() {
+        let item_db = make_food_db();
         for base_hp in [8u16, 10, 11] {
             let mut party = Party::new();
             let mut hero = Character::new(
@@ -989,12 +1407,15 @@ mod tests {
             hero.hp.current = 0;
             hero.sp.base = base_hp;
             hero.sp.current = 0;
+            // Give 5 rations.
+            for _ in 0..5 {
+                hero.inventory.add_item(1, 0).unwrap();
+            }
             party.add_member(hero).unwrap();
-            party.food = 5;
 
             let duration = RestDuration::Full;
             let needed = food_needed_to_rest(&party);
-            consume_food(&mut party, needed).unwrap();
+            consume_food(&mut party, &item_db, needed).unwrap();
             for hour in 1..=duration.hours() {
                 rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
             }
@@ -1013,6 +1434,7 @@ mod tests {
     /// A Short 4-hour rest must restore 50% HP and SP.
     #[test]
     fn test_short_rest_heals_50_percent() {
+        let item_db = make_food_db();
         let mut party = Party::new();
         let mut hero = Character::new(
             "Hero".to_string(),
@@ -1025,12 +1447,14 @@ mod tests {
         hero.hp.current = 0;
         hero.sp.base = 100;
         hero.sp.current = 0;
+        for _ in 0..5 {
+            hero.inventory.add_item(1, 0).unwrap();
+        }
         party.add_member(hero).unwrap();
-        party.food = 5;
 
         let duration = RestDuration::Short;
         let needed = food_needed_to_rest(&party);
-        consume_food(&mut party, needed).unwrap();
+        consume_food(&mut party, &item_db, needed).unwrap();
         for hour in 1..=duration.hours() {
             rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
         }
@@ -1045,6 +1469,7 @@ mod tests {
     /// A Long 8-hour rest must restore 75% HP and SP.
     #[test]
     fn test_long_rest_heals_75_percent() {
+        let item_db = make_food_db();
         let mut party = Party::new();
         let mut hero = Character::new(
             "Hero".to_string(),
@@ -1057,12 +1482,14 @@ mod tests {
         hero.hp.current = 0;
         hero.sp.base = 100;
         hero.sp.current = 0;
+        for _ in 0..5 {
+            hero.inventory.add_item(1, 0).unwrap();
+        }
         party.add_member(hero).unwrap();
-        party.food = 5;
 
         let duration = RestDuration::Long;
         let needed = food_needed_to_rest(&party);
-        consume_food(&mut party, needed).unwrap();
+        consume_food(&mut party, &item_db, needed).unwrap();
         for hour in 1..=duration.hours() {
             rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
         }
@@ -1075,7 +1502,7 @@ mod tests {
         );
     }
 
-    /// `rest_party_hour` does not consume food — food is unchanged after a call.
+    /// `rest_party_hour` does not consume food items — inventories are unchanged after a call.
     #[test]
     fn test_rest_party_hour_does_not_consume_food() {
         let mut party = Party::new();
@@ -1088,8 +1515,11 @@ mod tests {
         );
         hero.hp.base = 20;
         hero.hp.current = 0;
+        // Give 3 rations — rest_party_hour must not touch them.
+        hero.inventory.add_item(1, 0).unwrap();
+        hero.inventory.add_item(1, 0).unwrap();
+        hero.inventory.add_item(1, 0).unwrap();
         party.add_member(hero).unwrap();
-        party.food = 3;
 
         rest_party_hour(
             &mut party,
@@ -1098,10 +1528,14 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(party.food, 3, "rest_party_hour must not consume food");
+        assert_eq!(
+            party.members[0].inventory.items.len(),
+            3,
+            "rest_party_hour must not consume food items"
+        );
     }
 
-    /// `rest_party_hour` succeeds even when food is zero (food already paid upfront).
+    /// `rest_party_hour` succeeds even when inventories have no food (food already paid upfront).
     #[test]
     fn test_rest_party_hour_succeeds_without_food() {
         let mut party = Party::new();
@@ -1114,8 +1548,8 @@ mod tests {
         );
         hero.hp.base = 20;
         hero.hp.current = 0;
+        // No food items — food was already consumed by caller.
         party.add_member(hero).unwrap();
-        party.food = 0; // food already consumed by caller
 
         let result = rest_party_hour(
             &mut party,
@@ -1132,6 +1566,7 @@ mod tests {
     /// `rest_party_hour` 4 times with `Short.restore_fraction_per_hour()`.
     #[test]
     fn test_partial_rest_heals_proportionally() {
+        let item_db = make_food_db();
         let mut party = Party::new();
         let mut hero = Character::new(
             "Hero".to_string(),
@@ -1144,12 +1579,14 @@ mod tests {
         hero.hp.current = 0;
         hero.sp.base = 120;
         hero.sp.current = 0;
+        for _ in 0..5 {
+            hero.inventory.add_item(1, 0).unwrap();
+        }
         party.add_member(hero).unwrap();
-        party.food = 5;
 
         let duration = RestDuration::Short; // 4 hours → 50%
         let needed = food_needed_to_rest(&party);
-        consume_food(&mut party, needed).unwrap();
+        consume_food(&mut party, &item_db, needed).unwrap();
         for hour in 1..=duration.hours() {
             rest_party_hour(&mut party, duration.restore_fraction_per_hour(), hour).unwrap();
         }
@@ -1315,13 +1752,14 @@ mod tests {
 
     #[test]
     fn test_dead_character_skipped_in_rest() {
+        let item_db = make_food_db();
         let mut party = create_test_party();
         party.members[0].hp.current = 0;
         party.members[0].conditions.add(Condition::DEAD);
-        party.food = 10;
+        give_food(&mut party, 3);
 
         let initial_hp = party.members[0].hp.current;
-        rest_party(&mut party, 12).unwrap();
+        rest_party(&mut party, &item_db, 12).unwrap();
 
         // Dead character should not heal
         assert_eq!(party.members[0].hp.current, initial_hp);

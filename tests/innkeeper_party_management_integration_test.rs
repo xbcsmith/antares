@@ -157,10 +157,16 @@ fn test_state_preservation_across_transitions() {
     let mut game = create_game_with_party(2);
     game.party.gold = 500;
     game.party.gems = 10;
-    game.party.food = 100;
+    // Phase 2: party.food is deprecated; food is now IsFood inventory items.
+    // These assignments use the legacy field for backward-compat testing only.
+    #[allow(deprecated)]
+    {
+        game.party.food = 100;
+    }
 
     let initial_gold = game.party.gold;
     let initial_gems = game.party.gems;
+    #[allow(deprecated)]
     let initial_food = game.party.food;
 
     // Act: Transition through multiple modes
@@ -182,7 +188,10 @@ fn test_state_preservation_across_transitions() {
     // Assert: Resources preserved
     assert_eq!(game.party.gold, initial_gold);
     assert_eq!(game.party.gems, initial_gems);
-    assert_eq!(game.party.food, initial_food);
+    #[allow(deprecated)]
+    {
+        assert_eq!(game.party.food, initial_food);
+    }
 }
 
 // ============================================================================

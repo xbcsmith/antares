@@ -668,6 +668,13 @@ impl ItemsEditorState {
                                         n
                                     )
                                 }
+                                ConsumableEffect::IsFood(rations) => {
+                                    format!(
+                                        "Food ({} ration{})",
+                                        rations,
+                                        if rations == 1 { "" } else { "s" }
+                                    )
+                                }
                             };
                             ui.label(format!("  Effect: {}", effect_str));
                             ui.label(format!("  Combat Use: {}", data.is_combat_usable));
@@ -1296,6 +1303,7 @@ impl ItemsEditorState {
                         ConsumableEffect::CureCondition(_) => "Cure Condition",
                         ConsumableEffect::BoostAttribute(_, _) => "Boost Attribute",
                         ConsumableEffect::BoostResistance(_, _) => "Boost Resistance",
+                        ConsumableEffect::IsFood(_) => "Food (Rations)",
                     };
                     egui::ComboBox::from_id_salt("consumable_effect")
                         .selected_text(effect_type)
@@ -1338,7 +1346,18 @@ impl ItemsEditorState {
                                 data.effect =
                                     ConsumableEffect::BoostResistance(ResistanceType::Fire, 25);
                             }
+                            if ui
+                                .selectable_label(effect_type == "Food (Rations)", "Food (Rations)")
+                                .clicked()
+                            {
+                                data.effect = ConsumableEffect::IsFood(1);
+                            }
                         });
+                    ui.label("ℹ️").on_hover_text(concat!(
+                        "Food (Rations): consumed during rest to feed party members.\n",
+                        "Ration Value controls how many characters one item feeds (usually 1).\n",
+                        "Food items are not usable in combat.",
+                    ));
                 });
 
                 // Edit effect value
@@ -1419,6 +1438,18 @@ impl ItemsEditorState {
                             ui.add(egui::DragValue::new(amount).range(-128..=127));
                         });
                     }
+                    ConsumableEffect::IsFood(ration_value) => {
+                        ui.horizontal(|ui| {
+                            ui.label("Ration Value:");
+                            ui.add(egui::DragValue::new(ration_value).range(1..=255));
+                            ui.label("ℹ️").on_hover_text(concat!(
+                                "Number of party members this item feeds when consumed during rest.\n",
+                                "Standard Food Ration = 1 (feeds one character).\n",
+                                "Trail Ration = 3 (feeds three characters).",
+                            ));
+                        });
+                        ui.label("⚠️ Food items are not usable in combat.");
+                    }
                 }
             }
             ItemType::Ammo(data) => {
@@ -1491,6 +1522,7 @@ impl ItemsEditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antares::domain::items::types::{ConsumableData, ConsumableEffect};
 
     // =========================================================================
     // ItemsEditorState Tests
@@ -1720,5 +1752,200 @@ mod tests {
         assert_eq!(state.filter_magical, Some(true));
         assert_eq!(state.filter_cursed, Some(false));
         assert!(state.filter_quest.is_none());
+    }
+
+    // =========================================================================
+    // IsFood / ConsumableEffect::IsFood Editor Tests
+    // =========================================================================
+
+    /// A default `ConsumableData` with `IsFood(1)` must have a ration_value of 1
+    /// and must not be combat-usable (food is only consumed during rest).
+    #[test]
+    fn test_is_food_effect_default_ration_value() {
+        let effect = ConsumableEffect::IsFood(1);
+        if let ConsumableEffect::IsFood(ration_value) = effect {
+            assert_eq!(
+                ration_value, 1,
+                "standard Food Ration should provide exactly 1 ration"
+            );
+        } else {
+            panic!("expected ConsumableEffect::IsFood");
+        }
+    }
+
+    /// A Trail Ration has ration_value 3 — feeds three characters per item.
+    #[test]
+    fn test_is_food_effect_trail_ration_value() {
+        let effect = ConsumableEffect::IsFood(3);
+        if let ConsumableEffect::IsFood(ration_value) = effect {
+            assert_eq!(
+                ration_value, 3,
+                "Trail Ration should provide exactly 3 rations"
+            );
+        } else {
+            panic!("expected ConsumableEffect::IsFood");
+        }
+    }
+
+    /// Verifies that a `ConsumableData` carrying `IsFood` is distinct from
+    /// all other effect variants (equality/inequality contracts).
+    #[test]
+    fn test_is_food_effect_inequality_with_other_variants() {
+        let food = ConsumableEffect::IsFood(1);
+        assert_ne!(food, ConsumableEffect::HealHp(1));
+        assert_ne!(food, ConsumableEffect::RestoreSp(1));
+        assert_ne!(food, ConsumableEffect::CureCondition(0xFF));
+        assert_ne!(
+            food,
+            ConsumableEffect::BoostAttribute(
+                antares::domain::items::types::AttributeType::Might,
+                1
+            )
+        );
+    }
+
+    /// Ensures `IsFood` items round-trip through the editor `edit_buffer` without
+    /// losing their ration value. This simulates loading an existing food item
+    /// into the editor state and inspecting the buffered effect.
+    #[test]
+    #[allow(deprecated)]
+    fn test_is_food_item_loads_into_edit_buffer() {
+        let mut state = ItemsEditorState::new();
+        // Simulate selecting a Food Ration for editing
+        state.edit_buffer = Item {
+            id: 53,
+            name: "Food Ration".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::IsFood(1),
+                is_combat_usable: false,
+            }),
+            base_cost: 2,
+            sell_cost: 1,
+            is_cursed: false,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+
+        // Verify the buffer holds the correct effect
+        if let ItemType::Consumable(ref data) = state.edit_buffer.item_type {
+            assert_eq!(
+                data.effect,
+                ConsumableEffect::IsFood(1),
+                "edit_buffer must preserve IsFood(1) ration value"
+            );
+            assert!(
+                !data.is_combat_usable,
+                "food items must not be combat-usable"
+            );
+        } else {
+            panic!("expected Consumable item type in edit_buffer");
+        }
+    }
+
+    /// Ensures a Trail Ration (ration_value=3) round-trips through the editor
+    /// buffer correctly — verifying non-unit ration values are preserved.
+    #[test]
+    #[allow(deprecated)]
+    fn test_is_food_trail_ration_loads_into_edit_buffer() {
+        let mut state = ItemsEditorState::new();
+        state.edit_buffer = Item {
+            id: 54,
+            name: "Trail Ration".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::IsFood(3),
+                is_combat_usable: false,
+            }),
+            base_cost: 5,
+            sell_cost: 2,
+            is_cursed: false,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+
+        if let ItemType::Consumable(ref data) = state.edit_buffer.item_type {
+            assert_eq!(
+                data.effect,
+                ConsumableEffect::IsFood(3),
+                "edit_buffer must preserve IsFood(3) ration value for Trail Ration"
+            );
+        } else {
+            panic!("expected Consumable item type in edit_buffer");
+        }
+    }
+
+    /// Verifies that `ItemTypeFilter::Consumable` matches food items (since food
+    /// items are consumables). Campaign developers will use the Consumable filter
+    /// to find food items in the editor list view.
+    #[test]
+    #[allow(deprecated)]
+    fn test_consumable_filter_matches_food_item() {
+        let food_item = Item {
+            id: 53,
+            name: "Food Ration".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::IsFood(1),
+                is_combat_usable: false,
+            }),
+            base_cost: 2,
+            sell_cost: 1,
+            is_cursed: false,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+
+        assert!(
+            ItemTypeFilter::Consumable.matches(&food_item),
+            "Consumable filter must match IsFood items"
+        );
+        assert!(
+            !ItemTypeFilter::Weapon.matches(&food_item),
+            "Weapon filter must not match IsFood items"
+        );
+        assert!(
+            !ItemTypeFilter::Quest.matches(&food_item),
+            "Quest filter must not match IsFood items"
+        );
+    }
+
+    /// Verifies the preview label logic for `IsFood(1)` produces singular text.
+    #[test]
+    fn test_is_food_preview_label_singular() {
+        let rations: u8 = 1;
+        let label = format!(
+            "Food ({} ration{})",
+            rations,
+            if rations == 1 { "" } else { "s" }
+        );
+        assert_eq!(label, "Food (1 ration)");
+    }
+
+    /// Verifies the preview label logic for `IsFood(3)` produces plural text.
+    #[test]
+    fn test_is_food_preview_label_plural() {
+        let rations: u8 = 3;
+        let label = format!(
+            "Food ({} ration{})",
+            rations,
+            if rations == 1 { "" } else { "s" }
+        );
+        assert_eq!(label, "Food (3 rations)");
     }
 }

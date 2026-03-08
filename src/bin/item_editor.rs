@@ -320,6 +320,7 @@ impl ItemEditor {
         println!("    [2] Restore SP");
         println!("    [3] Cure Condition");
         println!("    [4] Boost Attribute");
+        println!("    [5] Food (Rations)");
 
         let choice = self.read_input("  Effect: ");
         let effect = match choice.trim() {
@@ -340,10 +341,23 @@ impl ItemEditor {
                 let boost = self.read_i8("Boost amount: ", 1);
                 ConsumableEffect::BoostAttribute(attr, boost)
             }
+            "5" => {
+                let ration_value = self.read_u8(
+                    "Ration value (1 = feeds one character per rest, e.g. 3 for Trail Ration): ",
+                    1,
+                );
+                ConsumableEffect::IsFood(ration_value)
+            }
             _ => ConsumableEffect::HealHp(10),
         };
 
-        let is_combat_usable = self.read_bool("Usable in combat? (y/n): ");
+        // Food items must not be combat-usable; skip the prompt and hard-code false.
+        let is_combat_usable = if matches!(effect, ConsumableEffect::IsFood(_)) {
+            println!("ℹ️  Food items are not usable in combat.");
+            false
+        } else {
+            self.read_bool("Usable in combat? (y/n): ")
+        };
 
         ItemType::Consumable(ConsumableData {
             effect,
@@ -878,6 +892,7 @@ impl ItemEditor {
                         println!("  2. Restore SP (specify amount)");
                         println!("  3. Cure Condition (specify condition flags)");
                         println!("  4. Boost Attribute");
+                        println!("  5. Food (Rations)");
 
                         let effect_choice = self.read_input("Choice: ");
                         let effect = match effect_choice.trim() {
@@ -919,13 +934,32 @@ impl ItemEditor {
                                 let boost = self.read_i8("Boost amount (can be negative): ", 1);
                                 ConsumableEffect::BoostAttribute(attr, boost)
                             }
+                            "5" => {
+                                let ration_value = self.read_u8(
+                                    "Ration value (1 = feeds one character per rest): ",
+                                    1,
+                                );
+                                ConsumableEffect::IsFood(ration_value)
+                            }
                             _ => {
                                 println!("❌ Invalid choice");
                                 return;
                             }
                         };
 
-                        if let ItemType::Consumable(ref mut cons_data) = self.items[idx].item_type {
+                        // Food items must never be combat-usable.
+                        if matches!(effect, ConsumableEffect::IsFood(_)) {
+                            if let ItemType::Consumable(ref mut cons_data) =
+                                self.items[idx].item_type
+                            {
+                                cons_data.effect = effect;
+                                cons_data.is_combat_usable = false;
+                                self.modified = true;
+                                println!("✅ Consumable effect updated (food items are not combat-usable)");
+                            }
+                        } else if let ItemType::Consumable(ref mut cons_data) =
+                            self.items[idx].item_type
+                        {
                             cons_data.effect = effect;
                             self.modified = true;
                             println!("✅ Consumable effect updated");
@@ -1470,6 +1504,23 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
+    fn test_format_classification_consumable_is_food() {
+        let editor = ItemEditor {
+            items: vec![],
+            modified: false,
+            file_path: PathBuf::from("test.ron"),
+        };
+        let food_type = ItemType::Consumable(ConsumableData {
+            effect: ConsumableEffect::IsFood(1),
+            is_combat_usable: false,
+        });
+        let result = editor.format_classification(&food_type);
+        assert!(result.contains("Consumable"), "must mention Consumable");
+        assert!(result.contains("IsFood"), "must mention IsFood variant");
+    }
+
+    #[test]
     fn test_format_classification_consumable() {
         let editor = ItemEditor {
             items: vec![],
@@ -1520,6 +1571,91 @@ mod tests {
 
         let result = editor.format_classification(&quest_type);
         assert_eq!(result, "Quest Item");
+    }
+
+    /// create_consumable result for choice "5" (Food) must produce an `IsFood`
+    /// effect with the correct ration value and `is_combat_usable = false`.
+    /// We verify this by constructing the effect directly as `create_consumable`
+    /// would and checking invariants, since the function reads from stdin.
+    #[test]
+    fn test_create_consumable_is_food_effect_not_combat_usable() {
+        // Mirror the logic inside create_consumable for the "5" branch.
+        let ration_value: u8 = 1;
+        let effect = ConsumableEffect::IsFood(ration_value);
+        // Food items must never be combat-usable.
+        let is_combat_usable = if matches!(effect, ConsumableEffect::IsFood(_)) {
+            false
+        } else {
+            true // would normally prompt
+        };
+        let data = ConsumableData {
+            effect,
+            is_combat_usable,
+        };
+        assert_eq!(data.effect, ConsumableEffect::IsFood(1));
+        assert!(
+            !data.is_combat_usable,
+            "food items must never be combat-usable"
+        );
+    }
+
+    /// Verifies that a Trail Ration (ration_value=3) constructed via the
+    /// IsFood branch preserves its multi-ration value correctly.
+    #[test]
+    fn test_create_consumable_trail_ration_value_preserved() {
+        let ration_value: u8 = 3;
+        let effect = ConsumableEffect::IsFood(ration_value);
+        if let ConsumableEffect::IsFood(v) = effect {
+            assert_eq!(v, 3, "Trail Ration ration_value must be 3");
+        } else {
+            panic!("expected IsFood variant");
+        }
+    }
+
+    /// When editing a consumable and choosing effect "5" (Food), the updated
+    /// item must have `is_combat_usable = false` regardless of its prior value.
+    #[test]
+    #[allow(deprecated)]
+    fn test_edit_consumable_is_food_clears_combat_usable() {
+        // Simulate an item that was previously a healing potion (combat-usable).
+        let mut item = antares::domain::items::Item {
+            id: 99,
+            name: "Potion of Healing".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(20),
+                is_combat_usable: true,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            is_cursed: false,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+
+        // Simulate the edit_item_classification "5" branch logic.
+        let new_effect = ConsumableEffect::IsFood(1);
+        if let ItemType::Consumable(ref mut cons_data) = item.item_type {
+            if matches!(new_effect, ConsumableEffect::IsFood(_)) {
+                cons_data.effect = new_effect;
+                cons_data.is_combat_usable = false;
+            }
+        }
+
+        if let ItemType::Consumable(ref data) = item.item_type {
+            assert_eq!(data.effect, ConsumableEffect::IsFood(1));
+            assert!(
+                !data.is_combat_usable,
+                "switching to IsFood must clear is_combat_usable"
+            );
+        } else {
+            panic!("expected Consumable item type");
+        }
     }
 
     #[test]

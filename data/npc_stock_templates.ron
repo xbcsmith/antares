@@ -17,6 +17,13 @@
 //     item_id       - References a valid item ID in items.ron
 //     quantity      - Initial available quantity (0 = sold out)
 //     override_price - Optional gold price override; None uses item base_cost * sell_rate
+//   magic_item_pool   - Pool of item IDs eligible for random magic-item slots.
+//                       Duplicates act as weighted entries (higher probability).
+//                       Empty list disables magic-item rotation entirely.
+//   magic_slot_count  - How many random magic items appear in the shop at once.
+//                       0 = no magic items (rotation disabled).
+//   magic_refresh_days - Number of in-game days between magic-item slot refreshes.
+//                        Defaults to 7. Values of 0 are treated as 1 at runtime.
 
 [
     // ===== Blacksmith Basic =====
@@ -36,10 +43,15 @@
             // Shields
             (item_id: 23, quantity: 3, override_price: None),   // Wooden Shield
         ],
+        magic_item_pool: [],
+        magic_slot_count: 0,
+        magic_refresh_days: 7,
     ),
 
     // ===== General Store Basic =====
     // Everyday consumables and supplies for traveling adventurers.
+    // Food Rations and Trail Rations are stocked so the party can always
+    // acquire food for resting after Phase 2 of the food system migration.
     // Higher quantities reflect common demand.
     (
         id: "general_store_basic",
@@ -48,10 +60,57 @@
             (item_id: 50, quantity: 8, override_price: None),   // Healing Potion
             (item_id: 51, quantity: 6, override_price: None),   // Magic Potion
             (item_id: 52, quantity: 5, override_price: None),   // Cure Poison Potion
+            // Food — purchasable rations so the party can rest
+            (item_id: 53, quantity: 20, override_price: None),  // Food Ration  (IsFood 1)
+            (item_id: 54, quantity: 10, override_price: None),  // Trail Ration (IsFood 3)
             // Ammunition
             (item_id: 60, quantity: 10, override_price: None),  // Arrows
             (item_id: 61, quantity: 10, override_price: None),  // Crossbow Bolts
         ],
+        magic_item_pool: [],
+        magic_slot_count: 0,
+        magic_refresh_days: 7,
+    ),
+
+    // ===== General Goods =====
+    // Alias template for general merchants who primarily sell provisions and
+    // everyday supplies.  Identical selection to general_store_basic; exists
+    // so campaign data authors can reference "general_goods" by name without
+    // coupling to the internal naming of the base template.
+    (
+        id: "general_goods",
+        entries: [
+            // Consumables
+            (item_id: 50, quantity: 8, override_price: None),   // Healing Potion
+            (item_id: 51, quantity: 6, override_price: None),   // Magic Potion
+            (item_id: 52, quantity: 5, override_price: None),   // Cure Poison Potion
+            // Food — purchasable rations so the party can rest
+            (item_id: 53, quantity: 20, override_price: None),  // Food Ration  (IsFood 1)
+            (item_id: 54, quantity: 10, override_price: None),  // Trail Ration (IsFood 3)
+            // Ammunition
+            (item_id: 60, quantity: 10, override_price: None),  // Arrows
+            (item_id: 61, quantity: 10, override_price: None),  // Crossbow Bolts
+        ],
+        magic_item_pool: [],
+        magic_slot_count: 0,
+        magic_refresh_days: 7,
+    ),
+
+    // ===== Innkeeper Basic =====
+    // Innkeepers provide rest services but also sell food so the party can
+    // stock up before venturing back into the wilderness.  Only food items
+    // are sold here; potions and weapons are left to specialist merchants.
+    // Prices are slightly above base cost to reflect the innkeeper's markup.
+    (
+        id: "innkeeper_basic",
+        entries: [
+            // Food — the primary reason adventurers visit an inn
+            (item_id: 53, quantity: 30, override_price: Some(3)),  // Food Ration  (slight markup)
+            (item_id: 54, quantity: 15, override_price: Some(6)),  // Trail Ration (slight markup)
+        ],
+        magic_item_pool: [],
+        magic_slot_count: 0,
+        magic_refresh_days: 7,
     ),
 
     // ===== Alchemist Basic =====
@@ -64,5 +123,8 @@
             (item_id: 51, quantity: 4, override_price: Some(120)), // Magic Potion (premium price)
             (item_id: 52, quantity: 3, override_price: Some(90)),  // Cure Poison Potion (premium price)
         ],
+        magic_item_pool: [],
+        magic_slot_count: 0,
+        magic_refresh_days: 7,
     ),
 ]

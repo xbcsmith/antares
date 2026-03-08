@@ -1000,7 +1000,19 @@ pub struct Character {
     pub gold: u32,
     /// Individual gems (0-max)
     pub gems: u32,
-    /// Individual food units (max 40, starts at 10)
+    /// Legacy food counter — deprecated in Phase 2.
+    ///
+    /// Food is now represented as `ConsumableEffect::IsFood` inventory items
+    /// (e.g. "Food Ration", item id 53).  The rest system reads food from
+    /// character inventories via [`crate::domain::resources::count_food_in_party`].
+    ///
+    /// This field is kept for save-game backward compatibility but is **no
+    /// longer read or written by any game logic**.  Do not rely on it.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use ConsumableEffect::IsFood inventory items instead; \
+                see food_system_implementation_plan.md Phase 2"
+    )]
     pub food: u8,
 }
 
@@ -1039,6 +1051,7 @@ impl Character {
         sex: Sex,
         alignment: Alignment,
     ) -> Self {
+        #[allow(deprecated)]
         Self {
             name,
             race_id,
@@ -1066,7 +1079,7 @@ impl Character {
             worthiness: 0,
             gold: 0,
             gems: 0,
-            food: 10,
+            food: 0,
         }
     }
 
@@ -1188,7 +1201,16 @@ pub struct Party {
     pub gold: u32,
     /// Party gems (can be pooled)
     pub gems: u32,
-    /// Party food supply (deprecated - use character food)
+    /// Legacy party food pool — deprecated in Phase 2.
+    ///
+    /// Food is now tracked as `ConsumableEffect::IsFood` items in each
+    /// character's inventory.  This field is retained for save-game
+    /// backward compatibility only and is **not read by any rest logic**.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use ConsumableEffect::IsFood inventory items instead; \
+                see food_system_implementation_plan.md Phase 2"
+    )]
     pub food: u32,
     /// Combat: which positions can attack
     pub position_index: [bool; 6],
@@ -1202,6 +1224,7 @@ impl Party {
 
     /// Creates a new empty party
     pub fn new() -> Self {
+        #[allow(deprecated)]
         Self {
             members: Vec::new(),
             gold: 0,
@@ -1678,7 +1701,12 @@ mod tests {
         assert_eq!(hero.level, 1);
         assert_eq!(hero.experience, 0);
         assert_eq!(hero.age, 18);
-        assert_eq!(hero.food, 10);
+        // Phase 2: food is now tracked as IsFood inventory items, not Character.food.
+        // Character::new() sets food=0 (deprecated field).
+        #[allow(deprecated)]
+        {
+            assert_eq!(hero.food, 0);
+        }
         assert_eq!(hero.gold, 0);
         assert_eq!(hero.gems, 0);
         assert!(hero.is_alive());

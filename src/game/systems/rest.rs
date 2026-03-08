@@ -68,7 +68,9 @@
 use bevy::prelude::*;
 
 use crate::application::{GameMode, GameState};
-use crate::domain::resources::{consume_food, food_needed_to_rest, rest_party_hour, RestDuration};
+use crate::domain::resources::{
+    consume_food, count_food_in_party, food_needed_to_rest, rest_party_hour, RestDuration,
+};
 use crate::domain::world::random_encounter;
 use crate::game::resources::GlobalState;
 
@@ -666,6 +668,7 @@ pub fn process_rest(
     mut complete_writer: MessageWriter<RestCompleteEvent>,
     mut tick_timer: Option<ResMut<RestTickTimer>>,
     time: Option<Res<Time>>,
+    content: Option<Res<crate::application::resources::GameContent>>,
 ) {
     let mut global_state = match global_state {
         Some(gs) => gs,
@@ -693,21 +696,34 @@ pub fn process_rest(
             // Check food upfront — 1 ration per party member required.
             // If the party can't pay, refuse rest entirely: no food consumed,
             // no HP/SP restored, no mode change.
+            //
+            // Phase 2: food is tracked as IsFood inventory items.  We use an
+            // empty ItemDatabase as a fallback so the food check passes
+            // gracefully when no campaign content is loaded (e.g. unit tests
+            // that don't set up GameContent).
+            let empty_item_db = crate::domain::items::ItemDatabase::new();
+            let item_db = content
+                .as_ref()
+                .map(|c| &c.db().items)
+                .unwrap_or(&empty_item_db);
+
             let needed = food_needed_to_rest(&game_state.party);
-            if game_state.party.food < needed {
+            let available = count_food_in_party(&game_state.party, item_db);
+            if available < needed {
                 warn!(
-                    "Rest refused: party needs {} food ration(s) but has {} — \
+                    "Rest refused: party needs {} food ration(s) but has {} in inventories — \
                      cannot rest while hungry",
-                    needed, game_state.party.food
+                    needed, available
                 );
                 return;
             }
 
-            // Consume food now, before the first healing tick.
-            // SAFETY: we already verified party.food >= needed above, so this
+            // Consume food now (from inventories), before the first healing tick.
+            // SAFETY: we already verified available >= needed above, so this
             // cannot fail.  The unwrap is intentional.
             consume_food(
                 &mut game_state.party,
+                item_db,
                 crate::domain::resources::FOOD_PER_REST,
             )
             .expect("consume_food must succeed after food check passed");
@@ -968,16 +984,54 @@ mod tests {
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    /// Build a minimal Bevy app with `RestPlugin`, `GlobalState`, and `GameLog`.
+    /// Build a minimal `ItemDatabase` containing a "Food Ration" item
+    /// (id=1, `IsFood(1)`) for use in rest tests that require food.
+    fn make_food_item_db() -> crate::domain::items::ItemDatabase {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect};
+        use crate::domain::items::{Item, ItemDatabase, ItemType};
+
+        let mut db = ItemDatabase::new();
+        db.add_item(Item {
+            id: 1,
+            name: "Food Ration".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::IsFood(1),
+                is_combat_usable: false,
+            }),
+            base_cost: 5,
+            sell_cost: 2,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        })
+        .unwrap();
+        db
+    }
+
+    /// Build a Bevy `GameContent` resource whose item DB contains a Food Ration.
+    fn make_food_game_content() -> crate::application::resources::GameContent {
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        db.items = make_food_item_db();
+        crate::application::resources::GameContent::new(db)
+    }
+
+    /// Build a minimal Bevy app with `RestPlugin`, `GlobalState`, `GameLog`,
+    /// and a `GameContent` resource that contains a Food Ration item (id=1).
     fn build_rest_app() -> App {
         let mut app = App::new();
         app.add_plugins(RestPlugin);
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
-        let mut game_state = crate::application::GameState::new();
-        // Give the party some food so rest doesn't fail immediately.
-        game_state.party.food = 100;
+        let game_state = crate::application::GameState::new();
         app.insert_resource(GlobalState(game_state));
+        // Insert a GameContent resource so process_rest can resolve IsFood items.
+        app.insert_resource(make_food_game_content());
 
         // Use a zero-duration timer so every frame fires a tick in tests.
         app.insert_resource(RestTickTimer(Timer::from_seconds(
@@ -994,9 +1048,10 @@ mod tests {
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
         let mut game_state = crate::application::GameState::new();
-        game_state.party.food = 1000;
         game_state.config.rest = rest_config;
         app.insert_resource(GlobalState(game_state));
+        // Insert GameContent so food checks work in any test that needs it.
+        app.insert_resource(make_food_game_content());
 
         // Zero-duration timer so every frame fires a tick in tests.
         app.insert_resource(RestTickTimer(Timer::from_seconds(
@@ -1023,6 +1078,22 @@ mod tests {
         gs.0.party.add_member(character).unwrap();
     }
 
+    /// Add a character AND give them `rations` Food Ration items (id=1).
+    fn add_character_with_hp_and_food(
+        app: &mut App,
+        hp_base: u16,
+        hp_current: u16,
+        rations: usize,
+    ) {
+        add_character_with_hp(app, hp_base, hp_current);
+        // The member just added is the last one.
+        let mut gs = app.world_mut().resource_mut::<GlobalState>();
+        let member = gs.0.party.members.last_mut().unwrap();
+        for _ in 0..rations {
+            member.inventory.add_item(1, 0).unwrap();
+        }
+    }
+
     // ── RestConfig multiplier tests ───────────────────────────────────────────
 
     /// When `rest_encounter_rate_multiplier` is `0.0`, running many rest ticks
@@ -1038,7 +1109,8 @@ mod tests {
             allow_partial_rest: false,
         };
         let mut app = build_rest_app_with_config(config);
-        add_character_with_hp(&mut app, 120, 0);
+        // Add character with enough food rations to survive the full rest.
+        add_character_with_hp_and_food(&mut app, 120, 0, 5);
 
         {
             let mut gs = app.world_mut().resource_mut::<GlobalState>();
@@ -1132,9 +1204,10 @@ mod tests {
     #[test]
     fn test_rest_completion_message_emitted() {
         let mut app = build_rest_app();
-        add_character_with_hp(&mut app, 120, 0);
+        // Add character with food so the rest system has food items available.
+        add_character_with_hp_and_food(&mut app, 120, 0, 5);
 
-        // Enter a 1-hour rest directly (bypasses food check; food already set to 100).
+        // Enter a 1-hour rest directly (food already consumed upfront in enter_rest path).
         {
             let mut gs = app.world_mut().resource_mut::<GlobalState>();
             gs.0.enter_rest(1);
@@ -1193,7 +1266,7 @@ mod tests {
     #[test]
     fn test_rest_ui_shows_during_resting_mode() {
         let mut app = build_rest_app();
-        add_character_with_hp(&mut app, 100, 50);
+        add_character_with_hp_and_food(&mut app, 100, 50, 5);
 
         // Startup systems run on the first update — let them run first.
         app.update();
@@ -1226,7 +1299,7 @@ mod tests {
     #[test]
     fn test_rest_ui_hides_after_completion() {
         let mut app = build_rest_app();
-        add_character_with_hp(&mut app, 120, 0);
+        add_character_with_hp_and_food(&mut app, 120, 0, 5);
 
         // Let startup systems run.
         app.update();
@@ -1306,7 +1379,7 @@ mod tests {
     #[test]
     fn test_rest_menu_key_1_fires_short_rest() {
         let mut app = build_rest_app();
-        add_character_with_hp(&mut app, 100, 50);
+        add_character_with_hp_and_food(&mut app, 100, 50, 5);
 
         app.insert_resource(ButtonInput::<KeyCode>::default());
 
@@ -1433,7 +1506,8 @@ mod tests {
     #[test]
     fn test_initiate_rest_enters_resting_mode() {
         let mut app = build_rest_app();
-        add_character_with_hp(&mut app, 100, 50);
+        // Add a member with food rations so the food check in process_rest passes.
+        add_character_with_hp_and_food(&mut app, 100, 50, 5);
 
         // Verify we start in Exploration.
         {
@@ -1478,15 +1552,10 @@ mod tests {
     fn test_rest_refused_when_insufficient_food() {
         let mut app = build_rest_app();
         // Add 3 party members — they need 3 rations total.
-        add_character_with_hp(&mut app, 100, 50);
-        add_character_with_hp(&mut app, 100, 50);
-        add_character_with_hp(&mut app, 100, 50);
-
-        // Give the party only 2 rations (one short).
-        {
-            let mut gs = app.world_mut().resource_mut::<GlobalState>();
-            gs.0.party.food = 2;
-        }
+        // Give only 2 rations across all members (one short).
+        add_character_with_hp_and_food(&mut app, 100, 50, 1); // 1 ration
+        add_character_with_hp_and_food(&mut app, 100, 50, 1); // 1 ration
+        add_character_with_hp(&mut app, 100, 50); // 0 rations — total = 2, need 3
 
         app.world_mut()
             .resource_mut::<Messages<InitiateRestEvent>>()
@@ -1503,10 +1572,21 @@ mod tests {
             gs.0.mode
         );
 
-        // Food must be untouched — no partial consumption.
+        // Inventories must be untouched — no partial consumption on failure.
         assert_eq!(
-            gs.0.party.food, 2,
-            "food must not be consumed when rest is refused"
+            gs.0.party.members[0].inventory.items.len(),
+            1,
+            "food items must not be consumed when rest is refused"
+        );
+        assert_eq!(
+            gs.0.party.members[1].inventory.items.len(),
+            1,
+            "food items must not be consumed when rest is refused"
+        );
+        assert_eq!(
+            gs.0.party.members[2].inventory.items.len(),
+            0,
+            "member with no food must still have empty inventory"
         );
 
         // HP must be unchanged — no healing occurred.
@@ -1521,14 +1601,9 @@ mod tests {
     #[test]
     fn test_rest_accepted_with_exact_food() {
         let mut app = build_rest_app();
-        add_character_with_hp(&mut app, 100, 50);
-        add_character_with_hp(&mut app, 100, 50);
-
-        // Exactly 2 rations for 2 members — just enough.
-        {
-            let mut gs = app.world_mut().resource_mut::<GlobalState>();
-            gs.0.party.food = 2;
-        }
+        // Exactly 1 ration per member for 2 members — just enough.
+        add_character_with_hp_and_food(&mut app, 100, 50, 1);
+        add_character_with_hp_and_food(&mut app, 100, 50, 1);
 
         app.world_mut()
             .resource_mut::<Messages<InitiateRestEvent>>()
@@ -1545,9 +1620,15 @@ mod tests {
             gs.0.mode
         );
 
-        // Food must have been consumed upfront.
+        // Both food rations must have been consumed upfront from inventories.
+        let total_food: usize =
+            gs.0.party
+                .members
+                .iter()
+                .map(|m| m.inventory.items.len())
+                .sum();
         assert_eq!(
-            gs.0.party.food, 0,
+            total_food, 0,
             "both rations must be consumed upfront when rest begins"
         );
     }
@@ -1584,7 +1665,7 @@ mod tests {
     #[test]
     fn test_rest_advances_time_per_hour() {
         let mut app = build_rest_app();
-        add_character_with_hp(&mut app, 120, 0);
+        add_character_with_hp_and_food(&mut app, 120, 0, 5);
 
         // Enter resting mode directly (skip initiation frame).
         {
@@ -1618,7 +1699,7 @@ mod tests {
     #[test]
     fn test_rest_completes_after_requested_hours() {
         let mut app = build_rest_app();
-        add_character_with_hp(&mut app, 120, 0);
+        add_character_with_hp_and_food(&mut app, 120, 0, 5);
 
         // Enter resting mode for 3 hours (fast test).
         {
@@ -1644,11 +1725,12 @@ mod tests {
     #[test]
     fn test_rest_heals_party_after_full_rest() {
         let mut app = build_rest_app();
-        add_character_with_hp(&mut app, 120, 0);
+        // Food already consumed upfront when entering Resting mode directly;
+        // adding rations here ensures inventory-based count is satisfied.
+        add_character_with_hp_and_food(&mut app, 120, 0, 20);
 
         {
             let mut gs = app.world_mut().resource_mut::<GlobalState>();
-            gs.0.party.food = 200;
             // Use with_fraction so the correct heal rate is stored.
             gs.0.mode = GameMode::Resting(crate::application::RestState::with_fraction(
                 REST_DURATION_HOURS,

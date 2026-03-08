@@ -72,7 +72,11 @@ fn test_game_state_without_campaign() {
 
     assert!(game_state.campaign.is_none());
     assert_eq!(game_state.party.gold, 0);
-    assert_eq!(game_state.party.food, 0);
+    // Phase 2: party.food is deprecated; food is now in character inventories.
+    #[allow(deprecated)]
+    {
+        assert_eq!(game_state.party.food, 0);
+    }
 }
 
 #[test]
@@ -82,9 +86,8 @@ fn test_game_state_with_campaign() {
 
     let mut game_state = GameState::new();
     game_state.campaign = Some(campaign.clone());
-    // Apply campaign starting configuration (was done by `new_game` previously)
+    // Apply campaign starting gold (food is now in character inventories, not party.food).
     game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
-    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
     assert!(game_state.campaign.is_some());
 
@@ -93,9 +96,14 @@ fn test_game_state_with_campaign() {
     assert_eq!(loaded_campaign.name, "Test Campaign");
     assert_eq!(loaded_campaign.version, "1.0.0");
 
-    // Verify starting conditions from campaign config
+    // Verify starting gold from campaign config.
     assert_eq!(game_state.party.gold, 500);
-    assert_eq!(game_state.party.food, 100);
+    // Phase 2: food is tracked as IsFood inventory items, not party.food.
+    // party.food remains 0 after new_game (deprecated field).
+    #[allow(deprecated)]
+    {
+        assert_eq!(game_state.party.food, 0);
+    }
 }
 
 #[test]
@@ -105,13 +113,16 @@ fn test_campaign_starting_conditions_applied() {
 
     let mut game_state = GameState::new();
     game_state.campaign = Some(campaign);
-    // Apply campaign starting configuration (was done by `new_game` previously)
+    // Apply campaign starting gold.
     game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
-    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
-    // Check starting gold and food
+    // Check starting gold.
     assert_eq!(game_state.party.gold, 500);
-    assert_eq!(game_state.party.food, 100);
+    // Phase 2: party.food is deprecated; food is now IsFood inventory items.
+    #[allow(deprecated)]
+    {
+        assert_eq!(game_state.party.food, 0);
+    }
 
     // Game state should be in exploration mode
     assert_eq!(game_state.mode, antares::application::GameMode::Exploration);
@@ -138,9 +149,8 @@ fn test_save_game_with_campaign_reference() {
     let campaign = create_test_campaign("save_test", "Save Test", "1.2.3");
     let mut game_state = GameState::new();
     game_state.campaign = Some(campaign.clone());
-    // Mirror previous `new_game` behavior for party starting resources
+    // Apply campaign starting gold (food is now in character inventories).
     game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
-    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
     let save = SaveGame::new(game_state);
 
@@ -163,7 +173,6 @@ fn test_save_and_load_campaign_game() {
     let mut game_state = GameState::new();
     game_state.campaign = Some(campaign.clone());
     game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
-    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
     // Save game
     manager.save("campaign_save", &game_state).unwrap();
@@ -176,9 +185,13 @@ fn test_save_and_load_campaign_game() {
     // the campaign_reference in SaveGame
     assert!(loaded_state.campaign.is_none());
 
-    // Verify game state is preserved
+    // Verify gold is preserved
     assert_eq!(loaded_state.party.gold, game_state.party.gold);
-    assert_eq!(loaded_state.party.food, game_state.party.food);
+    // Phase 2: party.food is deprecated; both should be 0.
+    #[allow(deprecated)]
+    {
+        assert_eq!(loaded_state.party.food, game_state.party.food);
+    }
 }
 
 #[test]
@@ -217,7 +230,6 @@ fn test_multiple_campaigns_save_load() {
     let mut game_state1 = GameState::new();
     game_state1.campaign = Some(campaign1.clone());
     game_state1.party.gold = game_state1.campaign.as_ref().unwrap().config.starting_gold;
-    game_state1.party.food = game_state1.campaign.as_ref().unwrap().config.starting_food;
     manager.save("save1", &game_state1).unwrap();
 
     // Campaign 2
@@ -225,7 +237,6 @@ fn test_multiple_campaigns_save_load() {
     let mut game_state2 = GameState::new();
     game_state2.campaign = Some(campaign2.clone());
     game_state2.party.gold = game_state2.campaign.as_ref().unwrap().config.starting_gold;
-    game_state2.party.food = game_state2.campaign.as_ref().unwrap().config.starting_food;
     manager.save("save2", &game_state2).unwrap();
 
     // Load both saves
@@ -256,10 +267,15 @@ fn test_campaign_config_variations() {
     let mut game_state = GameState::new();
     game_state.campaign = Some(campaign.clone());
     game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
-    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
     assert_eq!(game_state.party.gold, 50);
-    assert_eq!(game_state.party.food, 10);
+    // Phase 2: starting_food is in campaign config but no longer applied to party.food;
+    // food rations are granted to character inventories during instantiation.
+    // party.food remains 0.
+    #[allow(deprecated)]
+    {
+        assert_eq!(game_state.party.food, 0);
+    }
 }
 
 #[test]
@@ -316,7 +332,11 @@ fn test_campaign_backward_compatibility() {
 
     // Both should have identical initial state
     assert_eq!(game_state_new.party.gold, game_state_old.party.gold);
-    assert_eq!(game_state_new.party.food, game_state_old.party.food);
+    // Phase 2: party.food is deprecated; both should be 0.
+    #[allow(deprecated)]
+    {
+        assert_eq!(game_state_new.party.food, game_state_old.party.food);
+    }
     assert_eq!(game_state_new.mode, game_state_old.mode);
 }
 
@@ -337,7 +357,6 @@ fn test_game_state_serialization_with_campaign() {
     let mut game_state = GameState::new();
     game_state.campaign = Some(campaign.clone());
     game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
-    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
     // Serialize to RON
     let serialized = ron::ser::to_string(&game_state).unwrap();
@@ -348,9 +367,13 @@ fn test_game_state_serialization_with_campaign() {
     // Campaign is skipped in serialization, so it should be None
     assert!(deserialized.campaign.is_none());
 
-    // But other state should be preserved
+    // But gold should be preserved
     assert_eq!(deserialized.party.gold, game_state.party.gold);
-    assert_eq!(deserialized.party.food, game_state.party.food);
+    // Phase 2: party.food is deprecated; both should be 0.
+    #[allow(deprecated)]
+    {
+        assert_eq!(deserialized.party.food, game_state.party.food);
+    }
 }
 
 #[test]

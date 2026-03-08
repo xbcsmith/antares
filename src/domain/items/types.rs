@@ -281,6 +281,24 @@ pub struct ConsumableData {
 }
 
 /// Effects from consuming items
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::types::{ConsumableData, ConsumableEffect, AttributeType, ResistanceType};
+///
+/// let heal_potion = ConsumableData {
+///     effect: ConsumableEffect::HealHp(20),
+///     is_combat_usable: true,
+/// };
+///
+/// let food_ration = ConsumableData {
+///     effect: ConsumableEffect::IsFood(1),
+///     is_combat_usable: false,
+/// };
+///
+/// assert_eq!(food_ration.effect, ConsumableEffect::IsFood(1));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConsumableEffect {
     HealHp(u16),
@@ -290,6 +308,36 @@ pub enum ConsumableEffect {
     /// Temporarily boost a resistance by `i8` points (positive = resist more,
     /// negative = resist less).  Maps onto `character::Resistances` fields.
     BoostResistance(ResistanceType, i8),
+    /// A food item providing the given number of rations (almost always 1).
+    ///
+    /// When consumed during rest, each unit satisfies one character's food
+    /// requirement for that rest period.  The rest system searches character
+    /// inventories for items with this effect instead of decrementing the
+    /// legacy numeric `Character.food` counter.
+    ///
+    /// # Value
+    ///
+    /// The inner `u8` is the **ration count** supplied by one unit of this item.
+    /// Standard "Food Ration" items carry a value of `1`.  A "Trail Ration Pack"
+    /// could carry `3` to satisfy three characters with a single item.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::types::ConsumableEffect;
+    ///
+    /// let ration = ConsumableEffect::IsFood(1);
+    /// let trail_pack = ConsumableEffect::IsFood(3);
+    ///
+    /// // Pattern match to extract ration count
+    /// if let ConsumableEffect::IsFood(count) = ration {
+    ///     assert_eq!(count, 1);
+    /// }
+    /// if let ConsumableEffect::IsFood(count) = trail_pack {
+    ///     assert_eq!(count, 3);
+    /// }
+    /// ```
+    IsFood(u8),
 }
 
 /// Attribute types that can be boosted
@@ -1415,5 +1463,162 @@ mod tests {
         assert!(!dark_blade.can_use_alignment(Alignment::Good));
         assert!(dark_blade.can_use_alignment(Alignment::Evil));
         assert!(!dark_blade.can_use_alignment(Alignment::Neutral));
+    }
+
+    // ===== IsFood / ConsumableEffect Tests =====
+
+    #[test]
+    fn test_is_food_effect_equality() {
+        let ration = ConsumableEffect::IsFood(1);
+        let trail_pack = ConsumableEffect::IsFood(3);
+
+        assert_eq!(ration, ConsumableEffect::IsFood(1));
+        assert_ne!(ration, trail_pack);
+        assert_ne!(ration, ConsumableEffect::HealHp(1));
+    }
+
+    #[test]
+    fn test_is_food_ration_count_extracted() {
+        let effect = ConsumableEffect::IsFood(1);
+        if let ConsumableEffect::IsFood(count) = effect {
+            assert_eq!(count, 1u8);
+        } else {
+            panic!("Expected IsFood variant");
+        }
+    }
+
+    #[test]
+    fn test_is_food_trail_pack_ration_count() {
+        let effect = ConsumableEffect::IsFood(3);
+        if let ConsumableEffect::IsFood(count) = effect {
+            assert_eq!(count, 3u8);
+        } else {
+            panic!("Expected IsFood variant");
+        }
+    }
+
+    #[test]
+    fn test_is_food_serializes_correctly() {
+        let effect = ConsumableEffect::IsFood(1);
+        let serialized = ron::to_string(&effect).expect("serialization must succeed");
+        // RON serialises a tuple variant as VariantName(value)
+        assert!(
+            serialized.contains("IsFood"),
+            "serialized form must contain 'IsFood', got: {serialized}"
+        );
+        assert!(
+            serialized.contains('1'),
+            "serialized form must contain the ration count, got: {serialized}"
+        );
+    }
+
+    #[test]
+    fn test_is_food_deserializes_correctly() {
+        let ron_str = "IsFood(1)";
+        let effect: ConsumableEffect =
+            ron::from_str(ron_str).expect("deserialization must succeed");
+        assert_eq!(effect, ConsumableEffect::IsFood(1));
+    }
+
+    #[test]
+    fn test_is_food_roundtrip_serde() {
+        let original = ConsumableEffect::IsFood(2);
+        let serialized = ron::to_string(&original).expect("serialization must succeed");
+        let deserialized: ConsumableEffect =
+            ron::from_str(&serialized).expect("deserialization must succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_consumable_data_with_is_food_roundtrip() {
+        let data = ConsumableData {
+            effect: ConsumableEffect::IsFood(1),
+            is_combat_usable: false,
+        };
+        let serialized = ron::to_string(&data).expect("serialization must succeed");
+        let deserialized: ConsumableData =
+            ron::from_str(&serialized).expect("deserialization must succeed");
+        assert_eq!(deserialized.effect, ConsumableEffect::IsFood(1));
+        assert!(!deserialized.is_combat_usable);
+    }
+
+    #[test]
+    fn test_food_ration_item_loads_from_ron_string() {
+        let ron_data = r#"
+[
+    (
+        id: 53,
+        name: "Food Ration",
+        item_type: Consumable((
+            effect: IsFood(1),
+            is_combat_usable: false,
+        )),
+        base_cost: 2,
+        sell_cost: 1,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 1,
+        is_cursed: false,
+        icon_path: None,
+        tags: [],
+    ),
+]
+"#;
+        use crate::domain::items::database::ItemDatabase;
+        let db = ItemDatabase::load_from_string(ron_data)
+            .expect("ItemDatabase must load Food Ration without error");
+        let item = db
+            .get_item(53)
+            .expect("Food Ration must be findable by id 53");
+        assert_eq!(item.name, "Food Ration");
+        assert!(item.is_consumable());
+        if let ItemType::Consumable(ref data) = item.item_type {
+            assert_eq!(data.effect, ConsumableEffect::IsFood(1));
+            assert!(!data.is_combat_usable);
+        } else {
+            panic!("Food Ration must be a Consumable item type");
+        }
+    }
+
+    #[test]
+    fn test_food_ration_not_combat_usable() {
+        let data = ConsumableData {
+            effect: ConsumableEffect::IsFood(1),
+            is_combat_usable: false,
+        };
+        assert!(
+            !data.is_combat_usable,
+            "Food Rations must not be usable during combat"
+        );
+    }
+
+    #[test]
+    fn test_is_food_no_required_proficiency() {
+        let food_item = Item {
+            id: 53,
+            name: "Food Ration".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::IsFood(1),
+                is_combat_usable: false,
+            }),
+            base_cost: 2,
+            sell_cost: 1,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 1,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        assert_eq!(
+            food_item.required_proficiency(),
+            None,
+            "Food items must not require any proficiency"
+        );
     }
 }

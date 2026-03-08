@@ -844,4 +844,48 @@
         icon_path: None,
         tags: [],
     ),
+
+    // ===== Food Items =====
+    // Added in Phase 3 of the food system migration so that tutorial campaign
+    // merchants and innkeepers can sell rations to the party.
+    // Food Ration (id 111): provides 1 ration unit (IsFood 1).
+    // Trail Ration (id 112): provides 3 ration units (IsFood 3) — efficient for
+    //   parties that want to carry fewer inventory slots of food.
+
+    (
+        id: 111,
+        name: "Food Ration",
+        item_type: Consumable((
+            effect: IsFood(1),
+            is_combat_usable: false,
+        )),
+        base_cost: 2,
+        sell_cost: 1,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 1,
+        is_cursed: false,
+        icon_path: None,
+        tags: [],
+    ),
+    (
+        id: 112,
+        name: "Trail Ration",
+        item_type: Consumable((
+            effect: IsFood(3),
+            is_combat_usable: false,
+        )),
+        base_cost: 5,
+        sell_cost: 2,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 1,
+        is_cursed: false,
+        icon_path: None,
+        tags: [],
+    ),
 ]

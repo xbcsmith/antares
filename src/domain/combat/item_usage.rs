@@ -443,6 +443,13 @@ pub fn execute_item_use_by_slot<R: Rng>(
                     _ => return Err(ItemUseError::InvalidTarget),
                 }
             }
+
+            // Food items are never usable in combat; the `is_combat_usable` flag
+            // on `ConsumableData` already blocks them via `validate_item_use_slot`,
+            // so this arm is a safety net for any path that bypasses validation.
+            ConsumableEffect::IsFood(_) => {
+                return Err(ItemUseError::NotUsableInCombat);
+            }
         }
 
         // Build a short result message

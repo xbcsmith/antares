@@ -173,7 +173,7 @@ Testing requirements:
 - `test_get_character_attack_returns_unarmed_fallback` — unit test: `equipment.weapon = None`, assert returned `Attack.damage == UNARMED_DAMAGE`.
 - `test_get_character_attack_invalid_item_id_falls_back_to_unarmed` — equip a non-existent item_id (not in ItemDatabase), assert fallback to `UNARMED_DAMAGE` rather than panic.
 
-✅ PLAN WRITTEN - [Equipped Weapon Damage Implementation Plan](./equipped_weapon_damage_implementation_plan.md)
+✅ COMPLETED - [Equipped Weapon Damage Implementation Plan](./equipped_weapon_damage_implementation_plan.md)
 
 ### Dropped Items World Persistence
 
@@ -264,7 +264,7 @@ Boss Combat - Party sees the monster and can choose to attack or flee. The monst
 
 Write a plan with a phased approach to implementing different types of combat events in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Combat Events Implementation Plan](./combat_events_implementation_plan.md)
+✅ COMPLETED - [Combat Events Implementation Plan](./combat_events_implementation_plan.md)
 
 
 ### Locked Objects and Keys

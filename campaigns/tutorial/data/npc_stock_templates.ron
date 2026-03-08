@@ -1,1 +1,107 @@
-[]
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+//
+// npc_stock_templates.ron - Tutorial campaign merchant stock templates
+//
+// This file defines stock templates for merchant NPCs in the tutorial campaign.
+// Each template is referenced by NpcDefinition::stock_template in npcs.ron.
+//
+// Phase 3 of the food system migration: Food Ration (id 111, IsFood 1) and
+// Trail Ration (id 112, IsFood 3) are included in every merchant and innkeeper
+// template so that the party can always purchase food for resting.
+//
+// Template IDs must match the string values in npcs.ron exactly:
+//   tutorial_merchant_town  → stock_template: "town_merchant_basic"
+//   tutorial_merchant_town2 → stock_template: "mountain_pass_merchant"
+//
+// Field reference:
+//   id                - Unique string identifier (referenced by NpcDefinition::stock_template)
+//   entries           - List of stock entries
+//     item_id           - References a valid item ID in campaigns/tutorial/data/items.ron
+//     quantity          - Initial available quantity (0 = sold out)
+//     override_price    - Optional gold price override; None uses item base_cost * sell_rate
+//   magic_item_pool   - Pool of item IDs eligible for random magic-item slots.
+//                       Duplicates act as weighted entries (higher probability).
+//                       Empty list disables magic-item rotation entirely.
+//   magic_slot_count  - How many random magic items appear in the shop at once.
+//                       0 = no magic items (rotation disabled).
+//   magic_refresh_days - Number of in-game days between magic-item slot refreshes.
+//                        Defaults to 7.  Values of 0 are treated as 1 at runtime.
+
+[
+    // ===== Town Merchant Basic =====
+    // The general merchant in the starter town (tutorial_merchant_town).
+    // Stocks the essentials a new party will need: basic weapons, light armor,
+    // healing consumables, and food rations so the party can rest and recover.
+    //
+    // Food items are intentionally plentiful (high quantity) so that early-game
+    // players are not gated by food scarcity while learning the rest system.
+    //
+    // Magic rotation: 2 slots drawn from a small pool of early-game magic items,
+    // refreshed every 7 in-game days.
+    (
+        id: "town_merchant_basic",
+        entries: [
+            // Basic weapons — enough variety for a mixed-class party
+            (item_id: 1,   quantity: 5, override_price: None),    // Club
+            (item_id: 2,   quantity: 5, override_price: None),    // Dagger
+            (item_id: 3,   quantity: 3, override_price: None),    // Short Sword
+            (item_id: 5,   quantity: 3, override_price: None),    // Mace
+            // Light armor — accessible to most starting classes
+            (item_id: 20,  quantity: 4, override_price: None),    // Leather Armor
+            (item_id: 23,  quantity: 3, override_price: None),    // Wooden Shield
+            // Consumables
+            (item_id: 50,  quantity: 8, override_price: None),    // Healing Potion
+            (item_id: 52,  quantity: 4, override_price: None),    // Cure Poison Potion
+            // Ammunition
+            (item_id: 60,  quantity: 15, override_price: None),   // Arrows
+            (item_id: 61,  quantity: 10, override_price: None),   // Crossbow Bolts
+            // Food — purchasable rations so the party can rest (Phase 3)
+            (item_id: 111, quantity: 20, override_price: None),   // Food Ration  (IsFood 1)
+            (item_id: 112, quantity: 10, override_price: None),   // Trail Ration (IsFood 3)
+        ],
+        magic_item_pool: [10, 11, 12],
+        magic_slot_count: 2,
+        magic_refresh_days: 7,
+    ),
+
+    // ===== Mountain Pass Merchant =====
+    // The merchant at the mountain pass (tutorial_merchant_town2).
+    // Stocks a broader selection than the town merchant, reflecting the
+    // more dangerous territory and the party's greater wealth by the time
+    // they reach this area.
+    //
+    // Food rations are still stocked but at standard pricing — the mountain
+    // environment makes provisioning more expensive in lore, but we keep
+    // prices fair for gameplay balance at this stage.
+    //
+    // Magic rotation: 2 slots, same pool as town merchant for simplicity.
+    (
+        id: "mountain_pass_merchant",
+        entries: [
+            // Weapons — broader selection for a more experienced party
+            (item_id: 2,   quantity: 4, override_price: None),    // Dagger
+            (item_id: 3,   quantity: 3, override_price: None),    // Short Sword
+            (item_id: 4,   quantity: 2, override_price: None),    // Long Sword
+            (item_id: 5,   quantity: 3, override_price: None),    // Mace
+            (item_id: 6,   quantity: 2, override_price: None),    // Battle Axe
+            // Armor — heavier options now available
+            (item_id: 20,  quantity: 3, override_price: None),    // Leather Armor
+            (item_id: 21,  quantity: 2, override_price: None),    // Chain Mail
+            (item_id: 23,  quantity: 2, override_price: None),    // Wooden Shield
+            // Consumables
+            (item_id: 50,  quantity: 6, override_price: None),    // Healing Potion
+            (item_id: 51,  quantity: 4, override_price: None),    // Magic Potion
+            (item_id: 52,  quantity: 3, override_price: None),    // Cure Poison Potion
+            // Ammunition
+            (item_id: 60,  quantity: 12, override_price: None),   // Arrows
+            (item_id: 61,  quantity: 8,  override_price: None),   // Crossbow Bolts
+            // Food — purchasable rations so the party can rest (Phase 3)
+            (item_id: 111, quantity: 15, override_price: None),   // Food Ration  (IsFood 1)
+            (item_id: 112, quantity: 8,  override_price: None),   // Trail Ration (IsFood 3)
+        ],
+        magic_item_pool: [10, 11, 12],
+        magic_slot_count: 2,
+        magic_refresh_days: 7,
+    ),
+]

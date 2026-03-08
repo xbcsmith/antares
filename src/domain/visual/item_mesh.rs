@@ -755,6 +755,9 @@ impl ItemMeshDescriptor {
             ConsumableEffect::CureCondition(_) => COLOR_GREEN, // unreachable via early return above
             ConsumableEffect::BoostAttribute(_, _) => COLOR_YELLOW,
             ConsumableEffect::BoostResistance(_, _) => COLOR_GREEN,
+            // Food items use an earthy brown to visually distinguish them
+            // from magical potions and scrolls.
+            ConsumableEffect::IsFood(_) => [0.55, 0.35, 0.10, 1.0],
         };
 
         Self {
