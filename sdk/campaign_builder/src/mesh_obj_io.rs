@@ -223,10 +223,39 @@ pub(crate) enum ImportedObjMeshColorSource {
     HeuristicFallback,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ImportedObjMtlSourceKind {
+    #[default]
+    None,
+    AutoDetected,
+    ManualOverride,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ImportedObjMaterialSwatch {
+    pub label: String,
+    pub color: [f32; 4],
+    pub texture_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct ImportedObjMetadata {
+    pub mtl_source_kind: ImportedObjMtlSourceKind,
+    pub declared_material_libraries: Vec<String>,
+    pub resolved_material_library_paths: Vec<PathBuf>,
+    pub material_swatches: Vec<ImportedObjMaterialSwatch>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ImportedObjMesh {
     pub mesh_def: MeshDefinition,
     pub color_source: ImportedObjMeshColorSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct ImportedObjScene {
+    pub meshes: Vec<ImportedObjMesh>,
+    pub metadata: ImportedObjMetadata,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -542,7 +571,8 @@ pub fn import_meshes_from_obj_with_options(
     options: &ObjImportOptions,
 ) -> Result<Vec<MeshDefinition>, ObjError> {
     Ok(
-        import_meshes_for_importer_with_options(obj_string, options)?
+        import_obj_scene_for_importer_with_options(obj_string, options)?
+            .meshes
             .into_iter()
             .map(|mesh| mesh.mesh_def)
             .collect(),
@@ -553,6 +583,13 @@ pub(crate) fn import_meshes_for_importer_with_options(
     obj_string: &str,
     options: &ObjImportOptions,
 ) -> Result<Vec<ImportedObjMesh>, ObjError> {
+    Ok(import_obj_scene_for_importer_with_options(obj_string, options)?.meshes)
+}
+
+pub(crate) fn import_obj_scene_for_importer_with_options(
+    obj_string: &str,
+    options: &ObjImportOptions,
+) -> Result<ImportedObjScene, ObjError> {
     let parsed = parse_obj_meshes(obj_string, options)?;
 
     if parsed.segments.is_empty() {
@@ -575,7 +612,10 @@ pub(crate) fn import_meshes_for_importer_with_options(
         });
     }
 
-    Ok(meshes)
+    Ok(ImportedObjScene {
+        meshes,
+        metadata: build_imported_obj_metadata(&parsed, options),
+    })
 }
 
 /// Imports multiple meshes from an OBJ file.
@@ -610,7 +650,8 @@ pub fn import_meshes_from_obj_file_with_options(
     options: &ObjImportOptions,
 ) -> Result<Vec<MeshDefinition>, ObjError> {
     Ok(
-        import_meshes_for_importer_from_obj_file_with_options(path, options)?
+        import_obj_scene_for_importer_from_obj_file_with_options(path, options)?
+            .meshes
             .into_iter()
             .map(|mesh| mesh.mesh_def)
             .collect(),
@@ -621,9 +662,16 @@ pub(crate) fn import_meshes_for_importer_from_obj_file_with_options(
     path: &str,
     options: &ObjImportOptions,
 ) -> Result<Vec<ImportedObjMesh>, ObjError> {
+    Ok(import_obj_scene_for_importer_from_obj_file_with_options(path, options)?.meshes)
+}
+
+pub(crate) fn import_obj_scene_for_importer_from_obj_file_with_options(
+    path: &str,
+    options: &ObjImportOptions,
+) -> Result<ImportedObjScene, ObjError> {
     let obj_string = std::fs::read_to_string(path)?;
     let options = options_with_source_path(options, path);
-    import_meshes_for_importer_with_options(&obj_string, &options)
+    import_obj_scene_for_importer_with_options(&obj_string, &options)
 }
 
 /// Imports a mesh from an OBJ file
@@ -1115,6 +1163,52 @@ fn resolve_imported_material(material: &ParsedMtlMaterial) -> Option<ResolvedImp
             ImportedObjMeshColorSource::HeuristicFallback
         },
     })
+}
+
+fn build_imported_obj_metadata(
+    parsed: &ParsedObjData,
+    options: &ObjImportOptions,
+) -> ImportedObjMetadata {
+    ImportedObjMetadata {
+        mtl_source_kind: resolve_imported_obj_mtl_source_kind(parsed, options),
+        declared_material_libraries: parsed.material_library_names.clone(),
+        resolved_material_library_paths: parsed.material_library_paths.clone(),
+        material_swatches: build_imported_material_swatches(parsed),
+    }
+}
+
+fn resolve_imported_obj_mtl_source_kind(
+    parsed: &ParsedObjData,
+    options: &ObjImportOptions,
+) -> ImportedObjMtlSourceKind {
+    if !parsed.material_library_paths.is_empty() {
+        if options.manual_mtl_path.is_some() {
+            ImportedObjMtlSourceKind::ManualOverride
+        } else {
+            ImportedObjMtlSourceKind::AutoDetected
+        }
+    } else {
+        ImportedObjMtlSourceKind::None
+    }
+}
+
+fn build_imported_material_swatches(parsed: &ParsedObjData) -> Vec<ImportedObjMaterialSwatch> {
+    let mut materials = parsed.materials.iter().collect::<Vec<_>>();
+    materials.sort_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name));
+
+    materials
+        .into_iter()
+        .filter_map(|(material_name, material)| {
+            let resolved = resolve_imported_material(material)?;
+            (resolved.color_source == ImportedObjMeshColorSource::ImportedMaterial).then_some(
+                ImportedObjMaterialSwatch {
+                    label: material_name.clone(),
+                    color: resolved.mesh_color,
+                    texture_path: resolved.texture_path,
+                },
+            )
+        })
+        .collect()
 }
 
 fn derive_metallic(material: &ParsedMtlMaterial) -> f32 {

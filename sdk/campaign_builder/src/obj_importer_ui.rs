@@ -29,7 +29,10 @@
 use crate::color_palette::{palette_entries, PaletteEntry};
 use crate::creature_assets::{CreatureAssetError, CreatureAssetManager};
 use crate::logging::{category, Logger};
-use crate::obj_importer::{ExportType, ImporterMode, ObjImporterState};
+use crate::obj_importer::{
+    ExportType, ImportedMaterialSwatch, ImportedMeshColorSource, ImportedMtlSourceKind,
+    ImporterMode, ObjImporterState,
+};
 use crate::ui_helpers::TwoColumnLayout;
 use antares::domain::visual::{CreatureDefinition, MeshTransform};
 use eframe::egui;
@@ -150,6 +153,10 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
             });
             ui.end_row();
 
+            ui.label("MTL Source:");
+            render_mtl_source_controls(ui, state, logger, false);
+            ui.end_row();
+
             ui.label("Export Type:");
             ui.horizontal(|ui| {
                 if ui
@@ -246,6 +253,10 @@ fn render_loaded_mode(
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
+            ui.label("MTL Source:");
+            render_mtl_source_controls(ui, state, logger, true);
+            ui.end_row();
+
             ui.label("Export Type:");
             ui.horizontal(|ui| {
                 if ui
@@ -518,6 +529,10 @@ fn render_color_editor(
         "{} vertices, {} triangles",
         state.meshes[active_index].vertex_count, state.meshes[active_index].triangle_count
     ));
+    ui.small(describe_mesh_color_source(&state.meshes[active_index]));
+    if let Some(texture_path) = state.meshes[active_index].mesh_def.texture_path.as_deref() {
+        ui.small(format!("Texture: {}", texture_path));
+    }
     let ctx = ui.ctx().clone();
 
     let mut active_color = state.meshes[active_index].color;
@@ -548,6 +563,10 @@ fn render_color_editor(
     });
 
     ui.add_space(8.0);
+    ui.label(egui::RichText::new("Imported MTL Palette").strong());
+    render_imported_palette_section(ui, state, active_index);
+
+    ui.add_space(8.0);
     ui.label(egui::RichText::new("Built-In Palette").strong());
     render_palette_grid(ui, palette_entries(), |color| {
         state.meshes[active_index].set_color(color);
@@ -568,6 +587,69 @@ fn render_color_editor(
         state.status_message = "Reapplied automatic colors to all meshes.".to_string();
         ctx.request_repaint();
     }
+}
+
+fn render_imported_palette_section(
+    ui: &mut egui::Ui,
+    state: &mut ObjImporterState,
+    active_index: usize,
+) {
+    if state.imported_material_palette.is_empty() {
+        match state.active_mtl_source {
+            ImportedMtlSourceKind::None => {
+                ui.label("No imported MTL swatches available for this session.");
+            }
+            ImportedMtlSourceKind::AutoDetected | ImportedMtlSourceKind::ManualOverride => {
+                ui.label("The current MTL data did not include diffuse Kd colors to surface as swatches.");
+            }
+        }
+        return;
+    }
+
+    ui.small(
+        "Session-only imported swatches. Apply one to the active mesh or stage it for the existing custom-palette save flow.",
+    );
+
+    let swatches = state.imported_material_palette.clone();
+    egui::ScrollArea::vertical()
+        .id_salt("obj_importer_imported_palette_scroll")
+        .max_height(140.0)
+        .show(ui, |ui| {
+            for (index, swatch) in swatches.iter().enumerate() {
+                ui.push_id(index, |ui| {
+                    ui.horizontal(|ui| {
+                        let apply_clicked = ui
+                            .add(
+                                egui::Button::new("")
+                                    .fill(color32(swatch.color))
+                                    .min_size(egui::vec2(24.0, 24.0)),
+                            )
+                            .on_hover_text(imported_swatch_hover_text(swatch))
+                            .clicked();
+                        if apply_clicked {
+                            state.meshes[active_index].set_color(swatch.color);
+                            state.status_message = format!(
+                                "Applied imported material '{}' to {}.",
+                                swatch.label, state.meshes[active_index].name
+                            );
+                            ui.ctx().request_repaint();
+                        }
+
+                        ui.vertical(|ui| {
+                            ui.label(&swatch.label);
+                            if let Some(texture_path) = swatch.texture_path.as_deref() {
+                                ui.small(format!("Texture: {}", texture_path));
+                            }
+                        });
+
+                        if ui.button("Use As Draft").clicked() {
+                            stage_imported_swatch_as_custom_draft(state, swatch);
+                            ui.ctx().request_repaint();
+                        }
+                    });
+                });
+            }
+        });
 }
 
 fn render_palette_grid(
@@ -731,8 +813,213 @@ fn load_obj_into_state(state: &mut ObjImporterState, path: &Path) -> Result<(), 
     Ok(())
 }
 
+fn render_mtl_source_controls(
+    ui: &mut egui::Ui,
+    state: &mut ObjImporterState,
+    logger: &mut Logger,
+    reload_on_change: bool,
+) {
+    ui.vertical(|ui| {
+        ui.monospace(format_mtl_source_summary(state));
+
+        if let Some(detail) = format_mtl_source_detail(state) {
+            ui.small(detail);
+        }
+
+        ui.horizontal(|ui| {
+            if ui.button("Browse .mtl...").clicked() {
+                if let Some(path) = pick_mtl_file(preferred_mtl_dialog_path(state)) {
+                    state.manual_mtl_path = Some(path.clone());
+                    if reload_on_change {
+                        reload_obj_after_mtl_change(state, logger, "manual MTL override", path);
+                    } else {
+                        state.status_message = format!(
+                            "Selected manual MTL override for next import: {}",
+                            path.display()
+                        );
+                        ui.ctx().request_repaint();
+                    }
+                }
+            }
+
+            if ui
+                .add_enabled(
+                    state.manual_mtl_path.is_some(),
+                    egui::Button::new("Clear Override"),
+                )
+                .clicked()
+            {
+                state.manual_mtl_path = None;
+                if reload_on_change {
+                    if let Some(source_path) = state.source_path.clone() {
+                        reload_obj_after_mtl_change(
+                            state,
+                            logger,
+                            "auto-detected MTL",
+                            source_path,
+                        );
+                    } else {
+                        state.status_message = "Cleared manual MTL override.".to_string();
+                        ui.ctx().request_repaint();
+                    }
+                } else {
+                    state.status_message = "Cleared manual MTL override.".to_string();
+                    ui.ctx().request_repaint();
+                }
+            }
+        });
+    });
+}
+
+fn preferred_mtl_dialog_path(state: &ObjImporterState) -> Option<&Path> {
+    state
+        .manual_mtl_path
+        .as_deref()
+        .or(state.source_path.as_deref())
+}
+
+fn reload_obj_after_mtl_change(
+    state: &mut ObjImporterState,
+    logger: &mut Logger,
+    action_label: &str,
+    status_path: PathBuf,
+) {
+    let Some(source_path) = state.source_path.clone() else {
+        state.status_message = format!(
+            "Selected {} at {}. Load an OBJ file to apply it.",
+            action_label,
+            status_path.display()
+        );
+        return;
+    };
+
+    match load_obj_into_state(state, &source_path) {
+        Ok(()) => {
+            state.status_message = format!(
+                "Reloaded {} using {}.",
+                source_path.display(),
+                short_mtl_source_label(state)
+            );
+            logger.info(
+                category::EDITOR,
+                &format!(
+                    "Reloaded importer OBJ {} after updating MTL settings",
+                    source_path.display()
+                ),
+            );
+        }
+        Err(error) => {
+            state.status_message = error;
+            logger.error(category::FILE_IO, &state.status_message);
+        }
+    }
+}
+
+fn format_mtl_source_summary(state: &ObjImporterState) -> String {
+    match state.active_mtl_source {
+        ImportedMtlSourceKind::ManualOverride => state
+            .manual_mtl_path
+            .as_ref()
+            .map(|path| format!("Manual override: {}", path.display()))
+            .unwrap_or_else(|| "Manual override selected".to_string()),
+        ImportedMtlSourceKind::AutoDetected => match state.resolved_mtl_paths.as_slice() {
+            [] => "Auto-detect ready on next load".to_string(),
+            [path] => format!("Auto-detected: {}", path.display()),
+            paths => format!("Auto-detected {} material libraries", paths.len()),
+        },
+        ImportedMtlSourceKind::None => state
+            .manual_mtl_path
+            .as_ref()
+            .map(|path| format!("Manual override queued: {}", path.display()))
+            .or_else(|| {
+                (!state.declared_mtl_libraries.is_empty())
+                    .then(|| "OBJ declares MTL libraries, but none were resolved".to_string())
+            })
+            .unwrap_or_else(|| "No MTL file in use".to_string()),
+    }
+}
+
+fn format_mtl_source_detail(state: &ObjImporterState) -> Option<String> {
+    if state.resolved_mtl_paths.len() > 1 {
+        Some(
+            state
+                .resolved_mtl_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    } else if !state.declared_mtl_libraries.is_empty() && state.resolved_mtl_paths.is_empty() {
+        Some(format!(
+            "Declared by OBJ: {}",
+            state.declared_mtl_libraries.join(", ")
+        ))
+    } else if matches!(state.active_mtl_source, ImportedMtlSourceKind::None)
+        && state.source_path.is_some()
+    {
+        Some("Browse a .mtl file to override missing or incorrect mtllib detection.".to_string())
+    } else {
+        None
+    }
+}
+
+fn short_mtl_source_label(state: &ObjImporterState) -> &'static str {
+    match state.active_mtl_source {
+        ImportedMtlSourceKind::ManualOverride => "a manual MTL override",
+        ImportedMtlSourceKind::AutoDetected => "auto-detected MTL data",
+        ImportedMtlSourceKind::None => "OBJ geometry without MTL data",
+    }
+}
+
+fn describe_mesh_color_source(mesh: &crate::obj_importer::ImportedMesh) -> &'static str {
+    match mesh.color_source {
+        ImportedMeshColorSource::ImportedMaterial => {
+            "Color Source: imported from MTL diffuse color (Kd)."
+        }
+        ImportedMeshColorSource::AutoAssigned => {
+            "Color Source: built-in mesh-name fallback; imported alpha and other material metadata may still be preserved."
+        }
+        ImportedMeshColorSource::ManualOverride => {
+            "Color Source: manual importer override from the color picker or palette."
+        }
+    }
+}
+
+fn imported_swatch_hover_text(swatch: &ImportedMaterialSwatch) -> String {
+    swatch
+        .texture_path
+        .as_deref()
+        .map(|texture_path| format!("{}\nTexture: {}", swatch.label, texture_path))
+        .unwrap_or_else(|| swatch.label.clone())
+}
+
+fn stage_imported_swatch_as_custom_draft(
+    state: &mut ObjImporterState,
+    swatch: &ImportedMaterialSwatch,
+) {
+    state.new_custom_color_label = swatch.label.clone();
+    state.new_custom_color = swatch.color;
+    state.status_message = format!(
+        "Staged imported material '{}' for custom palette saving.",
+        swatch.label
+    );
+}
+
 fn pick_obj_file(initial_path: Option<&Path>) -> Option<PathBuf> {
     let mut dialog = rfd::FileDialog::new().add_filter("Wavefront OBJ", &["obj"]);
+    if let Some(path) = initial_path {
+        let directory = if path.is_dir() {
+            path.to_path_buf()
+        } else {
+            path.parent().unwrap_or(path).to_path_buf()
+        };
+        dialog = dialog.set_directory(directory);
+    }
+    dialog.pick_file()
+}
+
+fn pick_mtl_file(initial_path: Option<&Path>) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new().add_filter("Wavefront MTL", &["mtl"]);
     if let Some(path) = initial_path {
         let directory = if path.is_dir() {
             path.to_path_buf()
@@ -878,10 +1165,17 @@ fn export_type_label(export_type: ExportType) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_creature_definition, export_state_to_campaign, preview_export_relative_path,
+        build_creature_definition, describe_mesh_color_source, export_state_to_campaign,
+        format_mtl_source_detail, format_mtl_source_summary, preview_export_relative_path,
+        show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
     };
-    use crate::obj_importer::{ExportType, ImporterMode, ObjImporterState};
+    use crate::logging::Logger;
+    use crate::obj_importer::{
+        ExportType, ImportedMaterialSwatch, ImportedMeshColorSource, ImportedMtlSourceKind,
+        ImporterMode, ObjImporterState,
+    };
     use antares::domain::visual::{AlphaMode, CreatureDefinition, MaterialDefinition};
+    use eframe::egui;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -1006,5 +1300,82 @@ mod tests {
             preview_export_relative_path(ExportType::Item, "", 9),
             "assets/items/item_9.ron"
         );
+    }
+
+    #[test]
+    fn test_format_mtl_source_summary_reports_manual_override() {
+        let mut state = ObjImporterState::new();
+        state.manual_mtl_path = Some(PathBuf::from("materials/hero_override.mtl"));
+        state.active_mtl_source = ImportedMtlSourceKind::ManualOverride;
+
+        assert_eq!(
+            format_mtl_source_summary(&state),
+            "Manual override: materials/hero_override.mtl"
+        );
+    }
+
+    #[test]
+    fn test_format_mtl_source_detail_reports_declared_but_missing_libraries() {
+        let mut state = ObjImporterState::new();
+        state.source_path = Some(PathBuf::from("models/hero.obj"));
+        state.declared_mtl_libraries = vec!["hero.mtl".to_string(), "shared.mtl".to_string()];
+
+        assert_eq!(
+            format_mtl_source_detail(&state).as_deref(),
+            Some("Declared by OBJ: hero.mtl, shared.mtl")
+        );
+    }
+
+    #[test]
+    fn test_describe_mesh_color_source_covers_phase_six_messages() {
+        let mut state = triangle_mesh_state();
+        state.meshes[0].color_source = ImportedMeshColorSource::ImportedMaterial;
+        assert!(describe_mesh_color_source(&state.meshes[0]).contains("MTL diffuse color"));
+
+        state.meshes[0].color_source = ImportedMeshColorSource::AutoAssigned;
+        assert!(describe_mesh_color_source(&state.meshes[0]).contains("mesh-name fallback"));
+
+        state.meshes[0].color_source = ImportedMeshColorSource::ManualOverride;
+        assert!(describe_mesh_color_source(&state.meshes[0]).contains("manual importer override"));
+    }
+
+    #[test]
+    fn test_stage_imported_swatch_as_custom_draft_copies_label_and_color() {
+        let mut state = triangle_mesh_state();
+        let swatch = ImportedMaterialSwatch {
+            label: "HeroSkin".to_string(),
+            color: [0.7, 0.6, 0.5, 1.0],
+            texture_path: Some("textures/hero.png".to_string()),
+        };
+
+        stage_imported_swatch_as_custom_draft(&mut state, &swatch);
+
+        assert_eq!(state.new_custom_color_label, "HeroSkin");
+        assert_eq!(state.new_custom_color, [0.7, 0.6, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn test_show_obj_importer_tab_renders_phase_six_sections_without_panicking() {
+        let mut state = triangle_mesh_state();
+        state.active_mtl_source = ImportedMtlSourceKind::AutoDetected;
+        state.resolved_mtl_paths = vec![PathBuf::from("models/hero.mtl")];
+        state.imported_material_palette = vec![ImportedMaterialSwatch {
+            label: "HeroSkin".to_string(),
+            color: [0.7, 0.6, 0.5, 1.0],
+            texture_path: Some("textures/hero.png".to_string()),
+        }];
+        state.meshes[0].color_source = ImportedMeshColorSource::ImportedMaterial;
+        let ctx = egui::Context::default();
+        let mut logger = Logger::default();
+
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let signal = show_obj_importer_tab(ui, &mut state, None, &mut logger);
+                assert!(signal.is_none());
+            });
+        });
+
+        assert!(!output.platform_output.cursor_icon.is_resize());
+        assert_eq!(state.mode, ImporterMode::Loaded);
     }
 }

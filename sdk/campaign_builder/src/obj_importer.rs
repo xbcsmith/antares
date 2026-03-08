@@ -24,8 +24,9 @@
 
 use crate::color_palette::{suggest_color_for_mesh, CustomPalette, PaletteError};
 use crate::mesh_obj_io::{
-    import_meshes_for_importer_from_obj_file_with_options, ImportedObjMesh,
-    ImportedObjMeshColorSource, ObjError, ObjImportOptions,
+    import_obj_scene_for_importer_from_obj_file_with_options, ImportedObjMaterialSwatch,
+    ImportedObjMesh, ImportedObjMeshColorSource, ImportedObjMtlSourceKind, ImportedObjScene,
+    ObjError, ObjImportOptions,
 };
 use antares::domain::types::CreatureId;
 use antares::domain::visual::{AlphaMode, MeshDefinition};
@@ -65,6 +66,29 @@ pub enum ImportedMeshColorSource {
     ManualOverride,
 }
 
+/// Records which MTL source path, if any, was used for the current importer session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImportedMtlSourceKind {
+    /// No MTL file was resolved for the current import.
+    #[default]
+    None,
+    /// One or more MTL files were discovered from OBJ `mtllib` directives.
+    AutoDetected,
+    /// A manually selected MTL file override was used.
+    ManualOverride,
+}
+
+/// Temporary imported-material swatch surfaced in the importer UI for the current session.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportedMaterialSwatch {
+    /// Material name used as the swatch label.
+    pub label: String,
+    /// Imported RGBA color derived from MTL diffuse and dissolve values.
+    pub color: [f32; 4],
+    /// Optional texture metadata preserved from `map_Kd` when portable.
+    pub texture_path: Option<String>,
+}
+
 /// A mesh loaded into the importer, along with editable per-mesh metadata.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedMesh {
@@ -93,6 +117,14 @@ pub struct ObjImporterState {
     pub source_path: Option<PathBuf>,
     /// Optional manual override for the MTL file path.
     pub manual_mtl_path: Option<PathBuf>,
+    /// How the currently loaded importer session resolved its MTL source.
+    pub active_mtl_source: ImportedMtlSourceKind,
+    /// `mtllib` names declared by the current OBJ source, if any.
+    pub declared_mtl_libraries: Vec<String>,
+    /// Resolved MTL file paths that were actually used during the current import.
+    pub resolved_mtl_paths: Vec<PathBuf>,
+    /// Session-only imported material swatches surfaced in the importer palette.
+    pub imported_material_palette: Vec<ImportedMaterialSwatch>,
     /// Parsed meshes currently loaded in the importer.
     pub meshes: Vec<ImportedMesh>,
     /// Whether the export target is a creature or an item.
@@ -189,6 +221,24 @@ impl ImportedMesh {
     }
 }
 
+impl ImportedMaterialSwatch {
+    fn from_imported_obj_swatch(swatch: ImportedObjMaterialSwatch) -> Self {
+        Self {
+            label: swatch.label,
+            color: swatch.color,
+            texture_path: swatch.texture_path,
+        }
+    }
+}
+
+fn imported_mtl_source_kind_from_obj(kind: ImportedObjMtlSourceKind) -> ImportedMtlSourceKind {
+    match kind {
+        ImportedObjMtlSourceKind::None => ImportedMtlSourceKind::None,
+        ImportedObjMtlSourceKind::AutoDetected => ImportedMtlSourceKind::AutoDetected,
+        ImportedObjMtlSourceKind::ManualOverride => ImportedMtlSourceKind::ManualOverride,
+    }
+}
+
 fn auto_assigned_color(name: &str, alpha: f32) -> [f32; 4] {
     let mut color = suggest_color_for_mesh(name);
     color[3] = alpha.clamp(0.0, 1.0);
@@ -218,6 +268,10 @@ impl Default for ObjImporterState {
             mode: ImporterMode::Idle,
             source_path: None,
             manual_mtl_path: None,
+            active_mtl_source: ImportedMtlSourceKind::None,
+            declared_mtl_libraries: Vec::new(),
+            resolved_mtl_paths: Vec::new(),
+            imported_material_palette: Vec::new(),
             meshes: Vec::new(),
             export_type: ExportType::Creature,
             creature_id: 4000,
@@ -245,6 +299,7 @@ impl ObjImporterState {
         let creature_id = self.creature_id;
         let export_type = self.export_type;
         let new_custom_color = self.new_custom_color;
+        let manual_mtl_path = self.manual_mtl_path.clone();
 
         *self = Self {
             scale,
@@ -252,6 +307,7 @@ impl ObjImporterState {
             creature_id,
             export_type,
             new_custom_color,
+            manual_mtl_path,
             ..Self::default()
         };
     }
@@ -290,11 +346,47 @@ impl ObjImporterState {
                 .into_iter()
                 .map(ImportedMesh::from_mesh_definition)
                 .collect(),
+            ImportedMtlSourceKind::None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
         );
     }
 
-    fn load_imported_mesh_rows(&mut self, source_path: Option<PathBuf>, meshes: Vec<ImportedMesh>) {
+    fn load_imported_scene(&mut self, source_path: Option<PathBuf>, scene: ImportedObjScene) {
+        self.load_imported_mesh_rows(
+            source_path,
+            scene
+                .meshes
+                .into_iter()
+                .map(ImportedMesh::from_imported_obj_mesh)
+                .collect(),
+            imported_mtl_source_kind_from_obj(scene.metadata.mtl_source_kind),
+            scene.metadata.declared_material_libraries,
+            scene.metadata.resolved_material_library_paths,
+            scene
+                .metadata
+                .material_swatches
+                .into_iter()
+                .map(ImportedMaterialSwatch::from_imported_obj_swatch)
+                .collect(),
+        );
+    }
+
+    fn load_imported_mesh_rows(
+        &mut self,
+        source_path: Option<PathBuf>,
+        meshes: Vec<ImportedMesh>,
+        active_mtl_source: ImportedMtlSourceKind,
+        declared_mtl_libraries: Vec<String>,
+        resolved_mtl_paths: Vec<PathBuf>,
+        imported_material_palette: Vec<ImportedMaterialSwatch>,
+    ) {
         self.source_path = source_path;
+        self.active_mtl_source = active_mtl_source;
+        self.declared_mtl_libraries = declared_mtl_libraries;
+        self.resolved_mtl_paths = resolved_mtl_paths;
+        self.imported_material_palette = imported_material_palette;
         self.meshes = meshes;
         self.active_mesh_index = (!self.meshes.is_empty()).then_some(0);
         self.mode = if self.meshes.is_empty() {
@@ -314,12 +406,9 @@ impl ObjImporterState {
         let mut options = self.obj_import_options();
         options.source_path = Some(path.to_path_buf());
         let path_string = path.to_string_lossy().to_string();
-        let meshes = import_meshes_for_importer_from_obj_file_with_options(&path_string, &options)?;
-        let imported_meshes = meshes
-            .into_iter()
-            .map(ImportedMesh::from_imported_obj_mesh)
-            .collect();
-        self.load_imported_mesh_rows(Some(path.to_path_buf()), imported_meshes);
+        let scene =
+            import_obj_scene_for_importer_from_obj_file_with_options(&path_string, &options)?;
+        self.load_imported_scene(Some(path.to_path_buf()), scene);
         Ok(())
     }
 
@@ -370,7 +459,8 @@ impl ObjImporterState {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportType, ImportedMesh, ImportedMeshColorSource, ImporterMode, ObjImporterState,
+        ExportType, ImportedMesh, ImportedMeshColorSource, ImportedMtlSourceKind, ImporterMode,
+        ObjImporterState,
     };
     use antares::domain::visual::{AlphaMode, MaterialDefinition, MeshDefinition};
     use std::fs;
@@ -524,6 +614,98 @@ mod tests {
                 .base_color,
             [0.92, 0.85, 0.78, 0.5]
         );
+        assert!(state.imported_material_palette.is_empty());
+    }
+
+    #[test]
+    fn test_obj_importer_state_load_obj_file_tracks_imported_material_swatches_and_mtl_source() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("models/hero.obj");
+        let mtl_path = temp_dir.path().join("models/materials/hero.mtl");
+        fs::create_dir_all(mtl_path.parent().unwrap()).unwrap();
+        fs::write(
+            &mtl_path,
+            concat!(
+                "newmtl HeroSkin\n",
+                "Kd 0.7 0.6 0.5\n",
+                "map_Kd textures/hero.png\n",
+                "newmtl Cloth\n",
+                "Kd 0.2 0.3 0.7\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            &obj_path,
+            concat!(
+                "mtllib materials/hero.mtl\n",
+                "o Body\n",
+                "usemtl HeroSkin\n",
+                "v 0.0 0.0 0.0\n",
+                "v 1.0 0.0 0.0\n",
+                "v 0.0 1.0 0.0\n",
+                "f 1 2 3\n"
+            ),
+        )
+        .unwrap();
+
+        let mut state = ObjImporterState::new();
+        state.load_obj_file(&obj_path).unwrap();
+
+        assert_eq!(state.active_mtl_source, ImportedMtlSourceKind::AutoDetected);
+        assert_eq!(
+            state.declared_mtl_libraries,
+            vec!["materials/hero.mtl".to_string()]
+        );
+        assert_eq!(state.resolved_mtl_paths, vec![mtl_path]);
+        assert_eq!(state.imported_material_palette.len(), 2);
+        assert_eq!(state.imported_material_palette[0].label, "Cloth");
+        assert_eq!(
+            state.imported_material_palette[0].color,
+            [0.2, 0.3, 0.7, 1.0]
+        );
+        assert_eq!(state.imported_material_palette[1].label, "HeroSkin");
+        assert_eq!(
+            state.imported_material_palette[1].texture_path.as_deref(),
+            Some("textures/hero.png")
+        );
+    }
+
+    #[test]
+    fn test_obj_importer_state_load_obj_file_marks_manual_override_source() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("models/hero.obj");
+        let auto_mtl_path = temp_dir.path().join("models/hero.mtl");
+        let manual_mtl_path = temp_dir.path().join("overrides/manual.mtl");
+        fs::create_dir_all(auto_mtl_path.parent().unwrap()).unwrap();
+        fs::create_dir_all(manual_mtl_path.parent().unwrap()).unwrap();
+        fs::write(&auto_mtl_path, "newmtl Auto\nKd 0.1 0.1 0.1\n").unwrap();
+        fs::write(&manual_mtl_path, "newmtl Override\nKd 0.8 0.6 0.4\n").unwrap();
+        fs::write(
+            &obj_path,
+            concat!(
+                "mtllib hero.mtl\n",
+                "o Body\n",
+                "usemtl Override\n",
+                "v 0.0 0.0 0.0\n",
+                "v 1.0 0.0 0.0\n",
+                "v 0.0 1.0 0.0\n",
+                "f 1 2 3\n"
+            ),
+        )
+        .unwrap();
+
+        let mut state = ObjImporterState::new();
+        state.manual_mtl_path = Some(manual_mtl_path.clone());
+        state.load_obj_file(&obj_path).unwrap();
+
+        assert_eq!(
+            state.active_mtl_source,
+            ImportedMtlSourceKind::ManualOverride
+        );
+        assert_eq!(state.resolved_mtl_paths, vec![manual_mtl_path]);
+        assert_eq!(state.meshes[0].color, [0.8, 0.6, 0.4, 1.0]);
+        assert_eq!(state.imported_material_palette.len(), 1);
+        assert_eq!(state.imported_material_palette[0].label, "Override");
     }
 
     #[test]
@@ -607,6 +789,7 @@ mod tests {
         let mut state = ObjImporterState::new();
         state.scale = 0.05;
         state.creature_id = 4012;
+        state.manual_mtl_path = Some(PathBuf::from("materials/hero_override.mtl"));
         state.new_custom_color = [0.2, 0.4, 0.6, 1.0];
         state.add_custom_color("favorite_teal", [0.1, 0.7, 0.7, 1.0]);
         state.load_mesh_definitions(None, vec![named_triangle("EM3D_Base_Body")]);
@@ -616,9 +799,14 @@ mod tests {
         assert_eq!(state.mode, ImporterMode::Idle);
         assert_eq!(state.scale, 0.05);
         assert_eq!(state.creature_id, 4012);
+        assert_eq!(
+            state.manual_mtl_path,
+            Some(PathBuf::from("materials/hero_override.mtl"))
+        );
         assert_eq!(state.new_custom_color, [0.2, 0.4, 0.6, 1.0]);
         assert_eq!(state.custom_palette.colors.len(), 1);
         assert!(state.meshes.is_empty());
+        assert!(state.imported_material_palette.is_empty());
     }
 
     #[test]
