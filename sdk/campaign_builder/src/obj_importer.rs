@@ -115,7 +115,11 @@ impl ImportedMesh {
     /// Creates an importer mesh row from a domain mesh definition.
     pub fn from_mesh_definition(mut mesh_def: MeshDefinition) -> Self {
         let name = mesh_def.name.clone().unwrap_or_else(|| "mesh".to_string());
-        let color = suggest_color_for_mesh(&name);
+        let color = if has_imported_material_color(&mesh_def) {
+            mesh_def.color
+        } else {
+            suggest_color_for_mesh(&name)
+        };
         mesh_def.color = color;
 
         Self {
@@ -137,6 +141,10 @@ impl ImportedMesh {
     fn reapply_auto_color(&mut self) {
         self.set_color(suggest_color_for_mesh(&self.name));
     }
+}
+
+fn has_imported_material_color(mesh_def: &MeshDefinition) -> bool {
+    mesh_def.color != [1.0, 1.0, 1.0, 1.0]
 }
 
 impl Default for ObjImporterState {
@@ -313,6 +321,24 @@ mod tests {
         assert_eq!(mesh.mesh_def.color, [0.92, 0.85, 0.78, 1.0]);
         assert_eq!(mesh.vertex_count, 3);
         assert_eq!(mesh.triangle_count, 1);
+    }
+
+    #[test]
+    fn test_imported_mesh_from_mesh_definition_preserves_imported_material_color() {
+        let mut mesh_def = named_triangle("EM3D_Base_Body");
+        mesh_def.color = [0.2, 0.3, 0.4, 0.75];
+        mesh_def.material = Some(antares::domain::visual::MaterialDefinition {
+            base_color: [0.2, 0.3, 0.4, 0.75],
+            metallic: 0.0,
+            roughness: 0.9,
+            emissive: None,
+            alpha_mode: antares::domain::visual::AlphaMode::Blend,
+        });
+
+        let mesh = ImportedMesh::from_mesh_definition(mesh_def);
+
+        assert_eq!(mesh.color, [0.2, 0.3, 0.4, 0.75]);
+        assert_eq!(mesh.mesh_def.color, [0.2, 0.3, 0.4, 0.75]);
     }
 
     #[test]

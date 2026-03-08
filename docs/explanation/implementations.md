@@ -214,6 +214,117 @@ The parser now understands `mtllib` well enough to find sidecar material
 libraries relative to the OBJ file, honors a parser-side manual override path,
 and parses a first-pass subset of MTL directives into backend material data.
 
+## New MTL Support - Phase 4: Map Imported Materials Into Domain Types
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 4 wires parsed MTL data into the existing visual domain model so imported
+OBJ segments now carry visible color, material metadata, alpha behavior, and
+portable texture-path metadata through to exported `MeshDefinition` values.
+
+This phase stays focused on the parser and importer-state seam rather than the
+importer UI. The main effect is that successful MTL parsing now survives into
+domain output instead of being dropped after resolution.
+
+---
+
+### Phase 4 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Domain material mapping in the OBJ backend
+
+`build_mesh_from_faces()` now resolves the active parsed material and maps it
+into domain output instead of always returning default color-only meshes.
+
+Current mapping behavior:
+
+- `Kd` -> `MeshDefinition.color`
+- `Kd` -> `MaterialDefinition.base_color`
+- `d` -> alpha channel on both mesh color and material base color
+- `d < 1.0` -> `AlphaMode::Blend`
+- `Ke` -> `MaterialDefinition.emissive` when non-black
+- `map_Kd` -> `MeshDefinition.texture_path` only when the original MTL path is
+  relative and therefore safe to preserve as portable metadata
+
+If a referenced material has no meaningful parsed data, the importer still
+falls back to the existing default OBJ color behavior.
+
+#### Conservative `Ks` and `Ns` heuristics
+
+Phase 4 implements a conservative heuristic for MTL specular values rather than
+pretending Wavefront MTL maps perfectly onto the engine's PBR fields.
+
+- `Ks` contributes to `metallic` only when:
+  - illumination model is `>= 2`
+  - average specular strength is at least `0.5`
+- even then, metallic is capped at `0.35` to avoid over-classifying legacy MTL
+  materials as metal
+- `Ns` maps into `roughness` through a clamped square-root inversion over the
+  common `0..1000` shininess range
+- when `Ns` is absent, roughness falls back to `0.45` for mildly metallic
+  materials and `0.9` otherwise
+
+This keeps imported materials visually useful without overstating the fidelity
+of a Phong-to-PBR conversion.
+
+#### Texture-path safety rule
+
+The parser now preserves both the resolved on-disk `map_Kd` path and the
+original MTL reference string.
+
+That allows Phase 4 to keep texture metadata only when it is portable:
+
+- relative `map_Kd` paths are normalized and stored on `MeshDefinition`
+- absolute texture paths are intentionally dropped from exported domain data
+
+This avoids leaking machine-specific paths into RON exports.
+
+#### Importer-state color preservation seam
+
+The importer state still owns heuristic palette assignment, but it now avoids
+overwriting mesh colors that already arrived from MTL-backed domain data.
+
+That small seam change is required so Phase 4's mapped `Kd` color survives the
+initial load into `ImportedMesh` and remains visible for export.
+
+Automatic palette assignment is still available as an explicit importer action.
+
+---
+
+### Test coverage
+
+Added focused tests for:
+
+- mapping `Kd`, `d`, `Ke`, `Ks`, `Ns`, and relative `map_Kd` into domain mesh
+  output
+- preserving portable relative texture paths while rejecting absolute ones
+- keeping imported MTL colors when importer state creates editable mesh rows
+
+Existing parser tests for missing or malformed MTL files continue to verify the
+required graceful-degradation behavior.
+
+---
+
+### Architecture compliance
+
+- The work stays inside the SDK importer pipeline and existing visual domain
+  types.
+- `MeshDefinition`, `MaterialDefinition`, and `AlphaMode` are used exactly as
+  already defined in `src/domain/visual/mod.rs`.
+- No gameplay data structures or campaign fixture paths were changed.
+- No new persistence format was introduced.
+
 ---
 
 ### Phase 3 Deliverables
