@@ -291,6 +291,10 @@ pub enum TreeType {
     /// Multi-stem low profile, bushy appearance
     /// Use for: Undergrowth, small vegetation
     Shrub,
+
+    /// Tall slender trunk with fan-shaped fronds at the crown
+    /// Use for: Tropical biomes, coastal areas, desert oases
+    Palm,
 }
 
 impl TreeType {
@@ -357,6 +361,14 @@ impl TreeType {
                 foliage_density: 0.95,
                 foliage_color: (0.2, 0.5, 0.2),
             },
+            TreeType::Palm => TreeConfig {
+                trunk_radius: 0.18,
+                height: 5.5,
+                branch_angle_range: (70.0, 85.0),
+                depth: 2,
+                foliage_density: 0.7,
+                foliage_color: (0.4, 0.7, 0.2), // Tropical green
+            },
         }
     }
 
@@ -378,6 +390,7 @@ impl TreeType {
             TreeType::Willow => "Willow",
             TreeType::Dead => "Dead Tree",
             TreeType::Shrub => "Shrub",
+            TreeType::Palm => "Palm",
         }
     }
 
@@ -400,6 +413,7 @@ impl TreeType {
             TreeType::Willow,
             TreeType::Dead,
             TreeType::Shrub,
+            TreeType::Palm,
         ]
     }
 }
@@ -825,6 +839,7 @@ pub fn generate_branch_graph(tree_type: TreeType) -> BranchGraph {
         TreeType::Willow => 45u64,
         TreeType::Dead => 46u64,
         TreeType::Shrub => 47u64,
+        TreeType::Palm => 48u64,
     };
     let mut rng = StdRng::seed_from_u64(seed);
 
@@ -942,6 +957,7 @@ fn subdivide_branch(
         TreeType::Willow => rng.random_range(3..=4),
         TreeType::Dead => rng.random_range(1..=2),
         TreeType::Shrub => rng.random_range(2..=3),
+        TreeType::Palm => rng.random_range(2..=3),
     };
 
     // Calculate parent direction
@@ -1164,13 +1180,14 @@ mod tests {
     #[test]
     fn test_tree_type_all_variants_present() {
         let all_types = TreeType::all();
-        assert_eq!(all_types.len(), 6);
+        assert_eq!(all_types.len(), 7);
         assert!(all_types.contains(&TreeType::Oak));
         assert!(all_types.contains(&TreeType::Pine));
         assert!(all_types.contains(&TreeType::Birch));
         assert!(all_types.contains(&TreeType::Willow));
         assert!(all_types.contains(&TreeType::Dead));
         assert!(all_types.contains(&TreeType::Shrub));
+        assert!(all_types.contains(&TreeType::Palm));
     }
 
     #[test]
@@ -2012,6 +2029,54 @@ mod tests {
         );
     }
 
+    // ==================== Phase 3: Palm Tree Tests ====================
+
+    /// Tests that TreeType::Palm config returns correct trunk_radius and height
+    #[test]
+    fn test_tree_type_palm_config_returns_correct_parameters() {
+        let config = TreeType::Palm.config();
+        assert!(
+            (config.trunk_radius - 0.18).abs() < f32::EPSILON,
+            "Palm trunk_radius should be 0.18, got {}",
+            config.trunk_radius
+        );
+        assert!(
+            (config.height - 5.5).abs() < f32::EPSILON,
+            "Palm height should be 5.5, got {}",
+            config.height
+        );
+    }
+
+    /// Tests that TreeType::Palm.name() returns "Palm"
+    #[test]
+    fn test_tree_type_palm_name() {
+        assert_eq!(TreeType::Palm.name(), "Palm");
+    }
+
+    /// Tests that TreeType::all() includes Palm and has length 7
+    #[test]
+    fn test_tree_type_all_includes_palm() {
+        let all = TreeType::all();
+        assert_eq!(all.len(), 7, "TreeType::all() should have 7 variants");
+        assert!(
+            all.contains(&TreeType::Palm),
+            "TreeType::all() should contain Palm"
+        );
+    }
+
+    /// Tests that all tree types including Palm generate branch graphs without panic
+    #[test]
+    fn test_all_tree_types_including_palm_generate_without_panic() {
+        for tree_type in TreeType::all() {
+            let graph = generate_branch_graph(*tree_type);
+            assert!(
+                !graph.branches.is_empty(),
+                "{} should generate branches",
+                tree_type.name()
+            );
+        }
+    }
+
     #[test]
     fn test_get_leaf_branches_all_tree_types() {
         // All tree types should have leaf branches
@@ -2021,6 +2086,7 @@ mod tests {
             TreeType::Birch,
             TreeType::Willow,
             TreeType::Shrub,
+            TreeType::Palm,
         ] {
             let graph = generate_branch_graph(tree_type);
             let leaf_indices = get_leaf_branches(&graph);

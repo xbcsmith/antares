@@ -38,5 +38,6 @@ pub mod quest;
 pub mod recruitment_dialog;
 pub mod rest;
 pub mod sprite_uv_update;
+pub mod terrain_materials;
 pub mod time;
 pub mod ui;

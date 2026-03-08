@@ -33,6 +33,7 @@ wayland-sys = "0.31.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ordered-float = "4.0"
+image = { version = "0.25", features = ["png"] }
 
 [[bin]]
 name = "antares"
@@ -61,6 +62,10 @@ path = "src/bin/name_gen.rs"
 [[bin]]
 name = "update_tutorial_maps"
 path = "src/bin/update_tutorial_maps.rs"
+
+[[bin]]
+name = "generate_terrain_textures"
+path = "src/bin/generate_terrain_textures.rs"
 
 [dev-dependencies]
 tempfile = "3.23"

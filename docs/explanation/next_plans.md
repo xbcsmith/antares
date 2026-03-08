@@ -27,8 +27,6 @@ Analyze this codebase for refactoring opportunities:
 
 Compile the findings into a prioritized action plan with a phased approach.
 
-
-
 ### Custom Fonts
 
 Supporting custom fonts requires updates to the campaign config to allow specify a custom Dialogue Font, a Custom Game Menu font. I would expect it to work like this. Default Dialogue Font --> Custom Font in Campaign. The custom Font path should be ./campaigns/<campaign name>/fonts/<font-name>.ttf and it should be configurable by the Campaign Config RON file. If no custom font is specified in the Campaign Config RON file, the default font should be used.
@@ -201,7 +199,6 @@ This item is tracked here for future planning. It does not need to be addressed 
 
 ✅ PLAN WRITTEN - [Dropped Item Persistence Implementation Plan](./dropped_item_persistence_implementation_plan.md)
 
-
 ### Encounter Visibility Follow-up (Skeleton)
 
 Applied now:
@@ -266,7 +263,6 @@ Write a plan with a phased approach to implementing different types of combat ev
 
 ✅ COMPLETED - [Combat Events Implementation Plan](./combat_events_implementation_plan.md)
 
-
 ### Locked Objects and Keys
 
 We need to implement locked objects and keys in the game engine. Currently there are no locked objects or keys in the game. We should have locked doors, chests, and other containers that require a key to open. The keys should be items that can be found in the world or given as quest rewards. The locked objects should have a locked and unlocked state. When the player interacts with a locked object without the key, they should get a message saying it is locked. When they interact with it with the key, it should unlock and allow them to access whatever is behind it (e.g. a new area, loot, etc). We also need a lockpick skill and lockpicking mechanic that allows the player to attempt to pick the lock on a locked object if they do not have the key. The success of the lockpicking attempt should be based on the player's lockpicking skill and a random chance.
@@ -274,8 +270,6 @@ We need to implement locked objects and keys in the game engine. Currently there
 Write a plan with a phased approach to implementing locked objects and keys in the game engine. THINK HARD and follow the rules in @PLAN.md
 
 ✅ PLAN WRITTEN - [Locked Objects and Keys Implementation Plan](./locked_objects_and_keys_implementation_plan.md)
-
-
 
 ### Months and Years in the Time System
 
@@ -354,7 +348,7 @@ pub enum TimeCondition {
 for day, month, year). The `update_clock` system formats a full date string.
 A `period_label`-style helper can format month names when the campaign defines them.
 
- 1. Campaign Builder — Starting Date
+1.  Campaign Builder — Starting Date
 
 `CampaignConfig::starting_time` already has `day`, `hour`, `minute`. Extend to
 include `year` and `month`. The Campaign Builder's Gameplay section and
@@ -400,3 +394,283 @@ Food Ration should be a consumable item with a condition "can rest".
 Write a plan with a phased approach to implementing a food system in the game engine. THINK HARD and follow the rules in @PLAN.md
 
 ✅ PLAN WRITTEN - [Food System Implementation Plan](./food_system_implementation_plan.md)
+
+### Unified Creature Asset Binding (`creature_id` Standard)
+
+#### Problem
+
+There are currently three separate mechanisms for tying an entity to a creature
+asset (the procedural mesh definition in `creatures.ron`), and none of them are
+consistent:
+
+| Entity type           | Binding mechanism                                                                                     | Field                             |
+| --------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `MonsterDefinition`   | Direct field                                                                                          | `visual_id: Option<CreatureId>`   |
+| `NpcDefinition`       | Direct field                                                                                          | `creature_id: Option<CreatureId>` |
+| `CharacterDefinition` | **None** — resolved at runtime by a fragile name-match heuristic in `resolve_recruitable_creature_id` | (absent)                          |
+
+`MonsterDefinition` uses a different field name (`visual_id`) from `NpcDefinition`
+(`creature_id`) for the same concept. `CharacterDefinition` has no field at all;
+the rendering system works around this with a three-step runtime fallback:
+
+1. Look up the `character_id` in `NpcDefinition.creature_id` (re-uses the NPC
+   system as a proxy).
+2. Look up `CharacterDefinition.name` and fuzzy-match it against
+   `CreatureDefinition.name` after stripping non-alphanumeric characters and
+   lowercasing both sides.
+3. Fall back to the placeholder sprite (`sprites/placeholders/npc_placeholder.png`).
+
+Steps 1 and 2 are silent — no compile-time or load-time error is emitted when
+the mapping is missing or ambiguous. A campaign author who names a character
+`"Old Gareth"` in `characters.ron` and a creature `"old gareth"` in
+`creatures.ron` gets a working game; one who uses `"Gareth the Old"` gets a
+placeholder sprite with no warning beyond a log message.
+
+The `visual_id` / `creature_id` naming split also means every system that reads
+one of these fields must know which struct it is dealing with. There is no shared
+trait or convention.
+
+#### Goal
+
+Standardise on a single field name **`creature_id: Option<CreatureId>`** across
+all three definition types, and remove the runtime name-match heuristic entirely.
+
+- `MonsterDefinition.visual_id` → renamed to `creature_id`.
+- `NpcDefinition.creature_id` → kept as-is (already the right name).
+- `CharacterDefinition` → add `creature_id: Option<CreatureId>` as a new
+  `#[serde(default)]` field.
+
+After this change the rendering system can use one uniform lookup:
+
+```rust
+// Same call works for all three definition types
+let creature_id = def.creature_id;
+```
+
+`resolve_recruitable_creature_id` is deleted. Its replacement is a one-liner:
+`character_def.creature_id`.
+
+#### Scope
+
+**Files to modify:**
+
+- `src/domain/world/monster.rs` — rename `visual_id` → `creature_id` on
+  `MonsterDefinition`. Update all `serde` annotations. Remove any migration
+  shim for the old name (backwards compatibility is not required).
+- `src/domain/character_definition.rs` — add `pub creature_id:
+Option<CreatureId>` to `CharacterDefinition` with `#[serde(default)]`.
+  Update `CharacterDefinitionBuilder` (if present) to expose the new field.
+- `src/domain/world/npc.rs` — no structural change; verify field name is
+  already `creature_id` and doc comment is accurate.
+- `src/game/systems/map.rs`:
+  - Delete `resolve_recruitable_creature_id`.
+  - Delete `resolve_encounter_creature_id` or rewrite it to read
+    `monster_def.creature_id` directly without the `visual_id` alias.
+  - In the `RecruitableCharacter` spawn branch: replace the `resolve_*` call
+    with a direct lookup of `character_def.creature_id`.
+  - In the `Encounter` spawn branch: replace the `resolve_*` call with a direct
+    lookup of `monster_def.creature_id` (first monster in the group that has
+    `creature_id: Some(_)`).
+  - In the NPC spawn branch: no change required (already reads `npc_def.creature_id`).
+- `data/test_campaign/data/monsters.ron` — rename `visual_id` → `creature_id`
+  in all fixture entries.
+- `campaigns/tutorial/data/monsters.ron` — rename `visual_id` → `creature_id`
+  in all entries.
+- Any other `.ron` files in `data/` or `campaigns/` that contain `visual_id:`.
+- All tests that construct `MonsterDefinition` directly — update field name.
+- `docs/reference/architecture.md` — update the data structure tables to reflect
+  the unified field name.
+- `sdk/campaign_builder/src/monsters_editor.rs`:
+  - Rename `visual_id: None` → `creature_id: None` in `default_monster()`.
+  - Add a "Creature ID" row to `show_form` (numeric display + Browse picker +
+    Clear button + tooltip) — this field is **currently not exposed in the UI
+    at all** and must be added.
+  - Show resolved creature name in `show_monster_details` and
+    `show_preview_static`.
+- `sdk/campaign_builder/src/characters_editor.rs`:
+  - Add `pub creature_id: String` to `CharacterEditBuffer`.
+  - Populate it in `start_edit_character`.
+  - Write it back in `save_character` (parse to `Option<CreatureId>`).
+  - Add a "Creature ID" row to the character edit form (Browse/Clear/tooltip)
+    in the Visual section near `portrait_id`.
+  - Show creature name in the character list view and preview panel.
+- `sdk/campaign_builder/src/npc_editor.rs`:
+  - No structural changes needed (field already exists end-to-end).
+  - Upgrade the raw `TextEdit::singleline` creature_id input to the consistent
+    Browse/Clear/tooltip picker pattern used in the other two editors.
+  - Show resolved creature name in `show_preview` alongside the numeric ID.
+- `sdk/campaign_builder/src/advanced_validation.rs`:
+  - Rename `visual_id: Some(id)` → `creature_id: Some(id)` in
+    `create_test_monster`.
+
+**Files to create:**
+
+None. This is a rename-and-add refactor, not a new subsystem.
+
+#### Campaign Builder Editor Updates
+
+Every Campaign Builder editor that exposes one of these definition types must
+be updated to match the domain changes. The current state of each editor is
+documented below so nothing is missed.
+
+**`sdk/campaign_builder/src/monsters_editor.rs` — Monsters Editor**
+
+This is the most work. Two separate problems exist:
+
+1. **Field rename in the struct initialiser**: `default_monster()` constructs a
+   `MonsterDefinition` with `visual_id: None`. After the domain rename this must
+   become `creature_id: None`. The same applies to the `advanced_validation.rs`
+   test helper `create_test_monster` which also sets `visual_id: Some(id)`.
+
+2. **Missing UI field — `visual_id` / `creature_id` is not exposed in
+   `show_form` at all.** There is no text input, label, or picker for this field
+   in the Add/Edit form. A campaign author currently has no way to assign a
+   creature asset to a monster through the editor; they must hand-edit the RON
+   file. This must be fixed as part of this work.
+
+   Add a "Creature ID" row to `show_form` in the Identity section (near the
+   Name and ID fields):
+
+   - A read-only numeric display showing the current `creature_id` value (or
+     "None" when absent).
+   - A `DragValue` or `TextEdit` (parsing to `Option<CreatureId>`) for direct
+     numeric entry.
+   - A **"Browse…"** button that opens a modal `ComboBox` or searchable list
+     populated from `CreatureAssetManager::list_creature_references()`, showing
+     each creature's ID and name side by side so the author can pick one without
+     knowing the raw number.
+   - A **"Clear"** button that sets the field back to `None`.
+   - An `ℹ️` tooltip explaining: "Links this monster to a procedural mesh
+     creature definition. When set, the monster spawns as a 3-D creature mesh
+     on the map instead of a sprite placeholder."
+   - The `show_monster_details` and `show_preview_static` panels should also
+     display the resolved creature name (looked up from the `CreatureAssetManager`)
+     alongside the numeric ID, or "No creature asset" when `None`.
+
+**`sdk/campaign_builder/src/characters_editor.rs` — Characters Editor**
+
+`CharacterDefinition` currently has no `creature_id` field; `CharacterEditBuffer`
+has no corresponding buffer string; and `save_character` does not write one.
+Three coordinated changes are required:
+
+1. Add `pub creature_id: String` to `CharacterEditBuffer` (empty string = `None`).
+2. In `start_edit_character`, populate the buffer:
+   `creature_id: character.creature_id.map_or(String::new(), |id| id.to_string())`.
+3. In `save_character`, parse it back:
+   `creature_id: if self.buffer.creature_id.is_empty() { None } else { self.buffer.creature_id.parse::<CreatureId>().ok() }`.
+4. Add a "Creature ID" row to the character edit form (same Browse/Clear/tooltip
+   pattern described for the Monsters Editor above). Place it in the Visual
+   section of the form near `portrait_id`.
+5. The character list view and the preview panel should display the creature name
+   (or "No creature asset") alongside the portrait.
+
+**`sdk/campaign_builder/src/npc_editor.rs` — NPC Editor**
+
+The NPC editor already has a working `creature_id` text field in
+`NpcEditBuffer`, `start_edit_npc`, `save_npc`, and `show_preview`. No
+structural changes are required by the domain rename.
+
+However, the field is currently a raw `TextEdit::singleline` that accepts free
+text. Upgrade it to match the same Browse/Clear/tooltip pattern used in the
+Monsters and Characters editors so the experience is consistent:
+
+- Replace the raw text edit with a read-only numeric display + **"Browse…"**
+  button that opens the creature picker.
+- Keep the raw numeric text entry as a fallback (for keyboard-first users).
+- Show the resolved creature name in `show_preview` alongside the numeric ID.
+
+**`sdk/campaign_builder/src/advanced_validation.rs` — Validation**
+
+The `create_test_monster` helper at the bottom of this file sets
+`visual_id: Some(id)`. Rename to `creature_id: Some(id)` to match the domain
+change. No logic changes needed.
+
+**Campaign Builder Testing Requirements**
+
+- Add a test in `monsters_editor.rs`:
+  `test_monsters_editor_creature_id_roundtrips_through_form` — set
+  `edit_buffer.creature_id = Some(42)`, call `save_form`, reload into the
+  buffer via `start_edit_monster`, assert the buffer shows `"42"`.
+- Add a test in `characters_editor.rs`:
+  `test_characters_editor_creature_id_roundtrips_through_form` — same pattern
+  for `CharacterDefinition`.
+- Verify that the NPC editor's existing `test_start_edit_npc_populates_sprite_fields`
+  and `test_save_npc_edit_mode` tests still pass unchanged (they already cover
+  `creature_id` round-trip for NPCs).
+
+#### Data Migration
+
+Because backwards compatibility is explicitly not required, the rename is a
+hard cut. Every `monsters.ron` file must be updated to use `creature_id` before
+the build will pass. `cargo check` will catch any missed RON files at
+deserialisation time (test suite loads all campaign data).
+
+#### Shared Trait (Optional but Recommended)
+
+Define a small trait in `src/domain/world/creature_binding.rs`:
+
+```rust
+pub trait CreatureBound {
+    fn creature_id(&self) -> Option<CreatureId>;
+}
+```
+
+Implement it for `MonsterDefinition`, `NpcDefinition`, and
+`CharacterDefinition`. This makes the rendering system's lookup site
+type-generic and prevents future drift.
+
+#### Rendering System Simplification
+
+After the migration `spawn_map` no longer needs two resolve helpers. The spawn
+branches become symmetric:
+
+| Branch                        | Lookup                                                |
+| ----------------------------- | ----------------------------------------------------- |
+| `Encounter`                   | `monster_def.creature_id` (first monster with `Some`) |
+| `NpcDialogue` / NPC placement | `npc_def.creature_id`                                 |
+| `RecruitableCharacter`        | `character_def.creature_id`                           |
+
+All three fall back to the placeholder sprite path when `creature_id` is `None`,
+using the same fallback block (no special-cased heuristics).
+
+#### Testing Requirements
+
+- All existing map-rendering tests that exercise recruitable or encounter
+  visual spawning must continue to pass after the migration.
+- Add a test: `test_character_definition_creature_id_field_roundtrips_ron` —
+  serialise a `CharacterDefinition` with `creature_id: Some(7)` to RON and
+  deserialise it back; assert the value survives the round-trip.
+- Add a test: `test_monster_definition_creature_id_field_roundtrips_ron` —
+  same pattern for the renamed field on `MonsterDefinition`.
+- Add a test: `test_recruitable_spawn_uses_character_def_creature_id` — build
+  a minimal `App` with a `CharacterDefinition` that has `creature_id: Some(N)`
+  and a matching `CreatureDefinition`; assert that `spawn_map` produces a
+  `CreatureVisual { creature_id: N }` entity for the recruitable event (no
+  name-match heuristic involved).
+- `cargo nextest run --all-features` must pass with zero failures.
+
+#### Success Criteria
+
+- `MonsterDefinition`, `NpcDefinition`, and `CharacterDefinition` all expose
+  `creature_id: Option<CreatureId>`.
+- The field `visual_id` no longer exists anywhere in the codebase (source,
+  tests, RON data files, and SDK editor code).
+- `resolve_recruitable_creature_id` no longer exists.
+- Campaign data in `data/test_campaign/` and `campaigns/tutorial/` uses
+  `creature_id` in all monster entries.
+- **Monsters Editor**: `show_form` exposes a working "Creature ID" Browse/Clear
+  field that round-trips correctly through save and reload. The field was
+  previously absent from the UI entirely.
+- **Characters Editor**: `CharacterEditBuffer` carries `creature_id`; `save_character`
+  writes it to `CharacterDefinition`; the edit form exposes it with a Browse/Clear
+  picker in the Visual section.
+- **NPC Editor**: the creature_id input has been upgraded from a raw text edit to
+  a consistent Browse/Clear/tooltip picker; resolved creature name appears in the
+  preview panel.
+- All Campaign Builder editor tests pass, including the two new round-trip tests
+  for Monsters and Characters editors.
+- All quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D warnings`,
+  `cargo nextest run --all-features`.
+
+Write a plan with a phased approach to implementing unified creature asset
+binding in the game engine. THINK HARD and follow the rules in @PLAN.md
