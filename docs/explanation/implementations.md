@@ -1,5 +1,132 @@
 # Implementations
 
+## Food System — Phase 4: UI and SDK Editor Updates
+
+### Overview
+
+Phase 4 of the food system migration updates the SDK campaign builder's Items Editor and the
+CLI `item_editor` tool to expose the `ConsumableEffect::IsFood(u8)` variant introduced in
+Phase 1. Before this phase, campaign developers could not create novel food items (e.g. "Elven
+Bread", "Roast Beef") through the graphical or command-line editors — the `IsFood` variant was
+simply missing from all dropdowns and menus. Phase 4 closes that gap: the Items Editor now
+lists "Food (Rations)" as a selectable effect type and renders a `ration_value` drag-value
+field when it is chosen. The CLI tool gains an equivalent `[5] Food (Rations)` option in both
+the create and edit flows.
+
+No domain-logic changes were needed. All modifications are pure UI/presentation layer.
+
+### Deliverables Checklist
+
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — `IsFood` added to `ConsumableEffect` ComboBox dropdown
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — `ration_value: u8` DragValue field rendered when `IsFood` is selected
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — `IsFood` branch added to `show_preview_static` for readable label ("Food (1 ration)" / "Food (3 rations)")
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — tooltip on effect ComboBox row explains food semantics
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — "⚠️ Food items are not usable in combat." label shown below ration_value field
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — 9 new tests covering `IsFood` editor behaviour
+- [x] CLI `src/bin/item_editor.rs` — `[5] Food (Rations)` option added to `create_consumable`
+- [x] CLI `src/bin/item_editor.rs` — food items hard-code `is_combat_usable = false` in create flow
+- [x] CLI `src/bin/item_editor.rs` — `[5] Food (Rations)` option added to `edit_item_classification` consumable branch
+- [x] CLI `src/bin/item_editor.rs` — editing to `IsFood` forces `is_combat_usable = false` on the item
+- [x] CLI `src/bin/item_editor.rs` — 4 new tests covering `IsFood` CLI behaviour
+- [x] All quality gates passed: `cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run` (3258 passed, 8 skipped)
+
+### What Was Built
+
+#### `sdk/campaign_builder/src/items_editor.rs` — SDK Items Editor
+
+**Effect type ComboBox** (`show_type_editor`, Consumable branch): The existing ComboBox that
+lets the user pick a `ConsumableEffect` variant now includes a "Food (Rations)" option. When
+clicked it initialises the effect to `ConsumableEffect::IsFood(1)` (a standard single-ration
+food item). The option is added at the bottom of the dropdown alongside the existing Heal HP,
+Restore SP, Cure Condition, Boost Attribute, and Boost Resistance options.
+
+An `ℹ️` hover-tooltip on the ComboBox row explains the food mechanics:
+
+> "Food (Rations): consumed during rest to feed party members. Ration Value controls how many
+> characters one item feeds (usually 1). Food items are not usable in combat."
+
+**Ration Value field**: When `IsFood` is the active effect, the editor renders:
+
+```sdk/campaign_builder/src/items_editor.rs#L1438-1450
+ConsumableEffect::IsFood(ration_value) => {
+    ui.horizontal(|ui| {
+        ui.label("Ration Value:");
+        ui.add(egui::DragValue::new(ration_value).range(1..=255));
+        ui.label("ℹ️").on_hover_text(concat!(
+            "Number of party members this item feeds when consumed during rest.\n",
+            "Standard Food Ration = 1 (feeds one character).\n",
+            "Trail Ration = 3 (feeds three characters).",
+        ));
+    });
+    ui.label("⚠️ Food items are not usable in combat.");
+}
+```
+
+This is consistent with the `AttributePair`-style pattern used in the rest of the editor: each
+effect variant owns its own sub-controls.
+
+**Preview panel** (`show_preview_static`, Consumable branch): The static preview now handles
+`IsFood` and produces human-readable singular/plural labels:
+
+- `IsFood(1)` → "Food (1 ration)"
+- `IsFood(3)` → "Food (3 rations)"
+
+#### `src/bin/item_editor.rs` — CLI Item Editor
+
+**`create_consumable`**: A new `[5] Food (Rations)` option is listed in the effect menu. When
+chosen, the user is prompted for a ration value (default 1). The `is_combat_usable` prompt is
+skipped entirely for food items — the code hard-codes `false` and prints an informational
+message. This matches the domain invariant that food is never usable in combat.
+
+**`edit_item_classification`** (Consumable branch): The same `[5]` option is added to the
+effect-type change menu. When the user switches an existing consumable to `IsFood`, the code
+writes both the new effect and forces `is_combat_usable = false` on the stored item, ensuring
+a previously-combat-usable consumable (e.g. a Healing Potion) cannot become a combat-usable
+food item by accident.
+
+### Tests
+
+#### SDK Items Editor tests (9 new, all in `mod tests` of `items_editor.rs`)
+
+| Test                                                 | What it verifies                                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `test_is_food_effect_default_ration_value`           | `IsFood(1)` carries ration_value = 1                                                  |
+| `test_is_food_effect_trail_ration_value`             | `IsFood(3)` carries ration_value = 3                                                  |
+| `test_is_food_effect_inequality_with_other_variants` | `IsFood` is not equal to any other effect variant                                     |
+| `test_is_food_item_loads_into_edit_buffer`           | Food Ration (id 53) round-trips through `edit_buffer` with `is_combat_usable = false` |
+| `test_is_food_trail_ration_loads_into_edit_buffer`   | Trail Ration (id 54, ration_value 3) round-trips through `edit_buffer`                |
+| `test_consumable_filter_matches_food_item`           | `ItemTypeFilter::Consumable` matches `IsFood` items; Weapon/Quest filters do not      |
+| `test_is_food_preview_label_singular`                | `IsFood(1)` preview label is "Food (1 ration)"                                        |
+| `test_is_food_preview_label_plural`                  | `IsFood(3)` preview label is "Food (3 rations)"                                       |
+
+#### CLI Item Editor tests (4 new, in `mod tests` of `item_editor.rs`)
+
+| Test                                                      | What it verifies                                                                           |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `test_format_classification_consumable_is_food`           | `format_classification` output contains "Consumable" and "IsFood"                          |
+| `test_create_consumable_is_food_effect_not_combat_usable` | `IsFood` branch always produces `is_combat_usable = false`                                 |
+| `test_create_consumable_trail_ration_value_preserved`     | Trail Ration `ration_value = 3` is preserved through the create flow                       |
+| `test_edit_consumable_is_food_clears_combat_usable`       | Editing an existing combat-usable consumable to `IsFood` forces `is_combat_usable = false` |
+
+### Success Criteria Met
+
+> Campaign developers can create novel food items (e.g., "Elven Bread", "Roast Beef") in the
+> Items Editor.
+
+The "Food (Rations)" option is now available in the effect-type dropdown. A campaign developer
+can:
+
+1. Create a new Consumable item and select "Food (Rations)" as the effect.
+2. Set a custom `ration_value` (e.g., 2 for a hearty meal that feeds two characters).
+3. Save the item to the campaign's `items.ron`.
+4. Reference the new item ID in `npc_stock_templates.ron` so merchants sell it.
+
+The rest system (Phase 2) already reads any item with `ConsumableEffect::IsFood(_)` from
+character inventories — no further changes are needed for new food items to function correctly
+at runtime.
+
+---
+
 ## Food System — Phase 3: Merchant and Innkeeper Integration
 
 ### Overview
