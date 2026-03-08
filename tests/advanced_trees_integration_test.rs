@@ -208,7 +208,7 @@ fn test_branch_mesh_generation_empty_graph_fallback() {
 fn test_tree_type_enumeration() {
     // Test: All TreeType variants are enumerated correctly
     let all_types = TreeType::all();
-    assert_eq!(all_types.len(), 6, "Should have exactly 6 tree types");
+    assert_eq!(all_types.len(), 7, "Should have exactly 7 tree types");
 
     // Verify all variants present
     let oak_found = all_types.contains(&TreeType::Oak);
@@ -217,6 +217,7 @@ fn test_tree_type_enumeration() {
     let willow_found = all_types.contains(&TreeType::Willow);
     let dead_found = all_types.contains(&TreeType::Dead);
     let shrub_found = all_types.contains(&TreeType::Shrub);
+    let palm_found = all_types.contains(&TreeType::Palm);
 
     assert!(oak_found, "Oak should be in enumeration");
     assert!(pine_found, "Pine should be in enumeration");
@@ -224,6 +225,7 @@ fn test_tree_type_enumeration() {
     assert!(willow_found, "Willow should be in enumeration");
     assert!(dead_found, "Dead should be in enumeration");
     assert!(shrub_found, "Shrub should be in enumeration");
+    assert!(palm_found, "Palm should be in enumeration");
 }
 
 #[test]

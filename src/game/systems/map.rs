@@ -814,8 +814,8 @@ fn spawn_map(
                                         crate::game::systems::advanced_trees::TreeType::Shrub
                                     }
                                     crate::domain::world::TreeType::Palm => {
-                                        crate::game::systems::advanced_trees::TreeType::Oak
-                                    } // Fallback for Palm
+                                        crate::game::systems::advanced_trees::TreeType::Palm
+                                    }
                                 };
 
                                 if rendered_t
@@ -835,6 +835,7 @@ fn spawn_map(
                                         &mut commands,
                                         &mut materials,
                                         &mut meshes,
+                                        &asset_server,
                                         pos,
                                         map.id,
                                         Some(&tile.visual),
@@ -848,6 +849,7 @@ fn spawn_map(
                                     &mut commands,
                                     &mut materials,
                                     &mut meshes,
+                                    &asset_server,
                                     pos,
                                     map.id,
                                     Some(&tile.visual),

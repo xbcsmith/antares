@@ -55,6 +55,38 @@ const GRASS_BLADE_ALPHA_TIP: u8 = 64;
 const GRASS_BLADE_SEED: u64 = 0xA1B2_C3D4_E5F6_0718;
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Tree texture constants
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Width of bark texture in pixels.
+const BARK_WIDTH: u32 = 64;
+/// Height of bark texture in pixels.
+const BARK_HEIGHT: u32 = 128;
+/// Bark base brown colour — red channel.
+const BARK_R: u8 = 90;
+/// Bark base brown colour — green channel.
+const BARK_G: u8 = 60;
+/// Bark base brown colour — blue channel.
+const BARK_B: u8 = 35;
+/// Bark noise seed.
+const BARK_SEED: u64 = 0xB1C2_D3E4_F5A6_0718;
+
+/// Width of foliage textures in pixels.
+const FOLIAGE_WIDTH: u32 = 128;
+/// Height of foliage textures in pixels.
+const FOLIAGE_HEIGHT: u32 = 128;
+/// Width/height of shrub foliage texture (smaller).
+const SHRUB_FOLIAGE_SIZE: u32 = 64;
+/// Width of the pine foliage texture.
+const PINE_FOLIAGE_WIDTH: u32 = 64;
+/// Height of the pine foliage texture.
+const PINE_FOLIAGE_HEIGHT: u32 = 128;
+/// Alpha cutoff threshold — pixels with radius fraction above this are transparent.
+const FOLIAGE_ALPHA_OUTER: u8 = 0;
+/// Alpha for fully opaque foliage pixels.
+const FOLIAGE_ALPHA_INNER: u8 = 240;
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Constants
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -214,6 +246,196 @@ fn generate_texture(spec: &TerrainTextureSpec) -> ImageBuffer<Rgba<u8>, Vec<u8>>
     img
 }
 
+/// Generates a 64×128 RGBA bark texture for tree trunks.
+///
+/// The texture is fully opaque (alpha = 255) with a brown base colour and
+/// deterministic vertical-grain noise applied per pixel.
+pub fn generate_bark_texture() -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let mut img = ImageBuffer::new(BARK_WIDTH, BARK_HEIGHT);
+    let mut state = BARK_SEED;
+
+    for y in 0..BARK_HEIGHT {
+        // Vertical grain: modulate brightness slightly per row
+        let grain = ((y % 5) as i32) - 2; // -2..+2 grain variation
+        for x in 0..BARK_WIDTH {
+            let r_base = clamp_channel(BARK_R as i32 + grain);
+            let g_base = clamp_channel(BARK_G as i32 + grain);
+            let (r, s1) = apply_noise(r_base, state);
+            let (g, s2) = apply_noise(g_base, s1);
+            let (b, s3) = apply_noise(BARK_B, s2);
+            state = s3;
+            img.put_pixel(x, y, Rgba([r, g, b, 255]));
+        }
+    }
+    img
+}
+
+/// Generates an RGBA foliage texture with a circular alpha mask.
+///
+/// Pixels within the inscribed circle of the image are opaque, pixels outside
+/// are transparent. A small amount of noise is applied to the colour channels
+/// inside the circle for a natural look.
+///
+/// # Arguments
+///
+/// * `width` - Image width in pixels
+/// * `height` - Image height in pixels
+/// * `base_r` - Base red channel for foliage colour
+/// * `base_g` - Base green channel for foliage colour
+/// * `base_b` - Base blue channel for foliage colour
+/// * `seed` - Deterministic noise seed
+pub fn generate_foliage_texture(
+    width: u32,
+    height: u32,
+    base_r: u8,
+    base_g: u8,
+    base_b: u8,
+    seed: u64,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let mut img = ImageBuffer::new(width, height);
+    let mut state = seed;
+
+    let cx = width as f32 / 2.0;
+    let cy = height as f32 / 2.0;
+    let radius = (cx.min(cy)) * 0.85; // Slightly inset for soft edge
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            if dist <= radius {
+                // Inside circle: apply colour with noise
+                let (r, s1) = apply_noise(base_r, state);
+                let (g, s2) = apply_noise(base_g, s1);
+                let (b, s3) = apply_noise(base_b, s2);
+                state = s3;
+                // Soft falloff near edge
+                let alpha = if dist > radius * 0.8 {
+                    let t = (dist - radius * 0.8) / (radius * 0.2);
+                    (FOLIAGE_ALPHA_INNER as f32 * (1.0 - t)) as u8
+                } else {
+                    FOLIAGE_ALPHA_INNER
+                };
+                img.put_pixel(x, y, Rgba([r, g, b, alpha]));
+            } else {
+                // Advance state for determinism even for transparent pixels
+                state = xorshift64(state);
+                img.put_pixel(x, y, Rgba([0, 0, 0, FOLIAGE_ALPHA_OUTER]));
+            }
+        }
+    }
+    img
+}
+
+/// Generates all tree texture assets and writes them to `assets/textures/trees/`.
+///
+/// # Textures generated
+///
+/// | File                | Dimensions | Content                          |
+/// |---------------------|------------|----------------------------------|
+/// | `bark.png`          | 64×128     | Brown vertical-grain bark        |
+/// | `foliage_oak.png`   | 128×128    | Rounded leaf cluster             |
+/// | `foliage_pine.png`  | 64×128     | Vertical needle cluster          |
+/// | `foliage_birch.png` | 128×128    | Small round leaves               |
+/// | `foliage_willow.png`| 128×128    | Drooping curtain of leaves       |
+/// | `foliage_palm.png`  | 128×128    | Fan-shaped palm fronds           |
+/// | `foliage_shrub.png` | 64×64      | Dense bush silhouette            |
+pub fn generate_tree_textures(trees_dir: &std::path::Path) {
+    std::fs::create_dir_all(trees_dir).unwrap_or_else(|e| {
+        eprintln!(
+            "ERROR: Could not create directory '{}': {e}",
+            trees_dir.display()
+        );
+        std::process::exit(1);
+    });
+
+    // Bark texture (fully opaque)
+    let bark = generate_bark_texture();
+    save_texture(trees_dir, "bark.png", &bark);
+
+    // Oak foliage — medium green, 128×128 circular
+    let oak = generate_foliage_texture(
+        FOLIAGE_WIDTH,
+        FOLIAGE_HEIGHT,
+        45,
+        110,
+        35,
+        0xC1D2_E3F4_A506_1728,
+    );
+    save_texture(trees_dir, "foliage_oak.png", &oak);
+
+    // Pine foliage — dark green, 64×128 (tall narrow)
+    let pine = generate_foliage_texture(
+        PINE_FOLIAGE_WIDTH,
+        PINE_FOLIAGE_HEIGHT,
+        20,
+        75,
+        25,
+        0xD2E3_F4A5_0617_2839,
+    );
+    save_texture(trees_dir, "foliage_pine.png", &pine);
+
+    // Birch foliage — light green, 128×128 circular
+    let birch = generate_foliage_texture(
+        FOLIAGE_WIDTH,
+        FOLIAGE_HEIGHT,
+        65,
+        130,
+        55,
+        0xE3F4_A506_1728_394A,
+    );
+    save_texture(trees_dir, "foliage_birch.png", &birch);
+
+    // Willow foliage — medium-dark green, 128×128 circular
+    let willow = generate_foliage_texture(
+        FOLIAGE_WIDTH,
+        FOLIAGE_HEIGHT,
+        50,
+        100,
+        40,
+        0xF4A5_0617_2839_4A5B,
+    );
+    save_texture(trees_dir, "foliage_willow.png", &willow);
+
+    // Palm foliage — tropical green, 128×128 circular
+    let palm = generate_foliage_texture(
+        FOLIAGE_WIDTH,
+        FOLIAGE_HEIGHT,
+        55,
+        125,
+        30,
+        0xA506_1728_394A_5B6C,
+    );
+    save_texture(trees_dir, "foliage_palm.png", &palm);
+
+    // Shrub foliage — dark bush green, 64×64
+    let shrub = generate_foliage_texture(
+        SHRUB_FOLIAGE_SIZE,
+        SHRUB_FOLIAGE_SIZE,
+        40,
+        90,
+        30,
+        0x0617_2839_4A5B_6C7D,
+    );
+    save_texture(trees_dir, "foliage_shrub.png", &shrub);
+
+    println!("Done. 7 tree textures written to: {}", trees_dir.display());
+}
+
+/// Saves an image buffer to a file, exiting on error.
+fn save_texture(dir: &std::path::Path, filename: &str, img: &ImageBuffer<Rgba<u8>, Vec<u8>>) {
+    let path = dir.join(filename);
+    match img.save(&path) {
+        Ok(()) => println!("  ✓  {filename}"),
+        Err(e) => {
+            eprintln!("ERROR: Failed to write '{filename}': {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Entry point
 // ──────────────────────────────────────────────────────────────────────────────
@@ -321,6 +543,11 @@ fn main() {
     }
 
     println!("Done. 1 grass texture written.");
+
+    // ── Tree textures ─────────────────────────────────────────────────────────
+    let trees_dir = PathBuf::from(manifest_dir).join("assets/textures/trees");
+    println!("Writing tree textures to: {}", trees_dir.display());
+    generate_tree_textures(&trees_dir);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -590,6 +817,112 @@ mod tests {
             img1.as_raw(),
             img2.as_raw(),
             "Ground and grass textures should not be identical"
+        );
+    }
+
+    // ==================== Tree Texture Tests ====================
+
+    /// Tests that generate_bark_texture returns correct dimensions
+    #[test]
+    fn test_generate_bark_texture_dimensions() {
+        let img = generate_bark_texture();
+        assert_eq!(img.width(), BARK_WIDTH, "Bark texture width mismatch");
+        assert_eq!(img.height(), BARK_HEIGHT, "Bark texture height mismatch");
+    }
+
+    /// Tests that bark texture pixels are fully opaque
+    #[test]
+    fn test_generate_bark_texture_fully_opaque() {
+        let img = generate_bark_texture();
+        for (_x, _y, pixel) in img.enumerate_pixels() {
+            assert_eq!(pixel[3], 255, "All bark pixels must be fully opaque");
+        }
+    }
+
+    /// Tests that generate_bark_texture is deterministic
+    #[test]
+    fn test_generate_bark_texture_is_deterministic() {
+        let img1 = generate_bark_texture();
+        let img2 = generate_bark_texture();
+        assert_eq!(
+            img1.into_raw(),
+            img2.into_raw(),
+            "Bark texture must be deterministic"
+        );
+    }
+
+    /// Tests that generate_foliage_texture returns correct dimensions
+    #[test]
+    fn test_generate_foliage_texture_dimensions() {
+        let img = generate_foliage_texture(
+            FOLIAGE_WIDTH,
+            FOLIAGE_HEIGHT,
+            45,
+            110,
+            35,
+            0xABCD_1234_5678_9EF0,
+        );
+        assert_eq!(img.width(), FOLIAGE_WIDTH);
+        assert_eq!(img.height(), FOLIAGE_HEIGHT);
+    }
+
+    /// Tests that foliage texture centre pixel is opaque
+    #[test]
+    fn test_generate_foliage_texture_centre_is_opaque() {
+        let img = generate_foliage_texture(
+            FOLIAGE_WIDTH,
+            FOLIAGE_HEIGHT,
+            45,
+            110,
+            35,
+            0xABCD_1234_5678_9EF0,
+        );
+        let cx = FOLIAGE_WIDTH / 2;
+        let cy = FOLIAGE_HEIGHT / 2;
+        let pixel = img.get_pixel(cx, cy);
+        assert!(
+            pixel[3] > 0,
+            "Centre pixel of foliage texture should be opaque"
+        );
+    }
+
+    /// Tests that foliage texture corners are transparent
+    #[test]
+    fn test_generate_foliage_texture_corners_transparent() {
+        let img = generate_foliage_texture(
+            FOLIAGE_WIDTH,
+            FOLIAGE_HEIGHT,
+            45,
+            110,
+            35,
+            0xABCD_1234_5678_9EF0,
+        );
+        // Corners should be outside the circular mask
+        let corners = [
+            (0, 0),
+            (FOLIAGE_WIDTH - 1, 0),
+            (0, FOLIAGE_HEIGHT - 1),
+            (FOLIAGE_WIDTH - 1, FOLIAGE_HEIGHT - 1),
+        ];
+        for (x, y) in corners {
+            let pixel = img.get_pixel(x, y);
+            assert_eq!(
+                pixel[3], FOLIAGE_ALPHA_OUTER,
+                "Corner pixel ({x},{y}) should be transparent"
+            );
+        }
+    }
+
+    /// Tests that generate_foliage_texture is deterministic
+    #[test]
+    fn test_generate_foliage_texture_is_deterministic() {
+        let seed = 0xABCD_1234_5678_9EF0_u64;
+        let img1 = generate_foliage_texture(FOLIAGE_WIDTH, FOLIAGE_HEIGHT, 45, 110, 35, seed);
+        let img2 = generate_foliage_texture(FOLIAGE_WIDTH, FOLIAGE_HEIGHT, 45, 110, 35, seed);
+        assert_eq!(
+            img1.into_raw(),
+            img2.into_raw(),
+            "Foliage texture must be deterministic"
         );
     }
 }
