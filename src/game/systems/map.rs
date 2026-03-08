@@ -877,9 +877,11 @@ fn spawn_map(
                                 &mut commands,
                                 &mut materials,
                                 &mut meshes,
+                                &asset_server,
                                 pos,
                                 map.id,
                                 Some(&tile.visual),
+                                tile.visual.color_tint,
                                 &quality_settings,
                             );
                         }

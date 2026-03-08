@@ -1,11 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Binary that generates placeholder terrain textures for the Antares game.
+//! Binary that generates placeholder terrain and grass textures for the Antares game.
 //!
-//! Each texture is a 64×64 RGBA PNG with a solid base colour and a deterministic
-//! per-pixel noise overlay of ±10 per channel. The noise seed is fixed so that
-//! the output is identical across runs (reproducible builds).
+//! # Terrain textures
+//!
+//! Each terrain texture is a 64×64 RGBA PNG with a solid base colour and a
+//! deterministic per-pixel noise overlay of ±10 per channel.  The noise seed
+//! is fixed so that the output is identical across runs (reproducible builds).
+//!
+//! # Grass blade texture
+//!
+//! A single 32×128 RGBA PNG representing one vertical grass blade with a
+//! transparent background.  The blade occupies the centre 16 pixels and fades
+//! from fully opaque (alpha = 255) at the base to semi-transparent (alpha ≈ 64)
+//! at the tip.  Base colour: RGBA (60, 130, 50, 255).
 //!
 //! # Usage
 //!
@@ -13,11 +22,37 @@
 //! cargo run --bin generate_terrain_textures
 //! ```
 //!
-//! Output files are written to `assets/textures/terrain/` relative to
-//! `CARGO_MANIFEST_DIR`.
+//! Output files are written to:
+//! - `assets/textures/terrain/` for terrain PNGs
+//! - `assets/textures/grass/`   for grass PNGs
+//!
+//! Both directories are relative to `CARGO_MANIFEST_DIR`.
 
 use image::{ImageBuffer, Rgba};
 use std::path::PathBuf;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Grass blade texture constants
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Width of the grass blade texture in pixels.
+const GRASS_BLADE_WIDTH: u32 = 32;
+/// Height of the grass blade texture in pixels.
+const GRASS_BLADE_HEIGHT: u32 = 128;
+/// Width of the visible blade strip in pixels (centred in the image).
+const BLADE_STRIP_WIDTH: u32 = 16;
+/// Base red channel for the grass blade colour.
+const GRASS_BLADE_R: u8 = 60;
+/// Base green channel for the grass blade colour.
+const GRASS_BLADE_G: u8 = 130;
+/// Base blue channel for the grass blade colour.
+const GRASS_BLADE_B: u8 = 50;
+/// Alpha at the very base of the blade (fully opaque).
+const GRASS_BLADE_ALPHA_BASE: u8 = 255;
+/// Alpha at the very tip of the blade (semi-transparent).
+const GRASS_BLADE_ALPHA_TIP: u8 = 64;
+/// Deterministic noise seed for the grass blade texture.
+const GRASS_BLADE_SEED: u64 = 0xA1B2_C3D4_E5F6_0718;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -183,22 +218,71 @@ fn generate_texture(spec: &TerrainTextureSpec) -> ImageBuffer<Rgba<u8>, Vec<u8>>
 // Entry point
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Grass blade texture generation
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Generates a 32×128 RGBA grass blade texture with a transparent background.
+///
+/// The blade occupies the centre [`BLADE_STRIP_WIDTH`] columns and fades from
+/// [`GRASS_BLADE_ALPHA_BASE`] at the bottom row to [`GRASS_BLADE_ALPHA_TIP`]
+/// at the top row.  A small amount of per-pixel noise is applied to the RGB
+/// channels inside the blade strip so the result has a natural look.
+pub fn generate_grass_blade_texture() -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let mut img = ImageBuffer::new(GRASS_BLADE_WIDTH, GRASS_BLADE_HEIGHT);
+    let mut state = GRASS_BLADE_SEED;
+
+    let blade_left = (GRASS_BLADE_WIDTH - BLADE_STRIP_WIDTH) / 2;
+    let blade_right = blade_left + BLADE_STRIP_WIDTH;
+
+    for y in 0..GRASS_BLADE_HEIGHT {
+        // Normalised position from bottom (0.0) to top (1.0).
+        let t = y as f32 / (GRASS_BLADE_HEIGHT - 1) as f32;
+        // Alpha lerps from base (bottom) to tip (top).
+        let alpha_f = GRASS_BLADE_ALPHA_BASE as f32
+            + t * (GRASS_BLADE_ALPHA_TIP as f32 - GRASS_BLADE_ALPHA_BASE as f32);
+        let alpha = alpha_f.round() as u8;
+
+        for x in 0..GRASS_BLADE_WIDTH {
+            if x >= blade_left && x < blade_right {
+                // Inside the blade strip: apply noise to RGB.
+                let (r, s1) = apply_noise(GRASS_BLADE_R, state);
+                let (g, s2) = apply_noise(GRASS_BLADE_G, s1);
+                let (b, s3) = apply_noise(GRASS_BLADE_B, s2);
+                state = s3;
+                img.put_pixel(x, y, Rgba([r, g, b, alpha]));
+            } else {
+                // Outside the blade strip: fully transparent.
+                img.put_pixel(x, y, Rgba([0, 0, 0, 0]));
+            }
+        }
+    }
+
+    img
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Entry point
+// ──────────────────────────────────────────────────────────────────────────────
+
 fn main() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let output_dir = PathBuf::from(manifest_dir).join("assets/textures/terrain");
 
-    std::fs::create_dir_all(&output_dir).unwrap_or_else(|e| {
+    // ── Terrain textures ──────────────────────────────────────────────────────
+    let terrain_dir = PathBuf::from(manifest_dir).join("assets/textures/terrain");
+
+    std::fs::create_dir_all(&terrain_dir).unwrap_or_else(|e| {
         eprintln!(
-            "ERROR: Could not create output directory '{}': {e}",
-            output_dir.display()
+            "ERROR: Could not create directory '{}': {e}",
+            terrain_dir.display()
         );
         std::process::exit(1);
     });
 
-    println!("Writing terrain textures to: {}", output_dir.display());
+    println!("Writing terrain textures to: {}", terrain_dir.display());
 
     for spec in TERRAIN_SPECS {
-        let path = output_dir.join(spec.filename);
+        let path = terrain_dir.join(spec.filename);
         let img = generate_texture(spec);
 
         match img.save(&path) {
@@ -210,7 +294,33 @@ fn main() {
         }
     }
 
-    println!("Done. {} textures written.", TERRAIN_SPECS.len());
+    println!("Done. {} terrain textures written.", TERRAIN_SPECS.len());
+
+    // ── Grass blade texture ───────────────────────────────────────────────────
+    let grass_dir = PathBuf::from(manifest_dir).join("assets/textures/grass");
+
+    std::fs::create_dir_all(&grass_dir).unwrap_or_else(|e| {
+        eprintln!(
+            "ERROR: Could not create directory '{}': {e}",
+            grass_dir.display()
+        );
+        std::process::exit(1);
+    });
+
+    println!("Writing grass textures to: {}", grass_dir.display());
+
+    let blade_path = grass_dir.join("grass_blade.png");
+    let blade_img = generate_grass_blade_texture();
+
+    match blade_img.save(&blade_path) {
+        Ok(()) => println!("  ✓  grass_blade.png"),
+        Err(e) => {
+            eprintln!("ERROR: Failed to write 'grass_blade.png': {e}");
+            std::process::exit(1);
+        }
+    }
+
+    println!("Done. 1 grass texture written.");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -320,6 +430,97 @@ mod tests {
         for spec in TERRAIN_SPECS {
             assert_eq!(spec.a, 255, "Spec '{}' must be fully opaque", spec.filename);
         }
+    }
+
+    // ── Grass blade texture tests ─────────────────────────────────────────────
+
+    /// `generate_grass_blade_texture` must produce an image with the correct
+    /// dimensions (32×128).
+    #[test]
+    fn test_generate_grass_blade_texture_dimensions() {
+        let img = generate_grass_blade_texture();
+        assert_eq!(img.width(), GRASS_BLADE_WIDTH);
+        assert_eq!(img.height(), GRASS_BLADE_HEIGHT);
+    }
+
+    /// Pixels outside the blade strip must be fully transparent (alpha == 0).
+    #[test]
+    fn test_generate_grass_blade_texture_outside_strip_transparent() {
+        let img = generate_grass_blade_texture();
+        let blade_left = (GRASS_BLADE_WIDTH - BLADE_STRIP_WIDTH) / 2;
+        let blade_right = blade_left + BLADE_STRIP_WIDTH;
+
+        for y in 0..GRASS_BLADE_HEIGHT {
+            for x in 0..GRASS_BLADE_WIDTH {
+                if x < blade_left || x >= blade_right {
+                    let pixel = img.get_pixel(x, y);
+                    assert_eq!(
+                        pixel[3], 0,
+                        "Expected alpha=0 outside blade strip at ({x},{y}), got {}",
+                        pixel[3]
+                    );
+                }
+            }
+        }
+    }
+
+    /// Pixels inside the blade strip must have alpha within the expected range
+    /// [`GRASS_BLADE_ALPHA_TIP`, `GRASS_BLADE_ALPHA_BASE`].
+    #[test]
+    fn test_generate_grass_blade_texture_inside_strip_alpha_range() {
+        let img = generate_grass_blade_texture();
+        let blade_left = (GRASS_BLADE_WIDTH - BLADE_STRIP_WIDTH) / 2;
+        let blade_right = blade_left + BLADE_STRIP_WIDTH;
+
+        for y in 0..GRASS_BLADE_HEIGHT {
+            for x in blade_left..blade_right {
+                let pixel = img.get_pixel(x, y);
+                let alpha = pixel[3];
+                assert!(
+                    alpha >= GRASS_BLADE_ALPHA_TIP,
+                    "Alpha {alpha} at ({x},{y}) is below minimum [{GRASS_BLADE_ALPHA_TIP}]"
+                );
+            }
+        }
+    }
+
+    /// Verifies that the alpha gradient runs from fully-opaque at the **top**
+    /// of the image (`y = 0`) to semi-transparent at the **bottom**
+    /// (`y = HEIGHT - 1`).
+    ///
+    /// The UV generation in `create_grass_blade_mesh` maps `v = 0` (base of
+    /// blade) to the top of the texture and `v = 1` (tip of blade) to the
+    /// bottom, so:
+    ///
+    /// - `y = 0`          → `t = 0` → alpha = `GRASS_BLADE_ALPHA_BASE` (255, fully opaque)
+    /// - `y = HEIGHT - 1` → `t = 1` → alpha = `GRASS_BLADE_ALPHA_TIP`  (64, semi-transparent)
+    #[test]
+    fn test_generate_grass_blade_texture_alpha_gradient_direction() {
+        let img = generate_grass_blade_texture();
+        let blade_left = (GRASS_BLADE_WIDTH - BLADE_STRIP_WIDTH) / 2;
+
+        // y=0 is the top row of the image → blade base → must be near ALPHA_BASE (255).
+        let top_row_alpha = img.get_pixel(blade_left, 0)[3];
+        // y=HEIGHT-1 is the bottom row of the image → blade tip → must be near ALPHA_TIP (64).
+        let bottom_row_alpha = img.get_pixel(blade_left, GRASS_BLADE_HEIGHT - 1)[3];
+
+        assert!(
+            top_row_alpha > bottom_row_alpha,
+            "Top-row alpha ({top_row_alpha}) should be greater than bottom-row alpha \
+             ({bottom_row_alpha}): base of blade (v=0) must be more opaque than tip (v=1)"
+        );
+    }
+
+    /// `generate_grass_blade_texture` must be deterministic.
+    #[test]
+    fn test_generate_grass_blade_texture_is_deterministic() {
+        let img1 = generate_grass_blade_texture();
+        let img2 = generate_grass_blade_texture();
+        assert_eq!(
+            img1.as_raw(),
+            img2.as_raw(),
+            "generate_grass_blade_texture must be deterministic"
+        );
     }
 
     /// `generate_texture` must produce an image with the correct dimensions.
