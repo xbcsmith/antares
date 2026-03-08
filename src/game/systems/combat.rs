@@ -1210,7 +1210,9 @@ fn handle_combat_started(
                 }
                 CombatEventType::Ranged => "Combat begins at range! Draw your bows!".to_string(),
                 CombatEventType::Magic => "The air crackles with magical energy!".to_string(),
-                CombatEventType::Boss => "A powerful foe appears!".to_string(),
+                CombatEventType::Boss => {
+                    "A powerful foe stands before you! Prepare for a legendary battle!".to_string()
+                }
                 CombatEventType::Normal => "Monsters appear!".to_string(),
             };
             combat_log.push_line(CombatLogLine {
@@ -6312,6 +6314,142 @@ mod tests {
         );
     }
 
+    /// Phase 2 — During round 1 of an ambush, the player's turn must be
+    /// auto-skipped (suppressed) by `execute_monster_turn`.  The combat log
+    /// must record a "surprised" message and `CombatTurnStateResource` must
+    /// remain `EnemyTurn` after the skip so that the monster gets to act.
+    #[test]
+    fn test_ambush_player_turn_is_skipped() {
+        use crate::application::GameState;
+        use crate::domain::combat::monster::LootTable;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let player = Character::new(
+            "Surprised".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let goblin = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 6, 6, 8, 8, 1, 6),
+            20,
+            5,
+            vec![],
+            LootTable::default(),
+        );
+
+        // Ambush: player first in turn order (will be skipped), monster second.
+        let mut cs = CombatState::new(Handicap::MonsterAdvantage);
+        cs.ambush_round_active = true;
+        cs.add_player(player.clone());
+        cs.add_monster(goblin);
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        let mut cr = CombatResource::new();
+        cr.state = cs.clone();
+        cr.player_orig_indices = vec![Some(0), None];
+        cr.combat_event_type = CombatEventType::Ambush;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(player).unwrap();
+        gs.enter_combat_with_state(cs);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        app.insert_resource(cr);
+
+        // Manually set EnemyTurn so execute_monster_turn runs this frame.
+        app.insert_resource(CombatTurnStateResource(CombatTurnState::EnemyTurn));
+
+        app.update();
+
+        // Player's slot was skipped — the log must record the surprise message.
+        let log = app.world().resource::<CombatLogState>();
+        let found_surprised = log
+            .lines
+            .iter()
+            .any(|line| line.plain_text().to_lowercase().contains("surprised"));
+        assert!(
+            found_surprised,
+            "combat log must contain 'surprised' after player turn is skipped in ambush round 1; \
+             got lines: {:?}",
+            log.lines.iter().map(|l| l.plain_text()).collect::<Vec<_>>()
+        );
+
+        // After skipping the player slot, the system must keep EnemyTurn (so
+        // the monster on the next slot gets to act).
+        let ts = app.world().resource::<CombatTurnStateResource>();
+        assert!(
+            matches!(ts.0, CombatTurnState::EnemyTurn),
+            "CombatTurnStateResource must remain EnemyTurn after skipping \
+             the surprised player slot in round 1; got {:?}",
+            ts.0
+        );
+    }
+
+    /// Phase 2 — In round 2 of an ambush encounter `ambush_round_active` is
+    /// `false`, so the player must NOT be skipped.  `combat_input_system` must
+    /// dispatch the player's action normally and `CombatTurnStateResource` must
+    /// be `PlayerTurn` at the start of the round.
+    #[test]
+    fn test_ambush_player_can_act_round_2() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        // Build an ambush encounter and manually advance into round 2 so that
+        // `ambush_round_active` is cleared by `advance_round`.
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Ambush).unwrap();
+
+        // Advance past round 1 so `advance_round` fires and clears the flag.
+        if let crate::application::GameMode::Combat(ref mut cs) = gs.mode {
+            assert!(cs.ambush_round_active, "pre-condition: flag must be set");
+            let _ = cs.advance_turn(&[]);
+            assert!(
+                !cs.ambush_round_active,
+                "pre-condition: ambush_round_active must be cleared after advance_turn into round 2"
+            );
+            assert_eq!(cs.round, 2, "pre-condition: must be in round 2");
+        } else {
+            panic!("Expected Combat mode after start_encounter");
+        }
+
+        // In round 2 the player must NOT be skipped — `ambush_round_active` is
+        // false, so `combat_input_system` will process player input normally and
+        // `execute_monster_turn` will not auto-skip player slots.
+        if let crate::application::GameMode::Combat(ref cs) = gs.mode {
+            assert!(
+                !cs.ambush_round_active,
+                "ambush_round_active must be false in round 2 — player can act"
+            );
+            assert_eq!(
+                cs.handicap,
+                Handicap::Even,
+                "handicap must be reset to Even in round 2"
+            );
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
+
     // ===== Phase 2: Combat UI Tests =====
 
     /// Verify combat UI spawns when entering combat
@@ -10490,6 +10628,123 @@ mod tests {
     }
 
     // ===== Phase 4: Boss Combat Tests =====
+
+    /// 4.1 — `start_encounter` with Boss type must set `monsters_advance = true`.
+    #[test]
+    fn test_boss_combat_monsters_advance() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Boss).unwrap();
+
+        if let crate::application::GameMode::Combat(ref cs) = gs.mode {
+            assert!(
+                cs.monsters_advance,
+                "Boss encounter must set monsters_advance = true"
+            );
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
+
+    /// 4.2 — `start_encounter` with Boss type must set `monsters_regenerate = true`.
+    #[test]
+    fn test_boss_combat_monsters_regenerate() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Boss).unwrap();
+
+        if let crate::application::GameMode::Combat(ref cs) = gs.mode {
+            assert!(
+                cs.monsters_regenerate,
+                "Boss encounter must set monsters_regenerate = true"
+            );
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
+
+    /// 4.3 — `start_encounter` with Boss type must set `can_bribe = false`.
+    #[test]
+    fn test_boss_combat_cannot_bribe() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Boss).unwrap();
+
+        if let crate::application::GameMode::Combat(ref cs) = gs.mode {
+            assert!(!cs.can_bribe, "Boss encounter must set can_bribe = false");
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
+
+    /// 4.4 — `start_encounter` with Boss type must set `can_surrender = false`.
+    #[test]
+    fn test_boss_combat_cannot_surrender() {
+        use crate::application::resources::GameContent;
+        use crate::application::GameState;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        let content = GameContent::new(ContentDatabase::new());
+
+        start_encounter(&mut gs, &content, &[], CombatEventType::Boss).unwrap();
+
+        if let crate::application::GameMode::Combat(ref cs) = gs.mode {
+            assert!(
+                !cs.can_surrender,
+                "Boss encounter must set can_surrender = false"
+            );
+        } else {
+            panic!("Expected Combat mode");
+        }
+    }
 
     /// 4.7 — A boss monster at 1 HP with flee_threshold=50 must not trigger the flee path.
     #[test]

@@ -1,5 +1,144 @@
 # Implementations
 
+## Combat Events — Missing Deliverables Gap Fill
+
+### Overview
+
+After Phase 5 was completed a gap analysis against
+`docs/explanation/combat_events_implementation_plan.md` identified five
+outstanding deliverables that had not been implemented:
+
+1. **Phase 2** — `test_ambush_player_turn_is_skipped` test missing.
+2. **Phase 2** — `test_ambush_player_can_act_round_2` test missing.
+3. **Phase 4** — Four individually-named boss-flag tests missing
+   (`test_boss_combat_monsters_advance`, `test_boss_combat_monsters_regenerate`,
+   `test_boss_combat_cannot_bribe`, `test_boss_combat_cannot_surrender`); the
+   behaviour was covered by the combined `test_boss_combat_sets_boss_flags` but
+   the plan required each assertion in its own named test.
+4. **Phase 4** — Boss opening combat-log text deviated from the plan.
+   The plan specified `"A powerful foe stands before you! Prepare for a
+legendary battle!"` but the implementation emitted `"A powerful foe
+appears!"`.
+5. **Phase 2 / Section 2.7** — `src/domain/resources.rs` was missing the
+   mandatory code comment documenting that rest-interrupted encounters must use
+   `CombatEventType::Ambush`.
+
+### Deliverables Checklist
+
+- [x] `test_ambush_player_turn_is_skipped` — asserts the "surprised" log entry
+      is emitted and `CombatTurnStateResource` stays `EnemyTurn` after the player
+      slot is auto-skipped in round 1.
+- [x] `test_ambush_player_can_act_round_2` — asserts that after `advance_turn`
+      pushes the state into round 2, `ambush_round_active` is `false` and
+      `handicap` is `Even`, confirming the player would not be skipped.
+- [x] `test_boss_combat_monsters_advance` — isolated assertion on
+      `cs.monsters_advance == true`.
+- [x] `test_boss_combat_monsters_regenerate` — isolated assertion on
+      `cs.monsters_regenerate == true`.
+- [x] `test_boss_combat_cannot_bribe` — isolated assertion on
+      `cs.can_bribe == false`.
+- [x] `test_boss_combat_cannot_surrender` — isolated assertion on
+      `cs.can_surrender == false`.
+- [x] Boss opening log text corrected to
+      `"A powerful foe stands before you! Prepare for a legendary battle!"`.
+- [x] `ResourceError::CannotRestWithActiveEncounter` doc comment updated to
+      mandate `CombatEventType::Ambush` for rest-interrupted encounters.
+
+### What Was Built
+
+#### `test_ambush_player_turn_is_skipped` (`src/game/systems/combat.rs`)
+
+A Bevy app test that manually constructs a `CombatResource` with
+`ambush_round_active = true` and turn order `[Player(0), Monster(1)]`, inserts
+it into a `CombatPlugin` app with `CombatTurnState::EnemyTurn`, then calls
+`app.update()`. After the update:
+
+- `CombatLogState` must contain a line with the word "surprised" (emitted by
+  `execute_monster_turn`'s ambush-skip path).
+- `CombatTurnStateResource` must still be `EnemyTurn` (the monster on the next
+  slot has not yet acted, so the system keeps enemy turn active).
+
+#### `test_ambush_player_can_act_round_2` (`src/game/systems/combat.rs`)
+
+A pure-logic test (no Bevy app) that calls `start_encounter` with
+`CombatEventType::Ambush`, verifies `ambush_round_active == true` as a
+pre-condition, then calls `cs.advance_turn(&[])` to exhaust round 1 and
+trigger `advance_round`. After the call it asserts:
+
+- `ambush_round_active == false` — the flag is cleared.
+- `handicap == Handicap::Even` — the handicap is reset.
+- `round == 2` — we are actually in round 2.
+
+This is sufficient to prove the player would not be skipped: both guard checks
+(`combat_input_system` and `execute_monster_turn`) inspect `ambush_round_active`
+directly.
+
+#### Four individual boss-flag tests (`src/game/systems/combat.rs`)
+
+Each test calls `start_encounter(&mut gs, &content, &[], CombatEventType::Boss)`
+and asserts exactly one `CombatState` field. They are structurally identical to
+the existing `test_boss_combat_sets_boss_flags` (which remains as a combined
+sanity check) but satisfy the plan's requirement that each flag has a dedicated,
+individually-named test that can fail in isolation.
+
+| Test                                   | Field asserted                   |
+| -------------------------------------- | -------------------------------- |
+| `test_boss_combat_monsters_advance`    | `cs.monsters_advance == true`    |
+| `test_boss_combat_monsters_regenerate` | `cs.monsters_regenerate == true` |
+| `test_boss_combat_cannot_bribe`        | `cs.can_bribe == false`          |
+| `test_boss_combat_cannot_surrender`    | `cs.can_surrender == false`      |
+
+#### Boss opening log text (`src/game/systems/combat.rs`)
+
+The `CombatEventType::Boss` arm of the `opening_text` match inside
+`handle_combat_started` was updated from:
+
+```antares/src/game/systems/combat.rs#L1212-1212
+"A powerful foe appears!".to_string()
+```
+
+to:
+
+```antares/src/game/systems/combat.rs#L1212-1214
+"A powerful foe stands before you! Prepare for a legendary battle!".to_string()
+```
+
+This matches the exact text specified in plan Section 4.5.
+
+#### Rest-interruption ambush comment (`src/domain/resources.rs`)
+
+A `# Combat Event Type Requirement` doc section was added to the
+`ResourceError::CannotRestWithActiveEncounter` variant. It states:
+
+> Any encounter that fires while the party is resting **MUST** be started with
+> `CombatEventType::Ambush`. The resting party is asleep and cannot react — the
+> ambush mechanic (monsters act first in round 1, party turns suppressed)
+> correctly models this. The rest system implementation is responsible for
+> passing `CombatEventType::Ambush` to `start_encounter()` whenever it returns
+> this error variant and triggers combat.
+
+A cross-reference link to plan Section 2.7 is included.
+
+### Architecture Compliance
+
+- No architectural deviations introduced.
+- No new data structures modified.
+- All new tests use `data/test_campaign` patterns; no reference to
+  `campaigns/tutorial`.
+- RON format unchanged — no data files modified.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → no output (clean)
+cargo check --all-targets → Finished dev profile, 0 errors
+cargo clippy -D warnings  → Finished dev profile, 0 warnings
+cargo nextest run         → 3232 tests run: 3232 passed, 8 skipped
+  (campaign_builder)      → 1938 tests run: 1938 passed, 2 skipped
+```
+
+---
+
 ## Phase 5: Campaign Builder UI — Combat Event Type
 
 ### Overview
