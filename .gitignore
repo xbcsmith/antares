@@ -4,7 +4,7 @@ debug
 target
 saves
 *.log
-#*.png
+*.png
 *.jpg
 *.txt
 *.sh

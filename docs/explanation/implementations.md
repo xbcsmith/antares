@@ -1,5 +1,1331 @@
 # Implementations
 
+## New MTL Support - Phase 1: Rebaseline Around The Existing Importer
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 1 does not add MTL parsing yet. Instead, it rebases the OBJ import code
+around the branch's current architecture so later MTL work lands in the correct
+modules.
+
+The important correction is architectural: this branch already has a dedicated
+`Importer` tab, importer state, and export flow. The OBJ backend should now be
+documented and treated as the parser layer behind that standalone workflow,
+instead of being described as a creature-editor-only utility.
+
+---
+
+### Phase 1 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Importer backend rebaseline (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+Updated the module and API docs so `mesh_obj_io.rs` now clearly describes its
+actual role on this branch:
+
+- it is the OBJ parsing and serialization backend for the Campaign Builder
+  importer workflow
+- the standalone `Importer` tab is the primary consumer of the multi-mesh import
+  APIs
+- parser concerns stay in `mesh_obj_io.rs`, while importer-tab state and egui UI
+  concerns stay out of the parser layer
+
+This gives later MTL work a correct landing zone before any new parsing logic is
+added.
+
+#### Explicit parser-state seam (`sdk/campaign_builder/src/obj_importer.rs`)
+
+Documented `obj_importer.rs` as the handoff layer between:
+
+- `mesh_obj_io.rs`, which returns `MeshDefinition` values
+- `obj_importer.rs`, which turns them into editable importer rows and campaign
+  state
+- `obj_importer_ui.rs`, which renders and exports that state
+
+Added a dedicated `ObjImporterState::obj_import_options()` helper so parser
+options are assembled in one place instead of ad hoc inside load paths. That
+keeps future parser-facing changes such as MTL resolution, source-path
+awareness, and manual override wiring localized to a single seam.
+
+#### Regression coverage for the seam (`sdk/campaign_builder/src/obj_importer.rs`)
+
+Added a focused test that proves importer state forwards its current parser
+options into `mesh_obj_io` by verifying that `scale` changes alter the imported
+vertex positions.
+
+This is intentionally small, but it locks in the contract Phase 2 and later MTL
+phases will extend.
+
+---
+
+### Architecture compliance
+
+- The work stays entirely inside the SDK importer layer under
+  `sdk/campaign_builder`.
+- No domain structures were changed; `MeshDefinition` remains the parser output
+  passed through importer state exactly as defined in `src/domain/visual/mod.rs`.
+- The current standalone importer tab and export flow remain intact.
+- No campaign fixture or gameplay data paths were changed.
+
+---
+
+### Validation
+
+Validation was rerun after the Phase 1 rebaseline changes using the required
+repo commands.
+
+## New MTL Support - Phase 2: Refactor OBJ Parsing For Material-Aware Segments
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 2 refactors the OBJ parser backend so it no longer treats `o`, `g`, and
+future material boundaries as one overwriteable mesh name. The importer now
+parses low-level OBJ data into explicit segments that preserve object name,
+group name, and active material name separately before any `MeshDefinition`
+values are built.
+
+This is the structural groundwork Phase 3 needs for real MTL resolution.
+Nothing in the importer UI changes yet, but the parser can now represent a
+multi-material OBJ deterministically instead of flattening those boundaries
+away.
+
+---
+
+### Phase 2 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Material-aware segment parsing (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+Replaced the old parsed-mesh placeholder with explicit parser-side segment
+identity metadata:
+
+- `object_name`
+- `group_name`
+- `material_name`
+
+The parser now flushes segment geometry on:
+
+- `o`
+- `g`
+- `usemtl`
+
+That means one logical object can now produce multiple parsed segments when the
+source OBJ changes materials mid-stream, which is required because
+`MeshDefinition` still has only one material slot.
+
+#### Separation between parse-time structure and mesh construction
+
+The low-level parse path and the mesh-building path are now more clearly split:
+
+- `parse_obj_meshes()` gathers global vertices, normals, UVs, and parsed
+  segments
+- `build_mesh_from_faces()` constructs a `MeshDefinition` from a chosen segment
+  or a combined face stream
+- `resolve_segment_names()` assigns deterministic exported mesh names after the
+  parser has preserved object and group identity
+
+This keeps parse-time identity available long enough for later MTL resolution
+instead of discarding it during the first pass.
+
+#### Identity-preserving mesh naming
+
+Segment display names now prefer object/group identity instead of letting
+material switches rename meshes.
+
+Current naming behavior:
+
+- object + distinct group -> `<object>_<group>`
+- object only -> `<object>`
+- group only -> `<group>`
+- unnamed segment -> `mesh_<index>`
+- repeated object/group identity caused by `usemtl` splits -> first segment keeps
+  the base name, later segments receive `_segment_<n>` suffixes
+
+This preserves the source model's structural identity while still producing
+unique `MeshDefinition.name` values for export and editor display.
+
+#### Single-mesh import compatibility
+
+`import_mesh_from_obj_with_options()` now reuses the segment-aware parser and
+then combines all parsed segments back into one mesh for callers that still
+want a single mesh result.
+
+That preserves the existing single-mesh API contract while moving the parsing
+logic onto the same internal representation used by the multi-mesh importer.
+
+---
+
+### Test coverage
+
+Added parser-focused tests for:
+
+- preservation of object, group, and material identity across parsed segments
+- mesh splitting on `usemtl` boundaries without losing object/group naming
+- single-mesh import continuing to combine multi-segment OBJ input
+
+Existing OBJ fixture tests for `examples/skeleton.obj` and
+`examples/female_1.obj` continue to pass against the new segment model.
+
+---
+
+### Architecture compliance
+
+- The work stays inside the SDK importer backend under
+  `sdk/campaign_builder/src/mesh_obj_io.rs`.
+- No domain data structures were changed.
+- `MeshDefinition` remains the parser output type used by importer state.
+- No test fixtures were moved under `campaigns/tutorial`.
+- The refactor prepares later MTL work without introducing new persistence or UI
+  surface area prematurely.
+
+## New MTL Support - Phase 3: Add MTL Parsing And Resolution
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 3 teaches the OBJ importer backend to discover, resolve, and parse MTL
+files without yet mapping those parsed materials into `MeshDefinition.material`
+or imported mesh colors. That keeps this slice focused on the backend seam the
+later mapping and UI phases need.
+
+The parser now understands `mtllib` well enough to find sidecar material
+libraries relative to the OBJ file, honors a parser-side manual override path,
+and parses a first-pass subset of MTL directives into backend material data.
+
+## New MTL Support - Phase 4: Map Imported Materials Into Domain Types
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 4 wires parsed MTL data into the existing visual domain model so imported
+OBJ segments now carry visible color, material metadata, alpha behavior, and
+portable texture-path metadata through to exported `MeshDefinition` values.
+
+This phase stays focused on the parser and importer-state seam rather than the
+importer UI. The main effect is that successful MTL parsing now survives into
+domain output instead of being dropped after resolution.
+
+---
+
+### Phase 4 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Domain material mapping in the OBJ backend
+
+`build_mesh_from_faces()` now resolves the active parsed material and maps it
+into domain output instead of always returning default color-only meshes.
+
+Current mapping behavior:
+
+- `Kd` -> `MeshDefinition.color`
+- `Kd` -> `MaterialDefinition.base_color`
+- `d` -> alpha channel on both mesh color and material base color
+- `d < 1.0` -> `AlphaMode::Blend`
+- `Ke` -> `MaterialDefinition.emissive` when non-black
+- `map_Kd` -> `MeshDefinition.texture_path` only when the original MTL path is
+  relative and therefore safe to preserve as portable metadata
+
+If a referenced material has no meaningful parsed data, the importer still
+falls back to the existing default OBJ color behavior.
+
+#### Conservative `Ks` and `Ns` heuristics
+
+Phase 4 implements a conservative heuristic for MTL specular values rather than
+pretending Wavefront MTL maps perfectly onto the engine's PBR fields.
+
+- `Ks` contributes to `metallic` only when:
+  - illumination model is `>= 2`
+  - average specular strength is at least `0.5`
+- even then, metallic is capped at `0.35` to avoid over-classifying legacy MTL
+  materials as metal
+- `Ns` maps into `roughness` through a clamped square-root inversion over the
+  common `0..1000` shininess range
+- when `Ns` is absent, roughness falls back to `0.45` for mildly metallic
+  materials and `0.9` otherwise
+
+This keeps imported materials visually useful without overstating the fidelity
+of a Phong-to-PBR conversion.
+
+#### Texture-path safety rule
+
+The parser now preserves both the resolved on-disk `map_Kd` path and the
+original MTL reference string.
+
+That allows Phase 4 to keep texture metadata only when it is portable:
+
+- relative `map_Kd` paths are normalized and stored on `MeshDefinition`
+- absolute texture paths are intentionally dropped from exported domain data
+
+This avoids leaking machine-specific paths into RON exports.
+
+#### Importer-state color preservation seam
+
+The importer state still owns heuristic palette assignment, but it now avoids
+overwriting mesh colors that already arrived from MTL-backed domain data.
+
+That small seam change is required so Phase 4's mapped `Kd` color survives the
+initial load into `ImportedMesh` and remains visible for export.
+
+Automatic palette assignment is still available as an explicit importer action.
+
+---
+
+### Test coverage
+
+Added focused tests for:
+
+- mapping `Kd`, `d`, `Ke`, `Ks`, `Ns`, and relative `map_Kd` into domain mesh
+  output
+- preserving portable relative texture paths while rejecting absolute ones
+- keeping imported MTL colors when importer state creates editable mesh rows
+
+Existing parser tests for missing or malformed MTL files continue to verify the
+required graceful-degradation behavior.
+
+---
+
+### Architecture compliance
+
+- The work stays inside the SDK importer pipeline and existing visual domain
+  types.
+- `MeshDefinition`, `MaterialDefinition`, and `AlphaMode` are used exactly as
+  already defined in `src/domain/visual/mod.rs`.
+- No gameplay data structures or campaign fixture paths were changed.
+- No new persistence format was introduced.
+
+## New MTL Support - Phase 5: Integrate With Existing Importer State
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 5 threads MTL-aware import results through `ObjImporterState` without
+changing the current importer workflow. The key fix is that importer state now
+tracks whether a mesh color came from explicit MTL color data, fallback
+auto-assignment, or a later manual edit, instead of guessing based on whether a
+mesh happened to be white.
+
+This closes the gap left by Phase 4 where explicit white `Kd` values and
+fallback candidates could be confused once they were flattened into plain
+`MeshDefinition` values.
+
+---
+
+### Phase 5 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `sdk/campaign_builder/src/obj_importer_ui.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Parser-to-importer color-source handoff
+
+Added an SDK-internal importer path in `mesh_obj_io.rs` that returns each
+imported `MeshDefinition` together with color-source metadata for importer use.
+
+The public OBJ import APIs remain unchanged, but importer state can now tell:
+
+- explicit `Kd` color from MTL -> imported material color
+- material with no diffuse color -> fallback candidate for mesh-name auto-color
+- no material data -> fallback candidate
+
+That means explicit white material colors are preserved correctly instead of
+being mistaken for "no imported color".
+
+#### Explicit importer color provenance
+
+`ImportedMesh` now records whether its current color is:
+
+- `ImportedMaterial`
+- `AutoAssigned`
+- `ManualOverride`
+
+This lets importer state preserve imported material color on initial load,
+reset to heuristic colors only when the user explicitly requests it, and mark
+later palette or picker edits as user overrides.
+
+#### Fallback auto-color behavior that preserves imported alpha
+
+When importer state falls back to mesh-name heuristics because no diffuse MTL
+color exists, it now keeps the imported alpha channel instead of always
+resetting to fully opaque colors.
+
+This keeps transparency from `d` intact while still using the branch's existing
+name-based color suggestions for RGB fallback.
+
+#### Material/base-color synchronization during edits and export
+
+Importer color edits now synchronize both:
+
+- `mesh_def.color`
+- `mesh_def.material.base_color` when material data exists
+
+and update `AlphaMode::Blend` when edited alpha drops below `1.0`.
+
+As a result, exported RON assets now keep edited importer colors consistent
+between the top-level mesh color and the nested material color.
+
+---
+
+### Test coverage
+
+Added focused importer-state coverage for:
+
+- preserving explicit white `Kd` colors during OBJ import
+- using heuristic fallback when an MTL has no diffuse color
+- preserving imported alpha during fallback auto-assignment
+- marking later manual edits as overrides
+- exporting edited material base colors consistently
+
+---
+
+### Architecture compliance
+
+- The work stays inside the SDK importer backend, importer state, and exporter
+  seam.
+- No domain structs were changed.
+- Public OBJ import APIs continue returning `MeshDefinition` values.
+- The importer tab flow, mesh list, active selection, and export flow remain
+  intact.
+
+---
+
+### Phase 3 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Parser-facing MTL resolution options
+
+Extended `ObjImportOptions` with:
+
+- `source_path`
+- `manual_mtl_path`
+
+This gives the parser enough context to:
+
+- resolve OBJ-declared material libraries relative to the OBJ file location
+- accept a future importer-state or UI-supplied manual MTL override
+
+The file-based OBJ import helpers now automatically populate `source_path` when
+the caller does not provide one explicitly.
+
+#### MTL library discovery and path resolution
+
+`parse_obj_meshes()` now captures `mtllib` directives and resolves them into a
+list of actual library paths.
+
+Current precedence:
+
+- if `manual_mtl_path` is set and exists, it is used as the material source
+- otherwise, the parser resolves each `mtllib` reference relative to the OBJ
+  directory
+- missing libraries are ignored instead of failing geometry import
+
+This matches the plan's graceful-degradation requirement.
+
+## New MTL Support - Phase 6: Extend The Existing Importer Tab
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 6 completes the first importer-tab integration for MTL-aware OBJ import.
+The standalone `Importer` tab now exposes which MTL source is active, lets the
+user choose or clear a manual `.mtl` override from the existing workflow, and
+surfaces imported material swatches as a session-only palette without changing
+the existing campaign-scoped custom palette format.
+
+The UI remains the same importer tab and export flow introduced earlier on this
+branch. The difference is that the tab now explains where imported colors came
+from and gives users a direct path from imported MTL colors into the current
+custom-palette save flow.
+
+---
+
+### Phase 6 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `sdk/campaign_builder/src/obj_importer_ui.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Importer-session MTL source summary
+
+The importer now keeps a small session summary of the last OBJ load:
+
+- whether the current MTL source was auto-detected or manually overridden
+- which `mtllib` names were declared by the OBJ
+- which MTL file paths were actually resolved and used
+- which imported material swatches were available from explicit diffuse `Kd`
+  colors
+
+This summary is parser-driven instead of guessed in the UI, so the importer tab
+can report the real MTL source that produced the current mesh colors.
+
+#### MTL source row in idle and loaded importer metadata
+
+Both the idle importer form and the loaded importer metadata grid now include an
+`MTL Source` row.
+
+Current behavior:
+
+- when a manual override is selected, the row shows that path
+- when OBJ `mtllib` resolution succeeded, the row reports the resolved
+  auto-detected MTL path or path count
+- when the OBJ declared libraries but none resolved, the row explains that and
+  lists the declared names
+- when no MTL is in use, the row explains that a manual `.mtl` can be selected
+
+This gives the importer tab the explicit MTL status the Phase 6 plan called
+for, both before and after OBJ load.
+
+#### Manual `.mtl` override selection and clear flow
+
+The importer tab now includes `Browse .mtl...` and `Clear Override` actions.
+
+Behavior differs slightly by mode:
+
+- in idle mode, selecting a manual override stores it for the next OBJ load
+- in loaded mode, changing or clearing the override immediately reloads the
+  current OBJ through the existing importer pipeline so imported colors and
+  metadata update in place
+
+The override still uses the same parser seam as earlier phases: the UI updates
+`ObjImporterState.manual_mtl_path`, then importer state rebuilds
+`ObjImportOptions` and reloads the OBJ normally.
+
+#### Imported MTL palette in the color editor
+
+The right-hand `Color Editor` now has a dedicated `Imported MTL Palette`
+section ahead of the built-in and custom palettes.
+
+This palette is intentionally session-only:
+
+- it is populated from imported materials that had explicit diffuse `Kd` colors
+- it is cleared when importer session geometry is cleared
+- it is not persisted directly to campaign config
+
+Each imported swatch can:
+
+- apply its color to the active mesh
+- stage its label and color into the existing custom-palette draft controls via
+  `Use As Draft`
+
+That keeps imported colors separate from built-in and custom palette entries
+while still letting users promote useful swatches through the existing
+`config/importer_palette.ron` save path.
+
+#### Color provenance messaging in the active mesh editor
+
+The active mesh detail panel now explains whether the mesh's current color came
+from:
+
+- imported MTL diffuse data
+- built-in mesh-name fallback heuristics
+- a manual importer edit
+
+This message is driven by the `ImportedMeshColorSource` state added in Phase 5.
+The result is that the importer tab now tells the user whether a visible color
+is original imported material data or a fallback generated by the current
+branch's auto-assignment heuristics.
+
+#### Imported swatches versus built-in and custom palettes
+
+The importer now clearly separates three palette sources:
+
+- `Imported MTL Palette`: temporary session colors derived from imported MTL
+  diffuse values
+- `Built-In Palette`: static importer defaults baked into the SDK
+- `Custom Palette`: campaign-scoped colors persisted to
+  `config/importer_palette.ron`
+
+Promotion path for imported swatches:
+
+1. choose an imported swatch in `Imported MTL Palette`
+2. optionally use `Use As Draft` to copy its label and color into the custom
+   palette draft controls
+3. save it through the existing custom palette add action
+
+No new persistence format was introduced.
+
+---
+
+### Final priority rule
+
+The importer behavior is now explicit:
+
+- imported `Kd` colors win on initial load when they exist
+- built-in mesh-name auto-colors are only the fallback when diffuse `Kd` is not
+  available
+- `Auto-Assign All` remains an explicit user action that reverts meshes to the
+  built-in heuristic palette
+- later color picker or palette edits become manual overrides
+
+---
+
+### Deferred and unsupported UI behavior
+
+Phase 6 still stays conservative in a few areas:
+
+- imported swatches are only created for explicit diffuse `Kd` colors
+- materials that only contribute alpha, texture, or non-diffuse metadata do not
+  create palette swatches
+- no new persistence or palette file format was added beyond the existing
+  custom importer palette
+
+This matches the plan's first-pass goal of exposing imported material color
+cleanly without rebuilding the importer tab.
+
+#### First-pass MTL parser
+
+Added parser-side support for these MTL directives:
+
+- `newmtl`
+- `Kd`
+- `Ks`
+- `Ke`
+- `Ns`
+- `d`
+- `illum`
+- `map_Kd`
+
+Parsed materials are stored in backend structures keyed by material name, with
+resolved texture paths preserved as `PathBuf` values relative to the MTL file.
+
+Unsupported directives and malformed values are ignored non-fatally so OBJ
+geometry import still succeeds even when the material file is incomplete or
+partially invalid.
+
+#### Importer-state seam for future manual override UI
+
+Extended `ObjImporterState` with `manual_mtl_path` and updated the
+`obj_import_options()` helper so importer state now forwards:
+
+- `source_path`
+- `manual_mtl_path`
+- `scale`
+
+No importer-tab UI changes land in this phase yet, but the state seam is now in
+place for the later override picker.
+
+---
+
+### Test coverage
+
+Added backend tests covering:
+
+- relative `mtllib` resolution from an OBJ source path
+- multiple `mtllib` directives loading more than one library
+- manual MTL override precedence over OBJ-declared libraries
+- missing `.mtl` files degrading gracefully while geometry still imports
+- malformed MTL values being ignored without breaking OBJ import
+- parsing of `Kd`, `Ks`, `Ke`, `Ns`, `d`, `illum`, and `map_Kd`
+
+Added importer-state coverage proving parser-facing source and manual MTL paths
+are forwarded through `ObjImportOptions`.
+
+---
+
+### Architecture compliance
+
+- The work remains inside the SDK importer/backend layer.
+- No gameplay or domain core structures were changed.
+- `MeshDefinition` output remains unchanged in this phase; material-to-domain
+  mapping is intentionally deferred to Phase 4.
+- Missing or malformed MTL data does not break OBJ geometry import.
+- No tests reference `campaigns/tutorial`.
+
+## OBJ to RON Conversion - Phase 3: Importer Tab UI and RON Export
+
+**Plan**: [`obj_to_ron_implementation_plan.md`](obj_to_ron_implementation_plan.md)
+
+### Overview
+
+Phase 3 completes the Campaign Builder importer workflow. The SDK now exposes
+an `Importer` tab directly below `Creatures`, lets the user pick an OBJ file,
+inspect every imported mesh, edit colors with both the built-in palette and
+campaign-scoped custom colors, and export the result as a valid
+`CreatureDefinition` RON asset under either `assets/creatures/` or
+`assets/items/`.
+
+This phase also closes a fixture gap left by the earlier importer work:
+`examples/skeleton.obj` and `examples/female_1.obj` are now present in the
+repository, so both the existing file-based importer tests and the new importer
+workflow tests have stable OBJ inputs.
+
+## New MTL Support - Phase 7: Tests
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 7 closes the remaining MTL importer test matrix by treating the current
+branch state as the source of truth instead of rebuilding tests from scratch.
+The parser and importer-state suites already covered most of the MTL cases from
+the plan, so this phase fills the final persistence gap and documents the full
+coverage now present across parser, importer-state, and importer-UI helpers.
+
+---
+
+### Phase 7 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `sdk/campaign_builder/src/obj_importer_ui.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Parser and importer-state coverage audit completed
+
+The existing Phase 2 through Phase 6 work already provided backend coverage for
+the parser-heavy Phase 7 requirements, including:
+
+- relative `mtllib` resolution
+- multiple `mtllib` directives
+- missing `.mtl` fallback behavior
+- malformed MTL tolerance while preserving geometry import
+- `usemtl` boundary splitting with object and group identity preserved
+- `Kd`, `d`, and `Ke` mapping into exported mesh and material data
+- importer-state handling for imported-color precedence, manual override MTL
+  loading, imported swatch session state, and explicit `Auto-Assign All`
+  fallback behavior
+
+That meant the remaining missing deliverable was not another parser test, but a
+workflow-level assertion that the importer's palette persistence path still
+writes the expected campaign-scoped config file.
+
+#### Importer-state palette persistence test
+
+Added a focused `ObjImporterState` test that saves a custom palette entry
+through `save_custom_palette()`, verifies the campaign-local
+`config/importer_palette.ron` file is created, and reloads it through
+`load_custom_palette()` to prove the importer state API preserves round-trip
+behavior.
+
+This locks the persistence requirement to the importer state seam rather than
+only to the lower-level color-palette module.
+
+#### Importer-UI persistence helper test
+
+Added a companion `obj_importer_ui.rs` test that exercises the existing
+`persist_custom_palette()` helper used by the custom-palette UI actions.
+
+The test proves that the importer-tab save flow still writes
+`config/importer_palette.ron` at the expected campaign-relative path, which is
+the Phase 7 UI-side persistence deliverable from the plan.
+
+---
+
+### Test coverage summary
+
+Phase 7 coverage now explicitly exists for:
+
+- parser path resolution and non-fatal MTL error handling in
+  `sdk/campaign_builder/src/mesh_obj_io.rs`
+- importer-state color provenance, manual override handling, imported swatch
+  session state, and explicit auto-assign behavior in
+  `sdk/campaign_builder/src/obj_importer.rs`
+- importer-tab helper behavior for imported swatch staging, MTL status text,
+  rendering, and palette persistence in
+  `sdk/campaign_builder/src/obj_importer_ui.rs`
+
+---
+
+### Architecture compliance
+
+- The work stays inside the existing SDK importer workflow.
+- No gameplay or domain data structures were changed.
+- No tests use `campaigns/tutorial`; persistence tests write only into temporary
+  campaign directories.
+- The campaign-scoped custom palette format remains
+  `config/importer_palette.ron` exactly as required.
+
+## New MTL Support - Phase 8: Validation And Documentation
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 8 closes the MTL importer work by validating the finished branch state
+with the required repo quality gates and recording the final behavior that now
+defines the importer workflow.
+
+This phase does not introduce new importer features. It verifies that the
+existing Phase 1 through Phase 7 implementation still compiles, lints cleanly,
+and passes tests after the MTL-aware importer changes are integrated.
+
+---
+
+### Phase 8 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/obj_importer_ui.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### Final importer behavior
+
+#### Final priority rule between imported and fallback colors
+
+The importer color precedence is now finalized as:
+
+- imported `Kd` diffuse color wins on initial load when it exists
+- built-in mesh-name auto-coloring only applies when no diffuse `Kd` color was
+  imported for that mesh
+- `Auto-Assign All` remains an explicit reset action that reapplies built-in
+  heuristics even to meshes that originally had imported colors
+- later color picker edits and palette applications are treated as manual
+  overrides
+
+This keeps imported material intent visible by default while preserving the
+branch's pre-existing heuristic palette workflow as an opt-in editing action.
+
+#### Final `Ks` and `Ns` mapping behavior
+
+The importer keeps the Phase 4 conservative Phong-to-PBR mapping.
+
+- `Ks` contributes to `MaterialDefinition.metallic` only when the MTL
+  illumination model is at least `2` and average specular strength is at least
+  `0.5`
+- the resulting metallic value is capped at `0.35`
+- `Ns` maps into `MaterialDefinition.roughness` through a clamped square-root
+  inversion across the common `0..1000` shininess range
+- when `Ns` is absent, roughness falls back to `0.45` for mildly metallic
+  materials and `0.9` otherwise
+
+This remains intentionally heuristic rather than claiming a one-to-one MTL to
+PBR conversion.
+
+#### Unsupported and deferred MTL directives
+
+The first-pass importer intentionally supports only:
+
+- `newmtl`
+- `Kd`
+- `Ks`
+- `Ke`
+- `Ns`
+- `d`
+- `illum`
+- optional `map_Kd`
+
+Everything else is still unsupported or deferred in this pass.
+
+Current deferred behavior:
+
+- no broad support for the rest of the Wavefront MTL directive set
+- no separate persistence format beyond `config/importer_palette.ron`
+- no per-face material preservation beyond splitting OBJ meshes on `usemtl`
+- no aggressive texture-import workflow beyond conservative relative
+  `map_Kd` preservation
+
+Unsupported or malformed directives continue to degrade gracefully instead of
+failing otherwise valid OBJ geometry import.
+
+#### Imported swatches versus built-in and custom palettes
+
+The importer palette model is now finalized as three distinct sources:
+
+- `Imported MTL Palette`: session-only swatches derived from imported diffuse
+  `Kd` colors
+- `Built-In Palette`: static SDK defaults used for quick edits and fallback
+  auto-assignment
+- `Custom Palette`: campaign-scoped colors persisted to
+  `config/importer_palette.ron`
+
+Imported swatches differ from the other palette sources in two important ways:
+
+- they are generated from the current import session and cleared with importer
+  session state
+- they are not persisted directly; users keep them by promoting them through
+  the existing custom-palette draft and save flow
+
+---
+
+### Validation
+
+Phase 8 reran the required validation sequence in the exact order from
+`AGENTS.md`:
+
+```bash
+cargo fmt --all
+cargo check --all-targets --all-features
+cargo clippy --all-targets --all-features -- -D warnings
+cargo nextest run --all-features
+```
+
+Results:
+
+- `cargo fmt --all` completed successfully
+- `cargo check --all-targets --all-features` completed successfully
+- `cargo clippy --all-targets --all-features -- -D warnings` completed
+  successfully
+- `cargo nextest run --all-features` completed successfully with `3162` tests
+  passed and `8` skipped
+
+One compatibility repair was required during validation:
+
+- `sdk/campaign_builder/src/obj_importer_ui.rs` test code used the removed
+  `CursorIcon::is_resize()` helper from egui; the render test now keeps its
+  no-panic coverage without depending on that API
+
+---
+
+### Architecture compliance
+
+- Validation did not require changes to gameplay or domain core structures.
+- The importer still uses the existing `MeshDefinition`,
+  `MaterialDefinition`, and `AlphaMode` types from
+  `src/domain/visual/mod.rs`.
+- No new persistence format was added; campaign palette persistence remains
+  `config/importer_palette.ron`.
+- No tests or fixtures were moved to `campaigns/tutorial`.
+
+---
+
+### Phase 3 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/lib.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `sdk/campaign_builder/src/creature_assets.rs`
+- `docs/explanation/implementations.md`
+
+**Files created**:
+
+- `sdk/campaign_builder/src/obj_importer_ui.rs`
+- `examples/skeleton.obj`
+- `examples/female_1.obj`
+
+---
+
+### What was built
+
+#### Importer tab UI (`sdk/campaign_builder/src/obj_importer_ui.rs`)
+
+Added a dedicated importer UI module that renders:
+
+- Idle mode with OBJ file browsing, export-type selection, scale input, and a
+  `Load OBJ` action
+- Loaded mode with importer metadata inputs (`ID`, `Name`, `Import Scale`)
+- A scrollable mesh list showing mesh name, counts, selection state, and the
+  current color swatch plus an inline per-row color edit button for each
+  imported mesh
+- A color editor panel for the active mesh using `TwoColumnLayout` to stay
+  consistent with `sdk/AGENTS.md`
+- Built-in palette swatches plus campaign-scoped custom palette add/remove UI
+- Summary and control actions including `Auto-Assign All`, `Load Another OBJ`,
+  `Export RON`, and `Back / Clear`
+
+The importer UI follows the SDK-specific egui rules:
+
+- `TwoColumnLayout` is used for the list/detail split instead of raw panels
+- mesh rows are wrapped in `push_id`
+- all `ScrollArea`s have explicit `id_salt` values
+- layout-driving state changes request repaint immediately
+
+#### Export pipeline (`sdk/campaign_builder/src/obj_importer_ui.rs`)
+
+Added a reusable export path that:
+
+- builds a `CreatureDefinition` from the current `ObjImporterState`
+- applies the edited per-mesh colors back onto the cloned `MeshDefinition`s
+- generates `MeshTransform::identity()` entries for every exported mesh
+- preserves the importer `scale` as the exported creature scale
+
+Creature export now writes to the exact planned location:
+
+- `assets/creatures/<sanitized_name>.ron`
+
+Item export writes the same `CreatureDefinition` format to:
+
+- `assets/items/<sanitized_name>.ron`
+
+#### Creature registry integration (`sdk/campaign_builder/src/creature_assets.rs`)
+
+Added `save_creature_at_path()` so importer exports can preserve the exact
+relative asset path required by the Phase 3 plan while still updating the
+reference-backed `data/creatures.ron` registry.
+
+This keeps importer-created creature assets aligned with the existing creature
+asset manager rather than introducing separate persistence logic.
+
+#### Campaign Builder app wiring (`sdk/campaign_builder/src/lib.rs`)
+
+The app shell now:
+
+- exposes `obj_importer_ui` as a module
+- adds `EditorTab::Importer` directly below `EditorTab::Creatures`
+- dispatches the new tab from the central panel
+- refreshes the creature registry after successful creature exports
+- switches to the `Creatures` tab after creature export so the newly exported
+  asset is immediately visible in the main creature workflow
+
+#### Importer state polish (`sdk/campaign_builder/src/obj_importer.rs`)
+
+Extended importer state with lightweight UI state needed by Phase 3:
+
+- `active_mesh_index` for the currently edited mesh
+- `new_custom_color_label` and `new_custom_color` for the custom-palette form
+
+The importer `clear()` path now preserves:
+
+- current scale
+- custom palette entries
+- suggested creature ID
+- current export type
+- current custom-color draft value
+
+#### Deterministic OBJ fixtures (`examples/skeleton.obj`, `examples/female_1.obj`)
+
+Added the missing OBJ fixtures referenced by the Phase 1 and Phase 3 plans so
+the importer can be tested with real file-based inputs instead of only inline
+OBJ strings.
+
+---
+
+### Architecture compliance
+
+- The work stays inside the SDK/editor layer under `sdk/campaign_builder`.
+- Exported assets reuse `CreatureDefinition`, `MeshDefinition`, and
+  `MeshTransform` from `src/domain/visual/mod.rs` exactly as defined.
+- `CreatureId` remains the type used for importer-generated creature IDs.
+- No core gameplay, party, combat, or inventory data structures were modified.
+- All fixture data remains outside `campaigns/tutorial`, so Implementation Rule
+  5 stays satisfied.
+
+---
+
+### Test coverage
+
+Added importer workflow tests covering:
+
+- loading a real OBJ fixture into `ObjImporterState`
+- color edits propagating into the exported `CreatureDefinition`
+- creature export round-tripping through valid RON on disk
+- item export writing to `assets/items/`
+- export-path preview behavior
+
+The newly added `examples/*.obj` fixtures also satisfy the previously-added
+file-based multi-mesh importer tests in `sdk/campaign_builder/src/mesh_obj_io.rs`.
+
+Validation run status:
+
+- `cargo fmt --all` -> passed
+- `cargo check --all-targets --all-features` -> passed
+- `cargo clippy --all-targets --all-features -- -D warnings` -> passed
+- `cargo nextest run --all-features` -> blocked by existing unrelated failure:
+  `tests/campaign_integration_tests.rs:252`
+  `test_creature_database_load_performance`
+
+The isolated rerun of that performance test still measured slightly over the
+threshold on this machine (`535ms` vs expected `< 500ms`), matching the known
+timing-sensitive repository note rather than an importer-specific regression.
+
+## OBJ to RON Conversion - Phase 2: Color Palette and Mesh Color Mapping
+
+**Plan**: [`obj_to_ron_implementation_plan.md`](obj_to_ron_implementation_plan.md)
+
+### Overview
+
+Phase 2 adds the importer-side color system needed for the future OBJ Importer
+tab. The campaign builder now has a built-in palette module, mesh-name based
+auto-color assignment, campaign-scoped custom palette persistence, and a
+dedicated importer state object that can load OBJ meshes and pre-populate each
+mesh row with counts, selections, and editable colors.
+
+This work stays inside `sdk/campaign_builder` and reuses the existing
+`MeshDefinition` and `CreatureId` architecture types instead of inventing SDK-
+local equivalents.
+
+---
+
+### Phase 2 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/lib.rs`
+- `docs/explanation/implementations.md`
+
+**Files created**:
+
+- `sdk/campaign_builder/src/color_palette.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+
+---
+
+### What was built
+
+#### Built-in palette module (`sdk/campaign_builder/src/color_palette.rs`)
+
+Added a new palette module containing:
+
+- `PALETTE: &[(&str, [f32; 4])]` for the built-in importer palette
+- `PaletteEntry` for UI iteration
+- `palette_entries()` to expose the built-in palette as a `Vec<PaletteEntry>`
+- `suggest_color_for_mesh(mesh_name)` for name-based color assignment
+- `CustomPalette` plus per-campaign load/save helpers for
+  `config/importer_palette.ron`
+
+The palette includes skin, hair, armor, cloth, and material colors, plus the
+required default skin tone used by the Phase 2 test expectation for
+`EM3D_Base_Body`.
+
+#### Mesh-name color assignment (`sdk/campaign_builder/src/color_palette.rs`)
+
+The matcher normalizes mesh names to lowercase underscore-delimited tokens, then
+applies ordered keyword checks so specific names such as `Hair_Pink` win before
+generic matches like `hair` or `body`.
+
+Notable mappings now covered:
+
+- `EM3D_Base_Body` -> `[0.92, 0.85, 0.78, 1.0]`
+- `Hair_Pink` -> `[0.92, 0.55, 0.70, 1.0]`
+- unknown names -> `[0.8, 0.8, 0.8, 1.0]`
+
+#### Custom palette persistence (`sdk/campaign_builder/src/color_palette.rs`)
+
+`CustomPalette` now supports:
+
+- `load_from_campaign_dir()`
+- `save_to_campaign_dir()`
+- `add_color()`
+- `remove_color()`
+
+The file path is fixed at `<campaign_dir>/config/importer_palette.ron`, ready
+for the later importer UI to add and remove user palette entries.
+
+#### Importer state module (`sdk/campaign_builder/src/obj_importer.rs`)
+
+Added `ObjImporterState`, `ImportedMesh`, `ImporterMode`, `ExportType`, and an
+`ObjImporterError` wrapper. The state object now handles:
+
+- loading OBJ meshes through the Phase 1 multi-mesh importer
+- auto-assigning per-mesh colors during load
+- preserving mesh counts and selection state for later bulk actions
+- tracking custom palette data for the active campaign
+- preserving `scale` and suggested `CreatureId` across importer resets
+
+#### Campaign builder integration (`sdk/campaign_builder/src/lib.rs`)
+
+`CampaignBuilderApp` now owns `obj_importer_state` and initializes it in
+`Default::default()`.
+
+When a campaign is opened, the app now also:
+
+- loads `config/importer_palette.ron` into `obj_importer_state.custom_palette`
+- computes the next available custom creature ID and stores it in the importer
+  state
+
+This keeps later importer UI work aligned with the currently loaded campaign.
+
+#### Fixture consistency note
+
+The Phase 2 plan references `examples/skeleton.obj` and `examples/female_1.obj`,
+but those files were not present in this checkout while implementing Phase 2.
+The importer-state tests therefore use deterministic inline OBJ content instead
+of depending on absent fixture files.
+
+---
+
+### Architecture compliance
+
+- The work is confined to `sdk/campaign_builder`, matching the SDK/editor layer
+  described in `docs/reference/architecture.md`.
+- `CreatureId` from `src/domain/types.rs` is used instead of a raw `u32`.
+- `MeshDefinition` remains the authoritative mesh type; no duplicate mesh
+  structs were introduced.
+- No core domain or application data structures were modified.
+
+---
+
+### Test coverage
+
+Added unit tests for:
+
+- `suggest_color_for_mesh("EM3D_Base_Body")`
+- `suggest_color_for_mesh("Hair_Pink")`
+- unknown mesh fallback color
+- `palette_entries()` covering all built-in palette entries
+- custom palette load/save round-trip
+- custom palette add/remove behavior
+- importer mesh auto-color assignment
+- importer state mode transitions and OBJ load behavior
+
+Validation status is recorded after the Phase 2 code and tests were added.
+
+## OBJ to RON Conversion - Phase 1: Multi-Mesh OBJ Import
+
+**Plan**: [`obj_to_ron_implementation_plan.md`](obj_to_ron_implementation_plan.md)
+
+### Overview
+
+Phase 1 extends the Campaign Builder OBJ importer so it can read a Wavefront
+OBJ file as a list of named meshes instead of flattening every object/group
+into one `MeshDefinition`. The legacy single-mesh importer remains available,
+while a new multi-mesh API now produces one `MeshDefinition` per `o`/`g`
+section with local vertex remapping suitable for later creature/item RON
+export work.
+
+---
+
+### Phase 1 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `docs/explanation/implementations.md`
+
+**Files created**:
+
+- `examples/skeleton.obj`
+- `examples/female_1.obj`
+
+---
+
+### What was built
+
+#### Multi-mesh OBJ import APIs (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+Added four new public functions:
+
+- `import_meshes_from_obj`
+- `import_meshes_from_obj_with_options`
+- `import_meshes_from_obj_file`
+- `import_meshes_from_obj_file_with_options`
+
+These APIs parse global OBJ vertex/normal/UV pools, split meshes on `o` and
+`g` directives, then build one `MeshDefinition` per parsed section.
+
+#### Per-mesh vertex remapping (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+The new importer tracks face vertices as `(v, vt, vn)` references and remaps
+them into local mesh indices. This means each exported `MeshDefinition` only
+contains vertices actually referenced by that mesh, and every mesh gets its
+own local zero-based index buffer.
+
+Faces with more than three vertices are triangulated with a triangle-fan
+strategy, matching the existing importer behavior for quads and n-gons.
+
+#### Mesh name sanitization (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+Added a private `sanitize_mesh_name(raw: &str) -> String` helper that:
+
+- replaces non-ASCII alphanumeric / underscore characters with `_`
+- collapses repeated underscores
+- trims leading and trailing underscores
+
+If a sanitized mesh name becomes empty, the importer falls back to a stable
+generated name such as `mesh_0`.
+
+#### `ObjImportOptions::scale` (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+Extended `ObjImportOptions` with `scale: f32` and defaulted it to `1.0`.
+Imported vertex positions are multiplied by this scale in both the legacy
+single-mesh importer and the new multi-mesh importer.
+
+#### No-group fallback (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+When an OBJ has no `o` or `g` directives, the multi-mesh importer returns a
+single mesh named `mesh_0` so downstream code still receives a valid list of
+meshes.
+
+#### Deterministic OBJ fixtures (`examples/skeleton.obj`, `examples/female_1.obj`)
+
+Added two small multi-object OBJ fixtures to the repository so the importer
+tests can exercise the required filename-based paths without depending on
+external assets.
+
+---
+
+### Architecture compliance
+
+- The work is confined to the SDK importer layer under `sdk/campaign_builder`.
+- Existing `MeshDefinition` from `src/domain/visual/mod.rs` is reused exactly
+  as defined by the architecture.
+- No domain/core data structures were modified.
+- The legacy single-mesh importer remains intact for backward compatibility.
+- New test fixtures live outside `campaigns/tutorial`, so Implementation Rule 5
+  remains satisfied.
+
+---
+
+### Test coverage
+
+Added or extended unit tests in `sdk/campaign_builder/src/mesh_obj_io.rs` for:
+
+- `sanitize_mesh_name` edge cases
+- `scale` application during import
+- no-group fallback to `mesh_0`
+- file-based multi-mesh import of `examples/skeleton.obj`
+- file-based multi-mesh import of `examples/female_1.obj`
+- legacy round-trip and single-mesh import behavior remaining intact
+
+Validation run completed successfully:
+
+- `cargo fmt --all`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo nextest run --all-features` -> `3162 passed, 8 skipped`
 ## Combat Events — Missing Deliverables Gap Fill
 
 ### Overview
