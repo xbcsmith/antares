@@ -759,6 +759,7 @@ mod tests {
                 damage: DiceRoll::new(1, 6, 0),
                 attack_type: AttackType::Physical,
                 special_effect: None,
+                is_ranged: false,
             }],
             flee_threshold: 3,
             special_attack_threshold: 20,

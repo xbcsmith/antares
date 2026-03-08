@@ -1103,7 +1103,7 @@ impl GameState {
             .is_none()
         {
             let mut rng = rand::rng();
-            if let Some(monster_group) =
+            if let Some(encounter_group) =
                 crate::domain::world::random_encounter(&self.world, &mut rng)
             {
                 // Build combat state and initialize from the monster group
@@ -1114,11 +1114,13 @@ impl GameState {
                 crate::domain::combat::engine::initialize_combat_from_group(
                     &mut cs,
                     content,
-                    &monster_group,
+                    &encounter_group.monster_group,
                 )
                 .map_err(MoveHandleError::CombatInit)?;
 
                 // Enter combat with prepared combat state
+                // Phase 1: store the type; Phase 2+ will act on it.
+                let _ = encounter_group.combat_event_type;
                 self.mode = GameMode::Combat(cs);
 
                 // Combat occurred instead of triggering a tile event; return early.
@@ -1131,7 +1133,10 @@ impl GameState {
             .map_err(MoveHandleError::Event)?;
 
         match ev {
-            crate::domain::world::EventResult::Encounter { monster_group } => {
+            crate::domain::world::EventResult::Encounter {
+                monster_group,
+                combat_event_type,
+            } => {
                 // Build combat state and initialize from the monster group
                 let mut cs = crate::domain::combat::engine::CombatState::new(
                     crate::domain::combat::types::Handicap::Even,
@@ -1143,6 +1148,9 @@ impl GameState {
                     &monster_group,
                 )
                 .map_err(MoveHandleError::CombatInit)?;
+
+                // Phase 1: store the type; Phase 2+ will act on it.
+                let _ = combat_event_type;
 
                 // Enter combat with prepared combat state
                 self.mode = GameMode::Combat(cs);

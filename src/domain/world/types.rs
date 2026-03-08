@@ -10,6 +10,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.2 for complete specifications.
 
+use crate::domain::combat::types::CombatEventType;
 use crate::domain::types::{Direction, GameTime, ItemId, MapId, Position, TimeOfDay};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -1892,6 +1893,12 @@ pub enum MapEvent {
         /// `#[serde(default)]`.
         #[serde(default)]
         rotation_speed: Option<f32>,
+        /// How this combat begins and what special mechanics apply.
+        ///
+        /// Defaults to [`CombatEventType::Normal`] for backward compatibility with
+        /// existing RON files that omit this field.
+        #[serde(default)]
+        combat_event_type: CombatEventType,
     },
     /// Treasure chest
     Treasure {
@@ -2114,6 +2121,52 @@ fn default_furniture_scale() -> f32 {
 #[allow(dead_code)]
 pub const DEFAULT_RECRUITMENT_DIALOGUE_ID: crate::domain::dialogue::DialogueId = 1000;
 
+/// A single random encounter group entry in the encounter table.
+///
+/// Replaces the previous raw `Vec<u8>` entries in `EncounterTable::groups`
+/// so that each group can carry its own [`CombatEventType`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::types::EncounterGroup;
+/// use antares::domain::combat::types::CombatEventType;
+///
+/// let group = EncounterGroup {
+///     monster_group: vec![1, 2],
+///     combat_event_type: CombatEventType::Ambush,
+/// };
+/// assert!(group.combat_event_type.gives_monster_advantage());
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EncounterGroup {
+    /// Monster IDs in this group.
+    pub monster_group: Vec<u8>,
+    /// Combat event type for this group.
+    ///
+    /// Defaults to [`CombatEventType::Normal`] for backward compatibility.
+    #[serde(default)]
+    pub combat_event_type: CombatEventType,
+}
+
+impl EncounterGroup {
+    /// Construct a new `EncounterGroup` with `CombatEventType::Normal`.
+    pub fn new(monster_group: Vec<u8>) -> Self {
+        Self {
+            monster_group,
+            combat_event_type: CombatEventType::Normal,
+        }
+    }
+
+    /// Construct a new `EncounterGroup` with an explicit [`CombatEventType`].
+    pub fn with_type(monster_group: Vec<u8>, combat_event_type: CombatEventType) -> Self {
+        Self {
+            monster_group,
+            combat_event_type,
+        }
+    }
+}
+
 /// Encounter table definition for random encounters configured per map
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct EncounterTable {
@@ -2121,9 +2174,10 @@ pub struct EncounterTable {
     #[serde(default = "default_encounter_rate")]
     pub encounter_rate: f32,
 
-    /// Monster groups available in this area (each entry is a monster_group Vec<u8>)
+    /// Monster groups available in this area.  Each entry is an [`EncounterGroup`]
+    /// that pairs a monster list with a [`CombatEventType`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub groups: Vec<Vec<u8>>,
+    pub groups: Vec<EncounterGroup>,
 
     /// Terrain-based modifiers to multiply the base encounter rate
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -3199,6 +3253,7 @@ mod time_condition_tests {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
         };
         match event {
             MapEvent::Encounter {
@@ -3222,6 +3277,7 @@ mod time_condition_tests {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
         };
         match event {
             MapEvent::Encounter {

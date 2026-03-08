@@ -230,6 +230,7 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         },
     );
     map.add_event(
@@ -242,6 +243,7 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         },
     );
     map.add_event(
@@ -254,6 +256,7 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         },
     );
     map.add_event(
@@ -266,6 +269,7 @@ fn generate_starter_dungeon() -> Result<(), Box<dyn std::error::Error>> {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         },
     );
 
@@ -382,6 +386,7 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         },
     );
     map.add_event(
@@ -394,6 +399,7 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         },
     );
     map.add_event(
@@ -406,6 +412,7 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         },
     );
     map.add_event(
@@ -418,6 +425,7 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         },
     );
 

@@ -73,6 +73,7 @@ impl MonstersEditorState {
                 damage: DiceRoll::new(1, 6, 0),
                 attack_type: AttackType::Physical,
                 special_effect: None,
+                is_ranged: false,
             }],
             stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
             is_undead: false,
@@ -1061,6 +1062,7 @@ impl MonstersEditorState {
                 damage: DiceRoll::new(1, 6, 0),
                 attack_type: AttackType::Physical,
                 special_effect: None,
+                is_ranged: false,
             });
         }
     }

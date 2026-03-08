@@ -144,12 +144,14 @@ impl InitiateRestEvent {
 ///
 /// ```
 /// use antares::game::systems::rest::RestCompleteEvent;
+/// use antares::domain::combat::types::CombatEventType;
 ///
 /// // Completed rest
 /// let done = RestCompleteEvent {
 ///     hours_completed: 12,
 ///     interrupted_by_encounter: false,
 ///     encounter_group: None,
+///     encounter_combat_event_type: CombatEventType::Normal,
 /// };
 /// assert!(!done.interrupted_by_encounter);
 ///
@@ -158,6 +160,7 @@ impl InitiateRestEvent {
 ///     hours_completed: 3,
 ///     interrupted_by_encounter: true,
 ///     encounter_group: Some(vec![1, 2]),
+///     encounter_combat_event_type: CombatEventType::Ambush,
 /// };
 /// assert!(interrupted.interrupted_by_encounter);
 /// ```
@@ -172,6 +175,13 @@ pub struct RestCompleteEvent {
     /// Each `u8` is a monster ID from the encounter table.  `None` when the
     /// rest completed normally.
     pub encounter_group: Option<Vec<u8>>,
+    /// The [`CombatEventType`] of the interrupting encounter.
+    ///
+    /// Defaults to [`CombatEventType::Normal`].  Set to
+    /// [`CombatEventType::Ambush`] when the rest is interrupted (the party
+    /// is caught off-guard while sleeping).  Forwarded to
+    /// [`start_encounter`](crate::game::systems::combat::start_encounter).
+    pub encounter_combat_event_type: crate::domain::combat::types::CombatEventType,
 }
 
 // ---------------------------------------------------------------------------
@@ -760,6 +770,7 @@ pub fn process_rest(
             hours_completed: hours_done,
             interrupted_by_encounter: false,
             encounter_group: None,
+            encounter_combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
         });
         return;
     }
@@ -785,6 +796,7 @@ pub fn process_rest(
             hours_completed: hours_done,
             interrupted_by_encounter: false,
             encounter_group: None,
+            encounter_combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
         });
         return;
     }
@@ -837,7 +849,7 @@ pub fn process_rest(
         }
     };
 
-    if let Some(monster_group) = encounter_group {
+    if let Some(encounter_group) = encounter_group {
         // Encounter! Interrupt the rest.
         info!("Random encounter during rest — interrupting rest");
         let hours_done = match &game_state.mode {
@@ -845,13 +857,18 @@ pub fn process_rest(
             _ => rest_state_snapshot.hours_completed + 1,
         };
 
+        // Rest interruptions are always ambushes — the party is caught
+        // off-guard while sleeping.
+        let encounter_combat_event_type = crate::domain::combat::types::CombatEventType::Ambush;
+
         // Mark interrupted and return to Exploration so handle_rest_complete
         // can start combat without nesting mode transitions.
         game_state.mode = GameMode::Exploration;
         complete_writer.write(RestCompleteEvent {
             hours_completed: hours_done,
             interrupted_by_encounter: true,
-            encounter_group: Some(monster_group),
+            encounter_group: Some(encounter_group.monster_group),
+            encounter_combat_event_type,
         });
     }
 }
@@ -900,6 +917,7 @@ pub fn handle_rest_complete(
                         &mut global_state.0,
                         content_res.as_ref(),
                         group,
+                        event.encounter_combat_event_type,
                     ) {
                         Ok(()) => {
                             info!("Combat started from rest interruption");
@@ -1154,6 +1172,7 @@ mod tests {
                 hours_completed: 3,
                 interrupted_by_encounter: true,
                 encounter_group: Some(vec![1, 2, 3]),
+                encounter_combat_event_type: crate::domain::combat::types::CombatEventType::Ambush,
             });
 
         app.update();
@@ -1342,10 +1361,15 @@ mod tests {
             hours_completed: 12,
             interrupted_by_encounter: false,
             encounter_group: None,
+            encounter_combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
         };
         assert_eq!(event.hours_completed, 12);
         assert!(!event.interrupted_by_encounter);
         assert!(event.encounter_group.is_none());
+        assert_eq!(
+            event.encounter_combat_event_type,
+            crate::domain::combat::types::CombatEventType::Normal
+        );
     }
 
     /// [`RestCompleteEvent`] stores all fields correctly for an interruption.
@@ -1355,10 +1379,15 @@ mod tests {
             hours_completed: 3,
             interrupted_by_encounter: true,
             encounter_group: Some(vec![1, 2, 3]),
+            encounter_combat_event_type: crate::domain::combat::types::CombatEventType::Ambush,
         };
         assert_eq!(event.hours_completed, 3);
         assert!(event.interrupted_by_encounter);
         assert_eq!(event.encounter_group, Some(vec![1, 2, 3]));
+        assert_eq!(
+            event.encounter_combat_event_type,
+            crate::domain::combat::types::CombatEventType::Ambush
+        );
     }
 
     /// [`RestCompleteEvent`] is `Clone` and `PartialEq`.
@@ -1368,6 +1397,7 @@ mod tests {
             hours_completed: 6,
             interrupted_by_encounter: false,
             encounter_group: None,
+            encounter_combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
         };
         let b = a.clone();
         assert_eq!(a, b);
@@ -1391,6 +1421,7 @@ mod tests {
                 hours_completed: 0,
                 interrupted_by_encounter: false,
                 encounter_group: None,
+                encounter_combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             });
         app.update();
     }

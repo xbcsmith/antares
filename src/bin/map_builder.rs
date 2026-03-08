@@ -513,6 +513,7 @@ impl MapBuilder {
                         facing: None,
                         proximity_facing: false,
                         rotation_speed: None,
+                        combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
                     },
                     "treasure" => MapEvent::Treasure {
                         name: format!("Treasure at ({}, {})", x, y),

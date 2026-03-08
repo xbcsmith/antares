@@ -34,10 +34,10 @@ pub use npc_runtime::{
 };
 pub use types::{
     ArchConfig, AsyncMeshConfig, AsyncMeshTaskId, ColumnConfig, ColumnStyle, DetailLevel,
-    DoorFrameConfig, EncounterTable, FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags,
-    FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, InstanceData, LayeredSprite,
-    Map, MapEvent, RailingConfig, ResolvedNpc, RockVariant, SpriteAnimation, SpriteLayer,
-    SpriteMaterialProperties, SpriteReference, SpriteSelectionRule, StructureType, TerrainType,
-    Tile, TileVisualMetadata, TimeCondition, TreeType, WallSegmentConfig, WallType,
+    DoorFrameConfig, EncounterGroup, EncounterTable, FurnitureAppearancePreset, FurnitureCategory,
+    FurnitureFlags, FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, InstanceData,
+    LayeredSprite, Map, MapEvent, RailingConfig, ResolvedNpc, RockVariant, SpriteAnimation,
+    SpriteLayer, SpriteMaterialProperties, SpriteReference, SpriteSelectionRule, StructureType,
+    TerrainType, Tile, TileVisualMetadata, TimeCondition, TreeType, WallSegmentConfig, WallType,
     WaterFlowDirection, World,
 };

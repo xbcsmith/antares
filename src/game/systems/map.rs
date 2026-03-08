@@ -2354,6 +2354,7 @@ mod tests {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
 
@@ -2431,6 +2432,7 @@ mod tests {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
 
@@ -2692,6 +2694,7 @@ mod tests {
                 facing: Some(Direction::West),
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
 
@@ -2983,6 +2986,7 @@ mod tests {
                 facing: Some(Direction::South),
                 proximity_facing: true, // Phase 3: enable proximity tracking
                 rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
 
@@ -3055,6 +3059,7 @@ mod tests {
                 facing: None,
                 proximity_facing: false, // default – no component
                 rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
 
@@ -3204,6 +3209,7 @@ mod tests {
             facing: None,
             proximity_facing: true,
             rotation_speed: None,
+            combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
         };
 
         let ron_str = ron::to_string(&event).expect("serialize to RON");
@@ -3281,6 +3287,7 @@ mod tests {
             facing: None,
             proximity_facing: true,
             rotation_speed: Some(90.0),
+            combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
         };
 
         let ron_str = ron::to_string(&event).expect("serialize to RON");
@@ -3380,6 +3387,7 @@ mod tests {
                 facing: Some(Direction::South),
                 proximity_facing: true,
                 rotation_speed: Some(90.0), // Phase 4: smooth rotation
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
 

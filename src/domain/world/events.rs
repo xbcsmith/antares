@@ -10,7 +10,8 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.2 for world system specifications.
 
-use super::types::{MapEvent, World};
+use super::types::{EncounterGroup, MapEvent, World};
+use crate::domain::combat::types::CombatEventType;
 use crate::domain::types::{GameTime, Position};
 use thiserror::Error;
 
@@ -23,6 +24,10 @@ pub enum EventResult {
     Encounter {
         /// IDs of monsters in the encounter
         monster_group: Vec<u8>,
+        /// Type of combat event — governs how the battle begins and what
+        /// special mechanics apply.  Forwarded from [`MapEvent::Encounter`]
+        /// or from the selected [`EncounterGroup`] in the encounter table.
+        combat_event_type: CombatEventType,
     },
     /// Treasure found
     Treasure {
@@ -216,9 +221,13 @@ pub fn trigger_event(
     let result = match event {
         MapEvent::Encounter {
             monster_group,
+            combat_event_type,
             time_condition: _,
             ..
-        } => EventResult::Encounter { monster_group },
+        } => EventResult::Encounter {
+            monster_group,
+            combat_event_type,
+        },
 
         MapEvent::Treasure { loot, .. } => {
             // Remove treasure event after being collected (one-time)
@@ -327,11 +336,38 @@ pub fn trigger_event(
 }
 
 /// Roll for a random encounter based on the world's current map encounter table
-/// and the terrain modifier at the party position. Returns `Some(monster_group)`
-/// when an encounter should occur, otherwise `None`.
+/// and the terrain modifier at the party position.  Returns `Some(EncounterGroup)`
+/// when an encounter should occur — the group contains both the monster list and
+/// the [`CombatEventType`] for that group.  Returns `None` when no encounter fires.
 ///
 /// `R` is the RNG implementation used by the project's random helper (e.g. `rand::rng()`).
-pub fn random_encounter<R: rand::Rng>(world: &World, rng: &mut R) -> Option<Vec<u8>> {
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::{World, Map, random_encounter};
+/// use antares::domain::world::types::{EncounterGroup, EncounterTable};
+/// use antares::domain::combat::types::CombatEventType;
+/// use antares::domain::types::Position;
+///
+/// let mut world = World::new();
+/// let mut map = Map::new(1, "Forest".to_string(), "Dark forest".to_string(), 20, 20);
+/// map.allow_random_encounters = true;
+/// map.encounter_table = Some(EncounterTable {
+///     encounter_rate: 1.0, // guaranteed
+///     groups: vec![EncounterGroup::with_type(vec![1], CombatEventType::Ambush)],
+///     terrain_modifiers: Default::default(),
+/// });
+/// world.add_map(map);
+/// world.set_current_map(1);
+///
+/// let mut rng = rand::rng();
+/// let result = random_encounter(&world, &mut rng);
+/// assert!(result.is_some());
+/// let group = result.unwrap();
+/// assert_eq!(group.combat_event_type, CombatEventType::Ambush);
+/// ```
+pub fn random_encounter<R: rand::Rng>(world: &World, rng: &mut R) -> Option<EncounterGroup> {
     // Get the current map (return None if not present)
     let map = world.get_current_map()?;
 
@@ -379,6 +415,7 @@ mod tests {
     use super::*;
     use crate::domain::character::InventorySlot;
     use crate::domain::types::TimeOfDay;
+    use crate::domain::world::types::EncounterTable;
     use crate::domain::world::{Map, TimeCondition};
 
     /// Convenience: a neutral daytime clock for tests that do not care about time.
@@ -420,6 +457,7 @@ mod tests {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: CombatEventType::Normal,
             },
         );
 
@@ -429,8 +467,12 @@ mod tests {
         let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
         match result.unwrap() {
-            EventResult::Encounter { monster_group } => {
+            EventResult::Encounter {
+                monster_group,
+                combat_event_type,
+            } => {
                 assert_eq!(monster_group, vec![1, 2, 3]);
+                assert_eq!(combat_event_type, CombatEventType::Normal);
             }
             _ => panic!("Expected Encounter event"),
         }
@@ -589,6 +631,7 @@ mod tests {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: CombatEventType::Normal,
             },
         );
         world.add_map(map);
@@ -619,6 +662,7 @@ mod tests {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: CombatEventType::Normal,
             },
         );
         world.add_map(map);
@@ -784,6 +828,7 @@ mod tests {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: CombatEventType::Normal,
             },
         );
         world.add_map(map);
@@ -797,6 +842,118 @@ mod tests {
             matches!(result, Ok(EventResult::Encounter { .. })),
             "encounter must still be present after a failed (noon) trigger"
         );
+    }
+
+    // ===== Phase 1: CombatEventType threading tests =====
+
+    #[test]
+    fn test_combat_event_type_default_is_normal() {
+        assert_eq!(CombatEventType::default(), CombatEventType::Normal);
+    }
+
+    #[test]
+    fn test_map_event_encounter_ron_round_trip() {
+        use crate::domain::world::types::MapEvent;
+        let event = MapEvent::Encounter {
+            name: "Test".to_string(),
+            description: String::new(),
+            monster_group: vec![1, 2],
+            time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
+            combat_event_type: CombatEventType::Ambush,
+        };
+        let serialized = ron::to_string(&event).expect("serialize");
+        let deserialized: MapEvent = ron::from_str(&serialized).expect("deserialize");
+        match deserialized {
+            MapEvent::Encounter {
+                combat_event_type, ..
+            } => assert_eq!(combat_event_type, CombatEventType::Ambush),
+            _ => panic!("Expected Encounter"),
+        }
+    }
+
+    #[test]
+    fn test_map_event_encounter_ron_backward_compat() {
+        // Old RON without combat_event_type — must default to Normal.
+        let ron_str = r#"Encounter(
+            name: "Goblins",
+            description: "",
+            monster_group: [1, 2],
+        )"#;
+        let event: crate::domain::world::types::MapEvent =
+            ron::from_str(ron_str).expect("backward compat deserialize");
+        match event {
+            crate::domain::world::types::MapEvent::Encounter {
+                combat_event_type, ..
+            } => assert_eq!(combat_event_type, CombatEventType::Normal),
+            _ => panic!("Expected Encounter"),
+        }
+    }
+
+    #[test]
+    fn test_event_result_encounter_carries_type() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let pos = Position::new(5, 5);
+        map.add_event(
+            pos,
+            crate::domain::world::types::MapEvent::Encounter {
+                name: "Ambush".to_string(),
+                description: String::new(),
+                monster_group: vec![3],
+                time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
+                combat_event_type: CombatEventType::Ambush,
+            },
+        );
+        world.add_map(map);
+        world.set_current_map(1);
+
+        let result = trigger_event(&mut world, pos, &noon()).expect("trigger_event");
+        match result {
+            EventResult::Encounter {
+                combat_event_type, ..
+            } => assert_eq!(combat_event_type, CombatEventType::Ambush),
+            _ => panic!("Expected Encounter result"),
+        }
+    }
+
+    #[test]
+    fn test_encounter_group_ron_round_trip() {
+        use crate::domain::world::types::EncounterGroup;
+        let group = EncounterGroup::with_type(vec![1, 2, 3], CombatEventType::Ranged);
+        let serialized = ron::to_string(&group).expect("serialize");
+        let deserialized: EncounterGroup = ron::from_str(&serialized).expect("deserialize");
+        assert_eq!(deserialized.monster_group, vec![1, 2, 3]);
+        assert_eq!(deserialized.combat_event_type, CombatEventType::Ranged);
+    }
+
+    #[test]
+    fn test_random_encounter_returns_group_type() {
+        use crate::domain::world::types::EncounterGroup;
+
+        let mut world = World::new();
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.allow_random_encounters = true;
+        map.encounter_table = Some(EncounterTable {
+            encounter_rate: 1.0, // guaranteed
+            groups: vec![EncounterGroup::with_type(vec![5], CombatEventType::Ambush)],
+            terrain_modifiers: Default::default(),
+        });
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // Run enough times to get a hit given rate == 1.0
+        let mut rng = rand::rng();
+        let result = random_encounter(&world, &mut rng);
+        assert!(result.is_some(), "Expected encounter at rate 1.0");
+        let group = result.unwrap();
+        assert_eq!(group.combat_event_type, CombatEventType::Ambush);
+        assert_eq!(group.monster_group, vec![5]);
     }
 
     #[test]
@@ -814,7 +971,9 @@ mod tests {
         // Configure encounter table: 100% base rate and a single group [1,2,3]
         let table = crate::domain::world::EncounterTable {
             encounter_rate: 1.0,
-            groups: vec![vec![1u8, 2u8, 3u8]],
+            groups: vec![crate::domain::world::types::EncounterGroup::new(vec![
+                1u8, 2u8, 3u8,
+            ])],
             ..Default::default()
         };
 
@@ -831,7 +990,13 @@ mod tests {
 
         // Assert
         assert!(result.is_some());
-        assert_eq!(result.unwrap(), vec![1u8, 2u8, 3u8]);
+        let group = result.unwrap();
+        assert_eq!(group.monster_group, vec![1u8, 2u8, 3u8]);
+        assert_eq!(
+            group.combat_event_type,
+            CombatEventType::Normal,
+            "default group type should be Normal"
+        );
     }
 
     #[test]
@@ -848,7 +1013,7 @@ mod tests {
 
         let table = crate::domain::world::EncounterTable {
             encounter_rate: 1.0,
-            groups: vec![vec![1u8]],
+            groups: vec![crate::domain::world::types::EncounterGroup::new(vec![1u8])],
             ..Default::default()
         };
 

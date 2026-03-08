@@ -34,6 +34,17 @@ pub enum ResourceError {
     ///
     /// Returned when a random-encounter check fires during a per-hour rest
     /// loop before the requested rest duration is complete.
+    ///
+    /// # Combat Event Type Requirement
+    ///
+    /// Any encounter that fires while the party is resting **MUST** be started
+    /// with `CombatEventType::Ambush`.  The resting party is asleep and cannot
+    /// react — the ambush mechanic (monsters act first in round 1, party turns
+    /// suppressed) correctly models this.  The rest system implementation is
+    /// responsible for passing `CombatEventType::Ambush` to `start_encounter()`
+    /// whenever it returns this error variant and triggers combat.
+    ///
+    /// See: `docs/explanation/combat_events_implementation_plan.md` Section 2.7.
     #[error("Cannot rest - active encounter in progress")]
     CannotRestWithActiveEncounter,
 

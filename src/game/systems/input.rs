@@ -1947,6 +1947,7 @@ mod interaction_tests {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
 

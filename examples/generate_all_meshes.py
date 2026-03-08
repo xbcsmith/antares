@@ -7,7 +7,7 @@ os.makedirs(OUT, exist_ok=True)
 
 def get_id(filename):
     mapping = {'ancientskeleton.ron': 133, 'ancientwolf.ron': 122, 'apprenticezara.ron': 59, 'bandit.ron': 6, 'direwolf.ron': 4, 'direwolf_leader.ron': 14, 'direwolfleader.ron': 5, 'dragon.ron': 30, 'dwarfcleric.ron': 103, 'dyinggoblin.ron': 151, 'elfmage.ron': 102, 'evillich.ron': 153, 'fireelemental.ron': 22, 'giantrat.ron': 3, 'goblin.ron': 1, 'highpriest.ron': 54, 'highpriestess.ron': 55, 'humanfighter.ron': 101, 'innkeeper.ron': 52, 'kira.ron': 60, 'kobold.ron': 2, 'lich.ron': 31, 'merchant.ron': 53, 'mira.ron': 61, 'ogre.ron': 20, 'oldgareth.ron': 58, 'orc.ron': 10, 'pyramiddragon.ron': 33, 'ranger.ron': 57, 'reddragon.ron': 32, 'sirius.ron': 62, 'skeleton.ron': 11, 'skeletonwarrior.ron': 152, 'villageelder.ron': 51, 'whisper.ron': 63, 'wizardarcturus.ron': 56, 'wolf.ron': 12, 'zombie.ron': 21}
-    
+
     # 1. Look up old mapping, apply scaling logic if it exists
     if filename in mapping:
         old_id = mapping[filename]
@@ -24,7 +24,7 @@ def get_id(filename):
 
     # 2. Dynamic generation for non-mapped meshes instead of 999
     global next_monster_id, next_npc_id, next_custom_id
-    
+
     # Heuristics for category based on filename
     # Characters are NPCs or Custom. "male_" or "female_"
     if filename.startswith("male_") or filename.startswith("female_"):
@@ -102,31 +102,31 @@ def cylinder(name, cx, cy, cz, radius, height, color, segments=8):
     """Create a segmented cylinder for smooth curves."""
     verts = []
     indices = []
-    
+
     # Bottom cap center
     verts.append([cx, cy, cz])
-    
+
     # Bottom ring
     for i in range(segments):
         angle = (i / segments) * 2 * math.pi
         x = cx + radius * math.cos(angle)
         z = cz + radius * math.sin(angle)
         verts.append([x, cy, z])
-    
+
     # Top ring
     for i in range(segments):
         angle = (i / segments) * 2 * math.pi
         x = cx + radius * math.cos(angle)
         z = cz + radius * math.sin(angle)
         verts.append([x, cy + height, z])
-    
+
     # Top cap center
     verts.append([cx, cy + height, cz])
-    
+
     # Bottom cap triangles
     for i in range(segments):
         indices.extend([0, i + 1, ((i + 1) % segments) + 1])
-    
+
     # Side quads (as triangles)
     for i in range(segments):
         bottom1 = i + 1
@@ -134,33 +134,33 @@ def cylinder(name, cx, cy, cz, radius, height, color, segments=8):
         top1 = i + 1 + segments
         top2 = ((i + 1) % segments) + 1 + segments
         indices.extend([bottom1, bottom2, top1, bottom2, top2, top1])
-    
+
     # Top cap triangles
     top_center = len(verts) - 1
     for i in range(segments):
         indices.extend([top_center, ((i + 1) % segments) + 1 + segments, i + 1 + segments])
-    
+
     return emit_mesh(name, verts, indices, color)
 
 def tapered_cylinder(name, cx, cy, cz, radius_bottom, radius_top, height, color, segments=8):
     """Tapered cylinder for legs, snouts, tails."""
     verts = []
     indices = []
-    
+
     # Bottom ring
     for i in range(segments):
         angle = (i / segments) * 2 * math.pi
         x = cx + radius_bottom * math.cos(angle)
         z = cz + radius_bottom * math.sin(angle)
         verts.append([x, cy, z])
-    
+
     # Top ring
     for i in range(segments):
         angle = (i / segments) * 2 * math.pi
         x = cx + radius_top * math.cos(angle)
         z = cz + radius_top * math.sin(angle)
         verts.append([x, cy + height, z])
-    
+
     # Side quads
     for i in range(segments):
         bottom1 = i
@@ -168,25 +168,25 @@ def tapered_cylinder(name, cx, cy, cz, radius_bottom, radius_top, height, color,
         top1 = i + segments
         top2 = ((i + 1) % segments) + segments
         indices.extend([bottom1, bottom2, top1, bottom2, top2, top1])
-    
+
     # Caps (simple fans)
     center_bottom = len(verts)
     verts.append([cx, cy, cz])
     for i in range(segments):
         indices.extend([center_bottom, (i + 1) % segments, i])
-    
+
     center_top = len(verts)
     verts.append([cx, cy + height, cz])
     for i in range(segments):
         indices.extend([center_top, i + segments, ((i + 1) % segments) + segments])
-    
+
     return emit_mesh(name, verts, indices, color)
 
 def sphere_section(name, cx, cy, cz, radius, color, segments_h=6, segments_v=6):
     """Spherical section for heads, joints."""
     verts = []
     indices = []
-    
+
     for v in range(segments_v + 1):
         theta = (v / segments_v) * math.pi
         for h in range(segments_h):
@@ -195,7 +195,7 @@ def sphere_section(name, cx, cy, cz, radius, color, segments_h=6, segments_v=6):
             y = cy + radius * math.cos(theta)
             z = cz + radius * math.sin(theta) * math.sin(phi)
             verts.append([x, y, z])
-    
+
     # Build quad faces
     for v in range(segments_v):
         for h in range(segments_h):
@@ -204,14 +204,14 @@ def sphere_section(name, cx, cy, cz, radius, color, segments_h=6, segments_v=6):
             i3 = (v + 1) * segments_h + h
             i4 = (v + 1) * segments_h + (h + 1) % segments_h
             indices.extend([i1, i2, i3, i2, i4, i3])
-    
+
     return emit_mesh(name, verts, indices, color)
 
 def ellipsoid(name, cx, cy, cz, rx, ry, rz, color, segments_h=8, segments_v=6):
     """Ellipsoid for body masses."""
     verts = []
     indices = []
-    
+
     for v in range(segments_v + 1):
         theta = (v / segments_v) * math.pi
         for h in range(segments_h):
@@ -220,7 +220,7 @@ def ellipsoid(name, cx, cy, cz, rx, ry, rz, color, segments_h=8, segments_v=6):
             y = cy + ry * math.cos(theta)
             z = cz + rz * math.sin(theta) * math.sin(phi)
             verts.append([x, y, z])
-    
+
     for v in range(segments_v):
         for h in range(segments_h):
             i1 = v * segments_h + h
@@ -228,36 +228,36 @@ def ellipsoid(name, cx, cy, cz, rx, ry, rz, color, segments_h=8, segments_v=6):
             i3 = (v + 1) * segments_h + h
             i4 = (v + 1) * segments_h + (h + 1) % segments_h
             indices.extend([i1, i2, i3, i2, i4, i3])
-    
+
     return emit_mesh(name, verts, indices, color)
 
 def cone_mesh(name, cx, cy, cz, radius, height, color, segments=8):
     """Cone for teeth, claws, horns."""
     verts = []
     indices = []
-    
+
     # Base center
     verts.append([cx, cy, cz])
-    
+
     # Base ring
     for i in range(segments):
         angle = (i / segments) * 2 * math.pi
         x = cx + radius * math.cos(angle)
         z = cz + radius * math.sin(angle)
         verts.append([x, cy, z])
-    
+
     # Apex
     apex = len(verts)
     verts.append([cx, cy + height, cz])
-    
+
     # Base cap
     for i in range(segments):
         indices.extend([0, ((i + 1) % segments) + 1, i + 1])
-    
+
     # Sides
     for i in range(segments):
         indices.extend([i + 1, ((i + 1) % segments) + 1, apex])
-    
+
     return emit_mesh(name, verts, indices, color)
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -284,30 +284,30 @@ IRON_SHINE = c(0.58, 0.56, 0.60)
 
 def build_detailed_wolf():
     meshes = []
-    
+
     # BODY - ellipsoid torso
     meshes.append(ellipsoid("body", 0, 0.15, -0.2, 0.25, 0.22, 0.35, WOLF_FUR, 12, 8))
-    
+
     # CHEST - wider front section
     meshes.append(ellipsoid("chest", 0, 0.25, -0.55, 0.20, 0.18, 0.15, WOLF_FUR, 10, 6))
-    
+
     # NECK - tapered cylinder connecting chest to head
     meshes.append(tapered_cylinder("neck", 0, 0.30, -0.68, 0.12, 0.15, 0.15, WOLF_FUR, 10))
-    
+
     # HEAD - spherical with slight elongation
     meshes.append(ellipsoid("head", 0, 0.38, -0.80, 0.16, 0.14, 0.12, WOLF_FUR, 10, 8))
-    
+
     # SNOUT - tapered cone for muzzle
     meshes.append(tapered_cylinder("snout_upper", 0, 0.35, -0.90, 0.09, 0.06, 0.12, WOLF_DARK, 8))
     meshes.append(tapered_cylinder("snout_lower", 0, 0.30, -0.90, 0.08, 0.05, 0.12, WOLF_DARK, 8))
-    
+
     # NOSE - small sphere at tip
     meshes.append(sphere_section("nose", 0, 0.35, -1.02, 0.04, NOSE_BLACK, 6, 4))
-    
+
     # NOSTRILS - tiny dark spots
     for side, sx in [("left", -0.02), ("right", 0.02)]:
         meshes.append(sphere_section(f"nostril_{side}", sx, 0.36, -1.03, 0.015, c(0.05, 0.05, 0.05), 4, 3))
-    
+
     # EYES - spheres with pupils
     for side, sx in [("left", -0.10), ("right", 0.10)]:
         # Eye socket (darker)
@@ -316,25 +316,25 @@ def build_detailed_wolf():
         meshes.append(sphere_section(f"eye_{side}", sx, 0.42, -0.84, 0.038, EYE_YELLOW, 6, 4))
         # Pupil (dark center)
         meshes.append(sphere_section(f"pupil_{side}", sx, 0.42, -0.835, 0.018, c(0.08, 0.08, 0.08), 4, 3))
-    
+
     # EARS - triangular with inner detail
     for side, sx in [("left", -0.12), ("right", 0.12)]:
         # Outer ear (tapered)
         meshes.append(cone_mesh(f"ear_outer_{side}", sx, 0.48, -0.78, 0.06, 0.16, WOLF_DARK, 8))
         # Inner ear (lighter, smaller)
         meshes.append(cone_mesh(f"ear_inner_{side}", sx, 0.50, -0.78, 0.04, 0.14, c(0.75, 0.70, 0.65), 6))
-    
+
     # TEETH - visible fangs
     for side, sx in [("left", -0.03), ("right", 0.03)]:
         meshes.append(cone_mesh(f"fang_upper_{side}", sx, 0.38, -0.95, 0.012, 0.04, TEETH_WHITE, 6))
         meshes.append(cone_mesh(f"fang_lower_{side}", sx, 0.30, -0.95, 0.010, 0.03, TEETH_WHITE, 6))
-    
+
     # TONGUE (slightly visible)
     verts = [[-0.02, 0.32, -0.94], [0.02, 0.32, -0.94], [0.015, 0.32, -0.98], [-0.015, 0.32, -0.98]]
     indices = [0, 1, 2, 0, 2, 3]
     normals = [[0, 1, 0]] * 4
     meshes.append(emit_mesh("tongue", verts, indices, TONGUE_PINK, normals))
-    
+
     # LEGS - tapered cylinders with joints
     legs = [
         ("front_left",  -0.18, -0.50, -0.50),
@@ -342,7 +342,7 @@ def build_detailed_wolf():
         ("hind_left",   -0.18, -0.50,  0.10),
         ("hind_right",   0.18, -0.50,  0.10),
     ]
-    
+
     for name, lx, ly, lz in legs:
         # Upper leg (thicker)
         meshes.append(tapered_cylinder(f"{name}_upper", lx, ly, lz, 0.055, 0.045, 0.22, WOLF_FUR, 8))
@@ -357,7 +357,7 @@ def build_detailed_wolf():
                 lx + offset[0], ly + 0.46, lz + offset[1],
                 0.006, 0.015, CLAW_BONE, 4
             ))
-    
+
     # TAIL - segmented for natural curve
     tail_segments = [
         (0.22, 0.05, 0.05),   # Base (thick)
@@ -374,7 +374,7 @@ def build_detailed_wolf():
             WOLF_FUR if i < 3 else WOLF_DARK,
             8
         ))
-    
+
     return meshes
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -383,7 +383,7 @@ def build_detailed_wolf():
 
 def build_detailed_skeleton():
     meshes = []
-    
+
     # LEGS - thin bone cylinders with joints
     for side, sx in [("left", -0.08), ("right", 0.08)]:
         # Femur
@@ -400,15 +400,15 @@ def build_detailed_skeleton():
                 f"{side}_toe_{i}",
                 sx + offset, 0.00, 0.02, 0.012, 0.008, 0.06, BONE, 4
             ))
-    
+
     # PELVIS - connecting piece
     meshes.append(ellipsoid("pelvis", 0, -0.05, 0, 0.12, 0.08, 0.08, BONE, 8, 4))
-    
+
     # SPINE - segmented vertebrae
     for i in range(8):
         y = 0.05 + i * 0.10
         meshes.append(cylinder(f"vertebra_{i}", 0, y, 0, 0.030, 0.08, BONE_DIM, 6))
-    
+
     # RIBCAGE - individual ribs
     for i in range(6):
         y = 0.15 + i * 0.10
@@ -417,13 +417,13 @@ def build_detailed_skeleton():
                    [-0.16, y + 0.06, 0.02], [-0.15, y + 0.08, 0]]
         indices_l = [0, 1, 2, 2, 3, 4]
         meshes.append(emit_mesh(f"rib_left_{i}", verts_l, indices_l, BONE_DIM))
-        
+
         # Right rib (mirror)
         verts_r = [[0, y, 0], [0.08, y, 0.02], [0.14, y + 0.04, 0.04],
                    [0.16, y + 0.06, 0.02], [0.15, y + 0.08, 0]]
         indices_r = [0, 1, 2, 2, 3, 4]
         meshes.append(emit_mesh(f"rib_right_{i}", verts_r, indices_r, BONE_DIM))
-    
+
     # SHOULDERS - ball joints
     for side, sx in [("left", -0.20), ("right", 0.20)]:
         meshes.append(sphere_section(f"{side}_shoulder", sx, 0.65, 0, 0.04, BONE, 6, 4))
@@ -439,10 +439,10 @@ def build_detailed_skeleton():
                 f"{side}_finger_{i}",
                 sx + offset, 0.10, 0.02, 0.010, 0.006, -0.08, BONE, 4
             ))
-    
+
     # SKULL - detailed cranium
     meshes.append(ellipsoid("cranium", 0, 0.95, -0.08, 0.14, 0.16, 0.12, BONE, 10, 8))
-    
+
     # JAW - hinged mandible
     jaw_verts = [
         [-0.10, 0.82, -0.05], [0.10, 0.82, -0.05],  # Back
@@ -451,18 +451,18 @@ def build_detailed_skeleton():
     ]
     jaw_indices = [0, 1, 3, 0, 3, 2, 2, 3, 5, 2, 5, 4]
     meshes.append(emit_mesh("jaw", jaw_verts, jaw_indices, BONE))
-    
+
     # TEETH - in jaw
     for i in range(8):
         x = -0.05 + i * 0.0125
         meshes.append(cone_mesh(f"tooth_{i}", x, 0.80, 0.08, 0.006, 0.02, TEETH_WHITE, 4))
-    
+
     # EYE SOCKETS - dark hollow spheres
     for side, sx in [("left", -0.08), ("right", 0.08)]:
         meshes.append(sphere_section(f"{side}_socket", sx, 0.96, 0.04, 0.04, c(0.08, 0.08, 0.08), 6, 4))
         # Glowing eyes inside
         meshes.append(sphere_section(f"{side}_eye", sx, 0.96, 0.045, 0.025, EYE_GREEN, 6, 4))
-    
+
     # WEAPON - rusted sword with detail
     # Blade (tapered)
     meshes.append(tapered_cylinder("sword_blade", 0.54, -0.20, 0, 0.02, 0.015, 1.05, IRON_RUST, 6))
@@ -477,7 +477,7 @@ def build_detailed_skeleton():
         meshes.append(cylinder(f"grip_wrap_{i}", 0.54, y, 0, 0.018, 0.03, c(0.35, 0.25, 0.18), 6))
     # Pommel
     meshes.append(sphere_section("pommel", 0.54, 0.28, 0, 0.025, IRON_SHINE, 6, 4))
-    
+
     return meshes
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -2659,25 +2659,25 @@ print(f"Generated {len(all_characters)} RON files in {OUT}/")
 
 def main():
     print("\n🎨 Generating ALL meshes into %s..." % OUT)
-    
+
     # Detailed meshes
     write_creature("wolf_detailed.ron", get_id("wolf_detailed.ron"), "Wolf", build_detailed_wolf(), 0.9)
     write_creature("skeleton_detailed.ron", get_id("skeleton_detailed.ron"), "Skeleton", build_detailed_skeleton(), 1.0)
-    
+
     # Dire Wolves
     dire_meshes = build_wolf_base(body_color=DIRE_FUR, dark_color=DIRE_DARK, eye_color=DIRE_EYE, body_scale=1.2, bulk_scale=1.15, snout_length=1.1, ear_height=1.0, include_scars=False)
     write_creature("direwolf.ron", get_id("direwolf.ron"), "DireWolf", dire_meshes, 1.1)
-    
+
     leader_meshes = build_wolf_base(body_color=ALPHA_FUR, dark_color=ALPHA_DARK, eye_color=ALPHA_EYE, body_scale=1.4, bulk_scale=1.3, snout_length=1.15, ear_height=1.1, include_scars=True)
     write_creature("direwolf_leader.ron", get_id("direwolf_leader.ron"), "DireWolfLeader", leader_meshes, 1.15)
-    
+
     # Override write_ron for gen_monsters2 and generate_characters
     def write_ron_monsters(filename, name, scale, health, speed, note, meshes):
         write_creature(filename, get_id(filename), name, meshes, scale)
-    
+
     global write_ron
     write_ron = write_ron_monsters
-    
+
     # Monsters
     build_goblin()
     build_kobold()
@@ -2690,7 +2690,7 @@ def main():
     build_fire_elemental()
     build_dragon()
     build_lich()
-    
+
     # Characters
     chars = [obj for name, obj in globals().copy().items() if (name.startswith("female_") or name.startswith("male_")) and callable(obj)]
     for fn in chars:
