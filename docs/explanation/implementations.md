@@ -705,6 +705,97 @@ This phase also closes a fixture gap left by the earlier importer work:
 repository, so both the existing file-based importer tests and the new importer
 workflow tests have stable OBJ inputs.
 
+## New MTL Support - Phase 7: Tests
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 7 closes the remaining MTL importer test matrix by treating the current
+branch state as the source of truth instead of rebuilding tests from scratch.
+The parser and importer-state suites already covered most of the MTL cases from
+the plan, so this phase fills the final persistence gap and documents the full
+coverage now present across parser, importer-state, and importer-UI helpers.
+
+---
+
+### Phase 7 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `sdk/campaign_builder/src/obj_importer_ui.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Parser and importer-state coverage audit completed
+
+The existing Phase 2 through Phase 6 work already provided backend coverage for
+the parser-heavy Phase 7 requirements, including:
+
+- relative `mtllib` resolution
+- multiple `mtllib` directives
+- missing `.mtl` fallback behavior
+- malformed MTL tolerance while preserving geometry import
+- `usemtl` boundary splitting with object and group identity preserved
+- `Kd`, `d`, and `Ke` mapping into exported mesh and material data
+- importer-state handling for imported-color precedence, manual override MTL
+  loading, imported swatch session state, and explicit `Auto-Assign All`
+  fallback behavior
+
+That meant the remaining missing deliverable was not another parser test, but a
+workflow-level assertion that the importer's palette persistence path still
+writes the expected campaign-scoped config file.
+
+#### Importer-state palette persistence test
+
+Added a focused `ObjImporterState` test that saves a custom palette entry
+through `save_custom_palette()`, verifies the campaign-local
+`config/importer_palette.ron` file is created, and reloads it through
+`load_custom_palette()` to prove the importer state API preserves round-trip
+behavior.
+
+This locks the persistence requirement to the importer state seam rather than
+only to the lower-level color-palette module.
+
+#### Importer-UI persistence helper test
+
+Added a companion `obj_importer_ui.rs` test that exercises the existing
+`persist_custom_palette()` helper used by the custom-palette UI actions.
+
+The test proves that the importer-tab save flow still writes
+`config/importer_palette.ron` at the expected campaign-relative path, which is
+the Phase 7 UI-side persistence deliverable from the plan.
+
+---
+
+### Test coverage summary
+
+Phase 7 coverage now explicitly exists for:
+
+- parser path resolution and non-fatal MTL error handling in
+  `sdk/campaign_builder/src/mesh_obj_io.rs`
+- importer-state color provenance, manual override handling, imported swatch
+  session state, and explicit auto-assign behavior in
+  `sdk/campaign_builder/src/obj_importer.rs`
+- importer-tab helper behavior for imported swatch staging, MTL status text,
+  rendering, and palette persistence in
+  `sdk/campaign_builder/src/obj_importer_ui.rs`
+
+---
+
+### Architecture compliance
+
+- The work stays inside the existing SDK importer workflow.
+- No gameplay or domain data structures were changed.
+- No tests use `campaigns/tutorial`; persistence tests write only into temporary
+  campaign directories.
+- The campaign-scoped custom palette format remains
+  `config/importer_palette.ron` exactly as required.
+
 ---
 
 ### Phase 3 Deliverables

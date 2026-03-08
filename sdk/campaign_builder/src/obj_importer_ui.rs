@@ -1166,8 +1166,8 @@ fn export_type_label(export_type: ExportType) -> &'static str {
 mod tests {
     use super::{
         build_creature_definition, describe_mesh_color_source, export_state_to_campaign,
-        format_mtl_source_detail, format_mtl_source_summary, preview_export_relative_path,
-        show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
+        format_mtl_source_detail, format_mtl_source_summary, persist_custom_palette,
+        preview_export_relative_path, show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
     };
     use crate::logging::Logger;
     use crate::obj_importer::{
@@ -1352,6 +1352,26 @@ mod tests {
 
         assert_eq!(state.new_custom_color_label, "HeroSkin");
         assert_eq!(state.new_custom_color, [0.7, 0.6, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn test_persist_custom_palette_writes_importer_palette_file() {
+        let temp_dir = tempdir().unwrap();
+        let campaign_dir = temp_dir.path().to_path_buf();
+        let mut state = triangle_mesh_state();
+        let mut logger = Logger::default();
+        state.add_custom_color("HeroSkin", [0.7, 0.6, 0.5, 1.0]);
+
+        assert!(persist_custom_palette(
+            &mut state,
+            Some(&campaign_dir),
+            &mut logger,
+        ));
+
+        let palette_path = campaign_dir.join("config/importer_palette.ron");
+        assert!(palette_path.exists());
+        let saved = fs::read_to_string(palette_path).unwrap();
+        assert!(saved.contains("HeroSkin"));
     }
 
     #[test]

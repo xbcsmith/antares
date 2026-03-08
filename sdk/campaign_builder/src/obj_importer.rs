@@ -853,4 +853,22 @@ mod tests {
         );
         assert_eq!(options.scale, 0.25);
     }
+
+    #[test]
+    fn test_obj_importer_state_save_custom_palette_writes_importer_palette_file() {
+        let temp_dir = tempdir().unwrap();
+        let mut state = ObjImporterState::new();
+        state.add_custom_color("hero_skin", [0.7, 0.6, 0.5, 1.0]);
+
+        state.save_custom_palette(temp_dir.path()).unwrap();
+
+        let palette_path = temp_dir.path().join("config/importer_palette.ron");
+        assert!(palette_path.exists());
+        let saved = fs::read_to_string(&palette_path).unwrap();
+        assert!(saved.contains("hero_skin"));
+
+        let mut reloaded = ObjImporterState::new();
+        reloaded.load_custom_palette(temp_dir.path()).unwrap();
+        assert_eq!(reloaded.custom_palette, state.custom_palette);
+    }
 }
