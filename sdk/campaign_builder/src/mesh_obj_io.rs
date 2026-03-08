@@ -1,10 +1,16 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! OBJ mesh import/export for creature editor
+//! OBJ mesh import/export backend for the Campaign Builder importer workflow.
 //!
-//! Provides functionality for importing and exporting meshes in Wavefront OBJ format,
-//! a widely-used 3D model interchange format.
+//! Provides functionality for importing and exporting meshes in Wavefront OBJ
+//! format, a widely-used 3D model interchange format.
+//!
+//! The standalone `Importer` tab uses the multi-mesh import APIs in this module
+//! as its parser backend. This module is intentionally focused on OBJ parsing,
+//! serialization, and parser-facing options, while `obj_importer.rs` owns the
+//! importer-tab state and `obj_importer_ui.rs` owns egui rendering and export
+//! actions.
 //!
 //! # Examples
 //!
@@ -100,7 +106,10 @@ impl Default for ObjExportOptions {
     }
 }
 
-/// Options for OBJ import
+/// Options for OBJ import.
+///
+/// This struct is the parser-facing contract shared by direct OBJ import calls
+/// and the standalone importer tab state in `obj_importer.rs`.
 #[derive(Debug, Clone)]
 pub struct ObjImportOptions {
     /// Name to assign to imported mesh
@@ -601,6 +610,9 @@ pub fn import_meshes_from_obj(obj_string: &str) -> Result<Vec<MeshDefinition>, O
 
 /// Imports multiple meshes from an OBJ format string with custom options.
 ///
+/// This is the primary OBJ parsing entry point used by the standalone Importer
+/// tab after `ObjImporterState` assembles parser options.
+///
 /// # Arguments
 ///
 /// * `obj_string` - OBJ format string to parse
@@ -646,6 +658,10 @@ pub fn import_meshes_from_obj_file(path: &str) -> Result<Vec<MeshDefinition>, Ob
 }
 
 /// Imports multiple meshes from an OBJ file with custom options.
+///
+/// The standalone Importer tab routes file-based OBJ loading through this API,
+/// then converts the returned `MeshDefinition` values into editable importer
+/// rows.
 ///
 /// # Arguments
 ///

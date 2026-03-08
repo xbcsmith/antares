@@ -1,5 +1,90 @@
 # Implementations
 
+## New MTL Support - Phase 1: Rebaseline Around The Existing Importer
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 1 does not add MTL parsing yet. Instead, it rebases the OBJ import code
+around the branch's current architecture so later MTL work lands in the correct
+modules.
+
+The important correction is architectural: this branch already has a dedicated
+`Importer` tab, importer state, and export flow. The OBJ backend should now be
+documented and treated as the parser layer behind that standalone workflow,
+instead of being described as a creature-editor-only utility.
+
+---
+
+### Phase 1 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/mesh_obj_io.rs`
+- `sdk/campaign_builder/src/obj_importer.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### What was built
+
+#### Importer backend rebaseline (`sdk/campaign_builder/src/mesh_obj_io.rs`)
+
+Updated the module and API docs so `mesh_obj_io.rs` now clearly describes its
+actual role on this branch:
+
+- it is the OBJ parsing and serialization backend for the Campaign Builder
+  importer workflow
+- the standalone `Importer` tab is the primary consumer of the multi-mesh import
+  APIs
+- parser concerns stay in `mesh_obj_io.rs`, while importer-tab state and egui UI
+  concerns stay out of the parser layer
+
+This gives later MTL work a correct landing zone before any new parsing logic is
+added.
+
+#### Explicit parser-state seam (`sdk/campaign_builder/src/obj_importer.rs`)
+
+Documented `obj_importer.rs` as the handoff layer between:
+
+- `mesh_obj_io.rs`, which returns `MeshDefinition` values
+- `obj_importer.rs`, which turns them into editable importer rows and campaign
+  state
+- `obj_importer_ui.rs`, which renders and exports that state
+
+Added a dedicated `ObjImporterState::obj_import_options()` helper so parser
+options are assembled in one place instead of ad hoc inside load paths. That
+keeps future parser-facing changes such as MTL resolution, source-path
+awareness, and manual override wiring localized to a single seam.
+
+#### Regression coverage for the seam (`sdk/campaign_builder/src/obj_importer.rs`)
+
+Added a focused test that proves importer state forwards its current parser
+options into `mesh_obj_io` by verifying that `scale` changes alter the imported
+vertex positions.
+
+This is intentionally small, but it locks in the contract Phase 2 and later MTL
+phases will extend.
+
+---
+
+### Architecture compliance
+
+- The work stays entirely inside the SDK importer layer under
+  `sdk/campaign_builder`.
+- No domain structures were changed; `MeshDefinition` remains the parser output
+  passed through importer state exactly as defined in `src/domain/visual/mod.rs`.
+- The current standalone importer tab and export flow remain intact.
+- No campaign fixture or gameplay data paths were changed.
+
+---
+
+### Validation
+
+Validation was rerun after the Phase 1 rebaseline changes using the required
+repo commands.
+
 ## OBJ to RON Conversion - Phase 3: Importer Tab UI and RON Export
 
 **Plan**: [`obj_to_ron_implementation_plan.md`](obj_to_ron_implementation_plan.md)

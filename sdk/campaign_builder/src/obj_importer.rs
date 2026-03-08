@@ -7,6 +7,11 @@
 //! phases can focus on interaction and rendering instead of file I/O and color
 //! assignment mechanics.
 //!
+//! It is also the seam between the parser backend and the importer UI:
+//! `mesh_obj_io.rs` returns domain `MeshDefinition` values, this module turns
+//! them into editable importer rows plus campaign-scoped state, and
+//! `obj_importer_ui.rs` renders and exports that state.
+//!
 //! # Examples
 //!
 //! ```
@@ -223,10 +228,7 @@ impl ObjImporterState {
 
     /// Loads meshes directly from an OBJ file using the state's current scale.
     pub fn load_obj_file(&mut self, path: &Path) -> Result<(), ObjImporterError> {
-        let options = ObjImportOptions {
-            scale: self.scale,
-            ..Default::default()
-        };
+        let options = self.obj_import_options();
         let path_string = path.to_string_lossy().to_string();
         let meshes = import_meshes_from_obj_file_with_options(&path_string, &options)?;
         self.load_mesh_definitions(Some(path.to_path_buf()), meshes);
@@ -259,6 +261,19 @@ impl ObjImporterState {
     pub fn active_mesh_mut(&mut self) -> Option<&mut ImportedMesh> {
         self.active_mesh_index
             .and_then(move |idx| self.meshes.get_mut(idx))
+    }
+
+    /// Builds the parser options used by `mesh_obj_io` for the current state.
+    ///
+    /// This helper is the stable handoff between importer-tab state and the OBJ
+    /// parser backend. Future parser-facing features, such as MTL resolution or
+    /// source-path-aware import behavior, should be threaded through this method
+    /// instead of assembled ad hoc in the UI layer.
+    fn obj_import_options(&self) -> ObjImportOptions {
+        ObjImportOptions {
+            scale: self.scale,
+            ..Default::default()
+        }
     }
 }
 
@@ -364,5 +379,33 @@ mod tests {
         assert_eq!(state.new_custom_color, [0.2, 0.4, 0.6, 1.0]);
         assert_eq!(state.custom_palette.colors.len(), 1);
         assert!(state.meshes.is_empty());
+    }
+
+    #[test]
+    fn test_obj_importer_state_load_obj_file_uses_current_parser_options() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("scaled_triangle.obj");
+        fs::write(
+            &obj_path,
+            concat!(
+                "o Scaled\n",
+                "v 1.0 0.0 0.0\n",
+                "v 0.0 1.0 0.0\n",
+                "v 0.0 0.0 1.0\n",
+                "f 1 2 3\n"
+            ),
+        )
+        .unwrap();
+
+        let mut state = ObjImporterState::new();
+        state.scale = 0.5;
+
+        state.load_obj_file(&obj_path).unwrap();
+
+        assert_eq!(state.mode, ImporterMode::Loaded);
+        assert_eq!(state.meshes.len(), 1);
+        assert_eq!(state.meshes[0].mesh_def.vertices[0], [0.5, 0.0, 0.0]);
+        assert_eq!(state.meshes[0].mesh_def.vertices[1], [0.0, 0.5, 0.0]);
+        assert_eq!(state.meshes[0].mesh_def.vertices[2], [0.0, 0.0, 0.5]);
     }
 }
