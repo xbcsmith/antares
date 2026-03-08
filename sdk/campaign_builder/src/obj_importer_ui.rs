@@ -1388,14 +1388,13 @@ mod tests {
         let ctx = egui::Context::default();
         let mut logger = Logger::default();
 
-        let output = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let signal = show_obj_importer_tab(ui, &mut state, None, &mut logger);
                 assert!(signal.is_none());
             });
         });
 
-        assert!(!output.platform_output.cursor_icon.is_resize());
         assert_eq!(state.mode, ImporterMode::Loaded);
     }
 }

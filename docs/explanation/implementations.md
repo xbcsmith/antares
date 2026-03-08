@@ -796,6 +796,149 @@ Phase 7 coverage now explicitly exists for:
 - The campaign-scoped custom palette format remains
   `config/importer_palette.ron` exactly as required.
 
+## New MTL Support - Phase 8: Validation And Documentation
+
+**Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)
+
+### Overview
+
+Phase 8 closes the MTL importer work by validating the finished branch state
+with the required repo quality gates and recording the final behavior that now
+defines the importer workflow.
+
+This phase does not introduce new importer features. It verifies that the
+existing Phase 1 through Phase 7 implementation still compiles, lints cleanly,
+and passes tests after the MTL-aware importer changes are integrated.
+
+---
+
+### Phase 8 Deliverables
+
+**Files modified**:
+
+- `sdk/campaign_builder/src/obj_importer_ui.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+### Final importer behavior
+
+#### Final priority rule between imported and fallback colors
+
+The importer color precedence is now finalized as:
+
+- imported `Kd` diffuse color wins on initial load when it exists
+- built-in mesh-name auto-coloring only applies when no diffuse `Kd` color was
+  imported for that mesh
+- `Auto-Assign All` remains an explicit reset action that reapplies built-in
+  heuristics even to meshes that originally had imported colors
+- later color picker edits and palette applications are treated as manual
+  overrides
+
+This keeps imported material intent visible by default while preserving the
+branch's pre-existing heuristic palette workflow as an opt-in editing action.
+
+#### Final `Ks` and `Ns` mapping behavior
+
+The importer keeps the Phase 4 conservative Phong-to-PBR mapping.
+
+- `Ks` contributes to `MaterialDefinition.metallic` only when the MTL
+  illumination model is at least `2` and average specular strength is at least
+  `0.5`
+- the resulting metallic value is capped at `0.35`
+- `Ns` maps into `MaterialDefinition.roughness` through a clamped square-root
+  inversion across the common `0..1000` shininess range
+- when `Ns` is absent, roughness falls back to `0.45` for mildly metallic
+  materials and `0.9` otherwise
+
+This remains intentionally heuristic rather than claiming a one-to-one MTL to
+PBR conversion.
+
+#### Unsupported and deferred MTL directives
+
+The first-pass importer intentionally supports only:
+
+- `newmtl`
+- `Kd`
+- `Ks`
+- `Ke`
+- `Ns`
+- `d`
+- `illum`
+- optional `map_Kd`
+
+Everything else is still unsupported or deferred in this pass.
+
+Current deferred behavior:
+
+- no broad support for the rest of the Wavefront MTL directive set
+- no separate persistence format beyond `config/importer_palette.ron`
+- no per-face material preservation beyond splitting OBJ meshes on `usemtl`
+- no aggressive texture-import workflow beyond conservative relative
+  `map_Kd` preservation
+
+Unsupported or malformed directives continue to degrade gracefully instead of
+failing otherwise valid OBJ geometry import.
+
+#### Imported swatches versus built-in and custom palettes
+
+The importer palette model is now finalized as three distinct sources:
+
+- `Imported MTL Palette`: session-only swatches derived from imported diffuse
+  `Kd` colors
+- `Built-In Palette`: static SDK defaults used for quick edits and fallback
+  auto-assignment
+- `Custom Palette`: campaign-scoped colors persisted to
+  `config/importer_palette.ron`
+
+Imported swatches differ from the other palette sources in two important ways:
+
+- they are generated from the current import session and cleared with importer
+  session state
+- they are not persisted directly; users keep them by promoting them through
+  the existing custom-palette draft and save flow
+
+---
+
+### Validation
+
+Phase 8 reran the required validation sequence in the exact order from
+`AGENTS.md`:
+
+```bash
+cargo fmt --all
+cargo check --all-targets --all-features
+cargo clippy --all-targets --all-features -- -D warnings
+cargo nextest run --all-features
+```
+
+Results:
+
+- `cargo fmt --all` completed successfully
+- `cargo check --all-targets --all-features` completed successfully
+- `cargo clippy --all-targets --all-features -- -D warnings` completed
+  successfully
+- `cargo nextest run --all-features` completed successfully with `3162` tests
+  passed and `8` skipped
+
+One compatibility repair was required during validation:
+
+- `sdk/campaign_builder/src/obj_importer_ui.rs` test code used the removed
+  `CursorIcon::is_resize()` helper from egui; the render test now keeps its
+  no-panic coverage without depending on that API
+
+---
+
+### Architecture compliance
+
+- Validation did not require changes to gameplay or domain core structures.
+- The importer still uses the existing `MeshDefinition`,
+  `MaterialDefinition`, and `AlphaMode` types from
+  `src/domain/visual/mod.rs`.
+- No new persistence format was added; campaign palette persistence remains
+  `config/importer_palette.ron`.
+- No tests or fixtures were moved to `campaigns/tutorial`.
+
 ---
 
 ### Phase 3 Deliverables
