@@ -14,11 +14,13 @@ pub mod game_data;
 pub mod grass_quality_settings;
 pub mod performance;
 pub mod sprite_assets;
+pub mod terrain_material_cache;
 
 // Re-export commonly used types
 pub use game_data::GameDataResource;
 pub use grass_quality_settings::{GrassPerformanceLevel, GrassQualitySettings};
 pub use performance::{LodAutoTuning, MeshCache, PerformanceMetrics};
+pub use terrain_material_cache::TerrainMaterialCache;
 
 /// Global game state resource wrapper
 #[derive(Resource)]

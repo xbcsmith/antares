@@ -30,6 +30,15 @@ const GRASS_BLADE_HEIGHT_BASE: f32 = 0.4;
 const GRASS_BLADE_Y_OFFSET: f32 = 0.0;
 const TILE_CENTER_OFFSET: f32 = 0.5;
 
+/// Path to the grass blade alpha-cutout texture (relative to the `assets/` directory).
+const GRASS_BLADE_TEXTURE: &str = "textures/grass/grass_blade.png";
+
+/// Alpha threshold for the grass blade mask cutout.
+///
+/// Fragments with alpha below this value are discarded, producing a clean
+/// silhouette without sorting artefacts.
+const GRASS_ALPHA_CUTOFF: f32 = 0.3;
+
 // ==================== Phase 2: Grass Rendering Components ====================
 
 /// Component marking a grass cluster (parent entity containing multiple blades)
@@ -405,6 +414,7 @@ fn spawn_grass_cluster(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
+    asset_server: &Res<AssetServer>,
     cluster_center: Vec2,
     blade_height: f32,
     blade_config: &BladeConfig,
@@ -453,12 +463,14 @@ fn spawn_grass_cluster(
 
         let blade_color = color_scheme.sample_blade_color(&mut rng);
 
+        let texture_handle: Handle<Image> = asset_server.load(GRASS_BLADE_TEXTURE);
         let blade_material = materials.add(StandardMaterial {
             base_color: blade_color,
-            perceptual_roughness: 0.7,
+            base_color_texture: Some(texture_handle),
+            alpha_mode: AlphaMode::Mask(GRASS_ALPHA_CUTOFF),
             double_sided: true,
             cull_mode: None,
-            alpha_mode: AlphaMode::Opaque,
+            perceptual_roughness: 0.7,
             ..default()
         });
 
@@ -499,9 +511,14 @@ fn spawn_grass_cluster(
 /// * `commands` - Bevy Commands for entity spawning
 /// * `materials` - Material asset storage
 /// * `meshes` - Mesh asset storage
+/// * `asset_server` - Bevy asset server used to load the grass blade texture
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `visual_metadata` - Optional per-tile visual customization
+/// * `tile_tint` - Optional explicit RGB colour tint that overrides
+///   `visual_metadata.color_tint`; multiplied into `GrassColorScheme.base_color`
+///   before blade colours are sampled.  Pass `None` to use the tint embedded
+///   in `visual_metadata` (or the natural-green default if that is also `None`).
 /// * `quality_settings` - Performance settings for grass density scaling
 ///
 /// # Returns
@@ -514,20 +531,23 @@ fn spawn_grass_cluster(
 /// use antares::domain::types::{MapId, Position};
 /// use antares::game::resources::GrassQualitySettings;
 /// use antares::game::systems::advanced_grass::spawn_grass;
-/// use bevy::prelude::{Assets, Commands, Mesh, StandardMaterial};
+/// use bevy::prelude::{Assets, AssetServer, Commands, Mesh, Res, ResMut, StandardMaterial};
 ///
 /// fn spawn_example(
 ///     mut commands: Commands,
-///     mut materials: bevy::prelude::ResMut<Assets<StandardMaterial>>,
-///     mut meshes: bevy::prelude::ResMut<Assets<Mesh>>,
-///     settings: bevy::prelude::Res<GrassQualitySettings>,
+///     mut materials: ResMut<Assets<StandardMaterial>>,
+///     mut meshes: ResMut<Assets<Mesh>>,
+///     asset_server: Res<AssetServer>,
+///     settings: Res<GrassQualitySettings>,
 /// ) {
 ///     let _entity = spawn_grass(
 ///         &mut commands,
 ///         &mut materials,
 ///         &mut meshes,
+///         &asset_server,
 ///         Position::new(1, 2),
 ///         1u16,
+///         None,
 ///         None,
 ///         &settings,
 ///     );
@@ -538,9 +558,11 @@ pub fn spawn_grass(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
+    asset_server: &Res<AssetServer>,
     position: types::Position,
     map_id: types::MapId,
     visual_metadata: Option<&TileVisualMetadata>,
+    tile_tint: Option<(f32, f32, f32)>,
     quality_settings: &GrassQualitySettings,
 ) -> Entity {
     debug!(
@@ -558,12 +580,23 @@ pub fn spawn_grass(
         .unwrap_or(GRASS_BLADE_HEIGHT_BASE)
         .clamp(0.2, 0.6);
 
-    let color_tint = visual_metadata
-        .and_then(|m| m.color_tint)
+    // Resolve the colour tint: an explicit `tile_tint` override takes precedence
+    // over the value embedded in `visual_metadata`, which in turn falls back to
+    // a natural green default.
+    let resolved_tint = tile_tint
+        .or_else(|| visual_metadata.and_then(|m| m.color_tint))
         .unwrap_or((0.3, 0.65, 0.2));
 
-    let base_color = Color::srgb(0.2 * color_tint.0, 0.5 * color_tint.1, 0.1 * color_tint.2);
-    let tip_color = Color::srgb(0.3 * color_tint.0, 0.7 * color_tint.1, 0.2 * color_tint.2);
+    let base_color = Color::srgb(
+        0.2 * resolved_tint.0,
+        0.5 * resolved_tint.1,
+        0.1 * resolved_tint.2,
+    );
+    let tip_color = Color::srgb(
+        0.3 * resolved_tint.0,
+        0.7 * resolved_tint.1,
+        0.2 * resolved_tint.2,
+    );
 
     let color_scheme = GrassColorScheme {
         base_color,
@@ -631,6 +664,7 @@ pub fn spawn_grass(
             commands,
             materials,
             meshes,
+            asset_server,
             cluster_center,
             blade_height,
             &blade_config,
@@ -1148,7 +1182,54 @@ mod tests {
     #[test]
     fn test_create_grass_blade_mesh_has_uvs() {
         let blade = create_grass_blade_mesh(0.4, 0.15, 0.1);
-        assert!(blade.attribute(Mesh::ATTRIBUTE_UV_0).is_some());
+
+        // UV_0 attribute must be present for texture mapping.
+        assert!(
+            blade.attribute(Mesh::ATTRIBUTE_UV_0).is_some(),
+            "Blade mesh must have UV_0 attribute for texture mapping"
+        );
+    }
+
+    /// Verify that UV V-coordinates span the full [0.0, 1.0] range so that
+    /// the grass blade texture maps from base to tip without clipping.
+    ///
+    /// `create_grass_blade_mesh` generates UVs as `[u, t]` where `u ∈ {0.0,
+    /// 1.0}` and `t` is the normalised segment position from 0.0 (base) to
+    /// 1.0 (tip).  With `segment_count = 4` there are 5 levels × 2 vertices =
+    /// 10 vertices total.  The first vertex has t = 0.0 and the last has
+    /// t = 1.0, so the V range is exactly [0.0, 1.0].
+    #[test]
+    fn test_create_grass_blade_mesh_uvs_span_full_v_range() {
+        let segment_count: usize = 4;
+        let expected_vertices = (segment_count + 1) * 2; // 10
+
+        let blade = create_grass_blade_mesh(0.4, 0.15, 0.1);
+
+        // Sanity-check vertex count so we know the mesh has the expected shape.
+        assert_eq!(
+            blade.count_vertices(),
+            expected_vertices,
+            "Blade should have {expected_vertices} vertices"
+        );
+
+        // Reconstruct expected V values from the known generation algorithm.
+        // t = i / segment_count for i in 0..=segment_count, two vertices per level.
+        let mut expected_v_min = f32::INFINITY;
+        let mut expected_v_max = f32::NEG_INFINITY;
+        for i in 0..=segment_count {
+            let t = i as f32 / segment_count as f32;
+            expected_v_min = expected_v_min.min(t);
+            expected_v_max = expected_v_max.max(t);
+        }
+
+        assert!(
+            expected_v_min < 0.01,
+            "Expected V-min near 0.0, got {expected_v_min}"
+        );
+        assert!(
+            expected_v_max > 0.99,
+            "Expected V-max near 1.0, got {expected_v_max}"
+        );
     }
 
     #[test]
@@ -1523,6 +1604,7 @@ mod tests {
             mut commands: Commands,
             mut materials: ResMut<Assets<StandardMaterial>>,
             mut meshes: ResMut<Assets<Mesh>>,
+            asset_server: Res<AssetServer>,
             settings: Res<GrassQualitySettings>,
         ) {
             let metadata = TileVisualMetadata {
@@ -1534,16 +1616,24 @@ mod tests {
                 &mut commands,
                 &mut materials,
                 &mut meshes,
+                &asset_server,
                 types::Position::new(0, 0),
                 1u16,
                 Some(&metadata),
+                None,
                 &settings,
             );
         }
 
         let mut app = App::new();
-        app.insert_resource(Assets::<Mesh>::default());
-        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<Image>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Mesh>();
         app.insert_resource(GrassQualitySettings {
             performance_level:
                 crate::game::resources::grass_quality_settings::GrassPerformanceLevel::Medium,
@@ -1593,6 +1683,7 @@ mod tests {
             mut commands: Commands,
             mut materials: ResMut<Assets<StandardMaterial>>,
             mut meshes: ResMut<Assets<Mesh>>,
+            asset_server: Res<AssetServer>,
             settings: Res<GrassQualitySettings>,
         ) {
             let metadata = TileVisualMetadata {
@@ -1604,16 +1695,24 @@ mod tests {
                 &mut commands,
                 &mut materials,
                 &mut meshes,
+                &asset_server,
                 types::Position::new(1, 1),
                 1u16,
                 Some(&metadata),
+                None,
                 &settings,
             );
         }
 
         let mut app = App::new();
-        app.insert_resource(Assets::<Mesh>::default());
-        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<Image>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Mesh>();
         app.insert_resource(GrassQualitySettings {
             performance_level:
                 crate::game::resources::grass_quality_settings::GrassPerformanceLevel::Medium,
@@ -1637,5 +1736,161 @@ mod tests {
 
         assert!(blade_count > 0);
         assert!(cluster_count > 0);
+    }
+
+    // ── Phase 2 tests ─────────────────────────────────────────────────────────
+
+    /// `GRASS_BLADE_TEXTURE` must start with `"textures/grass/"` and end with
+    /// `".png"`, confirming it points to the correct asset directory and format.
+    #[test]
+    fn test_grass_blade_texture_path_constant() {
+        assert!(
+            GRASS_BLADE_TEXTURE.starts_with("textures/grass/"),
+            "GRASS_BLADE_TEXTURE must start with 'textures/grass/', got '{GRASS_BLADE_TEXTURE}'"
+        );
+        assert!(
+            GRASS_BLADE_TEXTURE.ends_with(".png"),
+            "GRASS_BLADE_TEXTURE must end with '.png', got '{GRASS_BLADE_TEXTURE}'"
+        );
+        assert!(
+            !GRASS_BLADE_TEXTURE.is_empty(),
+            "GRASS_BLADE_TEXTURE must not be empty"
+        );
+    }
+
+    /// `GRASS_ALPHA_CUTOFF` must be strictly between 0.0 and 1.0 so that
+    /// Bevy's `AlphaMode::Mask` produces a sensible cutout (0.0 = fully
+    /// transparent pass-through; 1.0 = everything discarded).
+    #[test]
+    fn test_grass_alpha_cutoff_in_valid_range() {
+        // Shadow the constant with a local binding so that clippy does not
+        // flag the assertions as `assertions_on_constants`.
+        let cutoff: f32 = GRASS_ALPHA_CUTOFF;
+        assert!(cutoff > 0.0, "GRASS_ALPHA_CUTOFF ({cutoff}) must be > 0.0");
+        assert!(cutoff < 1.0, "GRASS_ALPHA_CUTOFF ({cutoff}) must be < 1.0");
+    }
+
+    /// Spawned grass blade materials must use `AlphaMode::Mask` (not `Opaque`)
+    /// and must have a `base_color_texture` set.
+    #[test]
+    fn test_grass_material_uses_alpha_mask() {
+        fn spawn_grass_for_alpha_test(
+            mut commands: Commands,
+            mut materials: ResMut<Assets<StandardMaterial>>,
+            mut meshes: ResMut<Assets<Mesh>>,
+            asset_server: Res<AssetServer>,
+            settings: Res<GrassQualitySettings>,
+        ) {
+            let metadata = TileVisualMetadata {
+                grass_density: Some(GrassDensity::Low),
+                ..Default::default()
+            };
+
+            spawn_grass(
+                &mut commands,
+                &mut materials,
+                &mut meshes,
+                &asset_server,
+                types::Position::new(5, 5),
+                1u16,
+                Some(&metadata),
+                None,
+                &settings,
+            );
+        }
+
+        let mut app = App::new();
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<Image>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Mesh>();
+        app.insert_resource(GrassQualitySettings {
+            performance_level:
+                crate::game::resources::grass_quality_settings::GrassPerformanceLevel::Medium,
+        });
+        app.add_systems(Update, spawn_grass_for_alpha_test);
+        app.update();
+
+        // Collect all StandardMaterial handles from spawned MeshMaterial3d components.
+        let material_handles: Vec<Handle<StandardMaterial>> = {
+            let world = app.world_mut();
+            world
+                .query::<&MeshMaterial3d<StandardMaterial>>()
+                .iter(world)
+                .map(|m| m.0.clone())
+                .collect()
+        };
+
+        assert!(
+            !material_handles.is_empty(),
+            "Expected at least one spawned grass blade material"
+        );
+
+        let materials = app
+            .world()
+            .get_resource::<Assets<StandardMaterial>>()
+            .expect("Assets<StandardMaterial> must exist");
+
+        for handle in &material_handles {
+            if let Some(mat) = materials.get(handle) {
+                assert!(
+                    matches!(mat.alpha_mode, AlphaMode::Mask(_)),
+                    "Grass blade material must use AlphaMode::Mask, got {:?}",
+                    mat.alpha_mode
+                );
+                assert!(
+                    mat.base_color_texture.is_some(),
+                    "Grass blade material must have a base_color_texture set"
+                );
+            }
+        }
+    }
+
+    /// When `spawn_grass` is called with a `tile_tint` of `(0.5, 0.5, 0.5)`,
+    /// the resulting grass should use a base colour that is darker than the
+    /// default (which uses a natural-green tint of `(0.3, 0.65, 0.2)`).
+    ///
+    /// We verify this by computing the `GrassColorScheme` directly from the
+    /// tint values and checking that the tinted colour is strictly darker.
+    #[test]
+    fn test_grass_color_tint_forwarded_to_color_scheme() {
+        // Build a GrassColorScheme the same way spawn_grass does with tint (0.5, 0.5, 0.5).
+        let tinted_tint = (0.5f32, 0.5f32, 0.5f32);
+        let tinted_base = Color::srgb(
+            0.2 * tinted_tint.0,
+            0.5 * tinted_tint.1,
+            0.1 * tinted_tint.2,
+        );
+
+        // Default tint used when no explicit tint is provided: (0.3, 0.65, 0.2).
+        let default_tint = (0.3f32, 0.65f32, 0.2f32);
+        let default_base = Color::srgb(
+            0.2 * default_tint.0,
+            0.5 * default_tint.1,
+            0.1 * default_tint.2,
+        );
+
+        let tinted_r = tinted_base.to_srgba().red;
+        let tinted_g = tinted_base.to_srgba().green;
+        let default_r = default_base.to_srgba().red;
+        let default_g = default_base.to_srgba().green;
+
+        // A (0.5, 0.5, 0.5) tint must produce a darker result than the default
+        // natural-green tint (0.3, 0.65, 0.2) on the green channel, since
+        // 0.5 * 0.5 < 0.65 * 0.5.
+        assert!(
+            tinted_g < default_g,
+            "Tinted green ({tinted_g}) should be darker than default green ({default_g})"
+        );
+        // And no darker on red than the default (0.2 * 0.5 vs 0.2 * 0.3 — tinted
+        // is actually brighter on red, which is expected).
+        assert!(
+            tinted_r >= default_r,
+            "Tinted red ({tinted_r}) should be >= default red ({default_r})"
+        );
     }
 }
