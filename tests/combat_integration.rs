@@ -64,6 +64,7 @@ fn test_map_event_encounter_triggers_combat() {
             facing: None,
             proximity_facing: false,
             rotation_speed: None,
+            combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
         },
     );
 
@@ -93,6 +94,7 @@ fn test_map_event_encounter_triggers_combat() {
                 facing: None,
                 proximity_facing: false,
                 rotation_speed: None,
+                combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
             },
             position: event_pos,
         });
