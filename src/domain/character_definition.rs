@@ -57,6 +57,7 @@ use crate::domain::character::{
     InventorySlot, QuestFlags, Resistances as CharacterResistances, Sex, SpellBook, Stats,
 };
 use crate::domain::classes::{ClassDatabase, ClassDefinition, ClassId, SpellStat};
+use crate::domain::items::types::{ConsumableEffect, ItemType};
 use crate::domain::items::ItemDatabase;
 use crate::domain::races::{RaceDatabase, RaceDefinition};
 use crate::domain::types::{ItemId, RaceId};
@@ -793,8 +794,9 @@ impl CharacterDefinition {
         // Create resistances from race definition
         let resistances = apply_race_resistances(race_def);
 
-        // Create inventory with starting items
-        let inventory = populate_starting_inventory(&self.id, &self.starting_items)?;
+        // Create inventory with starting items, then grant food rations for starting_food.
+        let mut inventory = populate_starting_inventory(&self.id, &self.starting_items)?;
+        grant_starting_food(&self.id, &mut inventory, self.starting_food, items)?;
 
         // Create equipment from starting equipment
         let equipment = create_starting_equipment(&self.starting_equipment);
@@ -827,7 +829,8 @@ impl CharacterDefinition {
             worthiness: 0,
             gold: self.starting_gold,
             gems: self.starting_gems,
-            food: self.starting_food,
+            #[allow(deprecated)]
+            food: 0,
         };
 
         Ok(character)
@@ -998,6 +1001,80 @@ fn apply_race_resistances(race_def: &RaceDefinition) -> CharacterResistances {
 /// # Returns
 ///
 /// Returns `Ok(Inventory)` on success, or error if inventory becomes full.
+/// Grants `starting_food` ration-units to `inventory` by adding copies of the
+/// first `IsFood` item found in `item_db`.
+///
+/// If `starting_food` is zero, nothing is added.  If no `IsFood` item exists in
+/// the database, the function returns `Ok(())` silently — this can happen in
+/// test contexts where the item database is sparse.
+///
+/// # Arguments
+///
+/// * `character_id`  — used in error messages.
+/// * `inventory`     — the inventory to add food items to.
+/// * `starting_food` — the number of ration-units to grant.
+/// * `item_db`       — the item database to search for a food item.
+fn grant_starting_food(
+    character_id: &str,
+    inventory: &mut Inventory,
+    starting_food: u8,
+    item_db: &ItemDatabase,
+) -> Result<(), CharacterDefinitionError> {
+    if starting_food == 0 {
+        return Ok(());
+    }
+
+    // Find the lowest-id IsFood(1) item in the database.  We prefer single-ration
+    // items so that starting_food ration-units map 1-to-1 with inventory slots.
+    // Fall back to any IsFood item if none carry exactly 1 ration.
+    let food_item_id: Option<crate::domain::types::ItemId> = {
+        let mut single_ration: Option<(crate::domain::types::ItemId, u8)> = None;
+        let mut any_food: Option<(crate::domain::types::ItemId, u8)> = None;
+
+        let mut all_items: Vec<_> = item_db.all_items().into_iter().collect();
+        all_items.sort_by_key(|i| i.id);
+
+        for item in all_items {
+            if let ItemType::Consumable(ref data) = item.item_type {
+                if let ConsumableEffect::IsFood(rations) = data.effect {
+                    if rations == 1 && single_ration.is_none_or(|(id, _)| item.id < id) {
+                        single_ration = Some((item.id, rations));
+                    }
+                    if any_food.is_none_or(|(id, _)| item.id < id) {
+                        any_food = Some((item.id, rations));
+                    }
+                }
+            }
+        }
+
+        single_ration.or(any_food).map(|(id, _)| id)
+    };
+
+    let food_id = match food_item_id {
+        Some(id) => id,
+        None => {
+            // No food items in database — skip silently (sparse test databases).
+            return Ok(());
+        }
+    };
+
+    // Add one inventory slot per ration unit.
+    for _ in 0..starting_food {
+        if inventory.is_full() {
+            return Err(CharacterDefinitionError::InventoryFull {
+                character_id: character_id.to_string(),
+                item_id: food_id,
+            });
+        }
+        inventory.items.push(InventorySlot {
+            item_id: food_id,
+            charges: 0,
+        });
+    }
+
+    Ok(())
+}
+
 fn populate_starting_inventory(
     character_id: &str,
     starting_items: &[ItemId],
@@ -3118,7 +3195,24 @@ mod tests {
         assert_eq!(character.portrait_id, "1");
         assert_eq!(character.gold, 100);
         assert_eq!(character.gems, 5);
-        assert_eq!(character.food, 15);
+        // Phase 2: food is now tracked as IsFood inventory items, not character.food.
+        // The deprecated `food` field is always 0; `starting_food = 15` means 15
+        // Food Ration items (id=53) were added to the character's inventory.
+        #[allow(deprecated)]
+        {
+            assert_eq!(character.food, 0, "deprecated food field must be 0");
+        }
+        // Count food-ration inventory slots: starting_items=[50] + 15 food rations = 16 slots.
+        let food_slots = character
+            .inventory
+            .items
+            .iter()
+            .filter(|slot| slot.item_id == 53) // Food Ration id in data/items.ron
+            .count();
+        assert_eq!(
+            food_slots, 15,
+            "instantiate must add 15 Food Ration items for starting_food=15"
+        );
 
         // Verify stats were set
         assert!(character.stats.might.base >= 3);
@@ -3127,8 +3221,8 @@ mod tests {
         // Verify HP was calculated (should be > 0)
         assert!(character.hp.base > 0);
 
-        // Verify inventory has starting item
-        assert_eq!(character.inventory.items.len(), 1);
+        // Verify inventory has starting item (item 50) plus 15 food rations = 16 total
+        assert_eq!(character.inventory.items.len(), 16);
         assert_eq!(character.inventory.items[0].item_id, 50);
 
         // Verify equipment was set
@@ -3235,7 +3329,11 @@ mod tests {
             assert_eq!(character.name, char_def.name);
             assert_eq!(character.gold, char_def.starting_gold);
             assert_eq!(character.gems, char_def.starting_gems);
-            assert_eq!(character.food, char_def.starting_food);
+            // Phase 2: deprecated food field is always 0; food rations are in inventory.
+            #[allow(deprecated)]
+            {
+                assert_eq!(character.food, 0, "deprecated food field must be 0");
+            }
             assert!(
                 character.hp.base > 0,
                 "Character '{}' should have HP > 0",

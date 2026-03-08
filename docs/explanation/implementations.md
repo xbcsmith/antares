@@ -1,5 +1,550 @@
 # Implementations
 
+## Food System — Phase 4: UI and SDK Editor Updates
+
+### Overview
+
+Phase 4 of the food system migration updates the SDK campaign builder's Items Editor and the
+CLI `item_editor` tool to expose the `ConsumableEffect::IsFood(u8)` variant introduced in
+Phase 1. Before this phase, campaign developers could not create novel food items (e.g. "Elven
+Bread", "Roast Beef") through the graphical or command-line editors — the `IsFood` variant was
+simply missing from all dropdowns and menus. Phase 4 closes that gap: the Items Editor now
+lists "Food (Rations)" as a selectable effect type and renders a `ration_value` drag-value
+field when it is chosen. The CLI tool gains an equivalent `[5] Food (Rations)` option in both
+the create and edit flows.
+
+No domain-logic changes were needed. All modifications are pure UI/presentation layer.
+
+### Deliverables Checklist
+
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — `IsFood` added to `ConsumableEffect` ComboBox dropdown
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — `ration_value: u8` DragValue field rendered when `IsFood` is selected
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — `IsFood` branch added to `show_preview_static` for readable label ("Food (1 ration)" / "Food (3 rations)")
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — tooltip on effect ComboBox row explains food semantics
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — "⚠️ Food items are not usable in combat." label shown below ration_value field
+- [x] SDK `sdk/campaign_builder/src/items_editor.rs` — 9 new tests covering `IsFood` editor behaviour
+- [x] CLI `src/bin/item_editor.rs` — `[5] Food (Rations)` option added to `create_consumable`
+- [x] CLI `src/bin/item_editor.rs` — food items hard-code `is_combat_usable = false` in create flow
+- [x] CLI `src/bin/item_editor.rs` — `[5] Food (Rations)` option added to `edit_item_classification` consumable branch
+- [x] CLI `src/bin/item_editor.rs` — editing to `IsFood` forces `is_combat_usable = false` on the item
+- [x] CLI `src/bin/item_editor.rs` — 4 new tests covering `IsFood` CLI behaviour
+- [x] All quality gates passed: `cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run` (3258 passed, 8 skipped)
+
+### What Was Built
+
+#### `sdk/campaign_builder/src/items_editor.rs` — SDK Items Editor
+
+**Effect type ComboBox** (`show_type_editor`, Consumable branch): The existing ComboBox that
+lets the user pick a `ConsumableEffect` variant now includes a "Food (Rations)" option. When
+clicked it initialises the effect to `ConsumableEffect::IsFood(1)` (a standard single-ration
+food item). The option is added at the bottom of the dropdown alongside the existing Heal HP,
+Restore SP, Cure Condition, Boost Attribute, and Boost Resistance options.
+
+An `ℹ️` hover-tooltip on the ComboBox row explains the food mechanics:
+
+> "Food (Rations): consumed during rest to feed party members. Ration Value controls how many
+> characters one item feeds (usually 1). Food items are not usable in combat."
+
+**Ration Value field**: When `IsFood` is the active effect, the editor renders:
+
+```sdk/campaign_builder/src/items_editor.rs#L1438-1450
+ConsumableEffect::IsFood(ration_value) => {
+    ui.horizontal(|ui| {
+        ui.label("Ration Value:");
+        ui.add(egui::DragValue::new(ration_value).range(1..=255));
+        ui.label("ℹ️").on_hover_text(concat!(
+            "Number of party members this item feeds when consumed during rest.\n",
+            "Standard Food Ration = 1 (feeds one character).\n",
+            "Trail Ration = 3 (feeds three characters).",
+        ));
+    });
+    ui.label("⚠️ Food items are not usable in combat.");
+}
+```
+
+This is consistent with the `AttributePair`-style pattern used in the rest of the editor: each
+effect variant owns its own sub-controls.
+
+**Preview panel** (`show_preview_static`, Consumable branch): The static preview now handles
+`IsFood` and produces human-readable singular/plural labels:
+
+- `IsFood(1)` → "Food (1 ration)"
+- `IsFood(3)` → "Food (3 rations)"
+
+#### `src/bin/item_editor.rs` — CLI Item Editor
+
+**`create_consumable`**: A new `[5] Food (Rations)` option is listed in the effect menu. When
+chosen, the user is prompted for a ration value (default 1). The `is_combat_usable` prompt is
+skipped entirely for food items — the code hard-codes `false` and prints an informational
+message. This matches the domain invariant that food is never usable in combat.
+
+**`edit_item_classification`** (Consumable branch): The same `[5]` option is added to the
+effect-type change menu. When the user switches an existing consumable to `IsFood`, the code
+writes both the new effect and forces `is_combat_usable = false` on the stored item, ensuring
+a previously-combat-usable consumable (e.g. a Healing Potion) cannot become a combat-usable
+food item by accident.
+
+### Tests
+
+#### SDK Items Editor tests (9 new, all in `mod tests` of `items_editor.rs`)
+
+| Test                                                 | What it verifies                                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `test_is_food_effect_default_ration_value`           | `IsFood(1)` carries ration_value = 1                                                  |
+| `test_is_food_effect_trail_ration_value`             | `IsFood(3)` carries ration_value = 3                                                  |
+| `test_is_food_effect_inequality_with_other_variants` | `IsFood` is not equal to any other effect variant                                     |
+| `test_is_food_item_loads_into_edit_buffer`           | Food Ration (id 53) round-trips through `edit_buffer` with `is_combat_usable = false` |
+| `test_is_food_trail_ration_loads_into_edit_buffer`   | Trail Ration (id 54, ration_value 3) round-trips through `edit_buffer`                |
+| `test_consumable_filter_matches_food_item`           | `ItemTypeFilter::Consumable` matches `IsFood` items; Weapon/Quest filters do not      |
+| `test_is_food_preview_label_singular`                | `IsFood(1)` preview label is "Food (1 ration)"                                        |
+| `test_is_food_preview_label_plural`                  | `IsFood(3)` preview label is "Food (3 rations)"                                       |
+
+#### CLI Item Editor tests (4 new, in `mod tests` of `item_editor.rs`)
+
+| Test                                                      | What it verifies                                                                           |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `test_format_classification_consumable_is_food`           | `format_classification` output contains "Consumable" and "IsFood"                          |
+| `test_create_consumable_is_food_effect_not_combat_usable` | `IsFood` branch always produces `is_combat_usable = false`                                 |
+| `test_create_consumable_trail_ration_value_preserved`     | Trail Ration `ration_value = 3` is preserved through the create flow                       |
+| `test_edit_consumable_is_food_clears_combat_usable`       | Editing an existing combat-usable consumable to `IsFood` forces `is_combat_usable = false` |
+
+### Success Criteria Met
+
+> Campaign developers can create novel food items (e.g., "Elven Bread", "Roast Beef") in the
+> Items Editor.
+
+The "Food (Rations)" option is now available in the effect-type dropdown. A campaign developer
+can:
+
+1. Create a new Consumable item and select "Food (Rations)" as the effect.
+2. Set a custom `ration_value` (e.g., 2 for a hearty meal that feeds two characters).
+3. Save the item to the campaign's `items.ron`.
+4. Reference the new item ID in `npc_stock_templates.ron` so merchants sell it.
+
+The rest system (Phase 2) already reads any item with `ConsumableEffect::IsFood(_)` from
+character inventories — no further changes are needed for new food items to function correctly
+at runtime.
+
+---
+
+## Food System — Phase 3: Merchant and Innkeeper Integration
+
+### Overview
+
+Phase 3 of the food system migration makes food purchasable in the world by updating merchant
+and innkeeper stock templates to include Food Ration and Trail Ration items. Before this phase,
+the party could start with food rations (granted during character initialization in Phase 2) but
+had no way to replenish them — merchants had no food in their inventories and innkeepers sold
+no provisions. Phase 3 closes that loop: every general-goods merchant and innkeeper now stocks
+food so the player can always buy rations to enable resting.
+
+No Rust code changes were required — the entire work is data-driven, with new and updated RON
+stock template files plus integration tests to verify the templates load and populate runtime
+merchant stock correctly.
+
+### Deliverables Checklist
+
+- [x] Core `data/npc_stock_templates.ron` — `general_store_basic` updated with Food Ration (53) and Trail Ration (54)
+- [x] Core `data/npc_stock_templates.ron` — new `general_goods` template alias added with food items
+- [x] Core `data/npc_stock_templates.ron` — new `innkeeper_basic` template added with food items and markup prices
+- [x] Core `data/npc_stock_templates.ron` — `magic_item_pool / magic_slot_count / magic_refresh_days` fields added to all templates (previously missing)
+- [x] Test campaign `data/test_campaign/data/npc_stock_templates.ron` — `tutorial_merchant_stock` updated with Food Ration (108) and Trail Ration (109)
+- [x] Test campaign `data/test_campaign/data/npc_stock_templates.ron` — new `tutorial_general_store` template added
+- [x] Test campaign `data/test_campaign/data/npc_stock_templates.ron` — new `tutorial_innkeeper_stock` template added with override prices
+- [x] Tutorial campaign `campaigns/tutorial/data/items.ron` — Food Ration (id 111, IsFood 1) and Trail Ration (id 112, IsFood 3) added
+- [x] Tutorial campaign `campaigns/tutorial/data/npc_stock_templates.ron` — filled with `town_merchant_basic` and `mountain_pass_merchant` templates (previously empty `[]`)
+- [x] 7 new integration tests in `src/sdk/database.rs` — all passing
+
+### What Was Built
+
+#### `data/npc_stock_templates.ron` — core template updates
+
+Three templates were modified or added:
+
+**`general_store_basic`** (modified): Food Ration (item_id 53, quantity 20) and Trail Ration
+(item_id 54, quantity 10) added to the entries list. The `magic_item_pool`, `magic_slot_count`,
+and `magic_refresh_days` fields were also added to this and all other templates in the file,
+which were previously omitted (they have `#[serde(default)]` in Rust so they round-tripped
+silently, but making them explicit improves data legibility).
+
+**`general_goods`** (new): A named alias for general merchants who primarily sell provisions
+rather than weapons. Campaign authors can reference `"general_goods"` in `npcs.ron` without
+coupling to the internal `general_store_basic` name. Stocks the same selection including food.
+
+**`innkeeper_basic`** (new): Innkeepers provide rest services but also sell food provisions.
+This template stocks only food items (no weapons or potions) with a slight price markup via
+`override_price` to reflect the innkeeper's convenience premium:
+
+- Food Ration (item_id 53): quantity 30, override_price Some(3) (base cost is 2)
+- Trail Ration (item_id 54): quantity 15, override_price Some(6) (base cost is 5)
+
+#### `data/test_campaign/data/npc_stock_templates.ron` — test fixture updates
+
+**`tutorial_merchant_stock`** (modified): Food Ration (item_id 108, quantity 10) and Trail
+Ration (item_id 109, quantity 5) added. These item IDs match the test campaign's `items.ron`
+where food was placed at ids 108 and 109 during Phase 1.
+
+**`tutorial_general_store`** (new): A self-contained test fixture template used by the Phase 3
+acceptance tests. Stocks Healing Potion (50), Food Ration (108, qty 20), Trail Ration (109,
+qty 10), Arrows (60), and Crossbow Bolts (61). The comment in the file marks this as the
+canonical fixture for Phase 3 merchant integration tests.
+
+**`tutorial_innkeeper_stock`** (new): Mirrors `innkeeper_basic` but uses test-campaign item IDs
+(108, 109) and carries `override_price` values to allow tests to verify markup pricing is
+preserved through the template → `MerchantStock` initialization path.
+
+#### `campaigns/tutorial/data/items.ron` — food item additions
+
+Items 108–110 were already occupied in the tutorial campaign (Healing Scroll, Cure Disease
+Potion, Resurrection Scroll), so food items were appended with the next available IDs:
+
+- **id 111 — Food Ration**: `ConsumableEffect::IsFood(1)`, base_cost 2, sell_cost 1, max_charges 1
+- **id 112 — Trail Ration**: `ConsumableEffect::IsFood(3)`, base_cost 5, sell_cost 2, max_charges 1
+
+Both items are non-combat-usable (`is_combat_usable: false`) consistent with Phase 1 definitions.
+
+#### `campaigns/tutorial/data/npc_stock_templates.ron` — tutorial campaign templates
+
+This file was previously empty (`[]`), meaning the two merchants in `npcs.ron` that reference
+`stock_template: Some("town_merchant_basic")` and `stock_template: Some("mountain_pass_merchant")`
+would silently initialize with no stock. Both templates are now defined:
+
+**`town_merchant_basic`**: Full general-goods merchant for the starting town. Stocks Club (1),
+Dagger (2), Short Sword (3), Mace (5), Leather Armor (20), Wooden Shield (23), Healing Potion (50),
+Cure Poison Potion (52), Arrows (60), Crossbow Bolts (61), and food: Food Ration (111, qty 20)
+and Trail Ration (112, qty 10). Magic rotation: 2 slots from pool [10, 11, 12].
+
+**`mountain_pass_merchant`**: Expanded merchant for the mid-game area. Broader weapon and armor
+selection (adds Long Sword (4), Battle Axe (6), Chain Mail (21), Magic Potion (51)). Food stocked
+at slightly lower quantities (qty 15 / 8) reflecting the party being better provisioned by that
+point. Same magic rotation pool.
+
+### Tests
+
+Seven new integration tests were added to `src/sdk/database.rs`:
+
+| Test                                                                | What it verifies                                                                                                                                                          |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_general_store_basic_contains_food_rations`                    | `general_store_basic` in core data has item_id 53 and 54 with qty > 0                                                                                                     |
+| `test_innkeeper_basic_template_contains_food_rations`               | `innkeeper_basic` in core data has item_id 53 and 54; food ration qty >= 10                                                                                               |
+| `test_general_goods_template_contains_food_rations`                 | `general_goods` alias in core data has item_id 53 and 54                                                                                                                  |
+| `test_test_campaign_merchant_stock_contains_food_rations`           | `tutorial_merchant_stock` in test campaign has item_id 108 and 109 with qty > 0                                                                                           |
+| `test_test_campaign_general_store_template_contains_food_rations`   | `tutorial_general_store` in test campaign has item_id 108 and 109 with qty > 0                                                                                            |
+| `test_test_campaign_innkeeper_stock_template_contains_food_rations` | `tutorial_innkeeper_stock` has item*id 108 and 109 with `override_price: Some(*)`                                                                                         |
+| `test_stock_template_populates_merchant_runtime_with_food`          | End-to-end: loads `tutorial_general_store`, calls `NpcRuntimeState::initialize_stock_from_template`, asserts resulting `MerchantStock` contains food entries with qty > 0 |
+
+All tests use `data/test_campaign` fixtures, not `campaigns/tutorial`, in compliance with
+Implementation Rule 5.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 — no new types introduced; all changes are data-only
+- [x] RON format used for all data files
+- [x] `ItemId` type aliases used consistently in `TemplateStockEntry::item_id`
+- [x] No magic numbers hardcoded — item IDs documented with inline comments
+- [x] Test data lives in `data/test_campaign`, never in `campaigns/tutorial`
+- [x] `campaigns/tutorial` modified only to populate the previously-empty `npc_stock_templates.ron` (legitimate: runtime game binary default campaign data)
+- [x] No architectural deviations
+
+### Quality Gates
+
+```text
+cargo fmt --all         → clean (no output)
+cargo check             → Finished, 0 errors
+cargo clippy -- -D warnings → Finished, 0 warnings
+cargo nextest run       → 3254 passed, 8 skipped, 0 failed
+```
+
+Phase 3 acceptance test run (filtered):
+
+```text
+11 tests run: 11 passed, 3251 skipped
+  PASS antares sdk::database::tests::test_general_store_basic_contains_food_rations
+  PASS antares sdk::database::tests::test_innkeeper_basic_template_contains_food_rations
+  PASS antares sdk::database::tests::test_general_goods_template_contains_food_rations
+  PASS antares sdk::database::tests::test_test_campaign_merchant_stock_contains_food_rations
+  PASS antares sdk::database::tests::test_test_campaign_general_store_template_contains_food_rations
+  PASS antares sdk::database::tests::test_test_campaign_innkeeper_stock_template_contains_food_rations
+  PASS antares sdk::database::tests::test_stock_template_populates_merchant_runtime_with_food
+```
+
+---
+
+## Food System — Phase 2: Rest System Migration
+
+### Overview
+
+Phase 2 migrates the rest system from abstract numeric food counters
+(`Character.food: u8` / `Party.food: u32`) to inventory-based item consumption.
+When a party rests, the system now searches all party members' inventories for
+items carrying `ConsumableEffect::IsFood`, removes them as whole slots, and
+applies party-level pooling/sharing so that one member's surplus covers another
+member's need.
+
+This phase also deprecates the legacy numeric `food` fields on `Character` and
+`Party`, updates character initialization to grant starting food as inventory
+items, and removes legacy forced food assignments from the application layer.
+
+### Deliverables Checklist
+
+- [x] `consume_food()` rewritten to use inventory items (`src/domain/resources.rs`)
+- [x] `count_food_in_party()` added — sums `IsFood` values across all inventories
+- [x] `check_starvation()` rewritten — delegates to `count_food_in_party`
+- [x] `Character.food` numeric field deprecated (kept for save compatibility)
+- [x] `Party.food` numeric field deprecated (kept for save compatibility)
+- [x] Character initialization grants starting food as inventory items (`src/domain/character_definition.rs`)
+- [x] Legacy food assignments removed from `src/application/mod.rs` and `src/application/save_game.rs`
+- [x] `rest_party()` signature updated to accept `&ItemDatabase`
+- [x] Game-layer rest system (`src/game/systems/rest.rs`) updated to use `GameContent`
+- [x] All `consume_food` tests replaced with inventory-based tests
+- [x] All 3247 tests pass; 0 failures
+
+### What Was Built
+
+#### `count_food_in_party` — `src/domain/resources.rs`
+
+A new public function that iterates all party member inventories, resolves each
+slot's item from the `ItemDatabase`, and sums the inner `u8` value of every
+`ConsumableEffect::IsFood` variant found. The result is the total ration-units
+available across the whole party.
+
+```antares/src/domain/resources.rs#L237-252
+pub fn count_food_in_party(party: &Party, item_db: &ItemDatabase) -> u32 {
+    party
+        .members
+        .iter()
+        .flat_map(|c| c.inventory.items.iter())
+        .fold(0u32, |acc, slot| {
+            if let Some(item) = item_db.get_item(slot.item_id) {
+                if let ItemType::Consumable(ref data) = item.item_type {
+                    if let ConsumableEffect::IsFood(rations) = data.effect {
+                        return acc + rations as u32;
+                    }
+                }
+            }
+            acc
+        })
+}
+```
+
+#### `consume_food` rewrite — `src/domain/resources.rs`
+
+The function now operates in two passes:
+
+**Pass 1 — Member-first:** Each member pays `amount_per_member` ration-units
+from their own inventory. Items are removed as whole slots; the slot's full
+`IsFood` value is credited to `total_pass1_consumed`. If a multi-ration item
+(e.g. Trail Ration, `IsFood(3)`) covers more than a single member's need, the
+overpayment counts toward the net shortfall calculation.
+
+**Pass 2 — Pool/share:** After Pass 1, the net shortfall is
+`total_needed.saturating_sub(total_pass1_consumed)`. If any shortfall remains
+(members with no personal food), the function iterates all inventories again,
+removing `IsFood` items to cover the remainder.
+
+The key bug fixed in this phase: the previous implementation computed shortfall
+as the sum of per-member gaps, silently discarding overpayment from multi-ration
+items. A Trail Ration held by member 0 in a 3-member party would be consumed
+(removing the slot) but only credit 1 ration unit to the consumption total,
+leaving members 1 and 2 short with nothing left to pool. The fix tracks
+`total_pass1_consumed` (actual ration-units removed) and derives the shortfall
+from it, so a Trail Ration correctly satisfies all 3 members in one slot
+removal.
+
+The function returns `total_pass1_consumed + total_pass2_consumed` — the actual
+ration-units removed from inventories, which may exceed `total_needed` when a
+multi-ration item is the last item consumed (since items are removed as whole
+slots with no fractional consumption).
+
+Pre-check before any mutation: if `count_food_in_party < total_needed`, the
+function returns `Err(ResourceError::NoFoodRemaining)` without touching any
+inventory.
+
+#### `check_starvation` rewrite — `src/domain/resources.rs`
+
+Now a thin wrapper: `count_food_in_party(party, item_db) == 0`.
+
+#### `ration_value_of` helper — `src/domain/resources.rs`
+
+Private helper that resolves a single `ItemId` against the `ItemDatabase` and
+returns its `IsFood` ration value, or `0` if the item is not found or is not a
+food consumable.
+
+#### Deprecated numeric food fields — `src/domain/character.rs`
+
+`Character.food: u8` and `Party.food: u32` are retained with `#[deprecated]`
+attributes and zeroed-out constructors. Existing save files that still carry
+these fields deserialize without error; the fields are simply ignored by the
+rest system going forward. A future migration routine can convert them to
+inventory slots on load if desired.
+
+#### Character initialization — `src/domain/character_definition.rs`
+
+`instantiate()` now calls a private `grant_starting_food(character, item_db,
+starting_food)` helper instead of writing to `character.food`. The helper
+locates an `IsFood(1)` item in the database (preferring single-ration items),
+then calls `character.inventory.add_item()` once per ration unit. Returns
+`CharacterDefinitionError::InventoryFull` if the inventory cannot accept all
+starting food items.
+
+#### Application layer cleanup — `src/application/mod.rs`, `src/application/save_game.rs`
+
+Removed all assignments of the form `state.party.food = N` and
+`character.food = N` from the new-game and save-load paths. The new-game path
+relies entirely on `instantiate()` granting food items into character
+inventories.
+
+#### Game-layer rest system — `src/game/systems/rest.rs`
+
+`process_rest` now queries the `GameContent` Bevy resource (if present) to
+obtain the `ItemDatabase`, then:
+
+1. Calls `count_food_in_party` to check upfront whether enough food is
+   available before committing.
+2. Calls `consume_food(party, item_db, FOOD_PER_REST)` to remove `IsFood` items
+   from inventories.
+
+Rest system unit tests were updated to insert a minimal `GameContent` resource
+containing a Food Ration item (id=1) and to populate member inventories with
+ration items instead of mutating the deprecated `party.food` field.
+
+### Tests
+
+All pre-existing resource tests were replaced or updated to use the
+inventory-based API. New tests added:
+
+| Test name                                        | What it verifies                                                      |
+| ------------------------------------------------ | --------------------------------------------------------------------- |
+| `test_consume_food`                              | 3 members × 4 rations; 1 consumed per member; 3 remain each           |
+| `test_consume_food_not_enough`                   | Returns `NoFoodRemaining`; inventories unchanged                      |
+| `test_check_starvation`                          | Empty party is starving; party with ration is not                     |
+| `test_count_food_in_party_empty`                 | Returns 0 for party with no food                                      |
+| `test_count_food_in_party_multiple_members`      | Sums across all members                                               |
+| `test_count_food_multi_ration_item`              | Trail Ration counts as 3                                              |
+| `test_consume_food_sharing_across_members`       | Member 0's surplus feeds members 1 and 2                              |
+| `test_consume_food_trail_ration_counts_as_three` | Single Trail Ration satisfies 3-member party; slot removed; returns 3 |
+| `test_rest_consumes_food`                        | `rest_party` removes exactly 1 ration per member                      |
+| `test_rest_party_fails_without_enough_food`      | `rest_party` refuses when food < member count                         |
+| `test_rest_party_fails_without_food`             | `rest_party` refuses with completely empty inventories                |
+
+### Architecture Compliance
+
+- `consume_food`, `count_food_in_party`, `check_starvation` all accept
+  `&ItemDatabase` — no hidden global state.
+- Type aliases (`ItemId`) used throughout; no raw `u32` introduced.
+- `ConsumableEffect::IsFood(u8)` from Phase 1 used exactly as defined —
+  no duplicate food representation.
+- Test fixtures live in `data/test_campaign/` and inline `ItemDatabase`
+  helpers — no reference to `campaigns/tutorial`.
+- SPDX headers present in all modified `.rs` files.
+
+### Quality Gates
+
+```text
+cargo fmt         → no output
+cargo check       → Finished 0 errors
+cargo clippy      → Finished 0 warnings
+cargo nextest run → 3247 passed; 0 failed; 8 skipped
+```
+
+---
+
+## Food System — Phase 1: Core Item Foundation
+
+### Overview
+
+Phase 1 converts food from an abstract numeric counter into a proper inventory
+item by adding the `ConsumableEffect::IsFood(u8)` variant to the item type
+system and defining canonical food items in the game's data files. This is the
+foundation for Phases 2–4 which will rewrite the rest system, wire up merchant
+stock, and update the SDK editor.
+
+### Deliverables Checklist
+
+- [x] `ConsumableEffect::IsFood(u8)` variant added to `src/domain/items/types.rs`
+- [x] Base food items added to `data/items.ron` (ids 53 "Food Ration", 54 "Trail Ration")
+- [x] Food items added to `data/test_campaign/data/items.ron` (ids 108 "Food Ration", 109 "Trail Ration")
+- [x] Serialization / deserialization tests passed (10 new tests in `types.rs`)
+- [x] Exhaustive match sites updated (`combat/item_usage.rs`, `visual/item_mesh.rs`)
+
+### What Was Built
+
+#### `ConsumableEffect::IsFood(u8)` — `src/domain/items/types.rs`
+
+A new variant appended to the existing `ConsumableEffect` enum. The inner
+`u8` is the **ration count** supplied by a single unit of the item — almost
+always `1` for a standard ration, but higher values are valid for multi-serving
+items such as a "Trail Ration" (3 rations).
+
+The variant is `Copy + PartialEq + Serialize + Deserialize`, consistent with
+all other `ConsumableEffect` variants, so it round-trips cleanly through RON
+without any schema migration.
+
+#### `data/items.ron` additions
+
+Two food items were appended in a new `// ===== Food Items =====` section
+between the existing Consumables block and the Ammunition block:
+
+| id  | name         | effect    | base_cost | sell_cost | combat_usable |
+| --- | ------------ | --------- | --------- | --------- | ------------- |
+| 53  | Food Ration  | IsFood(1) | 2         | 1         | false         |
+| 54  | Trail Ration | IsFood(3) | 5         | 2         | false         |
+
+Food items are intentionally **not** combat-usable (`is_combat_usable: false`).
+
+#### `data/test_campaign/data/items.ron` additions
+
+Identical items at ids 108 / 109 (offset to avoid id collisions with the
+test-campaign's existing item numbering).
+
+#### Exhaustive match updates
+
+Two sites in the codebase perform exhaustive matches over `ConsumableEffect`
+and required new arms:
+
+- **`src/domain/combat/item_usage.rs`** — `execute_item_use_by_slot`: the
+  `IsFood(_)` arm returns `Err(ItemUseError::NotUsableInCombat)`. The
+  `validate_item_use_slot` gate already blocks food items via
+  `is_combat_usable: false`, so this arm is a safety net for callers that
+  bypass validation.
+- **`src/domain/visual/item_mesh.rs`** — consumable colour selector: food items
+  are assigned an earthy brown `[0.55, 0.35, 0.10, 1.0]` to visually
+  distinguish them from magical potions.
+
+#### Tests — `src/domain/items/types.rs` (10 new)
+
+| Test name                                     | What it verifies                                               |
+| --------------------------------------------- | -------------------------------------------------------------- |
+| `test_is_food_effect_equality`                | `IsFood(1) == IsFood(1)`, `IsFood(1) != IsFood(3)`             |
+| `test_is_food_ration_count_extracted`         | Pattern-match extracts inner `u8`                              |
+| `test_is_food_trail_pack_ration_count`        | Pack of 3 extracts correctly                                   |
+| `test_is_food_serializes_correctly`           | RON output contains `"IsFood"` and the count                   |
+| `test_is_food_deserializes_correctly`         | `"IsFood(1)"` parses to correct variant                        |
+| `test_is_food_roundtrip_serde`                | Full serialize → deserialize identity                          |
+| `test_consumable_data_with_is_food_roundtrip` | `ConsumableData` struct round-trips                            |
+| `test_food_ration_item_loads_from_ron_string` | `ItemDatabase::load_from_string` succeeds with Food Ration RON |
+| `test_food_ration_not_combat_usable`          | `is_combat_usable` is `false`                                  |
+| `test_is_food_no_required_proficiency`        | `required_proficiency()` returns `None`                        |
+
+### Architecture Compliance
+
+- Data structures match architecture.md Section 4.5 (`ConsumableData`, `ConsumableEffect`) **exactly**.
+- Type aliases (`ItemId`) used throughout; no raw `u32` introduced.
+- RON format used for all data files; no JSON/YAML.
+- Test fixtures live in `data/test_campaign/` — no reference to `campaigns/tutorial`.
+- SPDX headers present in all modified `.rs` files (pre-existing headers unchanged).
+
+### Quality Gates
+
+```text
+cargo fmt         → no output
+cargo check       → Finished 0 errors
+cargo clippy      → Finished 0 warnings
+cargo nextest run → 3242 passed; 0 failed; 8 skipped
+```
+
+---
+
 ## New MTL Support - Phase 1: Rebaseline Around The Existing Importer
 
 **Plan**: [`newmtl_support_plan.md`](newmtl_support_plan.md)

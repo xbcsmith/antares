@@ -607,6 +607,46 @@
         tags: [],
     ),
 
+    // ===== Food Items =====
+
+    (
+        id: 53,
+        name: "Food Ration",
+        item_type: Consumable((
+            effect: IsFood(1),
+            is_combat_usable: false,
+        )),
+        base_cost: 2,
+        sell_cost: 1,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 1,
+        is_cursed: false,
+        icon_path: None,
+        tags: [],
+    ),
+
+    (
+        id: 54,
+        name: "Trail Ration",
+        item_type: Consumable((
+            effect: IsFood(3),
+            is_combat_usable: false,
+        )),
+        base_cost: 5,
+        sell_cost: 2,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 1,
+        is_cursed: false,
+        icon_path: None,
+        tags: [],
+    ),
+
     // ===== Ammunition =====
 
     (

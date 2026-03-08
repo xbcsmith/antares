@@ -7,6 +7,12 @@
 // These templates are used by merchant NPCs during testing to verify
 // that npc_stock_templates load correctly from a campaign data directory.
 //
+// Phase 3 additions: Food Ration (id 108, IsFood 1) and Trail Ration
+// (id 109, IsFood 3) are now included in merchant and innkeeper stock so
+// the party can purchase food for resting.  This validates the full
+// Phase 3 requirement: players can interact with merchants and buy food
+// rations into their inventories using gold.
+//
 // Phase 6 additions: magic_item_pool, magic_slot_count, and magic_refresh_days
 // are now present on each template.  The blacksmith template keeps
 // magic_slot_count: 0 to verify the disabled-rotation path in tests.
@@ -35,6 +41,9 @@
     // Low quantities enforce resource management decisions for new players.
     // Only the most basic weapons, armor, and one healing consumable are stocked.
     //
+    // Phase 3: Food Ration and Trail Ration added so the party can purchase
+    // food for resting after spending their starting rations.
+    //
     // Magic rotation: 2 slots drawn from a pool of 5 magical items, refreshed
     // every 7 in-game days.  Item IDs 101-105 are assumed to be magical items
     // defined in data/test_campaign/data/items.ron.
@@ -42,14 +51,17 @@
         id: "tutorial_merchant_stock",
         entries: [
             // Basic weapons
-            (item_id: 1,  quantity: 2, override_price: None),    // Club
-            (item_id: 2,  quantity: 2, override_price: None),    // Dagger
-            (item_id: 3,  quantity: 1, override_price: None),    // Short Sword
+            (item_id: 1,   quantity: 2, override_price: None),    // Club
+            (item_id: 2,   quantity: 2, override_price: None),    // Dagger
+            (item_id: 3,   quantity: 1, override_price: None),    // Short Sword
             // Light armor
-            (item_id: 20, quantity: 2, override_price: None),    // Leather Armor
-            (item_id: 23, quantity: 2, override_price: None),    // Wooden Shield
+            (item_id: 20,  quantity: 2, override_price: None),    // Leather Armor
+            (item_id: 23,  quantity: 2, override_price: None),    // Wooden Shield
             // Consumables
-            (item_id: 50, quantity: 3, override_price: None),    // Healing Potion
+            (item_id: 50,  quantity: 3, override_price: None),    // Healing Potion
+            // Food — purchasable rations so the party can rest (Phase 3)
+            (item_id: 108, quantity: 10, override_price: None),   // Food Ration  (IsFood 1)
+            (item_id: 109, quantity: 5,  override_price: None),   // Trail Ration (IsFood 3)
         ],
         magic_item_pool: [101, 102, 103, 104, 105],
         magic_slot_count: 2,
@@ -75,6 +87,54 @@
             (item_id: 21, quantity: 1, override_price: None),    // Chain Mail
             // Shields
             (item_id: 23, quantity: 2, override_price: None),    // Wooden Shield
+        ],
+        magic_item_pool: [],
+        magic_slot_count: 0,
+        magic_refresh_days: 7,
+    ),
+
+    // ===== Tutorial General Store =====
+    // A general store stocking everyday provisions and consumables.
+    // Primary purpose in testing is to validate that food items load
+    // correctly from a campaign stock template and that a merchant NPC
+    // referencing this template can supply food rations to the party.
+    //
+    // This template is the canonical test fixture for Phase 3 merchant
+    // integration tests: it MUST contain Food Ration (108) and Trail
+    // Ration (109) with non-zero quantities.
+    (
+        id: "tutorial_general_store",
+        entries: [
+            // Consumables
+            (item_id: 50,  quantity: 5,  override_price: None),   // Healing Potion
+            // Food — purchasable rations so the party can rest (Phase 3)
+            (item_id: 108, quantity: 20, override_price: None),   // Food Ration  (IsFood 1)
+            (item_id: 109, quantity: 10, override_price: None),   // Trail Ration (IsFood 3)
+            // Ammunition
+            (item_id: 60,  quantity: 10, override_price: None),   // Arrows
+            (item_id: 61,  quantity: 10, override_price: None),   // Crossbow Bolts
+        ],
+        magic_item_pool: [],
+        magic_slot_count: 0,
+        magic_refresh_days: 7,
+    ),
+
+    // ===== Tutorial Innkeeper Stock =====
+    // Innkeepers provide rest services but also sell food so the party can
+    // stock up before venturing back into the wilderness.  Only food items
+    // are sold here; weapons and potions are left to specialist merchants.
+    //
+    // Prices are slightly above the item's base_cost to reflect the
+    // innkeeper's convenience markup (override_price in gold).
+    //
+    // This template is used in Phase 3 tests to verify that an innkeeper NPC
+    // can sell food rations.  A non-zero quantity on both food items is required.
+    (
+        id: "tutorial_innkeeper_stock",
+        entries: [
+            // Food — the primary reason adventurers visit an inn
+            (item_id: 108, quantity: 30, override_price: Some(3)),  // Food Ration  (slight markup)
+            (item_id: 109, quantity: 15, override_price: Some(6)),  // Trail Ration (slight markup)
         ],
         magic_item_pool: [],
         magic_slot_count: 0,
