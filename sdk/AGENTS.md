@@ -833,6 +833,130 @@ pub fn show(&mut self, ui: &mut egui::Ui, campaign_dir: Option<&PathBuf>, file: 
 
 ---
 
+### Rule 14: Every Text Field Bound to a Reference ID Must Use an Autocomplete Selector
+
+Any `egui::TextEdit` (or `text_edit_singleline`) that is bound to a field whose
+value references another domain object by ID **must** be replaced with a shared
+autocomplete selector helper from `ui_helpers.rs`. A raw `TextEdit` bound to a
+reference ID field is a bug waiting to happen: the value is lost between frames,
+the user gets no suggestions, there is no validation feedback, and clearing
+requires a separate widget that is easy to forget.
+
+**What counts as a "reference ID field"?**
+
+Any buffer `String` (or numeric type) that is later looked up against a
+registry, database, or list of defined objects:
+
+- Portrait IDs (`portrait_id`) → `autocomplete_portrait_selector`
+- Sprite sheet paths (`sprite_sheet`) → `autocomplete_sprite_sheet_selector`
+- Monster names/IDs → `autocomplete_monster_selector`
+- Creature IDs (`creature_id`) → `autocomplete_creature_selector`
+- Race IDs, class IDs, item IDs, dialogue IDs, condition names, etc. →
+  use the matching `autocomplete_*_selector` helper or add one if absent
+
+**WRONG — raw TextEdit for a reference ID field:**
+
+```antares/sdk/examples/wrong_reference_id_textedit.rs#L1-8
+// ❌ Value lost between frames; no suggestions; no validation; no clear button.
+ui.horizontal(|ui| {
+    ui.label("Creature ID:");
+    ui.add(
+        egui::TextEdit::singleline(&mut self.edit_buffer.creature_id)
+            .desired_width(80.0)
+            .hint_text("numeric ID or empty"),
+    );
+});
+```
+
+**RIGHT — autocomplete selector with persistent buffer and candidate list:**
+
+```antares/sdk/examples/right_reference_id_autocomplete.rs#L1-9
+// ✅ Persistent buffer; filtered "id — name" suggestions; hover tooltip;
+//    built-in Clear button; clears on reset_autocomplete_buffers.
+autocomplete_creature_selector(
+    ui,
+    "npc_creature",   // unique id_salt
+    "Creature ID:",   // label (pass "" to omit)
+    &mut self.edit_buffer.creature_id,
+    &self.available_creatures, // pre-built (u32, String) candidate list
+);
+```
+
+**Mandatory companion requirements** for every autocomplete selector added to
+an editor form:
+
+1. **Candidate cache field on the editor state struct** — add a
+   `#[serde(skip)] pub available_<type>: Vec<(IdType, String)>` (or
+   `Vec<String>` for string-keyed registries) field. Never call the
+   loader/manager inside the widget render loop.
+
+2. **Rebuild the cache when the campaign directory changes** — in `show()`,
+   alongside the `available_portraits` / `available_sprite_sheets` rebuild,
+   add:
+
+   ```rust
+   self.available_<type> = manager
+       .and_then(|m| m.load_all_<type>().ok())
+       .map(|items| items.into_iter().map(|i| (i.id, i.name)).collect())
+       .unwrap_or_default();
+   ```
+
+3. **Clear the autocomplete buffer on `reset_autocomplete_buffers`** — in the
+   `if self.reset_autocomplete_buffers { … }` block inside the edit form,
+   add:
+
+   ```rust
+   crate::ui_helpers::remove_autocomplete_buffer(
+       ctx,
+       egui::Id::new("autocomplete:<type>:<id_salt>".to_string()),
+   );
+   ```
+
+4. **Sync the autocomplete buffer after a modal picker selection** — when the
+   Browse modal writes an ID via `apply_selected_<type>_id`, also call
+   `store_autocomplete_buffer` with the resolved `"id — name"` display string
+   so the text field reflects the selection immediately:
+
+   ```rust
+   crate::ui_helpers::store_autocomplete_buffer(
+       ui.ctx(),
+       egui::Id::new("autocomplete:<type>:<id_salt>".to_string()),
+       &display_string,
+   );
+   ```
+
+5. **Add a new `autocomplete_<type>_selector` helper to `ui_helpers.rs`** if
+   one does not already exist. Model it on `autocomplete_portrait_selector`
+   or `autocomplete_creature_selector`. The helper must:
+   - Use `make_autocomplete_id(ui, "<type>", id_salt)` for its buffer key.
+   - Use `load_autocomplete_buffer` / `store_autocomplete_buffer` to persist
+     the typed text across frames.
+   - Show a hover tooltip with the resolved name (or a `⚠` warning for
+     unknown IDs).
+   - Include a built-in **Clear** button — do not rely on external clear widgets.
+   - Have at least one unit test per logical branch (display format, ID
+     extraction, unknown-ID fallback, empty-value initialisation).
+
+**Audit question to ask before every PR:**
+
+> "Does every `TextEdit` / `text_edit_singleline` in this editor store a value
+> that will later be looked up against a list of known objects?"
+> If YES → replace it with the appropriate `autocomplete_*_selector`.
+
+**Why this rule exists:**
+
+Phase 4 of the Unified Creature Asset Binding initially used
+`egui::TextEdit::singleline` for the `creature_id` field in both the Characters
+and NPC editors. The value was lost between frames, the user received no
+feedback about whether their typed ID existed in the registry, and the field was
+not cleared by `reset_autocomplete_buffers` when switching records. The fix
+required adding `autocomplete_creature_selector` to `ui_helpers.rs`, an
+`available_creatures` cache on both editor state structs, buffer-clear wiring,
+and modal-picker sync — all of which would have been in place from the start if
+this rule had existed.
+
+---
+
 ## Future Editor Standardization Pattern
 
 Use this section as the default implementation recipe when adding a new
@@ -902,6 +1026,11 @@ ui.push_id(stable_id, |ui| {
 - [ ] `request_repaint()` is called on layout-driving state changes
 - [ ] Search/filter/detail behavior remains intact
 - [ ] Data-file loader follows Rule 13 (exists guard, logger, reset, auto-load flag)
+- [ ] Every text field bound to a reference ID uses `autocomplete_*_selector`
+      (Rule 14) — no bare `TextEdit` for portrait IDs, creature IDs, race IDs,
+      class IDs, item IDs, or any other field looked up against a registry;
+      companion `available_<type>` cache, buffer-clear, and picker-sync wiring
+      are all present
 - [ ] `cargo fmt`, `cargo check`, `cargo clippy -D warnings`, and tests pass
 
 ---
@@ -953,6 +1082,17 @@ class this section was written to prevent.
 - [ ] No two `egui::Window::new(...)` calls share a title string in the same
       `update()` frame
 
+**Reference ID autocomplete (Rule 14):**
+
+- [ ] Every `TextEdit` / `text_edit_singleline` audited: does it hold a value
+      that will later be looked up against a registry or list?
+      If YES → it must use `autocomplete_*_selector`, not a bare `TextEdit`
+- [ ] Each autocomplete selector's candidate cache (`available_<type>`) is
+      rebuilt in `show()` when `campaign_dir_changed` is `true`
+- [ ] Each autocomplete buffer key is cleared in `reset_autocomplete_buffers`
+- [ ] Modal picker selection syncs the autocomplete buffer immediately after
+      writing the ID so the text field shows `"id — name"` not a bare number
+
 **Toolbar layout:**
 
 - [ ] Every toolbar row that contains more than two buttons uses
@@ -989,6 +1129,9 @@ under `sdk/campaign_builder/src/`:
       - Toolbar rows with more than two buttons use horizontal_wrapped, not horizontal
       - Every contextual action present in the toolbar is also present in the
         preview panel and the edit-mode action row
+      - Every TextEdit bound to a reference ID uses an autocomplete_*_selector
+        helper (Rule 14): no raw TextEdit for portrait IDs, creature IDs, race
+        IDs, class IDs, item IDs, or any other field looked up against a registry
 
 6b. (Campaign Builder data-file loaders only) Run the Rule 13 load-pattern checklist:
       - path.exists() guard present in every load_* function
@@ -1062,6 +1205,25 @@ campaign builder UI code:
 - [ ] Grepped the crate for duplicate `id_salt` and `from_id_salt` strings —
       none found
 
+### Reference ID Autocomplete Correctness (Rule 14)
+
+- [ ] Every `TextEdit` / `text_edit_singleline` in the changed files has been
+      audited: does it store a value looked up against a registry or list?
+      If yes → replaced with an `autocomplete_*_selector` helper
+- [ ] A `#[serde(skip)] pub available_<type>: Vec<…>` cache field exists on
+      the editor state struct for each autocomplete selector used
+- [ ] The cache is rebuilt in `show()` alongside `available_portraits` /
+      `available_sprite_sheets` when `campaign_dir_changed` is `true`
+- [ ] The autocomplete buffer is cleared in the `reset_autocomplete_buffers`
+      block using `remove_autocomplete_buffer` with the correct key
+      (`"autocomplete:<type>:<id_salt>"`)
+- [ ] When a Browse modal writes an ID, `store_autocomplete_buffer` is called
+      immediately afterward with the resolved `"id — name"` display string
+- [ ] If a new `autocomplete_<type>_selector` was added to `ui_helpers.rs`, it
+      has unit tests covering: display format, ID extraction from `"id — name"`,
+      raw numeric input, unknown-ID fallback, and empty-value initialisation
+- [ ] No new raw `TextEdit` bound to a reference ID field was introduced
+
 ---
 
 ## Living Document
@@ -1074,10 +1236,11 @@ Last updated: 2025
 
 ### Bugs recorded in this file
 
-| Date | File                                   | Pattern                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Rule             |
-| ---- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| 2025 | `template_browser.rs`                  | widgets in loops without `push_id`; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                                                                                                                                                                                                                      | Rules 1, 2, 3    |
-| 2025 | `creatures_editor.rs`                  | `SidePanel::right` wrapped in `if selected.is_some()`; no `request_repaint()` on click; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                                                                                                                                                                  | Rules 2, 3, 6, 7 |
-| 2025 | `creatures_editor.rs`                  | `SidePanel::right.show_inside` used instead of `TwoColumnLayout`; registry list loop rows missing `push_id`; `self.id_manager` borrowed inside left closure conflicting with `&mut self` capture in right closure — fixed by pre-computing `row_valid: Vec<bool>`                                                                                                                                                                                              | Rules 1, 6       |
-| 2025 | `creatures_editor.rs`                  | All toolbar controls in one `ui.horizontal` — "Register Asset" and "Browse Templates" clipped invisible at standard window widths; button not present in preview panel or edit-mode row                                                                                                                                                                                                                                                                        | Rule 12          |
-| 2025 | `stock_templates_editor.rs` / `lib.rs` | Stock Templates tab appeared empty after opening a campaign (recurring). Three compounding causes: (1) `load_stock_templates` had no `path.exists()` guard and clobbered `status_message` with an error on missing files; (2) `do_new_campaign` never reset `stock_templates_editor_state`, leaking previous campaign data; (3) `show()` had no `needs_initial_load` auto-load fallback when the explicit load silently failed. Fixed by Rule 13 load pattern. | Rule 13          |
+| Date | File                                     | Pattern                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Rule             |
+| ---- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| 2025 | `template_browser.rs`                    | widgets in loops without `push_id`; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                                                                                                                                                                                                                                                                                         | Rules 1, 2, 3    |
+| 2025 | `creatures_editor.rs`                    | `SidePanel::right` wrapped in `if selected.is_some()`; no `request_repaint()` on click; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                                                                                                                                                                                                                                     | Rules 2, 3, 6, 7 |
+| 2025 | `creatures_editor.rs`                    | `SidePanel::right.show_inside` used instead of `TwoColumnLayout`; registry list loop rows missing `push_id`; `self.id_manager` borrowed inside left closure conflicting with `&mut self` capture in right closure — fixed by pre-computing `row_valid: Vec<bool>`                                                                                                                                                                                                                                                                 | Rules 1, 6       |
+| 2025 | `creatures_editor.rs`                    | All toolbar controls in one `ui.horizontal` — "Register Asset" and "Browse Templates" clipped invisible at standard window widths; button not present in preview panel or edit-mode row                                                                                                                                                                                                                                                                                                                                           | Rule 12          |
+| 2025 | `stock_templates_editor.rs` / `lib.rs`   | Stock Templates tab appeared empty after opening a campaign (recurring). Three compounding causes: (1) `load_stock_templates` had no `path.exists()` guard and clobbered `status_message` with an error on missing files; (2) `do_new_campaign` never reset `stock_templates_editor_state`, leaking previous campaign data; (3) `show()` had no `needs_initial_load` auto-load fallback when the explicit load silently failed. Fixed by Rule 13 load pattern.                                                                    | Rule 13          |
+| 2025 | `characters_editor.rs` / `npc_editor.rs` | Phase 4 Unified Creature Asset Binding initially used `egui::TextEdit::singleline` for `creature_id` in both editors. Value was lost between frames, user received no candidate suggestions, field was not cleared by `reset_autocomplete_buffers`, and no hover tooltip showed whether the typed ID existed. Fixed by adding `autocomplete_creature_selector` to `ui_helpers.rs`, an `available_creatures` cache on both state structs, buffer-clear wiring in `reset_autocomplete_buffers`, and modal-picker autocomplete sync. | Rule 14          |

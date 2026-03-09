@@ -1,5 +1,893 @@
 # Implementations
 
+## Phase 4: Campaign Builder SDK Editor Updates — Unified Creature Asset Binding (Complete)
+
+### Overview
+
+Phase 4 extends all three Campaign Builder editors (Monsters, Characters, NPCs) so
+that every definition type exposes a consistent Browse/Clear/tooltip creature picker
+in its edit form. Each editor now accepts `creature_manager: Option<&CreatureAssetManager>`
+through its `show` method, which is constructed lazily from `campaign_dir` in
+`lib.rs` and passed down to the form-level methods. When no campaign is open the
+parameter is `None` and the picker button gracefully degrades to a plain text field.
+
+A post-implementation follow-up corrected the autocomplete handling for the
+Characters and NPC editors. The initial implementation used a raw
+`egui::TextEdit::singleline` for the creature ID field. This was replaced with a
+new shared helper `autocomplete_creature_selector` in `ui_helpers.rs` that follows
+the same pattern as `autocomplete_portrait_selector` and
+`autocomplete_sprite_sheet_selector`: a persistent egui-memory buffer, filtered
+candidate suggestions (shown as `"id — name"` pairs), a built-in Clear button, a
+hover tooltip showing the resolved creature name or a warning for unknown IDs, and
+proper buffer clearing when `reset_autocomplete_buffers` fires. The Monsters editor
+was not affected because its `creature_id` is `Option<CreatureId>` (numeric) and is
+displayed as a read-only label; only the Browse modal applies there.
+
+### Phase 4 Deliverables Checklist
+
+- [x] **4.1 Monsters Editor** — `creature_picker_open`; `apply_selected_creature_id`; Visual Asset section in `show_form` with read-only label + Browse modal; resolved name in `show_monster_details` and `show_preview_static`; `show_form` and `show` accept `creature_manager`
+- [x] **4.2 Characters Editor** — `creature_id: String` in `CharacterEditBuffer`; `start_edit_character` populates it; `save_character` writes it back; `available_creatures: Vec<(u32, String)>` cache on state; `autocomplete_creature_selector` in `show_character_form`; picker modal syncs autocomplete buffer on selection; `reset_autocomplete_buffers` clears creature buffer; creature name in preview
+- [x] **4.3 NPC Editor** — `available_creatures: Vec<(u32, String)>` cache on state; `autocomplete_creature_selector` in `show_edit_view` replacing raw TextEdit; picker modal syncs autocomplete buffer on selection; `reset_autocomplete_buffers` clears creature buffer; `show_preview` shows resolved creature name
+- [x] **`ui_helpers.rs`** — new `pub fn autocomplete_creature_selector` with persistent buffer, `"id — name"` display format, ID extraction, hover tooltip, built-in Clear button, and 10 logic-level unit tests
+- [x] All three `show` methods accept `creature_manager: Option<&CreatureAssetManager>`
+- [x] `sdk/campaign_builder/src/lib.rs` — All three call sites updated (Monsters, Characters, NPCs tabs)
+- [x] **20 new unit tests** (3 Monsters + 5 Characters + 2 NPCs + 10 `autocomplete_creature_selector` logic tests)
+- [x] All four quality gates pass: `cargo fmt` (no output), `cargo check --all-targets --all-features` (0 errors), `cargo clippy --all-targets --all-features -- -D warnings` (0 warnings), `cargo nextest run --all-features` (3333 passed, 0 failed)
+- [x] egui ID rules (sdk/AGENTS.md) satisfied: every `ScrollArea` has `id_salt`, every `Window` has `egui::Id::new(…)`, every loop uses `push_id`, no same-frame guard violations
+
+### `autocomplete_creature_selector` — Design Notes
+
+The new helper in `ui_helpers.rs` follows the exact same structure as
+`autocomplete_portrait_selector`:
+
+```sdk/campaign_builder/src/ui_helpers.rs#L2876-2884
+pub fn autocomplete_creature_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_creature_id: &mut String,
+    candidates: &[(u32, String)],
+) -> bool {
+```
+
+Key design decisions:
+
+- **Candidates are `(u32, String)` tuples** — the caller pre-builds this list once
+  per frame from `CreatureAssetManager::load_all_creatures()` and stores it in
+  `available_creatures` on the editor state, avoiding per-widget file I/O.
+- **Display format is `"id — name"`** — allows the user to filter by either numeric
+  ID or creature name. On commit, the `" — "` separator is used to extract just the
+  ID part back into the string buffer.
+- **Buffer initialisation resolves ID → display string** — when editing an existing
+  definition, the stored `"42"` is expanded to `"42 — Dragon"` on first render so
+  the field shows something human-readable.
+- **Raw numeric input is also accepted** — if the user types `"7"` directly (no
+  name), the widget stores `"7"` into the buffer. This preserves keyboard-first
+  workflow for power users.
+- **Built-in Clear button** — consistent with `autocomplete_portrait_selector`.
+  The external standalone "Clear" button added in the initial Phase 4
+  implementation was removed since the helper now owns that action.
+- **`autocomplete:creature:<id_salt>` egui memory key** — follows the same naming
+  convention as `autocomplete:portrait:…` and `autocomplete:sprite:…`.
+
+### `available_creatures` Cache
+
+Both `CharactersEditorState` and `NpcEditorState` gained:
+
+```sdk/campaign_builder/src/characters_editor.rs#L71-74
+    /// Available creature candidates (id, name) cached for autocomplete (rebuilt when campaign dir changes)
+    #[serde(skip)]
+    pub available_creatures: Vec<(u32, String)>,
+```
+
+The cache is rebuilt in `show()` whenever `campaign_dir_changed` is `true`:
+
+```sdk/campaign_builder/src/characters_editor.rs#L1040-1051
+            // Rebuild creature candidates from the manager whenever the campaign dir changes.
+            self.available_creatures = creature_manager
+                .and_then(|m| m.load_all_creatures().ok())
+                .map(|creatures| {
+                    creatures
+                        .into_iter()
+                        .map(|c| (c.id, c.name))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+```
+
+This matches the pattern used for `available_portraits` and
+`available_sprite_sheets`.
+
+### Autocomplete Buffer Sync on Modal Picker Selection
+
+When a creature is selected via the Browse modal (rather than typed), the
+autocomplete buffer is explicitly synced so the text field shows the resolved
+`"id — name"` string immediately rather than just the bare numeric ID:
+
+```sdk/campaign_builder/src/characters_editor.rs#L1241-1251
+                if let Some(id) = picked_id {
+                    self.apply_selected_creature_id(Some(id.clone()));
+                    // Sync the autocomplete buffer so the text field shows the
+                    // resolved "id — name" display string immediately.
+                    let display = creatures
+                        .iter()
+                        .find(|c| c.id.to_string() == id)
+                        .map(|c| format!("{} — {}", c.id, c.name))
+                        .unwrap_or_else(|| id.clone());
+                    crate::ui_helpers::store_autocomplete_buffer(
+                        ui.ctx(),
+                        egui::Id::new("autocomplete:creature:character_creature".to_string()),
+                        &display,
+                    );
+```
+
+The NPC editor uses the same pattern with key `"autocomplete:creature:npc_creature"`.
+
+### egui ID Audit (sdk/AGENTS.md compliance)
+
+| Widget              | ID                                         | Editor     |
+| ------------------- | ------------------------------------------ | ---------- |
+| `egui::Window`      | `monster_creature_picker`                  | Monsters   |
+| `ScrollArea`        | `monster_creature_picker_scroll`           | Monsters   |
+| `egui::Window`      | `character_creature_picker`                | Characters |
+| `ScrollArea`        | `character_creature_picker_scroll`         | Characters |
+| `AutocompleteInput` | `autocomplete:creature:character_creature` | Characters |
+| `egui::Window`      | `npc_creature_picker`                      | NPCs       |
+| `ScrollArea`        | `npc_creature_picker_scroll`               | NPCs       |
+| `AutocompleteInput` | `autocomplete:creature:npc_creature`       | NPCs       |
+
+All picker row loops use `ui.push_id(creature.id, …)`.
+All picker modals use two-phase (`picked_id` / `should_close`) to avoid borrow
+conflicts — no mutable borrow of `self` occurs inside the window closure.
+
+### Test Coverage Summary
+
+| Test                                                                          | Location          | What it verifies                                                                                   |
+| ----------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------- |
+| `test_monsters_editor_creature_id_roundtrips_through_form`                    | monsters_editor   | `apply_selected_creature_id(Some(42))` sets `edit_buffer.creature_id == Some(42)`                  |
+| `test_monsters_editor_clear_creature_id`                                      | monsters_editor   | `apply_selected_creature_id(None)` clears `edit_buffer.creature_id`                                |
+| `test_monsters_editor_default_monster_creature_id_is_none`                    | monsters_editor   | `default_monster().creature_id == None`                                                            |
+| `test_characters_editor_creature_id_roundtrips_through_form`                  | characters_editor | `start_edit_character` with `creature_id: Some(42)` → buffer `"42"`; `save_character` → `Some(42)` |
+| `test_characters_editor_creature_id_empty_string_saves_none`                  | characters_editor | Buffer `""` → `save_character` → `creature_id: None`                                               |
+| `test_characters_editor_creature_id_invalid_string_saves_none`                | characters_editor | Buffer `"not_a_number"` → `save_character` → `creature_id: None`                                   |
+| `test_creature_picker_open_flag`                                              | characters_editor | Default `CharactersEditorState` has `creature_picker_open == false`                                |
+| `test_apply_selected_creature_id_sets_buffer`                                 | characters_editor | `apply_selected_creature_id(Some("7"))` sets buffer to `"7"` and closes picker                     |
+| `test_npc_creature_picker_initial_state`                                      | npc_editor        | Default `NpcEditorState` has `creature_picker_open == false`                                       |
+| `test_npc_apply_selected_creature_id_updates_buffer`                          | npc_editor        | `apply_selected_creature_id("1000")` writes `"1000"` to buffer and closes picker                   |
+| `test_autocomplete_creature_selector_empty_candidates_returns_false`          | ui_helpers        | Empty candidate list produces empty display vec                                                    |
+| `test_autocomplete_creature_selector_display_format`                          | ui_helpers        | Each candidate renders as `"id — name"`                                                            |
+| `test_autocomplete_creature_selector_id_extraction_from_display_string`       | ui_helpers        | `"42 — Dragon"` → extracted ID `"42"`                                                              |
+| `test_autocomplete_creature_selector_raw_numeric_id_accepted`                 | ui_helpers        | Plain `"7"` parses successfully as `u32`                                                           |
+| `test_autocomplete_creature_selector_non_numeric_raw_input_rejected`          | ui_helpers        | Non-numeric, non-`" — "` string is rejected by both parse branches                                 |
+| `test_autocomplete_creature_selector_buffer_initialisation_with_known_id`     | ui_helpers        | Buffer init with `"7"` → `"7 — Skeleton"` when ID is in registry                                   |
+| `test_autocomplete_creature_selector_buffer_initialisation_with_unknown_id`   | ui_helpers        | Buffer init with `"99"` → `"99"` (raw) when ID is not in registry                                  |
+| `test_autocomplete_creature_selector_buffer_initialisation_empty_stays_empty` | ui_helpers        | Empty current value → empty display string                                                         |
+| `test_autocomplete_creature_selector_tooltip_resolved_name`                   | ui_helpers        | Known ID produces `"Creature: Dragon"` tooltip                                                     |
+| `test_autocomplete_creature_selector_tooltip_unknown_id`                      | ui_helpers        | Unknown ID produces `"⚠ Creature ID '999' not found in registry"` tooltip                          |
+
+---
+
+## Phase 4.3: NPC Editor — Unified Creature Asset Binding
+
+### Overview
+
+Updated `sdk/campaign_builder/src/npc_editor.rs` to support visual asset binding
+for NPCs. The editor now lets campaign authors link an `NpcDefinition` to a
+`CreatureDefinition` (a procedural mesh creature) via a "Creature ID" row in the
+Appearance group. When a `CreatureAssetManager` is provided the editor presents a
+browseable creature picker modal and resolves the creature's human-readable name in
+the preview panel; without one the text field remains fully editable as a plain
+numeric input and the picker button immediately closes itself.
+
+### Deliverables Checklist
+
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — `use crate::creature_assets::CreatureAssetManager` added to imports
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — `pub creature_picker_open: bool` field added to `NpcEditorState` with `#[serde(skip)]`
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — `creature_picker_open: false` added to `impl Default for NpcEditorState`
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — `apply_selected_creature_id(&mut self, id: String)` method added with `///` doc comment
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — `show` signature updated with `creature_manager: Option<&CreatureAssetManager>` parameter
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — `show_edit_view` signature updated with `creature_manager: Option<&CreatureAssetManager>` parameter
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — `show_edit_view` call site inside `show` updated to pass `creature_manager`
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — "Creature ID" row added to Appearance group in `show_edit_view` after the sprite index label, with text field, Browse, Clear, and ℹ widgets
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — Creature picker modal inserted after the Appearance group close, before Dialogue & Quests group
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — `show_preview` signature updated with `creature_manager: Option<&CreatureAssetManager>` parameter
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — `show_preview` call site inside `show_list_view` updated to pass `creature_manager`
+- [x] `sdk/campaign_builder/src/npc_editor.rs` — `show_preview` renders resolved creature asset name ("Asset:" row) after the existing "Creature ID:" row when manager is available
+- [x] `sdk/campaign_builder/src/lib.rs` — `EditorTab::NPCs` arm constructs `npc_creature_manager` and passes it as last arg to `npc_editor_state.show`
+- [x] Two new tests added: `test_npc_creature_picker_initial_state`, `test_npc_apply_selected_creature_id_updates_buffer`
+- [x] All four quality gates pass: `cargo fmt` (no output), `cargo check --all-targets --all-features` (0 errors), `cargo clippy --all-targets --all-features -- -D warnings` (0 warnings), `cargo nextest run --all-features` (3333 passed, 0 failed)
+
+### What Was Built
+
+#### `creature_picker_open` State Field
+
+A `#[serde(skip)] pub creature_picker_open: bool` on `NpcEditorState` tracks
+whether the picker modal is open. It is initialised `false` in `Default`. The
+`#[serde(skip)]` ensures it never leaks into serialised editor state.
+
+#### `apply_selected_creature_id`
+
+```sdk/campaign_builder/src/npc_editor.rs#L232-235
+    /// Sets the creature ID buffer and closes the creature picker.
+    pub(crate) fn apply_selected_creature_id(&mut self, id: String) {
+        self.edit_buffer.creature_id = id;
+        self.creature_picker_open = false;
+    }
+```
+
+Single method that both writes the string ID into the buffer and closes the
+picker, keeping the two pieces of state in sync. Used by both the picker modal
+selection handler and the "Clear" button.
+
+#### "Creature ID" Row in `show_edit_view`
+
+Appended to the existing Appearance `ui.group` closure, after the sprite index
+label, with a `ui.separator()` to visually separate it from the sprite fields.
+Contains:
+
+- A `TextEdit::singleline` bound to `self.edit_buffer.creature_id` (80 px wide,
+  hint text `"numeric ID or empty"`).
+- A **Browse…** button that sets `creature_picker_open = true`.
+- A **Clear** button that calls `apply_selected_creature_id(String::new())`.
+- An ℹ hover label explaining the 3-D mesh spawning behaviour.
+
+#### Creature Picker Modal in `show_edit_view`
+
+An `egui::Window` placed immediately after the Appearance group closes (before
+the Dialogue & Quests group) with:
+
+- `id(egui::Id::new("npc_creature_picker"))` — stable egui ID.
+- `ScrollArea::vertical()` with `id_salt("npc_creature_picker_scroll")`.
+- `ui.push_id(creature.id, …)` for every row (AGENTS.md egui ID audit compliance).
+- Two-phase close: `picked_id` / `should_close` locals evaluated after the window
+  closure to avoid borrow conflicts.
+- Graceful `None`-manager fallback: `creature_picker_open` is immediately cleared,
+  leaving the text field as the only input path.
+
+#### Preview Update in `show_preview`
+
+After the existing `if let Some(creature_id) = npc.creature_id` row that shows
+the raw numeric ID, a second conditional block resolves the human-readable name:
+
+```sdk/campaign_builder/src/npc_editor.rs#L648-657
+                if let (Some(creature_id), Some(manager)) = (npc.creature_id, creature_manager) {
+                    let resolved = manager
+                        .load_creature(creature_id)
+                        .map(|c| c.name)
+                        .unwrap_or_else(|_| "⚠ Unknown".to_string());
+                    ui.label("Asset:");
+                    ui.label(resolved);
+                    ui.end_row();
+                }
+```
+
+When the manager cannot load the creature (file missing, parse error, etc.) the
+cell displays `"⚠ Unknown"` rather than propagating an error.
+
+#### Call-Site Update in `lib.rs`
+
+```sdk/campaign_builder/src/lib.rs#L4703-4720
+            EditorTab::NPCs => {
+                // ...
+                let npc_creature_manager = self
+                    .campaign_dir
+                    .as_ref()
+                    .map(|d| crate::creature_assets::CreatureAssetManager::new(d.clone()));
+
+                if self.npc_editor_state.show(
+                    ui,
+                    &self.dialogues,
+                    &self.quests,
+                    self.campaign_dir.as_ref(),
+                    &self.tool_config.display,
+                    &self.campaign.npcs_file,
+                    npc_creature_manager.as_ref(),
+                ) {
+                    self.unsaved_changes = true;
+                }
+```
+
+The manager is constructed lazily from `self.campaign_dir` each frame, identical
+to the pattern used by the Characters and Monsters editors.
+
+#### Test Coverage
+
+| Test                                                 | What it verifies                                                                 |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `test_npc_creature_picker_initial_state`             | Default `NpcEditorState` has `creature_picker_open == false`                     |
+| `test_npc_apply_selected_creature_id_updates_buffer` | `apply_selected_creature_id("1000")` writes `"1000"` to buffer and closes picker |
+
+---
+
+## Phase 4.2: Characters Editor — Unified Creature Asset Binding
+
+### Overview
+
+Updated `sdk/campaign_builder/src/characters_editor.rs` to support visual asset
+binding for characters. The editor now lets campaign authors link a
+`CharacterDefinition` to a `CreatureDefinition` (a procedural mesh creature) via a
+"Creature ID" row in the Basic Information grid. When a `CreatureAssetManager` is
+provided the editor presents a browseable creature picker modal; without one the
+🦎 button is a no-op and the text field remains fully editable as a plain numeric
+input.
+
+### Deliverables Checklist
+
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `use antares::domain::types::CreatureId` added to imports
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `use crate::creature_assets::CreatureAssetManager` added to imports
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `pub creature_picker_open: bool` field added to `CharactersEditorState` with `#[serde(skip)]`
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `creature_picker_open: false` added to `impl Default for CharactersEditorState`
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `pub creature_id: String` field added to `CharacterEditBuffer`
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `creature_id: String::new()` added to `impl Default for CharacterEditBuffer`
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `start_edit_character` loads `character.creature_id.map_or(String::new(), |id| id.to_string())` into buffer
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `save_character` writes `creature_id` field using `parse::<CreatureId>().ok()` with empty-string → `None` guard
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `apply_selected_creature_id(&mut self, id: Option<String>)` method added with `///` doc comment
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `show` signature updated with `creature_manager: Option<&CreatureAssetManager>` parameter
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `show_character_form` signature updated with `creature_manager: Option<&CreatureAssetManager>` parameter
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `show_character_form` call site inside `show` updated to pass `creature_manager`
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — "Creature ID" row added to basic info grid in `show_character_form` after the "Portrait ID" row
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — Creature picker modal inserted in `show` after the portrait picker logic
+- [x] `sdk/campaign_builder/src/characters_editor.rs` — `show_character_preview` updated to show `Creature:` row in `character_preview_grid` when `creature_id` is set
+- [x] `sdk/campaign_builder/src/lib.rs` — `EditorTab::Characters` arm updated to construct a `CreatureAssetManager` and pass it to `show`
+- [x] `sdk/campaign_builder/src/asset_manager.rs` — Four existing test `CharacterDefinition` struct literals updated with `creature_id: None`
+- [x] Five new tests added: `test_characters_editor_creature_id_roundtrips_through_form`, `test_characters_editor_creature_id_empty_string_saves_none`, `test_characters_editor_creature_id_invalid_string_saves_none`, `test_creature_picker_open_flag`, `test_apply_selected_creature_id_sets_buffer`
+- [x] All four quality gates pass with zero errors/warnings (`cargo fmt`, `cargo check --all-targets --all-features`, `cargo clippy --all-targets --all-features -- -D warnings`, sdk `cargo test` — 1649 passed, 1 pre-existing unrelated failure in `mesh_obj_io`)
+
+### What Was Built
+
+#### `creature_id` Buffer Field
+
+`CharacterEditBuffer` gains a plain `pub creature_id: String` field. String storage
+was chosen (consistent with `portrait_id`) because egui text inputs work directly
+on `String`. Conversion to/from `CreatureId` (`u32`) happens only at the
+save/load boundary.
+
+#### `creature_picker_open` State Field
+
+A `#[serde(skip)] pub creature_picker_open: bool` on `CharactersEditorState`
+tracks whether the picker modal is open. It is initialised `false` in `Default`.
+
+#### `apply_selected_creature_id`
+
+```antares/sdk/campaign_builder/src/characters_editor.rs#L977-980
+    /// Sets the creature ID buffer and closes the creature picker.
+    pub(crate) fn apply_selected_creature_id(&mut self, id: Option<String>) {
+        self.buffer.creature_id = id.unwrap_or_default();
+        self.creature_picker_open = false;
+    }
+```
+
+Single method that both writes the string ID into the buffer and closes the
+picker, keeping the two pieces of state in sync.
+
+#### `save_character` — `creature_id` Serialisation
+
+```antares/sdk/campaign_builder/src/characters_editor.rs#L575-580
+            creature_id: if self.buffer.creature_id.is_empty() {
+                None
+            } else {
+                self.buffer.creature_id.trim().parse::<CreatureId>().ok()
+            },
+```
+
+Empty string → `None`; non-numeric string → `None` (silent discard, matching
+the portrait ID pattern); valid integer → `Some(id)`.
+
+#### "Creature ID" Row in `show_character_form`
+
+Inserted directly after the "Portrait ID" row in the `character_basic_grid`.
+Contains:
+
+- A `TextEdit::singleline` bound to `self.buffer.creature_id` (80 px wide, hint
+  text `"numeric ID or empty"`).
+- A 🦎 **Browse** button that opens the picker modal when a `creature_manager` is
+  available.
+- A ✕ **Clear** button that calls `apply_selected_creature_id(None)`.
+- An ℹ hover label explaining the 3-D mesh spawning behaviour.
+
+#### Creature Picker Modal in `show`
+
+An `egui::Window` inserted after the portrait picker logic with:
+
+- `id(egui::Id::new("character_creature_picker"))` — stable egui ID.
+- `ScrollArea::vertical()` with `id_salt("character_creature_picker_scroll")`.
+- `ui.push_id(creature.id, …)` for every row.
+- Two-phase close: `picked_id` / `should_close` locals evaluated after the window
+  closure.
+- Graceful `None`-manager fallback: `creature_picker_open` is immediately cleared.
+
+#### Preview Update
+
+`show_character_preview` renders a `Creature:` row inside `character_preview_grid`
+(between Alignment and the closing of that grid) when `character.creature_id` is
+`Some`.
+
+#### Call-Site Update in `lib.rs`
+
+```antares/sdk/campaign_builder/src/lib.rs#L4660-4680
+            EditorTab::Characters => {
+                let char_creature_manager = self
+                    .campaign_dir
+                    .as_ref()
+                    .map(|d| crate::creature_assets::CreatureAssetManager::new(d.clone()));
+                self.characters_editor_state.show(
+                    ui,
+                    &self.races_editor_state.races,
+                    &self.classes_editor_state.classes,
+                    &self.items,
+                    self.campaign_dir.as_ref(),
+                    &self.campaign.characters_file,
+                    &mut self.unsaved_changes,
+                    &mut self.status_message,
+                    &mut self.file_load_merge_mode,
+                    char_creature_manager.as_ref(),
+                )
+            }
+```
+
+#### Test Coverage
+
+| Test                                                           | What it verifies                                                                                 |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `test_characters_editor_creature_id_roundtrips_through_form`   | `start_edit_character` loads `Some(42)` → buffer `"42"`; `save_character` writes `Some(42)` back |
+| `test_characters_editor_creature_id_empty_string_saves_none`   | Empty buffer string → `creature_id: None` in saved definition                                    |
+| `test_characters_editor_creature_id_invalid_string_saves_none` | Non-numeric buffer string → `creature_id: None` (silent discard)                                 |
+| `test_creature_picker_open_flag`                               | Default state has `creature_picker_open == false`                                                |
+| `test_apply_selected_creature_id_sets_buffer`                  | `apply_selected_creature_id(Some("7"))` writes `"7"` and closes picker                           |
+
+---
+
+## Phase 4.1: Monsters Editor — Unified Creature Asset Binding
+
+### Overview
+
+Updated `sdk/campaign_builder/src/monsters_editor.rs` to support visual asset
+binding for monsters. The editor now lets campaign authors link a `MonsterDefinition`
+to a `CreatureDefinition` (a procedural mesh creature) via a "Visual Asset" section
+in the form. When a `CreatureAssetManager` is provided the editor resolves and
+displays the creature's human-readable name; without one it still shows the raw
+numeric ID.
+
+### Deliverables Checklist
+
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — `use antares::domain::types::CreatureId` import added
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — `use crate::creature_assets::CreatureAssetManager` import added
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — `pub creature_picker_open: bool` field added to `MonstersEditorState`
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — `creature_picker_open: false` added to `impl Default`
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — `apply_selected_creature_id(&mut self, id: Option<CreatureId>)` method added with `///` doc comment
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — `show` signature updated with `creature_manager: Option<&CreatureAssetManager>` parameter
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — `show_form` signature updated with `creature_manager: Option<&CreatureAssetManager>` parameter
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — "Visual Asset" `ui.group` section inserted in `show_form` between Basic Properties and Combat Stats
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — Creature picker modal (`egui::Window`) inserted with `ScrollArea`, `push_id` per row, `id_salt` on scroll area, and correct open/close state management
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — `show_monster_details` updated to display `Creature ID: {id}` when set
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — `show_preview_static` updated to display `🦎 Creature: {id}` or `🦎 Creature: No creature asset`
+- [x] `sdk/campaign_builder/src/lib.rs` — `EditorTab::Monsters` call site updated to pass a `CreatureAssetManager` built from `self.campaign_dir`
+- [x] Three new tests added: `test_monsters_editor_creature_id_roundtrips_through_form`, `test_monsters_editor_clear_creature_id`, `test_monsters_editor_default_monster_creature_id_is_none`
+- [x] All four quality gates pass with zero errors/warnings (`cargo fmt`, `cargo check --all-targets --all-features`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo nextest run --all-features` — 3333 passed)
+
+### What Was Built
+
+#### `creature_picker_open` Field
+
+A plain `pub bool` field (no serde attributes — the struct does not derive
+`Serialize`/`Deserialize`) that tracks whether the creature-picker modal window is
+open. It is initialised to `false` in `Default`.
+
+#### `apply_selected_creature_id`
+
+```antares/sdk/campaign_builder/src/monsters_editor.rs#L67-71
+    /// Sets the creature ID on the edit buffer and closes the picker.
+    pub fn apply_selected_creature_id(&mut self, id: Option<CreatureId>) {
+        self.edit_buffer.creature_id = id;
+        self.creature_picker_open = false;
+    }
+```
+
+Single method that both writes `creature_id` onto the edit buffer and closes the
+picker, keeping the two pieces of state in sync in one place.
+
+#### "Visual Asset" Section in `show_form`
+
+Inserted between the existing "Basic Properties" group and "Combat Stats" group.
+The section contains:
+
+- A read-only label showing the current `creature_id` (or `"None"`).
+- A **Browse…** button that sets `creature_picker_open = true`.
+- A **Clear** button that calls `apply_selected_creature_id(None)`.
+- An ℹ hover tooltip explaining what the binding does.
+- A resolved-name label (`Asset: "…"` in grey) rendered only when both a
+  `creature_id` and a `CreatureAssetManager` are available and
+  `manager.load_creature(id)` succeeds.
+
+#### Creature Picker Modal
+
+An `egui::Window` with:
+
+- `id(egui::Id::new("monster_creature_picker"))` — stable, unique egui ID.
+- A `ScrollArea::vertical()` with `id_salt("monster_creature_picker_scroll")`.
+- `ui.push_id(creature.id, …)` for every row in the scroll area.
+- Two-phase close: clicking a row records `picked_id`; clicking "Close" records
+  `should_close`. Both are evaluated after the window closure to avoid
+  borrow-checker conflicts with `&mut self` inside the closure.
+- Graceful fallback when `creature_manager` is `None`: the picker immediately
+  self-closes.
+
+#### Call-Site Update in `lib.rs`
+
+```antares/sdk/campaign_builder/src/lib.rs#L4555-4565
+            EditorTab::Monsters => self.monsters_editor_state.show(
+                ui,
+                &mut self.monsters,
+                self.campaign_dir.as_ref(),
+                &self.campaign.monsters_file,
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+                &mut self.file_load_merge_mode,
+                self.campaign_dir
+                    .as_ref()
+                    .map(|d| crate::creature_assets::CreatureAssetManager::new(d.clone()))
+                    .as_ref(),
+            ),
+```
+
+A `CreatureAssetManager` is constructed on-the-fly from `self.campaign_dir` and
+passed as `Option<&CreatureAssetManager>`. When no campaign is open the value is
+`None` and the feature degrades gracefully.
+
+#### Test Coverage
+
+| Test                                                       | What it verifies                                                                      |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `test_monsters_editor_creature_id_roundtrips_through_form` | `apply_selected_creature_id(Some(42))` writes `Some(42)` to `edit_buffer.creature_id` |
+| `test_monsters_editor_clear_creature_id`                   | `apply_selected_creature_id(None)` clears a previously set `creature_id`              |
+| `test_monsters_editor_default_monster_creature_id_is_none` | `default_monster()` initialises `creature_id` as `None`                               |
+
+---
+
+## Phase 3: Add the `CreatureBound` Trait — Unified Creature Asset Binding
+
+### Overview
+
+Defined the `CreatureBound` trait in a new file `src/domain/world/creature_binding.rs`
+and implemented it for all four types that carry a `creature_id: Option<CreatureId>`
+field: `MonsterDefinition`, `Monster` (runtime), `NpcDefinition`, and
+`CharacterDefinition`. Updated `src/game/systems/map.rs` to use the trait method
+(`def.creature_id()`) instead of direct field access at all three spawn branches:
+`resolve_encounter_creature_id` (Encounter), the `RecruitableCharacter` branch, and
+the NPC dialogue branch (via `ResolvedNpc`).
+
+The `Monster` runtime type was discovered to require its own `impl` because the
+SDK's `ContentDatabase` converts `MonsterDefinition` → `Monster` at load time
+via `to_monster()`, and `content.0.monsters.get_monster()` returns
+`Option<&Monster>`, not `Option<&MonsterDefinition>`.
+
+### Deliverables Checklist
+
+- [x] `src/domain/world/creature_binding.rs` — new file; SPDX header; `CreatureBound` trait definition with `///` doc comments and runnable `cargo test` example; `impl CreatureBound for MonsterDefinition`; `impl CreatureBound for Monster`; `impl CreatureBound for NpcDefinition`; `impl CreatureBound for CharacterDefinition`; nine unit tests
+- [x] `src/domain/world/mod.rs` — `pub mod creature_binding;` added; `pub use creature_binding::CreatureBound;` added to the re-export block
+- [x] `src/game/systems/map.rs` — `use crate::domain::world::CreatureBound;` import added; `resolve_encounter_creature_id` updated to `monster_def.creature_id()`; `RecruitableCharacter` branch updated to `.and_then(|def| def.creature_id())`
+- [x] All four quality gates pass with zero errors/warnings (`cargo fmt`, `cargo check --all-targets --all-features`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo nextest run --all-features`)
+- [x] All nine new trait unit tests pass (seven from the plan plus two for the `Monster` runtime type)
+
+### What Was Built
+
+#### `CreatureBound` Trait
+
+The trait is defined in `src/domain/world/creature_binding.rs`:
+
+```antares/src/domain/world/creature_binding.rs#L72-80
+pub trait CreatureBound {
+    /// Returns the optional [`CreatureId`] that links this definition to a mesh
+    /// asset in the creature registry.
+    ///
+    /// Returns `None` when no visual binding has been set for this definition.
+    fn creature_id(&self) -> Option<CreatureId>;
+}
+```
+
+Each `impl` block is a one-liner that copies the `Option<CreatureId>` field value
+(all four underlying fields are `Copy`):
+
+```antares/src/domain/world/creature_binding.rs#L119-123
+impl CreatureBound for MonsterDefinition {
+    fn creature_id(&self) -> Option<CreatureId> {
+        self.creature_id
+    }
+}
+```
+
+The module is publicly re-exported from `src/domain/world/mod.rs` so callers can
+write `use antares::domain::world::CreatureBound`.
+
+#### Why `Monster` Required a Separate `impl`
+
+The SDK's `ContentDatabase` (in `src/sdk/database.rs`) stores runtime `Monster`
+instances rather than `MonsterDefinition` objects — `add_monster` calls
+`def.to_monster()` and inserts the result. Consequently,
+`content.0.monsters.get_monster()` returns `Option<&Monster>`. The trait was
+therefore implemented for the runtime `Monster` struct as well as the definition
+type so that `resolve_encounter_creature_id` in `map.rs` can call the trait method
+uniformly regardless of which backing storage is used.
+
+#### Map System Updates
+
+All three creature-id read call-sites in `src/game/systems/map.rs` now use the
+trait method:
+
+**Encounter branch (`resolve_encounter_creature_id`):**
+
+```antares/src/game/systems/map.rs#L395-407
+fn resolve_encounter_creature_id(
+    monster_group: &[types::MonsterId],
+    content: &crate::application::resources::GameContent,
+) -> Option<types::CreatureId> {
+    for monster_id in monster_group {
+        if let Some(monster_def) = content.0.monsters.get_monster(*monster_id) {
+            if let Some(creature_id) = monster_def.creature_id() {
+                return Some(creature_id);
+            }
+        }
+    }
+
+    None
+}
+```
+
+**`RecruitableCharacter` branch:**
+
+```antares/src/game/systems/map.rs#L1347-1353
+                    if let Some(creature_id) = content
+                        .0
+                        .characters
+                        .get_character(character_id)
+                        .and_then(|def| def.creature_id())
+                    {
+```
+
+The NPC dialogue spawn loop works through `ResolvedNpc` (a DTO that copies
+`creature_id` from `NpcDefinition` at resolution time in
+`ResolvedNpc::from_placement_and_definition`). Because `ResolvedNpc` is a plain
+data-transfer object rather than a definition type, direct field access on
+`resolved_npc.creature_id` is correct there and is not replaced.
+
+#### Test Coverage
+
+Nine unit tests live in `src/domain/world/creature_binding.rs`:
+
+| Test                                             | What it verifies                                                                         |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `test_creature_bound_runtime_monster_some`       | `Monster { creature_id: Some(3), .. }.creature_id() == Some(3)`                          |
+| `test_creature_bound_runtime_monster_none`       | `Monster { creature_id: None, .. }.creature_id() == None`                                |
+| `test_creature_bound_monster_some`               | `MonsterDefinition { creature_id: Some(3), .. }.creature_id() == Some(3)`                |
+| `test_creature_bound_monster_none`               | `MonsterDefinition { creature_id: None, .. }.creature_id() == None`                      |
+| `test_creature_bound_npc_some`                   | `NpcDefinition { creature_id: Some(1000), .. }.creature_id() == Some(1000)`              |
+| `test_creature_bound_npc_none`                   | `NpcDefinition { creature_id: None, .. }.creature_id() == None`                          |
+| `test_creature_bound_character_some`             | `CharacterDefinition { creature_id: Some(2000), .. }.creature_id() == Some(2000)`        |
+| `test_creature_bound_character_none`             | `CharacterDefinition { creature_id: None, .. }.creature_id() == None`                    |
+| `test_creature_bound_all_three_types_consistent` | All four types with `creature_id: Some(42)` return identical `Option<CreatureId>` values |
+
+---
+
+## Phase 2: Add `creature_id` to `CharacterDefinition` — Unified Creature Asset Binding
+
+### Overview
+
+Added `pub creature_id: Option<CreatureId>` to `CharacterDefinition` (and its
+backward-compat deserialisation helper `CharacterDefinitionDef`) so that
+recruitable characters displayed on the 3D map can be linked directly to a
+`CreatureDefinition` in the creature registry. When `None`, the rendering system
+falls back to the portrait sprite as before.
+
+The heuristic functions `normalize_lookup_key` and `resolve_recruitable_creature_id`
+in `src/game/systems/map.rs` were deleted. The spawn path now reads
+`def.creature_id` directly from the `CharacterDefinition`, eliminating the
+fragile name-normalisation cross-database lookup that was the previous fallback.
+
+### Deliverables Checklist
+
+- [x] `src/domain/character_definition.rs` — `use crate::domain::types::CreatureId` import added
+- [x] `src/domain/character_definition.rs` — `creature_id: Option<CreatureId>` field added to `CharacterDefinition` with `#[serde(default)]` and `#[serde(skip_serializing_if = "Option::is_none")]`
+- [x] `src/domain/character_definition.rs` — `creature_id: Option<CreatureId>` field added to `CharacterDefinitionDef` with `#[serde(default)]`
+- [x] `src/domain/character_definition.rs` — `impl From<CharacterDefinitionDef> for CharacterDefinition` passes through `creature_id: def.creature_id`
+- [x] `src/domain/character_definition.rs` — `CharacterDefinition::new` initialises `creature_id: None`
+- [x] `src/domain/character_definition.rs` — `/// Examples` doc comment on `new` updated with `assert!(definition.creature_id.is_none())`
+- [x] `src/domain/character_definition.rs` — struct-literal `CharacterDefinition` instances in tests updated with `creature_id: None`
+- [x] `src/domain/character_definition.rs` — doc-comment struct literal updated with `creature_id: None`
+- [x] `src/domain/character_definition.rs` — three new tests added: `test_character_definition_creature_id_defaults_to_none`, `test_character_definition_creature_id_field_roundtrips_ron`, `test_character_definition_creature_id_none_omits_field_in_ron`
+- [x] `src/game/systems/map.rs` — `normalize_lookup_key` function deleted
+- [x] `src/game/systems/map.rs` — `resolve_recruitable_creature_id` function deleted
+- [x] `src/game/systems/map.rs` — `spawn_map` call site updated to use `content.0.characters.get_character(character_id).and_then(|def| def.creature_id)` directly
+- [x] `src/game/systems/map.rs` — `test_spawn_map_uses_recruitable_character_creature_visual` updated: `creature_id: Some(58)` set on `old_gareth`; `character_id` changed from `"npc_old_gareth"` to `"old_gareth"`
+- [x] `src/game/systems/map.rs` — `test_recruitable_visual_despawns_after_event_removed` updated: same `creature_id` and `character_id` fixes
+- [x] `src/game/systems/map.rs` — `test_map_event_recruitable_character_facing` rewritten to use `CharacterDefinition` with `creature_id: Some(30)` and `character_id: "facing_test_char"` instead of `NpcDefinition`
+- [x] `src/game/systems/map.rs` — new test `test_recruitable_spawn_uses_character_def_creature_id` added
+- [x] `src/game/systems/map.rs` — new test `test_recruitable_spawn_falls_back_to_sprite_when_no_creature_id` added
+- [x] `data/test_campaign/data/characters.ron` — `creature_id: Some(58)` added to `old_gareth` entry
+- [x] `campaigns/tutorial/data/characters.ron` — `creature_id: Some(1007)` added to `old_gareth` entry
+- [x] `docs/reference/architecture.md` — `creature_id: Option<CreatureId>` field added to `pub struct CharacterDefinition` in Section 4.7
+- [x] `campaigns/tutorial/data/characters.ron` — `creature_id: Some(1012)` added to `"whisper"`; `creature_id: Some(1008)` added to `"apprentice_zara"` (both are `RecruitableCharacter` map events that previously resolved through the name-match heuristic)
+- [x] All four quality gates pass with zero errors/warnings (`cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`)
+
+### What Was Built
+
+#### `creature_id` Field on `CharacterDefinition`
+
+The new field `pub creature_id: Option<CreatureId>` mirrors the pattern already
+established on `NpcDefinition` and `MonsterDefinition`. The field carries
+`#[serde(default)]` so existing RON files without the key deserialise silently
+to `None`, and `#[serde(skip_serializing_if = "Option::is_none")]` so new files
+serialised without a binding remain compact.
+
+`CharacterDefinitionDef` (the backward-compat shim used by the custom
+`Deserialize` impl) receives the same field with `#[serde(default)]`. The
+`From<CharacterDefinitionDef>` conversion passes it through unchanged.
+
+`CharacterDefinition::new` initialises the field to `None`; callers that need a
+binding set it directly after construction:
+
+```antares/src/domain/character_definition.rs#L557-591
+pub fn new(...) -> Self {
+    Self {
+        // ... other fields ...
+        creature_id: None,
+    }
+}
+```
+
+#### Deletion of Heuristic Resolution Functions
+
+`normalize_lookup_key` and `resolve_recruitable_creature_id` have been removed
+from `src/game/systems/map.rs`. These functions implemented a three-step
+fallback that matched character names against creature names via ASCII-folded
+normalisation — a fragile cross-database heuristic with no authoritative
+source of truth. Now the spawn path reads the field directly:
+
+```antares/src/game/systems/map.rs#L1344-1349
+if let Some(creature_id) = content
+    .0
+    .characters
+    .get_character(character_id)
+    .and_then(|def| def.creature_id)
+{
+```
+
+This is O(1), requires no name normalisation, and is fully deterministic.
+
+#### Test Updates
+
+Tests that previously relied on the name-match heuristic (`"npc_old_gareth"` →
+`"OldGareth"` creature) now set `creature_id: Some(58)` explicitly on the
+`CharacterDefinition` and use `character_id: "old_gareth"` in the map event to
+match the database key directly.
+
+`test_map_event_recruitable_character_facing` was rewritten to use a
+`CharacterDefinition` with `creature_id: Some(30)` and id `"facing_test_char"`,
+removing the dependency on `NpcDefinition` for the recruitable spawn path.
+
+Two new tests verify the complete contract:
+
+- **`test_recruitable_spawn_uses_character_def_creature_id`**: a
+  `CharacterDefinition` with `creature_id: Some(42)` triggers spawn of a
+  `CreatureVisual { creature_id: 42 }` entity at the correct tile position.
+- **`test_recruitable_spawn_falls_back_to_sprite_when_no_creature_id`**: a
+  `CharacterDefinition` with `creature_id: None` produces zero `CreatureVisual`
+  entities and exactly one `RecruitableVisualMarker` sprite-fallback entity.
+
+#### RON Data Files
+
+`old_gareth` in `data/test_campaign/data/characters.ron` receives
+`creature_id: Some(58)` so that the integration tests in `map.rs` that load
+actual campaign data continue to resolve correctly without the heuristic.
+
+`old_gareth` in `campaigns/tutorial/data/characters.ron` receives
+`creature_id: Some(1007)` to bind him to the tutorial creature registry entry
+for live-game rendering.
+
+---
+
+## Phase 1: Rename `visual_id` → `creature_id` on Monster Types
+
+### Overview
+
+Renamed the `visual_id` field to `creature_id` on both `MonsterDefinition` (domain
+data struct) and `Monster` (runtime struct) to align naming with `NpcDefinition`,
+which already used `creature_id`. Updated every call-site across source files, SDK
+files, RON data files, and integration tests. Added a new RON round-trip test.
+
+### Deliverables Checklist
+
+- [x] `src/domain/combat/database.rs` — `visual_id` → `creature_id` on `MonsterDefinition`; doc comment updated; `to_monster()` updated; `create_test_monster` helper updated; `test_monster_visual_id_parsing` renamed to `test_monster_creature_id_parsing`; `test_load_tutorial_monsters_visual_ids` renamed to `test_load_tutorial_monsters_creature_ids`; new `test_monster_definition_creature_id_field_roundtrips_ron` added
+- [x] `src/domain/combat/monster.rs` — `visual_id` → `creature_id` on `Monster`; `Monster::new()` initialiser updated; `set_visual` parameter renamed from `visual_id` to `creature_id`; doc comments updated; `test_set_visual_sets_creature_id` added
+- [x] `src/game/systems/map.rs` — `resolve_encounter_creature_id` doc comment and `monster_def.visual_id` field access updated; all six inline test `MonsterDefinition` literals updated (`visual_id` → `creature_id`)
+- [x] `src/game/systems/monster_rendering.rs` — module-level doc comments, `spawn_monster_with_visual` doc comment and logic, `spawn_fallback_visual` doc comment updated; local binding renamed from `visual_id` to `creature_id`; `CreatureVisual` construction updated to use shorthand `creature_id`; warn message updated
+- [x] `src/domain/combat/engine.rs` — test helper `MonsterDefinition` literal updated
+- [x] `sdk/campaign_builder/src/monsters_editor.rs` — `default_monster()` updated
+- [x] `sdk/campaign_builder/src/advanced_validation.rs` — `create_test_monster()` updated
+- [x] `sdk/campaign_builder/src/lib.rs` — all five `MonsterDefinition` literals updated (`default_monster`, `test_monster_xp_calculation_basic`, `test_monster_xp_calculation_with_abilities`, `test_monster_import_export_roundtrip`, `test_monster_preview_fields`)
+- [x] `sdk/campaign_builder/src/templates.rs` — all four `create_monster()` literals updated
+- [x] `sdk/campaign_builder/src/ui_helpers.rs` — both test-helper `MonsterDefinition` literals updated
+- [x] `data/test_campaign/data/monsters.ron` — all `visual_id:` occurrences replaced with `creature_id:`
+- [x] `campaigns/tutorial/data/monsters.ron` — all `visual_id:` occurrences replaced with `creature_id:`
+- [x] `tests/campaign_integration_tests.rs` — `test_all_monsters_have_visual_id_mapping` renamed to `test_all_monsters_have_creature_id_mapping`; `test_fallback_mechanism_for_missing_visual_id` renamed to `test_fallback_mechanism_for_monster_missing_creature_id`; `test_creature_visual_id_ranges_follow_convention` renamed to `test_creature_id_ranges_follow_convention`; all `.visual_id` field accesses updated; all assertion messages updated
+- [x] `tests/tutorial_campaign_loading_integration.rs` — `test_monster_spawning_with_missing_visual_id` renamed to `test_monster_spawning_with_missing_creature_id`; comments updated
+- [x] `tests/tutorial_monster_creature_mapping.rs` — module doc comment updated; all `.visual_id` field accesses updated; all assertion messages updated
+- [x] `grep -r "visual_id" . --include="*.rs" --include="*.ron"` returns zero matches
+- [x] `campaigns/tutorial/creature_mappings.md` — `visual_id:` in Step 4 monster example replaced with `creature_id:`; "See Also" reference updated; monster count table updated from 11 to 17 entries
+- [x] `docs/reference/architecture.md` Section 4.4 — `pub creature_id: Option<CreatureId>` added to `Monster` runtime struct; new sub-section `#### 4.4.1 CreatureBound Trait` added describing the trait and its three implementors
+- [x] All four quality gates pass with zero errors/warnings (`cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`)
+
+### What Was Built
+
+#### Field Rename — `MonsterDefinition` and `Monster`
+
+The field `pub visual_id: Option<CreatureId>` was renamed to
+`pub creature_id: Option<CreatureId>` on both structs. The doc comment was updated
+from `"Optional visual creature ID for 3D representation"` to the more precise
+`"Optional creature asset binding — links this monster to a CreatureDefinition in
+the creature registry."` mirroring the language used in `NpcDefinition`.
+
+The `#[serde(default)]` attribute was preserved unchanged. Because backwards
+compatibility is not required, no `#[serde(rename)]` alias was added; the RON
+data files were updated directly.
+
+#### `set_visual` Method
+
+The parameter of `Monster::set_visual` was renamed from `visual_id` to `creature_id`
+for consistency. The body now reads `self.creature_id = Some(creature_id);`.
+
+#### `to_monster()` Conversion
+
+The single assignment `monster.visual_id = self.visual_id;` in
+`MonsterDefinition::to_monster()` became `monster.creature_id = self.creature_id;`.
+
+#### `resolve_encounter_creature_id` in `map.rs`
+
+The field read `monster_def.visual_id` in the loop body was updated to
+`monster_def.creature_id`. The function's leading doc comment was also updated.
+
+#### `spawn_monster_with_visual` in `monster_rendering.rs`
+
+The local binding `if let Some(visual_id) = monster.visual_id` became
+`if let Some(creature_id) = monster.creature_id`. The `CreatureVisual` struct
+construction was simplified from `creature_id: visual_id` to shorthand `creature_id`
+after the binding rename. The `warn!` message and all comments referencing
+`visual_id` were updated.
+
+#### RON Data Files
+
+A `sed` substitution replaced every `visual_id:` token with `creature_id:` in:
+
+- `data/test_campaign/data/monsters.ron` (11 occurrences)
+- `campaigns/tutorial/data/monsters.ron` (17 occurrences)
+
+No numeric values changed.
+
+#### New Test: `test_monster_definition_creature_id_field_roundtrips_ron`
+
+Added to `src/domain/combat/database.rs` `mod tests`. Serialises a
+`MonsterDefinition` with `creature_id: Some(42)` to RON using
+`ron::ser::to_string_pretty`, deserialises it back, and asserts the value is
+preserved — directly satisfying the Phase 1 success criterion.
+
+#### New Test: `test_set_visual_sets_creature_id`
+
+Added to `src/domain/combat/monster.rs` `mod tests`. Constructs a `Monster`,
+asserts `creature_id` is `None`, calls `set_visual(5)` and asserts `Some(5)`,
+then calls `set_visual(42)` and asserts `Some(42)` — confirming the method
+sets `creature_id` and that repeated calls overwrite the previous value.
+This was a required Phase 1 test that had been omitted in the original implementation.
+
+### Success Criteria Verification
+
+| Criterion                                                                            | Result                  |
+| ------------------------------------------------------------------------------------ | ----------------------- |
+| `grep -r "visual_id" . --include="*.rs" --include="*.ron"` returns zero matches      | ✓ Verified              |
+| `cargo nextest run --all-features` reports zero failures                             | ✓ 3319 passed, 0 failed |
+| `test_monster_definition_creature_id_field_roundtrips_ron` passes RON round-trip     | ✓ Passes                |
+| All existing rendering and combat tests use `creature_id` and produce same behaviour | ✓ Verified              |
+
+---
+
 ## Terrain Quality Improvement — Phase 3: High-Quality Tree Models
 
 ### Overview

@@ -7,11 +7,12 @@
 //! rendering via the `show()` method, following the standard editor pattern.
 //! Uses shared UI components for consistent layout.
 
+use crate::creature_assets::CreatureAssetManager;
 use crate::ui_helpers::{
-    autocomplete_class_selector, autocomplete_item_list_selector, autocomplete_item_selector,
-    autocomplete_portrait_selector, autocomplete_race_selector, extract_portrait_candidates,
-    resolve_portrait_path, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
-    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    autocomplete_class_selector, autocomplete_creature_selector, autocomplete_item_list_selector,
+    autocomplete_item_selector, autocomplete_portrait_selector, autocomplete_race_selector,
+    extract_portrait_candidates, resolve_portrait_path, show_standard_list_item, EditorToolbar,
+    ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{Alignment, Sex, Stats};
 use antares::domain::character_definition::{
@@ -20,7 +21,7 @@ use antares::domain::character_definition::{
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::Item;
 use antares::domain::races::RaceDefinition;
-use antares::domain::types::{ItemId, RaceId};
+use antares::domain::types::{CreatureId, ItemId, RaceId};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -62,6 +63,14 @@ pub struct CharactersEditorState {
     /// Whether the portrait grid picker popup is open
     #[serde(skip)]
     pub portrait_picker_open: bool,
+
+    /// Whether the creature picker popup is open
+    #[serde(skip)]
+    pub creature_picker_open: bool,
+
+    /// Available creature candidates (id, name) cached for autocomplete (rebuilt when campaign dir changes)
+    #[serde(skip)]
+    pub available_creatures: Vec<(u32, String)>,
 
     /// Cached portrait textures for grid display
     #[serde(skip)]
@@ -125,6 +134,7 @@ pub struct CharacterEditBuffer {
     pub hp_override_current: String,
     // Other fields
     pub portrait_id: String,
+    pub creature_id: String,
     pub starting_gold: String,
     pub starting_gems: String,
     pub starting_food: String,
@@ -171,6 +181,7 @@ impl Default for CharacterEditBuffer {
             hp_override_base: String::new(),
             hp_override_current: String::new(),
             portrait_id: String::new(),
+            creature_id: String::new(),
             starting_gold: "0".to_string(),
             starting_gems: "0".to_string(),
             starting_food: "10".to_string(),
@@ -203,6 +214,8 @@ impl Default for CharactersEditorState {
             filter_premade_only: false,
             has_unsaved_changes: false,
             portrait_picker_open: false,
+            creature_picker_open: false,
+            available_creatures: Vec::new(),
             portrait_textures: HashMap::new(),
             available_portraits: Vec::new(),
             last_campaign_dir: None,
@@ -263,6 +276,9 @@ impl CharactersEditorState {
                     .map(|v| v.current.to_string())
                     .unwrap_or_default(),
                 portrait_id: character.portrait_id.to_string(),
+                creature_id: character
+                    .creature_id
+                    .map_or(String::new(), |id| id.to_string()),
                 starting_gold: character.starting_gold.to_string(),
                 starting_gems: character.starting_gems.to_string(),
                 starting_food: character.starting_food.to_string(),
@@ -564,6 +580,11 @@ impl CharactersEditorState {
             description: self.buffer.description.clone(),
             is_premade: self.buffer.is_premade,
             starts_in_party: self.buffer.starts_in_party,
+            creature_id: if self.buffer.creature_id.is_empty() {
+                None
+            } else {
+                self.buffer.creature_id.trim().parse::<CreatureId>().ok()
+            },
         };
 
         if let Some(idx) = self.selected_character {
@@ -953,12 +974,18 @@ impl CharactersEditorState {
     /// This method is small and testable on its own so unit tests can verify that a
     /// portrait selection is applied to the editor buffer and that the picker state
     /// and `has_unsaved_changes` are updated.
-    pub(crate) fn apply_selected_portrait(&mut self, selected: Option<String>) {
-        if let Some(id) = selected {
+    pub(crate) fn apply_selected_portrait(&mut self, id: Option<String>) {
+        if let Some(id) = id {
             self.buffer.portrait_id = id;
             self.portrait_picker_open = false;
             self.has_unsaved_changes = true;
         }
+    }
+
+    /// Sets the creature ID buffer and closes the creature picker.
+    pub(crate) fn apply_selected_creature_id(&mut self, id: Option<String>) {
+        self.buffer.creature_id = id.unwrap_or_default();
+        self.creature_picker_open = false;
     }
 
     /// Saves characters to a file path
@@ -998,6 +1025,7 @@ impl CharactersEditorState {
         unsaved_changes: &mut bool,
         status_message: &mut String,
         file_load_merge_mode: &mut bool,
+        creature_manager: Option<&CreatureAssetManager>,
     ) {
         // Scan portraits if campaign directory changed
         let campaign_dir_changed = match (&self.last_campaign_dir, campaign_dir) {
@@ -1009,6 +1037,16 @@ impl CharactersEditorState {
 
         if campaign_dir_changed {
             self.available_portraits = extract_portrait_candidates(campaign_dir);
+            // Rebuild creature candidates from the manager whenever the campaign dir changes.
+            self.available_creatures = creature_manager
+                .and_then(|m| m.load_all_creatures().ok())
+                .map(|creatures| {
+                    creatures
+                        .into_iter()
+                        .map(|c| (c.id, c.name))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             self.last_campaign_dir = campaign_dir.cloned();
         }
 
@@ -1137,7 +1175,15 @@ impl CharactersEditorState {
                 self.show_list(ui, items, campaign_dir, unsaved_changes);
             }
             CharactersEditorMode::Add | CharactersEditorMode::Edit => {
-                self.show_character_form(ui, races, classes, items, campaign_dir, characters_file);
+                self.show_character_form(
+                    ui,
+                    races,
+                    classes,
+                    items,
+                    campaign_dir,
+                    characters_file,
+                    creature_manager,
+                );
             }
         }
 
@@ -1153,6 +1199,62 @@ impl CharactersEditorState {
                     egui::Id::new("autocomplete:portrait:character_portrait".to_string()),
                     &self.buffer.portrait_id,
                 );
+            }
+        }
+
+        // Show creature picker modal if open
+        if self.creature_picker_open {
+            if let Some(manager) = creature_manager {
+                let creatures = manager.load_all_creatures().unwrap_or_default();
+                let mut picked_id: Option<String> = None;
+                let mut should_close = false;
+                egui::Window::new("Select Creature")
+                    .id(egui::Id::new("character_creature_picker"))
+                    .resizable(true)
+                    .show(ui.ctx(), |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("character_creature_picker_scroll")
+                            .max_height(300.0)
+                            .show(ui, |ui| {
+                                for creature in &creatures {
+                                    ui.push_id(creature.id, |ui| {
+                                        let selected =
+                                            self.buffer.creature_id == creature.id.to_string();
+                                        if ui
+                                            .selectable_label(
+                                                selected,
+                                                format!("{} — {}", creature.id, creature.name),
+                                            )
+                                            .clicked()
+                                        {
+                                            picked_id = Some(creature.id.to_string());
+                                        }
+                                    });
+                                }
+                            });
+                        if ui.button("Close").clicked() {
+                            should_close = true;
+                        }
+                    });
+                if let Some(id) = picked_id {
+                    self.apply_selected_creature_id(Some(id.clone()));
+                    // Sync the autocomplete buffer so the text field shows the
+                    // resolved "id — name" display string immediately.
+                    let display = creatures
+                        .iter()
+                        .find(|c| c.id.to_string() == id)
+                        .map(|c| format!("{} — {}", c.id, c.name))
+                        .unwrap_or_else(|| id.clone());
+                    crate::ui_helpers::store_autocomplete_buffer(
+                        ui.ctx(),
+                        egui::Id::new("autocomplete:creature:character_creature".to_string()),
+                        &display,
+                    );
+                } else if should_close {
+                    self.creature_picker_open = false;
+                }
+            } else {
+                self.creature_picker_open = false;
             }
         }
     }
@@ -1453,6 +1555,12 @@ impl CharactersEditorState {
                 ui.label("Alignment:");
                 ui.label(alignment_name(character.alignment));
                 ui.end_row();
+
+                if let Some(id) = character.creature_id {
+                    ui.label("Creature:");
+                    ui.label(id.to_string());
+                    ui.end_row();
+                }
             });
 
         ui.add_space(10.0);
@@ -1596,6 +1704,7 @@ impl CharactersEditorState {
         items: &[Item],
         campaign_dir: Option<&PathBuf>,
         characters_file: &str,
+        creature_manager: Option<&CreatureAssetManager>,
     ) {
         let title = if self.mode == CharactersEditorMode::Add {
             "New Character"
@@ -1618,6 +1727,10 @@ impl CharactersEditorState {
             crate::ui_helpers::remove_autocomplete_buffer(
                 ctx,
                 egui::Id::new("autocomplete:portrait:character_portrait".to_string()),
+            );
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:creature:character_creature".to_string()),
             );
             self.reset_autocomplete_buffers = false;
         }
@@ -1723,6 +1836,35 @@ impl CharactersEditorState {
                             if ui.button("🖼").on_hover_text("Browse portraits").clicked() {
                                 self.portrait_picker_open = true;
                             }
+                        });
+                        ui.end_row();
+
+                        ui.label("Creature ID:");
+                        ui.horizontal(|ui| {
+                            // Autocomplete input (types by name or numeric ID)
+                            autocomplete_creature_selector(
+                                ui,
+                                "character_creature",
+                                "",
+                                &mut self.buffer.creature_id,
+                                &self.available_creatures,
+                            );
+
+                            // Grid picker button
+                            if ui
+                                .button("🦎")
+                                .on_hover_text("Browse creature assets")
+                                .clicked()
+                            {
+                                if creature_manager.is_some() {
+                                    self.creature_picker_open = true;
+                                }
+                            }
+                            ui.label("ℹ").on_hover_text(
+                                "Links this character to a procedural mesh creature definition. \
+                                 When set, the character spawns as a 3-D creature mesh on the map \
+                                 instead of a sprite placeholder.",
+                            );
                         });
                         ui.end_row();
 
@@ -2143,6 +2285,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_characters_editor_creature_id_roundtrips_through_form() {
+        use antares::domain::character_definition::CharacterDefinition;
+        let mut state = CharactersEditorState::default();
+        // Simulate start_edit_character with creature_id: Some(42)
+        let mut def = CharacterDefinition::new(
+            "test_char".to_string(),
+            "Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            antares::domain::character::Sex::Male,
+            antares::domain::character::Alignment::Neutral,
+        );
+        def.creature_id = Some(42);
+        state.characters.push(def);
+        state.start_edit_character(0);
+        assert_eq!(state.buffer.creature_id, "42");
+        // Now save and verify
+        let result = state.save_character();
+        assert!(result.is_ok(), "save_character failed: {:?}", result);
+        assert_eq!(state.characters[0].creature_id, Some(42));
+    }
+
+    #[test]
+    fn test_characters_editor_creature_id_empty_string_saves_none() {
+        let mut state = CharactersEditorState::default();
+        state.buffer.id = "test".to_string();
+        state.buffer.name = "Test".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+        state.buffer.creature_id = String::new();
+        let result = state.save_character();
+        assert!(result.is_ok());
+        assert_eq!(state.characters[0].creature_id, None);
+    }
+
+    #[test]
+    fn test_characters_editor_creature_id_invalid_string_saves_none() {
+        let mut state = CharactersEditorState::default();
+        state.buffer.id = "test".to_string();
+        state.buffer.name = "Test".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+        state.buffer.creature_id = "not_a_number".to_string();
+        let result = state.save_character();
+        assert!(result.is_ok());
+        assert_eq!(state.characters[0].creature_id, None);
+    }
+
+    #[test]
+    fn test_creature_picker_open_flag() {
+        let state = CharactersEditorState::default();
+        assert!(!state.creature_picker_open);
+    }
+
+    #[test]
+    fn test_apply_selected_creature_id_sets_buffer() {
+        let mut state = CharactersEditorState::default();
+        state.apply_selected_creature_id(Some("7".to_string()));
+        assert_eq!(state.buffer.creature_id, "7");
+        assert!(!state.creature_picker_open);
+    }
+
+    #[test]
     fn test_characters_editor_state_creation() {
         let state = CharactersEditorState::new();
         assert!(state.characters.is_empty());
@@ -2545,6 +2750,7 @@ mod tests {
             description: String::new(),
             is_premade: true,
             starts_in_party: false,
+            creature_id: None,
         };
 
         state.characters.push(character);
@@ -3136,6 +3342,7 @@ mod tests {
                     &items,
                     None,
                     "data/characters.ron",
+                    None,
                 );
             });
         });

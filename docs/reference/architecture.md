@@ -175,9 +175,9 @@ _Purpose_: Content creation, validation, and development tools
 - **Editor Tools**: Complete set of content editors (items, classes, races, maps, quests, dialogue)
 - **Campaign Tools**: Campaign packaging, loading, and metadata management
 - **Campaign Builder UI Pattern**: `sdk/campaign_builder/src/ui_helpers.rs` defines
-    `MetadataBadge`, `StandardListItemConfig`, and `show_standard_list_item` for
-    consistent left-panel list rendering and context-menu action handling across
-    all Campaign Builder editors
+  `MetadataBadge`, `StandardListItemConfig`, and `show_standard_list_item` for
+  consistent left-panel list rendering and context-menu action handling across
+  all Campaign Builder editors
 
 #### 3.4 Key Architectural Patterns
 
@@ -658,6 +658,10 @@ pub struct Monster {
     // Runtime combat state
     pub conditions: MonsterCondition,
     pub has_acted: bool,
+    /// Optional creature asset binding — links this monster to a `CreatureDefinition`
+    /// in the creature registry for 3D map rendering.
+    /// Set from `MonsterDefinition.creature_id` via `to_monster()`.
+    pub creature_id: Option<CreatureId>,
 }
 
 pub struct MonsterResistances {
@@ -683,6 +687,33 @@ pub enum MonsterCondition {
     Afraid,
     Dead,
 }
+#### 4.4.1 CreatureBound Trait
+
+The `CreatureBound` trait provides a unified interface for retrieving the optional
+creature asset binding from any definition type. It is implemented by
+`MonsterDefinition`, `NpcDefinition`, and `CharacterDefinition`.
+
+```rust
+/// Implemented by any definition type that may carry a reference to a
+/// `CreatureDefinition` in the creature registry.
+pub trait CreatureBound {
+    /// Returns the optional `CreatureId` that links this definition to a mesh
+    /// asset in the creature registry. Returns `None` when no visual binding
+    /// has been set.
+    fn creature_id(&self) -> Option<CreatureId>;
+}
+
+impl CreatureBound for MonsterDefinition { /* self.creature_id */ }
+impl CreatureBound for NpcDefinition     { /* self.creature_id */ }
+impl CreatureBound for CharacterDefinition { /* self.creature_id */ }
+```
+
+All three spawn branches in `spawn_map` (`Encounter`, `NpcDialogue`,
+`RecruitableCharacter`) use `def.creature_id()` via this trait rather than
+direct field access. The trait is defined in
+`src/domain/world/creature_binding.rs` and re-exported as
+`antares::domain::world::CreatureBound`.
+
 #### 4.5 Items and Equipment
 
 ```rust
@@ -1134,6 +1165,11 @@ pub struct CharacterDefinition {
     pub description: String,
     #[serde(default)]
     pub is_premade: bool,
+    /// Optional creature asset binding for 3D map rendering
+    /// `#[serde(default)]` — `None` = sprite fallback
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creature_id: Option<CreatureId>,
 }
 
 fn default_starting_food() -> u32 { 10 }

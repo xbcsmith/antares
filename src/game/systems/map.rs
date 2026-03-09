@@ -3,6 +3,7 @@
 
 use crate::domain::types;
 use crate::domain::world;
+use crate::domain::world::CreatureBound;
 use crate::domain::world::SpriteReference;
 use crate::game::components::creature::CreatureVisual;
 use crate::game::components::sprite::{ActorType, AnimatedSprite, TileSprite};
@@ -388,64 +389,16 @@ fn map_event_to_event_type(ev: &world::MapEvent) -> Option<MapEventType> {
     }
 }
 
-/// Normalizes identifiers and names for loose cross-database matching.
-fn normalize_lookup_key(value: &str) -> String {
-    value
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .flat_map(|c| c.to_lowercase())
-        .collect()
-}
-
-/// Resolves a creature id for a recruitable map event character id.
-///
-/// Resolution order:
-/// 1. Treat the id as an NPC id and use its configured `creature_id`
-/// 2. Strip `npc_` prefix and try character definitions by id
-/// 3. Match character name against creature definition name (normalized)
-fn resolve_recruitable_creature_id(
-    character_id: &str,
-    content: &crate::application::resources::GameContent,
-) -> Option<types::CreatureId> {
-    if let Some(npc_def) = content.0.npcs.get_npc(character_id) {
-        if let Some(creature_id) = npc_def.creature_id {
-            return Some(creature_id);
-        }
-    }
-
-    let mut candidates = Vec::with_capacity(2);
-    candidates.push(character_id);
-    if let Some(stripped) = character_id.strip_prefix("npc_") {
-        candidates.push(stripped);
-    }
-
-    for candidate in candidates {
-        if let Some(character_def) = content.0.characters.get_character(candidate) {
-            let target_name = normalize_lookup_key(&character_def.name);
-            if let Some(creature) = content
-                .0
-                .creatures
-                .all_creatures()
-                .find(|creature| normalize_lookup_key(&creature.name) == target_name)
-            {
-                return Some(creature.id);
-            }
-        }
-    }
-
-    None
-}
-
 /// Resolves a creature id for an encounter marker from a monster group.
 ///
-/// Uses the first monster entry that has a configured `visual_id`.
+/// Uses the first monster entry that has a configured `creature_id`.
 fn resolve_encounter_creature_id(
     monster_group: &[types::MonsterId],
     content: &crate::application::resources::GameContent,
 ) -> Option<types::CreatureId> {
     for monster_id in monster_group {
         if let Some(monster_def) = content.0.monsters.get_monster(*monster_id) {
-            if let Some(creature_id) = monster_def.visual_id {
+            if let Some(creature_id) = monster_def.creature_id() {
                 return Some(creature_id);
             }
         }
@@ -1392,8 +1345,11 @@ fn spawn_map(
                     let x = position.x as f32;
                     let y = position.y as f32;
 
-                    if let Some(creature_id) =
-                        resolve_recruitable_creature_id(character_id, &content)
+                    if let Some(creature_id) = content
+                        .0
+                        .characters
+                        .get_character(character_id)
+                        .and_then(|def| def.creature_id())
                     {
                         if let Some(creature_def) = content.0.creatures.get_creature(creature_id) {
                             let entity = spawn_creature(
@@ -1910,7 +1866,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: crate::domain::combat::monster::LootTable::default(),
-            visual_id: Some(7),
+            creature_id: Some(7),
             conditions: crate::domain::combat::monster::MonsterCondition::Normal,
             active_conditions: Vec::new(),
             has_acted: false,
@@ -1945,7 +1901,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: crate::domain::combat::monster::LootTable::default(),
-            visual_id: None,
+            creature_id: None,
             conditions: crate::domain::combat::monster::MonsterCondition::Normal,
             active_conditions: Vec::new(),
             has_acted: false,
@@ -1968,7 +1924,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: crate::domain::combat::monster::LootTable::default(),
-            visual_id: Some(99),
+            creature_id: Some(99),
             conditions: crate::domain::combat::monster::MonsterCondition::Normal,
             active_conditions: Vec::new(),
             has_acted: false,
@@ -2210,6 +2166,7 @@ mod tests {
             crate::domain::character::Alignment::Neutral,
         );
         old_gareth.is_premade = true;
+        old_gareth.creature_id = Some(58);
         db.characters
             .add_character(old_gareth)
             .expect("Failed to add character to ContentDatabase");
@@ -2249,7 +2206,7 @@ mod tests {
             crate::domain::world::MapEvent::RecruitableCharacter {
                 name: "Old Gareth".to_string(),
                 description: "A veteran smith".to_string(),
-                character_id: "npc_old_gareth".to_string(),
+                character_id: "old_gareth".to_string(),
                 dialogue_id: None,
                 time_condition: None,
                 facing: None,
@@ -2277,7 +2234,7 @@ mod tests {
 
         let (visual, marker, coord) = results[0];
         assert_eq!(visual.creature_id, 58);
-        assert_eq!(marker.npc_id, "npc_old_gareth");
+        assert_eq!(marker.npc_id, "old_gareth");
         assert_eq!(coord.0, recruitable_pos);
     }
 
@@ -2302,6 +2259,7 @@ mod tests {
             crate::domain::character::Alignment::Neutral,
         );
         old_gareth.is_premade = true;
+        old_gareth.creature_id = Some(58);
         db.characters
             .add_character(old_gareth)
             .expect("Failed to add character to ContentDatabase");
@@ -2341,7 +2299,7 @@ mod tests {
             crate::domain::world::MapEvent::RecruitableCharacter {
                 name: "Old Gareth".to_string(),
                 description: "A veteran smith".to_string(),
-                character_id: "npc_old_gareth".to_string(),
+                character_id: "old_gareth".to_string(),
                 dialogue_id: None,
                 time_condition: None,
                 facing: None,
@@ -2363,7 +2321,7 @@ mod tests {
             let mut query = world_ref.query::<(&RecruitableVisualMarker, &TileCoord)>();
             let results: Vec<_> = query.iter(&*world_ref).collect();
             assert_eq!(results.len(), 1);
-            assert_eq!(results[0].0.character_id, "npc_old_gareth");
+            assert_eq!(results[0].0.character_id, "old_gareth");
             assert_eq!(results[0].1 .0, recruitable_pos);
         }
 
@@ -2717,7 +2675,7 @@ mod tests {
 
         let mut db = crate::sdk::database::ContentDatabase::new();
 
-        // Build a MonsterDefinition with visual_id pre-set so add_monster converts it correctly.
+        // Build a MonsterDefinition with creature_id pre-set so add_monster converts it correctly.
         let monster_def = MonsterDefinition {
             id: 33,
             name: "Test Monster".to_string(),
@@ -2733,7 +2691,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: MDLootTable::new(0, 0, 0, 0, 0),
-            visual_id: Some(20),
+            creature_id: Some(20),
             conditions: crate::domain::combat::monster::MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -2947,19 +2905,23 @@ mod tests {
     fn test_map_event_recruitable_character_facing() {
         // Integration test: RecruitableCharacter event with facing: Some(East) must produce
         // a creature entity whose FacingComponent stores Direction::East.
-        //
-        // Uses the NPC definition path so that resolve_recruitable_creature_id resolves
-        // creature_id=30 directly via the NpcDefinition.creature_id field.
         use crate::domain::types::{Direction, Position};
-        use crate::domain::world::npc::NpcDefinition;
         use crate::domain::world::MapEvent;
         use crate::game::components::creature::FacingComponent;
 
         let mut db = crate::sdk::database::ContentDatabase::new();
 
-        let mut npc_def = NpcDefinition::new("npc_facing_test", "Facing Test NPC", "portrait");
-        npc_def.creature_id = Some(30);
-        db.npcs.add_npc(npc_def).expect("add npc");
+        let mut char_def = crate::domain::character_definition::CharacterDefinition::new(
+            "facing_test_char".to_string(),
+            "Facing Test Character".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Good,
+        );
+        char_def.creature_id = Some(30);
+        char_def.is_premade = true;
+        db.characters.add_character(char_def).expect("add char");
         db.creatures
             .add_creature(make_creature_def(30))
             .expect("add creature");
@@ -2973,9 +2935,9 @@ mod tests {
         map.events.insert(
             rc_pos,
             MapEvent::RecruitableCharacter {
-                name: "Facing Test NPC".to_string(),
+                name: "Facing Test Character".to_string(),
                 description: "desc".to_string(),
-                character_id: "npc_facing_test".to_string(),
+                character_id: "facing_test_char".to_string(),
                 dialogue_id: None,
                 time_condition: None,
                 facing: Some(Direction::East),
@@ -2996,6 +2958,122 @@ mod tests {
             Direction::East,
             "RecruitableCharacter FacingComponent must store East"
         );
+    }
+
+    #[test]
+    fn test_recruitable_spawn_uses_character_def_creature_id() {
+        // Build an app with a CharacterDefinition that has creature_id: Some(N)
+        // and a matching CreatureDefinition; trigger a RecruitableCharacter map event;
+        // assert a CreatureVisual { creature_id: N } entity is spawned.
+        use crate::domain::types::Position;
+        use crate::game::components::creature::CreatureVisual;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let mut char_def = crate::domain::character_definition::CharacterDefinition::new(
+            "char_with_creature".to_string(),
+            "Character With Creature".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Good,
+        );
+        char_def.creature_id = Some(42);
+        char_def.is_premade = true;
+        db.characters.add_character(char_def).expect("add char");
+        db.creatures
+            .add_creature(make_creature_def(42))
+            .expect("add creature");
+
+        let mut app = make_spawn_app(db);
+
+        let mut game_state = crate::application::GameState::new();
+        let mut map = crate::domain::world::Map::new(1, "T".to_string(), "D".to_string(), 10, 10);
+
+        let rc_pos = Position::new(3, 3);
+        map.events.insert(
+            rc_pos,
+            crate::domain::world::MapEvent::RecruitableCharacter {
+                name: "Character With Creature".to_string(),
+                description: "desc".to_string(),
+                character_id: "char_with_creature".to_string(),
+                dialogue_id: None,
+                time_condition: None,
+                facing: None,
+            },
+        );
+
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&CreatureVisual, &TileCoord)>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(results.len(), 1, "expected one CreatureVisual spawned");
+        assert_eq!(results[0].0.creature_id, 42);
+        assert_eq!(results[0].1 .0, rc_pos);
+    }
+
+    #[test]
+    fn test_recruitable_spawn_falls_back_to_sprite_when_no_creature_id() {
+        // Same setup but creature_id: None; assert no CreatureVisual is spawned
+        // and a RecruitableVisualMarker entity is present instead.
+        use crate::domain::types::Position;
+        use crate::game::components::creature::CreatureVisual;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let char_def = crate::domain::character_definition::CharacterDefinition::new(
+            "char_no_creature".to_string(),
+            "Character Without Creature".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Good,
+        );
+        // creature_id is None by default
+        db.characters.add_character(char_def).expect("add char");
+
+        let mut app = make_spawn_app(db);
+
+        let mut game_state = crate::application::GameState::new();
+        let mut map = crate::domain::world::Map::new(1, "T".to_string(), "D".to_string(), 10, 10);
+
+        let rc_pos = Position::new(5, 5);
+        map.events.insert(
+            rc_pos,
+            crate::domain::world::MapEvent::RecruitableCharacter {
+                name: "Character Without Creature".to_string(),
+                description: "desc".to_string(),
+                character_id: "char_no_creature".to_string(),
+                dialogue_id: None,
+                time_condition: None,
+                facing: None,
+            },
+        );
+
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.update();
+
+        let world_ref = app.world_mut();
+        // No CreatureVisual should be spawned
+        let mut cv_query = world_ref.query::<&CreatureVisual>();
+        let cv_results: Vec<_> = cv_query.iter(&*world_ref).collect();
+        assert_eq!(
+            cv_results.len(),
+            0,
+            "no CreatureVisual when creature_id is None"
+        );
+
+        // A RecruitableVisualMarker sprite entity should be present (sprite fallback)
+        let mut rv_query = world_ref.query::<(&RecruitableVisualMarker, &TileCoord)>();
+        let rv_results: Vec<_> = rv_query.iter(&*world_ref).collect();
+        assert_eq!(rv_results.len(), 1, "expected sprite fallback entity");
+        assert_eq!(rv_results[0].1 .0, rc_pos);
     }
 
     // ===== Phase 3: Runtime Facing Change System tests =====
@@ -3026,7 +3104,7 @@ mod tests {
                 is_undead: false,
                 magic_resistance: 0,
                 loot: crate::domain::combat::monster::LootTable::default(),
-                visual_id: Some(55),
+                creature_id: Some(55),
                 conditions: crate::domain::combat::monster::MonsterCondition::Normal,
                 active_conditions: vec![],
                 has_acted: false,
@@ -3099,7 +3177,7 @@ mod tests {
                 is_undead: false,
                 magic_resistance: 0,
                 loot: crate::domain::combat::monster::LootTable::default(),
-                visual_id: Some(56),
+                creature_id: Some(56),
                 conditions: crate::domain::combat::monster::MonsterCondition::Normal,
                 active_conditions: vec![],
                 has_acted: false,
@@ -3427,7 +3505,7 @@ mod tests {
                 is_undead: false,
                 magic_resistance: 0,
                 loot: crate::domain::combat::monster::LootTable::default(),
-                visual_id: Some(75),
+                creature_id: Some(75),
                 conditions: crate::domain::combat::monster::MonsterCondition::Normal,
                 active_conditions: vec![],
                 has_acted: false,

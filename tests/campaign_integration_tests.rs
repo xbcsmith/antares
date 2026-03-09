@@ -96,7 +96,7 @@ fn test_campaign_creature_database_contains_expected_creatures() {
 }
 
 #[test]
-fn test_all_monsters_have_visual_id_mapping() {
+fn test_all_monsters_have_creature_id_mapping() {
     // Arrange: Load campaign content
     let content = ContentDatabase::load_campaign("data/test_campaign")
         .expect("Should load tutorial campaign content");
@@ -111,39 +111,39 @@ fn test_all_monsters_have_visual_id_mapping() {
         "Tutorial campaign should have monsters"
     );
 
-    // Assert: Count monsters with visual_id
+    // Assert: Count monsters with creature_id
     let mut monsters_with_visuals = 0;
 
     for monster_id in &monster_ids {
         if let Some(monster) = content.monsters.get_monster(*monster_id) {
-            if monster.visual_id.is_some() {
+            if monster.creature_id.is_some() {
                 monsters_with_visuals += 1;
 
                 // Verify creature exists
-                let visual_id = monster.visual_id.unwrap();
+                let creature_id = monster.creature_id.unwrap();
                 assert!(
-                    content.creatures.has_creature(visual_id),
+                    content.creatures.has_creature(creature_id),
                     "Monster '{}' references non-existent creature {}",
                     monster.name,
-                    visual_id
+                    creature_id
                 );
             }
         }
     }
 
     println!(
-        "Monsters: {} total, {} with visual_id",
+        "Monsters: {} total, {} with creature_id",
         monster_count, monsters_with_visuals
     );
 
-    // Assert: All monsters should have visual_id (100% coverage)
+    // Assert: All monsters should have creature_id (100% coverage)
     assert_eq!(
         monsters_with_visuals, monster_count,
-        "All monsters should have visual_id assigned"
+        "All monsters should have creature_id assigned"
     );
 
     println!(
-        "✓ All {} monsters have valid visual_id mappings",
+        "✓ All {} monsters have valid creature_id mappings",
         monster_count
     );
 }
@@ -200,21 +200,21 @@ fn test_all_npcs_have_creature_id_mapping() {
 }
 
 #[test]
-fn test_creature_visual_id_ranges_follow_convention() {
+fn test_creature_id_ranges_follow_convention() {
     // Arrange: Load campaign content
     let content = ContentDatabase::load_campaign("data/test_campaign")
         .expect("Should load tutorial campaign content");
 
-    // Check monster visual_id range (should be 1-50)
+    // Check monster creature_id range (should be 1-50)
     let monster_ids = content.monsters.all_monsters();
     for monster_id in monster_ids {
         if let Some(monster) = content.monsters.get_monster(monster_id) {
-            if let Some(visual_id) = monster.visual_id {
+            if let Some(creature_id) = monster.creature_id {
                 assert!(
-                    (1..=50).contains(&visual_id),
-                    "Monster '{}' has visual_id {} outside expected range 1-50",
+                    (1..=50).contains(&creature_id),
+                    "Monster '{}' has creature_id {} outside expected range 1-50",
                     monster.name,
-                    visual_id
+                    creature_id
                 );
             }
         }
@@ -263,8 +263,8 @@ fn test_creature_database_load_performance() {
 }
 
 #[test]
-fn test_fallback_mechanism_for_missing_visual_id() {
-    // Arrange: Create a monster without visual_id
+fn test_fallback_mechanism_for_monster_missing_creature_id() {
+    // Arrange: Create a monster without creature_id
     use antares::domain::character::{AttributePair, AttributePair16, Stats};
     use antares::domain::combat::monster::{AiBehavior, LootTable, Monster, MonsterCondition};
 
@@ -291,21 +291,21 @@ fn test_fallback_mechanism_for_missing_visual_id() {
         is_undead: false,
         magic_resistance: 0,
         ai_behavior: AiBehavior::default(),
-        visual_id: None, // No visual assigned
+        creature_id: None, // No creature assigned
         conditions: MonsterCondition::Normal,
         active_conditions: Vec::new(),
         has_acted: false,
     };
 
-    // Assert: Monster exists but has no visual_id
+    // Assert: Monster exists but has no creature_id
     assert!(
-        monster.visual_id.is_none(),
-        "Test monster should have no visual_id for fallback test"
+        monster.creature_id.is_none(),
+        "Test monster should have no creature_id for fallback test"
     );
 
     // Note: In actual rendering code, this should fall back to a placeholder
     // The spawning system should check for None and use a default cube or similar
-    println!("✓ Monsters can exist without visual_id for fallback scenarios");
+    println!("✓ Monsters can exist without creature_id for fallback scenarios");
 }
 
 #[test]
@@ -436,12 +436,12 @@ fn test_campaign_integration_end_to_end() {
     let monster_ids = content.monsters.all_monsters();
     for monster_id in monster_ids {
         if let Some(monster) = content.monsters.get_monster(monster_id) {
-            if let Some(visual_id) = monster.visual_id {
+            if let Some(creature_id) = monster.creature_id {
                 assert!(
-                    content.creatures.has_creature(visual_id),
+                    content.creatures.has_creature(creature_id),
                     "Monster '{}' references non-existent creature {}",
                     monster.name,
-                    visual_id
+                    creature_id
                 );
             }
         }

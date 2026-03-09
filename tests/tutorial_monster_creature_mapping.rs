@@ -4,7 +4,7 @@
 //! Integration test for tutorial campaign monster-to-creature visual mappings
 //!
 //! This test validates that all monsters in the tutorial campaign have valid
-//! visual_id references that point to existing creatures in the creature database.
+//! creature_id references that point to existing creatures in the creature database.
 //!
 //! Part of Phase 2: Monster Visual Mapping implementation.
 
@@ -36,18 +36,18 @@ fn test_monster_creature_mappings_are_valid() {
 
     for monster in monster_db.all_monsters() {
         assert!(
-            monster.visual_id.is_some(),
-            "Monster {} ({}) missing visual_id",
+            monster.creature_id.is_some(),
+            "Monster {} ({}) missing creature_id",
             monster.id,
             monster.name
         );
-        let visual_id = monster.visual_id.unwrap();
+        let creature_id = monster.creature_id.unwrap();
         assert!(
-            creature_db.has_creature(visual_id),
+            creature_db.has_creature(creature_id),
             "Monster {} ({}) references missing creature {}",
             monster.id,
             monster.name,
-            visual_id
+            creature_id
         );
     }
     println!("✓ All monsters reference existing creature visuals");
@@ -73,18 +73,18 @@ fn test_all_monsters_have_visuals() {
 
     let mut monsters_without_visuals = Vec::new();
     for mon in monster_db.all_monsters() {
-        if mon.visual_id.is_none() {
+        if mon.creature_id.is_none() {
             monsters_without_visuals.push((mon.id, mon.name.clone()));
         }
     }
 
     assert!(
         monsters_without_visuals.is_empty(),
-        "The following monsters are missing visual_id: {:?}",
+        "The following monsters are missing creature_id: {:?}",
         monsters_without_visuals
     );
 
-    println!("✓ All {} monsters have visual_id set", total_monsters);
+    println!("✓ All {} monsters have creature_id set", total_monsters);
 }
 
 #[test]
@@ -111,9 +111,9 @@ fn test_no_broken_creature_references() {
     let mut broken_references = Vec::new();
 
     for monster in monster_db.all_monsters() {
-        if let Some(visual_id) = monster.visual_id {
-            if creature_db.get_creature(visual_id).is_none() {
-                broken_references.push((monster.id, monster.name.clone(), visual_id));
+        if let Some(creature_id) = monster.creature_id {
+            if creature_db.get_creature(creature_id).is_none() {
+                broken_references.push((monster.id, monster.name.clone(), creature_id));
             }
         }
     }

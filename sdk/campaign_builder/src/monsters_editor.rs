@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::creature_assets::CreatureAssetManager;
 use crate::ui_helpers::{
     show_standard_list_item, AttributePair16Input, AttributePairInput, EditorToolbar, ItemAction,
     MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
@@ -9,7 +10,7 @@ use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
 use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
-use antares::domain::types::DiceRoll;
+use antares::domain::types::{CreatureId, DiceRoll};
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -38,6 +39,9 @@ pub struct MonstersEditorState {
 
     // Autocomplete input buffers
     pub monster_name_input_buffer: String,
+
+    // Creature asset picker
+    pub creature_picker_open: bool,
 }
 
 impl Default for MonstersEditorState {
@@ -54,6 +58,7 @@ impl Default for MonstersEditorState {
             show_attacks_editor: false,
             show_loot_editor: false,
             monster_name_input_buffer: String::new(),
+            creature_picker_open: false,
         }
     }
 }
@@ -61,6 +66,12 @@ impl Default for MonstersEditorState {
 impl MonstersEditorState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Sets the creature ID on the edit buffer and closes the picker.
+    pub fn apply_selected_creature_id(&mut self, id: Option<CreatureId>) {
+        self.edit_buffer.creature_id = id;
+        self.creature_picker_open = false;
     }
 
     pub fn default_monster() -> MonsterDefinition {
@@ -87,7 +98,7 @@ impl MonstersEditorState {
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
-            visual_id: None,
+            creature_id: None,
         }
     }
 
@@ -102,6 +113,7 @@ impl MonstersEditorState {
     /// * `unsaved_changes` - Flag to track if there are unsaved changes
     /// * `status_message` - Status message to display to user
     /// * `file_load_merge_mode` - Whether to merge or replace when loading files
+    /// * `creature_manager` - Optional creature asset manager for visual asset binding
     #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
@@ -112,6 +124,7 @@ impl MonstersEditorState {
         unsaved_changes: &mut bool,
         status_message: &mut String,
         file_load_merge_mode: &mut bool,
+        creature_manager: Option<&CreatureAssetManager>,
     ) {
         ui.heading("👹 Monsters Editor");
         ui.add_space(5.0);
@@ -268,6 +281,7 @@ impl MonstersEditorState {
                     status_message,
                     campaign_dir,
                     monsters_file,
+                    creature_manager,
                 )
             }
         }
@@ -486,6 +500,9 @@ impl MonstersEditorState {
                     ui.label(format!("Can Regenerate: {}", monster.can_regenerate));
                     ui.label(format!("Can Advance: {}", monster.can_advance));
                     ui.label(format!("Magic Resistance: {}%", monster.magic_resistance));
+                    if let Some(id) = monster.creature_id {
+                        ui.label(format!("Creature ID: {}", id));
+                    }
                     ui.separator();
                     ui.label("Loot:");
                     ui.label(format!(
@@ -517,6 +534,11 @@ impl MonstersEditorState {
                     ui.separator();
 
                     ui.label(format!("🆔 ID: {}", monster.id));
+                    if let Some(id) = monster.creature_id {
+                        ui.label(format!("🦎 Creature: {}", id));
+                    } else {
+                        ui.label("🦎 Creature: No creature asset");
+                    }
 
                     let type_icon = if monster.is_undead { "💀" } else { "👹" };
                     ui.label(format!(
@@ -752,6 +774,7 @@ impl MonstersEditorState {
         status_message: &mut String,
         campaign_dir: Option<&PathBuf>,
         monsters_file: &str,
+        creature_manager: Option<&CreatureAssetManager>,
     ) {
         let is_add = self.mode == MonstersEditorMode::Add;
         ui.heading(if is_add {
@@ -804,6 +827,97 @@ impl MonstersEditorState {
 
                     ui.checkbox(&mut self.edit_buffer.is_undead, "💀 Undead");
                 });
+
+                ui.add_space(10.0);
+
+                // Visual Asset section
+                ui.group(|ui| {
+                    ui.heading("Visual Asset");
+
+                    let creature_id_label = match self.edit_buffer.creature_id {
+                        Some(id) => id.to_string(),
+                        None => "None".to_string(),
+                    };
+
+                    ui.horizontal(|ui| {
+                        ui.label("Creature ID:");
+                        ui.label(&creature_id_label);
+                        if ui
+                            .button("Browse…")
+                            .on_hover_text("Select a creature asset")
+                            .clicked()
+                        {
+                            self.creature_picker_open = true;
+                        }
+                        if ui.button("Clear").clicked() {
+                            self.apply_selected_creature_id(None);
+                        }
+                        ui.label("ℹ").on_hover_text(
+                            "Links this monster to a procedural mesh creature definition. When set, \
+                             the monster spawns as a 3-D creature mesh on the map instead of a \
+                             sprite placeholder.",
+                        );
+                    });
+
+                    // Show resolved creature name when manager is available
+                    if let (Some(id), Some(manager)) =
+                        (self.edit_buffer.creature_id, creature_manager)
+                    {
+                        if let Ok(creature) = manager.load_creature(id) {
+                            ui.label(
+                                egui::RichText::new(format!("Asset: \"{}\"", creature.name))
+                                    .color(egui::Color32::GRAY),
+                            );
+                        }
+                    }
+                });
+
+                // Creature picker modal
+                if self.creature_picker_open {
+                    if let Some(manager) = creature_manager {
+                        let creatures = manager.load_all_creatures().unwrap_or_default();
+                        let mut picked_id: Option<CreatureId> = None;
+                        let mut should_close = false;
+                        egui::Window::new("Select Creature")
+                            .id(egui::Id::new("monster_creature_picker"))
+                            .resizable(true)
+                            .show(ui.ctx(), |ui| {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("monster_creature_picker_scroll")
+                                    .max_height(300.0)
+                                    .show(ui, |ui| {
+                                        for creature in &creatures {
+                                            ui.push_id(creature.id, |ui| {
+                                                if ui
+                                                    .selectable_label(
+                                                        self.edit_buffer.creature_id
+                                                            == Some(creature.id),
+                                                        format!(
+                                                            "{} — {}",
+                                                            creature.id, creature.name
+                                                        ),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    picked_id = Some(creature.id);
+                                                }
+                                            });
+                                        }
+                                    });
+                                if ui.button("Close").clicked() {
+                                    should_close = true;
+                                }
+                            });
+                        if let Some(id) = picked_id {
+                            self.apply_selected_creature_id(Some(id));
+                        } else if should_close {
+                            self.creature_picker_open = false;
+                        }
+                    } else {
+                        // No manager available; close picker
+                        self.creature_picker_open = false;
+                    }
+                }
 
                 ui.add_space(10.0);
 
@@ -1225,6 +1339,31 @@ impl MonstersEditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =========================================================================
+    // Creature Asset Binding Tests
+    // =========================================================================
+
+    #[test]
+    fn test_monsters_editor_creature_id_roundtrips_through_form() {
+        let mut state = MonstersEditorState::default();
+        state.apply_selected_creature_id(Some(42));
+        assert_eq!(state.edit_buffer.creature_id, Some(42));
+    }
+
+    #[test]
+    fn test_monsters_editor_clear_creature_id() {
+        let mut state = MonstersEditorState::default();
+        state.edit_buffer.creature_id = Some(42);
+        state.apply_selected_creature_id(None);
+        assert_eq!(state.edit_buffer.creature_id, None);
+    }
+
+    #[test]
+    fn test_monsters_editor_default_monster_creature_id_is_none() {
+        let monster = MonstersEditorState::default_monster();
+        assert_eq!(monster.creature_id, None);
+    }
 
     // =========================================================================
     // MonstersEditorState Tests

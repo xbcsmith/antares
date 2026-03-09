@@ -18,6 +18,7 @@
 //! - `sprite_selection`: Procedural sprite selection (Phase 6)
 
 pub mod blueprint;
+pub mod creature_binding;
 mod events;
 mod movement;
 pub mod npc;
@@ -26,6 +27,7 @@ pub mod sprite_selection;
 mod types;
 
 pub use blueprint::MapBlueprint;
+pub use creature_binding::CreatureBound;
 pub use events::{random_encounter, trigger_event, EventError, EventResult};
 pub use movement::{check_tile_blocked, move_party, MovementError};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};

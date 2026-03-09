@@ -40,6 +40,14 @@ use std::path::PathBuf;
 /// ```
 pub const OPEN_CREATURE_TEMPLATES_SENTINEL: &str = "__campaign_builder::open_creature_templates__";
 
+/// Minimum allowed value for the creature-level scale slider.
+///
+/// Allows very small creatures (e.g. insects, tiny familiars) down to 0.001 units.
+pub const CREATURE_SCALE_MIN: f64 = 0.001;
+
+/// Maximum allowed value for the creature-level scale slider.
+pub const CREATURE_SCALE_MAX: f64 = 5.0;
+
 /// Editor mode for creatures
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreaturesEditorMode {
@@ -2118,9 +2126,14 @@ impl CreaturesEditorState {
                 ui.label("Scale:");
                 if ui
                     .add(
-                        egui::Slider::new(&mut self.edit_buffer.scale, 0.1..=5.0)
-                            .text("units")
-                            .logarithmic(true),
+                        egui::Slider::new(
+                            &mut self.edit_buffer.scale,
+                            (CREATURE_SCALE_MIN as f32)..=(CREATURE_SCALE_MAX as f32),
+                        )
+                        .text("units")
+                        .logarithmic(true)
+                        .min_decimals(3)
+                        .max_decimals(3),
                     )
                     .changed()
                 {
@@ -3527,6 +3540,60 @@ mod tests {
         assert_eq!(creature.meshes.len(), 0);
         assert_eq!(creature.scale, 1.0);
         assert_eq!(creature.color_tint, None);
+    }
+
+    /// CREATURE_SCALE_MIN must be exactly 0.001 so that the slider reaches the
+    /// sub-tenth range required for tiny creatures.
+    #[test]
+    fn test_creature_scale_min_is_0_001() {
+        assert!(
+            (CREATURE_SCALE_MIN - 0.001).abs() < f64::EPSILON,
+            "CREATURE_SCALE_MIN should be 0.001, got {}",
+            CREATURE_SCALE_MIN
+        );
+    }
+
+    /// CREATURE_SCALE_MAX must be exactly 5.0 to match the design requirement.
+    #[test]
+    fn test_creature_scale_max_is_5_0() {
+        assert!(
+            (CREATURE_SCALE_MAX - 5.0).abs() < f64::EPSILON,
+            "CREATURE_SCALE_MAX should be 5.0, got {}",
+            CREATURE_SCALE_MAX
+        );
+    }
+
+    /// The scale range must be strictly ordered: min < max, and both must be
+    /// positive.
+    #[test]
+    fn test_creature_scale_range_is_valid() {
+        assert!(
+            CREATURE_SCALE_MIN > 0.0,
+            "CREATURE_SCALE_MIN must be positive"
+        );
+        assert!(
+            CREATURE_SCALE_MAX > CREATURE_SCALE_MIN,
+            "CREATURE_SCALE_MAX must be greater than CREATURE_SCALE_MIN"
+        );
+    }
+
+    /// The default creature scale (1.0) must fall within the allowed range so
+    /// that newly created creatures never start outside slider bounds.
+    #[test]
+    fn test_default_creature_scale_within_range() {
+        let creature = CreaturesEditorState::default_creature();
+        assert!(
+            creature.scale as f64 >= CREATURE_SCALE_MIN,
+            "default scale {} is below CREATURE_SCALE_MIN {}",
+            creature.scale,
+            CREATURE_SCALE_MIN
+        );
+        assert!(
+            creature.scale as f64 <= CREATURE_SCALE_MAX,
+            "default scale {} is above CREATURE_SCALE_MAX {}",
+            creature.scale,
+            CREATURE_SCALE_MAX
+        );
     }
 
     #[test]

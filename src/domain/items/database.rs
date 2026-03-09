@@ -203,6 +203,7 @@ impl ItemDatabase {
     ///     is_cursed: false,
     ///     icon_path: None,
     ///     tags: vec![],
+    ///     mesh_descriptor_override: None,
     /// };
     /// db.add_item(club).unwrap();
     ///
@@ -301,6 +302,7 @@ impl ItemDatabase {
     ///     is_cursed: false,
     ///     icon_path: None,
     ///     tags: vec![],
+    ///     mesh_descriptor_override: None,
     /// };
     /// db.add_item(club.clone()).unwrap();
     ///
