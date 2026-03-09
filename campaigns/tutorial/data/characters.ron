@@ -310,8 +310,9 @@
             accessory1: None,
             accessory2: None,
         ),
-        description: "A nimble elf with quick fingers and quicker feet. Whisper claims to be a \'locksmith\' but her skills with traps suggest a more colorful past.",
+        description: "A nimble elf with quick fingers and quicker feet. Whisper claims to be a 'locksmith' but her skills with traps suggest a more colorful past.",
         is_premade: true,
+        creature_id: Some(1012),
         starts_in_party: false,
     ),
     (
@@ -375,8 +376,9 @@
             accessory1: None,
             accessory2: None,
         ),
-        description: "An enthusiastic gnome apprentice from the Mage\'s Guild. Zara was separated from her mentor and seeks adventurers to help her complete her studies.",
+        description: "An enthusiastic gnome apprentice from the Mage's Guild. Zara was separated from her mentor and seeks adventurers to help her complete her studies.",
         is_premade: true,
+        creature_id: Some(1008),
         starts_in_party: false,
     ),
     (

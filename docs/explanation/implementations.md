@@ -705,6 +705,7 @@ fragile name-normalisation cross-database lookup that was the previous fallback.
 - [x] `data/test_campaign/data/characters.ron` — `creature_id: Some(58)` added to `old_gareth` entry
 - [x] `campaigns/tutorial/data/characters.ron` — `creature_id: Some(1007)` added to `old_gareth` entry
 - [x] `docs/reference/architecture.md` — `creature_id: Option<CreatureId>` field added to `pub struct CharacterDefinition` in Section 4.7
+- [x] `campaigns/tutorial/data/characters.ron` — `creature_id: Some(1012)` added to `"whisper"`; `creature_id: Some(1008)` added to `"apprentice_zara"` (both are `RecruitableCharacter` map events that previously resolved through the name-match heuristic)
 - [x] All four quality gates pass with zero errors/warnings (`cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`)
 
 ### What Was Built
@@ -796,7 +797,7 @@ files, RON data files, and integration tests. Added a new RON round-trip test.
 ### Deliverables Checklist
 
 - [x] `src/domain/combat/database.rs` — `visual_id` → `creature_id` on `MonsterDefinition`; doc comment updated; `to_monster()` updated; `create_test_monster` helper updated; `test_monster_visual_id_parsing` renamed to `test_monster_creature_id_parsing`; `test_load_tutorial_monsters_visual_ids` renamed to `test_load_tutorial_monsters_creature_ids`; new `test_monster_definition_creature_id_field_roundtrips_ron` added
-- [x] `src/domain/combat/monster.rs` — `visual_id` → `creature_id` on `Monster`; `Monster::new()` initialiser updated; `set_visual` parameter renamed from `visual_id` to `creature_id`; doc comments updated
+- [x] `src/domain/combat/monster.rs` — `visual_id` → `creature_id` on `Monster`; `Monster::new()` initialiser updated; `set_visual` parameter renamed from `visual_id` to `creature_id`; doc comments updated; `test_set_visual_sets_creature_id` added
 - [x] `src/game/systems/map.rs` — `resolve_encounter_creature_id` doc comment and `monster_def.visual_id` field access updated; all six inline test `MonsterDefinition` literals updated (`visual_id` → `creature_id`)
 - [x] `src/game/systems/monster_rendering.rs` — module-level doc comments, `spawn_monster_with_visual` doc comment and logic, `spawn_fallback_visual` doc comment updated; local binding renamed from `visual_id` to `creature_id`; `CreatureVisual` construction updated to use shorthand `creature_id`; warn message updated
 - [x] `src/domain/combat/engine.rs` — test helper `MonsterDefinition` literal updated
@@ -811,6 +812,8 @@ files, RON data files, and integration tests. Added a new RON round-trip test.
 - [x] `tests/tutorial_campaign_loading_integration.rs` — `test_monster_spawning_with_missing_visual_id` renamed to `test_monster_spawning_with_missing_creature_id`; comments updated
 - [x] `tests/tutorial_monster_creature_mapping.rs` — module doc comment updated; all `.visual_id` field accesses updated; all assertion messages updated
 - [x] `grep -r "visual_id" . --include="*.rs" --include="*.ron"` returns zero matches
+- [x] `campaigns/tutorial/creature_mappings.md` — `visual_id:` in Step 4 monster example replaced with `creature_id:`; "See Also" reference updated; monster count table updated from 11 to 17 entries
+- [x] `docs/reference/architecture.md` Section 4.4 — `pub creature_id: Option<CreatureId>` added to `Monster` runtime struct; new sub-section `#### 4.4.1 CreatureBound Trait` added describing the trait and its three implementors
 - [x] All four quality gates pass with zero errors/warnings (`cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`)
 
 ### What Was Built
@@ -865,6 +868,14 @@ Added to `src/domain/combat/database.rs` `mod tests`. Serialises a
 `MonsterDefinition` with `creature_id: Some(42)` to RON using
 `ron::ser::to_string_pretty`, deserialises it back, and asserts the value is
 preserved — directly satisfying the Phase 1 success criterion.
+
+#### New Test: `test_set_visual_sets_creature_id`
+
+Added to `src/domain/combat/monster.rs` `mod tests`. Constructs a `Monster`,
+asserts `creature_id` is `None`, calls `set_visual(5)` and asserts `Some(5)`,
+then calls `set_visual(42)` and asserts `Some(42)` — confirming the method
+sets `creature_id` and that repeated calls overwrite the previous value.
+This was a required Phase 1 test that had been omitted in the original implementation.
 
 ### Success Criteria Verification
 

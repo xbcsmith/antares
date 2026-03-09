@@ -150,6 +150,7 @@ pub enum EventError {
 ///     description: "A weathered sign".to_string(),
 ///     text: "Welcome to the dungeon!".to_string(),
 ///     time_condition: None,
+///     facing: None,
 /// });
 ///
 /// world.add_map(map);
@@ -346,7 +347,7 @@ pub fn trigger_event(
 ///
 /// ```
 /// use antares::domain::world::{World, Map, random_encounter};
-/// use antares::domain::world::types::{EncounterGroup, EncounterTable};
+/// use antares::domain::world::{EncounterGroup, EncounterTable};
 /// use antares::domain::combat::types::CombatEventType;
 /// use antares::domain::types::Position;
 ///

@@ -724,4 +724,20 @@ mod tests {
         let monster = Monster::new(42, "AI Test".to_string(), stats, 10, 5, attacks, loot);
         assert_eq!(monster.ai_behavior, AiBehavior::Random);
     }
+
+    #[test]
+    fn test_set_visual_sets_creature_id() {
+        let stats = Stats::new(10, 8, 6, 10, 8, 7, 5);
+        let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
+        let loot = LootTable::none();
+
+        let mut monster = Monster::new(1, "Goblin".to_string(), stats, 10, 5, attacks, loot);
+        assert_eq!(monster.creature_id, None);
+
+        monster.set_visual(5);
+        assert_eq!(monster.creature_id, Some(5));
+
+        monster.set_visual(42);
+        assert_eq!(monster.creature_id, Some(42));
+    }
 }

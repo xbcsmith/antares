@@ -402,7 +402,7 @@ impl TreeType {
     /// use antares::game::systems::advanced_trees::TreeType;
     ///
     /// let all_types = TreeType::all();
-    /// assert_eq!(all_types.len(), 6);
+    /// assert_eq!(all_types.len(), 7);
     /// assert!(all_types.contains(&TreeType::Oak));
     /// ```
     pub fn all() -> &'static [TreeType] {

@@ -383,7 +383,8 @@ impl NpcEditorState {
         // Mode-specific UI
         match self.mode {
             NpcEditorMode::List => {
-                needs_save |= self.show_list_view(ui, display_config, campaign_dir);
+                needs_save |=
+                    self.show_list_view(ui, display_config, campaign_dir, creature_manager);
             }
             NpcEditorMode::Add | NpcEditorMode::Edit => {
                 needs_save |= self.show_edit_view(ui, campaign_dir, npcs_file, creature_manager);
@@ -403,6 +404,7 @@ impl NpcEditorState {
         ui: &mut egui::Ui,
         display_config: &DisplayConfig,
         campaign_dir: Option<&PathBuf>,
+        creature_manager: Option<&CreatureAssetManager>,
     ) -> bool {
         let mut needs_save = false;
 

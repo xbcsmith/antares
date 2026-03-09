@@ -45,13 +45,13 @@
 //!
 //! ```no_run
 //! use antares::game::systems::combat::start_encounter;
+//! use antares::domain::combat::types::CombatEventType;
 //! # // In an event handler:
 //! # let mut gs = antares::application::GameState::new();
 //! # let content = antares::application::resources::GameContent::new(antares::sdk::database::ContentDatabase::new());
 //! # let monster_group: Vec<u8> = vec![1, 2];
-//! let _ = start_encounter(&mut gs, &content, &monster_group);
+//! let _ = start_encounter(&mut gs, &content, &monster_group, CombatEventType::Normal);
 //! ```
-
 use bevy::prelude::*;
 
 use crate::application::resources::GameContent;
