@@ -1,5 +1,248 @@
 # Implementations
 
+## Phase 3: Clock UI in the HUD (Complete)
+
+### Overview
+
+Phase 3 adds a visible clock widget to the exploration HUD, positioned directly
+below the compass in the top-right corner. The widget shows two lines of text
+that update every frame:
+
+- **Time line** — `"HH:MM"` with zero-padded hours and minutes
+- **Day line** — `"Day N"` where N is the current in-game day
+
+The time text tints between warm golden (`CLOCK_DAY_TEXT_COLOR`) during bright
+periods (Dawn through Dusk) and cool blue-white (`CLOCK_NIGHT_TEXT_COLOR`)
+during dark periods (Evening and Night), giving the player an ambient cue that
+mirrors the `TimeOfDay::is_dark()` flag from Phase 2. The clock is gated by
+`not_in_combat` so it does not render on top of the combat HUD.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `ClockRoot`, `ClockTimeText`, `ClockDayText` marker components in `src/game/systems/hud.rs`
+- [x] `CLOCK_FONT_SIZE`, `CLOCK_BACKGROUND_COLOR`, `CLOCK_BORDER_COLOR`, `CLOCK_TEXT_COLOR`, `CLOCK_NIGHT_TEXT_COLOR`, `CLOCK_DAY_TEXT_COLOR` constants
+- [x] `CLOCK_TOP_OFFSET`, `CLOCK_WIDTH`, `CLOCK_PADDING` layout constants
+- [x] Clock widget spawned in `setup_hud` — absolute-positioned below the compass, two `Text` children
+- [x] `update_clock` system updating time and day text + time text colour every frame
+- [x] `update_clock` registered in `HudPlugin` inside the `not_in_combat`-gated system set
+- [x] `format_clock_time()` and `format_clock_day()` pure helper functions for testability
+- [x] `clock_text_color()` pure helper delegating to `TimeOfDay::is_dark()`
+- [x] All Phase 3 tests pass (31 clock-specific tests across `mod clock_tests` and `mod tests`)
+
+### What Was Built
+
+#### Marker Components — `src/game/systems/hud.rs`
+
+Three zero-sized marker components identify the clock entities in queries:
+
+```src/game/systems/hud.rs#L151-163
+/// Marker component for the clock widget container (sits below the compass)
+#[derive(Component)]
+pub struct ClockRoot;
+
+/// Marker component for the time-of-day text node (displays "HH:MM")
+#[derive(Component)]
+pub struct ClockTimeText;
+
+/// Marker component for the day counter text node (displays "Day N")
+#[derive(Component)]
+pub struct ClockDayText;
+```
+
+#### Constants — `src/game/systems/hud.rs`
+
+Nine constants define the clock's visual style and layout, placed adjacent to
+the existing compass constants so related values are grouped together:
+
+| Constant                 | Value                       | Purpose                              |
+| ------------------------ | --------------------------- | ------------------------------------ |
+| `CLOCK_FONT_SIZE`        | `14.0`                      | Text size for both clock lines       |
+| `CLOCK_BACKGROUND_COLOR` | `srgba(0.1, 0.1, 0.1, 0.9)` | Matches compass panel style          |
+| `CLOCK_BORDER_COLOR`     | `srgba(0.4, 0.4, 0.4, 1.0)` | Matches compass border               |
+| `CLOCK_TEXT_COLOR`       | `srgba(1.0, 1.0, 1.0, 1.0)` | Default white (used for day line)    |
+| `CLOCK_NIGHT_TEXT_COLOR` | `srgba(0.6, 0.6, 1.0, 1.0)` | Cool blue-white for dark periods     |
+| `CLOCK_DAY_TEXT_COLOR`   | `srgba(1.0, 0.9, 0.5, 1.0)` | Warm golden for bright periods       |
+| `CLOCK_TOP_OFFSET`       | `COMPASS_SIZE + 28.0`       | Positions clock below compass (76px) |
+| `CLOCK_WIDTH`            | `COMPASS_SIZE` (48px)       | Matches compass width                |
+| `CLOCK_PADDING`          | `4.0`                       | Inner padding of the clock panel     |
+
+#### Clock Widget Spawn — `setup_hud` in `src/game/systems/hud.rs`
+
+The clock is spawned at the end of `setup_hud` as a separate absolute-positioned
+node. It uses `FlexDirection::Column` to stack the two text children vertically,
+anchored at `right: 20px` / `top: CLOCK_TOP_OFFSET`:
+
+```src/game/systems/hud.rs#L399-440
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(20.0),
+                top: Val::Px(CLOCK_TOP_OFFSET),
+                width: Val::Px(CLOCK_WIDTH),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::all(Val::Px(CLOCK_PADDING)),
+                row_gap: Val::Px(2.0),
+                ..default()
+            },
+            BackgroundColor(CLOCK_BACKGROUND_COLOR),
+            ClockRoot,
+        ))
+        .with_children(|parent| {
+            parent.spawn((Text::new("00:00"), ..., ClockTimeText));
+            parent.spawn((Text::new("Day 1"), ..., ClockDayText));
+        });
+```
+
+#### `update_clock` System — `src/game/systems/hud.rs`
+
+Runs every frame in the `not_in_combat`-gated `Update` set. It reads
+`global_state.0.time_of_day()` via `GameState::time_of_day()` (Phase 2
+helper) to pick the correct text colour, then updates both text nodes:
+
+```src/game/systems/hud.rs#L566-585
+fn update_clock(
+    global_state: Res<GlobalState>,
+    mut time_query: Query<
+        (&mut Text, &mut TextColor),
+        (With<ClockTimeText>, Without<ClockDayText>),
+    >,
+    mut day_query: Query<(&mut Text, &mut TextColor), (With<ClockDayText>, Without<ClockTimeText>)>,
+) {
+    let game_time = &global_state.0.time;
+    let time_of_day = global_state.0.time_of_day();
+    let time_color = clock_text_color(time_of_day);
+
+    for (mut text, mut color) in &mut time_query {
+        **text = format_clock_time(game_time.hour, game_time.minute);
+        *color = TextColor(time_color);
+    }
+    for (mut text, _color) in &mut day_query {
+        **text = format_clock_day(game_time.day);
+    }
+}
+```
+
+The `Without<ClockDayText>` / `Without<ClockTimeText>` filter guards prevent
+Bevy's borrow checker from rejecting the two simultaneous mutable queries over
+the same `Text` component type.
+
+#### `HudPlugin` Registration — `src/game/systems/hud.rs`
+
+`update_clock` is added to the `not_in_combat`-gated system tuple alongside
+`update_compass`, `update_portraits`, and `ensure_portraits_loaded`:
+
+```src/game/systems/hud.rs#L188-205
+    fn build(&self, app: &mut App) {
+        app.insert_resource(PortraitAssets::default())
+            .add_systems(Startup, (setup_hud, setup_party_entities))
+            .add_systems(Update, update_hud)
+            .add_systems(
+                Update,
+                (
+                    ensure_portraits_loaded,
+                    update_compass,
+                    update_clock,
+                    update_portraits,
+                )
+                    .run_if(not_in_combat),
+            );
+    }
+```
+
+#### Pure Helper Functions — `src/game/systems/hud.rs`
+
+Three public helpers are extracted from the system so they are independently
+testable without a Bevy world:
+
+- `format_clock_time(hour: u8, minute: u8) -> String` — zero-pads both fields to `"HH:MM"`
+- `format_clock_day(day: u32) -> String` — produces `"Day N"`
+- `clock_text_color(time_of_day: TimeOfDay) -> Color` — delegates to `TimeOfDay::is_dark()`, returning `CLOCK_NIGHT_TEXT_COLOR` or `CLOCK_DAY_TEXT_COLOR`
+
+### Tests
+
+All tests live in `mod clock_tests` (and a few clock-constant checks in `mod tests`) within `src/game/systems/hud.rs`.
+
+#### `format_clock_time` tests
+
+| Test                                                  | What it verifies                                     |
+| ----------------------------------------------------- | ---------------------------------------------------- |
+| `test_clock_format_midnight`                          | `(0, 0)` → `"00:00"`                                 |
+| `test_clock_format_noon`                              | `(12, 5)` → `"12:05"` (minute zero-padded)           |
+| `test_clock_format_single_digit_hour`                 | `(9, 0)` → `"09:00"` (hour zero-padded)              |
+| `test_clock_format_end_of_day`                        | `(23, 59)` → `"23:59"`                               |
+| `test_clock_format_zero_hour_one_minute`              | `(0, 1)` → `"00:01"`                                 |
+| `test_clock_format_dawn_default`                      | `(6, 30)` → `"06:30"`                                |
+| `test_clock_format_all_hours_produce_valid_strings`   | Every hour 0–23 produces a 5-char `"HH:MM"` string   |
+| `test_clock_format_all_minutes_produce_valid_strings` | Every minute 0–59 produces a 5-char `"HH:MM"` string |
+
+#### `format_clock_day` tests
+
+| Test                               | What it verifies                                       |
+| ---------------------------------- | ------------------------------------------------------ |
+| `test_clock_day_display_first_day` | `1` → `"Day 1"`                                        |
+| `test_clock_day_display_forty_two` | `42` → `"Day 42"`                                      |
+| `test_clock_day_display_year`      | `365` → `"Day 365"`                                    |
+| `test_clock_day_display_zero`      | `0` → `"Day 0"` (must not panic)                       |
+| `test_clock_day_display_max`       | `u32::MAX` must not panic; result starts with `"Day "` |
+
+#### `clock_text_color` tests
+
+| Test                                                        | What it verifies                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------- |
+| `test_clock_text_color_night_returns_night_color`           | `Night` → `CLOCK_NIGHT_TEXT_COLOR`                            |
+| `test_clock_text_color_evening_returns_night_color`         | `Evening` → `CLOCK_NIGHT_TEXT_COLOR` (is_dark)                |
+| `test_clock_text_color_dawn_returns_day_color`              | `Dawn` → `CLOCK_DAY_TEXT_COLOR`                               |
+| `test_clock_text_color_morning_returns_day_color`           | `Morning` → `CLOCK_DAY_TEXT_COLOR`                            |
+| `test_clock_text_color_afternoon_returns_day_color`         | `Afternoon` → `CLOCK_DAY_TEXT_COLOR`                          |
+| `test_clock_text_color_dusk_returns_day_color`              | `Dusk` → `CLOCK_DAY_TEXT_COLOR`                               |
+| `test_clock_text_color_agrees_with_is_dark_for_all_periods` | `clock_text_color` agrees with `is_dark()` for all 6 variants |
+
+#### Constant sanity tests
+
+| Test                                                  | What it verifies                                             |
+| ----------------------------------------------------- | ------------------------------------------------------------ |
+| `test_clock_font_size_is_positive`                    | `CLOCK_FONT_SIZE > 0.0`                                      |
+| `test_clock_top_offset_places_clock_below_compass`    | `CLOCK_TOP_OFFSET > COMPASS_SIZE` (no overlap)               |
+| `test_clock_width_is_positive`                        | `CLOCK_WIDTH > 0.0`                                          |
+| `test_clock_padding_is_non_negative`                  | `CLOCK_PADDING >= 0.0`                                       |
+| `test_clock_night_and_day_colors_are_distinct`        | Night and day colors differ by >0.05 on at least one channel |
+| `test_clock_colors_are_opaque`                        | All three text color constants have `alpha == 1.0`           |
+| `test_clock_background_and_border_colors_are_visible` | Background and border have `alpha > 0.0`                     |
+| `test_clock_constants_valid` (in `mod tests`)         | `CLOCK_FONT_SIZE > 0.0`, `CLOCK_BACKGROUND_COLOR` alpha > 0  |
+
+#### Bevy integration tests
+
+| Test                                           | What it verifies                                                                                |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `test_clock_widget_spawned_on_startup`         | After `app.update()` exactly one `ClockRoot`, `ClockTimeText`, and `ClockDayText` entity exists |
+| `test_clock_widget_shows_default_game_time`    | Default `GameState` (06:00, Day 1) produces `"06:00"` and `"Day 1"` text after two updates      |
+| `test_clock_widget_updates_after_time_advance` | `GameState` advanced 18 h from 06:00 → 00:00 Day 2 produces `"00:00"` and `"Day 2"` text        |
+
+### Architecture Compliance
+
+- [x] `ClockRoot`, `ClockTimeText`, `ClockDayText` marker components match the names specified in plan §3.1 exactly
+- [x] All nine constants match the values specified in plan §3.1
+- [x] Clock spawned in `setup_hud` as specified in plan §3.2 — absolute-positioned below the compass
+- [x] `update_clock` system matches the signature pattern from plan §3.3 (extended with `TextColor` mutation for the tinting bonus)
+- [x] `update_clock` registered in `HudPlugin` under `not_in_combat` as specified in plan §3.4
+- [x] All three spec tests (`test_clock_format_midnight`, `test_clock_format_noon`, `test_clock_day_display`) present and passing
+- [x] Pure helper functions extracted for testability — no `unwrap()` without justification
+- [x] No architectural deviations from `architecture.md`
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → no output (all files formatted)
+cargo check              → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings → Finished with 0 warnings
+cargo nextest run        → 3337 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Phase 2: Time-of-Day System (Complete)
 
 ### Overview
