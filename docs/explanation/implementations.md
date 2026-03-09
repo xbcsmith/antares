@@ -1,5 +1,244 @@
 # Implementations
 
+## Phase 2: Time-of-Day System (Complete)
+
+### Overview
+
+Phase 2 introduces the full `TimeOfDay` classification system, which maps the
+in-game 24-hour clock onto six named periods. Every system that needs to know
+whether it is dawn, midday, dusk, or pitch-dark can call a single helper
+rather than comparing raw hour numbers.
+
+| Period    | Hours         | Notes                                             |
+| --------- | ------------- | ------------------------------------------------- |
+| Dawn      | 05:00 – 07:59 | Pale light; roosters crow                         |
+| Morning   | 08:00 – 11:59 | Full daylight                                     |
+| Afternoon | 12:00 – 15:59 | Peak brightness                                   |
+| Dusk      | 16:00 – 18:59 | Golden hour; shadows lengthen                     |
+| Evening   | 19:00 – 21:59 | Dark but not full night; light source recommended |
+| Night     | 22:00 – 04:59 | Pitch black; light source required outdoors       |
+
+Ambient light is updated every frame by the `update_ambient_light` system in
+`src/game/systems/time.rs` so any time advancement (step, combat round, rest,
+map transition) is reflected in the rendered scene within the same frame.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `TimeOfDay` enum in `src/domain/types.rs` — six variants with correct hour boundaries, `label()`, and `is_dark()`
+- [x] `GameTime::time_of_day()` — maps `self.hour` to the correct `TimeOfDay` variant
+- [x] `GameTime::is_night()` — delegates to `time_of_day()`, returns `true` for `Evening | Night`
+- [x] `GameTime::is_day()` — delegates to `is_night()` via logical inverse
+- [x] `GameState::time_of_day()` convenience helper in `src/application/mod.rs`
+- [x] Ambient-light hook in `src/game/systems/time.rs` reading `time_of_day()` every frame
+- [x] `AMBIENT_NIGHT_BRIGHTNESS`, `AMBIENT_EVENING_BRIGHTNESS`, `AMBIENT_DAWN_BRIGHTNESS`, `AMBIENT_DUSK_BRIGHTNESS`, `AMBIENT_DAY_BRIGHTNESS` constants
+- [x] `time_of_day_brightness()` pure function for testability
+- [x] `TimeOfDayPlugin` registering both `apply_time_advance` and `update_ambient_light` systems
+- [x] All Phase 2 tests pass (see table below)
+
+### What Was Built
+
+#### `TimeOfDay` Enum — `src/domain/types.rs`
+
+Six variants cover the full 24-hour cycle with precise hour boundaries:
+
+```src/domain/types.rs#L381-394
+pub enum TimeOfDay {
+    /// 05:00–07:59 — pale light, roosters crow
+    Dawn,
+    /// 08:00–11:59 — full daylight
+    Morning,
+    /// 12:00–15:59 — peak brightness
+    Afternoon,
+    /// 16:00–18:59 — golden light, shadows lengthen
+    Dusk,
+    /// 19:00–21:59 — dark but not full night
+    Evening,
+    /// 22:00–04:59 — pitch black without a light source
+    Night,
+}
+```
+
+Two helper methods live on `TimeOfDay`:
+
+- `label() -> &'static str` — returns a human-readable period name (`"Dawn"`, `"Night"`, etc.), used by the HUD clock colour system.
+- `is_dark() -> bool` — returns `true` for `Evening | Night`; consumed by `clock_text_color()` in `hud.rs` and `time_of_day_brightness()` in `time.rs`.
+
+#### `GameTime::time_of_day()` — `src/domain/types.rs`
+
+A pure `match` on `self.hour` maps all 24 possible hour values to the correct
+`TimeOfDay` variant:
+
+```src/domain/types.rs#L543-553
+pub fn time_of_day(&self) -> TimeOfDay {
+    match self.hour {
+        5..=7 => TimeOfDay::Dawn,
+        8..=11 => TimeOfDay::Morning,
+        12..=15 => TimeOfDay::Afternoon,
+        16..=18 => TimeOfDay::Dusk,
+        19..=21 => TimeOfDay::Evening,
+        // 22-23 and 0-4 are Night
+        _ => TimeOfDay::Night,
+    }
+}
+```
+
+#### `GameTime::is_night()` and `GameTime::is_day()` — `src/domain/types.rs`
+
+Both delegate to `time_of_day()` so they are always consistent with the
+six-period classification:
+
+```src/domain/types.rs#L570-591
+pub fn is_night(&self) -> bool {
+    matches!(self.time_of_day(), TimeOfDay::Evening | TimeOfDay::Night)
+}
+
+pub fn is_day(&self) -> bool {
+    !self.is_night()
+}
+```
+
+`Evening` is classified as "night" for `is_night()` because a light source is
+recommended at that point; however the ambient-light system keeps `Evening`
+distinct from `Night` by using a higher brightness value (`0.50` vs `0.25`).
+
+#### `GameState::time_of_day()` — `src/application/mod.rs`
+
+A thin convenience wrapper so any system with `GameState` access can query the
+period without reaching into `state.time` directly:
+
+```src/application/mod.rs#L1469-1471
+pub fn time_of_day(&self) -> TimeOfDay {
+    self.time.time_of_day()
+}
+```
+
+#### Ambient-Light Hook — `src/game/systems/time.rs`
+
+Five brightness constants encode the intended per-period light intensity:
+
+| Constant                     | Value  | Period(s)          |
+| ---------------------------- | ------ | ------------------ |
+| `AMBIENT_NIGHT_BRIGHTNESS`   | `0.25` | Night              |
+| `AMBIENT_EVENING_BRIGHTNESS` | `0.50` | Evening            |
+| `AMBIENT_DAWN_BRIGHTNESS`    | `0.70` | Dawn               |
+| `AMBIENT_DUSK_BRIGHTNESS`    | `0.70` | Dusk               |
+| `AMBIENT_DAY_BRIGHTNESS`     | `1.00` | Morning, Afternoon |
+
+The `time_of_day_brightness()` pure function maps a `TimeOfDay` to the
+correct constant. The Bevy system `update_ambient_light` calls it every frame:
+
+```src/game/systems/time.rs#L137-143
+pub fn update_ambient_light(
+    global_state: Res<GlobalState>,
+    mut ambient_light: ResMut<AmbientLight>,
+) {
+    let brightness = time_of_day_brightness(global_state.0.time_of_day());
+    ambient_light.brightness = brightness;
+}
+```
+
+`TimeOfDayPlugin` orders `apply_time_advance` **before** `update_ambient_light`
+so the light always reflects the current frame's clock value:
+
+```src/game/systems/time.rs#L114-118
+fn build(&self, app: &mut App) {
+    app.add_message::<TimeAdvanceEvent>();
+    app.add_systems(Update, apply_time_advance.before(update_ambient_light));
+    app.add_systems(Update, update_ambient_light);
+}
+```
+
+#### HUD Clock Colour Tinting — `src/game/systems/hud.rs`
+
+The `update_clock` system reads `global_state.0.time_of_day()` and calls
+`clock_text_color()` to tint the time text:
+
+- Dark periods (`Evening`, `Night`) → `CLOCK_NIGHT_TEXT_COLOR` — cool blue-white (`rgba(0.6, 0.6, 1.0, 1.0)`)
+- All other periods → `CLOCK_DAY_TEXT_COLOR` — warm golden (`rgba(1.0, 0.9, 0.5, 1.0)`)
+
+This gives players an immediate ambient visual cue in the HUD that maps to the
+`TimeOfDay::is_dark()` flag.
+
+### Tests
+
+#### `src/domain/types.rs` — `TimeOfDay` and `GameTime` tests
+
+| Test                                     | What it verifies                                                                        |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| `test_time_of_day_night_early_morning`   | Hours 0–4 all map to `Night`                                                            |
+| `test_time_of_day_dawn`                  | Hours 5–7 (including 5:00 and 7:59) map to `Dawn`                                       |
+| `test_time_of_day_morning`               | Hours 8–11 map to `Morning`                                                             |
+| `test_time_of_day_afternoon`             | Hours 12–15 map to `Afternoon`                                                          |
+| `test_time_of_day_dusk`                  | Hours 16–18 map to `Dusk`                                                               |
+| `test_time_of_day_evening`               | Hours 19–21 map to `Evening`                                                            |
+| `test_time_of_day_night`                 | Hours 22–23 map to `Night`                                                              |
+| `test_time_of_day_boundary_transitions`  | Every exact transition hour tested (4:59→5:00, 7:59→8:00, …, 21:59→22:00)               |
+| `test_is_night_delegates_to_time_of_day` | `Evening` and `Night` return `true`; `Dawn`/`Morning`/`Afternoon`/`Dusk` return `false` |
+| `test_is_day_is_inverse_of_is_night`     | For every hour 0–23, `is_day() == !is_night()`                                          |
+| `test_time_of_day_label`                 | Each variant's `label()` returns the correct string                                     |
+| `test_time_of_day_is_dark`               | `Evening` and `Night` are dark; the other four are not                                  |
+
+#### `src/application/mod.rs` — `GameState::time_of_day()` tests
+
+| Test                                                 | What it verifies                                                         |
+| ---------------------------------------------------- | ------------------------------------------------------------------------ |
+| `test_game_state_time_of_day_default_is_dawn`        | `GameState::new()` starts at 06:00 — confirmed Dawn                      |
+| `test_game_state_time_of_day_delegates_to_game_time` | Seven representative hours each produce the expected `TimeOfDay` variant |
+| `test_game_state_time_of_day_advances_correctly`     | 06:00 + 6 hours via `advance_hours` → Afternoon                          |
+| `test_game_state_time_of_day_night_via_advance_time` | 06:00 + 16 hours via `advance_time` → Night                              |
+
+#### `src/game/systems/time.rs` — ambient-light tests
+
+| Test                                                    | What it verifies                                                       |
+| ------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `test_brightness_night`                                 | Night maps to `AMBIENT_NIGHT_BRIGHTNESS`                               |
+| `test_brightness_evening`                               | Evening maps to `AMBIENT_EVENING_BRIGHTNESS`                           |
+| `test_brightness_dawn`                                  | Dawn maps to `AMBIENT_DAWN_BRIGHTNESS`                                 |
+| `test_brightness_dusk`                                  | Dusk maps to `AMBIENT_DUSK_BRIGHTNESS`                                 |
+| `test_brightness_morning`                               | Morning maps to `AMBIENT_DAY_BRIGHTNESS`                               |
+| `test_brightness_afternoon`                             | Afternoon maps to `AMBIENT_DAY_BRIGHTNESS`                             |
+| `test_brightness_is_darker_at_night_than_day`           | Night brightness is strictly less than Afternoon brightness            |
+| `test_brightness_ordering`                              | Full ordering: Night < Evening < Dawn = Dusk < Morning = Afternoon     |
+| `test_all_hours_produce_valid_brightness`               | Every hour 0–23 yields a brightness in `[0.0, 1.0]`                    |
+| `test_dark_periods_below_threshold`                     | Evening and Night are strictly below `1.0`                             |
+| `test_time_of_day_is_dark_matches_brightness_reduction` | Every `is_dark()` period has brightness below `AMBIENT_DAY_BRIGHTNESS` |
+
+#### `src/game/systems/hud.rs` — clock colour tests
+
+| Test                                                        | What it verifies                                                         |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `test_clock_text_color_night_returns_night_color`           | `Night` → `CLOCK_NIGHT_TEXT_COLOR`                                       |
+| `test_clock_text_color_evening_returns_night_color`         | `Evening` → `CLOCK_NIGHT_TEXT_COLOR` (it `is_dark()`)                    |
+| `test_clock_text_color_dawn_returns_day_color`              | `Dawn` → `CLOCK_DAY_TEXT_COLOR`                                          |
+| `test_clock_text_color_morning_returns_day_color`           | `Morning` → `CLOCK_DAY_TEXT_COLOR`                                       |
+| `test_clock_text_color_afternoon_returns_day_color`         | `Afternoon` → `CLOCK_DAY_TEXT_COLOR`                                     |
+| `test_clock_text_color_dusk_returns_day_color`              | `Dusk` → `CLOCK_DAY_TEXT_COLOR`                                          |
+| `test_clock_text_color_agrees_with_is_dark_for_all_periods` | `clock_text_color` agrees with `TimeOfDay::is_dark()` for all 6 variants |
+
+### Architecture Compliance
+
+- [x] `TimeOfDay` lives in `src/domain/types.rs` alongside `GameTime` as specified in plan §2.1
+- [x] Hour boundaries match the plan specification exactly (Dawn 05–07, Morning 08–11, Afternoon 12–15, Dusk 16–18, Evening 19–21, Night 22–04)
+- [x] `is_night()` delegates to `time_of_day()` — no duplicated hour comparisons
+- [x] `is_day()` is the logical inverse of `is_night()` — no independent implementation
+- [x] `GameState::time_of_day()` convenience helper present as specified in plan §2.2
+- [x] Ambient-light hook reads `time_of_day()` in `src/game/systems/time.rs` as specified in plan §2.3
+- [x] `AMBIENT_NIGHT_BRIGHTNESS` = `0.25` matches the `night_ambient_brightness` value specified in plan §2.3
+- [x] `TimeOfDay` derives `Serialize, Deserialize` for future RON data-file event conditions (Phase 4)
+- [x] No `unwrap()` without justification; all paths handled
+- [x] All four quality gates pass
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → no output (all files formatted)
+cargo check              → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings → Finished with 0 warnings
+cargo nextest run        → 3337 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Phase 1: Time Advancement Hooks (Complete)
 
 ### Overview
