@@ -1021,7 +1021,7 @@ impl CampaignBuilderApp {
                 items: Vec::new(),
                 experience: 0,
             },
-            visual_id: None,
+            creature_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -4560,6 +4560,10 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.unsaved_changes,
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,
+                self.campaign_dir
+                    .as_ref()
+                    .map(|d| crate::creature_assets::CreatureAssetManager::new(d.clone()))
+                    .as_ref(),
             ),
             EditorTab::Creatures => {
                 if let Some(msg) = self.creatures_editor_state.show(
@@ -4653,17 +4657,24 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,
             ),
-            EditorTab::Characters => self.characters_editor_state.show(
-                ui,
-                &self.races_editor_state.races,
-                &self.classes_editor_state.classes,
-                &self.items,
-                self.campaign_dir.as_ref(),
-                &self.campaign.characters_file,
-                &mut self.unsaved_changes,
-                &mut self.status_message,
-                &mut self.file_load_merge_mode,
-            ),
+            EditorTab::Characters => {
+                let char_creature_manager = self
+                    .campaign_dir
+                    .as_ref()
+                    .map(|d| crate::creature_assets::CreatureAssetManager::new(d.clone()));
+                self.characters_editor_state.show(
+                    ui,
+                    &self.races_editor_state.races,
+                    &self.classes_editor_state.classes,
+                    &self.items,
+                    self.campaign_dir.as_ref(),
+                    &self.campaign.characters_file,
+                    &mut self.unsaved_changes,
+                    &mut self.status_message,
+                    &mut self.file_load_merge_mode,
+                    char_creature_manager.as_ref(),
+                )
+            }
             EditorTab::Dialogues => self.dialogue_editor_state.show(
                 ui,
                 &mut self.dialogues,
@@ -4688,6 +4699,11 @@ impl eframe::App for CampaignBuilderApp {
                 // Thread available stock templates into the NPC editor before rendering
                 self.npc_editor_state.available_stock_templates = self.stock_templates.clone();
 
+                let npc_creature_manager = self
+                    .campaign_dir
+                    .as_ref()
+                    .map(|d| crate::creature_assets::CreatureAssetManager::new(d.clone()));
+
                 if self.npc_editor_state.show(
                     ui,
                     &self.dialogues,
@@ -4695,6 +4711,7 @@ impl eframe::App for CampaignBuilderApp {
                     self.campaign_dir.as_ref(),
                     &self.tool_config.display,
                     &self.campaign.npcs_file,
+                    npc_creature_manager.as_ref(),
                 ) {
                     self.unsaved_changes = true;
                 }
@@ -9382,7 +9399,7 @@ mod tests {
                 items: Vec::new(),
                 experience: 0,
             },
-            visual_id: None,
+            creature_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -9436,7 +9453,7 @@ mod tests {
                 items: Vec::new(),
                 experience: 0,
             },
-            visual_id: None,
+            creature_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -9485,7 +9502,7 @@ mod tests {
                 items: Vec::new(),
                 experience: 0,
             },
-            visual_id: None,
+            creature_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -9539,7 +9556,7 @@ mod tests {
                 items: Vec::new(),
                 experience: 25,
             },
-            visual_id: None,
+            creature_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,

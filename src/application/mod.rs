@@ -1375,10 +1375,36 @@ impl GameState {
     ///
     /// ```
     /// use antares::application::GameState;
-    ///
-    /// let mut state = GameState::new();
     /// use antares::domain::character::{Character, Sex, Alignment};
     /// use antares::domain::resources::REST_DURATION_HOURS;
+    /// use antares::domain::items::{
+    ///     ItemDatabase, Item, ItemType, ConsumableData, ConsumableEffect,
+    /// };
+    ///
+    /// // Build an item database with one food ration (id = 1, IsFood(1)).
+    /// let mut item_db = ItemDatabase::new();
+    /// let ration = Item {
+    ///     id: 1,
+    ///     name: "Food Ration".to_string(),
+    ///     item_type: ItemType::Consumable(ConsumableData {
+    ///         effect: ConsumableEffect::IsFood(1),
+    ///         is_combat_usable: false,
+    ///     }),
+    ///     base_cost: 1,
+    ///     sell_cost: 0,
+    ///     alignment_restriction: None,
+    ///     constant_bonus: None,
+    ///     temporary_bonus: None,
+    ///     spell_effect: None,
+    ///     max_charges: 0,
+    ///     is_cursed: false,
+    ///     icon_path: None,
+    ///     tags: vec![],
+    ///     mesh_descriptor_override: None,
+    /// };
+    /// item_db.add_item(ration).unwrap();
+    ///
+    /// let mut state = GameState::new();
     /// let mut hero = Character::new(
     ///     "Hero".to_string(),
     ///     "human".to_string(),
@@ -1388,21 +1414,18 @@ impl GameState {
     /// );
     /// hero.hp.base = 20;
     /// hero.hp.current = 10;
+    /// // Give the hero a food ration so rest_party does not return TooHungryToRest.
+    /// hero.inventory.add_item(1, 0).unwrap();
     /// state.party.add_member(hero).unwrap();
     /// // Use a value ≤ 255 that is fully consumed by REST_DURATION_HOURS * 60 ticks.
     /// // REST_DURATION_HOURS * 60 = 720 > u8::MAX, so we use a smaller sentinel.
     /// state.active_spells.light = 60; // expires after 60 minutes (< 12 hours)
     ///
-    /// // Phase 2: food is tracked as IsFood inventory items.  Pass an empty
-    /// // ItemDatabase here — tests that need actual food gating should add
-    /// // IsFood items to character inventories and pass a real ItemDatabase.
-    /// use antares::domain::items::ItemDatabase;
-    /// let item_db = ItemDatabase::new();
     /// state.rest_party(REST_DURATION_HOURS, &item_db, None).unwrap();
     ///
-    /// // Active spell with only 60 ticks must expire during a 12-hour rest
+    /// // Active spell with only 60 ticks must expire during a 12-hour rest.
     /// assert_eq!(state.active_spells.light, 0);
-    /// // Time advanced by REST_DURATION_HOURS hours (starting from hour 6, so 6 + 12 = 18)
+    /// // Time advanced by REST_DURATION_HOURS hours (starting from hour 6, so 6 + 12 = 18).
     /// assert_eq!(state.time.hour, 18);
     /// ```
     pub fn rest_party(

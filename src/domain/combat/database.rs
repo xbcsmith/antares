@@ -79,7 +79,7 @@ pub enum MonsterDatabaseError {
 ///     is_undead: false,
 ///     magic_resistance: 0,
 ///     loot: LootTable::new(1, 10, 0, 0, 10),
-///     visual_id: None,
+///     creature_id: None,
 ///     conditions: Default::default(),
 ///     active_conditions: Vec::new(),
 ///     has_acted: false,
@@ -115,9 +115,10 @@ pub struct MonsterDefinition {
     pub magic_resistance: u8,
     /// Loot table
     pub loot: LootTable,
-    /// Optional visual creature ID for 3D representation
+    /// Optional creature asset binding — links this monster to a `CreatureDefinition`
+    /// in the creature registry.
     #[serde(default)]
-    pub visual_id: Option<CreatureId>,
+    pub creature_id: Option<CreatureId>,
     /// Current condition
     #[serde(default)]
     pub conditions: crate::domain::combat::monster::MonsterCondition,
@@ -155,7 +156,7 @@ impl MonsterDefinition {
     ///     is_undead: false,
     ///     magic_resistance: 0,
     ///     loot: LootTable::new(5, 15, 0, 0, 25),
-    ///     visual_id: None,
+    ///     creature_id: None,
     ///     conditions: MonsterCondition::Normal,
     ///     active_conditions: vec![],
     ///     has_acted: false,
@@ -183,7 +184,7 @@ impl MonsterDefinition {
         monster.can_advance = self.can_advance;
         monster.is_undead = self.is_undead;
         monster.magic_resistance = self.magic_resistance;
-        monster.visual_id = self.visual_id;
+        monster.creature_id = self.creature_id;
         monster.conditions = self.conditions;
         monster.active_conditions = self.active_conditions.clone();
         monster.has_acted = self.has_acted;
@@ -349,7 +350,7 @@ impl MonsterDatabase {
     ///     is_undead: false,
     ///     magic_resistance: 0,
     ///     loot: LootTable::new(1, 10, 0, 0, 10),
-    ///     visual_id: None,
+    ///     creature_id: None,
     ///     conditions: MonsterCondition::Normal,
     ///     active_conditions: vec![],
     ///     has_acted: false,
@@ -438,7 +439,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: LootTable::new(1, 10, 0, 0, 10),
-            visual_id: None,
+            creature_id: None,
             conditions: crate::domain::combat::monster::MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -529,22 +530,42 @@ mod tests {
     }
 
     #[test]
-    fn test_monster_visual_id_parsing() {
+    fn test_monster_creature_id_parsing() {
         let mut monster = create_test_monster(1, "Goblin", 8);
-        monster.visual_id = Some(42);
+        monster.creature_id = Some(42);
 
-        assert_eq!(monster.visual_id, Some(42));
+        assert_eq!(monster.creature_id, Some(42));
 
         // Test that None is valid
         let mut monster2 = create_test_monster(2, "Ghost", 10);
-        monster2.visual_id = None;
-        assert_eq!(monster2.visual_id, None);
+        monster2.creature_id = None;
+        assert_eq!(monster2.creature_id, None);
     }
 
     #[test]
-    fn test_load_tutorial_monsters_visual_ids() {
-        // This test validates that the tutorial campaign monsters.ron file
-        // has valid visual_id mappings
+    fn test_monster_definition_creature_id_field_roundtrips_ron() {
+        use ron::ser::PrettyConfig;
+
+        let mut monster = create_test_monster(3, "Orc", 15);
+        monster.creature_id = Some(42);
+
+        let serialized = ron::ser::to_string_pretty(&monster, PrettyConfig::default())
+            .expect("Failed to serialise MonsterDefinition to RON");
+
+        let deserialized: MonsterDefinition = ron::de::from_str(&serialized)
+            .expect("Failed to deserialise MonsterDefinition from RON");
+
+        assert_eq!(
+            deserialized.creature_id,
+            Some(42),
+            "creature_id should survive a RON round-trip"
+        );
+    }
+
+    #[test]
+    fn test_load_tutorial_monsters_creature_ids() {
+        // This test validates that the test campaign monsters.ron file
+        // has valid creature_id mappings
         let monsters_path = "data/test_campaign/data/monsters.ron";
 
         // Skip if file doesn't exist (running tests outside project root)
@@ -574,25 +595,25 @@ mod tests {
             (31, Some(31)), // Lich -> Lich
         ];
 
-        for (monster_id, expected_visual_id) in expected_mappings {
+        for (monster_id, expected_creature_id) in expected_mappings {
             let monster = db
                 .get_monster(monster_id)
                 .unwrap_or_else(|| panic!("Monster {} not found", monster_id));
 
             assert_eq!(
-                monster.visual_id, expected_visual_id,
-                "Monster {} ({}) has incorrect visual_id: expected {:?}, got {:?}",
-                monster_id, monster.name, expected_visual_id, monster.visual_id
+                monster.creature_id, expected_creature_id,
+                "Monster {} ({}) has incorrect creature_id: expected {:?}, got {:?}",
+                monster_id, monster.name, expected_creature_id, monster.creature_id
             );
         }
 
-        // Verify all tutorial monsters have visual_id set.
+        // Verify all tutorial monsters have creature_id set.
         assert_eq!(db.len(), 14, "Expected 14 monsters in tutorial campaign");
 
         for monster in db.all_monsters() {
             assert!(
-                monster.visual_id.is_some(),
-                "Monster {} ({}) is missing visual_id",
+                monster.creature_id.is_some(),
+                "Monster {} ({}) is missing creature_id",
                 monster.id,
                 monster.name
             );

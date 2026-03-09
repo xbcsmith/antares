@@ -27,11 +27,12 @@
 //! - `NpcEditBuffer`: Form field buffer for editing
 //! - Standard UI components: EditorToolbar, TwoColumnLayout
 
+use crate::creature_assets::CreatureAssetManager;
 use crate::ui_helpers::{
-    autocomplete_portrait_selector, autocomplete_sprite_sheet_selector,
-    extract_portrait_candidates, extract_sprite_sheet_candidates, resolve_portrait_path,
-    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout,
+    autocomplete_creature_selector, autocomplete_portrait_selector,
+    autocomplete_sprite_sheet_selector, extract_portrait_candidates,
+    extract_sprite_sheet_candidates, resolve_portrait_path, show_standard_list_item, EditorToolbar,
+    ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::dialogue::{DialogueId, DialogueTree};
 use antares::domain::quest::{Quest, QuestId};
@@ -108,6 +109,14 @@ pub struct NpcEditorState {
     /// Whether the sprite sheet picker popup is open
     #[serde(skip)]
     pub sprite_picker_open: bool,
+
+    /// Whether the creature picker popup is open
+    #[serde(skip)]
+    pub creature_picker_open: bool,
+
+    /// Available creature candidates (id, name) cached for autocomplete (rebuilt when campaign dir changes)
+    #[serde(skip)]
+    pub available_creatures: Vec<(u32, String)>,
 
     /// Cached portrait textures for grid display
     #[serde(skip)]
@@ -210,6 +219,8 @@ impl Default for NpcEditorState {
             portrait_picker_open: false,
             available_sprite_sheets: Vec::new(),
             sprite_picker_open: false,
+            creature_picker_open: false,
+            available_creatures: Vec::new(),
             portrait_textures: HashMap::new(),
             last_campaign_dir: None,
             last_npcs_file: None,
@@ -226,6 +237,12 @@ impl NpcEditorState {
         Self::default()
     }
 
+    /// Sets the creature ID buffer and closes the creature picker.
+    pub(crate) fn apply_selected_creature_id(&mut self, id: String) {
+        self.edit_buffer.creature_id = id;
+        self.creature_picker_open = false;
+    }
+
     /// Shows the NPC editor UI
     ///
     /// # Arguments
@@ -235,6 +252,8 @@ impl NpcEditorState {
     /// * `quests` - Available quests for multi-select
     /// * `campaign_dir` - Optional campaign directory for portrait loading
     /// * `display_config` - Display configuration for layout
+    /// * `npcs_file` - Relative path to the NPCs data file
+    /// * `creature_manager` - Optional creature asset manager for picker support
     ///
     /// # Returns
     ///
@@ -247,12 +266,23 @@ impl NpcEditorState {
         campaign_dir: Option<&PathBuf>,
         display_config: &DisplayConfig,
         npcs_file: &str,
+        creature_manager: Option<&CreatureAssetManager>,
     ) -> bool {
         // Update portrait and sprite sheet candidates if campaign directory changed
         if self.last_campaign_dir != campaign_dir.cloned() {
             self.available_portraits = extract_portrait_candidates(campaign_dir);
             self.available_sprite_sheets =
                 crate::ui_helpers::extract_sprite_sheet_candidates(campaign_dir);
+            // Rebuild creature candidates for autocomplete whenever the campaign dir changes.
+            self.available_creatures = creature_manager
+                .and_then(|m| m.load_all_creatures().ok())
+                .map(|creatures| {
+                    creatures
+                        .into_iter()
+                        .map(|c| (c.id, c.name))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             self.last_campaign_dir = campaign_dir.cloned();
         }
 
@@ -353,10 +383,11 @@ impl NpcEditorState {
         // Mode-specific UI
         match self.mode {
             NpcEditorMode::List => {
-                needs_save |= self.show_list_view(ui, display_config, campaign_dir);
+                needs_save |=
+                    self.show_list_view(ui, display_config, campaign_dir, creature_manager);
             }
             NpcEditorMode::Add | NpcEditorMode::Edit => {
-                needs_save |= self.show_edit_view(ui, campaign_dir, npcs_file);
+                needs_save |= self.show_edit_view(ui, campaign_dir, npcs_file, creature_manager);
             }
         }
 
@@ -373,6 +404,7 @@ impl NpcEditorState {
         ui: &mut egui::Ui,
         display_config: &DisplayConfig,
         campaign_dir: Option<&PathBuf>,
+        creature_manager: Option<&CreatureAssetManager>,
     ) -> bool {
         let mut needs_save = false;
 
@@ -476,7 +508,7 @@ impl NpcEditorState {
                 // Right panel: Detail view
                 if let Some(idx) = selected {
                     if let Some((_, npc)) = sorted_npcs.iter().find(|(i, _)| *i == idx) {
-                        self.show_preview(right_ui, npc, campaign_dir);
+                        self.show_preview(right_ui, npc, campaign_dir, creature_manager);
                     } else {
                         right_ui.vertical_centered(|ui| {
                             ui.add_space(100.0);
@@ -546,6 +578,7 @@ impl NpcEditorState {
         ui: &mut egui::Ui,
         npc: &NpcDefinition,
         campaign_dir: Option<&PathBuf>,
+        creature_manager: Option<&CreatureAssetManager>,
     ) {
         // ── Portrait + name header ────────────────────────────────────────
         ui.horizontal(|ui| {
@@ -632,6 +665,16 @@ impl NpcEditorState {
                     ui.label(creature_id.to_string());
                     ui.end_row();
                 }
+
+                if let (Some(creature_id), Some(manager)) = (npc.creature_id, creature_manager) {
+                    let resolved = manager
+                        .load_creature(creature_id)
+                        .map(|c| c.name)
+                        .unwrap_or_else(|_| "⚠ Unknown".to_string());
+                    ui.label("Asset:");
+                    ui.label(resolved);
+                    ui.end_row();
+                }
             });
 
         // ── Sprite info ───────────────────────────────────────────────────
@@ -713,6 +756,7 @@ impl NpcEditorState {
         ui: &mut egui::Ui,
         campaign_dir: Option<&PathBuf>,
         npcs_file: &str,
+        creature_manager: Option<&CreatureAssetManager>,
     ) -> bool {
         let mut needs_save = false;
         let is_add = self.mode == NpcEditorMode::Add;
@@ -727,6 +771,10 @@ impl NpcEditorState {
             crate::ui_helpers::remove_autocomplete_buffer(
                 ctx,
                 egui::Id::new("autocomplete:portrait:npc_edit_portrait".to_string()),
+            );
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:creature:npc_creature".to_string()),
             );
             self.reset_autocomplete_buffers = false;
         }
@@ -818,7 +866,95 @@ impl NpcEditorState {
                     ui.label(
                         "📁 Sprite sheets are relative to campaign assets (e.g., 'assets/sprites/actors/wizard.png')",
                     );
+
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        ui.label("Creature ID:");
+                        // Autocomplete input — type by name or numeric ID
+                        autocomplete_creature_selector(
+                            ui,
+                            "npc_creature",
+                            "",
+                            &mut self.edit_buffer.creature_id,
+                            &self.available_creatures,
+                        );
+
+                        // Grid picker button
+                        if ui
+                            .button("Browse…")
+                            .on_hover_text("Select a creature asset")
+                            .clicked()
+                        {
+                            self.creature_picker_open = true;
+                        }
+                        ui.label("ℹ").on_hover_text(
+                            "Links this NPC to a procedural mesh creature definition. When set, \
+                             the NPC spawns as a 3-D creature mesh on the map instead of a \
+                             sprite placeholder.",
+                        );
+                    });
                 });
+
+                // Creature picker modal
+                if self.creature_picker_open {
+                    if let Some(manager) = creature_manager {
+                        let creatures = manager.load_all_creatures().unwrap_or_default();
+                        let mut picked_id: Option<String> = None;
+                        let mut should_close = false;
+                        egui::Window::new("Select Creature")
+                            .id(egui::Id::new("npc_creature_picker"))
+                            .resizable(true)
+                            .show(ui.ctx(), |ui| {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("npc_creature_picker_scroll")
+                                    .max_height(300.0)
+                                    .show(ui, |ui| {
+                                        for creature in &creatures {
+                                            ui.push_id(creature.id, |ui| {
+                                                let selected = self.edit_buffer.creature_id
+                                                    == creature.id.to_string();
+                                                if ui
+                                                    .selectable_label(
+                                                        selected,
+                                                        format!(
+                                                            "{} — {}",
+                                                            creature.id, creature.name
+                                                        ),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    picked_id =
+                                                        Some(creature.id.to_string());
+                                                }
+                                            });
+                                        }
+                                    });
+                                if ui.button("Close").clicked() {
+                                    should_close = true;
+                                }
+                            });
+                        if let Some(id) = picked_id {
+                            self.apply_selected_creature_id(id.clone());
+                            // Sync the autocomplete buffer so the text field shows the
+                            // resolved "id — name" display string immediately.
+                            let display = creatures
+                                .iter()
+                                .find(|c| c.id.to_string() == id)
+                                .map(|c| format!("{} — {}", c.id, c.name))
+                                .unwrap_or_else(|| id.clone());
+                            crate::ui_helpers::store_autocomplete_buffer(
+                                ui.ctx(),
+                                egui::Id::new("autocomplete:creature:npc_creature".to_string()),
+                                &display,
+                            );
+                        } else if should_close {
+                            self.creature_picker_open = false;
+                        }
+                    } else {
+                        self.creature_picker_open = false;
+                    }
+                }
 
                 ui.add_space(10.0);
 
@@ -2132,7 +2268,7 @@ mod tests {
         // Render the form (this will clear previous buffer and store current value)
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                state.show_edit_view(ui, None, "data/npcs.ron");
+                state.show_edit_view(ui, None, "data/npcs.ron", None);
             });
         });
 
@@ -2504,6 +2640,20 @@ mod tests {
 
         state.start_edit_npc(0);
         assert_eq!(state.edit_buffer.stock_template, "wizard_shop");
+    }
+
+    #[test]
+    fn test_npc_creature_picker_initial_state() {
+        let state = NpcEditorState::default();
+        assert!(!state.creature_picker_open);
+    }
+
+    #[test]
+    fn test_npc_apply_selected_creature_id_updates_buffer() {
+        let mut state = NpcEditorState::default();
+        state.apply_selected_creature_id("1000".to_string());
+        assert_eq!(state.edit_buffer.creature_id, "1000");
+        assert!(!state.creature_picker_open);
     }
 
     #[test]

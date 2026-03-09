@@ -567,6 +567,7 @@ pub enum BonusAttribute {
 ///     is_cursed: false,
 ///     icon_path: None,
 ///     tags: vec![],
+///     mesh_descriptor_override: None,
 /// };
 ///
 /// // Holy Sword - good alignment only
@@ -589,6 +590,7 @@ pub enum BonusAttribute {
 ///     is_cursed: false,
 ///     icon_path: None,
 ///     tags: vec![],
+///     mesh_descriptor_override: None,
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -822,6 +824,7 @@ impl Item {
     ///     is_cursed: false,
     ///     icon_path: None,
     ///     tags: vec![],
+    ///     mesh_descriptor_override: None,
     /// };
     ///
     /// assert!(holy_sword.can_use_alignment(Alignment::Good));

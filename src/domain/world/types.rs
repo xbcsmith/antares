@@ -2129,7 +2129,7 @@ pub const DEFAULT_RECRUITMENT_DIALOGUE_ID: crate::domain::dialogue::DialogueId =
 /// # Examples
 ///
 /// ```
-/// use antares::domain::world::types::EncounterGroup;
+/// use antares::domain::world::EncounterGroup;
 /// use antares::domain::combat::types::CombatEventType;
 ///
 /// let group = EncounterGroup {
@@ -2529,6 +2529,7 @@ impl Map {
     ///     description: "A sign".to_string(),
     ///     text: "Hello!".to_string(),
     ///     time_condition: None,
+    ///     facing: None,
     /// };
     /// map.add_event(pos, event);
     ///
