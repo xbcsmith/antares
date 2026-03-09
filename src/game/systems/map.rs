@@ -3,6 +3,7 @@
 
 use crate::domain::types;
 use crate::domain::world;
+use crate::domain::world::CreatureBound;
 use crate::domain::world::SpriteReference;
 use crate::game::components::creature::CreatureVisual;
 use crate::game::components::sprite::{ActorType, AnimatedSprite, TileSprite};
@@ -397,7 +398,7 @@ fn resolve_encounter_creature_id(
 ) -> Option<types::CreatureId> {
     for monster_id in monster_group {
         if let Some(monster_def) = content.0.monsters.get_monster(*monster_id) {
-            if let Some(creature_id) = monster_def.creature_id {
+            if let Some(creature_id) = monster_def.creature_id() {
                 return Some(creature_id);
             }
         }
@@ -1348,7 +1349,7 @@ fn spawn_map(
                         .0
                         .characters
                         .get_character(character_id)
-                        .and_then(|def| def.creature_id)
+                        .and_then(|def| def.creature_id())
                     {
                         if let Some(creature_def) = content.0.creatures.get_creature(creature_id) {
                             let entity = spawn_creature(

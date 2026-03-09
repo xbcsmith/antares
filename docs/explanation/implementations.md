@@ -1,5 +1,129 @@
 # Implementations
 
+## Phase 3: Add the `CreatureBound` Trait — Unified Creature Asset Binding
+
+### Overview
+
+Defined the `CreatureBound` trait in a new file `src/domain/world/creature_binding.rs`
+and implemented it for all four types that carry a `creature_id: Option<CreatureId>`
+field: `MonsterDefinition`, `Monster` (runtime), `NpcDefinition`, and
+`CharacterDefinition`. Updated `src/game/systems/map.rs` to use the trait method
+(`def.creature_id()`) instead of direct field access at all three spawn branches:
+`resolve_encounter_creature_id` (Encounter), the `RecruitableCharacter` branch, and
+the NPC dialogue branch (via `ResolvedNpc`).
+
+The `Monster` runtime type was discovered to require its own `impl` because the
+SDK's `ContentDatabase` converts `MonsterDefinition` → `Monster` at load time
+via `to_monster()`, and `content.0.monsters.get_monster()` returns
+`Option<&Monster>`, not `Option<&MonsterDefinition>`.
+
+### Deliverables Checklist
+
+- [x] `src/domain/world/creature_binding.rs` — new file; SPDX header; `CreatureBound` trait definition with `///` doc comments and runnable `cargo test` example; `impl CreatureBound for MonsterDefinition`; `impl CreatureBound for Monster`; `impl CreatureBound for NpcDefinition`; `impl CreatureBound for CharacterDefinition`; nine unit tests
+- [x] `src/domain/world/mod.rs` — `pub mod creature_binding;` added; `pub use creature_binding::CreatureBound;` added to the re-export block
+- [x] `src/game/systems/map.rs` — `use crate::domain::world::CreatureBound;` import added; `resolve_encounter_creature_id` updated to `monster_def.creature_id()`; `RecruitableCharacter` branch updated to `.and_then(|def| def.creature_id())`
+- [x] All four quality gates pass with zero errors/warnings (`cargo fmt`, `cargo check --all-targets --all-features`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo nextest run --all-features`)
+- [x] All nine new trait unit tests pass (seven from the plan plus two for the `Monster` runtime type)
+
+### What Was Built
+
+#### `CreatureBound` Trait
+
+The trait is defined in `src/domain/world/creature_binding.rs`:
+
+```antares/src/domain/world/creature_binding.rs#L72-80
+pub trait CreatureBound {
+    /// Returns the optional [`CreatureId`] that links this definition to a mesh
+    /// asset in the creature registry.
+    ///
+    /// Returns `None` when no visual binding has been set for this definition.
+    fn creature_id(&self) -> Option<CreatureId>;
+}
+```
+
+Each `impl` block is a one-liner that copies the `Option<CreatureId>` field value
+(all four underlying fields are `Copy`):
+
+```antares/src/domain/world/creature_binding.rs#L119-123
+impl CreatureBound for MonsterDefinition {
+    fn creature_id(&self) -> Option<CreatureId> {
+        self.creature_id
+    }
+}
+```
+
+The module is publicly re-exported from `src/domain/world/mod.rs` so callers can
+write `use antares::domain::world::CreatureBound`.
+
+#### Why `Monster` Required a Separate `impl`
+
+The SDK's `ContentDatabase` (in `src/sdk/database.rs`) stores runtime `Monster`
+instances rather than `MonsterDefinition` objects — `add_monster` calls
+`def.to_monster()` and inserts the result. Consequently,
+`content.0.monsters.get_monster()` returns `Option<&Monster>`. The trait was
+therefore implemented for the runtime `Monster` struct as well as the definition
+type so that `resolve_encounter_creature_id` in `map.rs` can call the trait method
+uniformly regardless of which backing storage is used.
+
+#### Map System Updates
+
+All three creature-id read call-sites in `src/game/systems/map.rs` now use the
+trait method:
+
+**Encounter branch (`resolve_encounter_creature_id`):**
+
+```antares/src/game/systems/map.rs#L395-407
+fn resolve_encounter_creature_id(
+    monster_group: &[types::MonsterId],
+    content: &crate::application::resources::GameContent,
+) -> Option<types::CreatureId> {
+    for monster_id in monster_group {
+        if let Some(monster_def) = content.0.monsters.get_monster(*monster_id) {
+            if let Some(creature_id) = monster_def.creature_id() {
+                return Some(creature_id);
+            }
+        }
+    }
+
+    None
+}
+```
+
+**`RecruitableCharacter` branch:**
+
+```antares/src/game/systems/map.rs#L1347-1353
+                    if let Some(creature_id) = content
+                        .0
+                        .characters
+                        .get_character(character_id)
+                        .and_then(|def| def.creature_id())
+                    {
+```
+
+The NPC dialogue spawn loop works through `ResolvedNpc` (a DTO that copies
+`creature_id` from `NpcDefinition` at resolution time in
+`ResolvedNpc::from_placement_and_definition`). Because `ResolvedNpc` is a plain
+data-transfer object rather than a definition type, direct field access on
+`resolved_npc.creature_id` is correct there and is not replaced.
+
+#### Test Coverage
+
+Nine unit tests live in `src/domain/world/creature_binding.rs`:
+
+| Test                                             | What it verifies                                                                         |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `test_creature_bound_runtime_monster_some`       | `Monster { creature_id: Some(3), .. }.creature_id() == Some(3)`                          |
+| `test_creature_bound_runtime_monster_none`       | `Monster { creature_id: None, .. }.creature_id() == None`                                |
+| `test_creature_bound_monster_some`               | `MonsterDefinition { creature_id: Some(3), .. }.creature_id() == Some(3)`                |
+| `test_creature_bound_monster_none`               | `MonsterDefinition { creature_id: None, .. }.creature_id() == None`                      |
+| `test_creature_bound_npc_some`                   | `NpcDefinition { creature_id: Some(1000), .. }.creature_id() == Some(1000)`              |
+| `test_creature_bound_npc_none`                   | `NpcDefinition { creature_id: None, .. }.creature_id() == None`                          |
+| `test_creature_bound_character_some`             | `CharacterDefinition { creature_id: Some(2000), .. }.creature_id() == Some(2000)`        |
+| `test_creature_bound_character_none`             | `CharacterDefinition { creature_id: None, .. }.creature_id() == None`                    |
+| `test_creature_bound_all_three_types_consistent` | All four types with `creature_id: Some(42)` return identical `Option<CreatureId>` values |
+
+---
+
 ## Phase 2: Add `creature_id` to `CharacterDefinition` — Unified Creature Asset Binding
 
 ### Overview
