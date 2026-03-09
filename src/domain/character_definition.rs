@@ -60,7 +60,7 @@ use crate::domain::classes::{ClassDatabase, ClassDefinition, ClassId, SpellStat}
 use crate::domain::items::types::{ConsumableEffect, ItemType};
 use crate::domain::items::ItemDatabase;
 use crate::domain::races::{RaceDatabase, RaceDefinition};
-use crate::domain::types::{ItemId, RaceId};
+use crate::domain::types::{CreatureId, ItemId, RaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -331,6 +331,7 @@ impl StartingEquipment {
 ///     description: "A noble knight seeking glory.".to_string(),
 ///     is_premade: true,
 ///     starts_in_party: false,
+///     creature_id: None,
 /// };
 ///
 /// assert_eq!(knight.name, "Sir Galahad");
@@ -431,6 +432,13 @@ pub struct CharacterDefinition {
     /// flag set (PARTY_MAX_SIZE constraint).
     #[serde(default)]
     pub starts_in_party: bool,
+
+    /// Optional creature asset binding — links this character to a
+    /// `CreatureDefinition` in the creature registry for 3D map rendering.
+    /// When `None`, the rendering system falls back to the portrait sprite.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creature_id: Option<CreatureId>,
 }
 
 /// Default starting food value (10 units)
@@ -476,6 +484,8 @@ struct CharacterDefinitionDef {
     pub is_premade: bool,
     #[serde(default)]
     pub starts_in_party: bool,
+    #[serde(default)]
+    pub creature_id: Option<CreatureId>,
 }
 
 impl From<CharacterDefinitionDef> for CharacterDefinition {
@@ -514,6 +524,7 @@ impl From<CharacterDefinitionDef> for CharacterDefinition {
             description: def.description,
             is_premade: def.is_premade,
             starts_in_party: def.starts_in_party,
+            creature_id: def.creature_id,
         }
     }
 }
@@ -547,6 +558,7 @@ impl CharacterDefinition {
     ///
     /// assert_eq!(definition.id, "test_char");
     /// assert_eq!(definition.starting_food, 10);
+    /// assert!(definition.creature_id.is_none());
     /// ```
     pub fn new(
         id: CharacterDefinitionId,
@@ -574,6 +586,7 @@ impl CharacterDefinition {
             description: String::new(),
             is_premade: false,
             starts_in_party: false,
+            creature_id: None,
         }
     }
 
@@ -3176,6 +3189,7 @@ mod tests {
             description: "A test knight".to_string(),
             is_premade: true,
             starts_in_party: false,
+            creature_id: None,
         };
 
         let character = definition
@@ -3377,6 +3391,7 @@ mod tests {
             description: "A test sorcerer".to_string(),
             is_premade: true,
             starts_in_party: false,
+            creature_id: None,
         };
 
         let character = definition
@@ -3422,6 +3437,7 @@ mod tests {
             description: "Test".to_string(),
             is_premade: true,
             starts_in_party: false,
+            creature_id: None,
         };
 
         let character = definition
@@ -3816,6 +3832,61 @@ mod tests {
                 base: 40,
                 current: 25
             })
+        );
+    }
+
+    #[test]
+    fn test_character_definition_creature_id_defaults_to_none() {
+        // CharacterDefinition::new produces creature_id: None by default
+        let def = CharacterDefinition::new(
+            "test_creature_default".to_string(),
+            "Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Neutral,
+        );
+        assert!(def.creature_id.is_none());
+    }
+
+    #[test]
+    fn test_character_definition_creature_id_field_roundtrips_ron() {
+        // Serialise with creature_id: Some(7); deserialise; assert Some(7) survives
+        use ron::ser::PrettyConfig;
+        let mut def = CharacterDefinition::new(
+            "test_creature_roundtrip".to_string(),
+            "Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Neutral,
+        );
+        def.creature_id = Some(7);
+        let serialized = ron::ser::to_string_pretty(&def, PrettyConfig::default())
+            .expect("serialization must succeed");
+        let deserialized: CharacterDefinition =
+            ron::from_str(&serialized).expect("deserialization must succeed");
+        assert_eq!(deserialized.creature_id, Some(7));
+    }
+
+    #[test]
+    fn test_character_definition_creature_id_none_omits_field_in_ron() {
+        // Serialise with creature_id: None; assert the output string does not contain "creature_id"
+        use ron::ser::PrettyConfig;
+        let def = CharacterDefinition::new(
+            "test_creature_none".to_string(),
+            "Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Neutral,
+        );
+        let serialized = ron::ser::to_string_pretty(&def, PrettyConfig::default())
+            .expect("serialization must succeed");
+        assert!(
+            !serialized.contains("creature_id"),
+            "RON output must not contain 'creature_id' when None: {}",
+            serialized
         );
     }
 }

@@ -246,6 +246,7 @@
         ),
         description: "A grizzled dwarf veteran who runs the town\'s smithy. Though his adventuring days are behind him, Old Gareth can be convinced to join a worthy cause one last time.",
         is_premade: true,
+        creature_id: Some(1007),
         starts_in_party: false,
     ),
     (

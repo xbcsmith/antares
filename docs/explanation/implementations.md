@@ -1,5 +1,121 @@
 # Implementations
 
+## Phase 2: Add `creature_id` to `CharacterDefinition` — Unified Creature Asset Binding
+
+### Overview
+
+Added `pub creature_id: Option<CreatureId>` to `CharacterDefinition` (and its
+backward-compat deserialisation helper `CharacterDefinitionDef`) so that
+recruitable characters displayed on the 3D map can be linked directly to a
+`CreatureDefinition` in the creature registry. When `None`, the rendering system
+falls back to the portrait sprite as before.
+
+The heuristic functions `normalize_lookup_key` and `resolve_recruitable_creature_id`
+in `src/game/systems/map.rs` were deleted. The spawn path now reads
+`def.creature_id` directly from the `CharacterDefinition`, eliminating the
+fragile name-normalisation cross-database lookup that was the previous fallback.
+
+### Deliverables Checklist
+
+- [x] `src/domain/character_definition.rs` — `use crate::domain::types::CreatureId` import added
+- [x] `src/domain/character_definition.rs` — `creature_id: Option<CreatureId>` field added to `CharacterDefinition` with `#[serde(default)]` and `#[serde(skip_serializing_if = "Option::is_none")]`
+- [x] `src/domain/character_definition.rs` — `creature_id: Option<CreatureId>` field added to `CharacterDefinitionDef` with `#[serde(default)]`
+- [x] `src/domain/character_definition.rs` — `impl From<CharacterDefinitionDef> for CharacterDefinition` passes through `creature_id: def.creature_id`
+- [x] `src/domain/character_definition.rs` — `CharacterDefinition::new` initialises `creature_id: None`
+- [x] `src/domain/character_definition.rs` — `/// Examples` doc comment on `new` updated with `assert!(definition.creature_id.is_none())`
+- [x] `src/domain/character_definition.rs` — struct-literal `CharacterDefinition` instances in tests updated with `creature_id: None`
+- [x] `src/domain/character_definition.rs` — doc-comment struct literal updated with `creature_id: None`
+- [x] `src/domain/character_definition.rs` — three new tests added: `test_character_definition_creature_id_defaults_to_none`, `test_character_definition_creature_id_field_roundtrips_ron`, `test_character_definition_creature_id_none_omits_field_in_ron`
+- [x] `src/game/systems/map.rs` — `normalize_lookup_key` function deleted
+- [x] `src/game/systems/map.rs` — `resolve_recruitable_creature_id` function deleted
+- [x] `src/game/systems/map.rs` — `spawn_map` call site updated to use `content.0.characters.get_character(character_id).and_then(|def| def.creature_id)` directly
+- [x] `src/game/systems/map.rs` — `test_spawn_map_uses_recruitable_character_creature_visual` updated: `creature_id: Some(58)` set on `old_gareth`; `character_id` changed from `"npc_old_gareth"` to `"old_gareth"`
+- [x] `src/game/systems/map.rs` — `test_recruitable_visual_despawns_after_event_removed` updated: same `creature_id` and `character_id` fixes
+- [x] `src/game/systems/map.rs` — `test_map_event_recruitable_character_facing` rewritten to use `CharacterDefinition` with `creature_id: Some(30)` and `character_id: "facing_test_char"` instead of `NpcDefinition`
+- [x] `src/game/systems/map.rs` — new test `test_recruitable_spawn_uses_character_def_creature_id` added
+- [x] `src/game/systems/map.rs` — new test `test_recruitable_spawn_falls_back_to_sprite_when_no_creature_id` added
+- [x] `data/test_campaign/data/characters.ron` — `creature_id: Some(58)` added to `old_gareth` entry
+- [x] `campaigns/tutorial/data/characters.ron` — `creature_id: Some(1007)` added to `old_gareth` entry
+- [x] `docs/reference/architecture.md` — `creature_id: Option<CreatureId>` field added to `pub struct CharacterDefinition` in Section 4.7
+- [x] All four quality gates pass with zero errors/warnings (`cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`)
+
+### What Was Built
+
+#### `creature_id` Field on `CharacterDefinition`
+
+The new field `pub creature_id: Option<CreatureId>` mirrors the pattern already
+established on `NpcDefinition` and `MonsterDefinition`. The field carries
+`#[serde(default)]` so existing RON files without the key deserialise silently
+to `None`, and `#[serde(skip_serializing_if = "Option::is_none")]` so new files
+serialised without a binding remain compact.
+
+`CharacterDefinitionDef` (the backward-compat shim used by the custom
+`Deserialize` impl) receives the same field with `#[serde(default)]`. The
+`From<CharacterDefinitionDef>` conversion passes it through unchanged.
+
+`CharacterDefinition::new` initialises the field to `None`; callers that need a
+binding set it directly after construction:
+
+```antares/src/domain/character_definition.rs#L557-591
+pub fn new(...) -> Self {
+    Self {
+        // ... other fields ...
+        creature_id: None,
+    }
+}
+```
+
+#### Deletion of Heuristic Resolution Functions
+
+`normalize_lookup_key` and `resolve_recruitable_creature_id` have been removed
+from `src/game/systems/map.rs`. These functions implemented a three-step
+fallback that matched character names against creature names via ASCII-folded
+normalisation — a fragile cross-database heuristic with no authoritative
+source of truth. Now the spawn path reads the field directly:
+
+```antares/src/game/systems/map.rs#L1344-1349
+if let Some(creature_id) = content
+    .0
+    .characters
+    .get_character(character_id)
+    .and_then(|def| def.creature_id)
+{
+```
+
+This is O(1), requires no name normalisation, and is fully deterministic.
+
+#### Test Updates
+
+Tests that previously relied on the name-match heuristic (`"npc_old_gareth"` →
+`"OldGareth"` creature) now set `creature_id: Some(58)` explicitly on the
+`CharacterDefinition` and use `character_id: "old_gareth"` in the map event to
+match the database key directly.
+
+`test_map_event_recruitable_character_facing` was rewritten to use a
+`CharacterDefinition` with `creature_id: Some(30)` and id `"facing_test_char"`,
+removing the dependency on `NpcDefinition` for the recruitable spawn path.
+
+Two new tests verify the complete contract:
+
+- **`test_recruitable_spawn_uses_character_def_creature_id`**: a
+  `CharacterDefinition` with `creature_id: Some(42)` triggers spawn of a
+  `CreatureVisual { creature_id: 42 }` entity at the correct tile position.
+- **`test_recruitable_spawn_falls_back_to_sprite_when_no_creature_id`**: a
+  `CharacterDefinition` with `creature_id: None` produces zero `CreatureVisual`
+  entities and exactly one `RecruitableVisualMarker` sprite-fallback entity.
+
+#### RON Data Files
+
+`old_gareth` in `data/test_campaign/data/characters.ron` receives
+`creature_id: Some(58)` so that the integration tests in `map.rs` that load
+actual campaign data continue to resolve correctly without the heuristic.
+
+`old_gareth` in `campaigns/tutorial/data/characters.ron` receives
+`creature_id: Some(1007)` to bind him to the tutorial creature registry entry
+for live-game rendering.
+
+---
+
 ## Phase 1: Rename `visual_id` → `creature_id` on Monster Types
 
 ### Overview
