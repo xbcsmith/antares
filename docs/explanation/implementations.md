@@ -1,5 +1,138 @@
 # Implementations
 
+## Phase 1: Time Advancement Hooks (Complete)
+
+### Overview
+
+Phase 1 wires the in-game clock (`GameState.time: GameTime`) to every player
+action that should consume time:
+
+| Action                                     | Cost                                        | Location                                   |
+| ------------------------------------------ | ------------------------------------------- | ------------------------------------------ |
+| One exploration step                       | `TIME_COST_STEP_MINUTES` (5 min)            | `GameState::move_party_and_handle_events`  |
+| One combat round                           | `TIME_COST_COMBAT_ROUND_MINUTES` (5 min)    | `tick_combat_time` system in `combat.rs`   |
+| Map transition (teleport, dungeon, portal) | `TIME_COST_MAP_TRANSITION_MINUTES` (30 min) | `map_change_handler` system in `map.rs`    |
+| Rest (any duration)                        | `hours * 60` minutes                        | `GameState::rest_party` via `advance_time` |
+
+All time mutations go through `GameState::advance_time(minutes, templates)` so
+that active-spell duration ticking and merchant restocking are never bypassed.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `TIME_COST_STEP_MINUTES`, `TIME_COST_COMBAT_ROUND_MINUTES`, `TIME_COST_MAP_TRANSITION_MINUTES` constants in `src/domain/resources.rs`
+- [x] Time advance on successful exploration step (`move_party_and_handle_events`)
+- [x] Time advance per combat round (`tick_combat_time` in `src/game/systems/combat.rs`)
+- [x] Time advance on map transition (`map_change_handler` in `src/game/systems/map.rs`)
+- [x] `rest_party()` callers use `GameState::advance_time()` exclusively
+- [x] `TimeAdvanceEvent` Bevy event + `apply_time_advance` system in `src/game/systems/time.rs`
+- [x] `TimeOfDayPlugin` integrating ambient-light updates
+- [x] All phase-1 tests pass
+
+### What Was Built
+
+#### `TIME_COST_*` Constants — `src/domain/resources.rs`
+
+Three new constants define the canonical time cost for each action category:
+
+```src/domain/resources.rs#L77-85
+pub const TIME_COST_STEP_MINUTES: u32 = 5;
+pub const TIME_COST_COMBAT_ROUND_MINUTES: u32 = 5;
+pub const TIME_COST_MAP_TRANSITION_MINUTES: u32 = 30;
+```
+
+`REST_DURATION_HOURS` (12) already existed and was left unchanged.
+
+#### Exploration Movement — `src/application/mod.rs`
+
+`GameState::move_party_and_handle_events()` calls
+`self.advance_time(TIME_COST_STEP_MINUTES, None)` immediately after a
+successful `move_party()`, before any event resolution. A blocked step
+(movement error) returns early before `advance_time` is reached, so the clock
+never ticks for failed moves.
+
+#### Combat Round Time — `src/game/systems/combat.rs`
+
+The private `tick_combat_time` Bevy system runs after every combat-action
+handler. It compares `combat_res.state.round` against the new
+`CombatResource::last_timed_round` field; when the round has advanced it
+charges `new_rounds * TIME_COST_COMBAT_ROUND_MINUTES` exactly once. This
+prevents double-charging when the same round spans multiple frames.
+
+The system is a no-op when `GameMode` is not `Combat`, so stale combat data
+never advances the exploration clock.
+
+#### Map Transition Time — `src/game/systems/map.rs`
+
+`map_change_handler` now calls `global_state.0.advance_time(TIME_COST_MAP_TRANSITION_MINUTES, None)`
+after confirming the target map exists. Invalid map ids are silently ignored
+and do **not** advance the clock.
+
+#### Rest Time — `src/application/mod.rs`
+
+`GameState::rest_party()` delegates HP/SP restoration to
+`domain::resources::rest_party()` (which no longer calls `advance_hours`
+directly) and then calls `self.advance_time(hours * 60, templates)`.
+This ensures active-spell ticking and merchant restocking both happen for the
+full rest duration.
+
+#### `TimeAdvanceEvent` + `apply_time_advance` — `src/game/systems/time.rs`
+
+A Bevy `Message` type `TimeAdvanceEvent { minutes: u32 }` lets any system
+request a clock advance without touching `GlobalState` directly. The
+`apply_time_advance` system drains the queue each frame and calls
+`GameState::advance_time` per event, keeping time mutation centralised.
+`TimeOfDayPlugin` registers both this system and the ambient-light update
+system, ordering `apply_time_advance` before `update_ambient_light` so the
+light reflects the updated time within the same frame.
+
+### Tests Added
+
+#### New tests in `src/game/systems/combat.rs`
+
+| Test                              | What it verifies                                                                                                                               |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_combat_round_advances_time` | One combat round (round 1) advances clock by `TIME_COST_COMBAT_ROUND_MINUTES`; a second frame with the same round number does NOT charge again |
+
+#### New tests in `src/game/systems/map.rs`
+
+| Test                                                | What it verifies                                                                                                           |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `test_map_transition_advances_time`                 | A valid `MapChangeEvent` advances clock by `TIME_COST_MAP_TRANSITION_MINUTES` and updates `current_map` + `party_position` |
+| `test_invalid_map_transition_does_not_advance_time` | A `MapChangeEvent` targeting a non-existent map id does NOT advance the clock                                              |
+
+#### Pre-existing tests that cover Phase 1 requirements
+
+| Test                                                | Location                   | Phase 1 requirement covered                         |
+| --------------------------------------------------- | -------------------------- | --------------------------------------------------- |
+| `test_step_advances_time`                           | `src/application/mod.rs`   | Successful step costs `TIME_COST_STEP_MINUTES`      |
+| `test_blocked_step_does_not_advance_time`           | `src/application/mod.rs`   | Blocked step costs zero time                        |
+| `test_rest_advances_time_via_state`                 | `src/application/mod.rs`   | Rest costs exactly `hours * 60` minutes             |
+| `test_rest_ticks_active_spells`                     | `src/application/mod.rs`   | `advance_time` ticks active spells during rest      |
+| `test_time_advance_event_advances_clock`            | `src/game/systems/time.rs` | `TimeAdvanceEvent` moves clock by requested minutes |
+| `test_multiple_time_advance_events_same_frame`      | `src/game/systems/time.rs` | Multiple events per frame are all applied           |
+| `test_no_time_advance_event_leaves_clock_unchanged` | `src/game/systems/time.rs` | No event → clock unchanged                          |
+| `test_time_advance_event_rolls_over_midnight`       | `src/game/systems/time.rs` | Day rollover on midnight crossing                   |
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` Section 4.1 (`GameState.time: GameTime`) exactly
+- [x] `TIME_COST_*` constants extracted — no magic numbers
+- [x] `advance_time` is the single path for all clock mutations
+- [x] Active-spell ticking and merchant restocking are never bypassed
+- [x] No `unwrap()` without justification; all error paths handled
+- [x] All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → no output (all files formatted)
+cargo check              → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings → Finished with 0 warnings
+cargo nextest run        → 3337 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Phase 4: Campaign Builder SDK Editor Updates — Unified Creature Asset Binding (Complete)
 
 ### Overview
