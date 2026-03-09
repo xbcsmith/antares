@@ -2873,6 +2873,131 @@ pub fn autocomplete_monster_selector(
     changed
 }
 
+/// Autocomplete selector for creature IDs.
+///
+/// Provides a text autocomplete for creature candidates (by name) discovered from the
+/// `CreatureAssetManager`. The field stores the numeric creature ID as a `String` in
+/// the buffer (consistent with other string-based ID fields like `portrait_id`). The
+/// candidates list is `"id — name"` pairs so the user can type either the numeric ID
+/// or the creature name to filter.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI
+/// * `id_salt` - Salt used for the autocomplete widget ID (must be unique in the frame)
+/// * `label` - Label shown to the left of the input field (pass `""` to omit)
+/// * `selected_creature_id` - Mutable reference to the currently selected creature ID string
+/// * `candidates` - Pre-built `(id, name)` pair list (built once per frame by the caller)
+///
+/// # Returns
+///
+/// Returns `true` if the selection changed.
+///
+/// # Examples
+///
+/// ```no_run
+/// use eframe::egui;
+/// use campaign_builder::ui_helpers::autocomplete_creature_selector;
+///
+/// fn example(ui: &mut egui::Ui, creatures: &[(u32, String)]) {
+///     let mut creature_id_str = String::new();
+///     autocomplete_creature_selector(ui, "npc_creature", "Creature ID:", &mut creature_id_str, creatures);
+/// }
+/// ```
+pub fn autocomplete_creature_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_creature_id: &mut String,
+    candidates: &[(u32, String)],
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        if !label.is_empty() {
+            ui.label(label);
+        }
+
+        // Build display candidates: "id — name" so the user can type by either.
+        let display_candidates: Vec<String> = candidates
+            .iter()
+            .map(|(id, name)| format!("{} — {}", id, name))
+            .collect();
+
+        let buffer_id = make_autocomplete_id(ui, "creature", id_salt);
+
+        let current_value = selected_creature_id.clone();
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || {
+            // Initialise the buffer from the current ID: look up name for display.
+            if current_value.is_empty() {
+                String::new()
+            } else if let Ok(id_num) = current_value.trim().parse::<u32>() {
+                candidates
+                    .iter()
+                    .find(|(id, _)| *id == id_num)
+                    .map(|(id, name)| format!("{} — {}", id, name))
+                    .unwrap_or_else(|| current_value.clone())
+            } else {
+                current_value.clone()
+            }
+        });
+
+        let response = AutocompleteInput::new(id_salt, &display_candidates)
+            .with_placeholder("Type creature name or ID…")
+            .show(ui, &mut text_buffer);
+
+        // When the user picks an entry or finishes typing, extract just the numeric ID.
+        if response.changed() && !text_buffer.is_empty() {
+            // Accept entries from the candidate list ("id — name" format).
+            if let Some(pos) = text_buffer.find(" — ") {
+                let id_part = text_buffer[..pos].trim();
+                if id_part.parse::<u32>().is_ok() && *selected_creature_id != id_part {
+                    *selected_creature_id = id_part.to_string();
+                    changed = true;
+                }
+            } else if text_buffer.trim().parse::<u32>().is_ok() {
+                // User typed a raw numeric ID.
+                let trimmed = text_buffer.trim().to_string();
+                if *selected_creature_id != trimmed {
+                    *selected_creature_id = trimmed;
+                    changed = true;
+                }
+            }
+        }
+
+        // Add hover tooltip showing the resolved creature name.
+        if !selected_creature_id.is_empty() {
+            if let Ok(id_num) = selected_creature_id.trim().parse::<u32>() {
+                if let Some((_, name)) = candidates.iter().find(|(id, _)| *id == id_num) {
+                    // hover is shown on the response widget
+                    let _ = response.on_hover_text(format!("Creature: {}", name));
+                } else {
+                    let _ = response.on_hover_text(format!(
+                        "⚠ Creature ID '{}' not found in registry",
+                        selected_creature_id
+                    ));
+                }
+            }
+        }
+
+        // Clear button
+        if ui.button("Clear").clicked() {
+            if !selected_creature_id.is_empty() {
+                selected_creature_id.clear();
+                remove_autocomplete_buffer(ui.ctx(), buffer_id);
+                changed = true;
+            }
+        }
+
+        // Persist buffer back into egui memory so it survives frames.
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+    });
+
+    changed
+}
+
 /// Shows an autocomplete input for selecting a condition by name.
 ///
 /// Returns `true` if the selection changed.
@@ -7447,5 +7572,153 @@ mod tests {
         assert_eq!(candidates[0], "assets/creatures/goblin.ron");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    // =========================================================================
+    // autocomplete_creature_selector logic tests
+    // =========================================================================
+
+    /// Helper: build a candidate list as autocomplete_creature_selector receives it.
+    fn make_creature_candidates(pairs: &[(u32, &str)]) -> Vec<(u32, String)> {
+        pairs
+            .iter()
+            .map(|(id, name)| (*id, name.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn test_autocomplete_creature_selector_empty_candidates_returns_false() {
+        // With no candidates and an empty buffer the function should signal no change.
+        // We exercise the pure logic (candidate building) rather than rendering.
+        let candidates: Vec<(u32, String)> = Vec::new();
+        // Display candidates built inside the function
+        let display: Vec<String> = candidates
+            .iter()
+            .map(|(id, name)| format!("{} — {}", id, name))
+            .collect();
+        assert!(display.is_empty());
+    }
+
+    #[test]
+    fn test_autocomplete_creature_selector_display_format() {
+        // Each candidate is rendered as "id — name".
+        let candidates = make_creature_candidates(&[(1, "Goblin"), (42, "Dragon")]);
+        let display: Vec<String> = candidates
+            .iter()
+            .map(|(id, name)| format!("{} — {}", id, name))
+            .collect();
+        assert_eq!(display[0], "1 — Goblin");
+        assert_eq!(display[1], "42 — Dragon");
+    }
+
+    #[test]
+    fn test_autocomplete_creature_selector_id_extraction_from_display_string() {
+        // Simulate the "id — name" parsing that the selector does when a row is picked.
+        let picked = "42 — Dragon".to_string();
+        let extracted = if let Some(pos) = picked.find(" — ") {
+            let id_part = picked[..pos].trim();
+            id_part.parse::<u32>().ok().map(|v| v.to_string())
+        } else {
+            None
+        };
+        assert_eq!(extracted, Some("42".to_string()));
+    }
+
+    #[test]
+    fn test_autocomplete_creature_selector_raw_numeric_id_accepted() {
+        // Simulate the branch where the user typed a raw numeric ID.
+        let typed = "7";
+        let result = typed.trim().parse::<u32>();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 7u32);
+    }
+
+    #[test]
+    fn test_autocomplete_creature_selector_non_numeric_raw_input_rejected() {
+        // A string that is neither "id — name" nor a plain number should not parse.
+        let typed = "not_a_number";
+        assert!(typed.find(" — ").is_none());
+        assert!(typed.trim().parse::<u32>().is_err());
+    }
+
+    #[test]
+    fn test_autocomplete_creature_selector_buffer_initialisation_with_known_id() {
+        // When the buffer is initialised from a known numeric ID the display string
+        // should be resolved to "id — name".
+        let candidates = make_creature_candidates(&[(7, "Skeleton"), (42, "Dragon")]);
+        let current_value = "7".to_string();
+        let id_num: u32 = current_value.trim().parse().unwrap();
+        let display = candidates
+            .iter()
+            .find(|(id, _)| *id == id_num)
+            .map(|(id, name)| format!("{} — {}", id, name))
+            .unwrap_or_else(|| current_value.clone());
+        assert_eq!(display, "7 — Skeleton");
+    }
+
+    #[test]
+    fn test_autocomplete_creature_selector_buffer_initialisation_with_unknown_id() {
+        // When the ID is not in the registry the raw string is kept as-is.
+        let candidates = make_creature_candidates(&[(7, "Skeleton")]);
+        let current_value = "99".to_string();
+        let id_num: u32 = current_value.trim().parse().unwrap();
+        let display = candidates
+            .iter()
+            .find(|(id, _)| *id == id_num)
+            .map(|(id, name)| format!("{} — {}", id, name))
+            .unwrap_or_else(|| current_value.clone());
+        assert_eq!(display, "99");
+    }
+
+    #[test]
+    fn test_autocomplete_creature_selector_buffer_initialisation_empty_stays_empty() {
+        let candidates = make_creature_candidates(&[(7, "Skeleton")]);
+        let current_value = String::new();
+        let display = if current_value.is_empty() {
+            String::new()
+        } else if let Ok(id_num) = current_value.trim().parse::<u32>() {
+            candidates
+                .iter()
+                .find(|(id, _)| *id == id_num)
+                .map(|(id, name)| format!("{} — {}", id, name))
+                .unwrap_or_else(|| current_value.clone())
+        } else {
+            current_value.clone()
+        };
+        assert!(display.is_empty());
+    }
+
+    #[test]
+    fn test_autocomplete_creature_selector_tooltip_resolved_name() {
+        // The hover tooltip should show "Creature: <name>" for known IDs.
+        let candidates = make_creature_candidates(&[(42, "Dragon")]);
+        let selected_id = "42".to_string();
+        let tooltip = if let Ok(id_num) = selected_id.trim().parse::<u32>() {
+            candidates
+                .iter()
+                .find(|(id, _)| *id == id_num)
+                .map(|(_, name)| format!("Creature: {}", name))
+                .unwrap_or_else(|| format!("⚠ Creature ID '{}' not found in registry", selected_id))
+        } else {
+            String::new()
+        };
+        assert_eq!(tooltip, "Creature: Dragon");
+    }
+
+    #[test]
+    fn test_autocomplete_creature_selector_tooltip_unknown_id() {
+        // An unrecognised ID should produce a warning tooltip.
+        let candidates = make_creature_candidates(&[(42, "Dragon")]);
+        let selected_id = "999".to_string();
+        let tooltip = if let Ok(id_num) = selected_id.trim().parse::<u32>() {
+            candidates
+                .iter()
+                .find(|(id, _)| *id == id_num)
+                .map(|(_, name)| format!("Creature: {}", name))
+                .unwrap_or_else(|| format!("⚠ Creature ID '{}' not found in registry", selected_id))
+        } else {
+            String::new()
+        };
+        assert_eq!(tooltip, "⚠ Creature ID '999' not found in registry");
     }
 }

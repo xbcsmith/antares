@@ -2066,6 +2066,7 @@ mod tests {
             description: "A brave knight".to_string(),
             is_premade: true,
             starts_in_party: true,
+            creature_id: None,
         };
 
         manager.scan_references(&[], &[], &[], &[], &[], &[character], &[]);
@@ -2255,6 +2256,7 @@ mod tests {
             description: "A young warrior".to_string(),
             is_premade: true,
             starts_in_party: true,
+            creature_id: None,
         }];
 
         let npcs = vec![
@@ -2530,6 +2532,7 @@ mod tests {
             description: "First fighter".to_string(),
             is_premade: false,
             starts_in_party: false,
+            creature_id: None,
         };
 
         let character2 = CharacterDefinition {
@@ -2550,6 +2553,7 @@ mod tests {
             description: "Second fighter".to_string(),
             is_premade: false,
             starts_in_party: false,
+            creature_id: None,
         };
 
         manager.scan_references(&[], &[], &[], &[], &[], &[character1, character2], &[]);
