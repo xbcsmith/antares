@@ -5,8 +5,8 @@
 //!
 //! This module provides the single authoritative implementation for applying
 //! [`ConsumableEffect`] variants to a [`Character`]. Both the combat path
-//! ([`execute_item_use_by_slot`]) and the future exploration/menu path share
-//! this implementation, ensuring there is no duplicated match logic.
+//! ([`execute_item_use_by_slot`]) and the exploration/menu path share this
+//! implementation, ensuring there is no duplicated match logic.
 //!
 //! # Design Contract
 //!
@@ -29,7 +29,7 @@
 //!
 //! ```
 //! use antares::domain::character::{Character, Sex, Alignment, Condition};
-//! use antares::domain::items::types::{ConsumableEffect, AttributeType, ResistanceType};
+//! use antares::domain::items::types::{ConsumableData, ConsumableEffect, AttributeType, ResistanceType};
 //! use antares::domain::items::consumable_usage::apply_consumable_effect;
 //!
 //! let mut hero = Character::new(
@@ -42,17 +42,22 @@
 //! hero.hp.base = 30;
 //! hero.hp.current = 10;
 //!
-//! let result = apply_consumable_effect(&mut hero, ConsumableEffect::HealHp(50));
+//! let data = ConsumableData {
+//!     effect: ConsumableEffect::HealHp(50),
+//!     is_combat_usable: true,
+//!     duration_minutes: None,
+//! };
+//! let result = apply_consumable_effect(&mut hero, &data);
 //! assert_eq!(hero.hp.current, 30); // capped at base
 //! assert_eq!(result.healing, 20);  // only the delta is reported
 //! ```
 
 use crate::domain::character::Character;
-use crate::domain::items::types::{AttributeType, ConsumableEffect, ResistanceType};
+use crate::domain::items::types::{ConsumableData, ConsumableEffect, ResistanceType};
 
 /// Describes what `apply_consumable_effect` actually changed on the character.
 ///
-/// All fields are zero when the corresponding effect did not apply (e.g.
+/// All fields are zero/false when the corresponding effect did not apply (e.g.
 /// `healing == 0` for a `BoostAttribute` potion). Callers can use this to
 /// compose player-visible feedback messages without re-deriving the deltas.
 ///
@@ -60,7 +65,7 @@ use crate::domain::items::types::{AttributeType, ConsumableEffect, ResistanceTyp
 ///
 /// ```
 /// use antares::domain::character::{Character, Sex, Alignment};
-/// use antares::domain::items::types::ConsumableEffect;
+/// use antares::domain::items::types::{ConsumableData, ConsumableEffect};
 /// use antares::domain::items::consumable_usage::apply_consumable_effect;
 ///
 /// let mut hero = Character::new(
@@ -73,9 +78,16 @@ use crate::domain::items::types::{AttributeType, ConsumableEffect, ResistanceTyp
 /// hero.sp.base = 20;
 /// hero.sp.current = 5;
 ///
-/// let result = apply_consumable_effect(&mut hero, ConsumableEffect::RestoreSp(100));
+/// let data = ConsumableData {
+///     effect: ConsumableEffect::RestoreSp(100),
+///     is_combat_usable: true,
+///     duration_minutes: None,
+/// };
+/// let result = apply_consumable_effect(&mut hero, &data);
 /// assert_eq!(result.sp_restored, 15); // only the delta up to base
 /// assert_eq!(result.healing, 0);      // HP field untouched
+/// assert!(!result.attribute_boost_is_timed);
+/// assert!(!result.resistance_boost_is_timed);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ConsumableApplyResult {
@@ -89,6 +101,10 @@ pub struct ConsumableApplyResult {
     pub attribute_delta: i16,
     /// Resistance change applied via `BoostResistance` (0 if none)
     pub resistance_delta: i16,
+    /// True when a `BoostAttribute` was registered as a timed boost
+    pub attribute_boost_is_timed: bool,
+    /// True when a `BoostResistance` was handled by the caller's timed layer
+    pub resistance_boost_is_timed: bool,
 }
 
 /// Apply a single [`ConsumableEffect`] variant to `character` and return a
@@ -101,25 +117,36 @@ pub struct ConsumableApplyResult {
 /// # Arguments
 ///
 /// * `character` - The character receiving the effect (mutated in place).
-/// * `effect`    - The consumable effect to apply.
+/// * `data`      - The full [`ConsumableData`] including optional duration.
 ///
 /// # Returns
 ///
 /// A [`ConsumableApplyResult`] with the actual deltas applied. All fields that
-/// do not correspond to the active effect variant are zero.
+/// do not correspond to the active effect variant are zero/false.
 ///
 /// # Cap Behaviour
 ///
-/// - `HealHp`:   `hp.current` is clamped to `hp.base` after modification.
+/// - `HealHp`:    `hp.current` is clamped to `hp.base` after modification.
 /// - `RestoreSp`: `sp.current` is clamped to `sp.base` after modification.
 /// - All other variants use `AttributePair::modify` / `AttributePair16::modify`
 ///   which saturates at the type boundary (`u8::MAX` / `u16::MAX`).
+///
+/// # Timed vs Permanent Boosts
+///
+/// For `BoostAttribute`, if `normalize_duration(data.duration_minutes)` is
+/// `Some`, the boost is registered via `apply_timed_stat_boost` and
+/// `attribute_boost_is_timed` is set to `true`. Otherwise the permanent path
+/// mutates `current` directly.
+///
+/// `BoostResistance` **always** uses the permanent path in this function (combat
+/// context). Use [`apply_consumable_effect_exploration`] to route timed
+/// resistance boosts through `ActiveSpells`.
 ///
 /// # Examples
 ///
 /// ```
 /// use antares::domain::character::{Character, Sex, Alignment, Condition};
-/// use antares::domain::items::types::{ConsumableEffect, AttributeType, ResistanceType};
+/// use antares::domain::items::types::{ConsumableData, ConsumableEffect, AttributeType, ResistanceType};
 /// use antares::domain::items::consumable_usage::apply_consumable_effect;
 ///
 /// // --- HealHp capped at base ---
@@ -129,31 +156,46 @@ pub struct ConsumableApplyResult {
 /// );
 /// ch.hp.base = 30;
 /// ch.hp.current = 10;
-/// let r = apply_consumable_effect(&mut ch, ConsumableEffect::HealHp(50));
+/// let r = apply_consumable_effect(&mut ch, &ConsumableData {
+///     effect: ConsumableEffect::HealHp(50),
+///     is_combat_usable: true,
+///     duration_minutes: None,
+/// });
 /// assert_eq!(ch.hp.current, 30);
 /// assert_eq!(r.healing, 20);
 ///
 /// // --- CureCondition removes only the matching bits ---
 /// ch.conditions.add(Condition::POISONED);
 /// ch.conditions.add(Condition::BLINDED);
-/// let r2 = apply_consumable_effect(&mut ch, ConsumableEffect::CureCondition(Condition::POISONED));
+/// let r2 = apply_consumable_effect(&mut ch, &ConsumableData {
+///     effect: ConsumableEffect::CureCondition(Condition::POISONED),
+///     is_combat_usable: true,
+///     duration_minutes: None,
+/// });
 /// assert!(!ch.conditions.has(Condition::POISONED));
 /// assert!(ch.conditions.has(Condition::BLINDED));
 /// assert_eq!(r2.conditions_cleared, Condition::POISONED);
 ///
-/// // --- BoostAttribute modifies current, not base ---
-/// let r3 = apply_consumable_effect(&mut ch, ConsumableEffect::BoostAttribute(AttributeType::Might, 5));
+/// // --- BoostAttribute modifies current, not base (permanent) ---
+/// let r3 = apply_consumable_effect(&mut ch, &ConsumableData {
+///     effect: ConsumableEffect::BoostAttribute(AttributeType::Might, 5),
+///     is_combat_usable: true,
+///     duration_minutes: None,
+/// });
 /// assert_eq!(ch.stats.might.current, 15); // default base=10, current=10+5
 /// assert_eq!(ch.stats.might.base, 10);
 /// assert_eq!(r3.attribute_delta, 5);
+/// assert!(!r3.attribute_boost_is_timed);
 /// ```
 pub fn apply_consumable_effect(
     character: &mut Character,
-    effect: ConsumableEffect,
+    data: &ConsumableData,
 ) -> ConsumableApplyResult {
+    use crate::domain::items::types::normalize_duration;
+
     let mut result = ConsumableApplyResult::default();
 
-    match effect {
+    match data.effect {
         ConsumableEffect::HealHp(amount) => {
             let pre = character.hp.current as i32;
             character.hp.modify(amount as i32);
@@ -190,50 +232,21 @@ pub fn apply_consumable_effect(
         }
 
         ConsumableEffect::BoostAttribute(attr, amount) => {
-            match attr {
-                AttributeType::Might => character.stats.might.modify(amount as i16),
-                AttributeType::Intellect => character.stats.intellect.modify(amount as i16),
-                AttributeType::Personality => character.stats.personality.modify(amount as i16),
-                AttributeType::Endurance => character.stats.endurance.modify(amount as i16),
-                AttributeType::Speed => character.stats.speed.modify(amount as i16),
-                AttributeType::Accuracy => character.stats.accuracy.modify(amount as i16),
-                AttributeType::Luck => character.stats.luck.modify(amount as i16),
+            if normalize_duration(data.duration_minutes).is_some() {
+                // Timed path: register via apply_timed_stat_boost so the boost
+                // is automatically reversed by tick_timed_stat_boosts_minute.
+                character.apply_timed_stat_boost(attr, amount, data.duration_minutes);
+                result.attribute_delta = amount as i16;
+                result.attribute_boost_is_timed = true;
+            } else {
+                // Permanent path (legacy behaviour): directly mutate current.
+                character.apply_attribute_delta(attr, amount as i16);
+                result.attribute_delta = amount as i16;
             }
-            result.attribute_delta = amount as i16;
         }
 
         ConsumableEffect::BoostResistance(res_type, amount) => {
-            match res_type {
-                ResistanceType::Physical => {
-                    // No dedicated physical field on character Resistances;
-                    // use magic as the closest analogue (matches combat path).
-                    character.resistances.magic.modify(amount as i16);
-                }
-                ResistanceType::Fire => {
-                    character.resistances.fire.modify(amount as i16);
-                }
-                ResistanceType::Cold => {
-                    character.resistances.cold.modify(amount as i16);
-                }
-                ResistanceType::Electricity => {
-                    character.resistances.electricity.modify(amount as i16);
-                }
-                ResistanceType::Energy => {
-                    // Energy maps to magic resistance (matches combat path).
-                    character.resistances.magic.modify(amount as i16);
-                }
-                ResistanceType::Paralysis => {
-                    // Paralysis maps to psychic resistance (matches combat path).
-                    character.resistances.psychic.modify(amount as i16);
-                }
-                ResistanceType::Fear => {
-                    character.resistances.fear.modify(amount as i16);
-                }
-                ResistanceType::Sleep => {
-                    // Sleep maps to psychic resistance (matches combat path).
-                    character.resistances.psychic.modify(amount as i16);
-                }
-            }
+            apply_resistance_to_character(character, res_type, amount);
             result.resistance_delta = amount as i16;
         }
 
@@ -246,11 +259,139 @@ pub fn apply_consumable_effect(
     result
 }
 
+/// Applies a resistance boost directly to the character's resistance fields.
+///
+/// This is the shared permanent-path helper used by both
+/// `apply_consumable_effect` (combat) and `apply_consumable_effect_exploration`
+/// (exploration fallthrough for permanent resistance items).
+fn apply_resistance_to_character(character: &mut Character, res_type: ResistanceType, amount: i8) {
+    match res_type {
+        ResistanceType::Physical => {
+            // No dedicated physical field on character Resistances;
+            // use magic as the closest analogue (matches combat path).
+            character.resistances.magic.modify(amount as i16);
+        }
+        ResistanceType::Fire => {
+            character.resistances.fire.modify(amount as i16);
+        }
+        ResistanceType::Cold => {
+            character.resistances.cold.modify(amount as i16);
+        }
+        ResistanceType::Electricity => {
+            character.resistances.electricity.modify(amount as i16);
+        }
+        ResistanceType::Energy => {
+            // Energy maps to magic resistance (matches combat path).
+            character.resistances.magic.modify(amount as i16);
+        }
+        ResistanceType::Paralysis => {
+            // Paralysis maps to psychic resistance (matches combat path).
+            character.resistances.psychic.modify(amount as i16);
+        }
+        ResistanceType::Fear => {
+            character.resistances.fear.modify(amount as i16);
+        }
+        ResistanceType::Sleep => {
+            // Sleep maps to psychic resistance (matches combat path).
+            character.resistances.psychic.modify(amount as i16);
+        }
+    }
+}
+
+/// Applies a consumable effect in the exploration context.
+///
+/// Identical to [`apply_consumable_effect`] except that `BoostResistance` with
+/// a `duration_minutes` is written to `active_spells` instead of directly
+/// mutating `character.resistances`, so the effect expires automatically via
+/// `GameState::advance_time`.
+///
+/// For all other effect variants (including permanent `BoostResistance`),
+/// this function delegates to [`apply_consumable_effect`].
+///
+/// # Arguments
+///
+/// * `character`     — mutable reference to the consuming character
+/// * `active_spells` — mutable reference to the party-wide active spells
+/// * `data`          — the full [`ConsumableData`] including optional duration
+///
+/// # Returns
+///
+/// A [`ConsumableApplyResult`] with `resistance_boost_is_timed = true` when
+/// the resistance effect was routed to `active_spells`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::ActiveSpells;
+/// use antares::domain::character::{Character, Sex, Alignment};
+/// use antares::domain::items::types::{ConsumableData, ConsumableEffect, ResistanceType};
+/// use antares::domain::items::consumable_usage::apply_consumable_effect_exploration;
+///
+/// let mut hero = Character::new(
+///     "Scout".to_string(),
+///     "human".to_string(),
+///     "robber".to_string(),
+///     Sex::Female,
+///     Alignment::Neutral,
+/// );
+/// let mut active_spells = ActiveSpells::new();
+/// let fire_before = hero.resistances.fire.current;
+///
+/// let data = ConsumableData {
+///     effect: ConsumableEffect::BoostResistance(ResistanceType::Fire, 25),
+///     is_combat_usable: true,
+///     duration_minutes: Some(60),
+/// };
+/// let result = apply_consumable_effect_exploration(&mut hero, &mut active_spells, &data);
+///
+/// // Timed resistance routes to active_spells, not character.resistances
+/// assert_eq!(active_spells.fire_protection, 60);
+/// assert_eq!(hero.resistances.fire.current, fire_before);
+/// assert!(result.resistance_boost_is_timed);
+/// ```
+pub fn apply_consumable_effect_exploration(
+    character: &mut Character,
+    active_spells: &mut crate::application::ActiveSpells,
+    data: &ConsumableData,
+) -> ConsumableApplyResult {
+    use crate::domain::items::types::normalize_duration;
+
+    if let ConsumableEffect::BoostResistance(res_type, amount) = data.effect {
+        if let Some(minutes) = normalize_duration(data.duration_minutes) {
+            // Clamp to u8 range (overwrite semantics — last write wins).
+            let clamped = u16::min(minutes, u8::MAX as u16) as u8;
+            match res_type {
+                ResistanceType::Fire => active_spells.fire_protection = clamped,
+                ResistanceType::Cold => active_spells.cold_protection = clamped,
+                ResistanceType::Electricity => active_spells.electricity_protection = clamped,
+                ResistanceType::Energy => active_spells.magic_protection = clamped,
+                ResistanceType::Fear => active_spells.fear_protection = clamped,
+                ResistanceType::Physical => active_spells.magic_protection = clamped,
+                ResistanceType::Paralysis => active_spells.psychic_protection = clamped,
+                ResistanceType::Sleep => active_spells.psychic_protection = clamped,
+            }
+            return ConsumableApplyResult {
+                resistance_delta: amount as i16,
+                resistance_boost_is_timed: true,
+                ..Default::default()
+            };
+        }
+        // duration_minutes is None or Some(0) → fall through to permanent path
+    }
+
+    // Delegate all other effects (and permanent BoostResistance) to the
+    // shared combat helper.
+    apply_consumable_effect(character, data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::ActiveSpells;
     use crate::domain::character::{Alignment, Character, Condition, Sex};
-    use crate::domain::items::types::{AttributeType, ConsumableEffect, ResistanceType};
+    use crate::domain::items::types::{
+        AttributeType, ConsumableData, ConsumableEffect, ResistanceType,
+    };
 
     /// Build a basic character for tests with explicit hp/sp bases set.
     fn make_character(hp_base: u16, hp_current: u16, sp_base: u16, sp_current: u16) -> Character {
@@ -268,6 +409,18 @@ mod tests {
         ch
     }
 
+    /// Convenience constructor for test ConsumableData values.
+    fn make_consumable_data(
+        effect: ConsumableEffect,
+        duration_minutes: Option<u16>,
+    ) -> ConsumableData {
+        ConsumableData {
+            effect,
+            is_combat_usable: true,
+            duration_minutes,
+        }
+    }
+
     // -----------------------------------------------------------------------
     // HealHp
     // -----------------------------------------------------------------------
@@ -275,7 +428,8 @@ mod tests {
     #[test]
     fn test_heal_hp_restores_up_to_base() {
         let mut ch = make_character(30, 10, 0, 0);
-        let result = apply_consumable_effect(&mut ch, ConsumableEffect::HealHp(50));
+        let data = make_consumable_data(ConsumableEffect::HealHp(50), None);
+        let result = apply_consumable_effect(&mut ch, &data);
         // current must be capped at base
         assert_eq!(ch.hp.current, 30, "hp.current should be capped at hp.base");
         // only the actual delta (20) is reported
@@ -285,7 +439,8 @@ mod tests {
     #[test]
     fn test_heal_hp_already_full_is_noop() {
         let mut ch = make_character(30, 30, 0, 0);
-        let result = apply_consumable_effect(&mut ch, ConsumableEffect::HealHp(10));
+        let data = make_consumable_data(ConsumableEffect::HealHp(10), None);
+        let result = apply_consumable_effect(&mut ch, &data);
         assert_eq!(ch.hp.current, 30, "full-health character should not change");
         assert_eq!(result.healing, 0, "no actual healing should be reported");
     }
@@ -293,7 +448,8 @@ mod tests {
     #[test]
     fn test_heal_hp_partial_restore() {
         let mut ch = make_character(100, 50, 0, 0);
-        let result = apply_consumable_effect(&mut ch, ConsumableEffect::HealHp(30));
+        let data = make_consumable_data(ConsumableEffect::HealHp(30), None);
+        let result = apply_consumable_effect(&mut ch, &data);
         assert_eq!(ch.hp.current, 80, "current should increase by 30");
         assert_eq!(result.healing, 30);
     }
@@ -305,7 +461,8 @@ mod tests {
     #[test]
     fn test_restore_sp_capped_at_base() {
         let mut ch = make_character(30, 30, 20, 5);
-        let result = apply_consumable_effect(&mut ch, ConsumableEffect::RestoreSp(100));
+        let data = make_consumable_data(ConsumableEffect::RestoreSp(100), None);
+        let result = apply_consumable_effect(&mut ch, &data);
         assert_eq!(ch.sp.current, 20, "sp.current must be capped at sp.base");
         assert_eq!(result.sp_restored, 15, "only the delta to base is reported");
     }
@@ -313,7 +470,8 @@ mod tests {
     #[test]
     fn test_restore_sp_already_full_is_noop() {
         let mut ch = make_character(30, 30, 10, 10);
-        let result = apply_consumable_effect(&mut ch, ConsumableEffect::RestoreSp(10));
+        let data = make_consumable_data(ConsumableEffect::RestoreSp(10), None);
+        let result = apply_consumable_effect(&mut ch, &data);
         assert_eq!(ch.sp.current, 10, "full SP character should not change");
         assert_eq!(result.sp_restored, 0);
     }
@@ -321,7 +479,8 @@ mod tests {
     #[test]
     fn test_restore_sp_partial() {
         let mut ch = make_character(30, 30, 20, 0);
-        let result = apply_consumable_effect(&mut ch, ConsumableEffect::RestoreSp(8));
+        let data = make_consumable_data(ConsumableEffect::RestoreSp(8), None);
+        let result = apply_consumable_effect(&mut ch, &data);
         assert_eq!(ch.sp.current, 8);
         assert_eq!(result.sp_restored, 8);
     }
@@ -336,10 +495,8 @@ mod tests {
         ch.conditions.add(Condition::POISONED);
         ch.conditions.add(Condition::BLINDED);
 
-        let result = apply_consumable_effect(
-            &mut ch,
-            ConsumableEffect::CureCondition(Condition::POISONED),
-        );
+        let data = make_consumable_data(ConsumableEffect::CureCondition(Condition::POISONED), None);
+        let result = apply_consumable_effect(&mut ch, &data);
 
         assert!(
             !ch.conditions.has(Condition::POISONED),
@@ -369,10 +526,9 @@ mod tests {
             crate::domain::conditions::ConditionDuration::Rounds(3),
         ));
 
-        apply_consumable_effect(
-            &mut ch,
-            ConsumableEffect::CureCondition(Condition::PARALYZED),
-        );
+        let data =
+            make_consumable_data(ConsumableEffect::CureCondition(Condition::PARALYZED), None);
+        apply_consumable_effect(&mut ch, &data);
 
         // active_conditions must be untouched
         assert_eq!(
@@ -390,10 +546,8 @@ mod tests {
     fn test_cure_condition_noop_when_already_clear() {
         let mut ch = make_character(30, 30, 0, 0);
         // POISONED is not set — cure should be a harmless no-op
-        let result = apply_consumable_effect(
-            &mut ch,
-            ConsumableEffect::CureCondition(Condition::POISONED),
-        );
+        let data = make_consumable_data(ConsumableEffect::CureCondition(Condition::POISONED), None);
+        let result = apply_consumable_effect(&mut ch, &data);
         // flags field still set to the requested value (the remove is idempotent)
         assert_eq!(result.conditions_cleared, Condition::POISONED);
         assert!(ch.conditions.is_fine());
@@ -409,10 +563,11 @@ mod tests {
         let original_base = ch.stats.might.base;
         let original_current = ch.stats.might.current;
 
-        let result = apply_consumable_effect(
-            &mut ch,
+        let data = make_consumable_data(
             ConsumableEffect::BoostAttribute(AttributeType::Might, 5),
+            None,
         );
+        let result = apply_consumable_effect(&mut ch, &data);
 
         assert_eq!(
             ch.stats.might.current,
@@ -454,7 +609,8 @@ mod tests {
         for (attr, get) in cases {
             let mut ch = make_character(30, 30, 0, 0);
             let (base_before, current_before) = get(&ch);
-            apply_consumable_effect(&mut ch, ConsumableEffect::BoostAttribute(*attr, 3));
+            let data = make_consumable_data(ConsumableEffect::BoostAttribute(*attr, 3), None);
+            apply_consumable_effect(&mut ch, &data);
             let (base_after, current_after) = get(&ch);
             assert_eq!(base_before, base_after, "base must not change for {attr:?}");
             assert_eq!(
@@ -470,10 +626,11 @@ mod tests {
         let mut ch = make_character(30, 30, 0, 0);
         let base_before = ch.stats.speed.base;
 
-        apply_consumable_effect(
-            &mut ch,
+        let data = make_consumable_data(
             ConsumableEffect::BoostAttribute(AttributeType::Speed, -3),
+            None,
         );
+        apply_consumable_effect(&mut ch, &data);
 
         assert_eq!(ch.stats.speed.base, base_before, "base must not change");
         assert_eq!(ch.stats.speed.current, base_before.saturating_sub(3));
@@ -489,10 +646,11 @@ mod tests {
         let base_before = ch.resistances.fire.base;
         let current_before = ch.resistances.fire.current;
 
-        let result = apply_consumable_effect(
-            &mut ch,
+        let data = make_consumable_data(
             ConsumableEffect::BoostResistance(ResistanceType::Fire, 10),
+            None,
         );
+        let result = apply_consumable_effect(&mut ch, &data);
 
         assert_eq!(
             ch.resistances.fire.current,
@@ -530,7 +688,8 @@ mod tests {
         for (res_type, get_current) in cases {
             let mut ch = make_character(30, 30, 0, 0);
             let before = get_current(&ch);
-            apply_consumable_effect(&mut ch, ConsumableEffect::BoostResistance(*res_type, 5));
+            let data = make_consumable_data(ConsumableEffect::BoostResistance(*res_type, 5), None);
+            apply_consumable_effect(&mut ch, &data);
             let after = get_current(&ch);
             assert_eq!(
                 after,
@@ -566,7 +725,8 @@ mod tests {
                 ch.resistances.psychic.base,
             );
 
-            apply_consumable_effect(&mut ch, ConsumableEffect::BoostResistance(res_type, 20));
+            let data = make_consumable_data(ConsumableEffect::BoostResistance(res_type, 20), None);
+            apply_consumable_effect(&mut ch, &data);
 
             let bases_after = (
                 ch.resistances.magic.base,
@@ -596,7 +756,8 @@ mod tests {
         let hp_before = ch.hp.current;
         let sp_before = ch.sp.current;
 
-        let result = apply_consumable_effect(&mut ch, ConsumableEffect::IsFood(1));
+        let data = make_consumable_data(ConsumableEffect::IsFood(1), None);
+        let result = apply_consumable_effect(&mut ch, &data);
 
         assert_eq!(ch.hp.current, hp_before, "IsFood must not change HP");
         assert_eq!(ch.sp.current, sp_before, "IsFood must not change SP");
@@ -619,5 +780,172 @@ mod tests {
         assert_eq!(r.conditions_cleared, 0);
         assert_eq!(r.attribute_delta, 0);
         assert_eq!(r.resistance_delta, 0);
+        assert!(!r.attribute_boost_is_timed);
+        assert!(!r.resistance_boost_is_timed);
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 3 — Timed boost tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_apply_timed_attribute_boost_registers_in_timed_list() {
+        let mut ch = make_character(30, 30, 0, 0);
+        let data = make_consumable_data(
+            ConsumableEffect::BoostAttribute(AttributeType::Might, 5),
+            Some(30),
+        );
+        let result = apply_consumable_effect(&mut ch, &data);
+        assert_eq!(
+            ch.timed_stat_boosts.len(),
+            1,
+            "timed list should have one entry"
+        );
+        assert!(result.attribute_boost_is_timed);
+        assert_eq!(result.attribute_delta, 5);
+    }
+
+    #[test]
+    fn test_apply_permanent_attribute_boost_mutates_directly() {
+        let mut ch = make_character(30, 30, 0, 0);
+        let before = ch.stats.might.current;
+        let data = make_consumable_data(
+            ConsumableEffect::BoostAttribute(AttributeType::Might, 5),
+            None,
+        );
+        let result = apply_consumable_effect(&mut ch, &data);
+        assert!(
+            ch.timed_stat_boosts.is_empty(),
+            "no timed entry for permanent boost"
+        );
+        assert_eq!(ch.stats.might.current, before + 5);
+        assert!(!result.attribute_boost_is_timed);
+    }
+
+    #[test]
+    fn test_apply_timed_resistance_routes_to_active_spells() {
+        let mut ch = make_character(30, 30, 0, 0);
+        let mut active_spells = ActiveSpells::new();
+        let fire_before = ch.resistances.fire.current;
+        let data = make_consumable_data(
+            ConsumableEffect::BoostResistance(ResistanceType::Fire, 25),
+            Some(60),
+        );
+        let result = apply_consumable_effect_exploration(&mut ch, &mut active_spells, &data);
+        assert_eq!(
+            active_spells.fire_protection, 60,
+            "fire_protection should be set to 60"
+        );
+        assert_eq!(
+            ch.resistances.fire.current, fire_before,
+            "character resistances must be unchanged"
+        );
+        assert!(result.resistance_boost_is_timed);
+    }
+
+    #[test]
+    fn test_apply_permanent_resistance_mutates_character_directly() {
+        let mut ch = make_character(30, 30, 0, 0);
+        let mut active_spells = ActiveSpells::new();
+        let fire_before = ch.resistances.fire.current;
+        let data = make_consumable_data(
+            ConsumableEffect::BoostResistance(ResistanceType::Fire, 25),
+            None,
+        );
+        let result = apply_consumable_effect_exploration(&mut ch, &mut active_spells, &data);
+        assert!(
+            ch.resistances.fire.current > fire_before,
+            "permanent path must mutate character"
+        );
+        assert_eq!(
+            active_spells.fire_protection, 0,
+            "active_spells must be untouched"
+        );
+        assert!(!result.resistance_boost_is_timed);
+    }
+
+    #[test]
+    fn test_resistance_stacking_overwrites_duration() {
+        let mut ch = make_character(30, 30, 0, 0);
+        let mut active_spells = ActiveSpells::new();
+        let data1 = make_consumable_data(
+            ConsumableEffect::BoostResistance(ResistanceType::Cold, 10),
+            Some(30),
+        );
+        let data2 = make_consumable_data(
+            ConsumableEffect::BoostResistance(ResistanceType::Cold, 10),
+            Some(90),
+        );
+        apply_consumable_effect_exploration(&mut ch, &mut active_spells, &data1);
+        assert_eq!(active_spells.cold_protection, 30);
+        apply_consumable_effect_exploration(&mut ch, &mut active_spells, &data2);
+        assert_eq!(
+            active_spells.cold_protection, 90,
+            "second call should overwrite with 90"
+        );
+    }
+
+    #[test]
+    fn test_resistance_u8_clamping() {
+        let mut ch = make_character(30, 30, 0, 0);
+        let mut active_spells = ActiveSpells::new();
+        let data = make_consumable_data(
+            ConsumableEffect::BoostResistance(ResistanceType::Fire, 10),
+            Some(300),
+        );
+        apply_consumable_effect_exploration(&mut ch, &mut active_spells, &data);
+        assert_eq!(
+            active_spells.fire_protection,
+            u8::MAX,
+            "300 must be clamped to 255"
+        );
+    }
+
+    #[test]
+    fn test_timed_resistance_all_eight_types_map_correctly() {
+        type ActiveSpellsGetter = fn(&ActiveSpells) -> u8;
+        let cases: &[(ResistanceType, ActiveSpellsGetter)] = &[
+            (ResistanceType::Fire, |a| a.fire_protection),
+            (ResistanceType::Cold, |a| a.cold_protection),
+            (ResistanceType::Electricity, |a| a.electricity_protection),
+            (ResistanceType::Energy, |a| a.magic_protection),
+            (ResistanceType::Fear, |a| a.fear_protection),
+            (ResistanceType::Physical, |a| a.magic_protection),
+            (ResistanceType::Paralysis, |a| a.psychic_protection),
+            (ResistanceType::Sleep, |a| a.psychic_protection),
+        ];
+        for (res_type, get_field) in cases {
+            let mut ch = make_character(30, 30, 0, 0);
+            let mut active_spells = ActiveSpells::new();
+            let data =
+                make_consumable_data(ConsumableEffect::BoostResistance(*res_type, 5), Some(50));
+            apply_consumable_effect_exploration(&mut ch, &mut active_spells, &data);
+            assert_eq!(
+                get_field(&active_spells),
+                50,
+                "active_spells field for {res_type:?} should be 50"
+            );
+        }
+    }
+
+    #[test]
+    fn test_combat_resistance_boost_still_permanent() {
+        // apply_consumable_effect (not exploration) with BoostResistance + duration
+        // must still mutate character.resistances directly (combat path is permanent)
+        let mut ch = make_character(30, 30, 0, 0);
+        let fire_before = ch.resistances.fire.current;
+        let data = make_consumable_data(
+            ConsumableEffect::BoostResistance(ResistanceType::Fire, 25),
+            Some(60),
+        );
+        let result = apply_consumable_effect(&mut ch, &data);
+        assert!(
+            ch.resistances.fire.current > fire_before,
+            "combat path must mutate fire resistance"
+        );
+        assert!(
+            !result.resistance_boost_is_timed,
+            "combat path must not set resistance_boost_is_timed"
+        );
     }
 }

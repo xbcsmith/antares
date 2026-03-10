@@ -1261,7 +1261,7 @@ impl Character {
     ///
     /// This is the single authoritative mapping from `AttributeType` to a
     /// `Character` field. Used by timed-boost apply and reversal.
-    fn apply_attribute_delta(
+    pub(crate) fn apply_attribute_delta(
         &mut self,
         attr: crate::domain::items::types::AttributeType,
         delta: i16,

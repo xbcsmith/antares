@@ -34,7 +34,9 @@ use crate::application::resources::GameContent;
 use crate::application::GameMode;
 use crate::domain::character::{Inventory, PARTY_MAX_SIZE};
 use crate::domain::combat::item_usage::{validate_item_use_slot, ItemUseError};
-use crate::domain::items::consumable_usage::apply_consumable_effect;
+use crate::domain::items::consumable_usage::{
+    apply_consumable_effect_exploration, ConsumableApplyResult,
+};
 use crate::domain::items::types::{ConsumableEffect, ItemType};
 use crate::game::resources::GlobalState;
 use crate::game::systems::item_world_events::ItemDroppedEvent;
@@ -1573,7 +1575,7 @@ fn inventory_action_system(
 /// 3. Validates the item via [`validate_item_use_slot`] with `in_combat = false`.
 /// 4. Captures the item name and [`ConsumableEffect`] before mutation.
 /// 5. Consumes one charge (or removes the slot when the last charge is spent).
-/// 6. Applies the effect to the owning character via [`apply_consumable_effect`].
+/// 6. Applies the effect to the owning character via [`apply_consumable_effect_exploration`].
 /// 7. Writes a player-visible [`GameLog`] message describing the outcome.
 /// 8. Resets navigation state so the UI returns to slot-navigation phase.
 ///
@@ -1691,9 +1693,9 @@ fn handle_use_item_action_exploration(
             continue;
         }
 
-        // Step 4: capture item name and effect before any mutation.
+        // Step 4: capture item name and full ConsumableData before any mutation.
         // This short immutable borrow ends before we take a mutable borrow below.
-        let (item_name, effect) = {
+        let (item_name, consumable_data) = {
             let character = &global_state.0.party.members[party_index];
             let slot = match character.inventory.items.get(slot_index) {
                 Some(s) => s,
@@ -1722,7 +1724,7 @@ fn handle_use_item_action_exploration(
                     continue;
                 }
             };
-            (item.name.clone(), consumable.effect)
+            (item.name.clone(), *consumable)
         };
 
         // Step 5: consume one charge (mutable borrow of the character).
@@ -1752,10 +1754,13 @@ fn handle_use_item_action_exploration(
             }
         }
 
-        // Step 6: apply the effect to the owning character.
-        let result = {
-            let character = &mut global_state.0.party.members[party_index];
-            apply_consumable_effect(character, effect)
+        // Step 6: apply the effect to the owning character via the exploration
+        // helper. Split borrows: get active_spells separately from the character
+        // so the borrow checker sees them as disjoint fields.
+        let result: ConsumableApplyResult = {
+            let gs = &mut global_state.0;
+            let character = &mut gs.party.members[party_index];
+            apply_consumable_effect_exploration(character, &mut gs.active_spells, &consumable_data)
         };
 
         // Step 7: write a success GameLog message.
@@ -1767,7 +1772,10 @@ fn handle_use_item_action_exploration(
             .map(|ch| ch.name.clone())
             .unwrap_or_else(|| "Unknown".to_string());
 
-        let log_msg = match effect {
+        use crate::domain::items::types::normalize_duration;
+        let minutes_opt = normalize_duration(consumable_data.duration_minutes);
+
+        let log_msg = match consumable_data.effect {
             ConsumableEffect::HealHp(_) => {
                 if result.healing == 0 {
                     format!("{item_name} used. {character_name} was already at full health.")
@@ -1792,16 +1800,46 @@ fn handle_use_item_action_exploration(
                 format!("{item_name} used. Conditions cleared.")
             }
             ConsumableEffect::BoostAttribute(attr, _) => {
-                format!(
-                    "{item_name} used. {character_name}'s {} increased.",
-                    attr.display_name()
-                )
+                if result.attribute_boost_is_timed {
+                    if let Some(mins) = minutes_opt {
+                        format!(
+                            "{item_name} used. {} increased for {} minutes.",
+                            attr.display_name(),
+                            mins
+                        )
+                    } else {
+                        format!(
+                            "{item_name} used. {character_name}'s {} increased.",
+                            attr.display_name()
+                        )
+                    }
+                } else {
+                    format!(
+                        "{item_name} used. {character_name}'s {} increased.",
+                        attr.display_name()
+                    )
+                }
             }
             ConsumableEffect::BoostResistance(res, _) => {
-                format!(
-                    "{item_name} used. {character_name}'s {} resistance increased.",
-                    res.display_name()
-                )
+                if result.resistance_boost_is_timed {
+                    if let Some(mins) = minutes_opt {
+                        format!(
+                            "{item_name} used. {} resistance active for {} minutes.",
+                            res.display_name(),
+                            mins
+                        )
+                    } else {
+                        format!(
+                            "{item_name} used. {character_name}'s {} resistance increased.",
+                            res.display_name()
+                        )
+                    }
+                } else {
+                    format!(
+                        "{item_name} used. {character_name}'s {} resistance increased.",
+                        res.display_name()
+                    )
+                }
             }
             ConsumableEffect::IsFood(_) => {
                 format!("{item_name} used.")

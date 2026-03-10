@@ -39,7 +39,9 @@ pub mod equipment_validation;
 pub mod types;
 
 // Re-export main types for convenience
-pub use consumable_usage::{apply_consumable_effect, ConsumableApplyResult};
+pub use consumable_usage::{
+    apply_consumable_effect, apply_consumable_effect_exploration, ConsumableApplyResult,
+};
 pub use database::{ItemDatabase, ItemDatabaseError, ItemMeshDatabase};
 pub use equipment_validation::{can_equip_item, EquipError};
 pub use types::{

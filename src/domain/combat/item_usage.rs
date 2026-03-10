@@ -39,7 +39,7 @@ SPDX-License-Identifier: Apache-2.0
 use crate::domain::combat::engine::CombatState;
 use crate::domain::combat::types::CombatantId;
 use crate::domain::items::consumable_usage::apply_consumable_effect;
-use crate::domain::items::types::{ConsumableEffect, ItemType};
+use crate::domain::items::types::{ConsumableData, ConsumableEffect, ItemType};
 use crate::domain::types::ItemId;
 use crate::sdk::database::ContentDatabase;
 use rand::Rng;
@@ -302,8 +302,9 @@ pub fn execute_item_use_by_slot<R: Rng>(
     // Phase B: Re-borrow the combat state to apply the captured effect to the
     //          target (healing, SP restore, condition cure, or attribute boost).
     let (result_message, effected_indices, damage_amount, healing_amount, applied_conds) = {
-        // Phase A: consume charge and capture effect
-        let (item_name, effect) = {
+        // Phase A: consume charge and capture consumable data (full struct, not
+        // just the effect) so that duration_minutes is available for Phase B.
+        let (item_name, consumable_data) = {
             // Small mutable borrow for the user (only to mutate inventory)
             let user_ref_mut = combat_state
                 .get_combatant_mut(&user)
@@ -339,6 +340,10 @@ pub fn execute_item_use_by_slot<R: Rng>(
                 _ => return Err(ItemUseError::NotConsumable),
             };
 
+            // Clone the full ConsumableData so duration_minutes is available
+            // after the inventory borrow ends.
+            let consumable_data: ConsumableData = *consumable;
+
             // Consume one charge from the slot (or remove it)
             if slot.charges > 1 {
                 slot.charges -= 1;
@@ -346,7 +351,7 @@ pub fn execute_item_use_by_slot<R: Rng>(
                 let _ = pc.inventory.remove_item(inventory_index);
             }
 
-            (item.name.clone(), consumable.effect)
+            (item.name.clone(), consumable_data)
         };
 
         // Phase B: apply captured effect to target via the shared pure-domain
@@ -357,7 +362,7 @@ pub fn execute_item_use_by_slot<R: Rng>(
         // on `ConsumableData` blocks them via `validate_item_use_slot`. If one
         // somehow reaches here, `apply_consumable_effect` returns a zeroed
         // result (no-op), and the safety guard below surfaces the error.
-        if matches!(effect, ConsumableEffect::IsFood(_)) {
+        if matches!(consumable_data.effect, ConsumableEffect::IsFood(_)) {
             return Err(ItemUseError::NotUsableInCombat);
         }
 
@@ -369,7 +374,7 @@ pub fn execute_item_use_by_slot<R: Rng>(
         match combat_state.get_combatant_mut(&target) {
             Some(Combatant::Player(pc_target)) => {
                 if let CombatantId::Player(idx) = target {
-                    let apply_result = apply_consumable_effect(pc_target, effect);
+                    let apply_result = apply_consumable_effect(pc_target, &consumable_data);
 
                     if apply_result.healing > 0 {
                         total_healing += apply_result.healing;
@@ -450,7 +455,7 @@ mod tests {
     use crate::domain::combat::engine::{CombatState, Combatant};
     use crate::domain::items::consumable_usage::apply_consumable_effect;
     use crate::domain::items::types::{
-        AttributeType, ConsumableData, ConsumableEffect, Item, ItemType,
+        AttributeType, ConsumableData, ConsumableEffect, Item, ItemType, ResistanceType,
     };
     use crate::sdk::database::ContentDatabase;
 
@@ -693,8 +698,14 @@ mod tests {
         );
         reference_pc.hp.base = 30;
         reference_pc.hp.current = 10;
-        let ref_result =
-            apply_consumable_effect(&mut reference_pc, ConsumableEffect::HealHp(heal_amount));
+        let ref_result = apply_consumable_effect(
+            &mut reference_pc,
+            &ConsumableData {
+                effect: ConsumableEffect::HealHp(heal_amount),
+                is_combat_usable: true,
+                duration_minutes: None,
+            },
+        );
         let expected_healing = ref_result.healing;
         let expected_hp = reference_pc.hp.current;
 
@@ -977,8 +988,14 @@ mod tests {
             Alignment::Good,
         );
         let before_intellect = ref_pc.stats.intellect.current;
-        let ref_result =
-            apply_consumable_effect(&mut ref_pc, ConsumableEffect::BoostAttribute(attr, boost));
+        let ref_result = apply_consumable_effect(
+            &mut ref_pc,
+            &ConsumableData {
+                effect: ConsumableEffect::BoostAttribute(attr, boost),
+                is_combat_usable: true,
+                duration_minutes: None,
+            },
+        );
         let expected_delta = ref_result.attribute_delta;
         let expected_current = ref_pc.stats.intellect.current;
 
@@ -1034,8 +1051,6 @@ mod tests {
     /// consistent results on both paths.
     #[test]
     fn test_combat_boost_resistance_via_shared_helper() {
-        use crate::domain::items::types::ResistanceType;
-
         let potion_id: ItemId = 217;
         let boost: i8 = 12;
         let res_type = ResistanceType::Cold;
@@ -1051,7 +1066,11 @@ mod tests {
         let before_cold = ref_pc.resistances.cold.current;
         let ref_result = apply_consumable_effect(
             &mut ref_pc,
-            ConsumableEffect::BoostResistance(res_type, boost),
+            &ConsumableData {
+                effect: ConsumableEffect::BoostResistance(res_type, boost),
+                is_combat_usable: true,
+                duration_minutes: None,
+            },
         );
         let expected_delta = ref_result.resistance_delta;
         let expected_cold = ref_pc.resistances.cold.current;
@@ -1125,5 +1144,140 @@ mod tests {
         );
 
         assert!(matches!(res, Err(ItemUseError::InventorySlotInvalid(0))));
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 3 regression tests — timed boosts via combat path
+    // -----------------------------------------------------------------------
+
+    /// Combat use of a `BoostAttribute` item with `duration_minutes: Some(30)`
+    /// should register a `TimedStatBoost` on the character (timed path).
+    #[test]
+    fn test_execute_item_use_timed_attribute_in_combat_applies_boost() {
+        let mut content = ContentDatabase::new();
+        let potion_id: ItemId = 220;
+        let potion = Item {
+            id: potion_id,
+            name: "Swift Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::BoostAttribute(AttributeType::Speed, 5),
+                is_combat_usable: true,
+                duration_minutes: Some(30),
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        content.items.add_item(potion).unwrap();
+
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+        let mut pc = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "none".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        pc.inventory.add_item(potion_id, 1).unwrap();
+        cs.add_player(pc);
+
+        let mut rng = rand::rng();
+        let res = execute_item_use_by_slot(
+            &mut cs,
+            CombatantId::Player(0),
+            0,
+            CombatantId::Player(0),
+            &content,
+            &mut rng,
+        )
+        .unwrap();
+        assert!(res.success);
+
+        if let Some(Combatant::Player(pc_after)) = cs.get_combatant(&CombatantId::Player(0)) {
+            assert_eq!(
+                pc_after.timed_stat_boosts.len(),
+                1,
+                "timed boost should be registered"
+            );
+            assert_eq!(
+                pc_after.timed_stat_boosts[0].minutes_remaining, 30,
+                "minutes_remaining should be 30"
+            );
+            assert_eq!(
+                pc_after.timed_stat_boosts[0].amount, 5,
+                "boost amount should be 5"
+            );
+        } else {
+            panic!("player should exist");
+        }
+    }
+
+    /// Combat use of a `BoostResistance` item with `duration_minutes: Some(60)`
+    /// should still mutate resistances directly (not `active_spells`).
+    #[test]
+    fn test_execute_item_use_resistance_in_combat_is_permanent() {
+        let mut content = ContentDatabase::new();
+        let potion_id: ItemId = 221;
+        let potion = Item {
+            id: potion_id,
+            name: "Fire Shield Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::BoostResistance(ResistanceType::Fire, 25),
+                is_combat_usable: true,
+                duration_minutes: Some(60),
+            }),
+            base_cost: 20,
+            sell_cost: 10,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        content.items.add_item(potion).unwrap();
+
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+        let mut pc = Character::new(
+            "Pyro".to_string(),
+            "human".to_string(),
+            "none".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let fire_before = pc.resistances.fire.current;
+        pc.inventory.add_item(potion_id, 1).unwrap();
+        cs.add_player(pc);
+
+        let mut rng = rand::rng();
+        execute_item_use_by_slot(
+            &mut cs,
+            CombatantId::Player(0),
+            0,
+            CombatantId::Player(0),
+            &content,
+            &mut rng,
+        )
+        .unwrap();
+
+        if let Some(Combatant::Player(pc_after)) = cs.get_combatant(&CombatantId::Player(0)) {
+            assert!(
+                pc_after.resistances.fire.current > fire_before,
+                "combat path must still permanently mutate fire resistance"
+            );
+        } else {
+            panic!("player should exist");
+        }
     }
 }

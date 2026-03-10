@@ -1,5 +1,148 @@
 # Implementations
 
+## Consumable Duration Effects — Phase 3: Route Timed Consumable Effects to the Correct Backend (Complete)
+
+### Overview
+
+Phase 3 wires timed consumable effects to the correct backend for both the
+combat path and the exploration path. `BoostAttribute` consumables with
+`duration_minutes: Some(n)` now register a `TimedStatBoost` (via Phase 2's
+`apply_timed_stat_boost`) instead of permanently mutating `current`. A new
+`apply_consumable_effect_exploration` function routes timed `BoostResistance`
+effects through `ActiveSpells` (overwrite semantics, `u8`-clamped duration)
+rather than directly mutating `character.resistances`, so they expire
+automatically via `GameState::advance_time`. The combat path
+(`apply_consumable_effect`) continues to mutate resistance permanently. All
+call sites updated to pass `&ConsumableData` instead of `ConsumableEffect`.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `ConsumableApplyResult` extended with `attribute_boost_is_timed: bool`
+      and `resistance_boost_is_timed: bool` (both default `false`).
+- [x] `apply_consumable_effect` signature changed from
+      `(character, effect: ConsumableEffect)` to `(character, data: &ConsumableData)`.
+- [x] `BoostAttribute` arm branches on `normalize_duration(data.duration_minutes)`:
+      timed path calls `apply_timed_stat_boost` and sets `attribute_boost_is_timed`;
+      permanent path calls `pub(crate) apply_attribute_delta` directly.
+- [x] `apply_attribute_delta` promoted from `fn` to `pub(crate) fn` on
+      `Character` so `consumable_usage.rs` (a different module) can call it.
+- [x] `BoostResistance` in `apply_consumable_effect` always permanent (combat).
+- [x] `apply_resistance_to_character` private helper extracted to share the
+      eight-arm `ResistanceType` match between the two functions.
+- [x] `apply_consumable_effect_exploration` added: routes timed `BoostResistance`
+      to `ActiveSpells` (overwrite, `u16::min(minutes, u8::MAX)` clamp), falls
+      through to `apply_consumable_effect` for all other effects.
+- [x] `apply_consumable_effect_exploration` re-exported from
+      `src/domain/items/mod.rs`.
+- [x] `execute_item_use_by_slot` (combat) captures full `ConsumableData`
+      (`*consumable` copy) instead of `consumable.effect`; passes `&consumable_data`
+      to `apply_consumable_effect`.
+- [x] `handle_use_item_action_exploration` updated: captures `*consumable`
+      (full `ConsumableData`), calls `apply_consumable_effect_exploration` with
+      split borrows on `gs.party.members[party_index]` and `gs.active_spells`,
+      and emits timed-aware `GameLog` messages.
+- [x] All existing tests in `consumable_usage.rs`, `item_usage.rs`, and
+      `inventory_ui.rs` updated to pass `&ConsumableData` wrappers.
+- [x] 8 new Phase 3 unit tests added to `consumable_usage.rs`.
+- [x] 2 new Phase 3 regression tests added to `combat/item_usage.rs`.
+- [x] All four quality gates pass with zero errors and zero warnings.
+
+### Files Changed
+
+| File                                   | Change                                                                                                                                                                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/character.rs`              | `apply_attribute_delta` promoted to `pub(crate)`                                                                                                                                                                     |
+| `src/domain/items/consumable_usage.rs` | `ConsumableApplyResult` extended; `apply_consumable_effect` signature changed; `apply_resistance_to_character` helper extracted; `apply_consumable_effect_exploration` added; all tests updated; 8 new Phase 3 tests |
+| `src/domain/items/mod.rs`              | `apply_consumable_effect_exploration` added to re-export                                                                                                                                                             |
+| `src/domain/combat/item_usage.rs`      | Phase A captures `*consumable` (full `ConsumableData`); Phase B passes `&consumable_data`; all direct `apply_consumable_effect` test calls wrapped in `&ConsumableData`; 2 new Phase 3 regression tests              |
+| `src/game/systems/inventory_ui.rs`     | Import updated; Step 4 captures `*consumable`; Step 6 calls `apply_consumable_effect_exploration` with split borrows; Step 7 emits timed-aware log messages                                                          |
+
+### Architecture Details
+
+#### `ConsumableApplyResult` new fields
+
+```antares/src/domain/items/consumable_usage.rs#L99-109
+    /// Stat change applied via `BoostAttribute` (0 if none)
+    pub attribute_delta: i16,
+    /// Resistance change applied via `BoostResistance` (0 if none)
+    pub resistance_delta: i16,
+    /// True when a `BoostAttribute` was registered as a timed boost
+    pub attribute_boost_is_timed: bool,
+    /// True when a `BoostResistance` was handled by the caller's timed layer
+    pub resistance_boost_is_timed: bool,
+```
+
+#### Timed vs Permanent branching in `apply_consumable_effect`
+
+For `BoostAttribute`, `normalize_duration(data.duration_minutes).is_some()` is
+the branch condition:
+
+- `Some(n)` → `character.apply_timed_stat_boost(attr, amount, data.duration_minutes)`
+  and `attribute_boost_is_timed = true`
+- `None` / `Some(0)` → `character.apply_attribute_delta(attr, amount as i16)`
+  (permanent, no timed entry created)
+
+`BoostResistance` always uses the permanent path in `apply_consumable_effect`
+(combat context). Duration information is intentionally ignored on this path.
+
+#### `apply_consumable_effect_exploration` routing
+
+For `BoostResistance` with a timed duration, the function writes directly to
+`active_spells` using overwrite semantics (second potion of the same type
+replaces the duration, not stacks it):
+
+```antares/src/domain/items/consumable_usage.rs#L346-362
+    if let ConsumableEffect::BoostResistance(res_type, amount) = data.effect {
+        if let Some(minutes) = normalize_duration(data.duration_minutes) {
+            // Clamp to u8 range (overwrite semantics — last write wins).
+            let clamped = u16::min(minutes, u8::MAX as u16) as u8;
+            match res_type {
+                ResistanceType::Fire => active_spells.fire_protection = clamped,
+                ResistanceType::Cold => active_spells.cold_protection = clamped,
+                ResistanceType::Electricity => active_spells.electricity_protection = clamped,
+                ResistanceType::Energy => active_spells.magic_protection = clamped,
+                ResistanceType::Fear => active_spells.fear_protection = clamped,
+                ResistanceType::Physical => active_spells.magic_protection = clamped,
+                ResistanceType::Paralysis => active_spells.psychic_protection = clamped,
+                ResistanceType::Sleep => active_spells.psychic_protection = clamped,
+            }
+```
+
+#### Borrow-splitting in `handle_use_item_action_exploration`
+
+To satisfy the borrow checker when calling `apply_consumable_effect_exploration`
+with both `&mut character` and `&mut active_spells` from the same `GameState`,
+the code rebinds through a single `&mut GameState` reference:
+
+```antares/src/game/systems/inventory_ui.rs#L1756-1762
+        let result: ConsumableApplyResult = {
+            let gs = &mut global_state.0;
+            let character = &mut gs.party.members[party_index];
+            apply_consumable_effect_exploration(character, &mut gs.active_spells, &consumable_data)
+        };
+```
+
+This works because `gs.party.members[party_index]` and `gs.active_spells` are
+disjoint fields of `GameState`.
+
+#### ResistanceType → ActiveSpells field mapping
+
+| `ResistanceType` | `ActiveSpells` field                    |
+| ---------------- | --------------------------------------- |
+| `Fire`           | `fire_protection`                       |
+| `Cold`           | `cold_protection`                       |
+| `Electricity`    | `electricity_protection`                |
+| `Energy`         | `magic_protection`                      |
+| `Fear`           | `fear_protection`                       |
+| `Physical`       | `magic_protection` (no dedicated field) |
+| `Paralysis`      | `psychic_protection`                    |
+| `Sleep`          | `psychic_protection`                    |
+
+This mapping mirrors the existing `apply_resistance_to_character` mapping for
+consistency with the permanent path.
+
+---
+
 ## Consumable Duration Effects — Phase 2: Add `TimedStatBoost` to `Character` and Wire Expiry (Complete)
 
 ### Overview
