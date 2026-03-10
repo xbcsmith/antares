@@ -12,7 +12,7 @@ UI, assign colors via a color picker and preset palette, and export the result
 as a `CreatureDefinition` RON file (used for both creatures and items). The
 default export paths are `assets/creatures/` and `assets/items/` respectively.
 
-✅ PLAN WRITTEN - [obj to ron conversion](./obj_to_ron_implementation_plan.md)
+✅ COMPLETE - [obj to ron conversion](./obj_to_ron_implementation_plan.md)
 
 ## Game Engine
 
@@ -393,7 +393,7 @@ Food Ration should be a consumable item with a condition "can rest".
 
 Write a plan with a phased approach to implementing a food system in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Food System Implementation Plan](./food_system_implementation_plan.md)
+✅ COMPLETE - [Food System Implementation Plan](./food_system_implementation_plan.md)
 
 ### Unified Creature Asset Binding (`creature_id` Standard)
 
@@ -674,3 +674,5 @@ using the same fallback block (no special-cased heuristics).
 
 Write a plan with a phased approach to implementing unified creature asset
 binding in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ COMPLETE - [Unified Creature Asset Binding Implementation Plan](./unified_creature_asset_binding_implementation_plan.md)

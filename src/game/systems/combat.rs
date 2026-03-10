@@ -11044,6 +11044,82 @@ mod tests {
         );
     }
 
+    /// Phase 1: One complete combat round must advance the in-game clock by
+    /// exactly `TIME_COST_COMBAT_ROUND_MINUTES`.
+    ///
+    /// Strategy: build a minimal Bevy app with `CombatPlugin`, put the
+    /// `GlobalState` into combat mode with round = 1, run one update frame so
+    /// that `tick_combat_time` executes, and assert the clock advanced by the
+    /// expected amount.
+    #[test]
+    fn test_combat_round_advances_time() {
+        use crate::domain::resources::TIME_COST_COMBAT_ROUND_MINUTES;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Build a GameState already in combat mode (round 1).
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Time Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+        gs.enter_combat();
+
+        // Record the starting total minutes.
+        // Use total_days() so the cumulative-minute baseline is correct across
+        // month/year boundaries (day is now 1–30 within-month, not a running total).
+        let start_minutes = gs.time.total_days() as u64 * 24 * 60
+            + gs.time.hour as u64 * 60
+            + gs.time.minute as u64;
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // The CombatResource starts with last_timed_round = 0.
+        // After sync_party_to_combat runs, combat.state.round == 1.
+        // tick_combat_time sees current_round (1) > last_timed_round (0),
+        // so it charges TIME_COST_COMBAT_ROUND_MINUTES and sets last_timed_round = 1.
+        app.update();
+
+        let time_after_first_frame = {
+            let state = app
+                .world()
+                .resource::<crate::game::resources::GlobalState>();
+            let end_minutes = state.0.time.total_days() as u64 * 24 * 60
+                + state.0.time.hour as u64 * 60
+                + state.0.time.minute as u64;
+
+            assert_eq!(
+                end_minutes - start_minutes,
+                TIME_COST_COMBAT_ROUND_MINUTES as u64,
+                "one combat round must advance the clock by exactly TIME_COST_COMBAT_ROUND_MINUTES ({} min)",
+                TIME_COST_COMBAT_ROUND_MINUTES
+            );
+
+            // Capture the time so we can compare after the next frame.
+            state.0.time
+        };
+
+        // Subsequent frames with the same round number must NOT advance time again.
+        app.update(); // same round — no new charge
+        let state2 = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        assert_eq!(
+            state2.0.time.minute, time_after_first_frame.minute,
+            "same-round subsequent frame must not advance minutes again"
+        );
+        assert_eq!(
+            state2.0.time.hour, time_after_first_frame.hour,
+            "same-round subsequent frame must not advance hours again"
+        );
+    }
+
     /// 4.7 — Victory summary for a Boss encounter has boss_defeated == true.
     #[test]
     fn test_boss_victory_summary_has_boss_header() {

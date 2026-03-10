@@ -1,5 +1,1796 @@
 # Implementations
 
+## Phase 5E: Months and Years — Call-Site Audit & Quality Gates (Complete)
+
+### Overview
+
+Audited every `.day` access on `GameTime` across the entire codebase and updated all
+sites that were treating `day` as a **cumulative elapsed-day counter** to use
+`GameTime::total_days()` instead. After Phase 1A changed `day` to mean "day-within-month
+(1–30)", any arithmetic of the form `day * 24 * 60` or `day - 1` that computed
+absolute or elapsed minutes was silently wrong once the calendar rolled past month 1.
+
+### Phase 5E Deliverables Checklist
+
+- [x] Full `.day` access audit across `src/` and `sdk/` completed
+- [x] `src/domain/world/npc_runtime.rs` — `tick_restock()` uses `total_days()` for cumulative-day comparisons
+- [x] `src/application/mod.rs` — `test_step_advances_time` uses `total_days()` for minute baseline
+- [x] `src/application/mod.rs` — `test_rest_advances_time_via_state` uses `total_days()` for elapsed-minutes calculation
+- [x] `src/game/systems/combat.rs` — `test_combat_round_advances_time` uses `total_days()` for minute baseline
+- [x] `src/game/systems/map.rs` — `test_map_transition_advances_time` uses `total_days()` for minute baseline
+- [x] All quality gates pass (0 errors, 0 warnings, 3371 tests green)
+- [x] `implementations.md` updated
+
+### Call-Site Audit Results
+
+Every `.day` access was classified as one of three categories:
+
+#### Category 1: Legitimate day-within-month accesses (no change needed)
+
+These correctly use `day` as the 1–30 field it now represents:
+
+| Location                                                                        | Usage                                                                 | Verdict    |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------- |
+| `src/domain/types.rs` — struct body and tests                                   | Field construction, rollover logic, assertions about day-within-month | ✅ Correct |
+| `src/game/systems/hud.rs` — `update_clock()`                                    | `game_time.day` passed to `format_clock_date()`                       | ✅ Correct |
+| `src/sdk/campaign_loader.rs` — tests                                            | `starting_time.day == 1` assertions                                   | ✅ Correct |
+| `sdk/campaign_builder/src/campaign_editor.rs` — buffer                          | `m.starting_time.day` copy/apply                                      | ✅ Correct |
+| `src/application/mod.rs` — doctest + unit test                                  | `state.time.day == 1` new-game assertion                              | ✅ Correct |
+| `src/application/mod.rs` — `test_blocked_step_does_not_advance_time`            | `time.day == time_before.day` identity check                          | ✅ Correct |
+| `src/application/save_game.rs` — `test_save_and_load`                           | `loaded_state.time.day == game_state.time.day` roundtrip identity     | ✅ Correct |
+| `src/game/systems/time.rs` — `test_time_advance_event_rolls_over_midnight`      | `time.day == 2` after midnight rollover                               | ✅ Correct |
+| `src/game/systems/map.rs` — `test_invalid_map_transition_does_not_advance_time` | `time.day == time_before.day` identity check                          | ✅ Correct |
+
+#### Category 2: Cumulative elapsed-day arithmetic — FIXED
+
+These computed total elapsed minutes using `day * 24 * 60`, which breaks once the
+calendar rolls past month 1 (day resets to 1):
+
+| Location                                                               | Old code                            | Fixed code                                   |
+| ---------------------------------------------------------------------- | ----------------------------------- | -------------------------------------------- |
+| `src/application/mod.rs` `test_step_advances_time` (before)            | `state.time.day as u64 * 24 * 60`   | `state.time.total_days() as u64 * 24 * 60`   |
+| `src/application/mod.rs` `test_step_advances_time` (after)             | `state.time.day as u64 * 24 * 60`   | `state.time.total_days() as u64 * 24 * 60`   |
+| `src/application/mod.rs` `test_rest_advances_time_via_state`           | `(state.time.day - 1) * 24 * 60`    | `(state.time.total_days() - 1) * 24 * 60`    |
+| `src/game/systems/combat.rs` `test_combat_round_advances_time` (start) | `gs.time.day as u64 * 24 * 60`      | `gs.time.total_days() as u64 * 24 * 60`      |
+| `src/game/systems/combat.rs` `test_combat_round_advances_time` (end)   | `state.0.time.day as u64 * 24 * 60` | `state.0.time.total_days() as u64 * 24 * 60` |
+| `src/game/systems/map.rs` `test_map_transition_advances_time` (start)  | `gs.time.day as u64 * 24 * 60`      | `gs.time.total_days() as u64 * 24 * 60`      |
+| `src/game/systems/map.rs` `test_map_transition_advances_time` (end)    | `state.0.time.day as u64 * 24 * 60` | `state.0.time.total_days() as u64 * 24 * 60` |
+
+#### Category 3: NPC restock tracking — FIXED (most important)
+
+`NpcRuntimeStore::tick_restock()` compared `new_time.day` against
+`last_restock_day` / `last_magic_refresh_day` to determine whether a new
+calendar day had passed. With `day` now being 1–30, this caused NPCs to restock
+12 times per year (once per month rollover when day resets to 1):
+
+```antares/src/domain/world/npc_runtime.rs#L707-L714
+    pub fn tick_restock(
+        &mut self,
+        new_time: &crate::domain::types::GameTime,
+        templates: &MerchantStockTemplateDatabase,
+    ) {
+        // Use total_days() so the counter is cumulative across months and years.
+        // new_time.day is only 1–30 (day-within-month, not a running total).
+        let new_day = new_time.total_days();
+```
+
+`last_restock_day` and `last_magic_refresh_day` are stored as `u32` and continue
+to hold cumulative-day values (they are serde-persisted; existing save files have
+values ≤ 30 which will be treated as total_days() from year 1, month 1 — correct
+since existing saves have `year=1, month=1` via the serde default).
+
+Updated tests that previously asserted raw `.day` values in `last_restock_day`
+now assert `game_time.total_days()` instead. Comment explanations were added so
+the mapping from `GameTime::new(7, 12, 0)` → `total_days() = 7` is explicit.
+
+Updated doc comment to reference `total_days()` instead of `.day` for the seed
+recommendation in `refresh_magic_slots`.
+
+### What Was NOT Changed
+
+The following `.day` accesses were intentionally left unchanged because they
+operate on the correct semantic:
+
+- `npc_runtime.rs` doctest for `tick_restock` — uses `GameTime::new(2, 6, 0)` which
+  has `total_days() = 2`; the example comment "Advance to day 2" is still accurate
+  since the test starts at the very beginning of the calendar.
+- All doc comments in `src/application/mod.rs` that say `assert_eq!(state.time.day, 1)` —
+  these check the day-within-month field on a freshly created game state (correct).
+- `src/game/systems/time.rs` rollover test — explicitly tests that `day` increments
+  from 1 to 2 after midnight (day-within-month semantics, correct).
+
+### Architecture Compliance
+
+- The decision from the plan is enforced: `day` = day-within-month (1–30);
+  cumulative elapsed days = `total_days()`.
+- `TimeCondition::AfterDay` and `BeforeDay` already use `total_days()` (Phase 2B).
+- All comparison logic that needs cumulative day counts now uses `total_days()`.
+- No magic numbers introduced — all rollover constants reference `DAYS_PER_MONTH`,
+  `MONTHS_PER_YEAR`, `DAYS_PER_YEAR` from `src/domain/types.rs`.
+
+### Quality Gate Results
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt         → clean (no output)
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3371 passed, 8 skipped
+```
+
+---
+
+## Phase 4D: Months and Years — Campaign Builder & Config (Complete)
+
+### Overview
+
+Extended the Campaign Builder SDK editor (`sdk/campaign_builder/src/campaign_editor.rs`)
+to expose the new `year` and `month` fields from `GameTime` in the campaign metadata
+editing workflow. The `CampaignMetadataEditBuffer` now holds five separate time
+components — year, month, day, hour, minute — that are round-tripped through
+`GameTime::new_full(...)` with full range clamping. The Gameplay section of the
+Campaign Metadata editor panel gained two new `DragValue` spinners (Year and Month)
+so campaign authors can set the starting calendar date entirely within the UI.
+
+### Phase 4D Deliverables Checklist
+
+- [x] `starting_year: u32` and `starting_month: u32` fields added to `CampaignMetadataEditBuffer`
+- [x] `from_metadata()` updated to read `m.starting_time.year` and `m.starting_time.month`
+- [x] `apply_to()` updated to call `GameTime::new_full(year, month, day, hour, minute)` with clamping (`year.max(1)`, `month.clamp(1, 12)`)
+- [x] UI Gameplay grid: Year (1–9999) and Month (1–12) `DragValue` spinners added before the existing Day spinner
+- [x] Day spinner range narrowed from `1..=9999` to `1..=30` (day-within-month semantics)
+- [x] `preview_time` in the UI updated to use `GameTime::new_full(...)` with year/month
+- [x] Test `test_buffer_from_metadata_copies_starting_year_month` passes
+- [x] Test `test_buffer_apply_to_writes_starting_year_month` passes
+- [x] Test `test_buffer_starting_time_clamps_month` passes (both month=0 → 1 and month=13 → 12)
+- [x] Test `test_buffer_starting_time_clamps_year_zero` passes
+- [x] Existing buffer tests updated: `test_buffer_default_starting_time_fields`, `test_buffer_starting_time_roundtrip_via_metadata`, `test_buffer_starting_time_clamps_day_zero`
+- [x] All 22 campaign_editor tests pass
+- [x] All quality gates pass (0 errors, 0 warnings, 3371 main-crate tests green)
+
+### What Was Built
+
+#### `CampaignMetadataEditBuffer` — `sdk/campaign_builder/src/campaign_editor.rs`
+
+Two new fields were inserted immediately before `starting_day`, keeping logical
+calendar order (year → month → day → hour → minute):
+
+```antares/sdk/campaign_builder/src/campaign_editor.rs#L102-110
+    // Starting date/time (split from GameTime for ergonomic drag-value editing)
+    /// Starting year (1-based)
+    pub starting_year: u32,
+    /// Starting month within the year (1-based, 1–12)
+    pub starting_month: u32,
+    /// Starting day within the month (1-based, 1–30)
+    pub starting_day: u32,
+    /// Starting hour (0–23)
+    pub starting_hour: u8,
+    /// Starting minute (0–59)
+    pub starting_minute: u8,
+```
+
+#### `from_metadata()` — Reading Year and Month
+
+```antares/sdk/campaign_builder/src/campaign_editor.rs#L152-158
+            starting_year: m.starting_time.year,
+            starting_month: m.starting_time.month,
+            starting_day: m.starting_time.day,
+            starting_hour: m.starting_time.hour,
+            starting_minute: m.starting_time.minute,
+```
+
+#### `apply_to()` — Writing via `GameTime::new_full` with Clamping
+
+`apply_to()` now calls `GameTime::new_full(...)` instead of `GameTime::new(...)`,
+passing all five components with their respective clamping guards:
+
+- `year`: `self.starting_year.max(1)` — 1-based, 0 is invalid
+- `month`: `self.starting_month.clamp(1, 12)` — must stay in 1–12
+- `day`: `self.starting_day.max(1)` — 1-based, 0 is invalid
+- `hour`: `self.starting_hour.min(23)` — 0–23
+- `minute`: `self.starting_minute.min(59)` — 0–59
+
+#### UI Gameplay Grid Spinners
+
+Two `DragValue` spinners were added before the existing Day spinner in the
+"Starting Date/Time" row of the Gameplay grid:
+
+- **Year**: `DragValue::new(&mut year).range(1..=9999)` — clamped with `year.max(1)`
+- **Month**: `DragValue::new(&mut month).range(1..=12)` — clamped with `month.clamp(1, 12)`
+
+The Day spinner's upper bound was narrowed from `9999` to `30` (day-within-month
+semantics from Phase 1A). The period-of-day `preview_time` at the end of the row
+was updated to use `GameTime::new_full(year, month, day, hour, minute)`.
+
+#### `sdk/campaign_builder/src/lib.rs` — No Changes Required
+
+`CampaignMetadata.starting_time` is already typed as `GameTime`, which now carries
+`year` and `month`. The `default_starting_time()` function returns `GameTime::new(1, 8, 0)`
+which sets `year=1, month=1` via the backward-compatible three-argument constructor —
+no schema change needed.
+
+### Clamping Contract
+
+| Field             | Valid range | `apply_to()` guard |
+| ----------------- | ----------- | ------------------ |
+| `starting_year`   | ≥ 1         | `.max(1)`          |
+| `starting_month`  | 1–12        | `.clamp(1, 12)`    |
+| `starting_day`    | ≥ 1         | `.max(1)`          |
+| `starting_hour`   | 0–23        | `.min(23)`         |
+| `starting_minute` | 0–59        | `.min(59)`         |
+
+### Tests Added / Updated
+
+| Test name                                                    | What it verifies                                                       |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `test_buffer_from_metadata_copies_starting_year_month`       | `from_metadata` copies `year` and `month` into new buffer fields       |
+| `test_buffer_apply_to_writes_starting_year_month`            | `apply_to` writes all five fields via `new_full`                       |
+| `test_buffer_starting_time_clamps_month`                     | month=0 → 1, month=13 → 12                                             |
+| `test_buffer_starting_time_clamps_year_zero`                 | year=0 → 1                                                             |
+| `test_buffer_default_starting_time_fields` (updated)         | now also asserts `starting_year=1`, `starting_month=1`                 |
+| `test_buffer_starting_time_roundtrip_via_metadata` (updated) | now sets/checks year=2, month=6 in the round-trip                      |
+| `test_buffer_starting_time_clamps_day_zero` (updated)        | now initialises `starting_year` and `starting_month` in buffer literal |
+
+### Architecture Compliance
+
+- `GameTime::new_full()` (Phase 1A) used in `apply_to()` — no raw struct construction.
+- `MONTHS_PER_YEAR` constant from `src/domain/types.rs` is respected via the `clamp(1, 12)` bound.
+- No magic numbers: month upper-bound `12` matches `MONTHS_PER_YEAR`; day upper-bound `30` matches `DAYS_PER_MONTH`.
+- `CampaignMetadata.starting_time` field unchanged in `lib.rs` — uses `GameTime` which already carries the new fields via Phase 1A serde defaults.
+- `sdk/campaign_builder/src/lib.rs` `default_starting_time()` unchanged — `GameTime::new(1, 8, 0)` correctly defaults year=1/month=1.
+
+### Quality Gate Results
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt         → clean (no output)
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3371 passed, 8 skipped (main crate)
+campaign_builder campaign_editor tests → 22 passed
+```
+
+---
+
+## Phase 3C: Months and Years — HUD Clock Update (Complete)
+
+### Overview
+
+Updated `src/game/systems/hud.rs` to display a full calendar date on the HUD clock
+widget. The existing single-field `"Day N"` display is replaced with a three-field
+`"Y{year} M{month} D{day}"` compact format that fits the fixed-width clock panel.
+
+Three coordinated changes were made:
+
+1. **`ClockDayText` → `ClockDateText`** — marker component renamed throughout
+   (struct definition, spawn site, `update_clock()` queries, and all tests).
+2. **`format_clock_day(day)` → `format_clock_date(year, month, day)`** — pure helper
+   function replaced; returns `"Y{year} M{month} D{day}"`.
+3. **`update_clock()`** — updated to call `format_clock_date` with all three calendar
+   fields from `game_time`, and to use the renamed `ClockDateText` query.
+
+All existing clock tests were updated in-place (no tests deleted); two plan-specified
+new tests (`test_format_clock_date_defaults` and `test_format_clock_date_large_values`)
+plus three additional tests were added for full coverage.
+
+### Phase 3C Deliverables Checklist
+
+- [x] `ClockDayText` → `ClockDateText` rename (struct, spawn, queries, tests)
+- [x] `format_clock_date(year, month, day)` implemented (replaces `format_clock_day`)
+- [x] `update_clock()` passes `game_time.year`, `game_time.month`, `game_time.day`
+- [x] Initial spawn text updated from `"Day 1"` to `"Y1 M1 D1"`
+- [x] All HUD tests updated to `ClockDateText` and new format strings
+- [x] All quality gates pass (0 errors, 0 warnings, 3371 tests green)
+
+### What Was Built
+
+#### `ClockDateText` Marker Component — `src/game/systems/hud.rs`
+
+```antares/src/game/systems/hud.rs#L158-161
+/// Marker component for the calendar date text node (displays "Y{year} M{month} D{day}")
+#[derive(Component)]
+pub struct ClockDateText;
+```
+
+The rename cascaded to every reference: the `setup_hud` spawn site, both `Without<>`
+filter type parameters in `update_clock()`, and all `clock_tests` queries.
+
+#### `format_clock_date()` — Pure Helper
+
+```antares/src/game/systems/hud.rs#L1212-1245
+pub fn format_clock_date(year: u32, month: u32, day: u32) -> String {
+    format!("Y{} M{} D{}", year, month, day)
+}
+```
+
+Replaces the removed `format_clock_day(day: u32) -> String`. The compact
+`"Y{year} M{month} D{day}"` format keeps the clock panel narrow (same width as
+the compass widget above it) while conveying all three calendar fields.
+
+#### `setup_hud` Spawn Site Update
+
+The initial placeholder text for the date node changed from `"Day 1"` to `"Y1 M1 D1"`,
+and the marker changed from `ClockDayText` to `ClockDateText`:
+
+```antares/src/game/systems/hud.rs#L427-436
+            // Date line: "Y1 M1 D1"
+            parent.spawn((
+                Text::new("Y1 M1 D1"),
+                TextFont {
+                    font_size: CLOCK_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(CLOCK_TEXT_COLOR),
+                ClockDateText,
+            ));
+```
+
+#### `update_clock()` System Update
+
+```antares/src/game/systems/hud.rs#L580-590
+    for (mut text, _color) in &mut date_query {
+        **text = format_clock_date(game_time.year, game_time.month, game_time.day);
+    }
+```
+
+The system now reads all three calendar fields (`year`, `month`, `day`) from
+`game_time` and passes them to `format_clock_date`. The day-query variable was
+renamed `date_query` for clarity.
+
+### Tests
+
+#### Updated tests in `mod clock_tests`
+
+All five tests that previously referenced `format_clock_day` or `ClockDayText` were
+updated in-place:
+
+| Old test name                      | New test name                         | Change                                        |
+| ---------------------------------- | ------------------------------------- | --------------------------------------------- |
+| `test_clock_day_display_first_day` | `test_format_clock_date_defaults`     | `format_clock_date(1,1,1)` → `"Y1 M1 D1"`     |
+| `test_clock_day_display_forty_two` | `test_format_clock_date_large_values` | `format_clock_date(4,12,30)` → `"Y4 M12 D30"` |
+| `test_clock_day_display_year`      | `test_clock_date_display_mid_year`    | `format_clock_date(1,6,15)` → `"Y1 M6 D15"`   |
+| `test_clock_day_display_zero`      | `test_clock_date_display_year_two`    | `format_clock_date(2,1,1)` → `"Y2 M1 D1"`     |
+| `test_clock_day_display_max`       | `test_clock_date_display_max`         | panic-free with all three `u32::MAX`          |
+
+One additional test was added:
+
+| New test name                              | What it verifies             |
+| ------------------------------------------ | ---------------------------- |
+| `test_clock_date_display_last_day_of_year` | `(1,12,30)` → `"Y1 M12 D30"` |
+
+#### Updated Bevy ECS integration tests
+
+Three existing integration tests in `mod clock_tests` were updated:
+
+| Test name                                      | Change                                                     |
+| ---------------------------------------------- | ---------------------------------------------------------- |
+| `test_clock_widget_spawned_on_startup`         | Query uses `ClockDateText`; asserts count = 1              |
+| `test_clock_widget_shows_default_game_time`    | Query uses `ClockDateText`; asserts `"Y1 M1 D1"` present   |
+| `test_clock_widget_updates_after_time_advance` | Query uses `ClockDateText`; asserts `"Y1 M1 D2"` after 18h |
+
+### Architecture Compliance
+
+- `format_clock_date` is a pure function with no side effects — identical pattern
+  to `format_clock_time` and the removed `format_clock_day`.
+- The `"Y{year} M{month} D{day}"` format is compact and unambiguous, fitting the
+  fixed `CLOCK_WIDTH` panel that matches the compass widget width.
+- No constants were hardcoded; all clock panel sizing uses the existing
+  `CLOCK_WIDTH`, `CLOCK_FONT_SIZE`, and `CLOCK_PADDING` constants.
+- `ClockDateText` follows the existing naming convention for HUD marker components.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all          → clean (no output)
+cargo check              → Finished dev profile, 0 errors
+cargo clippy -D warnings → Finished dev profile, 0 warnings
+cargo nextest run        → 3371 passed, 8 skipped, 0 failed
+```
+
+## Phase 2B: Months and Years — TimeCondition Variants (Complete)
+
+### Overview
+
+Extended `TimeCondition` in `src/domain/world/types.rs` with four new variants that
+allow campaign authors to gate map events by calendar month or year, not just by
+time-of-day, elapsed days, or hour window.
+
+The four new variants are:
+
+- `DuringMonths(Vec<u32>)` — fires when `game_time.month` is in the supplied list
+- `AfterYear(u32)` — fires when `game_time.year > threshold`
+- `BeforeYear(u32)` — fires when `game_time.year < threshold`
+- `BetweenYears { from: u32, to: u32 }` — fires when `from <= game_time.year <= to`
+
+All existing tests (26) continue to pass unchanged. Twenty-one new tests cover
+match/skip/boundary/RON-roundtrip/RON-literal cases for every new variant.
+
+### Phase 2B Deliverables Checklist
+
+- [x] `DuringMonths(Vec<u32>)` variant added to `TimeCondition`
+- [x] `AfterYear(u32)` variant added to `TimeCondition`
+- [x] `BeforeYear(u32)` variant added to `TimeCondition`
+- [x] `BetweenYears { from: u32, to: u32 }` variant added to `TimeCondition`
+- [x] `is_met()` extended with match arms for all four new variants
+- [x] Enum-level doc comment variant table updated
+- [x] Enum-level doc comment examples updated
+- [x] `is_met()` doc comment examples updated
+- [x] Unit tests pass (21 new tests)
+- [x] RON roundtrip tests pass (4 roundtrip + 4 literal = 8 serialization tests)
+- [x] All quality gates pass (0 errors, 0 warnings, 3370 tests green)
+
+### What Was Built
+
+#### `TimeCondition` Enum — `src/domain/world/types.rs`
+
+Four variants appended to the existing enum after `BetweenHours`:
+
+```antares/src/domain/world/types.rs#L1827-1848
+    /// Event fires only when the current month is in the supplied list.
+    ///
+    /// Months are 1-based (1 = January … 12 = December in the game calendar).
+    /// Use this to gate events by season, e.g. `[11, 12, 1]` for winter.
+    DuringMonths(Vec<u32>),
+    /// Event fires only after the given year has passed (`game_time.year > threshold`).
+    AfterYear(u32),
+    /// Event fires only before the given year is reached (`game_time.year < threshold`).
+    BeforeYear(u32),
+    /// Event fires only while the current year is within `[from, to]` inclusive
+    /// (`from <= game_time.year <= to`).
+    BetweenYears {
+        /// First year of the active window (inclusive).
+        from: u32,
+        /// Last year of the active window (inclusive).
+        to: u32,
+    },
+```
+
+#### `is_met()` — New Match Arms
+
+Four arms added to the exhaustive match in `TimeCondition::is_met()`:
+
+```antares/src/domain/world/types.rs#L1903-1912
+            TimeCondition::DuringMonths(months) => months.contains(&game_time.month),
+            TimeCondition::AfterYear(threshold) => game_time.year > *threshold,
+            TimeCondition::BeforeYear(threshold) => game_time.year < *threshold,
+            TimeCondition::BetweenYears { from, to } => {
+                game_time.year >= *from && game_time.year <= *to
+            }
+```
+
+#### Variant Table in Doc Comment
+
+The enum-level table was extended to document all eight variants:
+
+| Variant         | Fires when …                                                   |
+| --------------- | -------------------------------------------------------------- |
+| `DuringPeriods` | current `TimeOfDay` is in the supplied list                    |
+| `AfterDay`      | `game_time.total_days() > threshold`                           |
+| `BeforeDay`     | `game_time.total_days() < threshold`                           |
+| `BetweenHours`  | `from <= game_time.hour <= to` (24-hour, inclusive)            |
+| `DuringMonths`  | `game_time.month` is in the supplied list (e.g. `[11, 12, 1]`) |
+| `AfterYear`     | `game_time.year > threshold`                                   |
+| `BeforeYear`    | `game_time.year < threshold`                                   |
+| `BetweenYears`  | `from <= game_time.year <= to` (inclusive)                     |
+
+#### RON Usage Examples
+
+Campaign authors can now write these conditions directly in map RON files:
+
+```antares/data/test_campaign/data/maps/map_1.ron#L1-1
+// Example RON spellings (not a real file excerpt — illustrative only):
+```
+
+```/dev/null/examples.ron#L1-8
+// Winter-only event (months 11, 12, 1):
+time_condition: Some(DuringMonths([11, 12, 1])),
+
+// Year 2+ content unlock:
+time_condition: Some(AfterYear(1)),
+
+// Era-gated story event active during years 2 through 4:
+time_condition: Some(BetweenYears(from: 2, to: 4)),
+```
+
+### Tests
+
+#### New tests in `src/domain/world/types.rs` — `mod time_condition_tests`
+
+**`DuringMonths` tests (4)**
+
+| Test name                            | What it verifies                             |
+| ------------------------------------ | -------------------------------------------- |
+| `test_during_months_fires_in_winter` | Months 11, 12, 1 all fire for winter list    |
+| `test_during_months_skips_summer`    | Months 6, 7, 8 do not fire for winter list   |
+| `test_during_months_single_month`    | Single-element list fires exactly that month |
+| `test_during_months_all_months`      | List of all 12 months fires for every month  |
+
+**`AfterYear` tests (3)**
+
+| Test name                  | What it verifies                                     |
+| -------------------------- | ---------------------------------------------------- |
+| `test_after_year_fires`    | Year 3 and year 10 fire for `AfterYear(2)`           |
+| `test_after_year_skips`    | Year 2 and year 1 do not fire for `AfterYear(2)`     |
+| `test_after_year_boundary` | Year 1 does not fire, year 2 does for `AfterYear(1)` |
+
+**`BeforeYear` tests (3)**
+
+| Test name                   | What it verifies                                  |
+| --------------------------- | ------------------------------------------------- |
+| `test_before_year_fires`    | Year 1 and year 2 fire for `BeforeYear(3)`        |
+| `test_before_year_skips`    | Year 3 and year 5 do not fire for `BeforeYear(3)` |
+| `test_before_year_boundary` | Year 1 fires, year 2 does not for `BeforeYear(2)` |
+
+**`BetweenYears` tests (3)**
+
+| Test name                        | What it verifies                                             |
+| -------------------------------- | ------------------------------------------------------------ |
+| `test_between_years_fires`       | Years 1, 2, 3 all fire for `BetweenYears{1,3}` (both bounds) |
+| `test_between_years_skips`       | Year 5 skips `{1,3}`; years below/above skip `{3,5}`         |
+| `test_between_years_single_year` | `from == to` fires only that exact year                      |
+
+**RON serialization tests (8)**
+
+| Test name                                         | What it verifies                       |
+| ------------------------------------------------- | -------------------------------------- |
+| `test_time_condition_ron_roundtrip_during_months` | Serialize → deserialize `DuringMonths` |
+| `test_time_condition_ron_roundtrip_after_year`    | Serialize → deserialize `AfterYear`    |
+| `test_time_condition_ron_roundtrip_before_year`   | Serialize → deserialize `BeforeYear`   |
+| `test_time_condition_ron_roundtrip_between_years` | Serialize → deserialize `BetweenYears` |
+| `test_time_condition_ron_literal_during_months`   | Canonical RON literal deserialises     |
+| `test_time_condition_ron_literal_after_year`      | Canonical RON literal deserialises     |
+| `test_time_condition_ron_literal_before_year`     | Canonical RON literal deserialises     |
+| `test_time_condition_ron_literal_between_years`   | Canonical RON literal deserialises     |
+
+### Architecture Compliance
+
+- No magic numbers — month and year comparisons use the values stored in `GameTime`
+  fields which are enforced by the calendar constants from Phase 1A.
+- `DuringMonths` mirrors `DuringPeriods` in design: a `Vec` of accepted values,
+  checked with `.contains()`. Consistent pattern.
+- `AfterYear` / `BeforeYear` mirror `AfterDay` / `BeforeDay` in design: strict
+  inequality, single `u32` threshold.
+- `BetweenYears` mirrors `BetweenHours` in design: `{ from, to }` struct with
+  inclusive bounds on both sides.
+- All variants are `#[derive(Serialize, Deserialize)]` via the existing enum derive,
+  so RON round-tripping works without any additional code.
+- Existing variants and their `is_met()` logic are completely unchanged.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all          → clean (no output)
+cargo check              → Finished dev profile, 0 errors
+cargo clippy -D warnings → Finished dev profile, 0 warnings
+cargo nextest run        → 3370 passed, 8 skipped, 0 failed
+```
+
+## Phase 1A: Months and Years — Core Time System (Complete)
+
+### Overview
+
+Extended `GameTime` in `src/domain/types.rs` from a three-field `{ day, hour, minute }`
+struct to a full five-field calendar struct `{ year, month, day, hour, minute }`.
+Added three calendar constants, a `new_full()` constructor, a `total_days()` helper,
+and rollover logic in `advance_minutes()` and `advance_days()` so that time correctly
+propagates from minutes → hours → days → months → years.
+
+Updated `TimeCondition::AfterDay` and `TimeCondition::BeforeDay` in
+`src/domain/world/types.rs` to compare against `game_time.total_days()` rather than
+`game_time.day`, preserving the original "total elapsed days" semantics for existing
+RON data even though `day` now means "day within month (1–30)".
+
+### Phase 1A Deliverables Checklist
+
+- [x] Calendar constants added (`MONTHS_PER_YEAR`, `DAYS_PER_MONTH`, `DAYS_PER_YEAR`)
+- [x] `GameTime` extended with `year` and `month` fields (serde default = 1)
+- [x] `GameTime::new_full(year, month, day, hour, minute)` constructor
+- [x] `GameTime::total_days()` helper
+- [x] `advance_minutes()` rolls day → month → year
+- [x] `advance_days()` rolls day → month → year (via shared `apply_day_rollover()`)
+- [x] Updated doctests pass
+- [x] New rollover unit tests pass (14 new tests)
+- [x] `TimeCondition::AfterDay` / `BeforeDay` updated to use `total_days()`
+- [x] All quality gates pass (0 errors, 0 warnings, 3349 tests green)
+
+### What Was Built
+
+#### Calendar Constants — `src/domain/types.rs`
+
+Three `pub const` values placed above the `GameTime` struct establish the fixed-length
+calendar used throughout the game:
+
+```antares/src/domain/types.rs#L437-447
+/// Number of months in a game year.
+pub const MONTHS_PER_YEAR: u32 = 12;
+
+/// Number of days in a game month (all months are equal length).
+pub const DAYS_PER_MONTH: u32 = 30;
+
+/// Number of days in a game year (MONTHS_PER_YEAR × DAYS_PER_MONTH = 360).
+pub const DAYS_PER_YEAR: u32 = MONTHS_PER_YEAR * DAYS_PER_MONTH;
+```
+
+#### `GameTime` Struct Extension — `src/domain/types.rs`
+
+Two new fields were prepended to `GameTime` in declaration order (`year`, `month`, then
+the existing `day`, `hour`, `minute`). Both use `#[serde(default)]` pointing to private
+helper functions that return `1`, so any existing save file or RON data that lacks these
+fields deserializes correctly with `year = 1, month = 1`.
+
+```antares/src/domain/types.rs#L505-515
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct GameTime {
+    /// Current year (1-based)
+    #[serde(default = "default_year")]
+    pub year: u32,
+    /// Current month within the year (1-based, 1–12)
+    #[serde(default = "default_month")]
+    pub month: u32,
+    /// Current day within the month (1-based, 1–30)
+    pub day: u32,
+    /// Current hour (0-23)
+    pub hour: u8,
+    /// Current minute (0-59)
+    pub minute: u8,
+}
+```
+
+#### `GameTime::new()` — Backward-Compatible Constructor
+
+The existing three-argument constructor is unchanged in signature; it now sets
+`year = 1, month = 1` internally so all call sites continue to compile without
+modification.
+
+#### `GameTime::new_full()` — Five-Argument Constructor
+
+A new constructor accepts all five fields in calendar order:
+
+```antares/src/domain/types.rs#L573-581
+pub fn new_full(year: u32, month: u32, day: u32, hour: u8, minute: u8) -> Self {
+    Self {
+        year,
+        month,
+        day,
+        hour,
+        minute,
+    }
+}
+```
+
+#### `GameTime::total_days()` — Cumulative Day Counter
+
+Returns the total number of days elapsed since the beginning of the calendar
+(Year 1, Month 1, Day 1 = day 1). Used by `TimeCondition::AfterDay` and
+`BeforeDay` so their thresholds continue to mean "total elapsed days" even though
+`self.day` is now bounded to 1–30.
+
+```antares/src/domain/types.rs#L616-619
+pub fn total_days(&self) -> u32 {
+    (self.year - 1) * DAYS_PER_YEAR + (self.month - 1) * DAYS_PER_MONTH + self.day
+}
+```
+
+#### `apply_day_rollover()` — Shared Rollover Helper
+
+A private method called by both `advance_minutes()` and `advance_days()` after
+incrementing `self.day`:
+
+```antares/src/domain/types.rs#L679-688
+fn apply_day_rollover(&mut self) {
+    while self.day > DAYS_PER_MONTH {
+        self.day -= DAYS_PER_MONTH;
+        self.month += 1;
+    }
+    while self.month > MONTHS_PER_YEAR {
+        self.month -= MONTHS_PER_YEAR;
+        self.year += 1;
+    }
+}
+```
+
+#### `TimeCondition::AfterDay` / `BeforeDay` — `src/domain/world/types.rs`
+
+The two match arms that previously compared `game_time.day` now call
+`game_time.total_days()`:
+
+```antares/src/domain/world/types.rs#L1839-1848
+pub fn is_met(&self, game_time: &GameTime) -> bool {
+    match self {
+        TimeCondition::DuringPeriods(periods) => periods.contains(&game_time.time_of_day()),
+        TimeCondition::AfterDay(threshold) => game_time.total_days() > *threshold,
+        TimeCondition::BeforeDay(threshold) => game_time.total_days() < *threshold,
+        TimeCondition::BetweenHours { from, to } => {
+            game_time.hour >= *from && game_time.hour <= *to
+        }
+    }
+}
+```
+
+This preserves all existing RON data semantics: `AfterDay(5)` still fires when
+the party has travelled more than 5 cumulative days into the campaign, regardless
+of which month or year they are in.
+
+### Tests
+
+#### New tests in `src/domain/types.rs` — 14 new tests
+
+| Test name                                     | What it verifies                                     |
+| --------------------------------------------- | ---------------------------------------------------- |
+| `test_new_full_constructor`                   | All five fields set correctly                        |
+| `test_new_defaults_year_and_month`            | `new()` sets year=1, month=1                         |
+| `test_advance_minutes_day_to_month_rollover`  | Day 30 + 1 min → Month 2, Day 1                      |
+| `test_advance_minutes_month_to_year_rollover` | Month 12, Day 30, 23:00 + 120 min → Year 2           |
+| `test_advance_minutes_multi_year_rollover`    | +2 full years of minutes → Year 3                    |
+| `test_advance_days_with_month_rollover`       | +31 days from Day 1 → Month 2, Day 2                 |
+| `test_advance_days_exact_month_boundary`      | +30 days from Day 1 → Month 2, Day 1                 |
+| `test_advance_days_year_rollover`             | +360 days → Year 2, Month 1, Day 1                   |
+| `test_serde_default_year_month`               | RON `(day: 5, hour: 8, minute: 0)` → year=1, month=1 |
+| `test_total_days_basic`                       | Y1M1D1=1, Y1M2D10=40, Y2M1D1=361                     |
+| `test_total_days_adventure_span`              | M2D10 → M3D12 = 32 days elapsed                      |
+| `test_total_days_year_boundary`               | Y1M12D30=360, Y2M1D1=361                             |
+| `test_game_time_creation`                     | Extended: also asserts year=1, month=1               |
+
+All 8 pre-existing `GameTime` unit tests continue to pass unchanged. All 26
+`TimeCondition` tests continue to pass.
+
+### Architecture Compliance
+
+- Constants use named `pub const` values — no magic numbers.
+- `#[serde(default)]` used for backward compatibility — no breaking format change.
+- `day` field semantics changed from "total elapsed days" to "day within month";
+  all code that required cumulative days was updated to use `total_days()`.
+- `new()` constructor preserved — zero call-site changes required across the codebase.
+- RON format unchanged; existing data files deserialize correctly.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all          → clean (no output)
+cargo check              → Finished dev profile, 0 errors
+cargo clippy -D warnings → Finished dev profile, 0 warnings
+cargo nextest run        → 3349 passed, 8 skipped, 0 failed
+```
+
+## Phase 5: Campaign Builder — Starting Date/Time (Complete)
+
+### Overview
+
+Phase 5 wires a configurable **starting date/time** into every layer of the
+campaign stack: the `CampaignConfig` data structure, the `CampaignMetadata`
+RON file, the `GameState` initialisation path, the Campaign Builder editor
+buffer, and the Gameplay section of the Campaign Builder UI. A campaign
+author can now open Campaign Builder → Campaign Editor → Gameplay, set
+Day 3, 22:00 as the starting time, save, and launch the game to find the HUD
+clock (Phase 3) showing `22:00` and `Day 3` from the very first frame of
+exploration. Campaigns whose `campaign.ron` lacks the field silently fall
+back to Day 1, 08:00 via `serde(default)`.
+
+---
+
+### Phase 5 Deliverables Checklist
+
+- [x] `starting_time: GameTime` field on `CampaignConfig` with `serde(default = "default_starting_time")`
+- [x] `default_starting_time()` returning `GameTime::new(1, 8, 0)` (morning)
+- [x] `starting_time: GameTime` field on `CampaignMetadata` with `serde(default)`
+- [x] `CampaignMetadata → CampaignConfig` conversion propagates `starting_time`
+- [x] `GameState::new_game()` initialises `state.time` from `campaign.config.starting_time`
+- [x] `starting_day`, `starting_hour`, `starting_minute` fields on `CampaignMetadataEditBuffer`
+- [x] `CampaignMetadataEditBuffer::from_metadata()` copies all three fields from `starting_time`
+- [x] `CampaignMetadataEditBuffer::apply_to()` clamps and writes back to `dest.starting_time`
+- [x] **Starting Date/Time** row in Campaign Builder → Campaign Editor → Gameplay section
+- [x] `period_label()` helper with `TimeOfDay` preview hint next to the spinners
+- [x] `campaigns/tutorial/campaign.ron` — explicit `starting_time: GameTime(day: 1, hour: 8, minute: 0)`
+- [x] `data/test_campaign/campaign.ron` — explicit `starting_time: (day: 1, hour: 8, minute: 0)`
+- [x] All phase-5 tests pass (3337/3337)
+
+---
+
+### What Was Built
+
+#### `starting_time` on `CampaignConfig` — `src/sdk/campaign_loader.rs`
+
+A `starting_time: GameTime` field was added to `CampaignConfig` (L192–197).
+The `#[serde(default = "default_starting_time")]` attribute guarantees
+backward compatibility with any `campaign.ron` file that pre-dates this change.
+`default_starting_time()` returns `GameTime::new(1, 8, 0)` — Day 1, 08:00 —
+so campaigns without an explicit field start in the morning.
+
+The `TryFrom<CampaignMetadata>` implementation at L533–537 copies
+`metadata.starting_time` directly into the resulting `CampaignConfig`.
+
+#### `starting_time` on `CampaignMetadata` — `src/sdk/campaign_loader.rs`
+
+`CampaignMetadata` (L480–484) received the same `starting_time: GameTime`
+field with an identical `serde(default)`. This is the struct that is
+deserialised from `campaign.ron` on disk, so the RON files only need to
+contain the field when a non-default starting time is desired.
+
+#### `GameState::new_game()` — `src/application/mod.rs`
+
+Inside `new_game()` (L645–654) the starting time is extracted from the
+campaign config before the `GameState` is constructed:
+
+```antares/src/application/mod.rs#L645-654
+// Initialise the game clock from the campaign's configured starting time.
+// Campaign authors set this in config.ron via `starting_time: (day: N, hour: H, minute: M)`.
+// Falls back to Day 1, 08:00 when the field is absent (serde default).
+let starting_time = campaign.config.starting_time;
+
+let mut state = Self {
+    // ...
+    time: starting_time,
+    // ...
+};
+```
+
+This means that from the very first frame of exploration the HUD clock, the
+ambient-lighting system, and every time-gated event condition all see the
+campaign author's intended starting time.
+
+#### `CampaignMetadataEditBuffer` — `sdk/campaign_builder/src/campaign_editor.rs`
+
+Three fields were added to the buffer struct (L103–109) to allow ergonomic
+drag-value editing in egui:
+
+```antares/sdk/campaign_builder/src/campaign_editor.rs#L103-109
+// Starting date/time (split from GameTime for ergonomic drag-value editing)
+/// Starting day (1-based)
+pub starting_day: u32,
+/// Starting hour (0–23)
+pub starting_hour: u8,
+/// Starting minute (0–59)
+pub starting_minute: u8,
+```
+
+`from_metadata()` (L149–155) copies `m.starting_time.{day,hour,minute}` into
+the three split fields.
+
+`apply_to()` (L192–196) reconstructs `GameTime` with clamping:
+
+- `starting_day.max(1)` — day is 1-based; 0 is invalid
+- `starting_hour.min(23)` — hours are 0–23
+- `starting_minute.min(59)` — minutes are 0–59
+
+`Default for CampaignMetadataEditBuffer` seeds the fields from
+`CampaignMetadata::default()`, which delegates to `default_starting_time()`,
+so a freshly opened editor always shows Day 1, 08:00.
+
+#### Starting Date/Time UI Row — `sdk/campaign_builder/src/campaign_editor.rs`
+
+The Gameplay section (`CampaignSection::Gameplay`, L1075–1128) contains the
+new row immediately after the **Starting Direction** ComboBox and before the
+**Starting Gold** drag-value:
+
+- Three `egui::DragValue` widgets with enforced ranges (`1..=9999` for day,
+  `0..=23` for hour, `0..=59` for minute).
+- A `ui.colored_label` grey preview that calls `period_label()` to show
+  which time-of-day period the selected time falls in — e.g. `(Morning)` for
+  08:00 or `(Night)` for 22:00.
+
+#### `period_label()` helper — `sdk/campaign_builder/src/campaign_editor.rs`
+
+A public helper at L1478–1487 maps every `TimeOfDay` variant to a short
+`&'static str` label. It is also tested by a doc-test and by
+`test_period_label_all_variants`.
+
+#### RON Data Files Updated
+
+Both canonical `campaign.ron` files now carry an explicit `starting_time`
+field so the `serde(default)` fallback is never exercised in production or the
+test fixture:
+
+- `campaigns/tutorial/campaign.ron` — `starting_time: GameTime(day: 1, hour: 8, minute: 0)`
+- `data/test_campaign/campaign.ron` — `starting_time: (day: 1, hour: 8, minute: 0)`
+
+---
+
+### Tests
+
+#### Domain / loader tests — `src/sdk/campaign_loader.rs`
+
+| Test                                                      | What it verifies                                                               |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `test_campaign_config_starting_time_default`              | `default_starting_time()` returns Day 1, 08:00                                 |
+| `test_campaign_config_starting_time_roundtrip`            | RON serialise → deserialise preserves `GameTime::new(3, 22, 30)`               |
+| `test_campaign_config_missing_starting_time_uses_default` | RON string without `starting_time` key defaults to Day 1, 08:00                |
+| `test_test_campaign_has_explicit_starting_time`           | Loading `data/test_campaign` yields `starting_time.day==1, hour==8, minute==0` |
+
+#### Campaign Editor buffer tests — `sdk/campaign_builder/src/campaign_editor.rs`
+
+| Test                                               | What it verifies                                                            |
+| -------------------------------------------------- | --------------------------------------------------------------------------- |
+| `test_buffer_from_metadata_copies_starting_time`   | `from_metadata()` copies day=2, hour=20, minute=45 into split fields        |
+| `test_buffer_apply_to_writes_starting_time`        | `apply_to()` writes day=5, hour=6, minute=30 back to `GameTime`             |
+| `test_buffer_starting_time_clamps_hour`            | hour=25 is clamped to 23 by `apply_to()`                                    |
+| `test_buffer_starting_time_clamps_minute`          | minute=75 is clamped to 59 by `apply_to()`                                  |
+| `test_buffer_starting_time_clamps_day_zero`        | day=0 is clamped to 1 by `apply_to()`                                       |
+| `test_buffer_default_starting_time_fields`         | Default buffer has day=1, hour=8, minute=0                                  |
+| `test_buffer_starting_time_roundtrip_via_metadata` | Split fields → `apply_to` → `from_metadata` round-trip preserves values     |
+| `test_period_label_all_variants`                   | `period_label` returns correct string for all six `TimeOfDay` variants      |
+| `test_period_label_matches_game_time_time_of_day`  | `period_label` agrees with `GameTime::time_of_day` for representative hours |
+
+---
+
+### Architecture Compliance
+
+| Check                                                                       | Status |
+| --------------------------------------------------------------------------- | ------ |
+| Data structures match `architecture.md` Section 4.9 `CampaignConfig`        | ✅     |
+| `serde(default)` ensures backward-compatible RON deserialization            | ✅     |
+| `GameTime` type alias used consistently (not raw fields)                    | ✅     |
+| `default_starting_time()` named consistently with other `default_*` helpers | ✅     |
+| Campaign builder split-field pattern matches existing DragValue conventions | ✅     |
+| RON format used for all data files (not JSON/YAML)                          | ✅     |
+| Test data under `data/test_campaign`, not `campaigns/tutorial`              | ✅     |
+| No architectural deviations from `architecture.md`                          | ✅     |
+
+---
+
+### Quality Gate Results
+
+```/dev/null/quality_gates.txt#L1-8
+cargo fmt --all          → No output (all files formatted)
+cargo check --all-targets --all-features
+                         → Finished (0 errors)
+cargo clippy --all-targets --all-features -- -D warnings
+                         → Finished (0 warnings)
+cargo nextest run --all-features
+                         → 3337 tests run: 3337 passed, 8 skipped
+```
+
+---
+
+## Phase 4: Time-Triggered Events (Complete)
+
+### Overview
+
+Phase 4 introduces time-gated map events — any `MapEvent` variant that supports
+it can now carry an optional `time_condition` field. When the condition is not
+met the event returns `EventResult::None` without being consumed, so the
+event re-evaluates on every future visit until the window opens. When
+`time_condition` is `None` (the default) the event fires unconditionally,
+preserving full backward compatibility with all existing RON map files.
+
+| Deliverable                                                                          | Location                               |
+| ------------------------------------------------------------------------------------ | -------------------------------------- |
+| `TimeCondition` enum                                                                 | `src/domain/world/types.rs`            |
+| `time_condition` field on `Encounter`, `Sign`, `NpcDialogue`, `RecruitableCharacter` | `src/domain/world/types.rs`            |
+| `trigger_event(world, position, &game_time)` gating logic                            | `src/domain/world/events.rs`           |
+| `TimeAdvanceEvent` + `apply_time_advance` system                                     | `src/game/systems/time.rs`             |
+| Campaign-author how-to guide                                                         | `docs/how-to/authoring_time_events.md` |
+
+### Phase 4 Deliverables Checklist
+
+- [x] `TimeCondition` enum in `src/domain/world/types.rs` — four variants, `is_met(&GameTime) -> bool` method
+- [x] `time_condition: Option<TimeCondition>` on `MapEvent::Encounter`, `::Sign`, `::NpcDialogue`, `::RecruitableCharacter` with `#[serde(default)]`
+- [x] `trigger_event` accepts `&GameTime` and evaluates the condition before processing
+- [x] Unmet condition returns `EventResult::None` without consuming the event
+- [x] `TimeAdvanceEvent { minutes: u32 }` Bevy event in `src/game/systems/time.rs`
+- [x] `apply_time_advance` system draining `TimeAdvanceEvent` queue and calling `GameState::advance_time`
+- [x] `TimeCondition` publicly re-exported from `src/domain/world/mod.rs`
+- [x] `docs/how-to/authoring_time_events.md` with complete RON examples for all four variants
+- [x] All Phase 4 tests pass (27 tests across `mod time_condition_tests` and `mod tests`)
+
+### What Was Built
+
+#### `TimeCondition` Enum — `src/domain/world/types.rs`
+
+Four variants cover the use cases described in the plan:
+
+```src/domain/world/types.rs#L1791-1805
+pub enum TimeCondition {
+    /// Event fires only during these time-of-day periods.
+    DuringPeriods(Vec<TimeOfDay>),
+    /// Event fires only after this many in-game days have elapsed (day > threshold).
+    AfterDay(u32),
+    /// Event fires only before this many in-game days have elapsed (day < threshold).
+    BeforeDay(u32),
+    /// Event fires only between these hours (inclusive, 0–23, 24-hour clock).
+    BetweenHours {
+        /// First hour of the active window (0–23, inclusive).
+        from: u8,
+        /// Last hour of the active window (0–23, inclusive).
+        to: u8,
+    },
+}
+```
+
+The `is_met(&GameTime) -> bool` method is a pure function — no side-effects,
+safe from both the domain layer and Bevy systems:
+
+```src/domain/world/types.rs#L1838-1847
+pub fn is_met(&self, game_time: &GameTime) -> bool {
+    match self {
+        TimeCondition::DuringPeriods(periods) => periods.contains(&game_time.time_of_day()),
+        TimeCondition::AfterDay(threshold) => game_time.day > *threshold,
+        TimeCondition::BeforeDay(threshold) => game_time.day < *threshold,
+        TimeCondition::BetweenHours { from, to } => {
+            game_time.hour >= *from && game_time.hour <= *to
+        }
+    }
+}
+```
+
+`TimeCondition` derives `Debug, Clone, PartialEq, Eq, Serialize, Deserialize`
+so it round-trips through RON without loss.
+
+#### `time_condition` Field on `MapEvent` Variants — `src/domain/world/types.rs`
+
+The field is added to `Encounter`, `Sign`, `NpcDialogue`, and
+`RecruitableCharacter`. Each uses `#[serde(default)]` so existing RON files
+that omit the field continue to load cleanly with `None`:
+
+```src/domain/world/types.rs#L1871-1875
+        /// Optional time condition — if `Some`, the encounter only fires when
+        /// the condition is met.  `None` means always fire (default, backward
+        /// compatible with existing RON data).
+        #[serde(default)]
+        time_condition: Option<TimeCondition>,
+```
+
+The same pattern is applied to `Sign` (L1953), `NpcDialogue` (L1975), and
+`RecruitableCharacter` (L2021).
+
+#### Time-Gating in `trigger_event` — `src/domain/world/events.rs`
+
+The function signature was extended with `game_time: &GameTime`. Before
+processing any event the function checks whether the event carries a
+`time_condition` and evaluates it:
+
+```src/domain/world/events.rs#L168-178
+pub fn trigger_event(
+    world: &mut World,
+    position: Position,
+    game_time: &GameTime,
+) -> Result<EventResult, EventError> {
+```
+
+The gating block:
+
+```src/domain/world/events.rs#L208-228
+    let time_condition_met = match &event {
+        MapEvent::Encounter {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        MapEvent::Sign {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        MapEvent::NpcDialogue {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        MapEvent::RecruitableCharacter {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        // All other variants, and any variant whose time_condition is None,
+        // are unconditionally allowed.
+        _ => true,
+    };
+
+    if !time_condition_met {
+        return Ok(EventResult::None);
+    }
+```
+
+Key design properties:
+
+- The event is **not consumed** when the condition is not met — it stays on the
+  map and is re-evaluated on the next step.
+- The domain layer remains pure — the caller passes `&game_state.time`; no
+  `GameState` or Bevy types enter the domain module.
+- All existing callers pass `&self.time` — the one caller in
+  `src/application/mod.rs::move_party_and_handle_events` was updated when the
+  signature changed.
+
+#### `TimeAdvanceEvent` and `apply_time_advance` — `src/game/systems/time.rs`
+
+The `TimeAdvanceEvent { minutes: u32 }` Bevy message type and the
+`apply_time_advance` drain system were implemented as part of Phase 1 and are
+registered by `TimeOfDayPlugin`. Phase 4 depends on — but does not duplicate —
+this infrastructure. See the Phase 1 and Phase 2 entries for the full
+description.
+
+#### `TimeCondition` Public Re-export — `src/domain/world/mod.rs`
+
+`TimeCondition` is exported from the world module facade so campaign tooling
+and tests can import it via the short path:
+
+```src/domain/world/mod.rs#L43-45
+pub use types::{
+    ...
+    TimeCondition, ...
+};
+```
+
+#### `docs/how-to/authoring_time_events.md`
+
+A complete campaign-author guide covering:
+
+- How time conditions work and which event variants support them
+- All four `TimeCondition` variants with RON examples
+- A full self-contained map file showing all four variants in one place
+- Cross-midnight caveats for `BetweenHours`
+- Backward-compatibility guarantee
+- Testing instructions pointing authors at `trigger_event` unit tests
+
+### Tests
+
+#### `mod time_condition_tests` in `src/domain/world/types.rs` — 21 tests
+
+| Test                                                      | What it verifies                                                                    |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `test_time_condition_during_periods_night_fires_at_night` | `DuringPeriods([Night])` fires at hour 23                                           |
+| `test_time_condition_during_periods_night_skips_at_noon`  | `DuringPeriods([Night])` does not fire at hour 12                                   |
+| `test_time_condition_during_periods_evening_and_night`    | Multi-period list fires at both Evening and Night, not at Dawn                      |
+| `test_time_condition_during_periods_all_six_variants`     | Each of the six `TimeOfDay` variants fires at its canonical hour and no other       |
+| `test_time_condition_after_day_fires`                     | `AfterDay(5)` fires on day 6 and 10; not on day 5 or 1                              |
+| `test_time_condition_after_day_boundary`                  | `AfterDay(1)` does not fire on day 1; fires on day 2                                |
+| `test_time_condition_before_day_fires`                    | `BeforeDay(10)` fires on day 9 and 1; not on day 10 or 15                           |
+| `test_time_condition_between_hours_fires_within_range`    | `BetweenHours{20,23}` fires at hours 20, 21, 23                                     |
+| `test_time_condition_between_hours_skips_outside_range`   | `BetweenHours{20,23}` does not fire at hour 19 or midnight                          |
+| `test_time_condition_between_hours_full_day_range`        | `BetweenHours{0,23}` fires at every hour 0–23                                       |
+| `test_time_condition_between_hours_single_hour`           | `BetweenHours{12,12}` fires only at hour 12                                         |
+| `test_time_condition_ron_roundtrip_during_periods`        | `DuringPeriods` survives RON serialise → deserialise                                |
+| `test_time_condition_ron_roundtrip_after_day`             | `AfterDay` survives RON round-trip                                                  |
+| `test_time_condition_ron_roundtrip_between_hours`         | `BetweenHours` survives RON round-trip                                              |
+| `test_map_event_encounter_time_condition_none_by_default` | Struct literal with `time_condition: None` compiles and matches                     |
+| `test_map_event_encounter_with_time_condition_night`      | `Encounter` with `DuringPeriods([Night, Evening])` fires at 23:00, not 12:00        |
+| `test_map_event_sign_time_condition_ron_roundtrip`        | `Sign` with `DuringPeriods([Night])` serialises to RON containing `"DuringPeriods"` |
+| `test_map_event_sign_no_time_condition_backward_compat`   | RON `Sign` without `time_condition` field deserialises to `None`                    |
+| `test_map_event_npc_dialogue_time_condition`              | `NpcDialogue` with `BetweenHours{8,18}` fires at noon, not at 22:00                 |
+| `test_map_event_recruitable_character_time_condition`     | `RecruitableCharacter` with `AfterDay(3)` fires on day 4, not day 3                 |
+
+#### `mod tests` in `src/domain/world/events.rs` — 6 time-condition integration tests
+
+| Test                                                 | What it verifies                                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `test_time_condition_night_fires_at_night`           | `trigger_event` with night-only Encounter returns `EventResult::Encounter` at hour 23 |
+| `test_time_condition_night_skips_at_noon`            | Same event returns `EventResult::None` at hour 12                                     |
+| `test_time_condition_after_day_fires`                | Sign with `AfterDay(5)` fires on day 10; returns None on day 3 and day 5 (boundary)   |
+| `test_time_condition_between_hours`                  | NpcDialogue with `BetweenHours{8,18}` fires at 8, 13, 18; returns None at 7 and 19    |
+| `test_no_time_condition_always_fires`                | Unconditional Sign fires at every hour 0–23                                           |
+| `test_time_condition_not_met_does_not_consume_event` | Event skipped at noon is still present and fires at night                             |
+
+### Architecture Compliance
+
+- [x] `TimeCondition` enum matches the four variants specified in plan §4.1 exactly
+- [x] `Option<TimeCondition>` with `#[serde(default)]` on all four applicable event variants — backward compatible
+- [x] `trigger_event` accepts `&GameTime` as specified in plan §4.2; domain layer remains pure
+- [x] Unmet condition returns `EventResult::None` without consuming the event — specified in plan §4.2
+- [x] `TimeAdvanceEvent` + `apply_time_advance` present in `src/game/systems/time.rs` — plan §4.3
+- [x] `docs/how-to/authoring_time_events.md` present with night-ambush RON example — plan §4.4
+- [x] All five spec tests from plan §4.5 present and passing
+- [x] `TimeCondition` derives `Serialize, Deserialize` for RON compatibility — plan §4.4
+- [x] No `unwrap()` without justification; domain functions return `Result`
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → no output (all files formatted)
+cargo check              → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings → Finished with 0 warnings
+cargo nextest run        → 3337 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Phase 3: Clock UI in the HUD (Complete)
+
+### Overview
+
+Phase 3 adds a visible clock widget to the exploration HUD, positioned directly
+below the compass in the top-right corner. The widget shows two lines of text
+that update every frame:
+
+- **Time line** — `"HH:MM"` with zero-padded hours and minutes
+- **Day line** — `"Day N"` where N is the current in-game day
+
+The time text tints between warm golden (`CLOCK_DAY_TEXT_COLOR`) during bright
+periods (Dawn through Dusk) and cool blue-white (`CLOCK_NIGHT_TEXT_COLOR`)
+during dark periods (Evening and Night), giving the player an ambient cue that
+mirrors the `TimeOfDay::is_dark()` flag from Phase 2. The clock is gated by
+`not_in_combat` so it does not render on top of the combat HUD.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `ClockRoot`, `ClockTimeText`, `ClockDayText` marker components in `src/game/systems/hud.rs`
+- [x] `CLOCK_FONT_SIZE`, `CLOCK_BACKGROUND_COLOR`, `CLOCK_BORDER_COLOR`, `CLOCK_TEXT_COLOR`, `CLOCK_NIGHT_TEXT_COLOR`, `CLOCK_DAY_TEXT_COLOR` constants
+- [x] `CLOCK_TOP_OFFSET`, `CLOCK_WIDTH`, `CLOCK_PADDING` layout constants
+- [x] Clock widget spawned in `setup_hud` — absolute-positioned below the compass, two `Text` children
+- [x] `update_clock` system updating time and day text + time text colour every frame
+- [x] `update_clock` registered in `HudPlugin` inside the `not_in_combat`-gated system set
+- [x] `format_clock_time()` and `format_clock_day()` pure helper functions for testability
+- [x] `clock_text_color()` pure helper delegating to `TimeOfDay::is_dark()`
+- [x] All Phase 3 tests pass (31 clock-specific tests across `mod clock_tests` and `mod tests`)
+
+### What Was Built
+
+#### Marker Components — `src/game/systems/hud.rs`
+
+Three zero-sized marker components identify the clock entities in queries:
+
+```src/game/systems/hud.rs#L151-163
+/// Marker component for the clock widget container (sits below the compass)
+#[derive(Component)]
+pub struct ClockRoot;
+
+/// Marker component for the time-of-day text node (displays "HH:MM")
+#[derive(Component)]
+pub struct ClockTimeText;
+
+/// Marker component for the day counter text node (displays "Day N")
+#[derive(Component)]
+pub struct ClockDayText;
+```
+
+#### Constants — `src/game/systems/hud.rs`
+
+Nine constants define the clock's visual style and layout, placed adjacent to
+the existing compass constants so related values are grouped together:
+
+| Constant                 | Value                       | Purpose                              |
+| ------------------------ | --------------------------- | ------------------------------------ |
+| `CLOCK_FONT_SIZE`        | `14.0`                      | Text size for both clock lines       |
+| `CLOCK_BACKGROUND_COLOR` | `srgba(0.1, 0.1, 0.1, 0.9)` | Matches compass panel style          |
+| `CLOCK_BORDER_COLOR`     | `srgba(0.4, 0.4, 0.4, 1.0)` | Matches compass border               |
+| `CLOCK_TEXT_COLOR`       | `srgba(1.0, 1.0, 1.0, 1.0)` | Default white (used for day line)    |
+| `CLOCK_NIGHT_TEXT_COLOR` | `srgba(0.6, 0.6, 1.0, 1.0)` | Cool blue-white for dark periods     |
+| `CLOCK_DAY_TEXT_COLOR`   | `srgba(1.0, 0.9, 0.5, 1.0)` | Warm golden for bright periods       |
+| `CLOCK_TOP_OFFSET`       | `COMPASS_SIZE + 28.0`       | Positions clock below compass (76px) |
+| `CLOCK_WIDTH`            | `COMPASS_SIZE` (48px)       | Matches compass width                |
+| `CLOCK_PADDING`          | `4.0`                       | Inner padding of the clock panel     |
+
+#### Clock Widget Spawn — `setup_hud` in `src/game/systems/hud.rs`
+
+The clock is spawned at the end of `setup_hud` as a separate absolute-positioned
+node. It uses `FlexDirection::Column` to stack the two text children vertically,
+anchored at `right: 20px` / `top: CLOCK_TOP_OFFSET`:
+
+```src/game/systems/hud.rs#L399-440
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(20.0),
+                top: Val::Px(CLOCK_TOP_OFFSET),
+                width: Val::Px(CLOCK_WIDTH),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::all(Val::Px(CLOCK_PADDING)),
+                row_gap: Val::Px(2.0),
+                ..default()
+            },
+            BackgroundColor(CLOCK_BACKGROUND_COLOR),
+            ClockRoot,
+        ))
+        .with_children(|parent| {
+            parent.spawn((Text::new("00:00"), ..., ClockTimeText));
+            parent.spawn((Text::new("Day 1"), ..., ClockDayText));
+        });
+```
+
+#### `update_clock` System — `src/game/systems/hud.rs`
+
+Runs every frame in the `not_in_combat`-gated `Update` set. It reads
+`global_state.0.time_of_day()` via `GameState::time_of_day()` (Phase 2
+helper) to pick the correct text colour, then updates both text nodes:
+
+```src/game/systems/hud.rs#L566-585
+fn update_clock(
+    global_state: Res<GlobalState>,
+    mut time_query: Query<
+        (&mut Text, &mut TextColor),
+        (With<ClockTimeText>, Without<ClockDayText>),
+    >,
+    mut day_query: Query<(&mut Text, &mut TextColor), (With<ClockDayText>, Without<ClockTimeText>)>,
+) {
+    let game_time = &global_state.0.time;
+    let time_of_day = global_state.0.time_of_day();
+    let time_color = clock_text_color(time_of_day);
+
+    for (mut text, mut color) in &mut time_query {
+        **text = format_clock_time(game_time.hour, game_time.minute);
+        *color = TextColor(time_color);
+    }
+    for (mut text, _color) in &mut day_query {
+        **text = format_clock_day(game_time.day);
+    }
+}
+```
+
+The `Without<ClockDayText>` / `Without<ClockTimeText>` filter guards prevent
+Bevy's borrow checker from rejecting the two simultaneous mutable queries over
+the same `Text` component type.
+
+#### `HudPlugin` Registration — `src/game/systems/hud.rs`
+
+`update_clock` is added to the `not_in_combat`-gated system tuple alongside
+`update_compass`, `update_portraits`, and `ensure_portraits_loaded`:
+
+```src/game/systems/hud.rs#L188-205
+    fn build(&self, app: &mut App) {
+        app.insert_resource(PortraitAssets::default())
+            .add_systems(Startup, (setup_hud, setup_party_entities))
+            .add_systems(Update, update_hud)
+            .add_systems(
+                Update,
+                (
+                    ensure_portraits_loaded,
+                    update_compass,
+                    update_clock,
+                    update_portraits,
+                )
+                    .run_if(not_in_combat),
+            );
+    }
+```
+
+#### Pure Helper Functions — `src/game/systems/hud.rs`
+
+Three public helpers are extracted from the system so they are independently
+testable without a Bevy world:
+
+- `format_clock_time(hour: u8, minute: u8) -> String` — zero-pads both fields to `"HH:MM"`
+- `format_clock_day(day: u32) -> String` — produces `"Day N"`
+- `clock_text_color(time_of_day: TimeOfDay) -> Color` — delegates to `TimeOfDay::is_dark()`, returning `CLOCK_NIGHT_TEXT_COLOR` or `CLOCK_DAY_TEXT_COLOR`
+
+### Tests
+
+All tests live in `mod clock_tests` (and a few clock-constant checks in `mod tests`) within `src/game/systems/hud.rs`.
+
+#### `format_clock_time` tests
+
+| Test                                                  | What it verifies                                     |
+| ----------------------------------------------------- | ---------------------------------------------------- |
+| `test_clock_format_midnight`                          | `(0, 0)` → `"00:00"`                                 |
+| `test_clock_format_noon`                              | `(12, 5)` → `"12:05"` (minute zero-padded)           |
+| `test_clock_format_single_digit_hour`                 | `(9, 0)` → `"09:00"` (hour zero-padded)              |
+| `test_clock_format_end_of_day`                        | `(23, 59)` → `"23:59"`                               |
+| `test_clock_format_zero_hour_one_minute`              | `(0, 1)` → `"00:01"`                                 |
+| `test_clock_format_dawn_default`                      | `(6, 30)` → `"06:30"`                                |
+| `test_clock_format_all_hours_produce_valid_strings`   | Every hour 0–23 produces a 5-char `"HH:MM"` string   |
+| `test_clock_format_all_minutes_produce_valid_strings` | Every minute 0–59 produces a 5-char `"HH:MM"` string |
+
+#### `format_clock_day` tests
+
+| Test                               | What it verifies                                       |
+| ---------------------------------- | ------------------------------------------------------ |
+| `test_clock_day_display_first_day` | `1` → `"Day 1"`                                        |
+| `test_clock_day_display_forty_two` | `42` → `"Day 42"`                                      |
+| `test_clock_day_display_year`      | `365` → `"Day 365"`                                    |
+| `test_clock_day_display_zero`      | `0` → `"Day 0"` (must not panic)                       |
+| `test_clock_day_display_max`       | `u32::MAX` must not panic; result starts with `"Day "` |
+
+#### `clock_text_color` tests
+
+| Test                                                        | What it verifies                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------- |
+| `test_clock_text_color_night_returns_night_color`           | `Night` → `CLOCK_NIGHT_TEXT_COLOR`                            |
+| `test_clock_text_color_evening_returns_night_color`         | `Evening` → `CLOCK_NIGHT_TEXT_COLOR` (is_dark)                |
+| `test_clock_text_color_dawn_returns_day_color`              | `Dawn` → `CLOCK_DAY_TEXT_COLOR`                               |
+| `test_clock_text_color_morning_returns_day_color`           | `Morning` → `CLOCK_DAY_TEXT_COLOR`                            |
+| `test_clock_text_color_afternoon_returns_day_color`         | `Afternoon` → `CLOCK_DAY_TEXT_COLOR`                          |
+| `test_clock_text_color_dusk_returns_day_color`              | `Dusk` → `CLOCK_DAY_TEXT_COLOR`                               |
+| `test_clock_text_color_agrees_with_is_dark_for_all_periods` | `clock_text_color` agrees with `is_dark()` for all 6 variants |
+
+#### Constant sanity tests
+
+| Test                                                  | What it verifies                                             |
+| ----------------------------------------------------- | ------------------------------------------------------------ |
+| `test_clock_font_size_is_positive`                    | `CLOCK_FONT_SIZE > 0.0`                                      |
+| `test_clock_top_offset_places_clock_below_compass`    | `CLOCK_TOP_OFFSET > COMPASS_SIZE` (no overlap)               |
+| `test_clock_width_is_positive`                        | `CLOCK_WIDTH > 0.0`                                          |
+| `test_clock_padding_is_non_negative`                  | `CLOCK_PADDING >= 0.0`                                       |
+| `test_clock_night_and_day_colors_are_distinct`        | Night and day colors differ by >0.05 on at least one channel |
+| `test_clock_colors_are_opaque`                        | All three text color constants have `alpha == 1.0`           |
+| `test_clock_background_and_border_colors_are_visible` | Background and border have `alpha > 0.0`                     |
+| `test_clock_constants_valid` (in `mod tests`)         | `CLOCK_FONT_SIZE > 0.0`, `CLOCK_BACKGROUND_COLOR` alpha > 0  |
+
+#### Bevy integration tests
+
+| Test                                           | What it verifies                                                                                |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `test_clock_widget_spawned_on_startup`         | After `app.update()` exactly one `ClockRoot`, `ClockTimeText`, and `ClockDayText` entity exists |
+| `test_clock_widget_shows_default_game_time`    | Default `GameState` (06:00, Day 1) produces `"06:00"` and `"Day 1"` text after two updates      |
+| `test_clock_widget_updates_after_time_advance` | `GameState` advanced 18 h from 06:00 → 00:00 Day 2 produces `"00:00"` and `"Day 2"` text        |
+
+### Architecture Compliance
+
+- [x] `ClockRoot`, `ClockTimeText`, `ClockDayText` marker components match the names specified in plan §3.1 exactly
+- [x] All nine constants match the values specified in plan §3.1
+- [x] Clock spawned in `setup_hud` as specified in plan §3.2 — absolute-positioned below the compass
+- [x] `update_clock` system matches the signature pattern from plan §3.3 (extended with `TextColor` mutation for the tinting bonus)
+- [x] `update_clock` registered in `HudPlugin` under `not_in_combat` as specified in plan §3.4
+- [x] All three spec tests (`test_clock_format_midnight`, `test_clock_format_noon`, `test_clock_day_display`) present and passing
+- [x] Pure helper functions extracted for testability — no `unwrap()` without justification
+- [x] No architectural deviations from `architecture.md`
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → no output (all files formatted)
+cargo check              → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings → Finished with 0 warnings
+cargo nextest run        → 3337 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Phase 2: Time-of-Day System (Complete)
+
+### Overview
+
+Phase 2 introduces the full `TimeOfDay` classification system, which maps the
+in-game 24-hour clock onto six named periods. Every system that needs to know
+whether it is dawn, midday, dusk, or pitch-dark can call a single helper
+rather than comparing raw hour numbers.
+
+| Period    | Hours         | Notes                                             |
+| --------- | ------------- | ------------------------------------------------- |
+| Dawn      | 05:00 – 07:59 | Pale light; roosters crow                         |
+| Morning   | 08:00 – 11:59 | Full daylight                                     |
+| Afternoon | 12:00 – 15:59 | Peak brightness                                   |
+| Dusk      | 16:00 – 18:59 | Golden hour; shadows lengthen                     |
+| Evening   | 19:00 – 21:59 | Dark but not full night; light source recommended |
+| Night     | 22:00 – 04:59 | Pitch black; light source required outdoors       |
+
+Ambient light is updated every frame by the `update_ambient_light` system in
+`src/game/systems/time.rs` so any time advancement (step, combat round, rest,
+map transition) is reflected in the rendered scene within the same frame.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `TimeOfDay` enum in `src/domain/types.rs` — six variants with correct hour boundaries, `label()`, and `is_dark()`
+- [x] `GameTime::time_of_day()` — maps `self.hour` to the correct `TimeOfDay` variant
+- [x] `GameTime::is_night()` — delegates to `time_of_day()`, returns `true` for `Evening | Night`
+- [x] `GameTime::is_day()` — delegates to `is_night()` via logical inverse
+- [x] `GameState::time_of_day()` convenience helper in `src/application/mod.rs`
+- [x] Ambient-light hook in `src/game/systems/time.rs` reading `time_of_day()` every frame
+- [x] `AMBIENT_NIGHT_BRIGHTNESS`, `AMBIENT_EVENING_BRIGHTNESS`, `AMBIENT_DAWN_BRIGHTNESS`, `AMBIENT_DUSK_BRIGHTNESS`, `AMBIENT_DAY_BRIGHTNESS` constants
+- [x] `time_of_day_brightness()` pure function for testability
+- [x] `TimeOfDayPlugin` registering both `apply_time_advance` and `update_ambient_light` systems
+- [x] All Phase 2 tests pass (see table below)
+
+### What Was Built
+
+#### `TimeOfDay` Enum — `src/domain/types.rs`
+
+Six variants cover the full 24-hour cycle with precise hour boundaries:
+
+```src/domain/types.rs#L381-394
+pub enum TimeOfDay {
+    /// 05:00–07:59 — pale light, roosters crow
+    Dawn,
+    /// 08:00–11:59 — full daylight
+    Morning,
+    /// 12:00–15:59 — peak brightness
+    Afternoon,
+    /// 16:00–18:59 — golden light, shadows lengthen
+    Dusk,
+    /// 19:00–21:59 — dark but not full night
+    Evening,
+    /// 22:00–04:59 — pitch black without a light source
+    Night,
+}
+```
+
+Two helper methods live on `TimeOfDay`:
+
+- `label() -> &'static str` — returns a human-readable period name (`"Dawn"`, `"Night"`, etc.), used by the HUD clock colour system.
+- `is_dark() -> bool` — returns `true` for `Evening | Night`; consumed by `clock_text_color()` in `hud.rs` and `time_of_day_brightness()` in `time.rs`.
+
+#### `GameTime::time_of_day()` — `src/domain/types.rs`
+
+A pure `match` on `self.hour` maps all 24 possible hour values to the correct
+`TimeOfDay` variant:
+
+```src/domain/types.rs#L543-553
+pub fn time_of_day(&self) -> TimeOfDay {
+    match self.hour {
+        5..=7 => TimeOfDay::Dawn,
+        8..=11 => TimeOfDay::Morning,
+        12..=15 => TimeOfDay::Afternoon,
+        16..=18 => TimeOfDay::Dusk,
+        19..=21 => TimeOfDay::Evening,
+        // 22-23 and 0-4 are Night
+        _ => TimeOfDay::Night,
+    }
+}
+```
+
+#### `GameTime::is_night()` and `GameTime::is_day()` — `src/domain/types.rs`
+
+Both delegate to `time_of_day()` so they are always consistent with the
+six-period classification:
+
+```src/domain/types.rs#L570-591
+pub fn is_night(&self) -> bool {
+    matches!(self.time_of_day(), TimeOfDay::Evening | TimeOfDay::Night)
+}
+
+pub fn is_day(&self) -> bool {
+    !self.is_night()
+}
+```
+
+`Evening` is classified as "night" for `is_night()` because a light source is
+recommended at that point; however the ambient-light system keeps `Evening`
+distinct from `Night` by using a higher brightness value (`0.50` vs `0.25`).
+
+#### `GameState::time_of_day()` — `src/application/mod.rs`
+
+A thin convenience wrapper so any system with `GameState` access can query the
+period without reaching into `state.time` directly:
+
+```src/application/mod.rs#L1469-1471
+pub fn time_of_day(&self) -> TimeOfDay {
+    self.time.time_of_day()
+}
+```
+
+#### Ambient-Light Hook — `src/game/systems/time.rs`
+
+Five brightness constants encode the intended per-period light intensity:
+
+| Constant                     | Value  | Period(s)          |
+| ---------------------------- | ------ | ------------------ |
+| `AMBIENT_NIGHT_BRIGHTNESS`   | `0.25` | Night              |
+| `AMBIENT_EVENING_BRIGHTNESS` | `0.50` | Evening            |
+| `AMBIENT_DAWN_BRIGHTNESS`    | `0.70` | Dawn               |
+| `AMBIENT_DUSK_BRIGHTNESS`    | `0.70` | Dusk               |
+| `AMBIENT_DAY_BRIGHTNESS`     | `1.00` | Morning, Afternoon |
+
+The `time_of_day_brightness()` pure function maps a `TimeOfDay` to the
+correct constant. The Bevy system `update_ambient_light` calls it every frame:
+
+```src/game/systems/time.rs#L137-143
+pub fn update_ambient_light(
+    global_state: Res<GlobalState>,
+    mut ambient_light: ResMut<AmbientLight>,
+) {
+    let brightness = time_of_day_brightness(global_state.0.time_of_day());
+    ambient_light.brightness = brightness;
+}
+```
+
+`TimeOfDayPlugin` orders `apply_time_advance` **before** `update_ambient_light`
+so the light always reflects the current frame's clock value:
+
+```src/game/systems/time.rs#L114-118
+fn build(&self, app: &mut App) {
+    app.add_message::<TimeAdvanceEvent>();
+    app.add_systems(Update, apply_time_advance.before(update_ambient_light));
+    app.add_systems(Update, update_ambient_light);
+}
+```
+
+#### HUD Clock Colour Tinting — `src/game/systems/hud.rs`
+
+The `update_clock` system reads `global_state.0.time_of_day()` and calls
+`clock_text_color()` to tint the time text:
+
+- Dark periods (`Evening`, `Night`) → `CLOCK_NIGHT_TEXT_COLOR` — cool blue-white (`rgba(0.6, 0.6, 1.0, 1.0)`)
+- All other periods → `CLOCK_DAY_TEXT_COLOR` — warm golden (`rgba(1.0, 0.9, 0.5, 1.0)`)
+
+This gives players an immediate ambient visual cue in the HUD that maps to the
+`TimeOfDay::is_dark()` flag.
+
+### Tests
+
+#### `src/domain/types.rs` — `TimeOfDay` and `GameTime` tests
+
+| Test                                     | What it verifies                                                                        |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| `test_time_of_day_night_early_morning`   | Hours 0–4 all map to `Night`                                                            |
+| `test_time_of_day_dawn`                  | Hours 5–7 (including 5:00 and 7:59) map to `Dawn`                                       |
+| `test_time_of_day_morning`               | Hours 8–11 map to `Morning`                                                             |
+| `test_time_of_day_afternoon`             | Hours 12–15 map to `Afternoon`                                                          |
+| `test_time_of_day_dusk`                  | Hours 16–18 map to `Dusk`                                                               |
+| `test_time_of_day_evening`               | Hours 19–21 map to `Evening`                                                            |
+| `test_time_of_day_night`                 | Hours 22–23 map to `Night`                                                              |
+| `test_time_of_day_boundary_transitions`  | Every exact transition hour tested (4:59→5:00, 7:59→8:00, …, 21:59→22:00)               |
+| `test_is_night_delegates_to_time_of_day` | `Evening` and `Night` return `true`; `Dawn`/`Morning`/`Afternoon`/`Dusk` return `false` |
+| `test_is_day_is_inverse_of_is_night`     | For every hour 0–23, `is_day() == !is_night()`                                          |
+| `test_time_of_day_label`                 | Each variant's `label()` returns the correct string                                     |
+| `test_time_of_day_is_dark`               | `Evening` and `Night` are dark; the other four are not                                  |
+
+#### `src/application/mod.rs` — `GameState::time_of_day()` tests
+
+| Test                                                 | What it verifies                                                         |
+| ---------------------------------------------------- | ------------------------------------------------------------------------ |
+| `test_game_state_time_of_day_default_is_dawn`        | `GameState::new()` starts at 06:00 — confirmed Dawn                      |
+| `test_game_state_time_of_day_delegates_to_game_time` | Seven representative hours each produce the expected `TimeOfDay` variant |
+| `test_game_state_time_of_day_advances_correctly`     | 06:00 + 6 hours via `advance_hours` → Afternoon                          |
+| `test_game_state_time_of_day_night_via_advance_time` | 06:00 + 16 hours via `advance_time` → Night                              |
+
+#### `src/game/systems/time.rs` — ambient-light tests
+
+| Test                                                    | What it verifies                                                       |
+| ------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `test_brightness_night`                                 | Night maps to `AMBIENT_NIGHT_BRIGHTNESS`                               |
+| `test_brightness_evening`                               | Evening maps to `AMBIENT_EVENING_BRIGHTNESS`                           |
+| `test_brightness_dawn`                                  | Dawn maps to `AMBIENT_DAWN_BRIGHTNESS`                                 |
+| `test_brightness_dusk`                                  | Dusk maps to `AMBIENT_DUSK_BRIGHTNESS`                                 |
+| `test_brightness_morning`                               | Morning maps to `AMBIENT_DAY_BRIGHTNESS`                               |
+| `test_brightness_afternoon`                             | Afternoon maps to `AMBIENT_DAY_BRIGHTNESS`                             |
+| `test_brightness_is_darker_at_night_than_day`           | Night brightness is strictly less than Afternoon brightness            |
+| `test_brightness_ordering`                              | Full ordering: Night < Evening < Dawn = Dusk < Morning = Afternoon     |
+| `test_all_hours_produce_valid_brightness`               | Every hour 0–23 yields a brightness in `[0.0, 1.0]`                    |
+| `test_dark_periods_below_threshold`                     | Evening and Night are strictly below `1.0`                             |
+| `test_time_of_day_is_dark_matches_brightness_reduction` | Every `is_dark()` period has brightness below `AMBIENT_DAY_BRIGHTNESS` |
+
+#### `src/game/systems/hud.rs` — clock colour tests
+
+| Test                                                        | What it verifies                                                         |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `test_clock_text_color_night_returns_night_color`           | `Night` → `CLOCK_NIGHT_TEXT_COLOR`                                       |
+| `test_clock_text_color_evening_returns_night_color`         | `Evening` → `CLOCK_NIGHT_TEXT_COLOR` (it `is_dark()`)                    |
+| `test_clock_text_color_dawn_returns_day_color`              | `Dawn` → `CLOCK_DAY_TEXT_COLOR`                                          |
+| `test_clock_text_color_morning_returns_day_color`           | `Morning` → `CLOCK_DAY_TEXT_COLOR`                                       |
+| `test_clock_text_color_afternoon_returns_day_color`         | `Afternoon` → `CLOCK_DAY_TEXT_COLOR`                                     |
+| `test_clock_text_color_dusk_returns_day_color`              | `Dusk` → `CLOCK_DAY_TEXT_COLOR`                                          |
+| `test_clock_text_color_agrees_with_is_dark_for_all_periods` | `clock_text_color` agrees with `TimeOfDay::is_dark()` for all 6 variants |
+
+### Architecture Compliance
+
+- [x] `TimeOfDay` lives in `src/domain/types.rs` alongside `GameTime` as specified in plan §2.1
+- [x] Hour boundaries match the plan specification exactly (Dawn 05–07, Morning 08–11, Afternoon 12–15, Dusk 16–18, Evening 19–21, Night 22–04)
+- [x] `is_night()` delegates to `time_of_day()` — no duplicated hour comparisons
+- [x] `is_day()` is the logical inverse of `is_night()` — no independent implementation
+- [x] `GameState::time_of_day()` convenience helper present as specified in plan §2.2
+- [x] Ambient-light hook reads `time_of_day()` in `src/game/systems/time.rs` as specified in plan §2.3
+- [x] `AMBIENT_NIGHT_BRIGHTNESS` = `0.25` matches the `night_ambient_brightness` value specified in plan §2.3
+- [x] `TimeOfDay` derives `Serialize, Deserialize` for future RON data-file event conditions (Phase 4)
+- [x] No `unwrap()` without justification; all paths handled
+- [x] All four quality gates pass
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → no output (all files formatted)
+cargo check              → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings → Finished with 0 warnings
+cargo nextest run        → 3337 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Phase 1: Time Advancement Hooks (Complete)
+
+### Overview
+
+Phase 1 wires the in-game clock (`GameState.time: GameTime`) to every player
+action that should consume time:
+
+| Action                                     | Cost                                        | Location                                   |
+| ------------------------------------------ | ------------------------------------------- | ------------------------------------------ |
+| One exploration step                       | `TIME_COST_STEP_MINUTES` (5 min)            | `GameState::move_party_and_handle_events`  |
+| One combat round                           | `TIME_COST_COMBAT_ROUND_MINUTES` (5 min)    | `tick_combat_time` system in `combat.rs`   |
+| Map transition (teleport, dungeon, portal) | `TIME_COST_MAP_TRANSITION_MINUTES` (30 min) | `map_change_handler` system in `map.rs`    |
+| Rest (any duration)                        | `hours * 60` minutes                        | `GameState::rest_party` via `advance_time` |
+
+All time mutations go through `GameState::advance_time(minutes, templates)` so
+that active-spell duration ticking and merchant restocking are never bypassed.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `TIME_COST_STEP_MINUTES`, `TIME_COST_COMBAT_ROUND_MINUTES`, `TIME_COST_MAP_TRANSITION_MINUTES` constants in `src/domain/resources.rs`
+- [x] Time advance on successful exploration step (`move_party_and_handle_events`)
+- [x] Time advance per combat round (`tick_combat_time` in `src/game/systems/combat.rs`)
+- [x] Time advance on map transition (`map_change_handler` in `src/game/systems/map.rs`)
+- [x] `rest_party()` callers use `GameState::advance_time()` exclusively
+- [x] `TimeAdvanceEvent` Bevy event + `apply_time_advance` system in `src/game/systems/time.rs`
+- [x] `TimeOfDayPlugin` integrating ambient-light updates
+- [x] All phase-1 tests pass
+
+### What Was Built
+
+#### `TIME_COST_*` Constants — `src/domain/resources.rs`
+
+Three new constants define the canonical time cost for each action category:
+
+```src/domain/resources.rs#L77-85
+pub const TIME_COST_STEP_MINUTES: u32 = 5;
+pub const TIME_COST_COMBAT_ROUND_MINUTES: u32 = 5;
+pub const TIME_COST_MAP_TRANSITION_MINUTES: u32 = 30;
+```
+
+`REST_DURATION_HOURS` (12) already existed and was left unchanged.
+
+#### Exploration Movement — `src/application/mod.rs`
+
+`GameState::move_party_and_handle_events()` calls
+`self.advance_time(TIME_COST_STEP_MINUTES, None)` immediately after a
+successful `move_party()`, before any event resolution. A blocked step
+(movement error) returns early before `advance_time` is reached, so the clock
+never ticks for failed moves.
+
+#### Combat Round Time — `src/game/systems/combat.rs`
+
+The private `tick_combat_time` Bevy system runs after every combat-action
+handler. It compares `combat_res.state.round` against the new
+`CombatResource::last_timed_round` field; when the round has advanced it
+charges `new_rounds * TIME_COST_COMBAT_ROUND_MINUTES` exactly once. This
+prevents double-charging when the same round spans multiple frames.
+
+The system is a no-op when `GameMode` is not `Combat`, so stale combat data
+never advances the exploration clock.
+
+#### Map Transition Time — `src/game/systems/map.rs`
+
+`map_change_handler` now calls `global_state.0.advance_time(TIME_COST_MAP_TRANSITION_MINUTES, None)`
+after confirming the target map exists. Invalid map ids are silently ignored
+and do **not** advance the clock.
+
+#### Rest Time — `src/application/mod.rs`
+
+`GameState::rest_party()` delegates HP/SP restoration to
+`domain::resources::rest_party()` (which no longer calls `advance_hours`
+directly) and then calls `self.advance_time(hours * 60, templates)`.
+This ensures active-spell ticking and merchant restocking both happen for the
+full rest duration.
+
+#### `TimeAdvanceEvent` + `apply_time_advance` — `src/game/systems/time.rs`
+
+A Bevy `Message` type `TimeAdvanceEvent { minutes: u32 }` lets any system
+request a clock advance without touching `GlobalState` directly. The
+`apply_time_advance` system drains the queue each frame and calls
+`GameState::advance_time` per event, keeping time mutation centralised.
+`TimeOfDayPlugin` registers both this system and the ambient-light update
+system, ordering `apply_time_advance` before `update_ambient_light` so the
+light reflects the updated time within the same frame.
+
+### Tests Added
+
+#### New tests in `src/game/systems/combat.rs`
+
+| Test                              | What it verifies                                                                                                                               |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_combat_round_advances_time` | One combat round (round 1) advances clock by `TIME_COST_COMBAT_ROUND_MINUTES`; a second frame with the same round number does NOT charge again |
+
+#### New tests in `src/game/systems/map.rs`
+
+| Test                                                | What it verifies                                                                                                           |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `test_map_transition_advances_time`                 | A valid `MapChangeEvent` advances clock by `TIME_COST_MAP_TRANSITION_MINUTES` and updates `current_map` + `party_position` |
+| `test_invalid_map_transition_does_not_advance_time` | A `MapChangeEvent` targeting a non-existent map id does NOT advance the clock                                              |
+
+#### Pre-existing tests that cover Phase 1 requirements
+
+| Test                                                | Location                   | Phase 1 requirement covered                         |
+| --------------------------------------------------- | -------------------------- | --------------------------------------------------- |
+| `test_step_advances_time`                           | `src/application/mod.rs`   | Successful step costs `TIME_COST_STEP_MINUTES`      |
+| `test_blocked_step_does_not_advance_time`           | `src/application/mod.rs`   | Blocked step costs zero time                        |
+| `test_rest_advances_time_via_state`                 | `src/application/mod.rs`   | Rest costs exactly `hours * 60` minutes             |
+| `test_rest_ticks_active_spells`                     | `src/application/mod.rs`   | `advance_time` ticks active spells during rest      |
+| `test_time_advance_event_advances_clock`            | `src/game/systems/time.rs` | `TimeAdvanceEvent` moves clock by requested minutes |
+| `test_multiple_time_advance_events_same_frame`      | `src/game/systems/time.rs` | Multiple events per frame are all applied           |
+| `test_no_time_advance_event_leaves_clock_unchanged` | `src/game/systems/time.rs` | No event → clock unchanged                          |
+| `test_time_advance_event_rolls_over_midnight`       | `src/game/systems/time.rs` | Day rollover on midnight crossing                   |
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` Section 4.1 (`GameState.time: GameTime`) exactly
+- [x] `TIME_COST_*` constants extracted — no magic numbers
+- [x] `advance_time` is the single path for all clock mutations
+- [x] Active-spell ticking and merchant restocking are never bypassed
+- [x] No `unwrap()` without justification; all error paths handled
+- [x] All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → no output (all files formatted)
+cargo check              → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings → Finished with 0 warnings
+cargo nextest run        → 3337 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Phase 4: Campaign Builder SDK Editor Updates — Unified Creature Asset Binding (Complete)
 
 ### Overview
