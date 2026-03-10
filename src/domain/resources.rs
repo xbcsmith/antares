@@ -292,6 +292,7 @@ pub fn count_food_in_party(party: &Party, item_db: &ItemDatabase) -> u32 {
 ///     item_type: ItemType::Consumable(ConsumableData {
 ///         effect: ConsumableEffect::IsFood(1),
 ///         is_combat_usable: false,
+///         duration_minutes: None,
 ///     }),
 ///     base_cost: 5,
 ///     sell_cost: 2,
@@ -597,6 +598,7 @@ pub fn food_needed_to_rest(party: &Party) -> u32 {
 ///     item_type: ItemType::Consumable(ConsumableData {
 ///         effect: ConsumableEffect::IsFood(1),
 ///         is_combat_usable: false,
+///         duration_minutes: None,
 ///     }),
 ///     base_cost: 5,
 ///     sell_cost: 2,
@@ -729,6 +731,7 @@ pub fn rest_party_hour(
 ///     item_type: ItemType::Consumable(ConsumableData {
 ///         effect: ConsumableEffect::IsFood(1),
 ///         is_combat_usable: false,
+///         duration_minutes: None,
 ///     }),
 ///     base_cost: 5,
 ///     sell_cost: 2,
@@ -883,6 +886,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(1),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 5,
             sell_cost: 2,
@@ -910,6 +914,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(3),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 12,
             sell_cost: 4,

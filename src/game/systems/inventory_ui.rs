@@ -3040,6 +3040,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::HealHp(50),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 10,
             sell_cost: 5,
@@ -3069,6 +3070,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::RestoreSp(30),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 10,
             sell_cost: 5,
@@ -3214,6 +3216,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::CureCondition(Condition::POISONED),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 10,
             sell_cost: 5,
@@ -3293,6 +3296,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::BoostAttribute(AttributeType::Might, 5),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 20,
             sell_cost: 10,
@@ -3364,6 +3368,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::BoostResistance(ResistanceType::Fire, 10),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 20,
             sell_cost: 10,
@@ -3736,6 +3741,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::HealHp(20),
                 is_combat_usable: false, // only usable outside combat
+                duration_minutes: None,
             }),
             base_cost: 15,
             sell_cost: 7,
@@ -3839,6 +3845,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::HealHp(20),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 10,
             sell_cost: 5,

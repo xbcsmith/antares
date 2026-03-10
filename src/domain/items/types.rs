@@ -270,6 +270,15 @@ pub enum AccessorySlot {
 /// let healing_potion = ConsumableData {
 ///     effect: ConsumableEffect::HealHp(20),
 ///     is_combat_usable: true,
+///     duration_minutes: None,
+/// };
+///
+/// use antares::domain::items::types::ResistanceType;
+///
+/// let fire_resist_potion = ConsumableData {
+///     effect: ConsumableEffect::BoostResistance(ResistanceType::Fire, 25),
+///     is_combat_usable: false,
+///     duration_minutes: Some(60),
 /// };
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,6 +287,36 @@ pub struct ConsumableData {
     pub effect: ConsumableEffect,
     /// Whether usable during combat
     pub is_combat_usable: bool,
+    /// Optional duration in in-game minutes.
+    ///
+    /// - `None` — effect is permanent (legacy behavior; backward compatible).
+    /// - `Some(0)` — normalized to `None` at application time; treat as permanent.
+    /// - `Some(n)` — effect expires after `n` in-game minutes.
+    ///
+    /// Only meaningful for `BoostAttribute` and `BoostResistance` effects.
+    /// `HealHp`, `RestoreSp`, and `CureCondition` are instant and ignore this field.
+    #[serde(default)]
+    pub duration_minutes: Option<u16>,
+}
+
+/// Normalizes a raw `duration_minutes` value.
+///
+/// `Some(0)` is treated as permanent (`None`) so that editor inputs of `0`
+/// and omitted RON fields both produce identical runtime semantics.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::types::normalize_duration;
+/// assert_eq!(normalize_duration(Some(0)), None);
+/// assert_eq!(normalize_duration(Some(60)), Some(60));
+/// assert_eq!(normalize_duration(None), None);
+/// ```
+pub fn normalize_duration(raw: Option<u16>) -> Option<u16> {
+    match raw {
+        Some(0) | None => None,
+        other => other,
+    }
 }
 
 /// Effects from consuming items
@@ -290,11 +329,13 @@ pub struct ConsumableData {
 /// let heal_potion = ConsumableData {
 ///     effect: ConsumableEffect::HealHp(20),
 ///     is_combat_usable: true,
+///     duration_minutes: None,
 /// };
 ///
 /// let food_ration = ConsumableData {
 ///     effect: ConsumableEffect::IsFood(1),
 ///     is_combat_usable: false,
+///     duration_minutes: None,
 /// };
 ///
 /// assert_eq!(food_ration.effect, ConsumableEffect::IsFood(1));
@@ -381,6 +422,7 @@ impl AttributeType {
 /// let potion = ConsumableData {
 ///     effect: ConsumableEffect::BoostResistance(ResistanceType::Fire, 25),
 ///     is_combat_usable: true,
+///     duration_minutes: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1305,6 +1347,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::HealHp(20),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 50,
             sell_cost: 25,
@@ -1537,12 +1580,14 @@ mod tests {
         let data = ConsumableData {
             effect: ConsumableEffect::IsFood(1),
             is_combat_usable: false,
+            duration_minutes: None,
         };
         let serialized = ron::to_string(&data).expect("serialization must succeed");
         let deserialized: ConsumableData =
             ron::from_str(&serialized).expect("deserialization must succeed");
         assert_eq!(deserialized.effect, ConsumableEffect::IsFood(1));
         assert!(!deserialized.is_combat_usable);
+        assert_eq!(deserialized.duration_minutes, None);
     }
 
     #[test]
@@ -1585,11 +1630,87 @@ mod tests {
         }
     }
 
+    // ===== Phase 1: duration_minutes / normalize_duration tests =====
+
+    #[test]
+    fn test_consumable_data_duration_defaults_none_in_ron() {
+        // RON without duration_minutes field must deserialize with duration_minutes: None
+        // due to #[serde(default)].
+        let ron_str = r#"(effect: HealHp(20), is_combat_usable: true)"#;
+        let data: ConsumableData = ron::from_str(ron_str).expect("deserialization must succeed");
+        assert_eq!(
+            data.duration_minutes, None,
+            "omitted duration_minutes must default to None"
+        );
+        assert_eq!(data.effect, ConsumableEffect::HealHp(20));
+        assert!(data.is_combat_usable);
+    }
+
+    #[test]
+    fn test_consumable_data_duration_some_round_trips() {
+        let original = ConsumableData {
+            effect: ConsumableEffect::BoostAttribute(AttributeType::Might, 5),
+            is_combat_usable: false,
+            duration_minutes: Some(60),
+        };
+        let serialized = ron::to_string(&original).expect("serialization must succeed");
+        let deserialized: ConsumableData =
+            ron::from_str(&serialized).expect("deserialization must succeed");
+        assert_eq!(
+            deserialized.duration_minutes,
+            Some(60),
+            "Some(60) must survive a RON round-trip"
+        );
+        assert_eq!(deserialized.effect, original.effect);
+    }
+
+    #[test]
+    fn test_normalize_duration_zero_becomes_none() {
+        assert_eq!(
+            normalize_duration(Some(0)),
+            None,
+            "Some(0) must be normalized to None"
+        );
+    }
+
+    #[test]
+    fn test_normalize_duration_none_stays_none() {
+        assert_eq!(
+            normalize_duration(None),
+            None,
+            "None must stay None after normalization"
+        );
+    }
+
+    #[test]
+    fn test_normalize_duration_positive_unchanged() {
+        assert_eq!(
+            normalize_duration(Some(30)),
+            Some(30),
+            "positive duration must pass through unchanged"
+        );
+        assert_eq!(normalize_duration(Some(1)), Some(1));
+        assert_eq!(normalize_duration(Some(u16::MAX)), Some(u16::MAX));
+    }
+
+    #[test]
+    fn test_consumable_data_struct_literal_compiles_with_new_field() {
+        let data = ConsumableData {
+            effect: ConsumableEffect::HealHp(10),
+            is_combat_usable: true,
+            duration_minutes: None,
+        };
+        assert_eq!(data.duration_minutes, None);
+        assert_eq!(data.effect, ConsumableEffect::HealHp(10));
+        assert!(data.is_combat_usable);
+    }
+
     #[test]
     fn test_food_ration_not_combat_usable() {
         let data = ConsumableData {
             effect: ConsumableEffect::IsFood(1),
             is_combat_usable: false,
+            duration_minutes: None,
         };
         assert!(
             !data.is_combat_usable,
@@ -1605,6 +1726,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(1),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 2,
             sell_cost: 1,

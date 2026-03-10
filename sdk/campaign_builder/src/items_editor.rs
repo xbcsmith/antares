@@ -905,6 +905,7 @@ impl ItemsEditorState {
                             self.edit_buffer.item_type = ItemType::Consumable(ConsumableData {
                                 effect: ConsumableEffect::HealHp(10),
                                 is_combat_usable: true,
+                                duration_minutes: None,
                             });
                         }
                         if ui
@@ -1818,6 +1819,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(1),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 2,
             sell_cost: 1,
@@ -1860,6 +1862,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(3),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 5,
             sell_cost: 2,
@@ -1897,6 +1900,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(1),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 2,
             sell_cost: 1,

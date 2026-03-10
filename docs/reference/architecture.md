@@ -831,8 +831,9 @@ pub struct AccessoryData {
 }
 
 pub struct ConsumableData {
-    pub effect: ConsumableEffect, // What the consumable does
-    pub is_combat_usable: bool,   // Can be used during combat
+    pub effect: ConsumableEffect,      // What the consumable does
+    pub is_combat_usable: bool,        // Can be used during combat
+    pub duration_minutes: Option<u16>, // None = permanent; Some(n) = expires after n minutes
 }
 
 pub struct AmmoData {

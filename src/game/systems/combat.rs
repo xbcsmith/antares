@@ -3388,6 +3388,7 @@ mod perform_use_item_tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::HealHp(20),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 10,
             sell_cost: 5,

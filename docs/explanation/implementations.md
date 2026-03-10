@@ -1,5 +1,133 @@
 # Implementations
 
+## Consumable Duration Effects — Phase 1: Extend `ConsumableData` and Align Core Contracts (Complete)
+
+### Overview
+
+Phase 1 of the Consumable Duration Effects plan adds `duration_minutes:
+Option<u16>` to `ConsumableData`, introduces the `normalize_duration` pure
+helper, and updates every struct literal call site across `src/`, `sdk/`, and
+`tests/` so the codebase compiles and all existing tests continue to pass. No
+behavioral changes are made in this phase — permanent-effect semantics are
+fully preserved. The architecture document is updated to match.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `ConsumableData` in `src/domain/items/types.rs` includes
+      `duration_minutes: Option<u16>` with `#[serde(default)]`.
+- [x] `normalize_duration` pure function added to `src/domain/items/types.rs`
+      and re-exported from `src/domain/items/mod.rs`.
+- [x] All struct literals in `src/`, `sdk/`, `src/bin/`, and `tests/`
+      compile with the new field (≈ 40 call sites updated).
+- [x] `docs/reference/architecture.md` updated at the `ConsumableData`
+      definition to include `duration_minutes`.
+- [x] All 6 Phase 1 unit tests pass.
+- [x] All four quality gates pass with zero errors and zero warnings.
+
+### Files Changed
+
+| File                                            | Change                                                                                                                                                                               |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/domain/items/types.rs`                     | Added `duration_minutes: Option<u16>` with `#[serde(default)]` to `ConsumableData`; added `normalize_duration` function; updated all doc examples in the file; added 6 Phase 1 tests |
+| `src/domain/items/mod.rs`                       | Re-exported `normalize_duration` alongside existing `pub use types::` block                                                                                                          |
+| `src/domain/combat/item_usage.rs`               | Added `duration_minutes: None` to 4 test-helper `ConsumableData` literals                                                                                                            |
+| `src/domain/combat/engine.rs`                   | Added `duration_minutes: None` to `make_consumable_item` test helper                                                                                                                 |
+| `src/domain/items/database.rs`                  | Added `duration_minutes: None` to test-helper literal                                                                                                                                |
+| `src/domain/items/equipment_validation.rs`      | Added `duration_minutes: None` to test literal                                                                                                                                       |
+| `src/domain/visual/item_mesh.rs`                | Added `duration_minutes: None` to `make_consumable` test helper                                                                                                                      |
+| `src/domain/resources.rs`                       | Added `duration_minutes: None` to 3 doc-comment examples and 2 test helpers                                                                                                          |
+| `src/application/mod.rs`                        | Added `duration_minutes: None` to 1 doc-comment example and 2 test helpers                                                                                                           |
+| `src/game/systems/combat.rs`                    | Added `duration_minutes: None` to `test_perform_use_item_action_heal_*` literal                                                                                                      |
+| `src/game/systems/inventory_ui.rs`              | Added `duration_minutes: None` to 7 test-helper `ConsumableData` literals                                                                                                            |
+| `src/game/systems/rest.rs`                      | Added `duration_minutes: None` to `make_food_item_db` test helper                                                                                                                    |
+| `src/sdk/templates.rs`                          | Added `duration_minutes: None` to `healing_potion` and `sp_potion` templates                                                                                                         |
+| `src/bin/item_editor.rs`                        | Added `duration_minutes: None` to `create_consumable` and 4 test literals                                                                                                            |
+| `sdk/campaign_builder/src/items_editor.rs`      | Added `duration_minutes: None` to `show_form` default and 3 test literals                                                                                                            |
+| `sdk/campaign_builder/src/characters_editor.rs` | Added `duration_minutes: None` to `create_test_item` literal                                                                                                                         |
+| `sdk/campaign_builder/src/dialogue_editor.rs`   | Added `duration_minutes: None` to test literal                                                                                                                                       |
+| `sdk/campaign_builder/src/lib.rs`               | Added `duration_minutes: None` to `test_item_type_specific_editors` literal                                                                                                          |
+| `sdk/campaign_builder/src/templates.rs`         | Added `duration_minutes: None` to `healing_potion` and `mana_potion` template literals                                                                                               |
+| `sdk/campaign_builder/src/ui_helpers.rs`        | Added `duration_minutes: None` to 2 `test_extract_item_tag_candidates` literals                                                                                                      |
+| `tests/cli_editor_tests.rs`                     | Added `duration_minutes: None` to `create_test_consumable` and `test_item_consumable_effect_variants` literals                                                                       |
+| `docs/reference/architecture.md`                | Updated `ConsumableData` struct definition to add `duration_minutes` field                                                                                                           |
+
+### Architecture Details
+
+#### `duration_minutes: Option<u16>` on `ConsumableData`
+
+The field uses `#[serde(default)]` so all existing RON files (`data/items.ron`,
+`data/test_campaign/data/items.ron`, `campaigns/tutorial/data/items.ron`)
+deserialize without modification — the absent field defaults to `None` via
+Serde's `Default` impl for `Option`.
+
+Semantics by value:
+
+| Value     | Meaning                                                            |
+| --------- | ------------------------------------------------------------------ |
+| `None`    | Effect is permanent (legacy / backward-compatible).                |
+| `Some(0)` | Normalized to `None` at application time via `normalize_duration`. |
+| `Some(n)` | Effect expires after `n` in-game minutes (used by Phases 2–4).     |
+
+Only `BoostAttribute` and `BoostResistance` effects are timed; `HealHp`,
+`RestoreSp`, and `CureCondition` are instant and ignore the field.
+
+#### `normalize_duration`
+
+```src/domain/items/types.rs#L289-302
+/// Normalizes a raw `duration_minutes` value.
+///
+/// `Some(0)` is treated as permanent (`None`) so that editor inputs of `0`
+/// and omitted RON fields both produce identical runtime semantics.
+pub fn normalize_duration(raw: Option<u16>) -> Option<u16> {
+    match raw {
+        Some(0) | None => None,
+        other => other,
+    }
+}
+```
+
+The function is re-exported as `antares::domain::items::normalize_duration` so
+later phases can call it directly from `consumable_usage.rs` without importing
+from the internal `types` submodule.
+
+#### RON data files — no changes required
+
+Because `#[serde(default)]` is present, all three RON item files continue to
+deserialize correctly. Adding a timed consumable to any of them requires only:
+
+```/dev/null/example.ron#L1-4
+item_type: Consumable((
+    effect: BoostResistance(Fire, 25),
+    is_combat_usable: false,
+    duration_minutes: Some(60),
+)),
+```
+
+### Tests Added
+
+All six tests live in `mod tests` inside `src/domain/items/types.rs`:
+
+| Test                                                          | What it verifies                                                              |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `test_consumable_data_duration_defaults_none_in_ron`          | RON without `duration_minutes` deserializes to `None` via `#[serde(default)]` |
+| `test_consumable_data_duration_some_round_trips`              | `Some(60)` survives a full RON serialize → deserialize round-trip             |
+| `test_normalize_duration_zero_becomes_none`                   | `normalize_duration(Some(0)) == None`                                         |
+| `test_normalize_duration_none_stays_none`                     | `normalize_duration(None) == None`                                            |
+| `test_normalize_duration_positive_unchanged`                  | `Some(30)`, `Some(1)`, `Some(u16::MAX)` all pass through unchanged            |
+| `test_consumable_data_struct_literal_compiles_with_new_field` | Three-field struct literal compiles; `duration_minutes` is `None`             |
+
+### Quality Gate Results
+
+```/dev/null/quality_gates.txt#L1-8
+cargo fmt --all                                    → OK (no output)
+cargo check --all-targets --all-features           → Finished (0 errors)
+cargo clippy --all-targets --all-features          → Finished (0 warnings)
+cargo nextest run --all-features                   → 3421 passed, 8 skipped
+  (includes 6 new Phase 1 tests — all PASS)
+```
+
+---
+
 ## Consumables Outside Combat — Feature Complete Summary
 
 All four phases of the "Consumables Outside Combat" implementation plan are
@@ -44,7 +172,7 @@ cross-mode regression tests to `src/domain/combat/item_usage.rs`.
 - [x] `src/domain/combat/item_usage.rs` module doc updated to note that effect
       application is delegated to `apply_consumable_effect` in
       `src/domain/items/consumable_usage.rs`; added `## Effect Application —
-    Shared Helper` and `## Design Notes` sections.
+  Shared Helper` and `## Design Notes` sections.
 - [x] `execute_item_use_by_slot` doc comment updated with numbered step list
       explicitly calling out the delegation; `# Arguments` section rewritten
       with plain 2-space continuation (fixes `doc_overindented_list_items`

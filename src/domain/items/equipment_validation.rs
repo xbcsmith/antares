@@ -462,6 +462,7 @@ mod tests {
             item_type: ItemType::Consumable(crate::domain::items::types::ConsumableData {
                 effect: crate::domain::items::types::ConsumableEffect::HealHp(10),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 50,
             sell_cost: 25,

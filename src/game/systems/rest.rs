@@ -997,6 +997,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(1),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 5,
             sell_cost: 2,

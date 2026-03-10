@@ -377,6 +377,7 @@ pub fn healing_potion(id: ItemId, name: &str, healing_amount: u16) -> Item {
         item_type: ItemType::Consumable(ConsumableData {
             effect: ConsumableEffect::HealHp(healing_amount),
             is_combat_usable: true,
+            duration_minutes: None,
         }),
         base_cost: (healing_amount as u32) * 5,
         sell_cost: (healing_amount as u32) * 2,
@@ -410,6 +411,7 @@ pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item {
         item_type: ItemType::Consumable(ConsumableData {
             effect: ConsumableEffect::RestoreSp(sp_amount),
             is_combat_usable: true,
+            duration_minutes: None,
         }),
         base_cost: (sp_amount as u32) * 10,
         sell_cost: (sp_amount as u32) * 5,

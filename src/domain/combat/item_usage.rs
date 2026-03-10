@@ -462,6 +462,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::HealHp(amount),
                 is_combat_usable: combat_usable,
+                duration_minutes: None,
             }),
             base_cost: 10,
             sell_cost: 5,
@@ -485,6 +486,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::CureCondition(flags),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 8,
             sell_cost: 4,
@@ -633,6 +635,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::BoostResistance(res_type, amount),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 15,
             sell_cost: 7,
@@ -656,6 +659,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::BoostAttribute(attr, amount),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 12,
             sell_cost: 6,
