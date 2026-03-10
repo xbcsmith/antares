@@ -1,5 +1,242 @@
 # Implementations
 
+## Phase 4: Time-Triggered Events (Complete)
+
+### Overview
+
+Phase 4 introduces time-gated map events — any `MapEvent` variant that supports
+it can now carry an optional `time_condition` field. When the condition is not
+met the event returns `EventResult::None` without being consumed, so the
+event re-evaluates on every future visit until the window opens. When
+`time_condition` is `None` (the default) the event fires unconditionally,
+preserving full backward compatibility with all existing RON map files.
+
+| Deliverable                                                                          | Location                               |
+| ------------------------------------------------------------------------------------ | -------------------------------------- |
+| `TimeCondition` enum                                                                 | `src/domain/world/types.rs`            |
+| `time_condition` field on `Encounter`, `Sign`, `NpcDialogue`, `RecruitableCharacter` | `src/domain/world/types.rs`            |
+| `trigger_event(world, position, &game_time)` gating logic                            | `src/domain/world/events.rs`           |
+| `TimeAdvanceEvent` + `apply_time_advance` system                                     | `src/game/systems/time.rs`             |
+| Campaign-author how-to guide                                                         | `docs/how-to/authoring_time_events.md` |
+
+### Phase 4 Deliverables Checklist
+
+- [x] `TimeCondition` enum in `src/domain/world/types.rs` — four variants, `is_met(&GameTime) -> bool` method
+- [x] `time_condition: Option<TimeCondition>` on `MapEvent::Encounter`, `::Sign`, `::NpcDialogue`, `::RecruitableCharacter` with `#[serde(default)]`
+- [x] `trigger_event` accepts `&GameTime` and evaluates the condition before processing
+- [x] Unmet condition returns `EventResult::None` without consuming the event
+- [x] `TimeAdvanceEvent { minutes: u32 }` Bevy event in `src/game/systems/time.rs`
+- [x] `apply_time_advance` system draining `TimeAdvanceEvent` queue and calling `GameState::advance_time`
+- [x] `TimeCondition` publicly re-exported from `src/domain/world/mod.rs`
+- [x] `docs/how-to/authoring_time_events.md` with complete RON examples for all four variants
+- [x] All Phase 4 tests pass (27 tests across `mod time_condition_tests` and `mod tests`)
+
+### What Was Built
+
+#### `TimeCondition` Enum — `src/domain/world/types.rs`
+
+Four variants cover the use cases described in the plan:
+
+```src/domain/world/types.rs#L1791-1805
+pub enum TimeCondition {
+    /// Event fires only during these time-of-day periods.
+    DuringPeriods(Vec<TimeOfDay>),
+    /// Event fires only after this many in-game days have elapsed (day > threshold).
+    AfterDay(u32),
+    /// Event fires only before this many in-game days have elapsed (day < threshold).
+    BeforeDay(u32),
+    /// Event fires only between these hours (inclusive, 0–23, 24-hour clock).
+    BetweenHours {
+        /// First hour of the active window (0–23, inclusive).
+        from: u8,
+        /// Last hour of the active window (0–23, inclusive).
+        to: u8,
+    },
+}
+```
+
+The `is_met(&GameTime) -> bool` method is a pure function — no side-effects,
+safe from both the domain layer and Bevy systems:
+
+```src/domain/world/types.rs#L1838-1847
+pub fn is_met(&self, game_time: &GameTime) -> bool {
+    match self {
+        TimeCondition::DuringPeriods(periods) => periods.contains(&game_time.time_of_day()),
+        TimeCondition::AfterDay(threshold) => game_time.day > *threshold,
+        TimeCondition::BeforeDay(threshold) => game_time.day < *threshold,
+        TimeCondition::BetweenHours { from, to } => {
+            game_time.hour >= *from && game_time.hour <= *to
+        }
+    }
+}
+```
+
+`TimeCondition` derives `Debug, Clone, PartialEq, Eq, Serialize, Deserialize`
+so it round-trips through RON without loss.
+
+#### `time_condition` Field on `MapEvent` Variants — `src/domain/world/types.rs`
+
+The field is added to `Encounter`, `Sign`, `NpcDialogue`, and
+`RecruitableCharacter`. Each uses `#[serde(default)]` so existing RON files
+that omit the field continue to load cleanly with `None`:
+
+```src/domain/world/types.rs#L1871-1875
+        /// Optional time condition — if `Some`, the encounter only fires when
+        /// the condition is met.  `None` means always fire (default, backward
+        /// compatible with existing RON data).
+        #[serde(default)]
+        time_condition: Option<TimeCondition>,
+```
+
+The same pattern is applied to `Sign` (L1953), `NpcDialogue` (L1975), and
+`RecruitableCharacter` (L2021).
+
+#### Time-Gating in `trigger_event` — `src/domain/world/events.rs`
+
+The function signature was extended with `game_time: &GameTime`. Before
+processing any event the function checks whether the event carries a
+`time_condition` and evaluates it:
+
+```src/domain/world/events.rs#L168-178
+pub fn trigger_event(
+    world: &mut World,
+    position: Position,
+    game_time: &GameTime,
+) -> Result<EventResult, EventError> {
+```
+
+The gating block:
+
+```src/domain/world/events.rs#L208-228
+    let time_condition_met = match &event {
+        MapEvent::Encounter {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        MapEvent::Sign {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        MapEvent::NpcDialogue {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        MapEvent::RecruitableCharacter {
+            time_condition: Some(tc),
+            ..
+        } => tc.is_met(game_time),
+        // All other variants, and any variant whose time_condition is None,
+        // are unconditionally allowed.
+        _ => true,
+    };
+
+    if !time_condition_met {
+        return Ok(EventResult::None);
+    }
+```
+
+Key design properties:
+
+- The event is **not consumed** when the condition is not met — it stays on the
+  map and is re-evaluated on the next step.
+- The domain layer remains pure — the caller passes `&game_state.time`; no
+  `GameState` or Bevy types enter the domain module.
+- All existing callers pass `&self.time` — the one caller in
+  `src/application/mod.rs::move_party_and_handle_events` was updated when the
+  signature changed.
+
+#### `TimeAdvanceEvent` and `apply_time_advance` — `src/game/systems/time.rs`
+
+The `TimeAdvanceEvent { minutes: u32 }` Bevy message type and the
+`apply_time_advance` drain system were implemented as part of Phase 1 and are
+registered by `TimeOfDayPlugin`. Phase 4 depends on — but does not duplicate —
+this infrastructure. See the Phase 1 and Phase 2 entries for the full
+description.
+
+#### `TimeCondition` Public Re-export — `src/domain/world/mod.rs`
+
+`TimeCondition` is exported from the world module facade so campaign tooling
+and tests can import it via the short path:
+
+```src/domain/world/mod.rs#L43-45
+pub use types::{
+    ...
+    TimeCondition, ...
+};
+```
+
+#### `docs/how-to/authoring_time_events.md`
+
+A complete campaign-author guide covering:
+
+- How time conditions work and which event variants support them
+- All four `TimeCondition` variants with RON examples
+- A full self-contained map file showing all four variants in one place
+- Cross-midnight caveats for `BetweenHours`
+- Backward-compatibility guarantee
+- Testing instructions pointing authors at `trigger_event` unit tests
+
+### Tests
+
+#### `mod time_condition_tests` in `src/domain/world/types.rs` — 21 tests
+
+| Test                                                      | What it verifies                                                                    |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `test_time_condition_during_periods_night_fires_at_night` | `DuringPeriods([Night])` fires at hour 23                                           |
+| `test_time_condition_during_periods_night_skips_at_noon`  | `DuringPeriods([Night])` does not fire at hour 12                                   |
+| `test_time_condition_during_periods_evening_and_night`    | Multi-period list fires at both Evening and Night, not at Dawn                      |
+| `test_time_condition_during_periods_all_six_variants`     | Each of the six `TimeOfDay` variants fires at its canonical hour and no other       |
+| `test_time_condition_after_day_fires`                     | `AfterDay(5)` fires on day 6 and 10; not on day 5 or 1                              |
+| `test_time_condition_after_day_boundary`                  | `AfterDay(1)` does not fire on day 1; fires on day 2                                |
+| `test_time_condition_before_day_fires`                    | `BeforeDay(10)` fires on day 9 and 1; not on day 10 or 15                           |
+| `test_time_condition_between_hours_fires_within_range`    | `BetweenHours{20,23}` fires at hours 20, 21, 23                                     |
+| `test_time_condition_between_hours_skips_outside_range`   | `BetweenHours{20,23}` does not fire at hour 19 or midnight                          |
+| `test_time_condition_between_hours_full_day_range`        | `BetweenHours{0,23}` fires at every hour 0–23                                       |
+| `test_time_condition_between_hours_single_hour`           | `BetweenHours{12,12}` fires only at hour 12                                         |
+| `test_time_condition_ron_roundtrip_during_periods`        | `DuringPeriods` survives RON serialise → deserialise                                |
+| `test_time_condition_ron_roundtrip_after_day`             | `AfterDay` survives RON round-trip                                                  |
+| `test_time_condition_ron_roundtrip_between_hours`         | `BetweenHours` survives RON round-trip                                              |
+| `test_map_event_encounter_time_condition_none_by_default` | Struct literal with `time_condition: None` compiles and matches                     |
+| `test_map_event_encounter_with_time_condition_night`      | `Encounter` with `DuringPeriods([Night, Evening])` fires at 23:00, not 12:00        |
+| `test_map_event_sign_time_condition_ron_roundtrip`        | `Sign` with `DuringPeriods([Night])` serialises to RON containing `"DuringPeriods"` |
+| `test_map_event_sign_no_time_condition_backward_compat`   | RON `Sign` without `time_condition` field deserialises to `None`                    |
+| `test_map_event_npc_dialogue_time_condition`              | `NpcDialogue` with `BetweenHours{8,18}` fires at noon, not at 22:00                 |
+| `test_map_event_recruitable_character_time_condition`     | `RecruitableCharacter` with `AfterDay(3)` fires on day 4, not day 3                 |
+
+#### `mod tests` in `src/domain/world/events.rs` — 6 time-condition integration tests
+
+| Test                                                 | What it verifies                                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `test_time_condition_night_fires_at_night`           | `trigger_event` with night-only Encounter returns `EventResult::Encounter` at hour 23 |
+| `test_time_condition_night_skips_at_noon`            | Same event returns `EventResult::None` at hour 12                                     |
+| `test_time_condition_after_day_fires`                | Sign with `AfterDay(5)` fires on day 10; returns None on day 3 and day 5 (boundary)   |
+| `test_time_condition_between_hours`                  | NpcDialogue with `BetweenHours{8,18}` fires at 8, 13, 18; returns None at 7 and 19    |
+| `test_no_time_condition_always_fires`                | Unconditional Sign fires at every hour 0–23                                           |
+| `test_time_condition_not_met_does_not_consume_event` | Event skipped at noon is still present and fires at night                             |
+
+### Architecture Compliance
+
+- [x] `TimeCondition` enum matches the four variants specified in plan §4.1 exactly
+- [x] `Option<TimeCondition>` with `#[serde(default)]` on all four applicable event variants — backward compatible
+- [x] `trigger_event` accepts `&GameTime` as specified in plan §4.2; domain layer remains pure
+- [x] Unmet condition returns `EventResult::None` without consuming the event — specified in plan §4.2
+- [x] `TimeAdvanceEvent` + `apply_time_advance` present in `src/game/systems/time.rs` — plan §4.3
+- [x] `docs/how-to/authoring_time_events.md` present with night-ambush RON example — plan §4.4
+- [x] All five spec tests from plan §4.5 present and passing
+- [x] `TimeCondition` derives `Serialize, Deserialize` for RON compatibility — plan §4.4
+- [x] No `unwrap()` without justification; domain functions return `Result`
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → no output (all files formatted)
+cargo check              → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings → Finished with 0 warnings
+cargo nextest run        → 3337 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Phase 3: Clock UI in the HUD (Complete)
 
 ### Overview
