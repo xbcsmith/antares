@@ -1,5 +1,183 @@
 # Implementations
 
+## Phase 2B: Months and Years — TimeCondition Variants (Complete)
+
+### Overview
+
+Extended `TimeCondition` in `src/domain/world/types.rs` with four new variants that
+allow campaign authors to gate map events by calendar month or year, not just by
+time-of-day, elapsed days, or hour window.
+
+The four new variants are:
+
+- `DuringMonths(Vec<u32>)` — fires when `game_time.month` is in the supplied list
+- `AfterYear(u32)` — fires when `game_time.year > threshold`
+- `BeforeYear(u32)` — fires when `game_time.year < threshold`
+- `BetweenYears { from: u32, to: u32 }` — fires when `from <= game_time.year <= to`
+
+All existing tests (26) continue to pass unchanged. Twenty-one new tests cover
+match/skip/boundary/RON-roundtrip/RON-literal cases for every new variant.
+
+### Phase 2B Deliverables Checklist
+
+- [x] `DuringMonths(Vec<u32>)` variant added to `TimeCondition`
+- [x] `AfterYear(u32)` variant added to `TimeCondition`
+- [x] `BeforeYear(u32)` variant added to `TimeCondition`
+- [x] `BetweenYears { from: u32, to: u32 }` variant added to `TimeCondition`
+- [x] `is_met()` extended with match arms for all four new variants
+- [x] Enum-level doc comment variant table updated
+- [x] Enum-level doc comment examples updated
+- [x] `is_met()` doc comment examples updated
+- [x] Unit tests pass (21 new tests)
+- [x] RON roundtrip tests pass (4 roundtrip + 4 literal = 8 serialization tests)
+- [x] All quality gates pass (0 errors, 0 warnings, 3370 tests green)
+
+### What Was Built
+
+#### `TimeCondition` Enum — `src/domain/world/types.rs`
+
+Four variants appended to the existing enum after `BetweenHours`:
+
+```antares/src/domain/world/types.rs#L1827-1848
+    /// Event fires only when the current month is in the supplied list.
+    ///
+    /// Months are 1-based (1 = January … 12 = December in the game calendar).
+    /// Use this to gate events by season, e.g. `[11, 12, 1]` for winter.
+    DuringMonths(Vec<u32>),
+    /// Event fires only after the given year has passed (`game_time.year > threshold`).
+    AfterYear(u32),
+    /// Event fires only before the given year is reached (`game_time.year < threshold`).
+    BeforeYear(u32),
+    /// Event fires only while the current year is within `[from, to]` inclusive
+    /// (`from <= game_time.year <= to`).
+    BetweenYears {
+        /// First year of the active window (inclusive).
+        from: u32,
+        /// Last year of the active window (inclusive).
+        to: u32,
+    },
+```
+
+#### `is_met()` — New Match Arms
+
+Four arms added to the exhaustive match in `TimeCondition::is_met()`:
+
+```antares/src/domain/world/types.rs#L1903-1912
+            TimeCondition::DuringMonths(months) => months.contains(&game_time.month),
+            TimeCondition::AfterYear(threshold) => game_time.year > *threshold,
+            TimeCondition::BeforeYear(threshold) => game_time.year < *threshold,
+            TimeCondition::BetweenYears { from, to } => {
+                game_time.year >= *from && game_time.year <= *to
+            }
+```
+
+#### Variant Table in Doc Comment
+
+The enum-level table was extended to document all eight variants:
+
+| Variant         | Fires when …                                                   |
+| --------------- | -------------------------------------------------------------- |
+| `DuringPeriods` | current `TimeOfDay` is in the supplied list                    |
+| `AfterDay`      | `game_time.total_days() > threshold`                           |
+| `BeforeDay`     | `game_time.total_days() < threshold`                           |
+| `BetweenHours`  | `from <= game_time.hour <= to` (24-hour, inclusive)            |
+| `DuringMonths`  | `game_time.month` is in the supplied list (e.g. `[11, 12, 1]`) |
+| `AfterYear`     | `game_time.year > threshold`                                   |
+| `BeforeYear`    | `game_time.year < threshold`                                   |
+| `BetweenYears`  | `from <= game_time.year <= to` (inclusive)                     |
+
+#### RON Usage Examples
+
+Campaign authors can now write these conditions directly in map RON files:
+
+```antares/data/test_campaign/data/maps/map_1.ron#L1-1
+// Example RON spellings (not a real file excerpt — illustrative only):
+```
+
+```/dev/null/examples.ron#L1-8
+// Winter-only event (months 11, 12, 1):
+time_condition: Some(DuringMonths([11, 12, 1])),
+
+// Year 2+ content unlock:
+time_condition: Some(AfterYear(1)),
+
+// Era-gated story event active during years 2 through 4:
+time_condition: Some(BetweenYears(from: 2, to: 4)),
+```
+
+### Tests
+
+#### New tests in `src/domain/world/types.rs` — `mod time_condition_tests`
+
+**`DuringMonths` tests (4)**
+
+| Test name                            | What it verifies                             |
+| ------------------------------------ | -------------------------------------------- |
+| `test_during_months_fires_in_winter` | Months 11, 12, 1 all fire for winter list    |
+| `test_during_months_skips_summer`    | Months 6, 7, 8 do not fire for winter list   |
+| `test_during_months_single_month`    | Single-element list fires exactly that month |
+| `test_during_months_all_months`      | List of all 12 months fires for every month  |
+
+**`AfterYear` tests (3)**
+
+| Test name                  | What it verifies                                     |
+| -------------------------- | ---------------------------------------------------- |
+| `test_after_year_fires`    | Year 3 and year 10 fire for `AfterYear(2)`           |
+| `test_after_year_skips`    | Year 2 and year 1 do not fire for `AfterYear(2)`     |
+| `test_after_year_boundary` | Year 1 does not fire, year 2 does for `AfterYear(1)` |
+
+**`BeforeYear` tests (3)**
+
+| Test name                   | What it verifies                                  |
+| --------------------------- | ------------------------------------------------- |
+| `test_before_year_fires`    | Year 1 and year 2 fire for `BeforeYear(3)`        |
+| `test_before_year_skips`    | Year 3 and year 5 do not fire for `BeforeYear(3)` |
+| `test_before_year_boundary` | Year 1 fires, year 2 does not for `BeforeYear(2)` |
+
+**`BetweenYears` tests (3)**
+
+| Test name                        | What it verifies                                             |
+| -------------------------------- | ------------------------------------------------------------ |
+| `test_between_years_fires`       | Years 1, 2, 3 all fire for `BetweenYears{1,3}` (both bounds) |
+| `test_between_years_skips`       | Year 5 skips `{1,3}`; years below/above skip `{3,5}`         |
+| `test_between_years_single_year` | `from == to` fires only that exact year                      |
+
+**RON serialization tests (8)**
+
+| Test name                                         | What it verifies                       |
+| ------------------------------------------------- | -------------------------------------- |
+| `test_time_condition_ron_roundtrip_during_months` | Serialize → deserialize `DuringMonths` |
+| `test_time_condition_ron_roundtrip_after_year`    | Serialize → deserialize `AfterYear`    |
+| `test_time_condition_ron_roundtrip_before_year`   | Serialize → deserialize `BeforeYear`   |
+| `test_time_condition_ron_roundtrip_between_years` | Serialize → deserialize `BetweenYears` |
+| `test_time_condition_ron_literal_during_months`   | Canonical RON literal deserialises     |
+| `test_time_condition_ron_literal_after_year`      | Canonical RON literal deserialises     |
+| `test_time_condition_ron_literal_before_year`     | Canonical RON literal deserialises     |
+| `test_time_condition_ron_literal_between_years`   | Canonical RON literal deserialises     |
+
+### Architecture Compliance
+
+- No magic numbers — month and year comparisons use the values stored in `GameTime`
+  fields which are enforced by the calendar constants from Phase 1A.
+- `DuringMonths` mirrors `DuringPeriods` in design: a `Vec` of accepted values,
+  checked with `.contains()`. Consistent pattern.
+- `AfterYear` / `BeforeYear` mirror `AfterDay` / `BeforeDay` in design: strict
+  inequality, single `u32` threshold.
+- `BetweenYears` mirrors `BetweenHours` in design: `{ from, to }` struct with
+  inclusive bounds on both sides.
+- All variants are `#[derive(Serialize, Deserialize)]` via the existing enum derive,
+  so RON round-tripping works without any additional code.
+- Existing variants and their `is_met()` logic are completely unchanged.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all          → clean (no output)
+cargo check              → Finished dev profile, 0 errors
+cargo clippy -D warnings → Finished dev profile, 0 warnings
+cargo nextest run        → 3370 passed, 8 skipped, 0 failed
+```
+
 ## Phase 1A: Months and Years — Core Time System (Complete)
 
 ### Overview

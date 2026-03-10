@@ -1758,12 +1758,16 @@ impl Default for AsyncMeshConfig {
 ///
 /// # Variants
 ///
-/// | Variant            | Fires when …                                            |
-/// |--------------------|---------------------------------------------------------|
-/// | `DuringPeriods`    | current [`TimeOfDay`] is in the supplied list           |
-/// | `AfterDay`         | `game_time.total_days() > threshold`                    |
-/// | `BeforeDay`        | `game_time.total_days() < threshold`                    |
-/// | `BetweenHours`     | `from <= game_time.hour <= to` (24-hour, inclusive)     |
+/// | Variant            | Fires when …                                                         |
+/// |--------------------|----------------------------------------------------------------------|
+/// | `DuringPeriods`    | current [`TimeOfDay`] is in the supplied list                        |
+/// | `AfterDay`         | `game_time.total_days() > threshold`                                 |
+/// | `BeforeDay`        | `game_time.total_days() < threshold`                                 |
+/// | `BetweenHours`     | `from <= game_time.hour <= to` (24-hour, inclusive)                  |
+/// | `DuringMonths`     | `game_time.month` is in the supplied list (e.g. `[11, 12, 1]`)      |
+/// | `AfterYear`        | `game_time.year > threshold`                                         |
+/// | `BeforeYear`       | `game_time.year < threshold`                                         |
+/// | `BetweenYears`     | `from <= game_time.year <= to` (inclusive)                           |
 ///
 /// # Examples
 ///
@@ -1786,14 +1790,36 @@ impl Default for AsyncMeshConfig {
 /// let cond4 = TimeCondition::BetweenHours { from: 20, to: 23 };
 /// assert!(cond4.is_met(&GameTime::new(1, 21, 0)));  // 21 in [20,23] — fires
 /// assert!(!cond4.is_met(&GameTime::new(1, 10, 0))); // 10 not in [20,23] — skipped
+///
+/// // DuringMonths — fires in winter (months 11, 12, 1)
+/// let winter = TimeCondition::DuringMonths(vec![11, 12, 1]);
+/// assert!(winter.is_met(&GameTime::new_full(1, 12, 1, 0, 0))); // December — fires
+/// assert!(!winter.is_met(&GameTime::new_full(1, 6, 1, 0, 0))); // June — skipped
+///
+/// // AfterYear — fires after year 2
+/// let cond5 = TimeCondition::AfterYear(2);
+/// assert!(cond5.is_met(&GameTime::new_full(3, 1, 1, 0, 0)));  // Year 3 > 2 — fires
+/// assert!(!cond5.is_met(&GameTime::new_full(2, 1, 1, 0, 0))); // Year 2 not > 2 — skipped
+///
+/// // BeforeYear — fires before year 3
+/// let cond6 = TimeCondition::BeforeYear(3);
+/// assert!(cond6.is_met(&GameTime::new_full(1, 1, 1, 0, 0)));  // Year 1 < 3 — fires
+/// assert!(!cond6.is_met(&GameTime::new_full(3, 1, 1, 0, 0))); // Year 3 not < 3 — skipped
+///
+/// // BetweenYears — fires during years 1 through 3 inclusive
+/// let cond7 = TimeCondition::BetweenYears { from: 1, to: 3 };
+/// assert!(cond7.is_met(&GameTime::new_full(2, 1, 1, 0, 0)));  // Year 2 in [1,3] — fires
+/// assert!(!cond7.is_met(&GameTime::new_full(5, 1, 1, 0, 0))); // Year 5 not in [1,3] — skipped
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TimeCondition {
     /// Event fires only during these time-of-day periods.
     DuringPeriods(Vec<TimeOfDay>),
-    /// Event fires only after this many in-game days have elapsed (day > threshold).
+    /// Event fires only after this many in-game days have elapsed
+    /// (`game_time.total_days() > threshold`).
     AfterDay(u32),
-    /// Event fires only before this many in-game days have elapsed (day < threshold).
+    /// Event fires only before this many in-game days have elapsed
+    /// (`game_time.total_days() < threshold`).
     BeforeDay(u32),
     /// Event fires only between these hours (inclusive, 0–23, 24-hour clock).
     BetweenHours {
@@ -1801,6 +1827,23 @@ pub enum TimeCondition {
         from: u8,
         /// Last hour of the active window (0–23, inclusive).
         to: u8,
+    },
+    /// Event fires only when the current month is in the supplied list.
+    ///
+    /// Months are 1-based (1 = January … 12 = December in the game calendar).
+    /// Use this to gate events by season, e.g. `[11, 12, 1]` for winter.
+    DuringMonths(Vec<u32>),
+    /// Event fires only after the given year has passed (`game_time.year > threshold`).
+    AfterYear(u32),
+    /// Event fires only before the given year is reached (`game_time.year < threshold`).
+    BeforeYear(u32),
+    /// Event fires only while the current year is within `[from, to]` inclusive
+    /// (`from <= game_time.year <= to`).
+    BetweenYears {
+        /// First year of the active window (inclusive).
+        from: u32,
+        /// Last year of the active window (inclusive).
+        to: u32,
     },
 }
 
@@ -1834,6 +1877,24 @@ impl TimeCondition {
     /// assert!(late.is_met(&GameTime::new(1, 20, 0)));
     /// assert!(late.is_met(&GameTime::new(1, 23, 59)));
     /// assert!(!late.is_met(&GameTime::new(1, 19, 59)));
+    ///
+    /// // DuringMonths — fires in winter months 11, 12, 1
+    /// let winter = TimeCondition::DuringMonths(vec![11, 12, 1]);
+    /// assert!(winter.is_met(&GameTime::new_full(1, 12, 1, 0, 0))); // December
+    /// assert!(!winter.is_met(&GameTime::new_full(1,  6, 1, 0, 0))); // June
+    ///
+    /// // AfterYear — fires after year 2
+    /// assert!(TimeCondition::AfterYear(2).is_met(&GameTime::new_full(3, 1, 1, 0, 0)));
+    /// assert!(!TimeCondition::AfterYear(2).is_met(&GameTime::new_full(2, 1, 1, 0, 0)));
+    ///
+    /// // BeforeYear — fires before year 3
+    /// assert!(TimeCondition::BeforeYear(3).is_met(&GameTime::new_full(1, 1, 1, 0, 0)));
+    /// assert!(!TimeCondition::BeforeYear(3).is_met(&GameTime::new_full(3, 1, 1, 0, 0)));
+    ///
+    /// // BetweenYears — fires during years 1–3 inclusive
+    /// let era = TimeCondition::BetweenYears { from: 1, to: 3 };
+    /// assert!(era.is_met(&GameTime::new_full(2, 1, 1, 0, 0)));
+    /// assert!(!era.is_met(&GameTime::new_full(5, 1, 1, 0, 0)));
     /// ```
     pub fn is_met(&self, game_time: &GameTime) -> bool {
         match self {
@@ -1842,6 +1903,12 @@ impl TimeCondition {
             TimeCondition::BeforeDay(threshold) => game_time.total_days() < *threshold,
             TimeCondition::BetweenHours { from, to } => {
                 game_time.hour >= *from && game_time.hour <= *to
+            }
+            TimeCondition::DuringMonths(months) => months.contains(&game_time.month),
+            TimeCondition::AfterYear(threshold) => game_time.year > *threshold,
+            TimeCondition::BeforeYear(threshold) => game_time.year < *threshold,
+            TimeCondition::BetweenYears { from, to } => {
+                game_time.year >= *from && game_time.year <= *to
             }
         }
     }
@@ -3373,6 +3440,252 @@ mod time_condition_tests {
             }
             _ => panic!("expected Some time_condition"),
         }
+    }
+
+    // ── DuringMonths ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_during_months_fires_in_winter() {
+        // Winter = months 11 (November), 12 (December), 1 (January)
+        let cond = TimeCondition::DuringMonths(vec![11, 12, 1]);
+        assert!(
+            cond.is_met(&GameTime::new_full(1, 11, 1, 0, 0)),
+            "DuringMonths([11,12,1]) must fire in month 11 (November)"
+        );
+        assert!(
+            cond.is_met(&GameTime::new_full(1, 12, 1, 0, 0)),
+            "DuringMonths([11,12,1]) must fire in month 12 (December)"
+        );
+        assert!(
+            cond.is_met(&GameTime::new_full(2, 1, 1, 0, 0)),
+            "DuringMonths([11,12,1]) must fire in month 1 (January) of year 2"
+        );
+    }
+
+    #[test]
+    fn test_during_months_skips_summer() {
+        // Summer months are not in winter list
+        let cond = TimeCondition::DuringMonths(vec![11, 12, 1]);
+        assert!(
+            !cond.is_met(&GameTime::new_full(1, 6, 15, 12, 0)),
+            "DuringMonths([11,12,1]) must NOT fire in month 6 (June)"
+        );
+        assert!(
+            !cond.is_met(&GameTime::new_full(1, 7, 1, 0, 0)),
+            "DuringMonths([11,12,1]) must NOT fire in month 7 (July)"
+        );
+        assert!(
+            !cond.is_met(&GameTime::new_full(1, 8, 1, 0, 0)),
+            "DuringMonths([11,12,1]) must NOT fire in month 8 (August)"
+        );
+    }
+
+    #[test]
+    fn test_during_months_single_month() {
+        // Only one month in the list
+        let cond = TimeCondition::DuringMonths(vec![3]);
+        assert!(cond.is_met(&GameTime::new_full(1, 3, 15, 0, 0)));
+        assert!(!cond.is_met(&GameTime::new_full(1, 2, 28, 0, 0)));
+        assert!(!cond.is_met(&GameTime::new_full(1, 4, 1, 0, 0)));
+    }
+
+    #[test]
+    fn test_during_months_all_months() {
+        // All twelve months in the list — always fires
+        let all: Vec<u32> = (1u32..=12).collect();
+        let cond = TimeCondition::DuringMonths(all);
+        for month in 1u32..=12 {
+            assert!(
+                cond.is_met(&GameTime::new_full(1, month, 1, 0, 0)),
+                "DuringMonths(all) must fire in month {month}"
+            );
+        }
+    }
+
+    // ── AfterYear ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_after_year_fires() {
+        // AfterYear(2): year > 2 fires; year == 2 and year < 2 do not
+        let cond = TimeCondition::AfterYear(2);
+        assert!(
+            cond.is_met(&GameTime::new_full(3, 1, 1, 0, 0)),
+            "AfterYear(2) must fire on year 3"
+        );
+        assert!(
+            cond.is_met(&GameTime::new_full(10, 6, 15, 8, 0)),
+            "AfterYear(2) must fire on year 10"
+        );
+    }
+
+    #[test]
+    fn test_after_year_skips() {
+        let cond = TimeCondition::AfterYear(2);
+        assert!(
+            !cond.is_met(&GameTime::new_full(2, 12, 30, 23, 59)),
+            "AfterYear(2) must NOT fire on year 2 itself"
+        );
+        assert!(
+            !cond.is_met(&GameTime::new_full(1, 1, 1, 0, 0)),
+            "AfterYear(2) must NOT fire on year 1"
+        );
+    }
+
+    #[test]
+    fn test_after_year_boundary() {
+        // Boundary: AfterYear(1) fires on year 2, not year 1
+        let cond = TimeCondition::AfterYear(1);
+        assert!(!cond.is_met(&GameTime::new_full(1, 12, 30, 23, 59)));
+        assert!(cond.is_met(&GameTime::new_full(2, 1, 1, 0, 0)));
+    }
+
+    // ── BeforeYear ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_before_year_fires() {
+        // BeforeYear(3): year < 3 fires; year == 3 and year > 3 do not
+        let cond = TimeCondition::BeforeYear(3);
+        assert!(
+            cond.is_met(&GameTime::new_full(1, 1, 1, 0, 0)),
+            "BeforeYear(3) must fire on year 1"
+        );
+        assert!(
+            cond.is_met(&GameTime::new_full(2, 6, 15, 12, 0)),
+            "BeforeYear(3) must fire on year 2"
+        );
+    }
+
+    #[test]
+    fn test_before_year_skips() {
+        let cond = TimeCondition::BeforeYear(3);
+        assert!(
+            !cond.is_met(&GameTime::new_full(3, 1, 1, 0, 0)),
+            "BeforeYear(3) must NOT fire on year 3 itself"
+        );
+        assert!(
+            !cond.is_met(&GameTime::new_full(5, 1, 1, 0, 0)),
+            "BeforeYear(3) must NOT fire on year 5"
+        );
+    }
+
+    #[test]
+    fn test_before_year_boundary() {
+        // Boundary: BeforeYear(2) fires on year 1, not year 2
+        let cond = TimeCondition::BeforeYear(2);
+        assert!(cond.is_met(&GameTime::new_full(1, 12, 30, 23, 59)));
+        assert!(!cond.is_met(&GameTime::new_full(2, 1, 1, 0, 0)));
+    }
+
+    // ── BetweenYears ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_between_years_fires() {
+        // BetweenYears{1,3}: years 1, 2, 3 fire; years outside do not
+        let cond = TimeCondition::BetweenYears { from: 1, to: 3 };
+        assert!(
+            cond.is_met(&GameTime::new_full(1, 1, 1, 0, 0)),
+            "BetweenYears{{1,3}} must fire on year 1 (lower bound)"
+        );
+        assert!(
+            cond.is_met(&GameTime::new_full(2, 6, 15, 0, 0)),
+            "BetweenYears{{1,3}} must fire on year 2 (middle)"
+        );
+        assert!(
+            cond.is_met(&GameTime::new_full(3, 12, 30, 23, 59)),
+            "BetweenYears{{1,3}} must fire on year 3 (upper bound)"
+        );
+    }
+
+    #[test]
+    fn test_between_years_skips() {
+        let cond = TimeCondition::BetweenYears { from: 1, to: 3 };
+        assert!(
+            !cond.is_met(&GameTime::new_full(5, 1, 1, 0, 0)),
+            "BetweenYears{{1,3}} must NOT fire on year 5"
+        );
+        // Year 0 is not a valid calendar year but test the logic holds for any u32 below from
+        // (from is 1, so we'd need year 0 — use a higher range to test below-from)
+        let cond2 = TimeCondition::BetweenYears { from: 3, to: 5 };
+        assert!(
+            !cond2.is_met(&GameTime::new_full(1, 1, 1, 0, 0)),
+            "BetweenYears{{3,5}} must NOT fire on year 1 (below from)"
+        );
+        assert!(
+            !cond2.is_met(&GameTime::new_full(6, 1, 1, 0, 0)),
+            "BetweenYears{{3,5}} must NOT fire on year 6 (above to)"
+        );
+    }
+
+    #[test]
+    fn test_between_years_single_year() {
+        // from == to: only that exact year fires
+        let cond = TimeCondition::BetweenYears { from: 4, to: 4 };
+        assert!(cond.is_met(&GameTime::new_full(4, 6, 15, 0, 0)));
+        assert!(!cond.is_met(&GameTime::new_full(3, 12, 30, 23, 59)));
+        assert!(!cond.is_met(&GameTime::new_full(5, 1, 1, 0, 0)));
+    }
+
+    // ── RON roundtrip for new variants ───────────────────────────────────────
+
+    #[test]
+    fn test_time_condition_ron_roundtrip_during_months() {
+        let original = TimeCondition::DuringMonths(vec![11, 12, 1]);
+        let ron_str = ron::to_string(&original).expect("serialize DuringMonths");
+        let back: TimeCondition = ron::from_str(&ron_str).expect("deserialize DuringMonths");
+        assert_eq!(original, back);
+    }
+
+    #[test]
+    fn test_time_condition_ron_roundtrip_after_year() {
+        let original = TimeCondition::AfterYear(5);
+        let ron_str = ron::to_string(&original).expect("serialize AfterYear");
+        let back: TimeCondition = ron::from_str(&ron_str).expect("deserialize AfterYear");
+        assert_eq!(original, back);
+    }
+
+    #[test]
+    fn test_time_condition_ron_roundtrip_before_year() {
+        let original = TimeCondition::BeforeYear(3);
+        let ron_str = ron::to_string(&original).expect("serialize BeforeYear");
+        let back: TimeCondition = ron::from_str(&ron_str).expect("deserialize BeforeYear");
+        assert_eq!(original, back);
+    }
+
+    #[test]
+    fn test_time_condition_ron_roundtrip_between_years() {
+        let original = TimeCondition::BetweenYears { from: 2, to: 7 };
+        let ron_str = ron::to_string(&original).expect("serialize BetweenYears");
+        let back: TimeCondition = ron::from_str(&ron_str).expect("deserialize BetweenYears");
+        assert_eq!(original, back);
+    }
+
+    // ── RON literal deserialisation for new variants ─────────────────────────
+
+    #[test]
+    fn test_time_condition_ron_literal_during_months() {
+        // Verify the canonical RON spelling deserialises correctly
+        let ron_str = "DuringMonths([11, 12, 1])";
+        let cond: TimeCondition = ron::from_str(ron_str).expect("literal DuringMonths");
+        assert_eq!(cond, TimeCondition::DuringMonths(vec![11, 12, 1]));
+    }
+
+    #[test]
+    fn test_time_condition_ron_literal_after_year() {
+        let cond: TimeCondition = ron::from_str("AfterYear(3)").expect("literal AfterYear");
+        assert_eq!(cond, TimeCondition::AfterYear(3));
+    }
+
+    #[test]
+    fn test_time_condition_ron_literal_before_year() {
+        let cond: TimeCondition = ron::from_str("BeforeYear(2)").expect("literal BeforeYear");
+        assert_eq!(cond, TimeCondition::BeforeYear(2));
+    }
+
+    #[test]
+    fn test_time_condition_ron_literal_between_years() {
+        let cond: TimeCondition =
+            ron::from_str("BetweenYears(from: 1, to: 5)").expect("literal BetweenYears");
+        assert_eq!(cond, TimeCondition::BetweenYears { from: 1, to: 5 });
     }
 }
 
