@@ -375,7 +375,9 @@ Write a detailed plan before implementing. Follow the rules in PLAN.md and
 AGENTS.md. All existing tests must continue to pass; add new tests for rollover
 logic (minute→hour→day→month→year) and for each new `TimeCondition` variant.
 
-✅ PLAN WRITTEN - [Time System Extension Plan](./time_system_extension_plan.md)
+✅ COMPLETE - [Time System Extension Plan](./time_system_extension_plan.md)
+✅ COMPLETE - [Months Years Plan](./months_years_implementation_plan.md)
+
 
 ### Automap and mini map
 

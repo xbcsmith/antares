@@ -1,5 +1,100 @@
 # Implementations
 
+## Phase 1: Extract Shared Consumable Domain Logic (Complete)
+
+### Overview
+
+Extracted the authoritative `ConsumableEffect` match from `execute_item_use_by_slot`
+in `src/domain/combat/item_usage.rs` into a new standalone pure-domain module
+`src/domain/items/consumable_usage.rs`. Both the existing combat path and the
+future exploration/menu path now share a single implementation, eliminating any
+risk of logic drift between the two. `ResistanceType` was also added to the
+public re-export surface of `src/domain/items/mod.rs` so callers can import it
+via `antares::domain::items::ResistanceType` without reaching into the `types`
+submodule directly.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `src/domain/items/consumable_usage.rs` created with SPDX header,
+      `ConsumableApplyResult` struct, and `apply_consumable_effect` covering all
+      six `ConsumableEffect` variants (`HealHp`, `RestoreSp`, `CureCondition`,
+      `BoostAttribute`, `BoostResistance`, `IsFood`).
+- [x] `src/domain/items/mod.rs` updated: `pub mod consumable_usage;` added;
+      `ResistanceType` added to `pub use types::...`; `apply_consumable_effect`
+      and `ConsumableApplyResult` re-exported from `consumable_usage`.
+- [x] `execute_item_use_by_slot` in `src/domain/combat/item_usage.rs` delegates
+      the `ConsumableEffect` match to `apply_consumable_effect`; all combat-only
+      responsibilities (user identity check, charge consumption, `advance_turn`,
+      `check_combat_end`) remain in the combat executor.
+- [x] All ten domain and regression tests listed in the plan pass.
+- [x] Two additional combat-path regression tests for `BoostResistance` and
+      `BoostAttribute` added to `item_usage.rs` to exercise the new helper
+      through the full combat stack.
+- [x] `cargo fmt --all`, `cargo check --all-targets --all-features`,
+      `cargo clippy --all-targets --all-features -- -D warnings`, and
+      `cargo nextest run --all-features` all pass with zero warnings.
+
+### Files Changed
+
+| File                                   | Change                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/items/consumable_usage.rs` | **Created** — `ConsumableApplyResult`, `apply_consumable_effect`, 18 unit tests                                     |
+| `src/domain/items/mod.rs`              | Added `pub mod consumable_usage;`, re-exported `apply_consumable_effect`, `ConsumableApplyResult`, `ResistanceType` |
+| `src/domain/combat/item_usage.rs`      | Phase B match replaced with `apply_consumable_effect` delegation; 5 new regression tests added                      |
+
+### Architecture Details
+
+#### `ConsumableApplyResult`
+
+A plain `#[derive(Default)]` struct with five `i32`/`i16`/`u8` fields:
+
+- `healing: i32` — HP delta actually applied (zero for non-heal effects).
+- `sp_restored: i32` — SP delta actually applied.
+- `conditions_cleared: u8` — bitflags cleared from `character.conditions`.
+- `attribute_delta: i16` — stat delta applied by `BoostAttribute`.
+- `resistance_delta: i16` — resistance delta applied by `BoostResistance`.
+
+Callers receive the result and can compose player-visible feedback messages
+without re-deriving deltas from a before/after snapshot.
+
+#### `apply_consumable_effect` Contract
+
+| Variant                             | Mutation                                                                 | Cap        |
+| ----------------------------------- | ------------------------------------------------------------------------ | ---------- |
+| `HealHp(amount)`                    | `hp.modify(amount as i32)` then clamp `hp.current` to `hp.base`          | `hp.base`  |
+| `RestoreSp(amount)`                 | `sp.modify(amount as i32)` then clamp `sp.current` to `sp.base`          | `sp.base`  |
+| `CureCondition(flags)`              | `conditions.remove(flags)` — bitflag only, `active_conditions` untouched | none       |
+| `BoostAttribute(attr, amount)`      | `stats.<field>.modify(amount as i16)`                                    | saturating |
+| `BoostResistance(res_type, amount)` | `resistances.<field>.modify(amount as i16)`                              | saturating |
+| `IsFood(_)`                         | No-op; returns zeroed `ConsumableApplyResult`                            | —          |
+
+#### Refactored Combat Path
+
+`execute_item_use_by_slot` retains all combat-only responsibilities. Phase B now
+consists of a single `get_combatant_mut` call followed by a call to
+`apply_consumable_effect(pc_target, effect)`. The returned `ConsumableApplyResult`
+is used to populate `total_healing`, `effected_indices`, and `applied_conditions`
+exactly as before, preserving full backward compatibility with existing callers and
+tests.
+
+#### `ResistanceType` Re-export
+
+`ResistanceType` was defined in `src/domain/items/types.rs` but was previously not
+re-exported from `src/domain/items/mod.rs`. It is now available as
+`antares::domain::items::ResistanceType` alongside `AttributeType`,
+`ConsumableEffect`, and the rest of the public items API.
+
+### Quality Gate Results
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt         → clean (no output)
+cargo check       → Finished (0 errors, 0 warnings)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3393 passed, 8 skipped
+```
+
+---
+
 ## Phase 5E: Months and Years — Call-Site Audit & Quality Gates (Complete)
 
 ### Overview

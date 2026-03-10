@@ -25,7 +25,8 @@ SPDX-License-Identifier: Apache-2.0
 
 use crate::domain::combat::engine::CombatState;
 use crate::domain::combat::types::CombatantId;
-use crate::domain::items::types::{AttributeType, ConsumableEffect, ItemType, ResistanceType};
+use crate::domain::items::consumable_usage::apply_consumable_effect;
+use crate::domain::items::types::{ConsumableEffect, ItemType};
 use crate::domain::types::ItemId;
 use crate::sdk::database::ContentDatabase;
 use rand::Rng;
@@ -319,137 +320,48 @@ pub fn execute_item_use_by_slot<R: Rng>(
             (item.name.clone(), consumable.effect)
         };
 
-        // Phase B: apply captured effect to target (fresh mutable borrows)
+        // Phase B: apply captured effect to target via the shared pure-domain
+        // helper. This delegates the authoritative ConsumableEffect match so
+        // there is exactly one implementation for all five variants.
+        //
+        // Food items are never usable in combat — the `is_combat_usable` flag
+        // on `ConsumableData` blocks them via `validate_item_use_slot`. If one
+        // somehow reaches here, `apply_consumable_effect` returns a zeroed
+        // result (no-op), and the safety guard below surfaces the error.
+        if matches!(effect, ConsumableEffect::IsFood(_)) {
+            return Err(ItemUseError::NotUsableInCombat);
+        }
+
         let mut effected_indices: Vec<usize> = Vec::new();
         let total_damage: i32 = 0;
         let mut total_healing: i32 = 0;
         let mut applied_conditions: Vec<String> = Vec::new();
 
-        match effect {
-            ConsumableEffect::HealHp(amount) => match combat_state.get_combatant_mut(&target) {
-                Some(Combatant::Player(pc_target)) => {
-                    if let CombatantId::Player(idx) = target {
-                        let pre = pc_target.hp.current as i32;
-                        pc_target.hp.modify(amount as i32);
-                        if pc_target.hp.current > pc_target.hp.base {
-                            pc_target.hp.current = pc_target.hp.base;
-                        }
-                        let post = pc_target.hp.current as i32;
-                        let healed = post - pre;
-                        if healed > 0 {
-                            total_healing += healed;
-                            effected_indices.push(idx);
-                        }
-                    }
-                }
-                _ => return Err(ItemUseError::InvalidTarget),
-            },
+        match combat_state.get_combatant_mut(&target) {
+            Some(Combatant::Player(pc_target)) => {
+                if let CombatantId::Player(idx) = target {
+                    let apply_result = apply_consumable_effect(pc_target, effect);
 
-            ConsumableEffect::RestoreSp(amount) => match combat_state.get_combatant_mut(&target) {
-                Some(Combatant::Player(pc_target)) => {
-                    if let CombatantId::Player(idx) = target {
-                        let pre_sp = pc_target.sp.current as i32;
-                        pc_target.sp.modify(amount as i32);
-                        if pc_target.sp.current > pc_target.sp.base {
-                            pc_target.sp.current = pc_target.sp.base;
-                        }
-                        let post_sp = pc_target.sp.current as i32;
-                        let restored = post_sp - pre_sp;
-                        if restored > 0 {
-                            total_healing += restored;
-                            effected_indices.push(idx);
-                        }
+                    if apply_result.healing > 0 {
+                        total_healing += apply_result.healing;
+                        effected_indices.push(idx);
+                    } else if apply_result.sp_restored > 0 {
+                        total_healing += apply_result.sp_restored;
+                        effected_indices.push(idx);
+                    } else if apply_result.conditions_cleared != 0 {
+                        effected_indices.push(idx);
+                        applied_conditions.push(format!(
+                            "cleared_flags:{:#X}",
+                            apply_result.conditions_cleared
+                        ));
+                    } else if apply_result.attribute_delta != 0
+                        || apply_result.resistance_delta != 0
+                    {
+                        effected_indices.push(idx);
                     }
-                }
-                _ => return Err(ItemUseError::InvalidTarget),
-            },
-
-            ConsumableEffect::CureCondition(flags) => {
-                match combat_state.get_combatant_mut(&target) {
-                    Some(Combatant::Player(pc_target)) => {
-                        if let CombatantId::Player(idx) = target {
-                            pc_target.conditions.remove(flags);
-                            effected_indices.push(idx);
-                            applied_conditions.push(format!("cleared_flags:{:#X}", flags));
-                        }
-                    }
-                    _ => return Err(ItemUseError::InvalidTarget),
                 }
             }
-
-            ConsumableEffect::BoostAttribute(attr, amount) => {
-                match combat_state.get_combatant_mut(&target) {
-                    Some(Combatant::Player(pc_target)) => {
-                        if let CombatantId::Player(idx) = target {
-                            match attr {
-                                AttributeType::Might => pc_target.stats.might.modify(amount as i16),
-                                AttributeType::Intellect => {
-                                    pc_target.stats.intellect.modify(amount as i16)
-                                }
-                                AttributeType::Personality => {
-                                    pc_target.stats.personality.modify(amount as i16)
-                                }
-                                AttributeType::Endurance => {
-                                    pc_target.stats.endurance.modify(amount as i16)
-                                }
-                                AttributeType::Speed => pc_target.stats.speed.modify(amount as i16),
-                                AttributeType::Accuracy => {
-                                    pc_target.stats.accuracy.modify(amount as i16)
-                                }
-                                AttributeType::Luck => pc_target.stats.luck.modify(amount as i16),
-                            }
-                            effected_indices.push(idx);
-                        }
-                    }
-                    _ => return Err(ItemUseError::InvalidTarget),
-                }
-            }
-
-            ConsumableEffect::BoostResistance(res_type, amount) => {
-                match combat_state.get_combatant_mut(&target) {
-                    Some(Combatant::Player(pc_target)) => {
-                        if let CombatantId::Player(idx) = target {
-                            match res_type {
-                                ResistanceType::Physical => {
-                                    // No direct physical field on character Resistances;
-                                    // use magic as the closest analogue for physical warding.
-                                    pc_target.resistances.magic.modify(amount as i16);
-                                }
-                                ResistanceType::Fire => {
-                                    pc_target.resistances.fire.modify(amount as i16);
-                                }
-                                ResistanceType::Cold => {
-                                    pc_target.resistances.cold.modify(amount as i16);
-                                }
-                                ResistanceType::Electricity => {
-                                    pc_target.resistances.electricity.modify(amount as i16);
-                                }
-                                ResistanceType::Energy => {
-                                    pc_target.resistances.magic.modify(amount as i16);
-                                }
-                                ResistanceType::Paralysis => {
-                                    pc_target.resistances.psychic.modify(amount as i16);
-                                }
-                                ResistanceType::Fear => {
-                                    pc_target.resistances.fear.modify(amount as i16);
-                                }
-                                ResistanceType::Sleep => {
-                                    pc_target.resistances.psychic.modify(amount as i16);
-                                }
-                            }
-                            effected_indices.push(idx);
-                        }
-                    }
-                    _ => return Err(ItemUseError::InvalidTarget),
-                }
-            }
-
-            // Food items are never usable in combat; the `is_combat_usable` flag
-            // on `ConsumableData` already blocks them via `validate_item_use_slot`,
-            // so this arm is a safety net for any path that bypasses validation.
-            ConsumableEffect::IsFood(_) => {
-                return Err(ItemUseError::NotUsableInCombat);
-            }
+            _ => return Err(ItemUseError::InvalidTarget),
         }
 
         // Build a short result message
@@ -507,7 +419,10 @@ mod tests {
     use super::*;
     use crate::domain::character::{Alignment, Character, Sex};
     use crate::domain::combat::engine::{CombatState, Combatant};
-    use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+    use crate::domain::items::consumable_usage::apply_consumable_effect;
+    use crate::domain::items::types::{
+        AttributeType, ConsumableData, ConsumableEffect, Item, ItemType,
+    };
     use crate::sdk::database::ContentDatabase;
 
     /// Helper: create a simple healing potion item
@@ -674,6 +589,294 @@ mod tests {
             assert!(!pc_after.conditions.has(Condition::POISONED));
         } else {
             panic!("player should exist");
+        }
+    }
+
+    /// Helper: create a BoostResistance potion
+    fn create_boost_resistance_potion(
+        id: ItemId,
+        res_type: crate::domain::items::types::ResistanceType,
+        amount: i8,
+    ) -> Item {
+        Item {
+            id,
+            name: "Resistance Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::BoostResistance(res_type, amount),
+                is_combat_usable: true,
+            }),
+            base_cost: 15,
+            sell_cost: 7,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        }
+    }
+
+    /// Helper: create a BoostAttribute potion
+    fn create_boost_attribute_potion(id: ItemId, attr: AttributeType, amount: i8) -> Item {
+        Item {
+            id,
+            name: "Attribute Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::BoostAttribute(attr, amount),
+                is_combat_usable: true,
+            }),
+            base_cost: 12,
+            sell_cost: 6,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        }
+    }
+
+    /// Regression: verify that `execute_item_use_by_slot` and a direct call to
+    /// `apply_consumable_effect` produce identical healing deltas, confirming
+    /// the combat executor delegates to the shared helper correctly.
+    #[test]
+    fn test_execute_item_use_delegates_to_shared_helper() {
+        let potion_id: ItemId = 210;
+        let heal_amount: u16 = 15;
+
+        // --- Baseline: compute expected delta using the pure helper directly ---
+        let mut reference_pc = Character::new(
+            "Reference".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        reference_pc.hp.base = 30;
+        reference_pc.hp.current = 10;
+        let ref_result =
+            apply_consumable_effect(&mut reference_pc, ConsumableEffect::HealHp(heal_amount));
+        let expected_healing = ref_result.healing;
+        let expected_hp = reference_pc.hp.current;
+
+        // --- Execute via the full combat path ---
+        let mut content = ContentDatabase::new();
+        content
+            .items
+            .add_item(create_healing_potion(potion_id, heal_amount, true))
+            .unwrap();
+
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+        let mut pc = Character::new(
+            "Fighter".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        pc.hp.base = 30;
+        pc.hp.current = 10;
+        pc.inventory.add_item(potion_id, 1).unwrap();
+        cs.add_player(pc);
+
+        let mut rng = rand::rng();
+        let res = execute_item_use_by_slot(
+            &mut cs,
+            CombatantId::Player(0),
+            0,
+            CombatantId::Player(0),
+            &content,
+            &mut rng,
+        )
+        .expect("execute should succeed");
+
+        // The combat result must match the pure-helper baseline exactly.
+        assert!(res.success);
+        assert_eq!(
+            res.healing,
+            Some(expected_healing),
+            "combat path healing must match pure-helper baseline"
+        );
+
+        if let Some(Combatant::Player(pc_after)) = cs.get_combatant(&CombatantId::Player(0)) {
+            assert_eq!(
+                pc_after.hp.current, expected_hp,
+                "post-combat HP must match pure-helper baseline"
+            );
+        } else {
+            panic!("player should still be present after item use");
+        }
+    }
+
+    /// Regression: `validate_item_use_slot` with `in_combat = false` must
+    /// permit items where `is_combat_usable: false`.
+    #[test]
+    fn test_validate_out_of_combat_permits_non_combat_usable() {
+        let mut content = ContentDatabase::new();
+        let potion_id: ItemId = 211;
+        content
+            .items
+            .add_item(create_healing_potion(potion_id, 10, false))
+            .unwrap();
+
+        let mut ch = Character::new(
+            "Explorer".to_string(),
+            "human".to_string(),
+            "none".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        ch.inventory.add_item(potion_id, 1).unwrap();
+
+        let result = validate_item_use_slot(&ch, 0, &content, false);
+        assert!(
+            result.is_ok(),
+            "out-of-combat validation must accept non-combat-usable items; got: {result:?}"
+        );
+    }
+
+    /// Regression: `validate_item_use_slot` with `in_combat = true` must
+    /// reject items where `is_combat_usable: false`.
+    #[test]
+    fn test_validate_in_combat_rejects_non_combat_usable() {
+        let mut content = ContentDatabase::new();
+        let potion_id: ItemId = 212;
+        content
+            .items
+            .add_item(create_healing_potion(potion_id, 10, false))
+            .unwrap();
+
+        let mut ch = Character::new(
+            "Fighter".to_string(),
+            "human".to_string(),
+            "none".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        ch.inventory.add_item(potion_id, 1).unwrap();
+
+        let result = validate_item_use_slot(&ch, 0, &content, true);
+        assert!(
+            matches!(result, Err(ItemUseError::NotUsableInCombat)),
+            "in-combat validation must reject non-combat-usable items; got: {result:?}"
+        );
+    }
+
+    /// Verify that BoostResistance flows correctly through the combat path
+    /// (exercises `create_boost_resistance_potion` helper).
+    #[test]
+    fn test_execute_item_use_boost_resistance_via_combat_path() {
+        use crate::domain::items::types::ResistanceType;
+
+        let potion_id: ItemId = 213;
+        let mut content = ContentDatabase::new();
+        content
+            .items
+            .add_item(create_boost_resistance_potion(
+                potion_id,
+                ResistanceType::Fire,
+                20,
+            ))
+            .unwrap();
+
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+        let mut pc = Character::new(
+            "Mage".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        let fire_before = pc.resistances.fire.current;
+        let fire_base = pc.resistances.fire.base;
+        pc.inventory.add_item(potion_id, 1).unwrap();
+        cs.add_player(pc);
+
+        let mut rng = rand::rng();
+        let res = execute_item_use_by_slot(
+            &mut cs,
+            CombatantId::Player(0),
+            0,
+            CombatantId::Player(0),
+            &content,
+            &mut rng,
+        )
+        .expect("BoostResistance use should succeed");
+
+        assert!(res.success);
+        if let Some(Combatant::Player(pc_after)) = cs.get_combatant(&CombatantId::Player(0)) {
+            assert_eq!(
+                pc_after.resistances.fire.current,
+                fire_before.saturating_add(20),
+                "fire resistance current should increase by 20"
+            );
+            assert_eq!(
+                pc_after.resistances.fire.base, fire_base,
+                "fire resistance base must not change"
+            );
+        } else {
+            panic!("player should still be present");
+        }
+    }
+
+    /// Verify that BoostAttribute flows correctly through the combat path
+    /// (exercises `create_boost_attribute_potion` helper).
+    #[test]
+    fn test_execute_item_use_boost_attribute_via_combat_path() {
+        let potion_id: ItemId = 214;
+        let mut content = ContentDatabase::new();
+        content
+            .items
+            .add_item(create_boost_attribute_potion(
+                potion_id,
+                AttributeType::Luck,
+                7,
+            ))
+            .unwrap();
+
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+        let mut pc = Character::new(
+            "Rogue".to_string(),
+            "human".to_string(),
+            "robber".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        let luck_before = pc.stats.luck.current;
+        let luck_base = pc.stats.luck.base;
+        pc.inventory.add_item(potion_id, 1).unwrap();
+        cs.add_player(pc);
+
+        let mut rng = rand::rng();
+        let res = execute_item_use_by_slot(
+            &mut cs,
+            CombatantId::Player(0),
+            0,
+            CombatantId::Player(0),
+            &content,
+            &mut rng,
+        )
+        .expect("BoostAttribute use should succeed");
+
+        assert!(res.success);
+        if let Some(Combatant::Player(pc_after)) = cs.get_combatant(&CombatantId::Player(0)) {
+            assert_eq!(
+                pc_after.stats.luck.current,
+                luck_before.saturating_add(7),
+                "luck current should increase by 7"
+            );
+            assert_eq!(
+                pc_after.stats.luck.base, luck_base,
+                "luck base must not change"
+            );
+        } else {
+            panic!("player should still be present");
         }
     }
 

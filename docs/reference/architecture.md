@@ -1519,26 +1519,185 @@ Self { count, sides, bonus }
 
 }
 
-/// Game time tracking
-pub struct GameTime {
+/// Calendar constants for the game's 12-month, 30-day-per-month calendar.
+pub const MONTHS_PER_YEAR: u32 = 12;
+pub const DAYS_PER_MONTH: u32 = 30;
+pub const DAYS_PER_YEAR: u32 = MONTHS_PER_YEAR \* DAYS_PER_MONTH; // 360
+
+/// Game time tracking — full calendar date plus time of day.
+///
+/// # Field semantics
+///
+/// | Field | Range | Meaning |
+/// |----------|--------|--------------------------------------|
+/// | `year` | ≥ 1 | Calendar year (1-based) |
+/// | `month` | 1–12 | Month within the year (1-based) |
+/// | `day` | 1–30 | Day within the month (1-based) |
+/// | `hour` | 0–23 | Hour of day |
+/// | `minute` | 0–59 | Minute of hour |
+///
+/// `year` and `month` use `#[serde(default)]` returning `1` so that existing
+/// save files and RON data that contain only `day/hour/minute` continue to
+/// deserialize correctly with `year = 1, month = 1`.
+///
+/// Use `total_days()` whenever you need a monotonically increasing day counter
+/// (e.g. for comparing elapsed game time). Do NOT use the `day` field directly
+/// for that purpose — it resets to 1 on every month rollover.
+pub struct GameTime { #[serde(default = "default_year")]
+pub year: u32, #[serde(default = "default_month")]
+pub month: u32,
 pub day: u32,
-pub hour: u8, // 0-23
-pub minute: u8, // 0-59
+pub hour: u8, // 0–23
+pub minute: u8, // 0–59
 }
 
 impl GameTime {
-pub fn advance_minutes(&mut self, minutes: u32) {
-self.minute += (minutes % 60) as u8;
-let hours = minutes / 60 + (self.minute / 60) as u32;
-self.minute %= 60;
+/// Backward-compatible three-argument constructor.
+/// Sets `year = 1` and `month = 1`; use `new_full` to specify all fields.
+pub fn new(day: u32, hour: u8, minute: u8) -> Self {
+Self { year: 1, month: 1, day, hour, minute }
+}
+
+    /// Five-argument constructor — specify all calendar fields explicitly.
+    pub fn new_full(year: u32, month: u32, day: u32, hour: u8, minute: u8) -> Self {
+        Self { year, month, day, hour, minute }
+    }
+
+    /// Cumulative days elapsed since the very start of the calendar
+    /// (Year 1, Month 1, Day 1 = total_days 1).
+    ///
+    /// Formula: `(year - 1) * DAYS_PER_YEAR + (month - 1) * DAYS_PER_MONTH + day`
+    ///
+    /// Use this instead of `day` whenever code needs a monotonically increasing
+    /// counter (NPC restock tracking, TimeCondition::AfterDay / BeforeDay, etc.).
+    pub fn total_days(&self) -> u32 {
+        (self.year - 1) * DAYS_PER_YEAR + (self.month - 1) * DAYS_PER_MONTH + self.day
+    }
+
+    /// Advance time by `minutes` minutes, rolling over hour → day → month → year
+    /// as necessary.
+    pub fn advance_minutes(&mut self, minutes: u32) {
+        self.minute += (minutes % 60) as u8;
+        let hours = minutes / 60 + (self.minute / 60) as u32;
+        self.minute %= 60;
 
         self.hour += (hours % 24) as u8;
         let days = hours / 24 + (self.hour / 24) as u32;
         self.hour %= 24;
 
         self.day += days;
+        self.apply_day_rollover();
     }
 
+    /// Advance time by `days` whole days, rolling over month → year as necessary.
+    pub fn advance_days(&mut self, days: u32) {
+        self.day += days;
+        self.apply_day_rollover();
+    }
+
+    /// Internal helper: roll day → month and month → year after any increment
+    /// to `self.day`.
+    fn apply_day_rollover(&mut self) {
+        while self.day > DAYS_PER_MONTH {
+            self.day -= DAYS_PER_MONTH;
+            self.month += 1;
+        }
+        while self.month > MONTHS_PER_YEAR {
+            self.month -= MONTHS_PER_YEAR;
+            self.year += 1;
+        }
+    }
+
+    /// Returns the broad time-of-day period (Dawn / Morning / Afternoon / Dusk /
+    /// Evening / Night) based on the current hour.
+    pub fn time_of_day(&self) -> TimeOfDay { /* … */ }
+
+    pub fn is_day(&self) -> bool { /* … */ }
+    pub fn is_night(&self) -> bool { /* … */ }
+
+}
+
+/// Broad time-of-day periods returned by `GameTime::time_of_day()`.
+pub enum TimeOfDay {
+Dawn, // 05:00–06:59
+Morning, // 07:00–11:59
+Afternoon, // 12:00–16:59
+Dusk, // 17:00–18:59
+Evening, // 19:00–21:59
+Night, // 22:00–04:59
+}
+
+/// Map-event conditions that gate whether a scripted event fires.
+///
+/// Evaluated at event-trigger time against the current `GameTime`.
+/// The `AfterDay` and `BeforeDay` variants compare against `GameTime::total_days()`
+/// (cumulative elapsed days) so that existing RON data continues to work correctly
+/// after the `day` field was narrowed to mean "day within month".
+///
+/// # Variants
+///
+/// | Variant | Fires when … |
+/// |----------------------------------|---------------------------------------------------|
+/// | `DuringPeriods(Vec<TimeOfDay>)` | current `time_of_day()` is in the list |
+/// | `AfterDay(u32)` | `total_days() > threshold` |
+/// | `BeforeDay(u32)` | `total_days() < threshold` |
+/// | `BetweenHours { from, to }` | `from <= hour <= to` |
+/// | `DuringMonths(Vec<u32>)` | `month` is in the list (e.g. `[11, 12, 1]`) |
+/// | `AfterYear(u32)` | `year > threshold` |
+/// | `BeforeYear(u32)` | `year < threshold` |
+/// | `BetweenYears { from, to }` | `from <= year <= to` |
+///
+/// # RON examples
+///
+/// `ron
+/// // Fires only at night
+/// DuringPeriods([Night])
+///
+/// // Fires after 10 total in-game days have passed
+/// AfterDay(10)
+///
+/// // Fires only in winter months (November, December, January)
+/// DuringMonths([11, 12, 1])
+///
+/// // Fires from Year 2 onward
+/// AfterYear(1)
+///
+/// // Fires during the first three in-game years
+/// BetweenYears(from: 1, to: 3)
+/// `
+pub enum TimeCondition {
+DuringPeriods(Vec<TimeOfDay>),
+AfterDay(u32),
+BeforeDay(u32),
+BetweenHours { from: u8, to: u8 },
+// ── Month / year variants (added in Phase 2B) ──────────────────────────
+DuringMonths(Vec<u32>),
+AfterYear(u32),
+BeforeYear(u32),
+BetweenYears { from: u32, to: u32 },
+}
+
+impl TimeCondition {
+pub fn is_met(&self, game_time: &GameTime) -> bool {
+match self {
+TimeCondition::DuringPeriods(periods) => {
+periods.contains(&game_time.time_of_day())
+}
+// AfterDay / BeforeDay use total_days() so thresholds mean cumulative
+// elapsed days, not day-within-month.
+TimeCondition::AfterDay(threshold) => game_time.total_days() > *threshold,
+TimeCondition::BeforeDay(threshold) => game_time.total_days() < *threshold,
+TimeCondition::BetweenHours { from, to } => {
+game_time.hour >= *from && game_time.hour <= *to
+}
+TimeCondition::DuringMonths(months) => months.contains(&game_time.month),
+TimeCondition::AfterYear(threshold) => game_time.year > *threshold,
+TimeCondition::BeforeYear(threshold) => game_time.year < *threshold,
+TimeCondition::BetweenYears { from, to } => {
+game_time.year >= *from && game_time.year <= *to
+}
+}
+}
 }
 
 /// Quest log tracking
@@ -2866,8 +3025,9 @@ Events can:
 - Restores all SP to maximum (unless inhibited)
 - Consumes 1 food unit per character
 - All party-wide protection spells expire
-- Advances time by ~8 hours
+- Advances time by ~8 hours (via `GameState::advance_time`)
 - Ages character by 1 day counter
+- Triggers NPC merchant restock check (daily restock uses `GameTime::total_days()`)
 
 **Rest Restrictions:**
 
@@ -2993,6 +3153,47 @@ pub fn max_spell_level(character_level: u32, class: Class) -> u8 {
 - 1 charge consumed per spell cast from item
 - Automatic depletion when item used
 - No warning before last charge
+
+#### 12.6a HUD Clock
+
+The in-game HUD displays the current calendar date and time in the clock panel.
+
+**Components:**
+
+- `ClockTimeText` — Bevy marker component for the `"HH:MM"` time string.
+- `ClockDateText` — Bevy marker component for the full calendar date string.
+
+**Format:**
+
+```text
+HH:MM          ← ClockTimeText  (e.g. "08:00")
+Y1 M3 D15      ← ClockDateText  (e.g. year 1, month 3, day 15)
+```
+
+The date string is produced by `format_clock_date(year, month, day)` in
+`src/game/systems/hud.rs`, which returns `"Y{year} M{month} D{day}"`.
+
+**Update system:**
+
+`update_clock()` runs every frame, reads `GlobalState.time`, and writes both
+text components:
+
+```rust
+// src/game/systems/hud.rs
+fn update_clock(
+    global_state: Res<GlobalState>,
+    mut time_query:  Query<(&mut Text, &mut TextColor), (With<ClockTimeText>,  Without<ClockDateText>)>,
+    mut date_query:  Query<(&mut Text, &mut TextColor), (With<ClockDateText>,  Without<ClockTimeText>)>,
+) {
+    let t = &global_state.0.time;
+    for (mut text, _) in &mut time_query {
+        **text = format_clock_time(t.hour, t.minute);
+    }
+    for (mut text, _) in &mut date_query {
+        **text = format_clock_date(t.year, t.month, t.day);
+    }
+}
+```
 
 #### 12.7 Inn and Save System
 
@@ -3274,6 +3475,26 @@ The Antares architecture has evolved significantly from its initial design:
 - Character definition system for data-driven templates
 - Proficiency system replacing legacy bit flags
 
+**Phase 5: Calendar Time System (Months & Years)**
+
+- `GameTime` extended from `{ day, hour, minute }` to `{ year, month, day, hour, minute }`
+- Calendar constants `MONTHS_PER_YEAR = 12`, `DAYS_PER_MONTH = 30`, `DAYS_PER_YEAR = 360`
+- `advance_minutes()` and `advance_days()` now roll day → month → year automatically
+- `total_days()` added for cumulative-day arithmetic (NPC restock, event conditions)
+- `GameTime::new_full(year, month, day, hour, minute)` constructor added alongside
+  the backward-compatible `new(day, hour, minute)` (sets year=1, month=1)
+- Serde backward compatibility: `year` and `month` default to `1` so existing save
+  files and RON campaign data deserialize without modification
+- `TimeCondition` extended with four new variants: `DuringMonths`, `AfterYear`,
+  `BeforeYear`, `BetweenYears` — enabling seasonal and yearly event gating in RON
+- `AfterDay` / `BeforeDay` updated to compare against `total_days()` (not raw `day`)
+  preserving semantics of existing campaign data
+- HUD clock renamed `ClockDayText` → `ClockDateText`, now shows `"Y{y} M{m} D{d}"`
+- Campaign Builder SDK: `CampaignMetadataEditBuffer` gains `starting_year` and
+  `starting_month` spinners; `apply_to()` uses `GameTime::new_full` with clamping
+- NPC restock (`tick_restock`) updated to use `total_days()` for day-change detection,
+  preventing incorrect multiple restocks per year on month rollover
+
 #### 13.2 Current Architecture Compliance
 
 **✅ Excellent Compliance Areas:**
@@ -3283,6 +3504,10 @@ The Antares architecture has evolved significantly from its initial design:
 - **Type Safety**: Consistent use of type aliases and strong typing throughout
 - **Error Handling**: Comprehensive error types with detailed validation
 - **Testing**: Extensive automated and manual test coverage
+- **Calendar Time System**: `GameTime` fully extended with year/month; backward-compatible
+  serde defaults; `total_days()` used consistently for cumulative-day comparisons
+- **Event Conditions**: `TimeCondition` covers all time granularities (period, hour,
+  day, month, year) with RON roundtrip support for all variants
 
 **🔄 Areas Requiring Updates:**
 
