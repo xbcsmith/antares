@@ -11,19 +11,20 @@
 //!
 //! ### Phase 1 — Slot Navigation
 //!
-//! | Key              | Effect                                                      |
-//! |------------------|-------------------------------------------------------------|
-//! | `Tab`            | Advance focus to the next character panel (yellow border)   |
-//! | `Shift+Tab`      | Move focus to the previous character panel                  |
-//! | `←` `→` `↑` `↓` | Navigate the slot grid inside the focused panel             |
-//! | `Enter`          | Enter **Action Navigation** for the highlighted slot        |
-//! | `Esc` / `I`      | Close the inventory and resume the previous game mode       |
+//! | Key              | Effect                                                                        |
+//! |------------------|-------------------------------------------------------------------------------|
+//! | `Tab`            | Advance focus to the next character panel (yellow border)                     |
+//! | `Shift+Tab`      | Move focus to the previous character panel                                    |
+//! | `←` `→` `↑` `↓` | Navigate the slot grid inside the focused panel                               |
+//! | `Enter`          | Enter **Action Navigation** for the highlighted slot                          |
+//! | `U`              | Use the highlighted consumable directly (bypasses Action Navigation)          |
+//! | `Esc` / `I`      | Close the inventory and resume the previous game mode                         |
 //!
 //! ### Phase 2 — Action Navigation
 //!
 //! | Key         | Effect                                                             |
 //! |-------------|--------------------------------------------------------------------|
-//! | `←` `→`     | Cycle between action buttons (Drop / Give→ …)                      |
+//! | `←` `→`     | Cycle between action buttons (Use / Drop / Give→ …)                |
 //! | `Enter`      | Execute the focused action; return focus to slot 0 of the grid     |
 //! | `Esc`        | Cancel; return to Slot Navigation at the previously selected slot   |
 //!
@@ -152,11 +153,31 @@ pub struct TransferItemAction {
     pub to_party_index: usize,
 }
 
-/// Emitted when the player uses a consumable item outside of combat.
+/// Emitted when the player uses a consumable item outside of combat
+/// (i.e. while in [`GameMode::Inventory`]).
 ///
-/// The effect is applied to the owning character only (self-targeted).
-/// `party_index` identifies which party member owns the item.
-/// `slot_index` is the index within that character's `inventory.items`.
+/// ## Self-target contract
+///
+/// The effect is **always applied to the owning character** — the party member
+/// identified by `party_index`.  Cross-party targeting (e.g. healing a
+/// different party member from another character's inventory panel) is
+/// explicitly out of scope and belongs to a future targeting phase.
+///
+/// ## Valid ranges
+///
+/// * `party_index` — `0..party.members.len()`.  Values outside this range
+///   cause [`handle_use_item_action_exploration`] to write a `GameLog` error
+///   entry and skip the message without panicking.
+/// * `slot_index` — `0..character.inventory.items.len()`.  Values outside
+///   this range are caught by [`validate_item_use_slot`] and produce a
+///   `GameLog` entry containing "no item in that slot".
+///
+/// ## Charge semantics
+///
+/// One charge is consumed per use:
+/// * `charges > 1` → decremented in place.
+/// * `charges == 1` → the slot is removed from the inventory entirely.
+/// * `charges == 0` → rejected before any mutation; "no charges" is logged.
 ///
 /// # Examples
 ///
@@ -170,8 +191,10 @@ pub struct TransferItemAction {
 #[derive(Message)]
 pub struct UseItemExplorationAction {
     /// Index of the party member (0-based) whose inventory contains the item.
+    /// Valid range: `0..party.members.len()`.
     pub party_index: usize,
     /// Index of the slot within that character's inventory to use.
+    /// Valid range: `0..character.inventory.items.len()`.
     pub slot_index: usize,
 }
 

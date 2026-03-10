@@ -1,5 +1,118 @@
 # Implementations
 
+## Consumables Outside Combat — Feature Complete Summary
+
+All four phases of the "Consumables Outside Combat" implementation plan are
+complete. Players can now use consumable items directly from the inventory
+screen in exploration and menu modes via:
+
+- **`U` keyboard shortcut** — use the highlighted consumable directly from
+  Slot Navigation, bypassing the Action Navigation step entirely.
+- **"Use" button** — rendered in the action strip when a consumable slot is
+  selected; accessible via mouse click or Action Navigation (`←`/`→` then
+  `Enter`).
+
+The implementation is backed by a single authoritative pure-domain helper
+(`apply_consumable_effect` in `src/domain/items/consumable_usage.rs`) shared
+by both the combat and exploration paths — no duplicated `ConsumableEffect`
+match logic exists anywhere in the codebase.
+
+### Files Changed (all phases)
+
+| File                                   | Change                                                    | Phase |
+| -------------------------------------- | --------------------------------------------------------- | ----- |
+| `src/domain/items/consumable_usage.rs` | **Created** — pure-domain effect helper + result type     | 1     |
+| `src/domain/items/mod.rs`              | Added `pub mod consumable_usage`; re-exports              | 1     |
+| `src/domain/combat/item_usage.rs`      | Delegated effect match to shared helper; regression tests | 1, 4  |
+| `src/game/systems/inventory_ui.rs`     | Messages, enum variants, systems, keyboard routing, docs  | 2, 3  |
+| `docs/explanation/implementations.md`  | This file                                                 | 4     |
+
+---
+
+## Phase 4: Harden Contracts, Docs, and Cross-Mode Regression Coverage (Complete)
+
+### Overview
+
+Finalized documentation across all three implementation files, verified no
+stray `ConsumableEffect` match arms exist outside the two designated files
+(`consumable_usage.rs` and `item_usage.rs`), confirmed `combat.rs`
+`perform_use_item_action_with_rng` still delegates correctly, and added three
+cross-mode regression tests to `src/domain/combat/item_usage.rs`.
+
+### Phase 4 Deliverables Checklist
+
+- [x] `src/domain/combat/item_usage.rs` module doc updated to note that effect
+      application is delegated to `apply_consumable_effect` in
+      `src/domain/items/consumable_usage.rs`; added `## Effect Application —
+    Shared Helper` and `## Design Notes` sections.
+- [x] `execute_item_use_by_slot` doc comment updated with numbered step list
+      explicitly calling out the delegation; `# Arguments` section rewritten
+      with plain 2-space continuation (fixes `doc_overindented_list_items`
+      Clippy lint); `# Errors` section added.
+- [x] `src/game/systems/inventory_ui.rs` module-level key-routing table updated: - Phase 1 table: added `U` row — "Use the highlighted consumable directly
+      (bypasses Action Navigation)". - Phase 2 table: `←` `→` description updated to include `Use`.
+- [x] `UseItemExplorationAction` doc comment expanded with: - `## Self-target contract` — explains self-target-only scope. - `## Valid ranges` — documents `party_index` and `slot_index` bounds and
+      the `GameLog` behaviour when they are exceeded. - `## Charge semantics` — documents decrement/remove/reject behaviour. - Field-level `///` comments updated with `Valid range:` notation.
+- [x] Stray `ConsumableEffect` audit: no duplicate match arms outside
+      `consumable_usage.rs` (authoritative) and `item_usage.rs` (`IsFood`
+      guard only). `item_editor.rs` uses constructors, not match arms on
+      effects, which is correct.
+- [x] `combat.rs` `perform_use_item_action_with_rng` confirmed to call
+      `execute_item_use_by_slot` unchanged — no duplicated effect logic.
+- [x] Three Phase 4 cross-mode regression tests added to
+      `src/domain/combat/item_usage.rs` `mod tests`: - `test_combat_still_rejects_non_combat_usable` — confirms combat gate
+      returns `Err(NotUsableInCombat)` for `is_combat_usable: false` items
+      after Phase 1 refactor. - `test_combat_boost_attribute_via_shared_helper` — `BoostAttribute` stat
+      delta in combat matches a direct call to `apply_consumable_effect`. - `test_combat_boost_resistance_via_shared_helper` — `BoostResistance`
+      delta in combat matches a direct call to `apply_consumable_effect`.
+- [x] `cargo fmt --all`, `cargo check --all-targets --all-features`,
+      `cargo clippy --all-targets --all-features -- -D warnings`, and
+      `cargo nextest run --all-features` all pass with zero warnings and
+      **3415 tests passing** (3 new Phase 4 tests).
+
+### Files Changed
+
+| File                                  | Change                                                                                                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `src/domain/combat/item_usage.rs`     | Module doc rewritten; `execute_item_use_by_slot` doc expanded; 3 regression tests added (ids 215, 216, 217) |
+| `src/game/systems/inventory_ui.rs`    | Module doc table updated (`U` key row); `UseItemExplorationAction` doc expanded with contract sections      |
+| `docs/explanation/implementations.md` | This entry added; full feature summary added at top                                                         |
+
+### Architecture Audit Results
+
+#### Single Source of Truth Confirmed
+
+A codebase-wide search for `ConsumableEffect::` match arms found:
+
+- **`src/domain/items/consumable_usage.rs`** — authoritative `match effect { … }`
+  covering all six variants (`HealHp`, `RestoreSp`, `CureCondition`,
+  `BoostAttribute`, `BoostResistance`, `IsFood`). ✅ correct location.
+- **`src/domain/combat/item_usage.rs`** — one `matches!(effect, ConsumableEffect::IsFood(_))`
+  guard to reject food items from the combat path (IsFood is not a real combat
+  consumable). ✅ intentional and documented.
+- All other occurrences are constructors (`ConsumableEffect::HealHp(20)`) in
+  test helpers and the CLI item editor — not duplicate match arms. ✅
+
+#### Combat Delegation Chain
+
+```text
+handle_use_item_action (Bevy system, combat.rs)
+  └─ perform_use_item_action_with_rng (combat.rs)
+       └─ execute_item_use_by_slot (item_usage.rs)
+            └─ apply_consumable_effect (consumable_usage.rs)  ← shared helper
+```
+
+```text
+handle_use_item_action_exploration (Bevy system, inventory_ui.rs)
+  └─ validate_item_use_slot (item_usage.rs)
+  └─ apply_consumable_effect (consumable_usage.rs)            ← same shared helper
+```
+
+Both paths converge on the same leaf function. Logic drift between modes is
+structurally impossible.
+
+---
+
 ## Phase 3: Consumables Outside Combat — Handler System and Feedback (Complete)
 
 ### Overview

@@ -8,9 +8,9 @@ members = [
 name = "antares"
 version = "0.1.0"
 edition = "2021"
-authors = ["Antares Contributors"]
-description = "A classic turn-based RPG inspired by Might and Magic 1"
-license = "MIT"
+authors = ["Brett Smith <xbcsmith@example.com>"]
+description = "A classic data driven turn-based RPG"
+license = "Apache-2.0"
 repository = "https://github.com/xbcsmith/antares"
 
 [dependencies]

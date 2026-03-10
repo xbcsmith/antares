@@ -8,17 +8,30 @@ SPDX-License-Identifier: Apache-2.0
 //! This module provides combat-facing helpers for validating and executing
 //! item usage (Phase 8: Item Usage System).
 //!
-//! Responsibilities:
+//! ## Responsibilities
+//!
 //! - Validate that an inventory slot contains a usable item (consumable,
-//!   combat-usable flag, alignment, race/proficiency restrictions as needed).
-//! - Execute consumable effects (HealHp, RestoreSp, CureCondition, BoostAttribute)
-//!   against a target in `CombatState`.
+//!   combat-usable flag, alignment, race/proficiency restrictions as needed)
+//!   via [`validate_item_use_slot`].
+//! - Execute consumable effects against a target in [`CombatState`] via
+//!   [`execute_item_use_by_slot`].
 //! - Consume inventory charges (decrement or remove slot).
 //! - Advance the combat turn and apply round/condition ticks.
 //!
-//! Design notes:
+//! ## Effect Application — Shared Helper
+//!
+//! All five [`ConsumableEffect`] variants (`HealHp`, `RestoreSp`,
+//! `CureCondition`, `BoostAttribute`, `BoostResistance`) are **not** matched
+//! here. Instead, [`execute_item_use_by_slot`] delegates effect application to
+//! [`apply_consumable_effect`] in
+//! [`crate::domain::items::consumable_usage`].  This ensures there is exactly
+//! one authoritative implementation shared between the combat path and the
+//! exploration/menu path introduced in Phase 3.
+//!
+//! ## Design Notes
+//!
 //! - Consumables are the primary item type supported in combat for this phase.
-//! - Only minimal behavior is implemented for effects (no durations on boosts).
+//! - Only minimal behaviour is implemented for effects (no durations on boosts).
 //! - Validation only queries class/race definitions when required (e.g., when an
 //!   item has a proficiency requirement or tags to validate); this keeps
 //!   tests lightweight for common consumables which typically have no profs/tags.
@@ -228,24 +241,40 @@ pub fn validate_item_use_slot(
 
 /// Execute using the item found at `inventory_index` for `user` against `target`.
 ///
-/// This:
-/// - Validates the use (via `validate_item_use_slot`)
-/// - Applies the consumable effect to the target
-/// - Consumes inventory charges / removes the slot
-/// - Advances the combat turn and ticks round effects
+/// Steps performed in order:
+///
+/// 1. Validate the use via [`validate_item_use_slot`] (checks consumable flag,
+///    `is_combat_usable`, alignment, proficiency/race restrictions, charges).
+/// 2. Consume one charge from the inventory slot (or remove the slot when the
+///    last charge is spent).
+/// 3. **Delegate effect application** to
+///    [`apply_consumable_effect`][crate::domain::items::consumable_usage::apply_consumable_effect]
+///    — the single authoritative implementation for all five
+///    [`ConsumableEffect`] variants.  There is no duplicated match here.
+/// 4. Advance the combat turn and tick round/condition effects.
 ///
 /// # Arguments
 ///
-/// * `combat_state` - mutable combat state to apply effects to
-/// * `user` - Combatant who is using the item (must be a player)
-/// * `inventory_index` - Index into the user's inventory to use
-/// * `target` - Target combatant for the item's effect
-/// * `content` - Content DB for items and conditions
-/// * `rng` - RNG (present for parity with spell APIs; not used by current consumable effects)
+/// * `combat_state` - Mutable combat state; the user and target must both
+///   be present as `Combatant::Player` entries.
+/// * `user` - Combatant identifier of the character using the item
+///   (must be a `CombatantId::Player`).
+/// * `inventory_index` - Index into the user's `inventory.items` slice.
+/// * `target` - Combatant identifier receiving the effect (must be a
+///   `CombatantId::Player`; self-target is supported).
+/// * `content` - Content DB used for item lookup and condition ticking.
+/// * `rng` - Random-number generator (present for API parity with
+///   spell helpers; not consumed by current effect variants).
 ///
 /// # Returns
 ///
-/// Returns `Ok(ItemUseResult)` on success or `Err(ItemUseError)` on failure.
+/// Returns `Ok(ItemUseResult)` describing what happened on success, or
+/// `Err(ItemUseError)` on any validation failure.
+///
+/// # Errors
+///
+/// Returns the same [`ItemUseError`] variants as [`validate_item_use_slot`]
+/// plus `InvalidTarget` when the combatant IDs cannot be resolved.
 pub fn execute_item_use_by_slot<R: Rng>(
     combat_state: &mut CombatState,
     user: CombatantId,
@@ -877,6 +906,194 @@ mod tests {
             );
         } else {
             panic!("player should still be present");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 4: Cross-mode regression tests
+    // ------------------------------------------------------------------
+
+    /// After the Phase 1 refactor, `execute_item_use_by_slot` with an item
+    /// whose `is_combat_usable: false` must still return
+    /// `Err(ItemUseError::NotUsableInCombat)`.  This regression test confirms
+    /// the combat gate is not broken by the delegation to `apply_consumable_effect`.
+    #[test]
+    fn test_combat_still_rejects_non_combat_usable() {
+        let potion_id: ItemId = 215;
+        let mut content = ContentDatabase::new();
+        // Create a potion that is explicitly NOT usable in combat.
+        content
+            .items
+            .add_item(create_healing_potion(potion_id, 10, false))
+            .unwrap();
+
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+        let mut pc = Character::new(
+            "Paladin".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        pc.inventory.add_item(potion_id, 1).unwrap();
+        cs.add_player(pc);
+
+        let mut rng = rand::rng();
+        let result = execute_item_use_by_slot(
+            &mut cs,
+            CombatantId::Player(0),
+            0,
+            CombatantId::Player(0),
+            &content,
+            &mut rng,
+        );
+
+        assert!(
+            matches!(result, Err(ItemUseError::NotUsableInCombat)),
+            "combat path must reject is_combat_usable:false items; got: {result:?}"
+        );
+    }
+
+    /// After Phase 1, `BoostAttribute` applied via `execute_item_use_by_slot`
+    /// must produce the same stat delta as a direct call to
+    /// `apply_consumable_effect`.  This verifies the shared helper produces
+    /// consistent results on both paths.
+    #[test]
+    fn test_combat_boost_attribute_via_shared_helper() {
+        let potion_id: ItemId = 216;
+        let boost: i8 = 8;
+        let attr = AttributeType::Intellect;
+
+        // --- Baseline via pure helper ---
+        let mut ref_pc = Character::new(
+            "Sage".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        let before_intellect = ref_pc.stats.intellect.current;
+        let ref_result =
+            apply_consumable_effect(&mut ref_pc, ConsumableEffect::BoostAttribute(attr, boost));
+        let expected_delta = ref_result.attribute_delta;
+        let expected_current = ref_pc.stats.intellect.current;
+
+        // --- Via combat path ---
+        let mut content = ContentDatabase::new();
+        content
+            .items
+            .add_item(create_boost_attribute_potion(potion_id, attr, boost))
+            .unwrap();
+
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+        let mut pc = Character::new(
+            "Sage".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        // Ensure both start at the same current value.
+        assert_eq!(pc.stats.intellect.current, before_intellect);
+        pc.inventory.add_item(potion_id, 1).unwrap();
+        cs.add_player(pc);
+
+        let mut rng = rand::rng();
+        let res = execute_item_use_by_slot(
+            &mut cs,
+            CombatantId::Player(0),
+            0,
+            CombatantId::Player(0),
+            &content,
+            &mut rng,
+        )
+        .expect("BoostAttribute use in combat should succeed");
+
+        assert!(res.success);
+        assert_eq!(
+            expected_delta, boost as i16,
+            "attribute_delta sanity: helper must report the requested boost"
+        );
+        if let Some(Combatant::Player(pc_after)) = cs.get_combatant(&CombatantId::Player(0)) {
+            assert_eq!(
+                pc_after.stats.intellect.current, expected_current,
+                "combat-path intellect must match pure-helper baseline"
+            );
+        } else {
+            panic!("player should still be present after item use");
+        }
+    }
+
+    /// After Phase 1, `BoostResistance` applied via `execute_item_use_by_slot`
+    /// must produce the same resistance delta as a direct call to
+    /// `apply_consumable_effect`.  This verifies the shared helper produces
+    /// consistent results on both paths.
+    #[test]
+    fn test_combat_boost_resistance_via_shared_helper() {
+        use crate::domain::items::types::ResistanceType;
+
+        let potion_id: ItemId = 217;
+        let boost: i8 = 12;
+        let res_type = ResistanceType::Cold;
+
+        // --- Baseline via pure helper ---
+        let mut ref_pc = Character::new(
+            "Frost".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        let before_cold = ref_pc.resistances.cold.current;
+        let ref_result = apply_consumable_effect(
+            &mut ref_pc,
+            ConsumableEffect::BoostResistance(res_type, boost),
+        );
+        let expected_delta = ref_result.resistance_delta;
+        let expected_cold = ref_pc.resistances.cold.current;
+
+        // --- Via combat path ---
+        let mut content = ContentDatabase::new();
+        content
+            .items
+            .add_item(create_boost_resistance_potion(potion_id, res_type, boost))
+            .unwrap();
+
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+        let mut pc = Character::new(
+            "Frost".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        assert_eq!(pc.resistances.cold.current, before_cold);
+        pc.inventory.add_item(potion_id, 1).unwrap();
+        cs.add_player(pc);
+
+        let mut rng = rand::rng();
+        let res = execute_item_use_by_slot(
+            &mut cs,
+            CombatantId::Player(0),
+            0,
+            CombatantId::Player(0),
+            &content,
+            &mut rng,
+        )
+        .expect("BoostResistance use in combat should succeed");
+
+        assert!(res.success);
+        assert_eq!(
+            expected_delta, boost as i16,
+            "resistance_delta sanity: helper must report the requested boost"
+        );
+        if let Some(Combatant::Player(pc_after)) = cs.get_combatant(&CombatantId::Player(0)) {
+            assert_eq!(
+                pc_after.resistances.cold.current, expected_cold,
+                "combat-path cold resistance must match pure-helper baseline"
+            );
+        } else {
+            panic!("player should still be present after item use");
         }
     }
 
