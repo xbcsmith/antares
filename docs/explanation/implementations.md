@@ -1,5 +1,192 @@
 # Implementations
 
+## Phase 1A: Months and Years — Core Time System (Complete)
+
+### Overview
+
+Extended `GameTime` in `src/domain/types.rs` from a three-field `{ day, hour, minute }`
+struct to a full five-field calendar struct `{ year, month, day, hour, minute }`.
+Added three calendar constants, a `new_full()` constructor, a `total_days()` helper,
+and rollover logic in `advance_minutes()` and `advance_days()` so that time correctly
+propagates from minutes → hours → days → months → years.
+
+Updated `TimeCondition::AfterDay` and `TimeCondition::BeforeDay` in
+`src/domain/world/types.rs` to compare against `game_time.total_days()` rather than
+`game_time.day`, preserving the original "total elapsed days" semantics for existing
+RON data even though `day` now means "day within month (1–30)".
+
+### Phase 1A Deliverables Checklist
+
+- [x] Calendar constants added (`MONTHS_PER_YEAR`, `DAYS_PER_MONTH`, `DAYS_PER_YEAR`)
+- [x] `GameTime` extended with `year` and `month` fields (serde default = 1)
+- [x] `GameTime::new_full(year, month, day, hour, minute)` constructor
+- [x] `GameTime::total_days()` helper
+- [x] `advance_minutes()` rolls day → month → year
+- [x] `advance_days()` rolls day → month → year (via shared `apply_day_rollover()`)
+- [x] Updated doctests pass
+- [x] New rollover unit tests pass (14 new tests)
+- [x] `TimeCondition::AfterDay` / `BeforeDay` updated to use `total_days()`
+- [x] All quality gates pass (0 errors, 0 warnings, 3349 tests green)
+
+### What Was Built
+
+#### Calendar Constants — `src/domain/types.rs`
+
+Three `pub const` values placed above the `GameTime` struct establish the fixed-length
+calendar used throughout the game:
+
+```antares/src/domain/types.rs#L437-447
+/// Number of months in a game year.
+pub const MONTHS_PER_YEAR: u32 = 12;
+
+/// Number of days in a game month (all months are equal length).
+pub const DAYS_PER_MONTH: u32 = 30;
+
+/// Number of days in a game year (MONTHS_PER_YEAR × DAYS_PER_MONTH = 360).
+pub const DAYS_PER_YEAR: u32 = MONTHS_PER_YEAR * DAYS_PER_MONTH;
+```
+
+#### `GameTime` Struct Extension — `src/domain/types.rs`
+
+Two new fields were prepended to `GameTime` in declaration order (`year`, `month`, then
+the existing `day`, `hour`, `minute`). Both use `#[serde(default)]` pointing to private
+helper functions that return `1`, so any existing save file or RON data that lacks these
+fields deserializes correctly with `year = 1, month = 1`.
+
+```antares/src/domain/types.rs#L505-515
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct GameTime {
+    /// Current year (1-based)
+    #[serde(default = "default_year")]
+    pub year: u32,
+    /// Current month within the year (1-based, 1–12)
+    #[serde(default = "default_month")]
+    pub month: u32,
+    /// Current day within the month (1-based, 1–30)
+    pub day: u32,
+    /// Current hour (0-23)
+    pub hour: u8,
+    /// Current minute (0-59)
+    pub minute: u8,
+}
+```
+
+#### `GameTime::new()` — Backward-Compatible Constructor
+
+The existing three-argument constructor is unchanged in signature; it now sets
+`year = 1, month = 1` internally so all call sites continue to compile without
+modification.
+
+#### `GameTime::new_full()` — Five-Argument Constructor
+
+A new constructor accepts all five fields in calendar order:
+
+```antares/src/domain/types.rs#L573-581
+pub fn new_full(year: u32, month: u32, day: u32, hour: u8, minute: u8) -> Self {
+    Self {
+        year,
+        month,
+        day,
+        hour,
+        minute,
+    }
+}
+```
+
+#### `GameTime::total_days()` — Cumulative Day Counter
+
+Returns the total number of days elapsed since the beginning of the calendar
+(Year 1, Month 1, Day 1 = day 1). Used by `TimeCondition::AfterDay` and
+`BeforeDay` so their thresholds continue to mean "total elapsed days" even though
+`self.day` is now bounded to 1–30.
+
+```antares/src/domain/types.rs#L616-619
+pub fn total_days(&self) -> u32 {
+    (self.year - 1) * DAYS_PER_YEAR + (self.month - 1) * DAYS_PER_MONTH + self.day
+}
+```
+
+#### `apply_day_rollover()` — Shared Rollover Helper
+
+A private method called by both `advance_minutes()` and `advance_days()` after
+incrementing `self.day`:
+
+```antares/src/domain/types.rs#L679-688
+fn apply_day_rollover(&mut self) {
+    while self.day > DAYS_PER_MONTH {
+        self.day -= DAYS_PER_MONTH;
+        self.month += 1;
+    }
+    while self.month > MONTHS_PER_YEAR {
+        self.month -= MONTHS_PER_YEAR;
+        self.year += 1;
+    }
+}
+```
+
+#### `TimeCondition::AfterDay` / `BeforeDay` — `src/domain/world/types.rs`
+
+The two match arms that previously compared `game_time.day` now call
+`game_time.total_days()`:
+
+```antares/src/domain/world/types.rs#L1839-1848
+pub fn is_met(&self, game_time: &GameTime) -> bool {
+    match self {
+        TimeCondition::DuringPeriods(periods) => periods.contains(&game_time.time_of_day()),
+        TimeCondition::AfterDay(threshold) => game_time.total_days() > *threshold,
+        TimeCondition::BeforeDay(threshold) => game_time.total_days() < *threshold,
+        TimeCondition::BetweenHours { from, to } => {
+            game_time.hour >= *from && game_time.hour <= *to
+        }
+    }
+}
+```
+
+This preserves all existing RON data semantics: `AfterDay(5)` still fires when
+the party has travelled more than 5 cumulative days into the campaign, regardless
+of which month or year they are in.
+
+### Tests
+
+#### New tests in `src/domain/types.rs` — 14 new tests
+
+| Test name                                     | What it verifies                                     |
+| --------------------------------------------- | ---------------------------------------------------- |
+| `test_new_full_constructor`                   | All five fields set correctly                        |
+| `test_new_defaults_year_and_month`            | `new()` sets year=1, month=1                         |
+| `test_advance_minutes_day_to_month_rollover`  | Day 30 + 1 min → Month 2, Day 1                      |
+| `test_advance_minutes_month_to_year_rollover` | Month 12, Day 30, 23:00 + 120 min → Year 2           |
+| `test_advance_minutes_multi_year_rollover`    | +2 full years of minutes → Year 3                    |
+| `test_advance_days_with_month_rollover`       | +31 days from Day 1 → Month 2, Day 2                 |
+| `test_advance_days_exact_month_boundary`      | +30 days from Day 1 → Month 2, Day 1                 |
+| `test_advance_days_year_rollover`             | +360 days → Year 2, Month 1, Day 1                   |
+| `test_serde_default_year_month`               | RON `(day: 5, hour: 8, minute: 0)` → year=1, month=1 |
+| `test_total_days_basic`                       | Y1M1D1=1, Y1M2D10=40, Y2M1D1=361                     |
+| `test_total_days_adventure_span`              | M2D10 → M3D12 = 32 days elapsed                      |
+| `test_total_days_year_boundary`               | Y1M12D30=360, Y2M1D1=361                             |
+| `test_game_time_creation`                     | Extended: also asserts year=1, month=1               |
+
+All 8 pre-existing `GameTime` unit tests continue to pass unchanged. All 26
+`TimeCondition` tests continue to pass.
+
+### Architecture Compliance
+
+- Constants use named `pub const` values — no magic numbers.
+- `#[serde(default)]` used for backward compatibility — no breaking format change.
+- `day` field semantics changed from "total elapsed days" to "day within month";
+  all code that required cumulative days was updated to use `total_days()`.
+- `new()` constructor preserved — zero call-site changes required across the codebase.
+- RON format unchanged; existing data files deserialize correctly.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all          → clean (no output)
+cargo check              → Finished dev profile, 0 errors
+cargo clippy -D warnings → Finished dev profile, 0 warnings
+cargo nextest run        → 3349 passed, 8 skipped, 0 failed
+```
+
 ## Phase 5: Campaign Builder — Starting Date/Time (Complete)
 
 ### Overview

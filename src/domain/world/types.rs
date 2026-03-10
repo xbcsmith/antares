@@ -1761,8 +1761,8 @@ impl Default for AsyncMeshConfig {
 /// | Variant            | Fires when …                                            |
 /// |--------------------|---------------------------------------------------------|
 /// | `DuringPeriods`    | current [`TimeOfDay`] is in the supplied list           |
-/// | `AfterDay`         | `game_time.day > threshold`                             |
-/// | `BeforeDay`        | `game_time.day < threshold`                             |
+/// | `AfterDay`         | `game_time.total_days() > threshold`                    |
+/// | `BeforeDay`        | `game_time.total_days() < threshold`                    |
 /// | `BetweenHours`     | `from <= game_time.hour <= to` (24-hour, inclusive)     |
 ///
 /// # Examples
@@ -1838,8 +1838,8 @@ impl TimeCondition {
     pub fn is_met(&self, game_time: &GameTime) -> bool {
         match self {
             TimeCondition::DuringPeriods(periods) => periods.contains(&game_time.time_of_day()),
-            TimeCondition::AfterDay(threshold) => game_time.day > *threshold,
-            TimeCondition::BeforeDay(threshold) => game_time.day < *threshold,
+            TimeCondition::AfterDay(threshold) => game_time.total_days() > *threshold,
+            TimeCondition::BeforeDay(threshold) => game_time.total_days() < *threshold,
             TimeCondition::BetweenHours { from, to } => {
                 game_time.hour >= *from && game_time.hour <= *to
             }
