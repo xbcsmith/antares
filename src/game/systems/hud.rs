@@ -156,9 +156,9 @@ pub struct ClockRoot;
 #[derive(Component)]
 pub struct ClockTimeText;
 
-/// Marker component for the day counter text node (displays "Day N")
+/// Marker component for the calendar date text node (displays "Y{year} M{month} D{day}")
 #[derive(Component)]
-pub struct ClockDayText;
+pub struct ClockDateText;
 
 /// Marker component for character portrait image
 #[derive(Component)]
@@ -425,15 +425,15 @@ fn setup_hud(mut commands: Commands) {
                 ClockTimeText,
             ));
 
-            // Day line: "Day N"
+            // Date line: "Y1 M1 D1"
             parent.spawn((
-                Text::new("Day 1"),
+                Text::new("Y1 M1 D1"),
                 TextFont {
                     font_size: CLOCK_FONT_SIZE,
                     ..default()
                 },
                 TextColor(CLOCK_TEXT_COLOR),
-                ClockDayText,
+                ClockDateText,
             ));
         });
 }
@@ -548,7 +548,7 @@ fn update_compass(
     }
 }
 
-/// Updates the clock widget with the current in-game time and day.
+/// Updates the clock widget with the current in-game time and calendar date.
 ///
 /// Runs every frame (guarded by `not_in_combat`) so that any time
 /// advancement — a step, rest, map transition, or combat round — is
@@ -561,15 +561,18 @@ fn update_compass(
 /// # Arguments
 /// * `global_state` - Game state containing the `time` field
 /// * `time_query`   - Query for the [`ClockTimeText`] entity
-/// * `day_query`    - Query for the [`ClockDayText`] entity
+/// * `date_query`   - Query for the [`ClockDateText`] entity
 #[allow(clippy::type_complexity)]
 fn update_clock(
     global_state: Res<GlobalState>,
     mut time_query: Query<
         (&mut Text, &mut TextColor),
-        (With<ClockTimeText>, Without<ClockDayText>),
+        (With<ClockTimeText>, Without<ClockDateText>),
     >,
-    mut day_query: Query<(&mut Text, &mut TextColor), (With<ClockDayText>, Without<ClockTimeText>)>,
+    mut date_query: Query<
+        (&mut Text, &mut TextColor),
+        (With<ClockDateText>, Without<ClockTimeText>),
+    >,
 ) {
     let game_time = &global_state.0.time;
     let time_of_day = global_state.0.time_of_day();
@@ -579,8 +582,8 @@ fn update_clock(
         **text = format_clock_time(game_time.hour, game_time.minute);
         *color = TextColor(time_color);
     }
-    for (mut text, _color) in &mut day_query {
-        **text = format_clock_day(game_time.day);
+    for (mut text, _color) in &mut date_query {
+        **text = format_clock_date(game_time.year, game_time.month, game_time.day);
     }
 }
 
@@ -1209,24 +1212,32 @@ pub fn format_clock_time(hour: u8, minute: u8) -> String {
     format!("{:02}:{:02}", hour, minute)
 }
 
-/// Formats the in-game day counter as `"Day N"`.
+/// Formats the in-game calendar date as `"Y{year} M{month} D{day}"`.
+///
+/// The compact format is designed to fit within the fixed-width clock panel
+/// that sits below the compass widget.  It shows all three calendar fields
+/// in a predictable left-to-right order.
 ///
 /// # Arguments
-/// * `day` - Current day (1-based)
+/// * `year`  - Current year (1-based)
+/// * `month` - Current month within the year (1-based, 1–12)
+/// * `day`   - Current day within the month (1-based, 1–30)
 ///
 /// # Returns
-/// A `String` in `"Day N"` format.
+/// A `String` in `"Y{year} M{month} D{day}"` format.
 ///
 /// # Examples
 ///
 /// ```
-/// use antares::game::systems::hud::format_clock_day;
+/// use antares::game::systems::hud::format_clock_date;
 ///
-/// assert_eq!(format_clock_day(1),  "Day 1");
-/// assert_eq!(format_clock_day(42), "Day 42");
+/// assert_eq!(format_clock_date(1, 1, 1),   "Y1 M1 D1");
+/// assert_eq!(format_clock_date(4, 12, 30), "Y4 M12 D30");
+/// assert_eq!(format_clock_date(1, 6, 15),  "Y1 M6 D15");
+/// assert_eq!(format_clock_date(2, 1, 1),   "Y2 M1 D1");
 /// ```
-pub fn format_clock_day(day: u32) -> String {
-    format!("Day {}", day)
+pub fn format_clock_date(year: u32, month: u32, day: u32) -> String {
+    format!("Y{} M{} D{}", year, month, day)
 }
 
 /// Returns the appropriate clock text color for a given [`TimeOfDay`] period.
@@ -2180,39 +2191,45 @@ mod clock_tests {
         }
     }
 
-    // ── format_clock_day ─────────────────────────────────────────────────────
+    // ── format_clock_date ────────────────────────────────────────────────────
 
-    /// day=1 → "Day 1"  (first day of the game)
+    /// (1, 1, 1) → "Y1 M1 D1"  (first day of the first month of year 1)
     #[test]
-    fn test_clock_day_display_first_day() {
-        assert_eq!(format_clock_day(1), "Day 1");
+    fn test_format_clock_date_defaults() {
+        assert_eq!(format_clock_date(1, 1, 1), "Y1 M1 D1");
     }
 
-    /// day=42 → "Day 42"  (arbitrary multi-digit day)
+    /// (4, 12, 30) → "Y4 M12 D30"  (large multi-digit values)
     #[test]
-    fn test_clock_day_display_forty_two() {
-        assert_eq!(format_clock_day(42), "Day 42");
+    fn test_format_clock_date_large_values() {
+        assert_eq!(format_clock_date(4, 12, 30), "Y4 M12 D30");
     }
 
-    /// day=365 → "Day 365"  (one year into the game)
+    /// (1, 6, 15) → "Y1 M6 D15"  (mid-year, mid-month)
     #[test]
-    fn test_clock_day_display_year() {
-        assert_eq!(format_clock_day(365), "Day 365");
+    fn test_clock_date_display_mid_year() {
+        assert_eq!(format_clock_date(1, 6, 15), "Y1 M6 D15");
     }
 
-    /// day=0 → "Day 0"  (edge-case — technically invalid but must not panic)
+    /// (2, 1, 1) → "Y2 M1 D1"  (start of year 2)
     #[test]
-    fn test_clock_day_display_zero() {
-        assert_eq!(format_clock_day(0), "Day 0");
+    fn test_clock_date_display_year_two() {
+        assert_eq!(format_clock_date(2, 1, 1), "Y2 M1 D1");
     }
 
-    /// day=u32::MAX must not panic
+    /// (1, 12, 30) → "Y1 M12 D30"  (last day of year 1)
     #[test]
-    fn test_clock_day_display_max() {
-        let result = format_clock_day(u32::MAX);
+    fn test_clock_date_display_last_day_of_year() {
+        assert_eq!(format_clock_date(1, 12, 30), "Y1 M12 D30");
+    }
+
+    /// (u32::MAX, u32::MAX, u32::MAX) must not panic
+    #[test]
+    fn test_clock_date_display_max() {
+        let result = format_clock_date(u32::MAX, u32::MAX, u32::MAX);
         assert!(
-            result.starts_with("Day "),
-            "format_clock_day(u32::MAX) should start with 'Day '"
+            result.starts_with("Y"),
+            "format_clock_date(MAX,MAX,MAX) should start with 'Y', got '{result}'"
         );
     }
 
@@ -2365,7 +2382,7 @@ mod clock_tests {
     // ── Bevy integration: clock widget spawned and updated ───────────────────
 
     /// After startup the clock widget must exist in the world with initial
-    /// placeholder text ("00:00" for time, "Day 1" for day).
+    /// placeholder text ("00:00" for time, "Y1 M1 D1" for date).
     #[test]
     fn test_clock_widget_spawned_on_startup() {
         use crate::application::GameState;
@@ -2386,10 +2403,10 @@ mod clock_tests {
         let time_count = time_q.iter(world).count();
         assert_eq!(time_count, 1, "Expected exactly one ClockTimeText entity");
 
-        // ClockDayText entity must exist
-        let mut day_q = world.query_filtered::<&Text, With<ClockDayText>>();
-        let day_count = day_q.iter(world).count();
-        assert_eq!(day_count, 1, "Expected exactly one ClockDayText entity");
+        // ClockDateText entity must exist
+        let mut date_q = world.query_filtered::<&Text, With<ClockDateText>>();
+        let date_count = date_q.iter(world).count();
+        assert_eq!(date_count, 1, "Expected exactly one ClockDateText entity");
 
         // ClockRoot entity must exist
         let mut root_q = world.query_filtered::<Entity, With<ClockRoot>>();
@@ -2398,7 +2415,7 @@ mod clock_tests {
     }
 
     /// After startup + one update, the clock text must reflect the default
-    /// GameState time (Day 1, 06:00 — the canonical starting time).
+    /// GameState time (Year 1, Month 1, Day 1, 06:00 — the canonical starting time).
     #[test]
     fn test_clock_widget_shows_default_game_time() {
         use crate::application::GameState;
@@ -2425,14 +2442,14 @@ mod clock_tests {
             time_text
         );
 
-        // Day text should say "Day 1"
-        let mut day_q = world.query_filtered::<&Text, With<ClockDayText>>();
-        let day_text_ref = day_q.single(world).unwrap();
-        let day_text: &str = day_text_ref;
+        // Date text should say "Y1 M1 D1"
+        let mut date_q = world.query_filtered::<&Text, With<ClockDateText>>();
+        let date_text_ref = date_q.single(world).unwrap();
+        let date_text: &str = date_text_ref;
         assert!(
-            day_text.contains("Day 1"),
-            "ClockDayText should contain 'Day 1' at default start, got '{}'",
-            day_text
+            date_text.contains("Y1 M1 D1"),
+            "ClockDateText should contain 'Y1 M1 D1' at default start, got '{}'",
+            date_text
         );
     }
 
@@ -2466,13 +2483,14 @@ mod clock_tests {
             time_text
         );
 
-        let mut day_q = world.query_filtered::<&Text, With<ClockDayText>>();
-        let day_text_ref = day_q.single(world).unwrap();
-        let day_text: &str = day_text_ref;
+        // After 18h from Day 1, 06:00 → Day 2, 00:00 — still Year 1, Month 1
+        let mut date_q = world.query_filtered::<&Text, With<ClockDateText>>();
+        let date_text_ref = date_q.single(world).unwrap();
+        let date_text: &str = date_text_ref;
         assert!(
-            day_text.contains("Day 2"),
-            "ClockDayText should be 'Day 2' after rolling over midnight, got '{}'",
-            day_text
+            date_text.contains("Y1 M1 D2"),
+            "ClockDateText should contain 'Y1 M1 D2' after rolling over midnight, got '{}'",
+            date_text
         );
     }
 }

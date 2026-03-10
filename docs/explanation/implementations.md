@@ -1,5 +1,140 @@
 # Implementations
 
+## Phase 3C: Months and Years — HUD Clock Update (Complete)
+
+### Overview
+
+Updated `src/game/systems/hud.rs` to display a full calendar date on the HUD clock
+widget. The existing single-field `"Day N"` display is replaced with a three-field
+`"Y{year} M{month} D{day}"` compact format that fits the fixed-width clock panel.
+
+Three coordinated changes were made:
+
+1. **`ClockDayText` → `ClockDateText`** — marker component renamed throughout
+   (struct definition, spawn site, `update_clock()` queries, and all tests).
+2. **`format_clock_day(day)` → `format_clock_date(year, month, day)`** — pure helper
+   function replaced; returns `"Y{year} M{month} D{day}"`.
+3. **`update_clock()`** — updated to call `format_clock_date` with all three calendar
+   fields from `game_time`, and to use the renamed `ClockDateText` query.
+
+All existing clock tests were updated in-place (no tests deleted); two plan-specified
+new tests (`test_format_clock_date_defaults` and `test_format_clock_date_large_values`)
+plus three additional tests were added for full coverage.
+
+### Phase 3C Deliverables Checklist
+
+- [x] `ClockDayText` → `ClockDateText` rename (struct, spawn, queries, tests)
+- [x] `format_clock_date(year, month, day)` implemented (replaces `format_clock_day`)
+- [x] `update_clock()` passes `game_time.year`, `game_time.month`, `game_time.day`
+- [x] Initial spawn text updated from `"Day 1"` to `"Y1 M1 D1"`
+- [x] All HUD tests updated to `ClockDateText` and new format strings
+- [x] All quality gates pass (0 errors, 0 warnings, 3371 tests green)
+
+### What Was Built
+
+#### `ClockDateText` Marker Component — `src/game/systems/hud.rs`
+
+```antares/src/game/systems/hud.rs#L158-161
+/// Marker component for the calendar date text node (displays "Y{year} M{month} D{day}")
+#[derive(Component)]
+pub struct ClockDateText;
+```
+
+The rename cascaded to every reference: the `setup_hud` spawn site, both `Without<>`
+filter type parameters in `update_clock()`, and all `clock_tests` queries.
+
+#### `format_clock_date()` — Pure Helper
+
+```antares/src/game/systems/hud.rs#L1212-1245
+pub fn format_clock_date(year: u32, month: u32, day: u32) -> String {
+    format!("Y{} M{} D{}", year, month, day)
+}
+```
+
+Replaces the removed `format_clock_day(day: u32) -> String`. The compact
+`"Y{year} M{month} D{day}"` format keeps the clock panel narrow (same width as
+the compass widget above it) while conveying all three calendar fields.
+
+#### `setup_hud` Spawn Site Update
+
+The initial placeholder text for the date node changed from `"Day 1"` to `"Y1 M1 D1"`,
+and the marker changed from `ClockDayText` to `ClockDateText`:
+
+```antares/src/game/systems/hud.rs#L427-436
+            // Date line: "Y1 M1 D1"
+            parent.spawn((
+                Text::new("Y1 M1 D1"),
+                TextFont {
+                    font_size: CLOCK_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(CLOCK_TEXT_COLOR),
+                ClockDateText,
+            ));
+```
+
+#### `update_clock()` System Update
+
+```antares/src/game/systems/hud.rs#L580-590
+    for (mut text, _color) in &mut date_query {
+        **text = format_clock_date(game_time.year, game_time.month, game_time.day);
+    }
+```
+
+The system now reads all three calendar fields (`year`, `month`, `day`) from
+`game_time` and passes them to `format_clock_date`. The day-query variable was
+renamed `date_query` for clarity.
+
+### Tests
+
+#### Updated tests in `mod clock_tests`
+
+All five tests that previously referenced `format_clock_day` or `ClockDayText` were
+updated in-place:
+
+| Old test name                      | New test name                         | Change                                        |
+| ---------------------------------- | ------------------------------------- | --------------------------------------------- |
+| `test_clock_day_display_first_day` | `test_format_clock_date_defaults`     | `format_clock_date(1,1,1)` → `"Y1 M1 D1"`     |
+| `test_clock_day_display_forty_two` | `test_format_clock_date_large_values` | `format_clock_date(4,12,30)` → `"Y4 M12 D30"` |
+| `test_clock_day_display_year`      | `test_clock_date_display_mid_year`    | `format_clock_date(1,6,15)` → `"Y1 M6 D15"`   |
+| `test_clock_day_display_zero`      | `test_clock_date_display_year_two`    | `format_clock_date(2,1,1)` → `"Y2 M1 D1"`     |
+| `test_clock_day_display_max`       | `test_clock_date_display_max`         | panic-free with all three `u32::MAX`          |
+
+One additional test was added:
+
+| New test name                              | What it verifies             |
+| ------------------------------------------ | ---------------------------- |
+| `test_clock_date_display_last_day_of_year` | `(1,12,30)` → `"Y1 M12 D30"` |
+
+#### Updated Bevy ECS integration tests
+
+Three existing integration tests in `mod clock_tests` were updated:
+
+| Test name                                      | Change                                                     |
+| ---------------------------------------------- | ---------------------------------------------------------- |
+| `test_clock_widget_spawned_on_startup`         | Query uses `ClockDateText`; asserts count = 1              |
+| `test_clock_widget_shows_default_game_time`    | Query uses `ClockDateText`; asserts `"Y1 M1 D1"` present   |
+| `test_clock_widget_updates_after_time_advance` | Query uses `ClockDateText`; asserts `"Y1 M1 D2"` after 18h |
+
+### Architecture Compliance
+
+- `format_clock_date` is a pure function with no side effects — identical pattern
+  to `format_clock_time` and the removed `format_clock_day`.
+- The `"Y{year} M{month} D{day}"` format is compact and unambiguous, fitting the
+  fixed `CLOCK_WIDTH` panel that matches the compass widget width.
+- No constants were hardcoded; all clock panel sizing uses the existing
+  `CLOCK_WIDTH`, `CLOCK_FONT_SIZE`, and `CLOCK_PADDING` constants.
+- `ClockDateText` follows the existing naming convention for HUD marker components.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all          → clean (no output)
+cargo check              → Finished dev profile, 0 errors
+cargo clippy -D warnings → Finished dev profile, 0 warnings
+cargo nextest run        → 3371 passed, 8 skipped, 0 failed
+```
+
 ## Phase 2B: Months and Years — TimeCondition Variants (Complete)
 
 ### Overview
