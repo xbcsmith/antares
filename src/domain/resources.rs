@@ -679,9 +679,10 @@ pub fn rest_party_hour(
             .min(character.sp.base);
         character.sp.current = character.sp.current.max(sp_target);
 
-        // Tick minute-based conditions for one hour (60 minutes).
+        // Tick minute-based conditions and timed stat boosts for one hour (60 minutes).
         for _ in 0..60 {
             character.tick_conditions_minute();
+            character.tick_timed_stat_boosts_minute();
         }
     }
 

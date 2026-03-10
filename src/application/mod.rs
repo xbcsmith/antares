@@ -1495,9 +1495,13 @@ impl GameState {
         templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
     ) {
         self.time.advance_minutes(minutes);
-        // Tick active spell durations
+        // Tick active spell durations and per-character timed stat boosts
         for _ in 0..minutes {
             self.active_spells.tick();
+            // Phase 2: tick per-character timed stat boosts
+            for member in &mut self.party.members {
+                member.tick_timed_stat_boosts_minute();
+            }
         }
         // Trigger daily restock and magic-slot rotation when templates are available.
         if let Some(tmpl) = templates {
@@ -1739,6 +1743,91 @@ mod tests {
         state.advance_time(5, None);
         assert_eq!(state.active_spells.light, 5);
         assert_eq!(state.time.minute, 5);
+    }
+
+    // ===== Phase 2: TimedStatBoost wiring tests =====
+
+    #[test]
+    fn test_advance_time_ticks_timed_stat_boosts() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::items::types::AttributeType;
+
+        let mut state = GameState::new();
+
+        // Add a party member with a timed Might boost of 5 minutes
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let base_might = hero.stats.might.current;
+        hero.apply_timed_stat_boost(AttributeType::Might, 8, Some(5));
+        assert_eq!(hero.stats.might.current, base_might + 8);
+        state.party.add_member(hero).unwrap();
+
+        // Advance 5 minutes — boost expires exactly on the 5th tick
+        state.advance_time(5, None);
+
+        assert_eq!(
+            state.party.members[0].stats.might.current, base_might,
+            "Might must be restored after advancing exactly 5 minutes"
+        );
+        assert!(
+            state.party.members[0].timed_stat_boosts.is_empty(),
+            "expired boost must be removed from the list"
+        );
+    }
+
+    #[test]
+    fn test_advance_time_ticks_both_spells_and_boosts() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::items::types::AttributeType;
+
+        let mut state = GameState::new();
+        state.active_spells.light = 10;
+
+        let mut hero = Character::new(
+            "Mage".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        let base_speed = hero.stats.speed.current;
+        hero.apply_timed_stat_boost(AttributeType::Speed, 4, Some(10));
+        state.party.add_member(hero).unwrap();
+
+        // Advance 7 minutes — both counters should tick together
+        state.advance_time(7, None);
+
+        assert_eq!(
+            state.active_spells.light, 3,
+            "active_spells.light must have decremented by 7"
+        );
+        assert_eq!(
+            state.party.members[0].stats.speed.current,
+            base_speed + 4,
+            "Speed boost must still be active after 7 of 10 minutes"
+        );
+        assert_eq!(
+            state.party.members[0].timed_stat_boosts[0].minutes_remaining, 3,
+            "boost must have 3 minutes remaining"
+        );
+
+        // Advance 3 more minutes — boost expires
+        state.advance_time(3, None);
+
+        assert_eq!(
+            state.active_spells.light, 0,
+            "active_spells.light must reach 0 after 10 total minutes"
+        );
+        assert_eq!(
+            state.party.members[0].stats.speed.current, base_speed,
+            "Speed must be restored after 10 total minutes"
+        );
+        assert!(state.party.members[0].timed_stat_boosts.is_empty());
     }
 
     #[test]

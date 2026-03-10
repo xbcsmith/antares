@@ -1,5 +1,158 @@
 # Implementations
 
+## Consumable Duration Effects — Phase 2: Add `TimedStatBoost` to `Character` and Wire Expiry (Complete)
+
+### Overview
+
+Phase 2 introduces a reversible per-character timed boost structure on
+`Character` so that `BoostAttribute` consumables with
+`duration_minutes: Some(n)` can be applied, tracked, and automatically
+reversed. Both `GameState::advance_time` and `rest_party_hour` are updated to
+tick per-character boosts in lockstep with `active_spells.tick()`. Existing
+save files without the new field load without error via `#[serde(default)]`.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `TimedStatBoost` struct added to `src/domain/character.rs` with doc
+      comment and doctest.
+- [x] `Character.timed_stat_boosts: Vec<TimedStatBoost>` field added with
+      `#[serde(default)]`.
+- [x] `Character::apply_timed_stat_boost` — applies delta to `current` and
+      stores entry for reversal; `None`/`Some(0)` durations are no-ops.
+- [x] `Character::tick_timed_stat_boosts_minute` — decrements counters,
+      reverses expired boosts by subtracting the original delta.
+- [x] `Character::apply_attribute_delta` — private, centralised
+      `AttributeType`→field mapping used by apply and reversal.
+- [x] `Character::new` initialises `timed_stat_boosts: Vec::new()`.
+- [x] `GameState::advance_time` ticks `tick_timed_stat_boosts_minute` for
+      every party member inside the per-minute loop alongside `active_spells.tick()`.
+- [x] `rest_party_hour` ticks `tick_timed_stat_boosts_minute` inside its
+      existing 60-iteration condition loop.
+- [x] `Character` struct literal in `character_definition.rs` updated with
+      `timed_stat_boosts: Vec::new()`.
+- [x] `Character` struct literal in `equipment_validation.rs` test updated
+      with `timed_stat_boosts: vec![]`.
+- [x] All 10 Phase 2 tests pass.
+- [x] All four quality gates pass with zero errors and zero warnings.
+
+### Files Changed
+
+| File                                       | Change                                                                                                                                                                               |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/domain/character.rs`                  | Added `TimedStatBoost` struct; `timed_stat_boosts` field on `Character`; `apply_timed_stat_boost`, `tick_timed_stat_boosts_minute`, `apply_attribute_delta` methods; 8 Phase 2 tests |
+| `src/domain/character_definition.rs`       | Added `timed_stat_boosts: Vec::new()` to `Character` struct literal in `instantiate`                                                                                                 |
+| `src/domain/items/equipment_validation.rs` | Added `timed_stat_boosts: vec![]` to `Character` struct literal in alignment-restriction test                                                                                        |
+| `src/application/mod.rs`                   | Extended `advance_time` per-minute loop to call `tick_timed_stat_boosts_minute` on every party member; added 2 Phase 2 tests                                                         |
+| `src/domain/resources.rs`                  | Extended `rest_party_hour` 60-tick condition loop to also call `tick_timed_stat_boosts_minute`                                                                                       |
+
+### Architecture Details
+
+#### `TimedStatBoost` struct
+
+```src/domain/character.rs#L931-963
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimedStatBoost {
+    /// Which attribute this boost modifies.
+    pub attribute: crate::domain::items::types::AttributeType,
+    /// Signed delta applied to `current` (positive = boost, negative = penalty).
+    pub amount: i8,
+    /// Minutes remaining before the boost expires and is reversed.
+    pub minutes_remaining: u16,
+}
+```
+
+#### `apply_timed_stat_boost` contract
+
+- Calls `normalize_duration` — `None` and `Some(0)` are both treated as
+  permanent: the function returns early with no mutation and no stored entry.
+- For `Some(n)` where `n > 0`: applies `amount` to `stats.<attr>.current`
+  via `apply_attribute_delta`, then pushes a `TimedStatBoost` entry.
+- `base` values are **never** mutated; only `current` is modified.
+
+#### `tick_timed_stat_boosts_minute` contract
+
+- Called once per in-game minute from both `advance_time` and `rest_party_hour`.
+- Uses `retain_mut` to decrement `minutes_remaining` by 1 (via
+  `saturating_sub`) and collect expired entries.
+- Expired entries (those reaching `0`) are removed and reversed: the original
+  `amount` is negated and applied via `apply_attribute_delta`.
+
+#### `apply_attribute_delta` — single authoritative mapping
+
+All seven `AttributeType` variants map to their `Stats` field:
+
+| Variant       | Field                    |
+| ------------- | ------------------------ |
+| `Might`       | `self.stats.might`       |
+| `Intellect`   | `self.stats.intellect`   |
+| `Personality` | `self.stats.personality` |
+| `Endurance`   | `self.stats.endurance`   |
+| `Speed`       | `self.stats.speed`       |
+| `Accuracy`    | `self.stats.accuracy`    |
+| `Luck`        | `self.stats.luck`        |
+
+#### Wiring in `GameState::advance_time`
+
+```src/application/mod.rs#L1495-1510
+for _ in 0..minutes {
+    self.active_spells.tick();
+    // Phase 2: tick per-character timed stat boosts
+    for member in &mut self.party.members {
+        member.tick_timed_stat_boosts_minute();
+    }
+}
+```
+
+#### Wiring in `rest_party_hour`
+
+```src/domain/resources.rs#L682-688
+// Tick minute-based conditions and timed stat boosts for one hour (60 minutes).
+for _ in 0..60 {
+    character.tick_conditions_minute();
+    character.tick_timed_stat_boosts_minute();
+}
+```
+
+#### Backward compatibility
+
+`#[serde(default)]` on `timed_stat_boosts` means all existing save files
+(which do not contain the field) deserialise cleanly — serde uses
+`Vec::default()` (an empty `Vec`) when the field is absent.
+
+### Tests Added
+
+**`src/domain/character.rs` — 8 tests:**
+
+| Test                                                      | What it verifies                                                                                 |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `test_timed_stat_boosts_defaults_empty_on_new_character`  | `Character::new` produces `timed_stat_boosts == []`                                              |
+| `test_apply_timed_stat_boost_modifies_current_not_base`   | `current` increases by `amount`; `base` unchanged; entry stored with correct `minutes_remaining` |
+| `test_apply_timed_stat_boost_none_duration_is_noop`       | `None` duration leaves `current` and `timed_stat_boosts` unchanged                               |
+| `test_apply_timed_stat_boost_zero_duration_is_noop`       | `Some(0)` duration leaves `current` and `timed_stat_boosts` unchanged                            |
+| `test_tick_timed_stat_boosts_decrements_counter`          | Single tick decrements `minutes_remaining` by 1; stat unchanged                                  |
+| `test_tick_timed_stat_boosts_reverses_on_expiry`          | After N ticks (N == initial duration), stat restored and list empty                              |
+| `test_tick_timed_stat_boosts_multiple_boosts_independent` | Two boosts with different durations expire independently at correct times                        |
+| `test_timed_stat_boost_serde_default_deserializes`        | Character RON without `timed_stat_boosts` deserialises with `timed_stat_boosts == []`            |
+
+**`src/application/mod.rs` — 2 tests:**
+
+| Test                                             | What it verifies                                                                                         |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `test_advance_time_ticks_timed_stat_boosts`      | `advance_time(N)` expires a boost with `minutes_remaining = N` and restores the stat                     |
+| `test_advance_time_ticks_both_spells_and_boosts` | `active_spells.light` and a member's timed boost both decrement together in the same `advance_time` call |
+
+### Quality Gate Results
+
+```/dev/null/quality_gates.txt#L1-6
+cargo fmt --all                                    → OK (no output)
+cargo check --all-targets --all-features           → Finished (0 errors)
+cargo clippy --all-targets --all-features          → Finished (0 warnings)
+cargo nextest run --all-features                   → 3431 passed, 8 skipped
+  (includes 10 new Phase 2 tests — all PASS)
+```
+
+---
+
 ## Consumable Duration Effects — Phase 1: Extend `ConsumableData` and Align Core Contracts (Complete)
 
 ### Overview
@@ -172,7 +325,7 @@ cross-mode regression tests to `src/domain/combat/item_usage.rs`.
 - [x] `src/domain/combat/item_usage.rs` module doc updated to note that effect
       application is delegated to `apply_consumable_effect` in
       `src/domain/items/consumable_usage.rs`; added `## Effect Application —
-  Shared Helper` and `## Design Notes` sections.
+Shared Helper` and `## Design Notes` sections.
 - [x] `execute_item_use_by_slot` doc comment updated with numbered step list
       explicitly calling out the delegation; `# Arguments` section rewritten
       with plain 2-space continuation (fixes `doc_overindented_list_items`
