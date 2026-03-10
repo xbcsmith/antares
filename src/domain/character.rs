@@ -1259,8 +1259,52 @@ impl Character {
 
     /// Applies a signed delta to the `current` value of the named attribute.
     ///
-    /// This is the single authoritative mapping from `AttributeType` to a
-    /// `Character` field. Used by timed-boost apply and reversal.
+    /// This is the single authoritative mapping from [`crate::domain::items::types::AttributeType`]
+    /// to a [`Character`] stats field.  It is used by both
+    /// [`Character::apply_timed_stat_boost`] (to apply the initial boost) and
+    /// [`Character::tick_timed_stat_boosts_minute`] (to reverse expired boosts).
+    ///
+    /// Modification is performed via [`crate::domain::character::AttributePair::modify`],
+    /// which saturates at the `u8` type boundary — a delta that would push
+    /// `current` below 0 clamps to 0; a delta that would exceed 255 clamps to
+    /// 255.
+    ///
+    /// # Arguments
+    ///
+    /// * `attr`  — which attribute to modify (maps to the corresponding
+    ///   `self.stats.<field>` member).
+    /// * `delta` — signed amount to add to `current` (positive = increase,
+    ///   negative = decrease / reversal).
+    ///
+    /// # Returns
+    ///
+    /// `()` — the character is mutated in place.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    /// use antares::domain::items::types::AttributeType;
+    ///
+    /// let mut hero = Character::new(
+    ///     "Hero".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// let base = hero.stats.might.current;
+    ///
+    /// // Apply a +5 boost to Might.
+    /// hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(10));
+    /// assert_eq!(hero.stats.might.current, base + 5);
+    ///
+    /// // Tick 10 minutes — the reversal delta of -5 is applied via apply_attribute_delta.
+    /// for _ in 0..10 {
+    ///     hero.tick_timed_stat_boosts_minute();
+    /// }
+    /// assert_eq!(hero.stats.might.current, base);
+    /// ```
     pub(crate) fn apply_attribute_delta(
         &mut self,
         attr: crate::domain::items::types::AttributeType,

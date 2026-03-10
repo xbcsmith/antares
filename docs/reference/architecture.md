@@ -888,11 +888,20 @@ pub enum BonusAttribute {
 /// Consumable effect variants (parameterized)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConsumableEffect {
-    HealHp(u16),                         // Restore N hit points
-    RestoreSp(u16),                      // Restore N spell points
-    CureCondition(u8),                   // Remove condition by bit flag
-    BoostAttribute(AttributeType, i8),   // Temporary stat modifier
+    HealHp(u16),                           // Restore N hit points
+    RestoreSp(u16),                        // Restore N spell points
+    CureCondition(u8),                     // Remove condition by bit flag
+    BoostAttribute(AttributeType, i8),     // Stat modifier; timed if duration_minutes is Some
+    BoostResistance(ResistanceType, i8),   // Resistance modifier; timed (exploration) or permanent (combat)
+    IsFood(u8),                            // Consumed by rest system; ration_value = characters fed
 }
+
+// Timed vs. permanent behaviour is controlled by ConsumableData::duration_minutes:
+//   None or Some(0)  → permanent (directly mutates character stats / resistances)
+//   Some(n)          → timed:
+//     BoostAttribute  → registers a TimedStatBoost; reversed after n in-game minutes
+//     BoostResistance → writes n (clamped to u8) into ActiveSpells.<field> during
+//                       exploration; expires via GameState::advance_time ticks
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttributeType {

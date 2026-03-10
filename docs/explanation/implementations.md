@@ -1,5 +1,193 @@
 # Implementations
 
+## Consumable Duration Effects — Phase 6: End-to-End Integration Tests and Documentation (Complete)
+
+### Overview
+
+Phase 6 hardens the complete consumable duration effects feature with five
+cross-layer integration tests and updates all affected documentation. The tests
+exercise the full path from effect application through in-game time advancement
+to verified expiry, covering both `ActiveSpells` resistance potions and
+per-character `TimedStatBoost` attribute potions. Documentation updates ensure
+every public symbol in the timed-consumable stack has `///` doc comments with
+`# Arguments`, `# Returns`, and runnable `# Examples` doctests, and that
+`docs/reference/architecture.md` accurately reflects all implemented
+`ConsumableEffect` variants.
+
+### Phase 6 Deliverables Checklist
+
+- [x] All 5 end-to-end integration tests in `src/application/mod.rs` pass:
+  - [x] `test_timed_resistance_potion_expires_after_advance_time`
+  - [x] `test_timed_attribute_potion_expires_after_advance_time`
+  - [x] `test_timed_potion_expires_during_rest`
+  - [x] `test_permanent_attribute_potion_survives_advance_time`
+  - [x] `test_second_resistance_potion_overwrites_duration`
+- [x] All `pub` symbols in `src/domain/items/consumable_usage.rs` have `///`
+      doc comments and doctests (module-level doc expanded with timed vs.
+      permanent table and two-entry-point description).
+- [x] `TimedStatBoost`, `apply_timed_stat_boost`, and
+      `tick_timed_stat_boosts_minute` have `///` doc comments (already present
+      from Phase 2; verified intact).
+- [x] `apply_attribute_delta` expanded with `# Arguments`, `# Returns`, and
+      `# Examples` doc comment.
+- [x] `ActiveSpells` struct doc comment expanded to describe
+      `effective_resistance`, `ACTIVE_PROTECTION_BONUS`, timed-resistance
+      routing, and overwrite semantics — with a runnable doctest.
+- [x] `GameState::advance_time` doc comment updated with a `# Summary` section
+      explicitly enumerating all three per-minute side effects (spell tick,
+      stat-boost tick, restock) plus a timed-boost expiry doctest.
+- [x] `docs/reference/architecture.md` `ConsumableEffect` enum updated to
+      include `BoostResistance` and `IsFood` variants with prose notes on
+      timed vs. permanent behaviour.
+- [x] `docs/explanation/implementations.md` (this file) includes a complete
+      Phase 6 summary section.
+- [x] All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy
+    -D warnings`, `cargo nextest run` — **3453/3453 tests pass**.
+
+### Files Changed
+
+| File                                   | Change                                                                                                                   |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `src/application/mod.rs`               | 5 new integration tests; `ActiveSpells` struct doc expanded; `advance_time` doc expanded with summary and second doctest |
+| `src/domain/items/consumable_usage.rs` | Module-level doc expanded with two-entry-point table and timed-vs-permanent matrix                                       |
+| `src/domain/character.rs`              | `apply_attribute_delta` doc expanded with `# Arguments`, `# Returns`, `# Examples`                                       |
+| `docs/reference/architecture.md`       | `ConsumableEffect` enum updated to include `BoostResistance`, `IsFood`, and timed-vs-permanent prose                     |
+| `docs/explanation/implementations.md`  | This Phase 6 summary section                                                                                             |
+
+### Architecture Details
+
+#### Integration test design
+
+The five tests are placed in `src/application/mod.rs` `mod tests` under the
+section banner `// ===== Phase 6: End-to-end timed potion / active-spell expiry
+tests =====`. Each test exercises a distinct scenario from the end-to-end expiry
+lifecycle:
+
+**1. `test_timed_resistance_potion_expires_after_advance_time`**
+
+`apply_consumable_effect_exploration` writes a `u8` duration directly onto the
+corresponding `ActiveSpells` field (e.g. `fire_protection = 60`). Each call to
+`advance_time(n, None)` calls `ActiveSpells::tick` once per minute, decrementing
+each non-zero field by 1 (saturating). After exactly 60 ticks the field is 0
+and `effective_resistance` returns 0. The test writes the field directly —
+identical to what the exploration handler writes — to avoid needing a full
+`GameState` with content loaded.
+
+**2. `test_timed_attribute_potion_expires_after_advance_time`**
+
+`apply_timed_stat_boost(attr, amount, Some(minutes))` appends a `TimedStatBoost`
+to `character.timed_stat_boosts` and immediately raises `stats.<attr>.current`.
+`GameState::advance_time` calls `tick_timed_stat_boosts_minute` once per elapsed
+minute. When `minutes_remaining` reaches 0, the entry is removed and
+`apply_attribute_delta(attr, -amount)` restores the stat. After exactly 30 ticks
+the list is empty and `stats.might.current` equals the pre-boost baseline.
+
+**3. `test_timed_potion_expires_during_rest`**
+
+`rest_party(REST_DURATION_HOURS, …)` internally calls `advance_time(hours * 60,
+…)`, which delivers 720 tick calls for `REST_DURATION_HOURS = 12`. This is
+more than enough to drain any effect shorter than 12 hours. The test applies a
+60-minute Speed boost and a 60-minute `cold_protection` potion, then calls a
+full rest, asserting both expire cleanly.
+
+**4. `test_permanent_attribute_potion_survives_advance_time`**
+
+When `ConsumableData::duration_minutes` is `None`, `normalize_duration` returns
+`None` and `apply_consumable_effect` takes the permanent branch, calling
+`apply_attribute_delta` directly. No entry is appended to `timed_stat_boosts`,
+so `tick_timed_stat_boosts_minute` has nothing to reverse.
+`advance_time(999, None)` therefore leaves the stat untouched and
+`timed_stat_boosts` remains empty throughout.
+
+**5. `test_second_resistance_potion_overwrites_duration`**
+
+`apply_consumable_effect_exploration` uses direct field assignment
+(`active_spells.fire_protection = clamped`) rather than addition. This is the
+canonical "last write wins" contract documented in the architecture design
+decisions. The test verifies: after 30 of 60 minutes elapse, a second potion
+sets the field to exactly 60 (not 90), and 30 more ticks leave exactly 30
+remaining.
+
+#### `ActiveSpells` documentation update
+
+The struct doc comment was rewritten to describe:
+
+- The per-field `u8` counter semantics (0 = inactive, n > 0 = n minutes remaining).
+- How timed resistance potions are written by `apply_consumable_effect_exploration`.
+- The role of `effective_resistance` during combat damage resolution.
+- The relationship between `ACTIVE_PROTECTION_BONUS` (flat 25-point bonus) and
+  the `amount` field on `BoostResistance` (campaign-author-controlled magnitude).
+- Overwrite semantics: second potion overwrites remaining duration, no stacking.
+- A runnable doctest demonstrating the full activate → tick-to-zero cycle.
+
+#### `advance_time` documentation update
+
+A new introductory summary paragraph was added before the existing `# Arguments`
+section, explicitly listing all three per-minute side effects:
+
+1. `ActiveSpells::tick()` — decrements all spell/potion protection counters.
+2. `Character::tick_timed_stat_boosts_minute()` — reverses expired attribute boosts.
+3. `npc_runtime.tick_restock(…)` — merchant stock replenishment (when templates are `Some`).
+
+A second doctest demonstrating timed-boost expiry was appended so the contract
+is machine-verified.
+
+#### `consumable_usage.rs` module doc update
+
+The module-level `//!` comment was extended with:
+
+- A "Two Entry Points" section describing when to use each of
+  `apply_consumable_effect` (combat) vs.
+  `apply_consumable_effect_exploration` (exploration).
+- A "Timed vs. Permanent Boosts" table mapping `duration_minutes` values to
+  observable behaviour for both `BoostAttribute` and `BoostResistance`.
+
+#### `apply_attribute_delta` documentation
+
+This `pub(crate)` function already had a brief doc comment; it was expanded to
+include `# Arguments`, `# Returns`, and an `# Examples` doctest that
+demonstrates the full apply-then-reverse cycle through
+`apply_timed_stat_boost` + 10 `tick_timed_stat_boosts_minute` calls.
+
+#### `architecture.md` update
+
+The `ConsumableEffect` pseudo-Rust enum was updated from four variants to six:
+
+- `BoostResistance(ResistanceType, i8)` — added (was missing)
+- `IsFood(u8)` — added (was missing)
+- `BoostAttribute` comment clarified to mention timed behaviour
+
+A prose block was appended describing how `duration_minutes` controls timed vs.
+permanent routing for each variant.
+
+### Tests Added
+
+#### `src/application/mod.rs` — 5 new end-to-end tests
+
+| Test                                                      | Layer exercised                                             | Assertion                                                        |
+| --------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- |
+| `test_timed_resistance_potion_expires_after_advance_time` | `GameState::advance_time` → `ActiveSpells::tick`            | `fire_protection` reaches 0 after exactly 60 ticks               |
+| `test_timed_attribute_potion_expires_after_advance_time`  | `GameState::advance_time` → `tick_timed_stat_boosts_minute` | boost list empty and stat restored after 30 ticks                |
+| `test_timed_potion_expires_during_rest`                   | `GameState::rest_party` → `advance_time` → both tick paths  | both Speed boost and cold protection expire during 720-tick rest |
+| `test_permanent_attribute_potion_survives_advance_time`   | `apply_consumable_effect` permanent path                    | stat unchanged and boost list empty after 999 ticks              |
+| `test_second_resistance_potion_overwrites_duration`       | `active_spells` overwrite semantics                         | second potion resets to 60, not 90; 30 ticks leave 30 remaining  |
+
+### Quality Gate Results
+
+```text
+✅ cargo fmt --all              → no output (all files formatted)
+✅ cargo check --all-targets    → Finished with 0 errors
+✅ cargo clippy -D warnings     → Finished with 0 warnings
+✅ cargo nextest run            → 3453/3453 passed, 8 skipped, 0 failed
+```
+
+Total test count increased from 3448 (end of Phase 5) to 3453 — exactly 5 new
+tests from this phase.
+
+---
+
+---
+
 ## Consumable Duration Effects — Phase 5: Campaign Builder Support for Duration-Aware Consumables (Complete)
 
 ### Overview

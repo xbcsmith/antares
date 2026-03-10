@@ -8,6 +8,36 @@
 //! ([`execute_item_use_by_slot`]) and the exploration/menu path share this
 //! implementation, ensuring there is no duplicated match logic.
 //!
+//! # Two Entry Points
+//!
+//! The module exposes two public functions, each suited to a different game
+//! context:
+//!
+//! - **[`apply_consumable_effect`]** — the *combat* entry point.  Handles all
+//!   five effect variants.  For `BoostResistance`, it always uses the permanent
+//!   path (mutating `character.resistances` directly) because resistances in
+//!   combat are typically granted by party spells already tracked in
+//!   [`crate::application::ActiveSpells`].
+//!
+//! - **[`apply_consumable_effect_exploration`]** — the *exploration* entry
+//!   point.  Identical to the combat path for every effect except timed
+//!   `BoostResistance`: when `ConsumableData::duration_minutes` is `Some(n >
+//!   0)`, the resistance boost is written to the corresponding field in
+//!   [`crate::application::ActiveSpells`] instead of directly mutating
+//!   `character.resistances`.  This lets the protection expire automatically
+//!   via [`crate::application::GameState::advance_time`].
+//!
+//! # Timed vs. Permanent Boosts
+//!
+//! `ConsumableData::duration_minutes` controls whether a boost is timed or
+//! permanent:
+//!
+//! | `duration_minutes` | `BoostAttribute` behaviour | `BoostResistance` (exploration) |
+//! | --- | --- | --- |
+//! | `None` | Mutates `stats.<attr>.current` directly (permanent) | Mutates `resistances.<field>.current` directly (permanent) |
+//! | `Some(0)` | Treated as `None` via `normalize_duration` (permanent) | Treated as `None` (permanent) |
+//! | `Some(n)` | Registers a [`crate::domain::character::TimedStatBoost`]; reversed after `n` minutes | Writes `n` (clamped to `u8`) into `ActiveSpells.<field>` |
+//!
 //! # Design Contract
 //!
 //! - **Self-mutation only.** `apply_consumable_effect` mutates only the
