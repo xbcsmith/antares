@@ -32,9 +32,12 @@
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
 use crate::domain::character::{Inventory, PARTY_MAX_SIZE};
-use crate::domain::items::types::ItemType;
+use crate::domain::combat::item_usage::{validate_item_use_slot, ItemUseError};
+use crate::domain::items::consumable_usage::apply_consumable_effect;
+use crate::domain::items::types::{ConsumableEffect, ItemType};
 use crate::game::resources::GlobalState;
 use crate::game::systems::item_world_events::ItemDroppedEvent;
+use crate::game::systems::ui::GameLog;
 
 use bevy::prelude::MessageWriter;
 use bevy::prelude::*;
@@ -83,6 +86,7 @@ impl Plugin for InventoryPlugin {
                     inventory_input_system,
                     inventory_ui_system,
                     inventory_action_system,
+                    handle_use_item_action_exploration,
                 )
                     .chain(),
             );
@@ -1536,6 +1540,265 @@ fn inventory_action_system(
     }
 }
 
+// ===== Exploration Use Handler =====
+
+/// Handles [`UseItemExplorationAction`] messages emitted by the inventory UI.
+///
+/// For each message this system:
+/// 1. Resolves `game_content` (returns early if unavailable).
+/// 2. Bounds-checks `party_index`.
+/// 3. Validates the item via [`validate_item_use_slot`] with `in_combat = false`.
+/// 4. Captures the item name and [`ConsumableEffect`] before mutation.
+/// 5. Consumes one charge (or removes the slot when the last charge is spent).
+/// 6. Applies the effect to the owning character via [`apply_consumable_effect`].
+/// 7. Writes a player-visible [`GameLog`] message describing the outcome.
+/// 8. Resets navigation state so the UI returns to slot-navigation phase.
+///
+/// Every failure path — including validation errors and defensive charge
+/// checks — writes a [`GameLog`] entry so the player is never silently blocked.
+///
+/// # Design
+///
+/// Self-target only: the effect is always applied to the character who owns
+/// the item. Cross-party targeting is out of scope for this phase.
+#[allow(clippy::too_many_lines)]
+fn handle_use_item_action_exploration(
+    mut reader: MessageReader<UseItemExplorationAction>,
+    mut global_state: ResMut<GlobalState>,
+    mut nav_state: ResMut<InventoryNavigationState>,
+    game_content: Option<Res<GameContent>>,
+    mut game_log: Option<ResMut<GameLog>>,
+) {
+    // Collect messages upfront to avoid borrow conflicts with mutable state.
+    let messages: Vec<(usize, usize)> = reader
+        .read()
+        .map(|m| (m.party_index, m.slot_index))
+        .collect();
+
+    if messages.is_empty() {
+        return;
+    }
+
+    // Step 1: resolve game_content — required for validation and item lookup.
+    let content = match game_content.as_deref() {
+        Some(gc) => gc,
+        None => {
+            if let Some(ref mut log) = game_log {
+                log.add("Cannot use item: game content not available.".to_string());
+            }
+            return;
+        }
+    };
+    let content_db = content.db();
+
+    for (party_index, slot_index) in messages {
+        // Step 2: bounds-check party_index.
+        if party_index >= global_state.0.party.members.len() {
+            if let Some(ref mut log) = game_log {
+                log.add("Cannot use item: invalid character.".to_string());
+            }
+            continue;
+        }
+
+        // Step 3: validate via shared gate (in_combat = false).
+        // We take a snapshot (clone) so that validation sees the current state
+        // without holding an immutable borrow while we mutate below.
+        let validation_result = {
+            let character = &global_state.0.party.members[party_index];
+            validate_item_use_slot(character, slot_index, content_db, false)
+        };
+
+        if let Err(ref e) = validation_result {
+            // Build item name for the error message if possible.
+            let item_name: String = global_state
+                .0
+                .party
+                .members
+                .get(party_index)
+                .and_then(|ch| ch.inventory.items.get(slot_index))
+                .and_then(|slot| content_db.items.get_item(slot.item_id))
+                .map(|item| item.name.clone())
+                .unwrap_or_else(|| "that item".to_string());
+
+            let msg = match e {
+                ItemUseError::InventorySlotInvalid(_) => {
+                    "Cannot use item: no item in that slot.".to_string()
+                }
+                ItemUseError::ItemNotFound(_) => {
+                    "Cannot use item: item data not found.".to_string()
+                }
+                ItemUseError::NotConsumable => {
+                    format!("Cannot use {item_name}: not a consumable.")
+                }
+                ItemUseError::NotUsableInCombat => {
+                    format!("Cannot use {item_name} outside of combat.")
+                }
+                ItemUseError::NoCharges => {
+                    format!("Cannot use {item_name}: no charges remaining.")
+                }
+                ItemUseError::AlignmentRestriction => {
+                    format!("Cannot use {item_name}: alignment restriction.")
+                }
+                ItemUseError::ClassRestriction => {
+                    format!("Cannot use {item_name}: class restriction.")
+                }
+                ItemUseError::RaceRestriction => {
+                    format!("Cannot use {item_name}: race restriction.")
+                }
+                ItemUseError::InvalidTarget => {
+                    format!("Cannot use {item_name}: invalid target.")
+                }
+                ItemUseError::Other(msg) => {
+                    format!("Cannot use item: {msg}.")
+                }
+            };
+
+            if let Some(ref mut log) = game_log {
+                log.add(msg);
+            }
+
+            // Reset navigation state even on failure so the UI is not stuck.
+            if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                inv_state.selected_slot = None;
+            }
+            nav_state.selected_slot_index = None;
+            nav_state.focused_action_index = 0;
+            nav_state.phase = NavigationPhase::SlotNavigation;
+
+            continue;
+        }
+
+        // Step 4: capture item name and effect before any mutation.
+        // This short immutable borrow ends before we take a mutable borrow below.
+        let (item_name, effect) = {
+            let character = &global_state.0.party.members[party_index];
+            let slot = match character.inventory.items.get(slot_index) {
+                Some(s) => s,
+                None => {
+                    if let Some(ref mut log) = game_log {
+                        log.add("Cannot use item: no item in that slot.".to_string());
+                    }
+                    continue;
+                }
+            };
+            let item = match content_db.items.get_item(slot.item_id) {
+                Some(i) => i,
+                None => {
+                    if let Some(ref mut log) = game_log {
+                        log.add("Cannot use item: item data not found.".to_string());
+                    }
+                    continue;
+                }
+            };
+            let consumable = match &item.item_type {
+                ItemType::Consumable(data) => data,
+                _ => {
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("Cannot use {}: not a consumable.", item.name));
+                    }
+                    continue;
+                }
+            };
+            (item.name.clone(), consumable.effect)
+        };
+
+        // Step 5: consume one charge (mutable borrow of the character).
+        {
+            let character = &mut global_state.0.party.members[party_index];
+            let charges = match character.inventory.items.get(slot_index) {
+                Some(s) => s.charges,
+                None => {
+                    if let Some(ref mut log) = game_log {
+                        log.add("Cannot use item: no item in that slot.".to_string());
+                    }
+                    continue;
+                }
+            };
+
+            if charges == 0 {
+                // Defensive check — validate_item_use_slot should have caught this.
+                if let Some(ref mut log) = game_log {
+                    log.add(format!("Cannot use {item_name}: no charges remaining."));
+                }
+                continue;
+            } else if charges > 1 {
+                character.inventory.items[slot_index].charges -= 1;
+            } else {
+                // charges == 1: remove the slot entirely.
+                let _ = character.inventory.remove_item(slot_index);
+            }
+        }
+
+        // Step 6: apply the effect to the owning character.
+        let result = {
+            let character = &mut global_state.0.party.members[party_index];
+            apply_consumable_effect(character, effect)
+        };
+
+        // Step 7: write a success GameLog message.
+        let character_name = global_state
+            .0
+            .party
+            .members
+            .get(party_index)
+            .map(|ch| ch.name.clone())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        let log_msg = match effect {
+            ConsumableEffect::HealHp(_) => {
+                if result.healing == 0 {
+                    format!("{item_name} used. {character_name} was already at full health.")
+                } else {
+                    format!(
+                        "{item_name} used. {character_name} recovered {} HP.",
+                        result.healing
+                    )
+                }
+            }
+            ConsumableEffect::RestoreSp(_) => {
+                if result.sp_restored == 0 {
+                    format!("{item_name} used. {character_name} was already at full SP.")
+                } else {
+                    format!(
+                        "{item_name} used. {character_name} recovered {} SP.",
+                        result.sp_restored
+                    )
+                }
+            }
+            ConsumableEffect::CureCondition(_) => {
+                format!("{item_name} used. Conditions cleared.")
+            }
+            ConsumableEffect::BoostAttribute(attr, _) => {
+                format!(
+                    "{item_name} used. {character_name}'s {} increased.",
+                    attr.display_name()
+                )
+            }
+            ConsumableEffect::BoostResistance(res, _) => {
+                format!(
+                    "{item_name} used. {character_name}'s {} resistance increased.",
+                    res.display_name()
+                )
+            }
+            ConsumableEffect::IsFood(_) => {
+                format!("{item_name} used.")
+            }
+        };
+
+        if let Some(ref mut log) = game_log {
+            log.add(log_msg);
+        }
+
+        // Step 8: reset navigation state.
+        if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+            inv_state.selected_slot = None;
+        }
+        nav_state.selected_slot_index = None;
+        nav_state.focused_action_index = 0;
+        nav_state.phase = NavigationPhase::SlotNavigation;
+    }
+}
+
 // ===== Tests =====
 
 #[cfg(test)]
@@ -2736,6 +2999,800 @@ mod tests {
         );
         assert_eq!(nav_after.focused_action_index, 0);
         assert_eq!(nav_after.selected_slot_index, None);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 3: handle_use_item_action_exploration tests
+    // ------------------------------------------------------------------
+
+    /// Helper to build a minimal ContentDatabase with a single healing potion.
+    fn make_heal_potion_db() -> crate::sdk::database::ContentDatabase {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let item = Item {
+            id: 1,
+            name: "Healing Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(50),
+                is_combat_usable: true,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        db.items.add_item(item).unwrap();
+        db
+    }
+
+    /// Helper to build a ContentDatabase with an SP potion.
+    fn make_sp_potion_db() -> crate::sdk::database::ContentDatabase {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let item = Item {
+            id: 2,
+            name: "Mana Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::RestoreSp(30),
+                is_combat_usable: true,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        db.items.add_item(item).unwrap();
+        db
+    }
+
+    /// Sets up an `App` with the minimal plugins, `GlobalState` in Inventory
+    /// mode, `InventoryNavigationState`, `GameLog`, `GameContent`, and the
+    /// `handle_use_item_action_exploration` system.
+    fn make_exploration_use_app(
+        game_state: crate::application::GameState,
+        content_db: crate::sdk::database::ContentDatabase,
+    ) -> App {
+        use crate::application::resources::GameContent;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<UseItemExplorationAction>();
+        app.insert_resource(GameContent::new(content_db));
+        app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
+        app.init_resource::<GameLog>();
+        app.add_systems(Update, handle_use_item_action_exploration);
+        app
+    }
+
+    /// A [`UseItemExplorationAction`] for a healing potion increases
+    /// `character.hp.current`, removes the slot from inventory (last charge),
+    /// and writes a "recovered" message to `GameLog`.
+    #[test]
+    fn test_exploration_use_heals_character() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.hp.base = 100;
+        ch.hp.current = 40;
+        ch.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 1,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, make_heal_potion_db());
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            gs.0.party.members[0].hp.current > 40,
+            "HP should have increased"
+        );
+        assert_eq!(
+            gs.0.party.members[0].inventory.items.len(),
+            0,
+            "last-charge slot should be removed"
+        );
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages.iter().any(|m| m.contains("recovered")),
+            "GameLog should contain 'recovered'"
+        );
+    }
+
+    /// A [`UseItemExplorationAction`] for an SP potion increases
+    /// `character.sp.current` and writes a message containing "SP".
+    #[test]
+    fn test_exploration_use_restores_sp() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Wizard".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        ch.sp.base = 50;
+        ch.sp.current = 10;
+        ch.inventory.items.push(InventorySlot {
+            item_id: 2,
+            charges: 1,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, make_sp_potion_db());
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            gs.0.party.members[0].sp.current > 10,
+            "SP should have increased"
+        );
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages.iter().any(|m| m.contains("SP")),
+            "GameLog should contain 'SP'"
+        );
+    }
+
+    /// A [`UseItemExplorationAction`] for a cure potion clears the matching
+    /// condition bits and writes "Conditions cleared" to `GameLog`.
+    #[test]
+    fn test_exploration_use_cures_condition() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, Condition, InventorySlot, Sex};
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let item = Item {
+            id: 3,
+            name: "Cure Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::CureCondition(Condition::POISONED),
+                is_combat_usable: true,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        db.items.add_item(item).unwrap();
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Sick Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.conditions.add(Condition::POISONED);
+        ch.inventory.items.push(InventorySlot {
+            item_id: 3,
+            charges: 1,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<UseItemExplorationAction>();
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
+        app.init_resource::<GameLog>();
+        app.add_systems(Update, handle_use_item_action_exploration);
+
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            !gs.0.party.members[0].conditions.has(Condition::POISONED),
+            "POISONED condition should be cleared"
+        );
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages
+                .iter()
+                .any(|m| m.contains("Conditions cleared")),
+            "GameLog should contain 'Conditions cleared'"
+        );
+    }
+
+    /// A [`UseItemExplorationAction`] for a `BoostAttribute` potion increases
+    /// the corresponding `stats.<attr>.current` field.
+    #[test]
+    fn test_exploration_use_boosts_attribute() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::items::types::{
+            AttributeType, ConsumableData, ConsumableEffect, Item, ItemType,
+        };
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let item = Item {
+            id: 4,
+            name: "Might Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::BoostAttribute(AttributeType::Might, 5),
+                is_combat_usable: true,
+            }),
+            base_cost: 20,
+            sell_cost: 10,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        db.items.add_item(item).unwrap();
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Warrior".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let before_might = ch.stats.might.current;
+        ch.inventory.items.push(InventorySlot {
+            item_id: 4,
+            charges: 1,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<UseItemExplorationAction>();
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
+        app.init_resource::<GameLog>();
+        app.add_systems(Update, handle_use_item_action_exploration);
+
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            gs.0.party.members[0].stats.might.current > before_might,
+            "Might should have increased after using Might Potion"
+        );
+    }
+
+    /// A [`UseItemExplorationAction`] for a `BoostResistance` potion increases
+    /// the corresponding resistance field on the character.
+    #[test]
+    fn test_exploration_use_boosts_resistance() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::items::types::{
+            ConsumableData, ConsumableEffect, Item, ItemType, ResistanceType,
+        };
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let item = Item {
+            id: 5,
+            name: "Fire Resist Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::BoostResistance(ResistanceType::Fire, 10),
+                is_combat_usable: true,
+            }),
+            base_cost: 20,
+            sell_cost: 10,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        db.items.add_item(item).unwrap();
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Ranger".to_string(),
+            "human".to_string(),
+            "robber".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        let before_fire = ch.resistances.fire.current;
+        ch.inventory.items.push(InventorySlot {
+            item_id: 5,
+            charges: 1,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<UseItemExplorationAction>();
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
+        app.init_resource::<GameLog>();
+        app.add_systems(Update, handle_use_item_action_exploration);
+
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            gs.0.party.members[0].resistances.fire.current > before_fire,
+            "Fire resistance should have increased"
+        );
+    }
+
+    /// An item with `charges = 3` should have `charges == 2` after one use;
+    /// the inventory slot must still be present.
+    #[test]
+    fn test_exploration_use_decrements_multi_charge_item() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.hp.base = 100;
+        ch.hp.current = 10;
+        ch.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 3,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, make_heal_potion_db());
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.party.members[0].inventory.items.len(),
+            1,
+            "slot should still be present after decrement"
+        );
+        assert_eq!(
+            gs.0.party.members[0].inventory.items[0].charges, 2,
+            "charges should be decremented from 3 to 2"
+        );
+    }
+
+    /// An item with `charges = 1` should have its slot removed entirely after use.
+    #[test]
+    fn test_exploration_use_removes_last_charge() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.hp.base = 100;
+        ch.hp.current = 10;
+        ch.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 1,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, make_heal_potion_db());
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.party.members[0].inventory.items.len(),
+            0,
+            "slot should be removed after last charge consumed"
+        );
+    }
+
+    /// After a successful use, `nav_state.phase` must be `SlotNavigation`,
+    /// `selected_slot_index` must be `None`, and `focused_action_index` must be 0.
+    #[test]
+    fn test_exploration_use_resets_nav_state() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.hp.base = 100;
+        ch.hp.current = 10;
+        ch.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 1,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, make_heal_potion_db());
+
+        // Pre-set nav_state to ActionNavigation to confirm it is fully reset.
+        {
+            let mut nav = app.world_mut().resource_mut::<InventoryNavigationState>();
+            nav.selected_slot_index = Some(0);
+            nav.focused_action_index = 1;
+            nav.phase = NavigationPhase::ActionNavigation;
+        }
+
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let nav = app.world().resource::<InventoryNavigationState>();
+        assert!(
+            matches!(nav.phase, NavigationPhase::SlotNavigation),
+            "phase should be reset to SlotNavigation"
+        );
+        assert_eq!(nav.selected_slot_index, None);
+        assert_eq!(nav.focused_action_index, 0);
+    }
+
+    /// A successful use appends exactly one entry to `GameLog.messages`.
+    #[test]
+    fn test_exploration_use_writes_game_log() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.hp.base = 100;
+        ch.hp.current = 10;
+        ch.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 1,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, make_heal_potion_db());
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        assert_eq!(
+            log.messages.len(),
+            1,
+            "exactly one GameLog entry should be written on success"
+        );
+    }
+
+    /// A `slot_index` beyond inventory length writes "no item in that slot"
+    /// to `GameLog`.
+    #[test]
+    fn test_exploration_use_invalid_slot_writes_log() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut game_state = GameState::new();
+        let ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, make_heal_potion_db());
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 99, // beyond inventory
+        });
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages
+                .iter()
+                .any(|m| m.contains("no item in that slot")),
+            "GameLog should say 'no item in that slot'"
+        );
+    }
+
+    /// A non-consumable item (e.g. a weapon) in the target slot writes
+    /// "not a consumable" to `GameLog`.
+    #[test]
+    fn test_exploration_use_non_consumable_writes_log() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::items::types::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::DiceRoll;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let weapon = Item {
+            id: 10,
+            name: "Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        db.items.add_item(weapon).unwrap();
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Warrior".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.inventory.items.push(InventorySlot {
+            item_id: 10,
+            charges: 0,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<UseItemExplorationAction>();
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
+        app.init_resource::<GameLog>();
+        app.add_systems(Update, handle_use_item_action_exploration);
+
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages.iter().any(|m| m.contains("not a consumable")),
+            "GameLog should say 'not a consumable'"
+        );
+    }
+
+    /// An item with `charges = 0` writes "no charges" to `GameLog` and does
+    /// not apply any effect.
+    #[test]
+    fn test_exploration_use_zero_charges_writes_log() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 0,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, make_heal_potion_db());
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages.iter().any(|m| m.contains("no charges")),
+            "GameLog should say 'no charges'"
+        );
+    }
+
+    /// An item with `is_combat_usable: false` can be used outside of combat;
+    /// the effect is applied and the item name appears in `GameLog`.
+    #[test]
+    fn test_exploration_use_non_combat_usable_item_succeeds() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let item = Item {
+            id: 6,
+            name: "Exploration Tonic".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(20),
+                is_combat_usable: false, // only usable outside combat
+            }),
+            base_cost: 15,
+            sell_cost: 7,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        db.items.add_item(item).unwrap();
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Explorer".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.hp.base = 100;
+        ch.hp.current = 50;
+        ch.inventory.items.push(InventorySlot {
+            item_id: 6,
+            charges: 1,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<UseItemExplorationAction>();
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GlobalState(game_state));
+        app.init_resource::<InventoryNavigationState>();
+        app.init_resource::<GameLog>();
+        app.add_systems(Update, handle_use_item_action_exploration);
+
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            gs.0.party.members[0].hp.current > 50,
+            "effect should have been applied even though is_combat_usable is false"
+        );
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages.iter().any(|m| m.contains("Exploration Tonic")),
+            "GameLog should contain the item name"
+        );
+    }
+
+    /// A `party_index` beyond the party size writes "invalid character" to
+    /// `GameLog` and does not panic.
+    #[test]
+    fn test_exploration_use_invalid_party_index_writes_log() {
+        let mut game_state = GameState::new();
+        // Party is empty — any party_index is out of bounds.
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, make_heal_potion_db());
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 99,
+            slot_index: 0,
+        });
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages.iter().any(|m| m.contains("invalid character")),
+            "GameLog should say 'invalid character'"
+        );
     }
 
     // ------------------------------------------------------------------

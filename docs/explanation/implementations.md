@@ -1,5 +1,130 @@
 # Implementations
 
+## Phase 3: Consumables Outside Combat — Handler System and Feedback (Complete)
+
+### Overview
+
+Added `handle_use_item_action_exploration`, the Bevy system that processes
+`UseItemExplorationAction` messages emitted by the inventory UI. The system
+validates each use request via the shared `validate_item_use_slot` gate (with
+`in_combat = false`), applies the effect via `apply_consumable_effect`, consumes
+charges (decrement or remove), resets navigation state, and writes a
+player-visible `GameLog` entry for every outcome — success or failure. All 14
+required Phase 3 tests pass.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `handle_use_item_action_exploration` system added to
+      `src/game/systems/inventory_ui.rs` after `inventory_action_system`.
+- [x] System registered as the **last** entry in `InventoryPlugin::build()`'s
+      `.chain()` set:
+      `(inventory_input_system, inventory_ui_system, inventory_action_system, handle_use_item_action_exploration).chain()`.
+- [x] `GameLog` import added:
+      `use crate::game::systems::ui::GameLog;`
+- [x] `validate_item_use_slot` and `ItemUseError` imported:
+      `use crate::domain::combat::item_usage::{validate_item_use_slot, ItemUseError};`
+- [x] `apply_consumable_effect` imported:
+      `use crate::domain::items::consumable_usage::apply_consumable_effect;`
+- [x] `ConsumableEffect` imported for the success message match:
+      `use crate::domain::items::types::{ConsumableEffect, ItemType};`
+- [x] All 10 `ItemUseError` variants produce a distinct, player-readable
+      `GameLog` message as specified in the plan's error table.
+- [x] Charge consumption semantics match the combat path: decrement when
+      `charges > 1`, remove the slot entirely when `charges == 1`, defensive
+      check + log entry when `charges == 0`.
+- [x] Effect-specific `GameLog` success messages implemented for all six
+      `ConsumableEffect` variants including the "already at full" cases for
+      `HealHp` and `RestoreSp`.
+- [x] Navigation state fully reset after every use attempt (success or failure):
+      `selected_slot = None`, `selected_slot_index = None`,
+      `focused_action_index = 0`, `phase = SlotNavigation`.
+- [x] Helper functions `make_heal_potion_db`, `make_sp_potion_db`, and
+      `make_exploration_use_app` added to `mod tests` to reduce repetition
+      across the 14 new tests.
+- [x] All 14 Phase 3 tests added and passing:
+      `test_exploration_use_heals_character`,
+      `test_exploration_use_restores_sp`,
+      `test_exploration_use_cures_condition`,
+      `test_exploration_use_boosts_attribute`,
+      `test_exploration_use_boosts_resistance`,
+      `test_exploration_use_decrements_multi_charge_item`,
+      `test_exploration_use_removes_last_charge`,
+      `test_exploration_use_resets_nav_state`,
+      `test_exploration_use_writes_game_log`,
+      `test_exploration_use_invalid_slot_writes_log`,
+      `test_exploration_use_non_consumable_writes_log`,
+      `test_exploration_use_zero_charges_writes_log`,
+      `test_exploration_use_non_combat_usable_item_succeeds`,
+      `test_exploration_use_invalid_party_index_writes_log`.
+- [x] `cargo fmt --all`, `cargo check --all-targets --all-features`,
+      `cargo clippy --all-targets --all-features -- -D warnings`, and
+      `cargo nextest run --all-features` all pass with zero warnings and 3412
+      tests passing (14 new).
+
+### Files Changed
+
+| File                                  | Change                                                                                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/game/systems/inventory_ui.rs`    | 4 new imports; `handle_use_item_action_exploration` system added; plugin chain extended; 14 new tests; 2 test helpers + 1 app helper added |
+| `docs/explanation/implementations.md` | This entry added                                                                                                                           |
+
+### Architecture Details
+
+#### `handle_use_item_action_exploration` System
+
+The system signature follows the exact contract from the plan:
+
+```text
+fn handle_use_item_action_exploration(
+    mut reader: MessageReader<UseItemExplorationAction>,
+    mut global_state: ResMut<GlobalState>,
+    mut nav_state: ResMut<InventoryNavigationState>,
+    game_content: Option<Res<GameContent>>,
+    mut game_log: Option<ResMut<GameLog>>,
+)
+```
+
+Messages are collected upfront into a `Vec<(usize, usize)>` to avoid borrow
+conflicts between the immutable `game_content` reference and the mutable
+`global_state`. The system returns early (writing one `GameLog` entry) if
+`game_content` is `None`.
+
+#### Validation → Charge Consumption → Effect → Log ordering
+
+The logic for each message follows these ordered steps:
+
+1. **Resolve game_content** — early return if unavailable.
+2. **Bounds-check party_index** — `continue` with log if out of range.
+3. **`validate_item_use_slot(…, false)`** — all 10 error arms produce a
+   distinct `GameLog` message; navigation state is reset even on failure.
+4. **Capture item name and effect** — short immutable borrow, releases before
+   mutation.
+5. **Consume one charge** — decrement or remove; defensive zero-charge guard.
+6. **`apply_consumable_effect`** — mutates character stats via the shared
+   pure-domain helper.
+7. **Write success `GameLog`** — effect-specific template; "already at full"
+   fallback for `HealHp`/`RestoreSp` when `result.healing == 0` /
+   `result.sp_restored == 0`.
+8. **Reset navigation state** — `selected_slot`, `selected_slot_index`,
+   `focused_action_index`, `phase`.
+
+#### `is_combat_usable: false` Items
+
+`validate_item_use_slot` returns `NotUsableInCombat` only when
+`in_combat == true && !consumable.is_combat_usable`. Calling it with
+`in_combat = false` means exploration-only items pass validation normally.
+The dedicated test `test_exploration_use_non_combat_usable_item_succeeds`
+exercises this boundary explicitly.
+
+#### Navigation Reset on All Paths
+
+Both success and all failure paths (except the `game_content = None` early
+return which resets nothing — there is no character state to reset) perform the
+identical four-field navigation reset. This prevents the UI being stuck in
+`ActionNavigation` after a failed use attempt.
+
+---
+
 ## Phase 2: Consumables Outside Combat — Inventory UI Integration (Complete)
 
 ### Overview
