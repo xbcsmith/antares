@@ -1,5 +1,136 @@
 # Implementations
 
+## Phase 4D: Months and Years — Campaign Builder & Config (Complete)
+
+### Overview
+
+Extended the Campaign Builder SDK editor (`sdk/campaign_builder/src/campaign_editor.rs`)
+to expose the new `year` and `month` fields from `GameTime` in the campaign metadata
+editing workflow. The `CampaignMetadataEditBuffer` now holds five separate time
+components — year, month, day, hour, minute — that are round-tripped through
+`GameTime::new_full(...)` with full range clamping. The Gameplay section of the
+Campaign Metadata editor panel gained two new `DragValue` spinners (Year and Month)
+so campaign authors can set the starting calendar date entirely within the UI.
+
+### Phase 4D Deliverables Checklist
+
+- [x] `starting_year: u32` and `starting_month: u32` fields added to `CampaignMetadataEditBuffer`
+- [x] `from_metadata()` updated to read `m.starting_time.year` and `m.starting_time.month`
+- [x] `apply_to()` updated to call `GameTime::new_full(year, month, day, hour, minute)` with clamping (`year.max(1)`, `month.clamp(1, 12)`)
+- [x] UI Gameplay grid: Year (1–9999) and Month (1–12) `DragValue` spinners added before the existing Day spinner
+- [x] Day spinner range narrowed from `1..=9999` to `1..=30` (day-within-month semantics)
+- [x] `preview_time` in the UI updated to use `GameTime::new_full(...)` with year/month
+- [x] Test `test_buffer_from_metadata_copies_starting_year_month` passes
+- [x] Test `test_buffer_apply_to_writes_starting_year_month` passes
+- [x] Test `test_buffer_starting_time_clamps_month` passes (both month=0 → 1 and month=13 → 12)
+- [x] Test `test_buffer_starting_time_clamps_year_zero` passes
+- [x] Existing buffer tests updated: `test_buffer_default_starting_time_fields`, `test_buffer_starting_time_roundtrip_via_metadata`, `test_buffer_starting_time_clamps_day_zero`
+- [x] All 22 campaign_editor tests pass
+- [x] All quality gates pass (0 errors, 0 warnings, 3371 main-crate tests green)
+
+### What Was Built
+
+#### `CampaignMetadataEditBuffer` — `sdk/campaign_builder/src/campaign_editor.rs`
+
+Two new fields were inserted immediately before `starting_day`, keeping logical
+calendar order (year → month → day → hour → minute):
+
+```antares/sdk/campaign_builder/src/campaign_editor.rs#L102-110
+    // Starting date/time (split from GameTime for ergonomic drag-value editing)
+    /// Starting year (1-based)
+    pub starting_year: u32,
+    /// Starting month within the year (1-based, 1–12)
+    pub starting_month: u32,
+    /// Starting day within the month (1-based, 1–30)
+    pub starting_day: u32,
+    /// Starting hour (0–23)
+    pub starting_hour: u8,
+    /// Starting minute (0–59)
+    pub starting_minute: u8,
+```
+
+#### `from_metadata()` — Reading Year and Month
+
+```antares/sdk/campaign_builder/src/campaign_editor.rs#L152-158
+            starting_year: m.starting_time.year,
+            starting_month: m.starting_time.month,
+            starting_day: m.starting_time.day,
+            starting_hour: m.starting_time.hour,
+            starting_minute: m.starting_time.minute,
+```
+
+#### `apply_to()` — Writing via `GameTime::new_full` with Clamping
+
+`apply_to()` now calls `GameTime::new_full(...)` instead of `GameTime::new(...)`,
+passing all five components with their respective clamping guards:
+
+- `year`: `self.starting_year.max(1)` — 1-based, 0 is invalid
+- `month`: `self.starting_month.clamp(1, 12)` — must stay in 1–12
+- `day`: `self.starting_day.max(1)` — 1-based, 0 is invalid
+- `hour`: `self.starting_hour.min(23)` — 0–23
+- `minute`: `self.starting_minute.min(59)` — 0–59
+
+#### UI Gameplay Grid Spinners
+
+Two `DragValue` spinners were added before the existing Day spinner in the
+"Starting Date/Time" row of the Gameplay grid:
+
+- **Year**: `DragValue::new(&mut year).range(1..=9999)` — clamped with `year.max(1)`
+- **Month**: `DragValue::new(&mut month).range(1..=12)` — clamped with `month.clamp(1, 12)`
+
+The Day spinner's upper bound was narrowed from `9999` to `30` (day-within-month
+semantics from Phase 1A). The period-of-day `preview_time` at the end of the row
+was updated to use `GameTime::new_full(year, month, day, hour, minute)`.
+
+#### `sdk/campaign_builder/src/lib.rs` — No Changes Required
+
+`CampaignMetadata.starting_time` is already typed as `GameTime`, which now carries
+`year` and `month`. The `default_starting_time()` function returns `GameTime::new(1, 8, 0)`
+which sets `year=1, month=1` via the backward-compatible three-argument constructor —
+no schema change needed.
+
+### Clamping Contract
+
+| Field             | Valid range | `apply_to()` guard |
+| ----------------- | ----------- | ------------------ |
+| `starting_year`   | ≥ 1         | `.max(1)`          |
+| `starting_month`  | 1–12        | `.clamp(1, 12)`    |
+| `starting_day`    | ≥ 1         | `.max(1)`          |
+| `starting_hour`   | 0–23        | `.min(23)`         |
+| `starting_minute` | 0–59        | `.min(59)`         |
+
+### Tests Added / Updated
+
+| Test name                                                    | What it verifies                                                       |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `test_buffer_from_metadata_copies_starting_year_month`       | `from_metadata` copies `year` and `month` into new buffer fields       |
+| `test_buffer_apply_to_writes_starting_year_month`            | `apply_to` writes all five fields via `new_full`                       |
+| `test_buffer_starting_time_clamps_month`                     | month=0 → 1, month=13 → 12                                             |
+| `test_buffer_starting_time_clamps_year_zero`                 | year=0 → 1                                                             |
+| `test_buffer_default_starting_time_fields` (updated)         | now also asserts `starting_year=1`, `starting_month=1`                 |
+| `test_buffer_starting_time_roundtrip_via_metadata` (updated) | now sets/checks year=2, month=6 in the round-trip                      |
+| `test_buffer_starting_time_clamps_day_zero` (updated)        | now initialises `starting_year` and `starting_month` in buffer literal |
+
+### Architecture Compliance
+
+- `GameTime::new_full()` (Phase 1A) used in `apply_to()` — no raw struct construction.
+- `MONTHS_PER_YEAR` constant from `src/domain/types.rs` is respected via the `clamp(1, 12)` bound.
+- No magic numbers: month upper-bound `12` matches `MONTHS_PER_YEAR`; day upper-bound `30` matches `DAYS_PER_MONTH`.
+- `CampaignMetadata.starting_time` field unchanged in `lib.rs` — uses `GameTime` which already carries the new fields via Phase 1A serde defaults.
+- `sdk/campaign_builder/src/lib.rs` `default_starting_time()` unchanged — `GameTime::new(1, 8, 0)` correctly defaults year=1/month=1.
+
+### Quality Gate Results
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt         → clean (no output)
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3371 passed, 8 skipped (main crate)
+campaign_builder campaign_editor tests → 22 passed
+```
+
+---
+
 ## Phase 3C: Months and Years — HUD Clock Update (Complete)
 
 ### Overview
