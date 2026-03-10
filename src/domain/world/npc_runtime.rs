@@ -392,7 +392,7 @@ impl NpcRuntimeState {
     /// # Arguments
     ///
     /// * `template` - The template defining the magic-item pool and slot count.
-    /// * `seed`     - PRNG seed for reproducible selection (use `game_time.day`
+    /// * `seed`     - PRNG seed for reproducible selection (use `game_time.total_days()`
     ///   combined with a stable NPC-specific value in production).
     ///
     /// # Examples
@@ -647,7 +647,7 @@ impl NpcRuntimeStore {
     ///
     /// For each NPC that has an active `MerchantStock`:
     ///
-    /// 1. **Daily restock** — if `new_day > last_restock_day` (or
+    /// 1. **Daily restock** — if `new_total_days > last_restock_day` (or
     ///    `last_restock_day == 0`), replenish all regular stock entries back
     ///    to their template quantities.
     /// 2. **Magic-slot refresh** — if the number of days elapsed since
@@ -707,7 +707,10 @@ impl NpcRuntimeStore {
         new_time: &crate::domain::types::GameTime,
         templates: &MerchantStockTemplateDatabase,
     ) {
-        let new_day = new_time.day;
+        // Use total_days() so the counter is cumulative across months and years.
+        // new_time.day is only 1–30 (day-within-month); comparing it against
+        // last_restock_day would cause NPCs to restock on every month rollover.
+        let new_day = new_time.total_days();
 
         // Collect NPC IDs first to avoid simultaneous mutable borrow issues.
         let npc_ids: Vec<NpcId> = self.npcs.keys().cloned().collect();
@@ -736,8 +739,8 @@ impl NpcRuntimeStore {
             };
 
             // --- Daily restock ---
-            // Trigger on day 1 when last_restock_day == 0 (never ticked) OR whenever
-            // a new day has begun.
+            // Trigger on total-day 1 when last_restock_day == 0 (never ticked) OR
+            // whenever a new cumulative day has begun.
             if new_day > state.last_restock_day {
                 state.restock_daily(&template);
                 state.last_restock_day = new_day;
@@ -1400,6 +1403,12 @@ mod tests {
                 .quantity,
             5
         );
+        // last_restock_day must equal total_days() for the ticked GameTime
+        assert_eq!(
+            store.get(&"merchant".to_string()).unwrap().last_restock_day,
+            day1.total_days(),
+            "last_restock_day must be set to total_days()"
+        );
     }
 
     #[test]
@@ -1410,7 +1419,8 @@ mod tests {
 
         let mut store = make_store_with_template("merchant", &template, &db);
 
-        // Simulate: ticked on day 1 (sets last_restock_day = 1), deplete, tick on day 2.
+        // Simulate: ticked on day 1 (sets last_restock_day = total_days(day1) = 1),
+        // deplete, tick on day 2 (total_days = 2).
         let day1 = GameTime::new(1, 0, 0);
         store.tick_restock(&day1, &db);
         store
@@ -1491,9 +1501,12 @@ mod tests {
         let day7 = GameTime::new(7, 12, 0);
         store.tick_restock(&day7, &db);
 
+        // last_restock_day must be stored as total_days(), not raw .day.
+        // GameTime::new(7, 12, 0) → year=1, month=1, day=7 → total_days() = 7.
         assert_eq!(
             store.get(&"merchant".to_string()).unwrap().last_restock_day,
-            7
+            day7.total_days(),
+            "last_restock_day must equal total_days() of the ticked GameTime"
         );
     }
 
@@ -1513,15 +1526,19 @@ mod tests {
             entries: vec![],
             restock_template: Some("wizard_shop".to_string()),
         });
-        state.last_magic_refresh_day = 1; // pretend we refreshed on day 1
+        // Pretend we refreshed on total_days() == 1 (year=1, month=1, day=1).
+        state.last_magic_refresh_day = 1;
         store.insert(state);
 
+        // GameTime::new(8, 0, 0) → year=1, month=1, day=8 → total_days() = 8.
+        // days_since_refresh = 8 - 1 = 7 >= refresh_interval (7) → triggers refresh.
         let day8 = GameTime::new(8, 0, 0);
         store.tick_restock(&day8, &db);
 
         let state = store.get(&"wizard".to_string()).unwrap();
         assert_eq!(state.magic_slots.len(), 2);
-        assert_eq!(state.last_magic_refresh_day, 8);
+        // last_magic_refresh_day is now total_days() of day8 = 8.
+        assert_eq!(state.last_magic_refresh_day, day8.total_days());
     }
 
     #[test]
@@ -1536,6 +1553,7 @@ mod tests {
             entries: vec![],
             restock_template: Some("wizard_shop".to_string()),
         });
+        // last_magic_refresh_day stored as total_days(): year=1,month=1,day=5 → 5.
         state.last_magic_refresh_day = 5;
         // Manually pre-populate magic slots so we can verify they are unchanged.
         state.magic_slots = vec![100, 101];
@@ -1553,7 +1571,8 @@ mod tests {
         let mut store = NpcRuntimeStore::new();
         store.insert(state);
 
-        // Day 11 is only 6 days after day 5 — should NOT trigger a refresh.
+        // GameTime::new(11, 0, 0) → total_days() = 11.
+        // days_since_refresh = 11 - 5 = 6 < refresh_interval (7) → no refresh.
         let day11 = GameTime::new(11, 0, 0);
         store.tick_restock(&day11, &db);
 

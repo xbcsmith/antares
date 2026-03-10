@@ -101,7 +101,11 @@ pub struct CampaignMetadataEditBuffer {
     pub max_level: u8,
 
     // Starting date/time (split from GameTime for ergonomic drag-value editing)
-    /// Starting day (1-based)
+    /// Starting year (1-based)
+    pub starting_year: u32,
+    /// Starting month within the year (1-based, 1–12)
+    pub starting_month: u32,
+    /// Starting day within the month (1-based, 1–30)
     pub starting_day: u32,
     /// Starting hour (0–23)
     pub starting_hour: u8,
@@ -148,6 +152,8 @@ impl CampaignMetadataEditBuffer {
             allow_multiclassing: m.allow_multiclassing,
             starting_level: m.starting_level,
             max_level: m.max_level,
+            starting_year: m.starting_time.year,
+            starting_month: m.starting_time.month,
             starting_day: m.starting_time.day,
             starting_hour: m.starting_time.hour,
             starting_minute: m.starting_time.minute,
@@ -189,7 +195,9 @@ impl CampaignMetadataEditBuffer {
         dest.allow_multiclassing = self.allow_multiclassing;
         dest.starting_level = self.starting_level;
         dest.max_level = self.max_level;
-        dest.starting_time = antares::domain::types::GameTime::new(
+        dest.starting_time = antares::domain::types::GameTime::new_full(
+            self.starting_year.max(1),
+            self.starting_month.clamp(1, 12),
             self.starting_day.max(1),
             self.starting_hour.min(23),
             self.starting_minute.min(59),
@@ -1075,12 +1083,35 @@ impl CampaignMetadataEditorState {
                                     ui.end_row();
 
                                     ui.label("Starting Date/Time:")
-                                        .on_hover_text("Day, hour (0–23), and minute (0–59) at which the campaign begins");
+                                        .on_hover_text("Year, month (1–12), day, hour (0–23), and minute (0–59) at which the campaign begins");
                                     ui.horizontal(|ui| {
+                                        ui.label("Year");
+                                        let mut year = self.buffer.starting_year as i32;
+                                        if ui
+                                            .add(egui::DragValue::new(&mut year).range(1..=9999))
+                                            .changed()
+                                        {
+                                            self.buffer.starting_year = year.max(1) as u32;
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+
+                                        ui.label("Month");
+                                        let mut month = self.buffer.starting_month as i32;
+                                        if ui
+                                            .add(egui::DragValue::new(&mut month).range(1..=12))
+                                            .changed()
+                                        {
+                                            self.buffer.starting_month =
+                                                month.clamp(1, 12) as u32;
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+
                                         ui.label("Day");
                                         let mut day = self.buffer.starting_day as i32;
                                         if ui
-                                            .add(egui::DragValue::new(&mut day).range(1..=9999))
+                                            .add(egui::DragValue::new(&mut day).range(1..=30))
                                             .changed()
                                         {
                                             self.buffer.starting_day = day.max(1) as u32;
@@ -1112,11 +1143,14 @@ impl CampaignMetadataEditorState {
                                         }
 
                                         // Preview the time-of-day period next to the spinners
-                                        let preview_time = antares::domain::types::GameTime::new(
-                                            self.buffer.starting_day.max(1),
-                                            self.buffer.starting_hour.min(23),
-                                            self.buffer.starting_minute.min(59),
-                                        );
+                                        let preview_time =
+                                            antares::domain::types::GameTime::new_full(
+                                                self.buffer.starting_year.max(1),
+                                                self.buffer.starting_month.clamp(1, 12),
+                                                self.buffer.starting_day.max(1),
+                                                self.buffer.starting_hour.min(23),
+                                                self.buffer.starting_minute.min(59),
+                                            );
                                         ui.colored_label(
                                             egui::Color32::GRAY,
                                             format!(
@@ -1684,6 +1718,80 @@ mod tests {
         assert_eq!(dest.starting_time.minute, 30);
     }
 
+    /// `from_metadata` must copy `year` and `month` into the new split buffer
+    /// fields `starting_year` and `starting_month`.
+    #[test]
+    fn test_buffer_from_metadata_copies_starting_year_month() {
+        let meta = crate::CampaignMetadata {
+            starting_time: antares::domain::types::GameTime::new_full(3, 7, 15, 10, 30),
+            ..crate::CampaignMetadata::default()
+        };
+
+        let buf = CampaignMetadataEditBuffer::from_metadata(&meta);
+
+        assert_eq!(buf.starting_year, 3, "year should be copied");
+        assert_eq!(buf.starting_month, 7, "month should be copied");
+        assert_eq!(buf.starting_day, 15, "day should be copied");
+        assert_eq!(buf.starting_hour, 10, "hour should be copied");
+        assert_eq!(buf.starting_minute, 30, "minute should be copied");
+    }
+
+    /// `apply_to` must write `starting_year` and `starting_month` from the
+    /// buffer back into the destination metadata via `GameTime::new_full`.
+    #[test]
+    fn test_buffer_apply_to_writes_starting_year_month() {
+        let buf = CampaignMetadataEditBuffer {
+            starting_year: 4,
+            starting_month: 11,
+            starting_day: 20,
+            starting_hour: 14,
+            starting_minute: 45,
+            ..CampaignMetadataEditBuffer::default()
+        };
+
+        let mut dest = crate::CampaignMetadata::default();
+        buf.apply_to(&mut dest);
+
+        assert_eq!(dest.starting_time.year, 4, "year should be written");
+        assert_eq!(dest.starting_time.month, 11, "month should be written");
+        assert_eq!(dest.starting_time.day, 20, "day should be written");
+        assert_eq!(dest.starting_time.hour, 14, "hour should be written");
+        assert_eq!(dest.starting_time.minute, 45, "minute should be written");
+    }
+
+    /// `apply_to` must clamp `starting_month` to the valid range 1–12.
+    #[test]
+    fn test_buffer_starting_time_clamps_month() {
+        // Month 0 is invalid — must clamp to 1
+        let buf_zero = CampaignMetadataEditBuffer {
+            starting_year: 1,
+            starting_month: 0,
+            starting_day: 1,
+            starting_hour: 8,
+            starting_minute: 0,
+            ..CampaignMetadataEditBuffer::default()
+        };
+        let mut dest = crate::CampaignMetadata::default();
+        buf_zero.apply_to(&mut dest);
+        assert_eq!(dest.starting_time.month, 1, "month 0 must be clamped to 1");
+
+        // Month 13 is invalid — must clamp to 12
+        let buf_overflow = CampaignMetadataEditBuffer {
+            starting_year: 1,
+            starting_month: 13,
+            starting_day: 1,
+            starting_hour: 8,
+            starting_minute: 0,
+            ..CampaignMetadataEditBuffer::default()
+        };
+        let mut dest2 = crate::CampaignMetadata::default();
+        buf_overflow.apply_to(&mut dest2);
+        assert_eq!(
+            dest2.starting_time.month, 12,
+            "month 13 must be clamped to 12"
+        );
+    }
+
     /// `apply_to` must clamp `starting_hour` to 23 when the buffer holds an
     /// out-of-range value (e.g. set programmatically to 25).
     #[test]
@@ -1721,11 +1829,32 @@ mod tests {
         );
     }
 
+    /// `apply_to` must clamp `starting_year` to 1 when the buffer holds zero
+    /// (year is 1-based; 0 is invalid).
+    #[test]
+    fn test_buffer_starting_time_clamps_year_zero() {
+        let buf = CampaignMetadataEditBuffer {
+            starting_year: 0, // invalid — must clamp to 1
+            starting_month: 1,
+            starting_day: 1,
+            starting_hour: 8,
+            starting_minute: 0,
+            ..CampaignMetadataEditBuffer::default()
+        };
+
+        let mut dest = crate::CampaignMetadata::default();
+        buf.apply_to(&mut dest);
+
+        assert_eq!(dest.starting_time.year, 1, "year 0 must be clamped to 1");
+    }
+
     /// `apply_to` must clamp `starting_day` to 1 when the buffer holds zero
     /// (day is 1-based; 0 is invalid).
     #[test]
     fn test_buffer_starting_time_clamps_day_zero() {
         let buf = CampaignMetadataEditBuffer {
+            starting_year: 1,
+            starting_month: 1,
             starting_day: 0, // invalid — must clamp to 1
             starting_hour: 8,
             starting_minute: 0,
@@ -1767,21 +1896,26 @@ mod tests {
         assert_eq!(period_label(GameTime::new(1, 5, 0).time_of_day()), "Dawn");
     }
 
-    /// The default buffer must seed starting_day=1, starting_hour=8, starting_minute=0
-    /// (matching the `default_starting_time()` in CampaignMetadata).
+    /// The default buffer must seed starting_year=1, starting_month=1, starting_day=1,
+    /// starting_hour=8, starting_minute=0 (matching the `default_starting_time()` in
+    /// CampaignMetadata).
     #[test]
     fn test_buffer_default_starting_time_fields() {
         let buf = CampaignMetadataEditBuffer::default();
+        assert_eq!(buf.starting_year, 1, "default year should be 1");
+        assert_eq!(buf.starting_month, 1, "default month should be 1");
         assert_eq!(buf.starting_day, 1, "default day should be 1");
         assert_eq!(buf.starting_hour, 8, "default hour should be 8");
         assert_eq!(buf.starting_minute, 0, "default minute should be 0");
     }
 
-    /// Round-trip: set three buffer fields → apply_to → from_metadata → buffer fields
+    /// Round-trip: set all five buffer fields → apply_to → from_metadata → buffer fields
     /// should survive unchanged.
     #[test]
     fn test_buffer_starting_time_roundtrip_via_metadata() {
         let buf = CampaignMetadataEditBuffer {
+            starting_year: 2,
+            starting_month: 6,
             starting_day: 7,
             starting_hour: 19,
             starting_minute: 45,
@@ -1793,6 +1927,8 @@ mod tests {
 
         // Reconstruct buffer from the updated metadata
         let buf2 = CampaignMetadataEditBuffer::from_metadata(&meta);
+        assert_eq!(buf2.starting_year, 2);
+        assert_eq!(buf2.starting_month, 6);
         assert_eq!(buf2.starting_day, 7);
         assert_eq!(buf2.starting_hour, 19);
         assert_eq!(buf2.starting_minute, 45);

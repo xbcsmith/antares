@@ -3616,4 +3616,180 @@ mod tests {
         );
         assert_eq!(results[0].1.npc_id, "npc_smooth_test");
     }
+
+    /// Phase 1: A map transition via `MapChangeEvent` must advance the in-game
+    /// clock by exactly `TIME_COST_MAP_TRANSITION_MINUTES`.
+    ///
+    /// Strategy: build a minimal Bevy app with `MapManagerPlugin`, wire up two
+    /// maps in `GlobalState`, send a `MapChangeEvent` targeting the second map,
+    /// run one update frame so `map_change_handler` executes, and assert the
+    /// clock advanced by the expected amount.
+    #[test]
+    fn test_map_transition_advances_time() {
+        use crate::domain::resources::TIME_COST_MAP_TRANSITION_MINUTES;
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, World};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapManagerPlugin);
+
+        // Required resources for spawn_map_markers (called by MapManagerPlugin).
+        app.insert_resource(crate::application::resources::GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(crate::game::resources::GrassQualitySettings::default());
+
+        // Build a world with two maps: party starts on map 1.
+        let mut world = World::new();
+        world.add_map(Map::new(
+            1,
+            "Map One".to_string(),
+            "First".to_string(),
+            10,
+            10,
+        ));
+        world.add_map(Map::new(
+            2,
+            "Map Two".to_string(),
+            "Second".to_string(),
+            10,
+            10,
+        ));
+        world.set_current_map(1);
+        world.set_party_position(Position::new(5, 5));
+
+        let mut gs = crate::application::GameState::new();
+        gs.world = world;
+
+        // Record the starting total minutes.
+        // Use total_days() so the cumulative-minute baseline is correct across
+        // month/year boundaries (day is now 1–30 within-month, not a running total).
+        let start_minutes = gs.time.total_days() as u64 * 24 * 60
+            + gs.time.hour as u64 * 60
+            + gs.time.minute as u64;
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Send a MapChangeEvent targeting map 2.
+        {
+            let mut msgs = app
+                .world_mut()
+                .get_resource_mut::<Messages<MapChangeEvent>>()
+                .expect("MapChangeEvent message queue must exist after MapManagerPlugin");
+            msgs.write(MapChangeEvent {
+                target_map: 2,
+                target_pos: Position::new(1, 1),
+            });
+        }
+
+        // Run one frame — map_change_handler processes the event and advances time.
+        app.update();
+
+        let state = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        let end_minutes = state.0.time.total_days() as u64 * 24 * 60
+            + state.0.time.hour as u64 * 60
+            + state.0.time.minute as u64;
+
+        assert_eq!(
+            end_minutes - start_minutes,
+            TIME_COST_MAP_TRANSITION_MINUTES as u64,
+            "a map transition must advance the clock by exactly TIME_COST_MAP_TRANSITION_MINUTES ({} min)",
+            TIME_COST_MAP_TRANSITION_MINUTES
+        );
+
+        // The active map must also have been updated.
+        assert_eq!(
+            state.0.world.current_map, 2,
+            "world.current_map must be updated to the target map id"
+        );
+        assert_eq!(
+            state.0.world.party_position,
+            Position::new(1, 1),
+            "world.party_position must be updated to the target position"
+        );
+    }
+
+    /// Phase 1: An invalid MapChangeEvent (targeting a non-existent map) must
+    /// NOT advance the in-game clock.
+    ///
+    /// The handler gracefully ignores unknown map ids, so no time should pass.
+    #[test]
+    fn test_invalid_map_transition_does_not_advance_time() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, World};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapManagerPlugin);
+
+        app.insert_resource(crate::application::resources::GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(crate::game::resources::GrassQualitySettings::default());
+
+        let mut world = World::new();
+        world.add_map(Map::new(
+            1,
+            "Only Map".to_string(),
+            "Only".to_string(),
+            10,
+            10,
+        ));
+        world.set_current_map(1);
+        world.set_party_position(Position::new(5, 5));
+
+        let mut gs = crate::application::GameState::new();
+        gs.world = world;
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        let time_before = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>()
+            .0
+            .time;
+
+        // Send an event targeting map 999 — does not exist.
+        {
+            let mut msgs = app
+                .world_mut()
+                .get_resource_mut::<Messages<MapChangeEvent>>()
+                .expect("MapChangeEvent message queue must exist");
+            msgs.write(MapChangeEvent {
+                target_map: 999,
+                target_pos: Position::new(0, 0),
+            });
+        }
+
+        app.update();
+
+        let state = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        assert_eq!(
+            state.0.time.minute, time_before.minute,
+            "invalid map transition must not advance minutes"
+        );
+        assert_eq!(
+            state.0.time.hour, time_before.hour,
+            "invalid map transition must not advance hours"
+        );
+        assert_eq!(
+            state.0.time.day, time_before.day,
+            "invalid map transition must not advance days"
+        );
+    }
 }

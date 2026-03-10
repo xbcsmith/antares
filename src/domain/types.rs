@@ -435,26 +435,75 @@ impl TimeOfDay {
     }
 }
 
+// ===== Calendar Constants =====
+
+/// Number of months in a game year.
+pub const MONTHS_PER_YEAR: u32 = 12;
+
+/// Number of days in a game month (all months are equal length).
+pub const DAYS_PER_MONTH: u32 = 30;
+
+/// Number of days in a game year (MONTHS_PER_YEAR × DAYS_PER_MONTH = 360).
+pub const DAYS_PER_YEAR: u32 = MONTHS_PER_YEAR * DAYS_PER_MONTH;
+
+// ===== Serde default helpers =====
+
+fn default_year() -> u32 {
+    1
+}
+
+fn default_month() -> u32 {
+    1
+}
+
 // ===== GameTime =====
 
 /// Game time tracking
 ///
-/// Tracks the in-game date and time. Days, hours, and minutes advance
-/// as the party travels, rests, and performs actions.
+/// Tracks the in-game calendar date and time. Years, months, days, hours, and
+/// minutes advance as the party travels, rests, and performs actions.
+///
+/// The calendar uses a simplified fixed-length structure:
+/// - 12 months per year ([`MONTHS_PER_YEAR`])
+/// - 30 days per month ([`DAYS_PER_MONTH`])
+/// - 360 days per year ([`DAYS_PER_YEAR`])
+///
+/// All fields are 1-based for `year`, `month`, and `day`; `hour` is 0–23;
+/// `minute` is 0–59.
+///
+/// # Backward Compatibility
+///
+/// The `year` and `month` fields use `#[serde(default)]` so existing save
+/// files and RON data that only contain `day`, `hour`, and `minute` will
+/// deserialize with `year = 1, month = 1`.
 ///
 /// # Examples
 ///
 /// ```
 /// use antares::domain::types::GameTime;
 ///
-/// let mut time = GameTime::new(1, 0, 0); // Day 1, midnight
+/// let mut time = GameTime::new(1, 0, 0); // Year 1, Month 1, Day 1, midnight
 /// time.advance_minutes(90); // Advance 1 hour 30 minutes
 /// assert_eq!(time.hour, 1);
 /// assert_eq!(time.minute, 30);
+///
+/// // Full constructor
+/// let full = GameTime::new_full(2, 6, 15, 8, 30);
+/// assert_eq!(full.year, 2);
+/// assert_eq!(full.month, 6);
+/// assert_eq!(full.day, 15);
+/// assert_eq!(full.hour, 8);
+/// assert_eq!(full.minute, 30);
 /// ```
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct GameTime {
-    /// Current day (1-based)
+    /// Current year (1-based)
+    #[serde(default = "default_year")]
+    pub year: u32,
+    /// Current month within the year (1-based, 1–12)
+    #[serde(default = "default_month")]
+    pub month: u32,
+    /// Current day within the month (1-based, 1–30)
     pub day: u32,
     /// Current hour (0-23)
     pub hour: u8,
@@ -463,25 +512,107 @@ pub struct GameTime {
 }
 
 impl GameTime {
-    /// Creates a new GameTime at the specified day, hour, and minute
+    /// Creates a new `GameTime` at the specified day, hour, and minute.
+    ///
+    /// Sets `year = 1` and `month = 1` for backward compatibility with
+    /// existing call sites. Use [`GameTime::new_full`] to specify year and
+    /// month explicitly.
     ///
     /// # Examples
     ///
     /// ```
     /// use antares::domain::types::GameTime;
     ///
-    /// let time = GameTime::new(1, 12, 30); // Day 1, 12:30 PM
+    /// let time = GameTime::new(1, 12, 30); // Year 1, Month 1, Day 1, 12:30 PM
+    /// assert_eq!(time.year, 1);
+    /// assert_eq!(time.month, 1);
     /// assert_eq!(time.day, 1);
     /// assert_eq!(time.hour, 12);
     /// assert_eq!(time.minute, 30);
     /// ```
     pub fn new(day: u32, hour: u8, minute: u8) -> Self {
-        Self { day, hour, minute }
+        Self {
+            year: 1,
+            month: 1,
+            day,
+            hour,
+            minute,
+        }
     }
 
-    /// Advances time by the specified number of minutes
+    /// Creates a new `GameTime` with all five calendar and clock fields set.
     ///
-    /// Automatically handles overflow into hours and days.
+    /// # Arguments
+    ///
+    /// * `year`   - 1-based year (e.g. `1` for the first in-game year)
+    /// * `month`  - 1-based month within the year (1–12)
+    /// * `day`    - 1-based day within the month (1–30)
+    /// * `hour`   - Hour of day (0–23)
+    /// * `minute` - Minute of hour (0–59)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::GameTime;
+    ///
+    /// let time = GameTime::new_full(3, 11, 20, 14, 45);
+    /// assert_eq!(time.year, 3);
+    /// assert_eq!(time.month, 11);
+    /// assert_eq!(time.day, 20);
+    /// assert_eq!(time.hour, 14);
+    /// assert_eq!(time.minute, 45);
+    /// ```
+    pub fn new_full(year: u32, month: u32, day: u32, hour: u8, minute: u8) -> Self {
+        Self {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+        }
+    }
+
+    /// Returns the total cumulative days elapsed since the very beginning of
+    /// the calendar (Year 1, Month 1, Day 1).
+    ///
+    /// This is the canonical way to compare two points in time by day count
+    /// and is used by [`crate::domain::world::TimeCondition::AfterDay`] and
+    /// [`crate::domain::world::TimeCondition::BeforeDay`] so that their
+    /// thresholds continue to mean "total elapsed days" even after `day` was
+    /// narrowed to mean "day within month".
+    ///
+    /// # Formula
+    ///
+    /// `(year - 1) * DAYS_PER_YEAR + (month - 1) * DAYS_PER_MONTH + day`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::GameTime;
+    ///
+    /// // Year 1, Month 1, Day 1 → day 1
+    /// assert_eq!(GameTime::new(1, 0, 0).total_days(), 1);
+    ///
+    /// // Year 1, Month 2, Day 10 → 30 + 10 = 40
+    /// assert_eq!(GameTime::new_full(1, 2, 10, 0, 0).total_days(), 40);
+    ///
+    /// // Year 2, Month 1, Day 1 → 360 + 1 = 361
+    /// assert_eq!(GameTime::new_full(2, 1, 1, 0, 0).total_days(), 361);
+    /// ```
+    pub fn total_days(&self) -> u32 {
+        (self.year - 1) * DAYS_PER_YEAR + (self.month - 1) * DAYS_PER_MONTH + self.day
+    }
+
+    /// Advances time by the specified number of minutes.
+    ///
+    /// Automatically handles rollover into hours, days, months, and years.
+    ///
+    /// | Boundary           | Roll-over rule                          |
+    /// |--------------------|-----------------------------------------|
+    /// | 60 minutes         | → increment hour                        |
+    /// | 24 hours           | → increment day                         |
+    /// | `DAYS_PER_MONTH`   | → increment month, reset day to 1       |
+    /// | `MONTHS_PER_YEAR`  | → increment year, reset month to 1      |
     ///
     /// # Examples
     ///
@@ -504,16 +635,47 @@ impl GameTime {
         self.hour %= 24;
 
         self.day += days;
+        self.apply_day_rollover();
     }
 
-    /// Advances time by the specified number of hours
+    /// Advances time by the specified number of hours.
     pub fn advance_hours(&mut self, hours: u32) {
         self.advance_minutes(hours * 60);
     }
 
-    /// Advances time by the specified number of days
+    /// Advances time by the specified number of days.
+    ///
+    /// Handles rollover into months and years via the same logic as
+    /// [`GameTime::advance_minutes`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::GameTime;
+    ///
+    /// // Advancing 31 days from Month 1, Day 1 should land on Month 2, Day 1
+    /// let mut time = GameTime::new(1, 0, 0);
+    /// time.advance_days(31);
+    /// assert_eq!(time.month, 2);
+    /// assert_eq!(time.day, 1);
+    /// ```
     pub fn advance_days(&mut self, days: u32) {
         self.day += days;
+        self.apply_day_rollover();
+    }
+
+    /// Applies month and year rollover after `self.day` has been incremented.
+    ///
+    /// Called internally by [`advance_minutes`] and [`advance_days`].
+    fn apply_day_rollover(&mut self) {
+        while self.day > DAYS_PER_MONTH {
+            self.day -= DAYS_PER_MONTH;
+            self.month += 1;
+        }
+        while self.month > MONTHS_PER_YEAR {
+            self.month -= MONTHS_PER_YEAR;
+            self.year += 1;
+        }
     }
 
     /// Returns the current [`TimeOfDay`] period based on the hour.
@@ -902,6 +1064,8 @@ mod tests {
     #[test]
     fn test_game_time_creation() {
         let time = GameTime::new(5, 14, 30);
+        assert_eq!(time.year, 1);
+        assert_eq!(time.month, 1);
         assert_eq!(time.day, 5);
         assert_eq!(time.hour, 14);
         assert_eq!(time.minute, 30);
@@ -958,5 +1122,137 @@ mod tests {
         let time = GameTime::new(1, 12, 0);
         assert!(!time.is_night());
         assert!(time.is_day());
+    }
+
+    // ===== GameTime Calendar / Rollover Tests =====
+
+    #[test]
+    fn test_new_full_constructor() {
+        let time = GameTime::new_full(3, 11, 20, 14, 45);
+        assert_eq!(time.year, 3);
+        assert_eq!(time.month, 11);
+        assert_eq!(time.day, 20);
+        assert_eq!(time.hour, 14);
+        assert_eq!(time.minute, 45);
+    }
+
+    #[test]
+    fn test_advance_minutes_day_to_month_rollover() {
+        // Start at Month 1, Day 30, 23:59 — one minute rolls into Month 2
+        let mut time = GameTime::new_full(1, 1, 30, 23, 59);
+        time.advance_minutes(1);
+        assert_eq!(time.year, 1);
+        assert_eq!(time.month, 2);
+        assert_eq!(time.day, 1);
+        assert_eq!(time.hour, 0);
+        assert_eq!(time.minute, 0);
+    }
+
+    #[test]
+    fn test_advance_minutes_month_to_year_rollover() {
+        // Start at Month 12, Day 30, 23:00 — advance 120 minutes → crosses midnight → Year 2
+        let mut time = GameTime::new_full(1, 12, 30, 23, 0);
+        time.advance_minutes(120);
+        assert_eq!(time.year, 2);
+        assert_eq!(time.month, 1);
+        assert_eq!(time.day, 1);
+        assert_eq!(time.hour, 1);
+        assert_eq!(time.minute, 0);
+    }
+
+    #[test]
+    fn test_advance_minutes_multi_year_rollover() {
+        // Start at Year 1, Month 1, Day 1, 00:00
+        // Advance 2 full years (2 × 360 × 24 × 60 minutes)
+        let mut time = GameTime::new_full(1, 1, 1, 0, 0);
+        let two_years_in_minutes = 2 * DAYS_PER_YEAR * 24 * 60;
+        time.advance_minutes(two_years_in_minutes);
+        assert_eq!(time.year, 3);
+        assert_eq!(time.month, 1);
+        assert_eq!(time.day, 1);
+        assert_eq!(time.hour, 0);
+        assert_eq!(time.minute, 0);
+    }
+
+    #[test]
+    fn test_advance_days_with_month_rollover() {
+        // Advancing 31 days from Month 1, Day 1 → Month 2, Day 2
+        let mut time = GameTime::new_full(1, 1, 1, 0, 0);
+        time.advance_days(31);
+        assert_eq!(time.year, 1);
+        assert_eq!(time.month, 2);
+        assert_eq!(time.day, 2);
+        assert_eq!(time.hour, 0);
+        assert_eq!(time.minute, 0);
+    }
+
+    #[test]
+    fn test_advance_days_exact_month_boundary() {
+        // Advancing 30 days from Month 1, Day 1 → Month 2, Day 1
+        let mut time = GameTime::new_full(1, 1, 1, 6, 0);
+        time.advance_days(30);
+        assert_eq!(time.year, 1);
+        assert_eq!(time.month, 2);
+        assert_eq!(time.day, 1);
+        assert_eq!(time.hour, 6);
+    }
+
+    #[test]
+    fn test_advance_days_year_rollover() {
+        // Advancing 360 days from start lands on Year 2 Month 1 Day 1
+        let mut time = GameTime::new_full(1, 1, 1, 0, 0);
+        time.advance_days(360);
+        assert_eq!(time.year, 2);
+        assert_eq!(time.month, 1);
+        assert_eq!(time.day, 1);
+    }
+
+    #[test]
+    fn test_serde_default_year_month() {
+        // RON data without year/month fields should deserialize with year=1, month=1
+        let ron_str = "(day: 5, hour: 8, minute: 0)";
+        let time: GameTime = ron::from_str(ron_str).expect("RON deserialize failed");
+        assert_eq!(time.year, 1, "year should default to 1");
+        assert_eq!(time.month, 1, "month should default to 1");
+        assert_eq!(time.day, 5);
+        assert_eq!(time.hour, 8);
+        assert_eq!(time.minute, 0);
+    }
+
+    #[test]
+    fn test_total_days_basic() {
+        // Year 1, Month 1, Day 1 → total 1
+        assert_eq!(GameTime::new_full(1, 1, 1, 0, 0).total_days(), 1);
+
+        // Year 1, Month 2, Day 10 → (0 * 360) + (1 * 30) + 10 = 40
+        assert_eq!(GameTime::new_full(1, 2, 10, 0, 0).total_days(), 40);
+
+        // Year 2, Month 1, Day 1 → (1 * 360) + (0 * 30) + 1 = 361
+        assert_eq!(GameTime::new_full(2, 1, 1, 0, 0).total_days(), 361);
+    }
+
+    #[test]
+    fn test_total_days_adventure_span() {
+        // Month 2 Day 10 to Month 3 Day 12 = 32 days elapsed
+        let start = GameTime::new_full(1, 2, 10, 0, 0);
+        let end = GameTime::new_full(1, 3, 12, 0, 0);
+        assert_eq!(end.total_days() - start.total_days(), 32);
+    }
+
+    #[test]
+    fn test_total_days_year_boundary() {
+        // Last day of year 1 → 360
+        assert_eq!(GameTime::new_full(1, 12, 30, 0, 0).total_days(), 360);
+        // First day of year 2 → 361
+        assert_eq!(GameTime::new_full(2, 1, 1, 0, 0).total_days(), 361);
+    }
+
+    #[test]
+    fn test_new_defaults_year_and_month() {
+        // GameTime::new() must set year=1 and month=1 for backward compat
+        let time = GameTime::new(15, 8, 30);
+        assert_eq!(time.year, 1);
+        assert_eq!(time.month, 1);
+        assert_eq!(time.day, 15);
     }
 }
