@@ -3412,7 +3412,9 @@ mod tests {
 
         let mut state = GameState::new();
         state.world = build_world_with_map();
-        let before = state.time.day as u64 * 24 * 60
+        // Use total_days() so the cumulative-minute baseline is correct across
+        // month/year boundaries (day is now 1–30 within-month, not a running total).
+        let before = state.time.total_days() as u64 * 24 * 60
             + state.time.hour as u64 * 60
             + state.time.minute as u64;
 
@@ -3421,7 +3423,7 @@ mod tests {
             .move_party_and_handle_events(Direction::North, &content)
             .expect("move north on clear map must succeed");
 
-        let after = state.time.day as u64 * 24 * 60
+        let after = state.time.total_days() as u64 * 24 * 60
             + state.time.hour as u64 * 60
             + state.time.minute as u64;
 
@@ -3530,9 +3532,11 @@ mod tests {
             .rest_party(hours, &item_db, None)
             .expect("rest_party must succeed with food");
 
-        // Total minutes elapsed since day 1, hour 0, minute 0.
-        let elapsed_minutes =
-            (state.time.day - 1) * 24 * 60 + state.time.hour as u32 * 60 + state.time.minute as u32;
+        // Total minutes elapsed since the campaign start (Year 1, Month 1, Day 1, 00:00).
+        // total_days() is cumulative across months/years; subtract 1 to get elapsed days.
+        let elapsed_minutes = (state.time.total_days() - 1) * 24 * 60
+            + state.time.hour as u32 * 60
+            + state.time.minute as u32;
         let expected_elapsed = (initial_hour as u32) * 60 + (initial_minute as u32) + hours * 60;
         assert_eq!(
             elapsed_minutes,

@@ -3668,8 +3668,11 @@ mod tests {
         gs.world = world;
 
         // Record the starting total minutes.
-        let start_minutes =
-            gs.time.day as u64 * 24 * 60 + gs.time.hour as u64 * 60 + gs.time.minute as u64;
+        // Use total_days() so the cumulative-minute baseline is correct across
+        // month/year boundaries (day is now 1–30 within-month, not a running total).
+        let start_minutes = gs.time.total_days() as u64 * 24 * 60
+            + gs.time.hour as u64 * 60
+            + gs.time.minute as u64;
 
         app.insert_resource(crate::game::resources::GlobalState(gs));
 
@@ -3691,7 +3694,7 @@ mod tests {
         let state = app
             .world()
             .resource::<crate::game::resources::GlobalState>();
-        let end_minutes = state.0.time.day as u64 * 24 * 60
+        let end_minutes = state.0.time.total_days() as u64 * 24 * 60
             + state.0.time.hour as u64 * 60
             + state.0.time.minute as u64;
 

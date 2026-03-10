@@ -1,5 +1,124 @@
 # Implementations
 
+## Phase 5E: Months and Years — Call-Site Audit & Quality Gates (Complete)
+
+### Overview
+
+Audited every `.day` access on `GameTime` across the entire codebase and updated all
+sites that were treating `day` as a **cumulative elapsed-day counter** to use
+`GameTime::total_days()` instead. After Phase 1A changed `day` to mean "day-within-month
+(1–30)", any arithmetic of the form `day * 24 * 60` or `day - 1` that computed
+absolute or elapsed minutes was silently wrong once the calendar rolled past month 1.
+
+### Phase 5E Deliverables Checklist
+
+- [x] Full `.day` access audit across `src/` and `sdk/` completed
+- [x] `src/domain/world/npc_runtime.rs` — `tick_restock()` uses `total_days()` for cumulative-day comparisons
+- [x] `src/application/mod.rs` — `test_step_advances_time` uses `total_days()` for minute baseline
+- [x] `src/application/mod.rs` — `test_rest_advances_time_via_state` uses `total_days()` for elapsed-minutes calculation
+- [x] `src/game/systems/combat.rs` — `test_combat_round_advances_time` uses `total_days()` for minute baseline
+- [x] `src/game/systems/map.rs` — `test_map_transition_advances_time` uses `total_days()` for minute baseline
+- [x] All quality gates pass (0 errors, 0 warnings, 3371 tests green)
+- [x] `implementations.md` updated
+
+### Call-Site Audit Results
+
+Every `.day` access was classified as one of three categories:
+
+#### Category 1: Legitimate day-within-month accesses (no change needed)
+
+These correctly use `day` as the 1–30 field it now represents:
+
+| Location                                                                        | Usage                                                                 | Verdict    |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------- |
+| `src/domain/types.rs` — struct body and tests                                   | Field construction, rollover logic, assertions about day-within-month | ✅ Correct |
+| `src/game/systems/hud.rs` — `update_clock()`                                    | `game_time.day` passed to `format_clock_date()`                       | ✅ Correct |
+| `src/sdk/campaign_loader.rs` — tests                                            | `starting_time.day == 1` assertions                                   | ✅ Correct |
+| `sdk/campaign_builder/src/campaign_editor.rs` — buffer                          | `m.starting_time.day` copy/apply                                      | ✅ Correct |
+| `src/application/mod.rs` — doctest + unit test                                  | `state.time.day == 1` new-game assertion                              | ✅ Correct |
+| `src/application/mod.rs` — `test_blocked_step_does_not_advance_time`            | `time.day == time_before.day` identity check                          | ✅ Correct |
+| `src/application/save_game.rs` — `test_save_and_load`                           | `loaded_state.time.day == game_state.time.day` roundtrip identity     | ✅ Correct |
+| `src/game/systems/time.rs` — `test_time_advance_event_rolls_over_midnight`      | `time.day == 2` after midnight rollover                               | ✅ Correct |
+| `src/game/systems/map.rs` — `test_invalid_map_transition_does_not_advance_time` | `time.day == time_before.day` identity check                          | ✅ Correct |
+
+#### Category 2: Cumulative elapsed-day arithmetic — FIXED
+
+These computed total elapsed minutes using `day * 24 * 60`, which breaks once the
+calendar rolls past month 1 (day resets to 1):
+
+| Location                                                               | Old code                            | Fixed code                                   |
+| ---------------------------------------------------------------------- | ----------------------------------- | -------------------------------------------- |
+| `src/application/mod.rs` `test_step_advances_time` (before)            | `state.time.day as u64 * 24 * 60`   | `state.time.total_days() as u64 * 24 * 60`   |
+| `src/application/mod.rs` `test_step_advances_time` (after)             | `state.time.day as u64 * 24 * 60`   | `state.time.total_days() as u64 * 24 * 60`   |
+| `src/application/mod.rs` `test_rest_advances_time_via_state`           | `(state.time.day - 1) * 24 * 60`    | `(state.time.total_days() - 1) * 24 * 60`    |
+| `src/game/systems/combat.rs` `test_combat_round_advances_time` (start) | `gs.time.day as u64 * 24 * 60`      | `gs.time.total_days() as u64 * 24 * 60`      |
+| `src/game/systems/combat.rs` `test_combat_round_advances_time` (end)   | `state.0.time.day as u64 * 24 * 60` | `state.0.time.total_days() as u64 * 24 * 60` |
+| `src/game/systems/map.rs` `test_map_transition_advances_time` (start)  | `gs.time.day as u64 * 24 * 60`      | `gs.time.total_days() as u64 * 24 * 60`      |
+| `src/game/systems/map.rs` `test_map_transition_advances_time` (end)    | `state.0.time.day as u64 * 24 * 60` | `state.0.time.total_days() as u64 * 24 * 60` |
+
+#### Category 3: NPC restock tracking — FIXED (most important)
+
+`NpcRuntimeStore::tick_restock()` compared `new_time.day` against
+`last_restock_day` / `last_magic_refresh_day` to determine whether a new
+calendar day had passed. With `day` now being 1–30, this caused NPCs to restock
+12 times per year (once per month rollover when day resets to 1):
+
+```antares/src/domain/world/npc_runtime.rs#L707-L714
+    pub fn tick_restock(
+        &mut self,
+        new_time: &crate::domain::types::GameTime,
+        templates: &MerchantStockTemplateDatabase,
+    ) {
+        // Use total_days() so the counter is cumulative across months and years.
+        // new_time.day is only 1–30 (day-within-month, not a running total).
+        let new_day = new_time.total_days();
+```
+
+`last_restock_day` and `last_magic_refresh_day` are stored as `u32` and continue
+to hold cumulative-day values (they are serde-persisted; existing save files have
+values ≤ 30 which will be treated as total_days() from year 1, month 1 — correct
+since existing saves have `year=1, month=1` via the serde default).
+
+Updated tests that previously asserted raw `.day` values in `last_restock_day`
+now assert `game_time.total_days()` instead. Comment explanations were added so
+the mapping from `GameTime::new(7, 12, 0)` → `total_days() = 7` is explicit.
+
+Updated doc comment to reference `total_days()` instead of `.day` for the seed
+recommendation in `refresh_magic_slots`.
+
+### What Was NOT Changed
+
+The following `.day` accesses were intentionally left unchanged because they
+operate on the correct semantic:
+
+- `npc_runtime.rs` doctest for `tick_restock` — uses `GameTime::new(2, 6, 0)` which
+  has `total_days() = 2`; the example comment "Advance to day 2" is still accurate
+  since the test starts at the very beginning of the calendar.
+- All doc comments in `src/application/mod.rs` that say `assert_eq!(state.time.day, 1)` —
+  these check the day-within-month field on a freshly created game state (correct).
+- `src/game/systems/time.rs` rollover test — explicitly tests that `day` increments
+  from 1 to 2 after midnight (day-within-month semantics, correct).
+
+### Architecture Compliance
+
+- The decision from the plan is enforced: `day` = day-within-month (1–30);
+  cumulative elapsed days = `total_days()`.
+- `TimeCondition::AfterDay` and `BeforeDay` already use `total_days()` (Phase 2B).
+- All comparison logic that needs cumulative day counts now uses `total_days()`.
+- No magic numbers introduced — all rollover constants reference `DAYS_PER_MONTH`,
+  `MONTHS_PER_YEAR`, `DAYS_PER_YEAR` from `src/domain/types.rs`.
+
+### Quality Gate Results
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt         → clean (no output)
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3371 passed, 8 skipped
+```
+
+---
+
 ## Phase 4D: Months and Years — Campaign Builder & Config (Complete)
 
 ### Overview
