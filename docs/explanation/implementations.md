@@ -1,5 +1,194 @@
 # Implementations
 
+## Phase 5: Campaign Builder — Starting Date/Time (Complete)
+
+### Overview
+
+Phase 5 wires a configurable **starting date/time** into every layer of the
+campaign stack: the `CampaignConfig` data structure, the `CampaignMetadata`
+RON file, the `GameState` initialisation path, the Campaign Builder editor
+buffer, and the Gameplay section of the Campaign Builder UI. A campaign
+author can now open Campaign Builder → Campaign Editor → Gameplay, set
+Day 3, 22:00 as the starting time, save, and launch the game to find the HUD
+clock (Phase 3) showing `22:00` and `Day 3` from the very first frame of
+exploration. Campaigns whose `campaign.ron` lacks the field silently fall
+back to Day 1, 08:00 via `serde(default)`.
+
+---
+
+### Phase 5 Deliverables Checklist
+
+- [x] `starting_time: GameTime` field on `CampaignConfig` with `serde(default = "default_starting_time")`
+- [x] `default_starting_time()` returning `GameTime::new(1, 8, 0)` (morning)
+- [x] `starting_time: GameTime` field on `CampaignMetadata` with `serde(default)`
+- [x] `CampaignMetadata → CampaignConfig` conversion propagates `starting_time`
+- [x] `GameState::new_game()` initialises `state.time` from `campaign.config.starting_time`
+- [x] `starting_day`, `starting_hour`, `starting_minute` fields on `CampaignMetadataEditBuffer`
+- [x] `CampaignMetadataEditBuffer::from_metadata()` copies all three fields from `starting_time`
+- [x] `CampaignMetadataEditBuffer::apply_to()` clamps and writes back to `dest.starting_time`
+- [x] **Starting Date/Time** row in Campaign Builder → Campaign Editor → Gameplay section
+- [x] `period_label()` helper with `TimeOfDay` preview hint next to the spinners
+- [x] `campaigns/tutorial/campaign.ron` — explicit `starting_time: GameTime(day: 1, hour: 8, minute: 0)`
+- [x] `data/test_campaign/campaign.ron` — explicit `starting_time: (day: 1, hour: 8, minute: 0)`
+- [x] All phase-5 tests pass (3337/3337)
+
+---
+
+### What Was Built
+
+#### `starting_time` on `CampaignConfig` — `src/sdk/campaign_loader.rs`
+
+A `starting_time: GameTime` field was added to `CampaignConfig` (L192–197).
+The `#[serde(default = "default_starting_time")]` attribute guarantees
+backward compatibility with any `campaign.ron` file that pre-dates this change.
+`default_starting_time()` returns `GameTime::new(1, 8, 0)` — Day 1, 08:00 —
+so campaigns without an explicit field start in the morning.
+
+The `TryFrom<CampaignMetadata>` implementation at L533–537 copies
+`metadata.starting_time` directly into the resulting `CampaignConfig`.
+
+#### `starting_time` on `CampaignMetadata` — `src/sdk/campaign_loader.rs`
+
+`CampaignMetadata` (L480–484) received the same `starting_time: GameTime`
+field with an identical `serde(default)`. This is the struct that is
+deserialised from `campaign.ron` on disk, so the RON files only need to
+contain the field when a non-default starting time is desired.
+
+#### `GameState::new_game()` — `src/application/mod.rs`
+
+Inside `new_game()` (L645–654) the starting time is extracted from the
+campaign config before the `GameState` is constructed:
+
+```antares/src/application/mod.rs#L645-654
+// Initialise the game clock from the campaign's configured starting time.
+// Campaign authors set this in config.ron via `starting_time: (day: N, hour: H, minute: M)`.
+// Falls back to Day 1, 08:00 when the field is absent (serde default).
+let starting_time = campaign.config.starting_time;
+
+let mut state = Self {
+    // ...
+    time: starting_time,
+    // ...
+};
+```
+
+This means that from the very first frame of exploration the HUD clock, the
+ambient-lighting system, and every time-gated event condition all see the
+campaign author's intended starting time.
+
+#### `CampaignMetadataEditBuffer` — `sdk/campaign_builder/src/campaign_editor.rs`
+
+Three fields were added to the buffer struct (L103–109) to allow ergonomic
+drag-value editing in egui:
+
+```antares/sdk/campaign_builder/src/campaign_editor.rs#L103-109
+// Starting date/time (split from GameTime for ergonomic drag-value editing)
+/// Starting day (1-based)
+pub starting_day: u32,
+/// Starting hour (0–23)
+pub starting_hour: u8,
+/// Starting minute (0–59)
+pub starting_minute: u8,
+```
+
+`from_metadata()` (L149–155) copies `m.starting_time.{day,hour,minute}` into
+the three split fields.
+
+`apply_to()` (L192–196) reconstructs `GameTime` with clamping:
+
+- `starting_day.max(1)` — day is 1-based; 0 is invalid
+- `starting_hour.min(23)` — hours are 0–23
+- `starting_minute.min(59)` — minutes are 0–59
+
+`Default for CampaignMetadataEditBuffer` seeds the fields from
+`CampaignMetadata::default()`, which delegates to `default_starting_time()`,
+so a freshly opened editor always shows Day 1, 08:00.
+
+#### Starting Date/Time UI Row — `sdk/campaign_builder/src/campaign_editor.rs`
+
+The Gameplay section (`CampaignSection::Gameplay`, L1075–1128) contains the
+new row immediately after the **Starting Direction** ComboBox and before the
+**Starting Gold** drag-value:
+
+- Three `egui::DragValue` widgets with enforced ranges (`1..=9999` for day,
+  `0..=23` for hour, `0..=59` for minute).
+- A `ui.colored_label` grey preview that calls `period_label()` to show
+  which time-of-day period the selected time falls in — e.g. `(Morning)` for
+  08:00 or `(Night)` for 22:00.
+
+#### `period_label()` helper — `sdk/campaign_builder/src/campaign_editor.rs`
+
+A public helper at L1478–1487 maps every `TimeOfDay` variant to a short
+`&'static str` label. It is also tested by a doc-test and by
+`test_period_label_all_variants`.
+
+#### RON Data Files Updated
+
+Both canonical `campaign.ron` files now carry an explicit `starting_time`
+field so the `serde(default)` fallback is never exercised in production or the
+test fixture:
+
+- `campaigns/tutorial/campaign.ron` — `starting_time: GameTime(day: 1, hour: 8, minute: 0)`
+- `data/test_campaign/campaign.ron` — `starting_time: (day: 1, hour: 8, minute: 0)`
+
+---
+
+### Tests
+
+#### Domain / loader tests — `src/sdk/campaign_loader.rs`
+
+| Test                                                      | What it verifies                                                               |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `test_campaign_config_starting_time_default`              | `default_starting_time()` returns Day 1, 08:00                                 |
+| `test_campaign_config_starting_time_roundtrip`            | RON serialise → deserialise preserves `GameTime::new(3, 22, 30)`               |
+| `test_campaign_config_missing_starting_time_uses_default` | RON string without `starting_time` key defaults to Day 1, 08:00                |
+| `test_test_campaign_has_explicit_starting_time`           | Loading `data/test_campaign` yields `starting_time.day==1, hour==8, minute==0` |
+
+#### Campaign Editor buffer tests — `sdk/campaign_builder/src/campaign_editor.rs`
+
+| Test                                               | What it verifies                                                            |
+| -------------------------------------------------- | --------------------------------------------------------------------------- |
+| `test_buffer_from_metadata_copies_starting_time`   | `from_metadata()` copies day=2, hour=20, minute=45 into split fields        |
+| `test_buffer_apply_to_writes_starting_time`        | `apply_to()` writes day=5, hour=6, minute=30 back to `GameTime`             |
+| `test_buffer_starting_time_clamps_hour`            | hour=25 is clamped to 23 by `apply_to()`                                    |
+| `test_buffer_starting_time_clamps_minute`          | minute=75 is clamped to 59 by `apply_to()`                                  |
+| `test_buffer_starting_time_clamps_day_zero`        | day=0 is clamped to 1 by `apply_to()`                                       |
+| `test_buffer_default_starting_time_fields`         | Default buffer has day=1, hour=8, minute=0                                  |
+| `test_buffer_starting_time_roundtrip_via_metadata` | Split fields → `apply_to` → `from_metadata` round-trip preserves values     |
+| `test_period_label_all_variants`                   | `period_label` returns correct string for all six `TimeOfDay` variants      |
+| `test_period_label_matches_game_time_time_of_day`  | `period_label` agrees with `GameTime::time_of_day` for representative hours |
+
+---
+
+### Architecture Compliance
+
+| Check                                                                       | Status |
+| --------------------------------------------------------------------------- | ------ |
+| Data structures match `architecture.md` Section 4.9 `CampaignConfig`        | ✅     |
+| `serde(default)` ensures backward-compatible RON deserialization            | ✅     |
+| `GameTime` type alias used consistently (not raw fields)                    | ✅     |
+| `default_starting_time()` named consistently with other `default_*` helpers | ✅     |
+| Campaign builder split-field pattern matches existing DragValue conventions | ✅     |
+| RON format used for all data files (not JSON/YAML)                          | ✅     |
+| Test data under `data/test_campaign`, not `campaigns/tutorial`              | ✅     |
+| No architectural deviations from `architecture.md`                          | ✅     |
+
+---
+
+### Quality Gate Results
+
+```/dev/null/quality_gates.txt#L1-8
+cargo fmt --all          → No output (all files formatted)
+cargo check --all-targets --all-features
+                         → Finished (0 errors)
+cargo clippy --all-targets --all-features -- -D warnings
+                         → Finished (0 warnings)
+cargo nextest run --all-features
+                         → 3337 tests run: 3337 passed, 8 skipped
+```
+
+---
+
 ## Phase 4: Time-Triggered Events (Complete)
 
 ### Overview
