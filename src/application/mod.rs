@@ -302,6 +302,13 @@ pub struct ActiveSpells {
     pub cursed: u8,
 }
 
+/// Bonus resistance points granted per active protection spell/potion.
+///
+/// When an `ActiveSpells` protection field is non-zero, this flat bonus is
+/// added to the character's current resistance for the matching damage type
+/// during combat damage resolution.
+pub const ACTIVE_PROTECTION_BONUS: i16 = 25;
+
 impl ActiveSpells {
     /// Creates a new ActiveSpells with all effects inactive
     pub fn new() -> Self {
@@ -324,6 +331,55 @@ impl ActiveSpells {
             shield: 0,
             power_shield: 0,
             cursed: 0,
+        }
+    }
+
+    /// Returns the effective bonus resistance for a given [`ResistanceType`]
+    /// contributed by active spell/potion protections.
+    ///
+    /// Returns [`ACTIVE_PROTECTION_BONUS`] (25) when the mapped `active_spells`
+    /// field is non-zero (i.e. the protection is currently active), and `0`
+    /// when the field has ticked down to zero (expired).
+    ///
+    /// Callers add this value to `character.resistances.<field>.current` to
+    /// obtain the total effective resistance for a given damage type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{ActiveSpells, ACTIVE_PROTECTION_BONUS};
+    /// use antares::domain::items::types::ResistanceType;
+    ///
+    /// let mut spells = ActiveSpells::new();
+    /// // No protection active — all types return 0.
+    /// assert_eq!(spells.effective_resistance(ResistanceType::Fire), 0);
+    ///
+    /// // Activate fire protection for 30 minutes.
+    /// spells.fire_protection = 30;
+    /// assert_eq!(spells.effective_resistance(ResistanceType::Fire), ACTIVE_PROTECTION_BONUS);
+    ///
+    /// // Cold is still inactive.
+    /// assert_eq!(spells.effective_resistance(ResistanceType::Cold), 0);
+    /// ```
+    pub fn effective_resistance(
+        &self,
+        res_type: crate::domain::items::types::ResistanceType,
+    ) -> i16 {
+        use crate::domain::items::types::ResistanceType;
+        let active = match res_type {
+            ResistanceType::Fire => self.fire_protection > 0,
+            ResistanceType::Cold => self.cold_protection > 0,
+            ResistanceType::Electricity => self.electricity_protection > 0,
+            ResistanceType::Energy => self.magic_protection > 0,
+            ResistanceType::Fear => self.fear_protection > 0,
+            ResistanceType::Physical => self.magic_protection > 0,
+            ResistanceType::Paralysis => self.psychic_protection > 0,
+            ResistanceType::Sleep => self.psychic_protection > 0,
+        };
+        if active {
+            ACTIVE_PROTECTION_BONUS
+        } else {
+            0
         }
     }
 
@@ -3771,6 +3827,99 @@ mod tests {
             state.time_of_day(),
             TimeOfDay::Night,
             "06:00 + 16 hours should be Night"
+        );
+    }
+
+    // ===== Phase 4: ActiveSpells::effective_resistance tests =====
+
+    #[test]
+    fn test_effective_resistance_zero_when_no_protection() {
+        use crate::domain::items::types::ResistanceType;
+
+        // All active_spells fields are 0 by default — every type must return 0.
+        let spells = ActiveSpells::new();
+        let all_types = [
+            ResistanceType::Fire,
+            ResistanceType::Cold,
+            ResistanceType::Electricity,
+            ResistanceType::Energy,
+            ResistanceType::Fear,
+            ResistanceType::Physical,
+            ResistanceType::Paralysis,
+            ResistanceType::Sleep,
+        ];
+        for res_type in all_types {
+            assert_eq!(
+                spells.effective_resistance(res_type),
+                0,
+                "effective_resistance({res_type:?}) must be 0 when no protection is active"
+            );
+        }
+    }
+
+    #[test]
+    fn test_effective_resistance_nonzero_when_active() {
+        use crate::domain::items::types::ResistanceType;
+
+        // Each of the eight ResistanceType variants must return ACTIVE_PROTECTION_BONUS
+        // when its mapped ActiveSpells field is non-zero.
+        //
+        // Mapping (mirrors Phase 3 / apply_consumable_effect_exploration):
+        //   Fire        → fire_protection
+        //   Cold        → cold_protection
+        //   Electricity → electricity_protection
+        //   Energy      → magic_protection
+        //   Fear        → fear_protection
+        //   Physical    → magic_protection  (no dedicated field)
+        //   Paralysis   → psychic_protection
+        //   Sleep       → psychic_protection
+        type ActivateFn = fn(&mut ActiveSpells);
+        let cases: &[(ResistanceType, ActivateFn)] = &[
+            (ResistanceType::Fire, |s| s.fire_protection = 10),
+            (ResistanceType::Cold, |s| s.cold_protection = 10),
+            (ResistanceType::Electricity, |s| {
+                s.electricity_protection = 10
+            }),
+            (ResistanceType::Energy, |s| s.magic_protection = 10),
+            (ResistanceType::Fear, |s| s.fear_protection = 10),
+            (ResistanceType::Physical, |s| s.magic_protection = 10),
+            (ResistanceType::Paralysis, |s| s.psychic_protection = 10),
+            (ResistanceType::Sleep, |s| s.psychic_protection = 10),
+        ];
+
+        for (res_type, activate) in cases {
+            let mut spells = ActiveSpells::new();
+            activate(&mut spells);
+            assert_eq!(
+                spells.effective_resistance(*res_type),
+                ACTIVE_PROTECTION_BONUS,
+                "effective_resistance({res_type:?}) must be {ACTIVE_PROTECTION_BONUS} when protection is active"
+            );
+        }
+    }
+
+    #[test]
+    fn test_effective_resistance_zero_when_expired() {
+        use crate::domain::items::types::ResistanceType;
+
+        // Set fire_protection to 1, tick once — it becomes 0 — resistance bonus
+        // must then be 0 again.
+        let mut spells = ActiveSpells::new();
+        spells.fire_protection = 1;
+
+        assert_eq!(
+            spells.effective_resistance(ResistanceType::Fire),
+            ACTIVE_PROTECTION_BONUS,
+            "fire resistance bonus must be non-zero while protection is active"
+        );
+
+        // One tick decrements fire_protection to 0.
+        spells.tick();
+
+        assert_eq!(
+            spells.effective_resistance(ResistanceType::Fire),
+            0,
+            "fire resistance bonus must be 0 after protection expires (tick to 0)"
         );
     }
 }

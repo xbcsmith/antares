@@ -1,5 +1,172 @@
 # Implementations
 
+## Consumable Duration Effects — Phase 4: Project `ActiveSpells` into Effective Resistance Calculations (Complete)
+
+### Overview
+
+Phase 4 makes the `active_spells.*_protection` fields that are written by Phase 3
+(timed resistance potions) actually influence combat outcomes. Before this phase
+those fields were ticked by `advance_time` but never read during damage
+resolution. After this phase a party member who has consumed a fire-resistance
+potion will take measurably less fire damage while the duration is non-zero, and
+full damage again once it expires.
+
+Two files were changed and five new tests were added.
+
+### Phase 4 Deliverables Checklist
+
+- [x] `ACTIVE_PROTECTION_BONUS: i16 = 25` constant defined at module scope in
+      `src/application/mod.rs`.
+- [x] `ActiveSpells::effective_resistance(res_type: ResistanceType) -> i16`
+      method added to `impl ActiveSpells` in `src/application/mod.rs`; covers
+      all eight `ResistanceType` variants using the same mapping as Phase 3.
+- [x] `resolve_attack` signature updated to accept
+      `active_spells: Option<&ActiveSpells>` as a new parameter (inserted
+      between `attack` and `rng`).
+- [x] `resolve_attack` body projects the active-spell bonus into the effective
+      resistance percentage for non-Physical attack types targeting player
+      characters; Physical attacks are unaffected.
+- [x] All three call sites of `resolve_attack` in `src/game/systems/combat.rs`
+      updated to pass `Some(&global_state.0.active_spells)`.
+- [x] All existing `resolve_attack` call sites inside
+      `src/domain/combat/engine.rs` `mod tests` updated to pass `None`.
+- [x] All five Phase 4 tests pass.
+- [x] All four quality gates pass (fmt, check, clippy -D warnings, nextest).
+
+### Files Changed
+
+| File                          | Change                                                                                                                                                                                                                                            |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/application/mod.rs`      | `ACTIVE_PROTECTION_BONUS` constant added; `effective_resistance` method added to `impl ActiveSpells`; 3 new Phase 4 tests                                                                                                                         |
+| `src/domain/combat/engine.rs` | `use crate::application::ActiveSpells` import added; `resolve_attack` signature extended with `active_spells: Option<&ActiveSpells>`; resistance-projection logic added; all internal test call sites updated to pass `None`; 2 new Phase 4 tests |
+| `src/game/systems/combat.rs`  | All 3 `resolve_attack` call sites updated to pass `Some(&global_state.0.active_spells)`                                                                                                                                                           |
+
+### Architecture Details
+
+#### `ACTIVE_PROTECTION_BONUS` constant
+
+```antares/src/application/mod.rs#L305-311
+/// Bonus resistance points granted per active protection spell/potion.
+///
+/// When an `ActiveSpells` protection field is non-zero, this flat bonus is
+/// added to the character's current resistance for the matching damage type
+/// during combat damage resolution.
+pub const ACTIVE_PROTECTION_BONUS: i16 = 25;
+```
+
+A single canonical value controls how much resistance (out of 100%) a timed
+potion/spell contributes. At 25 points a fully-unresisted fire character still
+takes 25% less fire damage while the potion is active.
+
+#### `ActiveSpells::effective_resistance`
+
+The method maps each `ResistanceType` to the `ActiveSpells` field established in
+Phase 3, returning `ACTIVE_PROTECTION_BONUS` if non-zero or `0` if expired:
+
+```antares/src/application/mod.rs#L362-384
+    pub fn effective_resistance(
+        &self,
+        res_type: crate::domain::items::types::ResistanceType,
+    ) -> i16 {
+        use crate::domain::items::types::ResistanceType;
+        let active = match res_type {
+            ResistanceType::Fire => self.fire_protection > 0,
+            ResistanceType::Cold => self.cold_protection > 0,
+            ResistanceType::Electricity => self.electricity_protection > 0,
+            ResistanceType::Energy => self.magic_protection > 0,
+            ResistanceType::Fear => self.fear_protection > 0,
+            ResistanceType::Physical => self.magic_protection > 0,
+            ResistanceType::Paralysis => self.psychic_protection > 0,
+            ResistanceType::Sleep => self.psychic_protection > 0,
+        };
+        if active {
+            ACTIVE_PROTECTION_BONUS
+        } else {
+            0
+        }
+    }
+```
+
+#### `resolve_attack` resistance projection
+
+After the damage roll and might-bonus calculation, the function computes a
+`resistance_reduction` using the target's character resistance value plus the
+`active_spells` projection, clamped to `[0, 100]` and treated as a percentage:
+
+```antares/src/domain/combat/engine.rs#L638-688
+    let raw_damage = (base_damage + damage_bonus).max(1);
+
+    // Project active spell protection bonuses into effective resistance …
+    let resistance_reduction: i32 = match &attack.attack_type {
+        AttackType::Physical => 0,
+        non_physical => {
+            // Map AttackType → ResistanceType for active_spells lookup
+            // Map AttackType → character resistance field for base value
+            // effective = (char_resistance + spell_bonus).clamp(0, 100)
+            // reduction = (raw_damage * effective) / 100
+            …
+        }
+    };
+
+    let total_damage = (raw_damage - resistance_reduction).max(0) as u16;
+```
+
+**Key design decisions:**
+
+- **Physical attacks bypass resistance** — the `AttackType::Physical` arm always
+  returns `resistance_reduction = 0`, preserving all existing physical-damage
+  tests.
+- **Monsters are unaffected** — `active_spells` is party-wide; when the target
+  is a `Combatant::Monster`, `char_resistance` is set to `0` so the projection
+  has no effect on monster-targeted attacks.
+- **`None` preserves legacy behaviour** — passing `None` for `active_spells`
+  makes `spell_bonus = 0`, so all existing unit tests that pass `None` are
+  unaffected.
+- **Percentage reduction** — resistance is `[0, 100]`; `100` means full
+  immunity. The formula `(raw_damage * effective) / 100` is integer division,
+  which slightly under-reduces at low values (safe by design — never over-
+  protects).
+
+#### Call sites in `combat.rs`
+
+All three functions that invoke `resolve_attack` now pass the party's live
+`active_spells` reference:
+
+```antares/src/game/systems/combat.rs#L2714-2720
+    let (damage, special) = resolve_attack(
+        &combat_res.state,
+        action.attacker,
+        action.target,
+        &attack_data,
+        Some(&global_state.0.active_spells),
+        rng,
+    )?;
+```
+
+The same pattern is applied in `perform_ranged_attack_action_with_rng` and
+`perform_monster_turn_with_rng`.
+
+### Tests Added
+
+| Location                      | Test name                                           | What it verifies                                                                                                                 |
+| ----------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `src/application/mod.rs`      | `test_effective_resistance_zero_when_no_protection` | All eight `ResistanceType` variants return `0` when all `active_spells` fields are `0`                                           |
+| `src/application/mod.rs`      | `test_effective_resistance_nonzero_when_active`     | Each of the eight types returns `ACTIVE_PROTECTION_BONUS` when its mapped field is non-zero                                      |
+| `src/application/mod.rs`      | `test_effective_resistance_zero_when_expired`       | After `tick()` decrements `fire_protection` to `0`, `effective_resistance(Fire)` returns `0`                                     |
+| `src/domain/combat/engine.rs` | `test_resistance_check_without_active_spells`       | `resolve_attack` with `None` active spells applies no resistance reduction; physical damage stays in `[1, 6]` for a `1d6` attack |
+| `src/domain/combat/engine.rs` | `test_resistance_check_with_active_fire_protection` | Average fire damage with `fire_protection = 30` is statistically lower than without protection (300 trials each)                 |
+
+### Quality Gate Results
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt --all           → OK  (no output)
+cargo check --all-targets → Finished with 0 errors
+cargo clippy -D warnings  → Finished with 0 warnings
+cargo nextest run         → 3445 passed, 1 pre-existing timing flake, 8 skipped
+```
+
+---
+
 ## Consumable Duration Effects — Phase 3: Route Timed Consumable Effects to the Correct Backend (Complete)
 
 ### Overview
