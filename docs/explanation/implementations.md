@@ -1,5 +1,169 @@
 # Implementations
 
+## Consumable Duration Effects — Phase 5: Campaign Builder Support for Duration-Aware Consumables (Complete)
+
+### Overview
+
+Phase 5 exposes `duration_minutes` in the Campaign Builder's Items Editor so
+campaign authors can author timed attribute and resistance consumables. It also
+adds two SDK template functions and two timed consumable fixtures to the test
+campaign data file.
+
+### Phase 5 Deliverables Checklist
+
+- [x] `show_type_editor` in `sdk/campaign_builder/src/items_editor.rs` shows a
+      `Duration (minutes)` `DragValue` row for `BoostAttribute` and
+      `BoostResistance` effect types only; instant effects (`HealHp`,
+      `RestoreSp`, `CureCondition`, `IsFood`) never show the widget.
+- [x] Preview text in `show_preview_static` appends `" (N min)"` for timed
+      `BoostAttribute` and `BoostResistance` items; permanent items show no
+      suffix.
+- [x] `timed_fire_resist_potion` template function added to
+      `src/sdk/templates.rs`.
+- [x] `timed_might_potion` template function added to `src/sdk/templates.rs`.
+- [x] Test-campaign fixture `data/test_campaign/data/items.ron` includes item
+      62 (`Fire Resist Potion`, `BoostResistance(Fire, 25)`,
+      `duration_minutes: Some(60)`) and item 63 (`Might Potion`,
+      `BoostAttribute(Might, 5)`, `duration_minutes: Some(30)`).
+- [x] All 7 Phase 5 tests pass (5 in `items_editor.rs`, 2 in `templates.rs`).
+- [x] All four quality gates pass.
+- [x] `sdk/AGENTS.md` egui ID audit confirmed clean — no new `ComboBox`,
+      `ScrollArea`, loop, `SidePanel`, or `CollapsingHeader` was introduced.
+
+### Files Changed
+
+| File                                       | Change                                                                                       |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/items_editor.rs` | Duration widget in `show_type_editor`; duration suffix in `show_preview_static`; 5 new tests |
+| `src/sdk/templates.rs`                     | `timed_fire_resist_potion` and `timed_might_potion` functions; 2 new tests                   |
+| `data/test_campaign/data/items.ron`        | Items 62 and 63 added                                                                        |
+
+### Architecture Details
+
+#### Duration widget in `show_type_editor`
+
+A `ui.horizontal` block containing a `DragValue` (range `0..=u16::MAX`) and a
+`"(0 = permanent)"` label is added **after** the Amount row for both the
+`BoostResistance` and `BoostAttribute` match arms. The write-back logic mirrors
+`normalize_duration`: if `raw == 0` the field is stored as `None`; otherwise it
+is stored as `Some(raw)`.
+
+```sdk/campaign_builder/src/items_editor.rs#L1412-1425
+// Duration row — shown only for timed-capable effects
+ui.horizontal(|ui| {
+    ui.label("Duration (minutes):");
+    let mut raw: u16 = data.duration_minutes.unwrap_or(0);
+    ui.add(egui::DragValue::new(&mut raw).range(0..=u16::MAX));
+    ui.label("(0 = permanent)");
+    data.duration_minutes = if raw == 0 { None } else { Some(raw) };
+});
+```
+
+The widget uses no new egui ID contexts — `DragValue` requires no `push_id`,
+`from_id_salt`, or `id_salt`. This is exactly the pattern described in the
+implementation plan (Section 5.1).
+
+#### Duration suffix in `show_preview_static`
+
+Inside the `ItemType::Consumable` arm of `show_preview_static`, both the
+`BoostAttribute` and `BoostResistance` format strings are updated to compute a
+`duration_str` and append it:
+
+```sdk/campaign_builder/src/items_editor.rs#L655-670
+ConsumableEffect::BoostAttribute(attr, n) => {
+    let duration_str = data
+        .duration_minutes
+        .map(|m| format!(" ({} min)", m))
+        .unwrap_or_default();
+    format!(
+        "Boost {} ({}{}){}",
+        attr.display_name(),
+        if n >= 0 { "+" } else { "" },
+        n,
+        duration_str
+    )
+}
+```
+
+Permanent items (`duration_minutes: None`) produce `unwrap_or_default()` → an
+empty string, so no suffix appears. This satisfies Section 5.2.
+
+#### SDK template functions
+
+`timed_fire_resist_potion(id, duration_minutes, name)` — creates an
+`Item` with `ConsumableData { effect: BoostResistance(Fire, 25), is_combat_usable: false,
+duration_minutes: normalize_duration(Some(duration_minutes)) }`. Cost defaults
+to 100 gold buy / 50 gold sell and `max_charges: 1`.
+
+`timed_might_potion(id, duration_minutes, name)` — creates an `Item` with
+`ConsumableData { effect: BoostAttribute(Might, 5), is_combat_usable: false,
+duration_minutes: normalize_duration(Some(duration_minutes)) }`. Cost defaults
+to 80 gold buy / 40 gold sell and `max_charges: 1`.
+
+Both functions call `normalize_duration(Some(duration_minutes))` so that callers
+passing `0` receive a permanent item (`duration_minutes: None`). This matches
+Section 5.3 of the plan.
+
+#### Test-campaign fixture items
+
+Items 60 and 61 in `data/test_campaign/data/items.ron` are already occupied by
+`Arrows` and `Crossbow Bolts` respectively. The new timed consumable fixtures
+use the next free IDs:
+
+| ID  | Name               | Effect                      | Duration   |
+| --- | ------------------ | --------------------------- | ---------- |
+| 62  | Fire Resist Potion | `BoostResistance(Fire, 25)` | `Some(60)` |
+| 63  | Might Potion       | `BoostAttribute(Might, 5)`  | `Some(30)` |
+
+### Tests Added
+
+#### `sdk/campaign_builder/src/items_editor.rs` — 5 new tests
+
+| Test                                                       | What it verifies                                                                       |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `test_duration_field_round_trips_through_editor`           | `duration_minutes: Some(60)` in the edit buffer survives the round-trip                |
+| `test_duration_hidden_for_instant_effects`                 | `HealHp` and `RestoreSp` `ConsumableData` have `duration_minutes: None`                |
+| `test_duration_zero_normalizes_to_none_on_save`            | The `raw == 0 → None` logic produces `None`; non-zero produces `Some(n)`               |
+| `test_preview_text_includes_duration_for_timed_boost`      | Preview string for a `BoostAttribute` item with `Some(60)` contains `"60"` and `"min"` |
+| `test_preview_text_no_duration_suffix_for_permanent_boost` | Preview string for a `BoostAttribute` item with `None` does not contain `"min"`        |
+
+#### `src/sdk/templates.rs` — 2 new tests
+
+| Test                                                 | What it verifies                                                                                           |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `test_timed_fire_resist_potion_has_correct_duration` | `timed_fire_resist_potion(62, 90, "…")` produces `duration_minutes: Some(90)` and `BoostResistance(_, 25)` |
+| `test_timed_might_potion_zero_duration_is_none`      | `timed_might_potion(63, 0, "…")` produces `duration_minutes: None` (permanent)                             |
+
+### egui ID Audit (sdk/AGENTS.md compliance)
+
+The two new `ui.horizontal` blocks each contain only:
+
+- `ui.label` — no ID required
+- `egui::DragValue::new(&mut raw)` — no ID required
+- `ui.label` — no ID required
+
+✅ No `ComboBox` introduced — no `from_id_salt` needed
+✅ No `ScrollArea` introduced — no `id_salt` needed
+✅ No loop introduced — no `push_id` needed
+✅ No `SidePanel`/`TopBottomPanel`/`CentralPanel` touched
+✅ No `request_repaint()` needed — `DragValue` is a passive input widget, not a layout driver
+✅ No `CollapsingHeader`, `egui::Grid`, or `egui::Window` introduced
+
+### Quality Gate Results
+
+```text
+✅ cargo fmt --all              → no output (all files formatted)
+✅ cargo check --all-targets    → Finished with 0 errors
+✅ cargo clippy -D warnings     → Finished with 0 warnings
+✅ cargo nextest run            → 3447/3448 passed; 1 pre-existing flaky
+                                  performance test unrelated to Phase 5
+                                  (test_creature_database_load_performance
+                                   times out at ~700–800 ms vs. a 500 ms
+                                   threshold on this machine)
+```
+
+---
+
 ## Consumable Duration Effects — Phase 4: Project `ActiveSpells` into Effective Resistance Calculations (Complete)
 
 ### Overview
