@@ -75,6 +75,7 @@ impl Plugin for InventoryPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<DropItemAction>()
             .add_message::<TransferItemAction>()
+            .add_message::<UseItemExplorationAction>()
             .init_resource::<InventoryNavigationState>()
             .add_systems(
                 Update,
@@ -147,6 +148,29 @@ pub struct TransferItemAction {
     pub to_party_index: usize,
 }
 
+/// Emitted when the player uses a consumable item outside of combat.
+///
+/// The effect is applied to the owning character only (self-targeted).
+/// `party_index` identifies which party member owns the item.
+/// `slot_index` is the index within that character's `inventory.items`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::inventory_ui::UseItemExplorationAction;
+///
+/// let action = UseItemExplorationAction { party_index: 1, slot_index: 2 };
+/// assert_eq!(action.party_index, 1);
+/// assert_eq!(action.slot_index, 2);
+/// ```
+#[derive(Message)]
+pub struct UseItemExplorationAction {
+    /// Index of the party member (0-based) whose inventory contains the item.
+    pub party_index: usize,
+    /// Index of the slot within that character's inventory to use.
+    pub slot_index: usize,
+}
+
 // ===== Panel Action =====
 
 /// Represents an action that the player has requested via the inventory UI.
@@ -161,18 +185,26 @@ pub struct TransferItemAction {
 /// ```
 /// use antares::game::systems::inventory_ui::PanelAction;
 ///
+/// let use_action = PanelAction::Use { party_index: 0, slot_index: 3 };
 /// let drop = PanelAction::Drop { party_index: 0, slot_index: 1 };
 /// let transfer = PanelAction::Transfer {
 ///     from_party_index: 0,
 ///     from_slot_index: 0,
 ///     to_party_index: 1,
 /// };
+/// match use_action {
+///     PanelAction::Use { party_index, slot_index } => {
+///         assert_eq!(party_index, 0);
+///         assert_eq!(slot_index, 3);
+///     }
+///     _ => panic!("unexpected"),
+/// }
 /// match drop {
 ///     PanelAction::Drop { party_index, slot_index } => {
 ///         assert_eq!(party_index, 0);
 ///         assert_eq!(slot_index, 1);
 ///     }
-///     PanelAction::Transfer { .. } => panic!("unexpected"),
+///     _ => panic!("unexpected"),
 /// }
 /// match transfer {
 ///     PanelAction::Transfer { from_party_index, from_slot_index, to_party_index } => {
@@ -180,11 +212,18 @@ pub struct TransferItemAction {
 ///         assert_eq!(from_slot_index, 0);
 ///         assert_eq!(to_party_index, 1);
 ///     }
-///     PanelAction::Drop { .. } => panic!("unexpected"),
+///     _ => panic!("unexpected"),
 /// }
 /// ```
 #[derive(Debug, PartialEq, Eq)]
 pub enum PanelAction {
+    /// Use the consumable at `slot_index` owned by `party_index`.
+    Use {
+        /// Party member index of the owner.
+        party_index: usize,
+        /// Inventory slot index to use.
+        slot_index: usize,
+    },
     /// Drop the item at `slot_index` from party member `party_index`.
     Drop {
         /// Party member index of the owner.
@@ -273,17 +312,41 @@ impl InventoryNavigationState {
 /// Build the ordered list of action button descriptors for a focused panel.
 ///
 /// Returns a `Vec<PanelAction>` in the same order the UI renders them:
-/// `Drop` first, then one `Transfer` per other open panel member.
+/// `Use` first (only for consumable items), then `Drop`, then one `Transfer`
+/// per other open panel member.
 ///
 /// `panel_names` contains `(party_index, name)` for every visible panel.
 /// `focused_party_index` is the panel whose actions are being computed.
-/// `party_members_len` is used for bounds checking only.
+/// `selected_slot_index` is the inventory slot currently highlighted.
+/// `character` is the focused party member, used to inspect the item type.
+/// `game_content` is used to look up the item definition; if `None`, no `Use`
+/// action is generated.
 fn build_action_list(
     focused_party_index: usize,
+    selected_slot_index: usize,
     panel_names: &[(usize, String)],
+    character: &crate::domain::character::Character,
+    game_content: Option<&crate::application::resources::GameContent>,
 ) -> Vec<PanelAction> {
     let mut actions = Vec::new();
-    // Drop is always action 0
+
+    // Prepend Use action if the focused slot contains a consumable item
+    let is_consumable = character
+        .inventory
+        .items
+        .get(selected_slot_index)
+        .and_then(|slot| game_content.and_then(|gc| gc.db().items.get_item(slot.item_id)))
+        .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
+        .unwrap_or(false);
+
+    if is_consumable {
+        actions.push(PanelAction::Use {
+            party_index: focused_party_index,
+            slot_index: 0, // placeholder — filled at execution time
+        });
+    }
+
+    // Drop is always present
     actions.push(PanelAction::Drop {
         party_index: focused_party_index,
         slot_index: 0, // placeholder — filled in at execution time
@@ -327,6 +390,8 @@ fn inventory_input_system(
     mut nav_state: ResMut<InventoryNavigationState>,
     mut drop_writer: MessageWriter<DropItemAction>,
     mut transfer_writer: MessageWriter<TransferItemAction>,
+    game_content: Option<Res<GameContent>>,
+    mut use_writer: MessageWriter<UseItemExplorationAction>,
 ) {
     // Bail if not in inventory mode; reset nav state for next entry.
     let party_size = match &global_state.0.mode {
@@ -374,7 +439,20 @@ fn inventory_input_system(
         }
 
         // Build the action list for the focused panel
-        let actions = build_action_list(focused_party_index, &panel_names);
+        let focused_char_opt = global_state.0.party.members.get(focused_party_index);
+        let actions = match focused_char_opt {
+            Some(ch) => build_action_list(
+                focused_party_index,
+                slot_idx,
+                &panel_names,
+                ch,
+                game_content.as_deref(),
+            ),
+            None => {
+                nav_state.phase = NavigationPhase::SlotNavigation;
+                return;
+            }
+        };
         let action_count = actions.len();
 
         if action_count == 0 {
@@ -400,6 +478,12 @@ fn inventory_input_system(
         if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
             let action_idx = nav_state.focused_action_index.min(action_count - 1);
             match &actions[action_idx] {
+                PanelAction::Use { party_index, .. } => {
+                    use_writer.write(UseItemExplorationAction {
+                        party_index: *party_index,
+                        slot_index: slot_idx,
+                    });
+                }
                 PanelAction::Drop { party_index, .. } => {
                     drop_writer.write(DropItemAction {
                         party_index: *party_index,
@@ -496,6 +580,39 @@ fn inventory_input_system(
         return;
     }
 
+    // U key — use consumable in the highlighted slot directly (bypasses ActionNavigation)
+    if keyboard.just_pressed(KeyCode::KeyU) {
+        if let Some(slot_idx) = nav_state.selected_slot_index {
+            let is_consumable = global_state
+                .0
+                .party
+                .members
+                .get(focused_party_index)
+                .and_then(|ch| ch.inventory.items.get(slot_idx))
+                .and_then(|slot| {
+                    game_content
+                        .as_deref()
+                        .and_then(|gc| gc.db().items.get_item(slot.item_id))
+                })
+                .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
+                .unwrap_or(false);
+
+            if is_consumable {
+                use_writer.write(UseItemExplorationAction {
+                    party_index: focused_party_index,
+                    slot_index: slot_idx,
+                });
+                if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                    inv_state.selected_slot = None;
+                }
+                nav_state.selected_slot_index = None;
+                nav_state.focused_action_index = 0;
+                nav_state.phase = NavigationPhase::SlotNavigation;
+            }
+        }
+        return;
+    }
+
     // ── Enter — confirm slot selection → enter ActionNavigation ───────────
     if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
         if let Some(slot_idx) = nav_state.selected_slot_index {
@@ -580,6 +697,7 @@ fn inventory_ui_system(
     nav_state: Res<InventoryNavigationState>,
     mut drop_writer: MessageWriter<DropItemAction>,
     mut transfer_writer: MessageWriter<TransferItemAction>,
+    mut use_writer: MessageWriter<UseItemExplorationAction>,
 ) {
     let inv_state = match &global_state.0.mode {
         GameMode::Inventory(s) => s.clone(),
@@ -630,14 +748,19 @@ fn inventory_ui_system(
                 let status = match selected_slot {
                     Some(slot_idx) if slot_idx < character.inventory.items.len() => {
                         let slot = &character.inventory.items[slot_idx];
-                        let item_name = game_content
+                        let item_opt = game_content
                             .as_deref()
-                            .and_then(|gc| gc.db().items.get_item(slot.item_id))
+                            .and_then(|gc| gc.db().items.get_item(slot.item_id));
+                        let item_name = item_opt
                             .map(|item| item.name.clone())
                             .unwrap_or_else(|| format!("Item #{}", slot.item_id));
+                        let is_consumable = item_opt
+                            .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
+                            .unwrap_or(false);
+                        let use_hint = if is_consumable { "  [U: use]" } else { "" };
                         format!(
-                            "Focus: {}  |  Selected: {} (slot {})",
-                            character.name, item_name, slot_idx
+                            "Focus: {}  |  Selected: {} (slot {}){}",
+                            character.name, item_name, slot_idx, use_hint
                         )
                     }
                     _ => format!("Focus: {}", character.name),
@@ -649,7 +772,7 @@ fn inventory_ui_system(
         // ── Hint line changes based on navigation phase ──────────────────
         let hint = match nav_state.phase {
             NavigationPhase::SlotNavigation => {
-                "Tab: cycle character   ←→↑↓: navigate slots   Enter: select item   Esc/I: close"
+                "Tab: cycle character   ←→↑↓: navigate slots   Enter: select item   U: use consumable   Esc/I: close"
             }
             NavigationPhase::ActionNavigation => "←→: cycle actions   Enter: execute   Esc: cancel",
         };
@@ -719,6 +842,15 @@ fn inventory_ui_system(
 
     if let Some(action) = pending_action {
         match action {
+            PanelAction::Use {
+                party_index,
+                slot_index,
+            } => {
+                use_writer.write(UseItemExplorationAction {
+                    party_index,
+                    slot_index,
+                });
+            }
             PanelAction::Drop {
                 party_index,
                 slot_index,
@@ -907,8 +1039,42 @@ fn render_character_panel(
             // push_id for the action row — mandatory per sdk/AGENTS.md
             child.push_id("actions", |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    // ── Action 0: Drop ────────────────────────────────────
-                    let drop_focused = focused_action_index == Some(0);
+                    // ── Action: Use (consumable only, appears before Drop) ─
+                    let is_consumable = game_content
+                        .and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id))
+                        .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
+                        .unwrap_or(false);
+
+                    if is_consumable {
+                        // action index 0 = Use (when present)
+                        let use_focused = focused_action_index == Some(0);
+                        let use_label = egui::RichText::new("Use")
+                            .color(if use_focused {
+                                ACTION_FOCUSED_COLOR
+                            } else {
+                                egui::Color32::from_rgb(100, 180, 255)
+                            })
+                            .small();
+                        let mut use_btn = egui::Button::new(use_label);
+                        if use_focused {
+                            use_btn = use_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                        }
+                        if ui
+                            .add(use_btn)
+                            .on_hover_text("Use this consumable item")
+                            .clicked()
+                        {
+                            panel_action = Some(PanelAction::Use {
+                                party_index,
+                                slot_index: slot_idx,
+                            });
+                        }
+                    }
+
+                    // ── Action: Drop ──────────────────────────────────────
+                    // When Use is present, Drop is index 1; otherwise index 0.
+                    let drop_focused_idx = if is_consumable { 1 } else { 0 };
+                    let drop_focused = focused_action_index == Some(drop_focused_idx);
                     let drop_label = egui::RichText::new("Drop")
                         .color(if drop_focused {
                             ACTION_FOCUSED_COLOR
@@ -931,8 +1097,10 @@ fn render_character_panel(
                         });
                     }
 
-                    // ── Actions 1..N: Transfer to other party members ─────
-                    let mut action_btn_idx: usize = 1;
+                    // ── Actions: Transfer to other party members ──────────
+                    // When Use is present, Transfer buttons start at index 2;
+                    // otherwise they start at index 1.
+                    let mut action_btn_idx: usize = if is_consumable { 2 } else { 1 };
                     for &(other_index, ref other_name) in panel_names {
                         if other_index == party_index {
                             continue;
@@ -2073,6 +2241,7 @@ mod tests {
                 assert_eq!(slot_index, 1, "slot_index should be 1");
             }
             PanelAction::Transfer { .. } => panic!("expected Drop variant"),
+            PanelAction::Use { .. } => panic!("expected Drop variant"),
         }
     }
 
@@ -2099,6 +2268,7 @@ mod tests {
                 assert_eq!(to_party_index, 1, "to_party_index should be 1");
             }
             PanelAction::Drop { .. } => panic!("expected Transfer variant"),
+            PanelAction::Use { .. } => panic!("expected Transfer variant"),
         }
     }
 
@@ -2333,8 +2503,17 @@ mod tests {
     /// `build_action_list` with no other panels returns exactly one action: Drop.
     #[test]
     fn test_build_action_list_drop_only() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
         let panel_names: Vec<(usize, String)> = vec![(0, "Hero".to_string())];
-        let actions = build_action_list(0, &panel_names);
+        let character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let actions = build_action_list(0, 0, &panel_names, &character, None);
         assert_eq!(actions.len(), 1);
         assert!(matches!(
             actions[0],
@@ -2345,12 +2524,21 @@ mod tests {
     /// `build_action_list` with two other panels returns Drop + two Transfer actions.
     #[test]
     fn test_build_action_list_drop_and_transfers() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
         let panel_names: Vec<(usize, String)> = vec![
             (0, "Hero".to_string()),
             (1, "Ally".to_string()),
             (2, "Mage".to_string()),
         ];
-        let actions = build_action_list(0, &panel_names);
+        let character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let actions = build_action_list(0, 0, &panel_names, &character, None);
         // Drop + Transfer→1 + Transfer→2
         assert_eq!(actions.len(), 3);
         assert!(matches!(
@@ -2378,8 +2566,17 @@ mod tests {
     /// `build_action_list` excludes the focused panel itself from Transfer targets.
     #[test]
     fn test_build_action_list_excludes_self() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
         let panel_names: Vec<(usize, String)> = vec![(0, "A".to_string()), (1, "B".to_string())];
-        let actions = build_action_list(1, &panel_names);
+        let character = Character::new(
+            "A".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let actions = build_action_list(1, 0, &panel_names, &character, None);
         // Drop(1) + Transfer(1→0)
         assert_eq!(actions.len(), 2);
         assert!(matches!(
@@ -2539,5 +2736,242 @@ mod tests {
         );
         assert_eq!(nav_after.focused_action_index, 0);
         assert_eq!(nav_after.selected_slot_index, None);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 2: build_action_list with consumable/non-consumable
+    // ------------------------------------------------------------------
+
+    /// `build_action_list` for a slot containing a consumable returns `Use` as
+    /// the first action, before `Drop`.
+    #[test]
+    fn test_build_action_list_use_first_for_consumable() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        // Build a ContentDatabase with one consumable item
+        let mut content_db = ContentDatabase::new();
+        let item = Item {
+            id: 1,
+            name: "Healing Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(20),
+                is_combat_usable: true,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        content_db.items.add_item(item).unwrap();
+        let game_content = GameContent::new(content_db);
+
+        let mut character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 1,
+        });
+
+        let panel_names: Vec<(usize, String)> = vec![(0, "Hero".to_string())];
+        let actions = build_action_list(0, 0, &panel_names, &character, Some(&game_content));
+
+        // Use must be first
+        assert!(
+            matches!(actions[0], PanelAction::Use { party_index: 0, .. }),
+            "first action should be Use for a consumable slot"
+        );
+        // Drop must be second
+        assert!(
+            matches!(actions[1], PanelAction::Drop { party_index: 0, .. }),
+            "second action should be Drop"
+        );
+        assert_eq!(
+            actions.len(),
+            2,
+            "should have exactly Use + Drop with no other panels"
+        );
+    }
+
+    /// `build_action_list` for a non-consumable slot (e.g., a weapon) returns only
+    /// `Drop` and `Transfer` — no `Use` action.
+    #[test]
+    fn test_build_action_list_no_use_for_non_consumable() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::items::types::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::DiceRoll;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut content_db = ContentDatabase::new();
+        let weapon = Item {
+            id: 2,
+            name: "Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+        content_db.items.add_item(weapon).unwrap();
+        let game_content = GameContent::new(content_db);
+
+        let mut character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.inventory.items.push(InventorySlot {
+            item_id: 2,
+            charges: 0,
+        });
+
+        let panel_names: Vec<(usize, String)> = vec![(0, "Hero".to_string())];
+        let actions = build_action_list(0, 0, &panel_names, &character, Some(&game_content));
+
+        // No Use action for a weapon
+        assert!(
+            actions
+                .iter()
+                .all(|a| !matches!(a, PanelAction::Use { .. })),
+            "no Use action should appear for a non-consumable slot"
+        );
+        assert!(
+            matches!(actions[0], PanelAction::Drop { party_index: 0, .. }),
+            "first action should be Drop for a non-consumable slot"
+        );
+    }
+
+    /// `build_action_list` with `game_content = None` must never return a `Use`
+    /// action (cannot determine item type without content DB).
+    #[test]
+    fn test_build_action_list_no_use_when_no_content() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let mut character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.inventory.items.push(InventorySlot {
+            item_id: 99,
+            charges: 1,
+        });
+
+        let panel_names: Vec<(usize, String)> = vec![(0, "Hero".to_string())];
+        let actions = build_action_list(0, 0, &panel_names, &character, None);
+
+        assert!(
+            actions
+                .iter()
+                .all(|a| !matches!(a, PanelAction::Use { .. })),
+            "no Use action should appear when game_content is None"
+        );
+        assert!(matches!(actions[0], PanelAction::Drop { .. }));
+    }
+
+    /// `PanelAction::Use` carries `party_index` and `slot_index` correctly and
+    /// implements `Debug` and `PartialEq`.
+    #[test]
+    fn test_panel_action_use_variant() {
+        let a = PanelAction::Use {
+            party_index: 0,
+            slot_index: 2,
+        };
+        let b = PanelAction::Use {
+            party_index: 0,
+            slot_index: 2,
+        };
+        assert_eq!(a, b, "identical Use variants must be equal");
+
+        let debug_str = format!("{:?}", a);
+        assert!(
+            debug_str.contains("Use"),
+            "Debug output should contain 'Use'"
+        );
+        assert!(
+            debug_str.contains("party_index"),
+            "Debug output should contain 'party_index'"
+        );
+        assert!(
+            debug_str.contains("slot_index"),
+            "Debug output should contain 'slot_index'"
+        );
+
+        // Round-trip through matching
+        match a {
+            PanelAction::Use {
+                party_index,
+                slot_index,
+            } => {
+                assert_eq!(party_index, 0);
+                assert_eq!(slot_index, 2);
+            }
+            _ => panic!("expected Use variant"),
+        }
+    }
+
+    /// Drop and Transfer actions remain present and unaffected after the
+    /// `build_action_list` signature change.
+    #[test]
+    fn test_build_action_list_drop_transfer_unchanged() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // No items in inventory → slot 0 is empty → no Use action
+        let panel_names: Vec<(usize, String)> =
+            vec![(0, "Hero".to_string()), (1, "Ally".to_string())];
+        let actions = build_action_list(0, 0, &panel_names, &character, None);
+
+        // Drop + Transfer→1
+        assert_eq!(actions.len(), 2);
+        assert!(matches!(
+            actions[0],
+            PanelAction::Drop { party_index: 0, .. }
+        ));
+        assert!(matches!(
+            actions[1],
+            PanelAction::Transfer {
+                from_party_index: 0,
+                to_party_index: 1,
+                ..
+            }
+        ));
     }
 }

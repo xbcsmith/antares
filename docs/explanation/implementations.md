@@ -1,5 +1,112 @@
 # Implementations
 
+## Phase 2: Consumables Outside Combat — Inventory UI Integration (Complete)
+
+### Overview
+
+Wired the consumable-use pathway into the exploration-mode inventory UI
+(`src/game/systems/inventory_ui.rs`). Players can now use consumable items
+directly from the inventory screen without entering combat. The implementation
+adds a new `UseItemExplorationAction` message, a `PanelAction::Use` variant, a
+`U` keyboard shortcut, and a "Use" button in the action strip — all gated on the
+item being a `ItemType::Consumable(_)` according to the content database.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `UseItemExplorationAction { party_index, slot_index }` struct added with
+      `#[derive(Message)]`, full `///` doc comment, and doctest.
+- [x] `PanelAction::Use { party_index, slot_index }` variant added as the first
+      variant in the enum; doc example updated to cover all three variants.
+- [x] `build_action_list` signature extended to accept `selected_slot_index`,
+      `character: &Character`, and `game_content: Option<&GameContent>`;
+      `Use` is prepended only when the slot holds a consumable item.
+- [x] `inventory_input_system` updated: two new parameters
+      (`game_content: Option<Res<GameContent>>`, `use_writer: MessageWriter<UseItemExplorationAction>`);
+      `build_action_list` call updated; `PanelAction::Use` arm added in the
+      `Enter` handler; `U` shortcut added in `SlotNavigation` phase.
+- [x] `inventory_ui_system` updated: `use_writer` parameter added; status line
+      appends `"  [U: use]"` for consumable slots; hint text updated to include
+      `"U: use consumable"`; `PanelAction::Use` arm added in the
+      `pending_action` match.
+- [x] `render_character_panel` action strip updated: "Use" button rendered before
+      "Drop" when the selected slot is a consumable; Drop and Transfer button
+      focus indices adjusted accordingly (`drop_focused_idx` and
+      `action_btn_idx` conditioned on `is_consumable`).
+- [x] `InventoryPlugin::build()` registers `UseItemExplorationAction` with
+      `app.add_message::<UseItemExplorationAction>()`.
+- [x] Existing `build_action_list` tests updated to the new 5-argument signature
+      (character with empty inventory, `game_content = None`).
+- [x] Existing `test_panel_action_drop_variant` and
+      `test_panel_action_transfer_variant` updated with `PanelAction::Use { .. }`
+      arms to satisfy exhaustiveness.
+- [x] 5 new Phase 2 tests added:
+      `test_build_action_list_use_first_for_consumable`,
+      `test_build_action_list_no_use_for_non_consumable`,
+      `test_build_action_list_no_use_when_no_content`,
+      `test_panel_action_use_variant`,
+      `test_build_action_list_drop_transfer_unchanged`.
+- [x] `cargo fmt --all`, `cargo check --all-targets --all-features`,
+      `cargo clippy --all-targets --all-features -- -D warnings`, and
+      `cargo nextest run --all-features` all pass with zero warnings and 3398
+      tests passing.
+
+### Files Changed
+
+| File                                  | Change                                                                                                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/game/systems/inventory_ui.rs`    | `UseItemExplorationAction` struct added; `PanelAction::Use` variant added; `build_action_list` extended; systems updated; 7 new tests; 5 tests updated |
+| `docs/explanation/implementations.md` | This entry added                                                                                                                                       |
+
+### Architecture Details
+
+#### `UseItemExplorationAction`
+
+A `#[derive(Message)]` struct with two `pub usize` fields:
+
+- `party_index` — which party member owns the item (0-based).
+- `slot_index` — which slot in that character's `inventory.items` to consume.
+
+Mirrors the shape of `DropItemAction` and `TransferItemAction` to keep the
+action message pattern consistent across the inventory system.
+
+#### `PanelAction::Use` Variant
+
+Added as the **first** variant in `PanelAction` so that when keyboard focus
+enters `ActionNavigation`, index 0 maps to `Use` for consumables (and index 0
+maps to `Drop` for non-consumables). This preserves the invariant that the most
+destructive irreversible action (`Drop`) is not the default focus when a safer
+action (`Use`) is available.
+
+#### `build_action_list` Consumable Guard
+
+```text
+character.inventory.items.get(selected_slot_index)
+    → game_content.db().items.get_item(slot.item_id)
+    → matches!(item.item_type, ItemType::Consumable(_))
+```
+
+If `game_content` is `None` or the item ID is not found, `is_consumable`
+defaults to `false` and no `Use` action is emitted. This makes the function
+safe to call in tests without a content database.
+
+#### Button Index Offsets in `render_character_panel`
+
+When a consumable slot is selected the action strip renders:
+`[Use] [Drop] [→ Ally] [→ Mage] …`
+
+The Drop button focus index becomes `1` (was `0`) and Transfer buttons start at
+`2` (were `1`). These offsets are computed from the same `is_consumable` boolean
+so keyboard and mouse paths always agree.
+
+#### `U` Keyboard Shortcut
+
+Inserted in `SlotNavigation` phase, before the arrow-key handler and after the
+`Esc`/`Tab`/`Enter` blocks. If the highlighted slot is a consumable the shortcut
+fires `UseItemExplorationAction` immediately, clears the slot selection, and
+resets the nav phase — bypassing `ActionNavigation` entirely for the common case.
+
+---
+
 ## Phase 1: Extract Shared Consumable Domain Logic (Complete)
 
 ### Overview
