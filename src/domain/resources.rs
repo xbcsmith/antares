@@ -292,6 +292,7 @@ pub fn count_food_in_party(party: &Party, item_db: &ItemDatabase) -> u32 {
 ///     item_type: ItemType::Consumable(ConsumableData {
 ///         effect: ConsumableEffect::IsFood(1),
 ///         is_combat_usable: false,
+///         duration_minutes: None,
 ///     }),
 ///     base_cost: 5,
 ///     sell_cost: 2,
@@ -597,6 +598,7 @@ pub fn food_needed_to_rest(party: &Party) -> u32 {
 ///     item_type: ItemType::Consumable(ConsumableData {
 ///         effect: ConsumableEffect::IsFood(1),
 ///         is_combat_usable: false,
+///         duration_minutes: None,
 ///     }),
 ///     base_cost: 5,
 ///     sell_cost: 2,
@@ -677,9 +679,10 @@ pub fn rest_party_hour(
             .min(character.sp.base);
         character.sp.current = character.sp.current.max(sp_target);
 
-        // Tick minute-based conditions for one hour (60 minutes).
+        // Tick minute-based conditions and timed stat boosts for one hour (60 minutes).
         for _ in 0..60 {
             character.tick_conditions_minute();
+            character.tick_timed_stat_boosts_minute();
         }
     }
 
@@ -729,6 +732,7 @@ pub fn rest_party_hour(
 ///     item_type: ItemType::Consumable(ConsumableData {
 ///         effect: ConsumableEffect::IsFood(1),
 ///         is_combat_usable: false,
+///         duration_minutes: None,
 ///     }),
 ///     base_cost: 5,
 ///     sell_cost: 2,
@@ -883,6 +887,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(1),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 5,
             sell_cost: 2,
@@ -910,6 +915,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(3),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 12,
             sell_cost: 4,

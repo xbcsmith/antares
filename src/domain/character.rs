@@ -928,6 +928,37 @@ impl Default for QuestFlags {
     }
 }
 
+// ===== TimedStatBoost =====
+
+/// A reversible timed attribute boost applied by a consumable item.
+///
+/// When `minutes_remaining` reaches zero the boost is reversed by subtracting
+/// `amount` from `stats.<attribute>.current`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::TimedStatBoost;
+/// use antares::domain::items::types::AttributeType;
+///
+/// let boost = TimedStatBoost {
+///     attribute: AttributeType::Might,
+///     amount: 5,
+///     minutes_remaining: 30,
+/// };
+/// assert_eq!(boost.minutes_remaining, 30);
+/// assert_eq!(boost.amount, 5);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimedStatBoost {
+    /// Which attribute this boost modifies.
+    pub attribute: crate::domain::items::types::AttributeType,
+    /// Signed delta applied to `current` (positive = boost, negative = penalty).
+    pub amount: i8,
+    /// Minutes remaining before the boost expires and is reversed.
+    pub minutes_remaining: u16,
+}
+
 // ===== Character =====
 
 /// Represents a single character (party member or roster character)
@@ -988,6 +1019,10 @@ pub struct Character {
     pub conditions: Condition,
     /// Active data-driven conditions
     pub active_conditions: Vec<crate::domain::conditions::ActiveCondition>,
+    /// Active timed attribute boosts from consumable items.
+    /// Each entry is reversed when `minutes_remaining` reaches zero.
+    #[serde(default)]
+    pub timed_stat_boosts: Vec<TimedStatBoost>,
     /// Damage resistances
     pub resistances: Resistances,
     /// Per-character quest/event tracking
@@ -1073,6 +1108,7 @@ impl Character {
             spells: SpellBook::new(),
             conditions: Condition::new(),
             active_conditions: Vec::new(),
+            timed_stat_boosts: Vec::new(),
             resistances: Resistances::new(),
             quest_flags: QuestFlags::new(),
             portrait_id: String::new(),
@@ -1121,6 +1157,169 @@ impl Character {
     /// Updates conditions based on minute tick
     pub fn tick_conditions_minute(&mut self) {
         self.active_conditions.retain_mut(|c| !c.tick_minute());
+    }
+
+    /// Applies a timed attribute boost and records it for later reversal.
+    ///
+    /// Calls [`crate::domain::items::types::normalize_duration`] on
+    /// `duration_minutes` before storing, so `Some(0)` behaves identically to
+    /// `None` — no boost is applied and no entry is stored.
+    ///
+    /// # Arguments
+    ///
+    /// * `attr` — the attribute to boost
+    /// * `amount` — signed delta (positive = increase, negative = decrease)
+    /// * `duration_minutes` — `Some(n)` for a timed boost; `None` or `Some(0)`
+    ///   means permanent (no entry is stored and no current value is changed)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    /// use antares::domain::items::types::AttributeType;
+    ///
+    /// let mut hero = Character::new(
+    ///     "Hero".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// let base_might = hero.stats.might.current;
+    /// hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(30));
+    /// assert_eq!(hero.stats.might.current, base_might + 5);
+    /// assert_eq!(hero.timed_stat_boosts.len(), 1);
+    /// assert_eq!(hero.timed_stat_boosts[0].minutes_remaining, 30);
+    /// ```
+    pub fn apply_timed_stat_boost(
+        &mut self,
+        attr: crate::domain::items::types::AttributeType,
+        amount: i8,
+        duration_minutes: Option<u16>,
+    ) {
+        use crate::domain::items::types::normalize_duration;
+        let Some(minutes) = normalize_duration(duration_minutes) else {
+            return;
+        };
+        self.apply_attribute_delta(attr, amount as i16);
+        self.timed_stat_boosts.push(TimedStatBoost {
+            attribute: attr,
+            amount,
+            minutes_remaining: minutes,
+        });
+    }
+
+    /// Ticks all timed stat boosts by one minute.
+    ///
+    /// Boosts whose `minutes_remaining` reaches zero are expired and reversed:
+    /// the original `amount` is subtracted from the corresponding `current`
+    /// attribute value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    /// use antares::domain::items::types::AttributeType;
+    ///
+    /// let mut hero = Character::new(
+    ///     "Hero".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// let base_might = hero.stats.might.current;
+    /// hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(2));
+    ///
+    /// // After 1 minute: boost still active
+    /// hero.tick_timed_stat_boosts_minute();
+    /// assert_eq!(hero.stats.might.current, base_might + 5);
+    /// assert_eq!(hero.timed_stat_boosts[0].minutes_remaining, 1);
+    ///
+    /// // After 2nd minute: boost expires and is reversed
+    /// hero.tick_timed_stat_boosts_minute();
+    /// assert_eq!(hero.stats.might.current, base_might);
+    /// assert!(hero.timed_stat_boosts.is_empty());
+    /// ```
+    pub fn tick_timed_stat_boosts_minute(&mut self) {
+        let mut expired: Vec<TimedStatBoost> = Vec::new();
+        self.timed_stat_boosts.retain_mut(|boost| {
+            boost.minutes_remaining = boost.minutes_remaining.saturating_sub(1);
+            if boost.minutes_remaining == 0 {
+                expired.push(boost.clone());
+                false
+            } else {
+                true
+            }
+        });
+        for boost in expired {
+            self.apply_attribute_delta(boost.attribute, -(boost.amount as i16));
+        }
+    }
+
+    /// Applies a signed delta to the `current` value of the named attribute.
+    ///
+    /// This is the single authoritative mapping from [`crate::domain::items::types::AttributeType`]
+    /// to a [`Character`] stats field.  It is used by both
+    /// [`Character::apply_timed_stat_boost`] (to apply the initial boost) and
+    /// [`Character::tick_timed_stat_boosts_minute`] (to reverse expired boosts).
+    ///
+    /// Modification is performed via [`crate::domain::character::AttributePair::modify`],
+    /// which saturates at the `u8` type boundary — a delta that would push
+    /// `current` below 0 clamps to 0; a delta that would exceed 255 clamps to
+    /// 255.
+    ///
+    /// # Arguments
+    ///
+    /// * `attr`  — which attribute to modify (maps to the corresponding
+    ///   `self.stats.<field>` member).
+    /// * `delta` — signed amount to add to `current` (positive = increase,
+    ///   negative = decrease / reversal).
+    ///
+    /// # Returns
+    ///
+    /// `()` — the character is mutated in place.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    /// use antares::domain::items::types::AttributeType;
+    ///
+    /// let mut hero = Character::new(
+    ///     "Hero".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// let base = hero.stats.might.current;
+    ///
+    /// // Apply a +5 boost to Might.
+    /// hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(10));
+    /// assert_eq!(hero.stats.might.current, base + 5);
+    ///
+    /// // Tick 10 minutes — the reversal delta of -5 is applied via apply_attribute_delta.
+    /// for _ in 0..10 {
+    ///     hero.tick_timed_stat_boosts_minute();
+    /// }
+    /// assert_eq!(hero.stats.might.current, base);
+    /// ```
+    pub(crate) fn apply_attribute_delta(
+        &mut self,
+        attr: crate::domain::items::types::AttributeType,
+        delta: i16,
+    ) {
+        use crate::domain::items::types::AttributeType;
+        match attr {
+            AttributeType::Might => self.stats.might.modify(delta),
+            AttributeType::Intellect => self.stats.intellect.modify(delta),
+            AttributeType::Personality => self.stats.personality.modify(delta),
+            AttributeType::Endurance => self.stats.endurance.modify(delta),
+            AttributeType::Speed => self.stats.speed.modify(delta),
+            AttributeType::Accuracy => self.stats.accuracy.modify(delta),
+            AttributeType::Luck => self.stats.luck.modify(delta),
+        }
     }
 
     /// Calculates the total modifier from active conditions for a given attribute
@@ -1465,6 +1664,200 @@ impl Default for Roster {
 mod tests {
     use super::*;
     use crate::domain::classes::ClassDatabase;
+    use crate::domain::items::types::AttributeType;
+
+    fn make_hero() -> Character {
+        Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        )
+    }
+
+    // ===== Phase 2: TimedStatBoost tests =====
+
+    #[test]
+    fn test_timed_stat_boosts_defaults_empty_on_new_character() {
+        let hero = make_hero();
+        assert!(
+            hero.timed_stat_boosts.is_empty(),
+            "new Character must have no timed stat boosts"
+        );
+    }
+
+    #[test]
+    fn test_apply_timed_stat_boost_modifies_current_not_base() {
+        let mut hero = make_hero();
+        let base_before = hero.stats.might.base;
+        let current_before = hero.stats.might.current;
+
+        hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(30));
+
+        assert_eq!(
+            hero.stats.might.base, base_before,
+            "base must not change after timed boost"
+        );
+        assert_eq!(
+            hero.stats.might.current,
+            current_before + 5,
+            "current must increase by the boost amount"
+        );
+        assert_eq!(hero.timed_stat_boosts.len(), 1);
+        assert_eq!(hero.timed_stat_boosts[0].minutes_remaining, 30);
+    }
+
+    #[test]
+    fn test_apply_timed_stat_boost_none_duration_is_noop() {
+        let mut hero = make_hero();
+        let current_before = hero.stats.might.current;
+
+        hero.apply_timed_stat_boost(AttributeType::Might, 5, None);
+
+        assert_eq!(
+            hero.stats.might.current, current_before,
+            "None duration must not change current value"
+        );
+        assert!(
+            hero.timed_stat_boosts.is_empty(),
+            "None duration must not store a boost entry"
+        );
+    }
+
+    #[test]
+    fn test_apply_timed_stat_boost_zero_duration_is_noop() {
+        let mut hero = make_hero();
+        let current_before = hero.stats.might.current;
+
+        hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(0));
+
+        assert_eq!(
+            hero.stats.might.current, current_before,
+            "Some(0) duration must not change current value"
+        );
+        assert!(
+            hero.timed_stat_boosts.is_empty(),
+            "Some(0) duration must not store a boost entry"
+        );
+    }
+
+    #[test]
+    fn test_tick_timed_stat_boosts_decrements_counter() {
+        let mut hero = make_hero();
+        let current_before = hero.stats.might.current;
+
+        hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(10));
+
+        hero.tick_timed_stat_boosts_minute();
+
+        assert_eq!(
+            hero.timed_stat_boosts[0].minutes_remaining, 9,
+            "minutes_remaining must decrement by 1"
+        );
+        assert_eq!(
+            hero.stats.might.current,
+            current_before + 5,
+            "stat must remain boosted while counter > 0"
+        );
+    }
+
+    #[test]
+    fn test_tick_timed_stat_boosts_reverses_on_expiry() {
+        let mut hero = make_hero();
+        let current_before = hero.stats.might.current;
+
+        hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(3));
+        assert_eq!(hero.stats.might.current, current_before + 5);
+
+        // Tick 3 times — boost expires on the 3rd tick
+        for _ in 0..3 {
+            hero.tick_timed_stat_boosts_minute();
+        }
+
+        assert_eq!(
+            hero.stats.might.current, current_before,
+            "stat must be restored after boost expires"
+        );
+        assert!(
+            hero.timed_stat_boosts.is_empty(),
+            "expired boost must be removed from the list"
+        );
+    }
+
+    #[test]
+    fn test_tick_timed_stat_boosts_multiple_boosts_independent() {
+        let mut hero = make_hero();
+        let base_might = hero.stats.might.current;
+        let base_luck = hero.stats.luck.current;
+
+        // Boost Might for 2 minutes, Luck for 4 minutes
+        hero.apply_timed_stat_boost(AttributeType::Might, 3, Some(2));
+        hero.apply_timed_stat_boost(AttributeType::Luck, 7, Some(4));
+
+        assert_eq!(hero.stats.might.current, base_might + 3);
+        assert_eq!(hero.stats.luck.current, base_luck + 7);
+
+        // Tick 2 minutes — Might boost expires; Luck boost still active
+        hero.tick_timed_stat_boosts_minute();
+        hero.tick_timed_stat_boosts_minute();
+
+        assert_eq!(
+            hero.stats.might.current, base_might,
+            "Might boost must have reversed after 2 ticks"
+        );
+        assert_eq!(
+            hero.stats.luck.current,
+            base_luck + 7,
+            "Luck boost must still be active after 2 ticks"
+        );
+        assert_eq!(
+            hero.timed_stat_boosts.len(),
+            1,
+            "only the Luck boost must remain"
+        );
+
+        // Tick 2 more minutes — Luck boost expires
+        hero.tick_timed_stat_boosts_minute();
+        hero.tick_timed_stat_boosts_minute();
+
+        assert_eq!(
+            hero.stats.luck.current, base_luck,
+            "Luck boost must have reversed after 4 total ticks"
+        );
+        assert!(hero.timed_stat_boosts.is_empty());
+    }
+
+    #[test]
+    fn test_timed_stat_boost_serde_default_deserializes() {
+        // Serialise a character to RON, then strip the timed_stat_boosts field
+        // to simulate a save file created before Phase 2 (the field did not
+        // exist yet).  #[serde(default)] must cause it to deserialise as an
+        // empty Vec rather than returning an error.
+        let hero = make_hero();
+        let serialized = ron::to_string(&hero).expect("serialization must succeed");
+
+        // ron::to_string emits "timed_stat_boosts: []," (with a space and a
+        // trailing comma inside the struct).  Strip both forms defensively.
+        let stripped = serialized
+            .replace("timed_stat_boosts: [],", "")
+            .replace("timed_stat_boosts:[],", "")
+            .replace("timed_stat_boosts: []", "")
+            .replace("timed_stat_boosts:[]", "");
+
+        // Confirm the field is actually gone before attempting deserialization.
+        assert!(
+            !stripped.contains("timed_stat_boosts"),
+            "field must have been removed from the RON string; got: {stripped}"
+        );
+
+        let deserialized: Character = ron::from_str(&stripped)
+            .expect("deserialization must succeed without timed_stat_boosts");
+        assert!(
+            deserialized.timed_stat_boosts.is_empty(),
+            "missing timed_stat_boosts field must default to empty Vec"
+        );
+    }
 
     #[test]
     fn test_attribute_pair_new() {

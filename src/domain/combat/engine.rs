@@ -10,6 +10,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.4 for complete specifications.
 
+use crate::application::ActiveSpells;
 use crate::domain::character::Character;
 use crate::domain::combat::monster::Monster;
 use crate::domain::combat::types::{
@@ -576,13 +577,14 @@ pub fn calculate_turn_order(combat: &CombatState) -> Vec<CombatantId> {
 /// let mut rng = rng();
 ///
 /// // Note: In real combat, target would be a different combatant
-/// let result = resolve_attack(&combat, attacker, target, &attack, &mut rng);
+/// let result = resolve_attack(&combat, attacker, target, &attack, None, &mut rng);
 /// ```
 pub fn resolve_attack<R: Rng>(
     combat: &CombatState,
     attacker_id: CombatantId,
     target_id: CombatantId,
     attack: &Attack,
+    active_spells: Option<&ActiveSpells>,
     rng: &mut R,
 ) -> Result<(u16, Option<SpecialEffect>), CombatError> {
     // Get attacker
@@ -633,7 +635,55 @@ pub fn resolve_attack<R: Rng>(
         _ => 0,
     };
 
-    let total_damage = (base_damage + damage_bonus).max(1) as u16;
+    let raw_damage = (base_damage + damage_bonus).max(1);
+
+    // Project active spell protection bonuses into effective resistance for the
+    // target (players only — monsters do not carry ActiveSpells).  Resistance
+    // values are in the range [0, 100] and are treated as a percentage reduction.
+    // Effective resistance = character.resistances.<field>.current
+    //                       + active_spells.effective_resistance(res_type)
+    // clamped to [0, 100].
+    let resistance_reduction: i32 = match &attack.attack_type {
+        AttackType::Physical => 0, // Physical attacks are not mitigated by elemental resistance
+        non_physical => {
+            use crate::domain::items::types::ResistanceType;
+            // Map AttackType → (ResistanceType for active_spells, character resistance field)
+            let res_type = match non_physical {
+                AttackType::Fire => ResistanceType::Fire,
+                AttackType::Cold => ResistanceType::Cold,
+                AttackType::Electricity => ResistanceType::Electricity,
+                AttackType::Energy => ResistanceType::Energy,
+                AttackType::Acid => ResistanceType::Physical, // closest analogue
+                AttackType::Poison => ResistanceType::Physical, // closest analogue
+                AttackType::Physical => unreachable!("guarded above"),
+            };
+
+            // Character's current resistance for this damage type
+            let char_resistance: i16 = match target {
+                Combatant::Player(c) => match non_physical {
+                    AttackType::Fire => c.resistances.fire.current as i16,
+                    AttackType::Cold => c.resistances.cold.current as i16,
+                    AttackType::Electricity => c.resistances.electricity.current as i16,
+                    AttackType::Energy => c.resistances.magic.current as i16,
+                    AttackType::Acid => c.resistances.acid.current as i16,
+                    AttackType::Poison => c.resistances.poison.current as i16,
+                    AttackType::Physical => unreachable!("guarded above"),
+                },
+                Combatant::Monster(_) => 0, // Monsters rely on their own stats; no active_spells projection
+            };
+
+            // Active-spell bonus for this damage type (0 when no protection active)
+            let spell_bonus: i16 = active_spells.map_or(0, |s| s.effective_resistance(res_type));
+
+            // Total effective resistance clamped to [0, 100]
+            let effective = (char_resistance + spell_bonus).clamp(0, 100) as i32;
+
+            // Resistance is a percentage reduction: effective / 100 * damage
+            (raw_damage * effective) / 100
+        }
+    };
+
+    let total_damage = (raw_damage - resistance_reduction).max(0) as u16;
 
     Ok((total_damage, attack.special_effect))
 }
@@ -1326,6 +1376,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::HealHp(10),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 50,
             sell_cost: 25,
@@ -1825,6 +1876,7 @@ mod tests {
                 CombatantId::Player(0),
                 CombatantId::Player(1),
                 &attack,
+                None,
                 &mut rng,
             );
             assert!(result.is_ok());
@@ -2307,6 +2359,7 @@ mod tests {
                 CombatantId::Player(0),
                 CombatantId::Player(1),
                 &attack,
+                None,
                 &mut rng,
             );
             assert!(result.is_ok(), "resolve_attack returned an error");
@@ -2332,6 +2385,7 @@ mod tests {
                     CombatantId::Player(0),
                     CombatantId::Player(1),
                     &attack,
+                    None,
                     &mut rng,
                 )
                 .unwrap();
@@ -2421,6 +2475,7 @@ mod tests {
                     CombatantId::Player(0),
                     CombatantId::Player(1),
                     &attack,
+                    None,
                     &mut rng,
                 )
                 .unwrap();
@@ -2455,5 +2510,152 @@ mod tests {
                 d
             );
         }
+    }
+
+    // ===== Phase 4: ActiveSpells resistance projection tests =====
+
+    #[test]
+    fn test_resistance_check_without_active_spells() {
+        // resolve_attack with active_spells: None must behave identically to
+        // before Phase 4 — no resistance reduction for physical attacks.
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut attacker = create_test_character("Attacker", 10);
+        attacker.stats.might.current = 10; // 0 damage bonus
+        attacker.stats.accuracy.current = 20; // always hit
+        combat.add_player(attacker);
+
+        let mut target = create_test_character("Target", 10);
+        target.ac.current = 0;
+        combat.add_player(target);
+
+        let attack = Attack::physical(crate::domain::types::DiceRoll::new(1, 6, 0));
+        let mut rng = rand::rng();
+
+        // Collect hit-damage values with None active_spells
+        let hit_damages_no_spells: Vec<u16> = (0..200)
+            .filter_map(|_| {
+                let (dmg, _) = resolve_attack(
+                    &combat,
+                    CombatantId::Player(0),
+                    CombatantId::Player(1),
+                    &attack,
+                    None,
+                    &mut rng,
+                )
+                .unwrap();
+                if dmg > 0 {
+                    Some(dmg)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Physical attacks are never resistance-reduced, so all hit damage
+        // must fall in [1, 6] (1d6, might bonus 0).
+        assert!(
+            !hit_damages_no_spells.is_empty(),
+            "Expected at least one hit"
+        );
+        for &d in &hit_damages_no_spells {
+            assert!(
+                (1..=6).contains(&d),
+                "Physical damage {d} out of [1,6] range"
+            );
+        }
+    }
+
+    #[test]
+    fn test_resistance_check_with_active_fire_protection() {
+        use crate::application::ActiveSpells;
+        use crate::domain::combat::types::AttackType;
+
+        // A fire attack against a target whose active_spells.fire_protection > 0
+        // must deal strictly less damage than the same attack without protection,
+        // assuming the target has no base fire resistance.
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut attacker = create_test_character("Pyromancer", 10);
+        attacker.stats.might.current = 10;
+        attacker.stats.accuracy.current = 20; // always hit
+        combat.add_player(attacker);
+
+        let mut target = create_test_character("Victim", 20);
+        target.ac.current = 0;
+        target.resistances.fire.current = 0; // no base fire resistance
+        target.resistances.fire.base = 0;
+        combat.add_player(target);
+
+        // A fire Attack — use a large fixed die so variance is visible
+        let fire_attack = Attack::new(
+            crate::domain::types::DiceRoll::new(4, 6, 0),
+            AttackType::Fire,
+            None,
+        );
+
+        let mut rng = rand::rng();
+
+        // --- Without active fire protection ---
+        let damage_without: Vec<u16> = (0..300)
+            .filter_map(|_| {
+                let (dmg, _) = resolve_attack(
+                    &combat,
+                    CombatantId::Player(0),
+                    CombatantId::Player(1),
+                    &fire_attack,
+                    None,
+                    &mut rng,
+                )
+                .unwrap();
+                if dmg > 0 {
+                    Some(dmg)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // --- With active fire protection (25-point bonus) ---
+        let mut spells = ActiveSpells::new();
+        spells.fire_protection = 30; // non-zero → 25-point resistance bonus
+
+        let damage_with: Vec<u16> = (0..300)
+            .filter_map(|_| {
+                let (dmg, _) = resolve_attack(
+                    &combat,
+                    CombatantId::Player(0),
+                    CombatantId::Player(1),
+                    &fire_attack,
+                    Some(&spells),
+                    &mut rng,
+                )
+                .unwrap();
+                if dmg > 0 {
+                    Some(dmg)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Both sets should have hits.
+        assert!(
+            !damage_without.is_empty(),
+            "Expected hits without protection"
+        );
+        assert!(!damage_with.is_empty(), "Expected hits with protection");
+
+        // Average damage with protection must be strictly less than without.
+        let avg_without: f64 =
+            damage_without.iter().map(|&d| d as f64).sum::<f64>() / damage_without.len() as f64;
+        let avg_with: f64 =
+            damage_with.iter().map(|&d| d as f64).sum::<f64>() / damage_with.len() as f64;
+
+        assert!(
+            avg_with < avg_without,
+            "Average fire damage with protection ({avg_with:.1}) should be \
+             less than without ({avg_without:.1})"
+        );
     }
 }

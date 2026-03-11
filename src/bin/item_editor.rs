@@ -362,6 +362,7 @@ impl ItemEditor {
         ItemType::Consumable(ConsumableData {
             effect,
             is_combat_usable,
+            duration_minutes: None,
         })
     }
 
@@ -1514,6 +1515,7 @@ mod tests {
         let food_type = ItemType::Consumable(ConsumableData {
             effect: ConsumableEffect::IsFood(1),
             is_combat_usable: false,
+            duration_minutes: None,
         });
         let result = editor.format_classification(&food_type);
         assert!(result.contains("Consumable"), "must mention Consumable");
@@ -1531,6 +1533,7 @@ mod tests {
         let consumable_type = ItemType::Consumable(ConsumableData {
             effect: ConsumableEffect::HealHp(20),
             is_combat_usable: true,
+            duration_minutes: None,
         });
 
         let result = editor.format_classification(&consumable_type);
@@ -1591,6 +1594,7 @@ mod tests {
         let data = ConsumableData {
             effect,
             is_combat_usable,
+            duration_minutes: None,
         };
         assert_eq!(data.effect, ConsumableEffect::IsFood(1));
         assert!(
@@ -1624,6 +1628,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::HealHp(20),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 50,
             sell_cost: 25,

@@ -462,6 +462,7 @@ mod tests {
             item_type: ItemType::Consumable(crate::domain::items::types::ConsumableData {
                 effect: crate::domain::items::types::ConsumableEffect::HealHp(10),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 50,
             sell_cost: 25,
@@ -547,6 +548,7 @@ mod tests {
             spells: crate::domain::character::SpellBook::new(),
             conditions: crate::domain::character::Condition::new(),
             active_conditions: vec![],
+            timed_stat_boosts: vec![],
             resistances: crate::domain::character::Resistances::default(),
             quest_flags: crate::domain::character::QuestFlags::new(),
             portrait_id: "0".to_string(),

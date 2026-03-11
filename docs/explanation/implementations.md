@@ -1,5 +1,1388 @@
 # Implementations
 
+## Consumable Duration Effects — Phase 6: End-to-End Integration Tests and Documentation (Complete)
+
+### Overview
+
+Phase 6 hardens the complete consumable duration effects feature with five
+cross-layer integration tests and updates all affected documentation. The tests
+exercise the full path from effect application through in-game time advancement
+to verified expiry, covering both `ActiveSpells` resistance potions and
+per-character `TimedStatBoost` attribute potions. Documentation updates ensure
+every public symbol in the timed-consumable stack has `///` doc comments with
+`# Arguments`, `# Returns`, and runnable `# Examples` doctests, and that
+`docs/reference/architecture.md` accurately reflects all implemented
+`ConsumableEffect` variants.
+
+### Phase 6 Deliverables Checklist
+
+- [x] All 5 end-to-end integration tests in `src/application/mod.rs` pass:
+  - [x] `test_timed_resistance_potion_expires_after_advance_time`
+  - [x] `test_timed_attribute_potion_expires_after_advance_time`
+  - [x] `test_timed_potion_expires_during_rest`
+  - [x] `test_permanent_attribute_potion_survives_advance_time`
+  - [x] `test_second_resistance_potion_overwrites_duration`
+- [x] All `pub` symbols in `src/domain/items/consumable_usage.rs` have `///`
+      doc comments and doctests (module-level doc expanded with timed vs.
+      permanent table and two-entry-point description).
+- [x] `TimedStatBoost`, `apply_timed_stat_boost`, and
+      `tick_timed_stat_boosts_minute` have `///` doc comments (already present
+      from Phase 2; verified intact).
+- [x] `apply_attribute_delta` expanded with `# Arguments`, `# Returns`, and
+      `# Examples` doc comment.
+- [x] `ActiveSpells` struct doc comment expanded to describe
+      `effective_resistance`, `ACTIVE_PROTECTION_BONUS`, timed-resistance
+      routing, and overwrite semantics — with a runnable doctest.
+- [x] `GameState::advance_time` doc comment updated with a `# Summary` section
+      explicitly enumerating all three per-minute side effects (spell tick,
+      stat-boost tick, restock) plus a timed-boost expiry doctest.
+- [x] `docs/reference/architecture.md` `ConsumableEffect` enum updated to
+      include `BoostResistance` and `IsFood` variants with prose notes on
+      timed vs. permanent behaviour.
+- [x] `docs/explanation/implementations.md` (this file) includes a complete
+      Phase 6 summary section.
+- [x] All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy
+    -D warnings`, `cargo nextest run` — **3453/3453 tests pass**.
+
+### Files Changed
+
+| File                                   | Change                                                                                                                   |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `src/application/mod.rs`               | 5 new integration tests; `ActiveSpells` struct doc expanded; `advance_time` doc expanded with summary and second doctest |
+| `src/domain/items/consumable_usage.rs` | Module-level doc expanded with two-entry-point table and timed-vs-permanent matrix                                       |
+| `src/domain/character.rs`              | `apply_attribute_delta` doc expanded with `# Arguments`, `# Returns`, `# Examples`                                       |
+| `docs/reference/architecture.md`       | `ConsumableEffect` enum updated to include `BoostResistance`, `IsFood`, and timed-vs-permanent prose                     |
+| `docs/explanation/implementations.md`  | This Phase 6 summary section                                                                                             |
+
+### Architecture Details
+
+#### Integration test design
+
+The five tests are placed in `src/application/mod.rs` `mod tests` under the
+section banner `// ===== Phase 6: End-to-end timed potion / active-spell expiry
+tests =====`. Each test exercises a distinct scenario from the end-to-end expiry
+lifecycle:
+
+**1. `test_timed_resistance_potion_expires_after_advance_time`**
+
+`apply_consumable_effect_exploration` writes a `u8` duration directly onto the
+corresponding `ActiveSpells` field (e.g. `fire_protection = 60`). Each call to
+`advance_time(n, None)` calls `ActiveSpells::tick` once per minute, decrementing
+each non-zero field by 1 (saturating). After exactly 60 ticks the field is 0
+and `effective_resistance` returns 0. The test writes the field directly —
+identical to what the exploration handler writes — to avoid needing a full
+`GameState` with content loaded.
+
+**2. `test_timed_attribute_potion_expires_after_advance_time`**
+
+`apply_timed_stat_boost(attr, amount, Some(minutes))` appends a `TimedStatBoost`
+to `character.timed_stat_boosts` and immediately raises `stats.<attr>.current`.
+`GameState::advance_time` calls `tick_timed_stat_boosts_minute` once per elapsed
+minute. When `minutes_remaining` reaches 0, the entry is removed and
+`apply_attribute_delta(attr, -amount)` restores the stat. After exactly 30 ticks
+the list is empty and `stats.might.current` equals the pre-boost baseline.
+
+**3. `test_timed_potion_expires_during_rest`**
+
+`rest_party(REST_DURATION_HOURS, …)` internally calls `advance_time(hours * 60,
+…)`, which delivers 720 tick calls for `REST_DURATION_HOURS = 12`. This is
+more than enough to drain any effect shorter than 12 hours. The test applies a
+60-minute Speed boost and a 60-minute `cold_protection` potion, then calls a
+full rest, asserting both expire cleanly.
+
+**4. `test_permanent_attribute_potion_survives_advance_time`**
+
+When `ConsumableData::duration_minutes` is `None`, `normalize_duration` returns
+`None` and `apply_consumable_effect` takes the permanent branch, calling
+`apply_attribute_delta` directly. No entry is appended to `timed_stat_boosts`,
+so `tick_timed_stat_boosts_minute` has nothing to reverse.
+`advance_time(999, None)` therefore leaves the stat untouched and
+`timed_stat_boosts` remains empty throughout.
+
+**5. `test_second_resistance_potion_overwrites_duration`**
+
+`apply_consumable_effect_exploration` uses direct field assignment
+(`active_spells.fire_protection = clamped`) rather than addition. This is the
+canonical "last write wins" contract documented in the architecture design
+decisions. The test verifies: after 30 of 60 minutes elapse, a second potion
+sets the field to exactly 60 (not 90), and 30 more ticks leave exactly 30
+remaining.
+
+#### `ActiveSpells` documentation update
+
+The struct doc comment was rewritten to describe:
+
+- The per-field `u8` counter semantics (0 = inactive, n > 0 = n minutes remaining).
+- How timed resistance potions are written by `apply_consumable_effect_exploration`.
+- The role of `effective_resistance` during combat damage resolution.
+- The relationship between `ACTIVE_PROTECTION_BONUS` (flat 25-point bonus) and
+  the `amount` field on `BoostResistance` (campaign-author-controlled magnitude).
+- Overwrite semantics: second potion overwrites remaining duration, no stacking.
+- A runnable doctest demonstrating the full activate → tick-to-zero cycle.
+
+#### `advance_time` documentation update
+
+A new introductory summary paragraph was added before the existing `# Arguments`
+section, explicitly listing all three per-minute side effects:
+
+1. `ActiveSpells::tick()` — decrements all spell/potion protection counters.
+2. `Character::tick_timed_stat_boosts_minute()` — reverses expired attribute boosts.
+3. `npc_runtime.tick_restock(…)` — merchant stock replenishment (when templates are `Some`).
+
+A second doctest demonstrating timed-boost expiry was appended so the contract
+is machine-verified.
+
+#### `consumable_usage.rs` module doc update
+
+The module-level `//!` comment was extended with:
+
+- A "Two Entry Points" section describing when to use each of
+  `apply_consumable_effect` (combat) vs.
+  `apply_consumable_effect_exploration` (exploration).
+- A "Timed vs. Permanent Boosts" table mapping `duration_minutes` values to
+  observable behaviour for both `BoostAttribute` and `BoostResistance`.
+
+#### `apply_attribute_delta` documentation
+
+This `pub(crate)` function already had a brief doc comment; it was expanded to
+include `# Arguments`, `# Returns`, and an `# Examples` doctest that
+demonstrates the full apply-then-reverse cycle through
+`apply_timed_stat_boost` + 10 `tick_timed_stat_boosts_minute` calls.
+
+#### `architecture.md` update
+
+The `ConsumableEffect` pseudo-Rust enum was updated from four variants to six:
+
+- `BoostResistance(ResistanceType, i8)` — added (was missing)
+- `IsFood(u8)` — added (was missing)
+- `BoostAttribute` comment clarified to mention timed behaviour
+
+A prose block was appended describing how `duration_minutes` controls timed vs.
+permanent routing for each variant.
+
+### Tests Added
+
+#### `src/application/mod.rs` — 5 new end-to-end tests
+
+| Test                                                      | Layer exercised                                             | Assertion                                                        |
+| --------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- |
+| `test_timed_resistance_potion_expires_after_advance_time` | `GameState::advance_time` → `ActiveSpells::tick`            | `fire_protection` reaches 0 after exactly 60 ticks               |
+| `test_timed_attribute_potion_expires_after_advance_time`  | `GameState::advance_time` → `tick_timed_stat_boosts_minute` | boost list empty and stat restored after 30 ticks                |
+| `test_timed_potion_expires_during_rest`                   | `GameState::rest_party` → `advance_time` → both tick paths  | both Speed boost and cold protection expire during 720-tick rest |
+| `test_permanent_attribute_potion_survives_advance_time`   | `apply_consumable_effect` permanent path                    | stat unchanged and boost list empty after 999 ticks              |
+| `test_second_resistance_potion_overwrites_duration`       | `active_spells` overwrite semantics                         | second potion resets to 60, not 90; 30 ticks leave 30 remaining  |
+
+### Quality Gate Results
+
+```text
+✅ cargo fmt --all              → no output (all files formatted)
+✅ cargo check --all-targets    → Finished with 0 errors
+✅ cargo clippy -D warnings     → Finished with 0 warnings
+✅ cargo nextest run            → 3453/3453 passed, 8 skipped, 0 failed
+```
+
+Total test count increased from 3448 (end of Phase 5) to 3453 — exactly 5 new
+tests from this phase.
+
+---
+
+---
+
+## Consumable Duration Effects — Phase 5: Campaign Builder Support for Duration-Aware Consumables (Complete)
+
+### Overview
+
+Phase 5 exposes `duration_minutes` in the Campaign Builder's Items Editor so
+campaign authors can author timed attribute and resistance consumables. It also
+adds two SDK template functions and two timed consumable fixtures to the test
+campaign data file.
+
+### Phase 5 Deliverables Checklist
+
+- [x] `show_type_editor` in `sdk/campaign_builder/src/items_editor.rs` shows a
+      `Duration (minutes)` `DragValue` row for `BoostAttribute` and
+      `BoostResistance` effect types only; instant effects (`HealHp`,
+      `RestoreSp`, `CureCondition`, `IsFood`) never show the widget.
+- [x] Preview text in `show_preview_static` appends `" (N min)"` for timed
+      `BoostAttribute` and `BoostResistance` items; permanent items show no
+      suffix.
+- [x] `timed_fire_resist_potion` template function added to
+      `src/sdk/templates.rs`.
+- [x] `timed_might_potion` template function added to `src/sdk/templates.rs`.
+- [x] Test-campaign fixture `data/test_campaign/data/items.ron` includes item
+      62 (`Fire Resist Potion`, `BoostResistance(Fire, 25)`,
+      `duration_minutes: Some(60)`) and item 63 (`Might Potion`,
+      `BoostAttribute(Might, 5)`, `duration_minutes: Some(30)`).
+- [x] All 7 Phase 5 tests pass (5 in `items_editor.rs`, 2 in `templates.rs`).
+- [x] All four quality gates pass.
+- [x] `sdk/AGENTS.md` egui ID audit confirmed clean — no new `ComboBox`,
+      `ScrollArea`, loop, `SidePanel`, or `CollapsingHeader` was introduced.
+
+### Files Changed
+
+| File                                       | Change                                                                                       |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/items_editor.rs` | Duration widget in `show_type_editor`; duration suffix in `show_preview_static`; 5 new tests |
+| `src/sdk/templates.rs`                     | `timed_fire_resist_potion` and `timed_might_potion` functions; 2 new tests                   |
+| `data/test_campaign/data/items.ron`        | Items 62 and 63 added                                                                        |
+
+### Architecture Details
+
+#### Duration widget in `show_type_editor`
+
+A `ui.horizontal` block containing a `DragValue` (range `0..=u16::MAX`) and a
+`"(0 = permanent)"` label is added **after** the Amount row for both the
+`BoostResistance` and `BoostAttribute` match arms. The write-back logic mirrors
+`normalize_duration`: if `raw == 0` the field is stored as `None`; otherwise it
+is stored as `Some(raw)`.
+
+```sdk/campaign_builder/src/items_editor.rs#L1412-1425
+// Duration row — shown only for timed-capable effects
+ui.horizontal(|ui| {
+    ui.label("Duration (minutes):");
+    let mut raw: u16 = data.duration_minutes.unwrap_or(0);
+    ui.add(egui::DragValue::new(&mut raw).range(0..=u16::MAX));
+    ui.label("(0 = permanent)");
+    data.duration_minutes = if raw == 0 { None } else { Some(raw) };
+});
+```
+
+The widget uses no new egui ID contexts — `DragValue` requires no `push_id`,
+`from_id_salt`, or `id_salt`. This is exactly the pattern described in the
+implementation plan (Section 5.1).
+
+#### Duration suffix in `show_preview_static`
+
+Inside the `ItemType::Consumable` arm of `show_preview_static`, both the
+`BoostAttribute` and `BoostResistance` format strings are updated to compute a
+`duration_str` and append it:
+
+```sdk/campaign_builder/src/items_editor.rs#L655-670
+ConsumableEffect::BoostAttribute(attr, n) => {
+    let duration_str = data
+        .duration_minutes
+        .map(|m| format!(" ({} min)", m))
+        .unwrap_or_default();
+    format!(
+        "Boost {} ({}{}){}",
+        attr.display_name(),
+        if n >= 0 { "+" } else { "" },
+        n,
+        duration_str
+    )
+}
+```
+
+Permanent items (`duration_minutes: None`) produce `unwrap_or_default()` → an
+empty string, so no suffix appears. This satisfies Section 5.2.
+
+#### SDK template functions
+
+`timed_fire_resist_potion(id, duration_minutes, name)` — creates an
+`Item` with `ConsumableData { effect: BoostResistance(Fire, 25), is_combat_usable: false,
+duration_minutes: normalize_duration(Some(duration_minutes)) }`. Cost defaults
+to 100 gold buy / 50 gold sell and `max_charges: 1`.
+
+`timed_might_potion(id, duration_minutes, name)` — creates an `Item` with
+`ConsumableData { effect: BoostAttribute(Might, 5), is_combat_usable: false,
+duration_minutes: normalize_duration(Some(duration_minutes)) }`. Cost defaults
+to 80 gold buy / 40 gold sell and `max_charges: 1`.
+
+Both functions call `normalize_duration(Some(duration_minutes))` so that callers
+passing `0` receive a permanent item (`duration_minutes: None`). This matches
+Section 5.3 of the plan.
+
+#### Test-campaign fixture items
+
+Items 60 and 61 in `data/test_campaign/data/items.ron` are already occupied by
+`Arrows` and `Crossbow Bolts` respectively. The new timed consumable fixtures
+use the next free IDs:
+
+| ID  | Name               | Effect                      | Duration   |
+| --- | ------------------ | --------------------------- | ---------- |
+| 62  | Fire Resist Potion | `BoostResistance(Fire, 25)` | `Some(60)` |
+| 63  | Might Potion       | `BoostAttribute(Might, 5)`  | `Some(30)` |
+
+### Tests Added
+
+#### `sdk/campaign_builder/src/items_editor.rs` — 5 new tests
+
+| Test                                                       | What it verifies                                                                       |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `test_duration_field_round_trips_through_editor`           | `duration_minutes: Some(60)` in the edit buffer survives the round-trip                |
+| `test_duration_hidden_for_instant_effects`                 | `HealHp` and `RestoreSp` `ConsumableData` have `duration_minutes: None`                |
+| `test_duration_zero_normalizes_to_none_on_save`            | The `raw == 0 → None` logic produces `None`; non-zero produces `Some(n)`               |
+| `test_preview_text_includes_duration_for_timed_boost`      | Preview string for a `BoostAttribute` item with `Some(60)` contains `"60"` and `"min"` |
+| `test_preview_text_no_duration_suffix_for_permanent_boost` | Preview string for a `BoostAttribute` item with `None` does not contain `"min"`        |
+
+#### `src/sdk/templates.rs` — 2 new tests
+
+| Test                                                 | What it verifies                                                                                           |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `test_timed_fire_resist_potion_has_correct_duration` | `timed_fire_resist_potion(62, 90, "…")` produces `duration_minutes: Some(90)` and `BoostResistance(_, 25)` |
+| `test_timed_might_potion_zero_duration_is_none`      | `timed_might_potion(63, 0, "…")` produces `duration_minutes: None` (permanent)                             |
+
+### egui ID Audit (sdk/AGENTS.md compliance)
+
+The two new `ui.horizontal` blocks each contain only:
+
+- `ui.label` — no ID required
+- `egui::DragValue::new(&mut raw)` — no ID required
+- `ui.label` — no ID required
+
+✅ No `ComboBox` introduced — no `from_id_salt` needed
+✅ No `ScrollArea` introduced — no `id_salt` needed
+✅ No loop introduced — no `push_id` needed
+✅ No `SidePanel`/`TopBottomPanel`/`CentralPanel` touched
+✅ No `request_repaint()` needed — `DragValue` is a passive input widget, not a layout driver
+✅ No `CollapsingHeader`, `egui::Grid`, or `egui::Window` introduced
+
+### Quality Gate Results
+
+```text
+✅ cargo fmt --all              → no output (all files formatted)
+✅ cargo check --all-targets    → Finished with 0 errors
+✅ cargo clippy -D warnings     → Finished with 0 warnings
+✅ cargo nextest run            → 3447/3448 passed; 1 pre-existing flaky
+                                  performance test unrelated to Phase 5
+                                  (test_creature_database_load_performance
+                                   times out at ~700–800 ms vs. a 500 ms
+                                   threshold on this machine)
+```
+
+---
+
+## Consumable Duration Effects — Phase 4: Project `ActiveSpells` into Effective Resistance Calculations (Complete)
+
+### Overview
+
+Phase 4 makes the `active_spells.*_protection` fields that are written by Phase 3
+(timed resistance potions) actually influence combat outcomes. Before this phase
+those fields were ticked by `advance_time` but never read during damage
+resolution. After this phase a party member who has consumed a fire-resistance
+potion will take measurably less fire damage while the duration is non-zero, and
+full damage again once it expires.
+
+Two files were changed and five new tests were added.
+
+### Phase 4 Deliverables Checklist
+
+- [x] `ACTIVE_PROTECTION_BONUS: i16 = 25` constant defined at module scope in
+      `src/application/mod.rs`.
+- [x] `ActiveSpells::effective_resistance(res_type: ResistanceType) -> i16`
+      method added to `impl ActiveSpells` in `src/application/mod.rs`; covers
+      all eight `ResistanceType` variants using the same mapping as Phase 3.
+- [x] `resolve_attack` signature updated to accept
+      `active_spells: Option<&ActiveSpells>` as a new parameter (inserted
+      between `attack` and `rng`).
+- [x] `resolve_attack` body projects the active-spell bonus into the effective
+      resistance percentage for non-Physical attack types targeting player
+      characters; Physical attacks are unaffected.
+- [x] All three call sites of `resolve_attack` in `src/game/systems/combat.rs`
+      updated to pass `Some(&global_state.0.active_spells)`.
+- [x] All existing `resolve_attack` call sites inside
+      `src/domain/combat/engine.rs` `mod tests` updated to pass `None`.
+- [x] All five Phase 4 tests pass.
+- [x] All four quality gates pass (fmt, check, clippy -D warnings, nextest).
+
+### Files Changed
+
+| File                          | Change                                                                                                                                                                                                                                            |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/application/mod.rs`      | `ACTIVE_PROTECTION_BONUS` constant added; `effective_resistance` method added to `impl ActiveSpells`; 3 new Phase 4 tests                                                                                                                         |
+| `src/domain/combat/engine.rs` | `use crate::application::ActiveSpells` import added; `resolve_attack` signature extended with `active_spells: Option<&ActiveSpells>`; resistance-projection logic added; all internal test call sites updated to pass `None`; 2 new Phase 4 tests |
+| `src/game/systems/combat.rs`  | All 3 `resolve_attack` call sites updated to pass `Some(&global_state.0.active_spells)`                                                                                                                                                           |
+
+### Architecture Details
+
+#### `ACTIVE_PROTECTION_BONUS` constant
+
+```antares/src/application/mod.rs#L305-311
+/// Bonus resistance points granted per active protection spell/potion.
+///
+/// When an `ActiveSpells` protection field is non-zero, this flat bonus is
+/// added to the character's current resistance for the matching damage type
+/// during combat damage resolution.
+pub const ACTIVE_PROTECTION_BONUS: i16 = 25;
+```
+
+A single canonical value controls how much resistance (out of 100%) a timed
+potion/spell contributes. At 25 points a fully-unresisted fire character still
+takes 25% less fire damage while the potion is active.
+
+#### `ActiveSpells::effective_resistance`
+
+The method maps each `ResistanceType` to the `ActiveSpells` field established in
+Phase 3, returning `ACTIVE_PROTECTION_BONUS` if non-zero or `0` if expired:
+
+```antares/src/application/mod.rs#L362-384
+    pub fn effective_resistance(
+        &self,
+        res_type: crate::domain::items::types::ResistanceType,
+    ) -> i16 {
+        use crate::domain::items::types::ResistanceType;
+        let active = match res_type {
+            ResistanceType::Fire => self.fire_protection > 0,
+            ResistanceType::Cold => self.cold_protection > 0,
+            ResistanceType::Electricity => self.electricity_protection > 0,
+            ResistanceType::Energy => self.magic_protection > 0,
+            ResistanceType::Fear => self.fear_protection > 0,
+            ResistanceType::Physical => self.magic_protection > 0,
+            ResistanceType::Paralysis => self.psychic_protection > 0,
+            ResistanceType::Sleep => self.psychic_protection > 0,
+        };
+        if active {
+            ACTIVE_PROTECTION_BONUS
+        } else {
+            0
+        }
+    }
+```
+
+#### `resolve_attack` resistance projection
+
+After the damage roll and might-bonus calculation, the function computes a
+`resistance_reduction` using the target's character resistance value plus the
+`active_spells` projection, clamped to `[0, 100]` and treated as a percentage:
+
+```antares/src/domain/combat/engine.rs#L638-688
+    let raw_damage = (base_damage + damage_bonus).max(1);
+
+    // Project active spell protection bonuses into effective resistance …
+    let resistance_reduction: i32 = match &attack.attack_type {
+        AttackType::Physical => 0,
+        non_physical => {
+            // Map AttackType → ResistanceType for active_spells lookup
+            // Map AttackType → character resistance field for base value
+            // effective = (char_resistance + spell_bonus).clamp(0, 100)
+            // reduction = (raw_damage * effective) / 100
+            …
+        }
+    };
+
+    let total_damage = (raw_damage - resistance_reduction).max(0) as u16;
+```
+
+**Key design decisions:**
+
+- **Physical attacks bypass resistance** — the `AttackType::Physical` arm always
+  returns `resistance_reduction = 0`, preserving all existing physical-damage
+  tests.
+- **Monsters are unaffected** — `active_spells` is party-wide; when the target
+  is a `Combatant::Monster`, `char_resistance` is set to `0` so the projection
+  has no effect on monster-targeted attacks.
+- **`None` preserves legacy behaviour** — passing `None` for `active_spells`
+  makes `spell_bonus = 0`, so all existing unit tests that pass `None` are
+  unaffected.
+- **Percentage reduction** — resistance is `[0, 100]`; `100` means full
+  immunity. The formula `(raw_damage * effective) / 100` is integer division,
+  which slightly under-reduces at low values (safe by design — never over-
+  protects).
+
+#### Call sites in `combat.rs`
+
+All three functions that invoke `resolve_attack` now pass the party's live
+`active_spells` reference:
+
+```antares/src/game/systems/combat.rs#L2714-2720
+    let (damage, special) = resolve_attack(
+        &combat_res.state,
+        action.attacker,
+        action.target,
+        &attack_data,
+        Some(&global_state.0.active_spells),
+        rng,
+    )?;
+```
+
+The same pattern is applied in `perform_ranged_attack_action_with_rng` and
+`perform_monster_turn_with_rng`.
+
+### Tests Added
+
+| Location                      | Test name                                           | What it verifies                                                                                                                 |
+| ----------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `src/application/mod.rs`      | `test_effective_resistance_zero_when_no_protection` | All eight `ResistanceType` variants return `0` when all `active_spells` fields are `0`                                           |
+| `src/application/mod.rs`      | `test_effective_resistance_nonzero_when_active`     | Each of the eight types returns `ACTIVE_PROTECTION_BONUS` when its mapped field is non-zero                                      |
+| `src/application/mod.rs`      | `test_effective_resistance_zero_when_expired`       | After `tick()` decrements `fire_protection` to `0`, `effective_resistance(Fire)` returns `0`                                     |
+| `src/domain/combat/engine.rs` | `test_resistance_check_without_active_spells`       | `resolve_attack` with `None` active spells applies no resistance reduction; physical damage stays in `[1, 6]` for a `1d6` attack |
+| `src/domain/combat/engine.rs` | `test_resistance_check_with_active_fire_protection` | Average fire damage with `fire_protection = 30` is statistically lower than without protection (300 trials each)                 |
+
+### Quality Gate Results
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt --all           → OK  (no output)
+cargo check --all-targets → Finished with 0 errors
+cargo clippy -D warnings  → Finished with 0 warnings
+cargo nextest run         → 3445 passed, 1 pre-existing timing flake, 8 skipped
+```
+
+---
+
+## Consumable Duration Effects — Phase 3: Route Timed Consumable Effects to the Correct Backend (Complete)
+
+### Overview
+
+Phase 3 wires timed consumable effects to the correct backend for both the
+combat path and the exploration path. `BoostAttribute` consumables with
+`duration_minutes: Some(n)` now register a `TimedStatBoost` (via Phase 2's
+`apply_timed_stat_boost`) instead of permanently mutating `current`. A new
+`apply_consumable_effect_exploration` function routes timed `BoostResistance`
+effects through `ActiveSpells` (overwrite semantics, `u8`-clamped duration)
+rather than directly mutating `character.resistances`, so they expire
+automatically via `GameState::advance_time`. The combat path
+(`apply_consumable_effect`) continues to mutate resistance permanently. All
+call sites updated to pass `&ConsumableData` instead of `ConsumableEffect`.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `ConsumableApplyResult` extended with `attribute_boost_is_timed: bool`
+      and `resistance_boost_is_timed: bool` (both default `false`).
+- [x] `apply_consumable_effect` signature changed from
+      `(character, effect: ConsumableEffect)` to `(character, data: &ConsumableData)`.
+- [x] `BoostAttribute` arm branches on `normalize_duration(data.duration_minutes)`:
+      timed path calls `apply_timed_stat_boost` and sets `attribute_boost_is_timed`;
+      permanent path calls `pub(crate) apply_attribute_delta` directly.
+- [x] `apply_attribute_delta` promoted from `fn` to `pub(crate) fn` on
+      `Character` so `consumable_usage.rs` (a different module) can call it.
+- [x] `BoostResistance` in `apply_consumable_effect` always permanent (combat).
+- [x] `apply_resistance_to_character` private helper extracted to share the
+      eight-arm `ResistanceType` match between the two functions.
+- [x] `apply_consumable_effect_exploration` added: routes timed `BoostResistance`
+      to `ActiveSpells` (overwrite, `u16::min(minutes, u8::MAX)` clamp), falls
+      through to `apply_consumable_effect` for all other effects.
+- [x] `apply_consumable_effect_exploration` re-exported from
+      `src/domain/items/mod.rs`.
+- [x] `execute_item_use_by_slot` (combat) captures full `ConsumableData`
+      (`*consumable` copy) instead of `consumable.effect`; passes `&consumable_data`
+      to `apply_consumable_effect`.
+- [x] `handle_use_item_action_exploration` updated: captures `*consumable`
+      (full `ConsumableData`), calls `apply_consumable_effect_exploration` with
+      split borrows on `gs.party.members[party_index]` and `gs.active_spells`,
+      and emits timed-aware `GameLog` messages.
+- [x] All existing tests in `consumable_usage.rs`, `item_usage.rs`, and
+      `inventory_ui.rs` updated to pass `&ConsumableData` wrappers.
+- [x] 8 new Phase 3 unit tests added to `consumable_usage.rs`.
+- [x] 2 new Phase 3 regression tests added to `combat/item_usage.rs`.
+- [x] All four quality gates pass with zero errors and zero warnings.
+
+### Files Changed
+
+| File                                   | Change                                                                                                                                                                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/character.rs`              | `apply_attribute_delta` promoted to `pub(crate)`                                                                                                                                                                     |
+| `src/domain/items/consumable_usage.rs` | `ConsumableApplyResult` extended; `apply_consumable_effect` signature changed; `apply_resistance_to_character` helper extracted; `apply_consumable_effect_exploration` added; all tests updated; 8 new Phase 3 tests |
+| `src/domain/items/mod.rs`              | `apply_consumable_effect_exploration` added to re-export                                                                                                                                                             |
+| `src/domain/combat/item_usage.rs`      | Phase A captures `*consumable` (full `ConsumableData`); Phase B passes `&consumable_data`; all direct `apply_consumable_effect` test calls wrapped in `&ConsumableData`; 2 new Phase 3 regression tests              |
+| `src/game/systems/inventory_ui.rs`     | Import updated; Step 4 captures `*consumable`; Step 6 calls `apply_consumable_effect_exploration` with split borrows; Step 7 emits timed-aware log messages                                                          |
+
+### Architecture Details
+
+#### `ConsumableApplyResult` new fields
+
+```antares/src/domain/items/consumable_usage.rs#L99-109
+    /// Stat change applied via `BoostAttribute` (0 if none)
+    pub attribute_delta: i16,
+    /// Resistance change applied via `BoostResistance` (0 if none)
+    pub resistance_delta: i16,
+    /// True when a `BoostAttribute` was registered as a timed boost
+    pub attribute_boost_is_timed: bool,
+    /// True when a `BoostResistance` was handled by the caller's timed layer
+    pub resistance_boost_is_timed: bool,
+```
+
+#### Timed vs Permanent branching in `apply_consumable_effect`
+
+For `BoostAttribute`, `normalize_duration(data.duration_minutes).is_some()` is
+the branch condition:
+
+- `Some(n)` → `character.apply_timed_stat_boost(attr, amount, data.duration_minutes)`
+  and `attribute_boost_is_timed = true`
+- `None` / `Some(0)` → `character.apply_attribute_delta(attr, amount as i16)`
+  (permanent, no timed entry created)
+
+`BoostResistance` always uses the permanent path in `apply_consumable_effect`
+(combat context). Duration information is intentionally ignored on this path.
+
+#### `apply_consumable_effect_exploration` routing
+
+For `BoostResistance` with a timed duration, the function writes directly to
+`active_spells` using overwrite semantics (second potion of the same type
+replaces the duration, not stacks it):
+
+```antares/src/domain/items/consumable_usage.rs#L346-362
+    if let ConsumableEffect::BoostResistance(res_type, amount) = data.effect {
+        if let Some(minutes) = normalize_duration(data.duration_minutes) {
+            // Clamp to u8 range (overwrite semantics — last write wins).
+            let clamped = u16::min(minutes, u8::MAX as u16) as u8;
+            match res_type {
+                ResistanceType::Fire => active_spells.fire_protection = clamped,
+                ResistanceType::Cold => active_spells.cold_protection = clamped,
+                ResistanceType::Electricity => active_spells.electricity_protection = clamped,
+                ResistanceType::Energy => active_spells.magic_protection = clamped,
+                ResistanceType::Fear => active_spells.fear_protection = clamped,
+                ResistanceType::Physical => active_spells.magic_protection = clamped,
+                ResistanceType::Paralysis => active_spells.psychic_protection = clamped,
+                ResistanceType::Sleep => active_spells.psychic_protection = clamped,
+            }
+```
+
+#### Borrow-splitting in `handle_use_item_action_exploration`
+
+To satisfy the borrow checker when calling `apply_consumable_effect_exploration`
+with both `&mut character` and `&mut active_spells` from the same `GameState`,
+the code rebinds through a single `&mut GameState` reference:
+
+```antares/src/game/systems/inventory_ui.rs#L1756-1762
+        let result: ConsumableApplyResult = {
+            let gs = &mut global_state.0;
+            let character = &mut gs.party.members[party_index];
+            apply_consumable_effect_exploration(character, &mut gs.active_spells, &consumable_data)
+        };
+```
+
+This works because `gs.party.members[party_index]` and `gs.active_spells` are
+disjoint fields of `GameState`.
+
+#### ResistanceType → ActiveSpells field mapping
+
+| `ResistanceType` | `ActiveSpells` field                    |
+| ---------------- | --------------------------------------- |
+| `Fire`           | `fire_protection`                       |
+| `Cold`           | `cold_protection`                       |
+| `Electricity`    | `electricity_protection`                |
+| `Energy`         | `magic_protection`                      |
+| `Fear`           | `fear_protection`                       |
+| `Physical`       | `magic_protection` (no dedicated field) |
+| `Paralysis`      | `psychic_protection`                    |
+| `Sleep`          | `psychic_protection`                    |
+
+This mapping mirrors the existing `apply_resistance_to_character` mapping for
+consistency with the permanent path.
+
+---
+
+## Consumable Duration Effects — Phase 2: Add `TimedStatBoost` to `Character` and Wire Expiry (Complete)
+
+### Overview
+
+Phase 2 introduces a reversible per-character timed boost structure on
+`Character` so that `BoostAttribute` consumables with
+`duration_minutes: Some(n)` can be applied, tracked, and automatically
+reversed. Both `GameState::advance_time` and `rest_party_hour` are updated to
+tick per-character boosts in lockstep with `active_spells.tick()`. Existing
+save files without the new field load without error via `#[serde(default)]`.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `TimedStatBoost` struct added to `src/domain/character.rs` with doc
+      comment and doctest.
+- [x] `Character.timed_stat_boosts: Vec<TimedStatBoost>` field added with
+      `#[serde(default)]`.
+- [x] `Character::apply_timed_stat_boost` — applies delta to `current` and
+      stores entry for reversal; `None`/`Some(0)` durations are no-ops.
+- [x] `Character::tick_timed_stat_boosts_minute` — decrements counters,
+      reverses expired boosts by subtracting the original delta.
+- [x] `Character::apply_attribute_delta` — private, centralised
+      `AttributeType`→field mapping used by apply and reversal.
+- [x] `Character::new` initialises `timed_stat_boosts: Vec::new()`.
+- [x] `GameState::advance_time` ticks `tick_timed_stat_boosts_minute` for
+      every party member inside the per-minute loop alongside `active_spells.tick()`.
+- [x] `rest_party_hour` ticks `tick_timed_stat_boosts_minute` inside its
+      existing 60-iteration condition loop.
+- [x] `Character` struct literal in `character_definition.rs` updated with
+      `timed_stat_boosts: Vec::new()`.
+- [x] `Character` struct literal in `equipment_validation.rs` test updated
+      with `timed_stat_boosts: vec![]`.
+- [x] All 10 Phase 2 tests pass.
+- [x] All four quality gates pass with zero errors and zero warnings.
+
+### Files Changed
+
+| File                                       | Change                                                                                                                                                                               |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/domain/character.rs`                  | Added `TimedStatBoost` struct; `timed_stat_boosts` field on `Character`; `apply_timed_stat_boost`, `tick_timed_stat_boosts_minute`, `apply_attribute_delta` methods; 8 Phase 2 tests |
+| `src/domain/character_definition.rs`       | Added `timed_stat_boosts: Vec::new()` to `Character` struct literal in `instantiate`                                                                                                 |
+| `src/domain/items/equipment_validation.rs` | Added `timed_stat_boosts: vec![]` to `Character` struct literal in alignment-restriction test                                                                                        |
+| `src/application/mod.rs`                   | Extended `advance_time` per-minute loop to call `tick_timed_stat_boosts_minute` on every party member; added 2 Phase 2 tests                                                         |
+| `src/domain/resources.rs`                  | Extended `rest_party_hour` 60-tick condition loop to also call `tick_timed_stat_boosts_minute`                                                                                       |
+
+### Architecture Details
+
+#### `TimedStatBoost` struct
+
+```src/domain/character.rs#L931-963
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimedStatBoost {
+    /// Which attribute this boost modifies.
+    pub attribute: crate::domain::items::types::AttributeType,
+    /// Signed delta applied to `current` (positive = boost, negative = penalty).
+    pub amount: i8,
+    /// Minutes remaining before the boost expires and is reversed.
+    pub minutes_remaining: u16,
+}
+```
+
+#### `apply_timed_stat_boost` contract
+
+- Calls `normalize_duration` — `None` and `Some(0)` are both treated as
+  permanent: the function returns early with no mutation and no stored entry.
+- For `Some(n)` where `n > 0`: applies `amount` to `stats.<attr>.current`
+  via `apply_attribute_delta`, then pushes a `TimedStatBoost` entry.
+- `base` values are **never** mutated; only `current` is modified.
+
+#### `tick_timed_stat_boosts_minute` contract
+
+- Called once per in-game minute from both `advance_time` and `rest_party_hour`.
+- Uses `retain_mut` to decrement `minutes_remaining` by 1 (via
+  `saturating_sub`) and collect expired entries.
+- Expired entries (those reaching `0`) are removed and reversed: the original
+  `amount` is negated and applied via `apply_attribute_delta`.
+
+#### `apply_attribute_delta` — single authoritative mapping
+
+All seven `AttributeType` variants map to their `Stats` field:
+
+| Variant       | Field                    |
+| ------------- | ------------------------ |
+| `Might`       | `self.stats.might`       |
+| `Intellect`   | `self.stats.intellect`   |
+| `Personality` | `self.stats.personality` |
+| `Endurance`   | `self.stats.endurance`   |
+| `Speed`       | `self.stats.speed`       |
+| `Accuracy`    | `self.stats.accuracy`    |
+| `Luck`        | `self.stats.luck`        |
+
+#### Wiring in `GameState::advance_time`
+
+```src/application/mod.rs#L1495-1510
+for _ in 0..minutes {
+    self.active_spells.tick();
+    // Phase 2: tick per-character timed stat boosts
+    for member in &mut self.party.members {
+        member.tick_timed_stat_boosts_minute();
+    }
+}
+```
+
+#### Wiring in `rest_party_hour`
+
+```src/domain/resources.rs#L682-688
+// Tick minute-based conditions and timed stat boosts for one hour (60 minutes).
+for _ in 0..60 {
+    character.tick_conditions_minute();
+    character.tick_timed_stat_boosts_minute();
+}
+```
+
+#### Backward compatibility
+
+`#[serde(default)]` on `timed_stat_boosts` means all existing save files
+(which do not contain the field) deserialise cleanly — serde uses
+`Vec::default()` (an empty `Vec`) when the field is absent.
+
+### Tests Added
+
+**`src/domain/character.rs` — 8 tests:**
+
+| Test                                                      | What it verifies                                                                                 |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `test_timed_stat_boosts_defaults_empty_on_new_character`  | `Character::new` produces `timed_stat_boosts == []`                                              |
+| `test_apply_timed_stat_boost_modifies_current_not_base`   | `current` increases by `amount`; `base` unchanged; entry stored with correct `minutes_remaining` |
+| `test_apply_timed_stat_boost_none_duration_is_noop`       | `None` duration leaves `current` and `timed_stat_boosts` unchanged                               |
+| `test_apply_timed_stat_boost_zero_duration_is_noop`       | `Some(0)` duration leaves `current` and `timed_stat_boosts` unchanged                            |
+| `test_tick_timed_stat_boosts_decrements_counter`          | Single tick decrements `minutes_remaining` by 1; stat unchanged                                  |
+| `test_tick_timed_stat_boosts_reverses_on_expiry`          | After N ticks (N == initial duration), stat restored and list empty                              |
+| `test_tick_timed_stat_boosts_multiple_boosts_independent` | Two boosts with different durations expire independently at correct times                        |
+| `test_timed_stat_boost_serde_default_deserializes`        | Character RON without `timed_stat_boosts` deserialises with `timed_stat_boosts == []`            |
+
+**`src/application/mod.rs` — 2 tests:**
+
+| Test                                             | What it verifies                                                                                         |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `test_advance_time_ticks_timed_stat_boosts`      | `advance_time(N)` expires a boost with `minutes_remaining = N` and restores the stat                     |
+| `test_advance_time_ticks_both_spells_and_boosts` | `active_spells.light` and a member's timed boost both decrement together in the same `advance_time` call |
+
+### Quality Gate Results
+
+```/dev/null/quality_gates.txt#L1-6
+cargo fmt --all                                    → OK (no output)
+cargo check --all-targets --all-features           → Finished (0 errors)
+cargo clippy --all-targets --all-features          → Finished (0 warnings)
+cargo nextest run --all-features                   → 3431 passed, 8 skipped
+  (includes 10 new Phase 2 tests — all PASS)
+```
+
+---
+
+## Consumable Duration Effects — Phase 1: Extend `ConsumableData` and Align Core Contracts (Complete)
+
+### Overview
+
+Phase 1 of the Consumable Duration Effects plan adds `duration_minutes:
+Option<u16>` to `ConsumableData`, introduces the `normalize_duration` pure
+helper, and updates every struct literal call site across `src/`, `sdk/`, and
+`tests/` so the codebase compiles and all existing tests continue to pass. No
+behavioral changes are made in this phase — permanent-effect semantics are
+fully preserved. The architecture document is updated to match.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `ConsumableData` in `src/domain/items/types.rs` includes
+      `duration_minutes: Option<u16>` with `#[serde(default)]`.
+- [x] `normalize_duration` pure function added to `src/domain/items/types.rs`
+      and re-exported from `src/domain/items/mod.rs`.
+- [x] All struct literals in `src/`, `sdk/`, `src/bin/`, and `tests/`
+      compile with the new field (≈ 40 call sites updated).
+- [x] `docs/reference/architecture.md` updated at the `ConsumableData`
+      definition to include `duration_minutes`.
+- [x] All 6 Phase 1 unit tests pass.
+- [x] All four quality gates pass with zero errors and zero warnings.
+
+### Files Changed
+
+| File                                            | Change                                                                                                                                                                               |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/domain/items/types.rs`                     | Added `duration_minutes: Option<u16>` with `#[serde(default)]` to `ConsumableData`; added `normalize_duration` function; updated all doc examples in the file; added 6 Phase 1 tests |
+| `src/domain/items/mod.rs`                       | Re-exported `normalize_duration` alongside existing `pub use types::` block                                                                                                          |
+| `src/domain/combat/item_usage.rs`               | Added `duration_minutes: None` to 4 test-helper `ConsumableData` literals                                                                                                            |
+| `src/domain/combat/engine.rs`                   | Added `duration_minutes: None` to `make_consumable_item` test helper                                                                                                                 |
+| `src/domain/items/database.rs`                  | Added `duration_minutes: None` to test-helper literal                                                                                                                                |
+| `src/domain/items/equipment_validation.rs`      | Added `duration_minutes: None` to test literal                                                                                                                                       |
+| `src/domain/visual/item_mesh.rs`                | Added `duration_minutes: None` to `make_consumable` test helper                                                                                                                      |
+| `src/domain/resources.rs`                       | Added `duration_minutes: None` to 3 doc-comment examples and 2 test helpers                                                                                                          |
+| `src/application/mod.rs`                        | Added `duration_minutes: None` to 1 doc-comment example and 2 test helpers                                                                                                           |
+| `src/game/systems/combat.rs`                    | Added `duration_minutes: None` to `test_perform_use_item_action_heal_*` literal                                                                                                      |
+| `src/game/systems/inventory_ui.rs`              | Added `duration_minutes: None` to 7 test-helper `ConsumableData` literals                                                                                                            |
+| `src/game/systems/rest.rs`                      | Added `duration_minutes: None` to `make_food_item_db` test helper                                                                                                                    |
+| `src/sdk/templates.rs`                          | Added `duration_minutes: None` to `healing_potion` and `sp_potion` templates                                                                                                         |
+| `src/bin/item_editor.rs`                        | Added `duration_minutes: None` to `create_consumable` and 4 test literals                                                                                                            |
+| `sdk/campaign_builder/src/items_editor.rs`      | Added `duration_minutes: None` to `show_form` default and 3 test literals                                                                                                            |
+| `sdk/campaign_builder/src/characters_editor.rs` | Added `duration_minutes: None` to `create_test_item` literal                                                                                                                         |
+| `sdk/campaign_builder/src/dialogue_editor.rs`   | Added `duration_minutes: None` to test literal                                                                                                                                       |
+| `sdk/campaign_builder/src/lib.rs`               | Added `duration_minutes: None` to `test_item_type_specific_editors` literal                                                                                                          |
+| `sdk/campaign_builder/src/templates.rs`         | Added `duration_minutes: None` to `healing_potion` and `mana_potion` template literals                                                                                               |
+| `sdk/campaign_builder/src/ui_helpers.rs`        | Added `duration_minutes: None` to 2 `test_extract_item_tag_candidates` literals                                                                                                      |
+| `tests/cli_editor_tests.rs`                     | Added `duration_minutes: None` to `create_test_consumable` and `test_item_consumable_effect_variants` literals                                                                       |
+| `docs/reference/architecture.md`                | Updated `ConsumableData` struct definition to add `duration_minutes` field                                                                                                           |
+
+### Architecture Details
+
+#### `duration_minutes: Option<u16>` on `ConsumableData`
+
+The field uses `#[serde(default)]` so all existing RON files (`data/items.ron`,
+`data/test_campaign/data/items.ron`, `campaigns/tutorial/data/items.ron`)
+deserialize without modification — the absent field defaults to `None` via
+Serde's `Default` impl for `Option`.
+
+Semantics by value:
+
+| Value     | Meaning                                                            |
+| --------- | ------------------------------------------------------------------ |
+| `None`    | Effect is permanent (legacy / backward-compatible).                |
+| `Some(0)` | Normalized to `None` at application time via `normalize_duration`. |
+| `Some(n)` | Effect expires after `n` in-game minutes (used by Phases 2–4).     |
+
+Only `BoostAttribute` and `BoostResistance` effects are timed; `HealHp`,
+`RestoreSp`, and `CureCondition` are instant and ignore the field.
+
+#### `normalize_duration`
+
+```src/domain/items/types.rs#L289-302
+/// Normalizes a raw `duration_minutes` value.
+///
+/// `Some(0)` is treated as permanent (`None`) so that editor inputs of `0`
+/// and omitted RON fields both produce identical runtime semantics.
+pub fn normalize_duration(raw: Option<u16>) -> Option<u16> {
+    match raw {
+        Some(0) | None => None,
+        other => other,
+    }
+}
+```
+
+The function is re-exported as `antares::domain::items::normalize_duration` so
+later phases can call it directly from `consumable_usage.rs` without importing
+from the internal `types` submodule.
+
+#### RON data files — no changes required
+
+Because `#[serde(default)]` is present, all three RON item files continue to
+deserialize correctly. Adding a timed consumable to any of them requires only:
+
+```/dev/null/example.ron#L1-4
+item_type: Consumable((
+    effect: BoostResistance(Fire, 25),
+    is_combat_usable: false,
+    duration_minutes: Some(60),
+)),
+```
+
+### Tests Added
+
+All six tests live in `mod tests` inside `src/domain/items/types.rs`:
+
+| Test                                                          | What it verifies                                                              |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `test_consumable_data_duration_defaults_none_in_ron`          | RON without `duration_minutes` deserializes to `None` via `#[serde(default)]` |
+| `test_consumable_data_duration_some_round_trips`              | `Some(60)` survives a full RON serialize → deserialize round-trip             |
+| `test_normalize_duration_zero_becomes_none`                   | `normalize_duration(Some(0)) == None`                                         |
+| `test_normalize_duration_none_stays_none`                     | `normalize_duration(None) == None`                                            |
+| `test_normalize_duration_positive_unchanged`                  | `Some(30)`, `Some(1)`, `Some(u16::MAX)` all pass through unchanged            |
+| `test_consumable_data_struct_literal_compiles_with_new_field` | Three-field struct literal compiles; `duration_minutes` is `None`             |
+
+### Quality Gate Results
+
+```/dev/null/quality_gates.txt#L1-8
+cargo fmt --all                                    → OK (no output)
+cargo check --all-targets --all-features           → Finished (0 errors)
+cargo clippy --all-targets --all-features          → Finished (0 warnings)
+cargo nextest run --all-features                   → 3421 passed, 8 skipped
+  (includes 6 new Phase 1 tests — all PASS)
+```
+
+---
+
+## Consumables Outside Combat — Feature Complete Summary
+
+All four phases of the "Consumables Outside Combat" implementation plan are
+complete. Players can now use consumable items directly from the inventory
+screen in exploration and menu modes via:
+
+- **`U` keyboard shortcut** — use the highlighted consumable directly from
+  Slot Navigation, bypassing the Action Navigation step entirely.
+- **"Use" button** — rendered in the action strip when a consumable slot is
+  selected; accessible via mouse click or Action Navigation (`←`/`→` then
+  `Enter`).
+
+The implementation is backed by a single authoritative pure-domain helper
+(`apply_consumable_effect` in `src/domain/items/consumable_usage.rs`) shared
+by both the combat and exploration paths — no duplicated `ConsumableEffect`
+match logic exists anywhere in the codebase.
+
+### Files Changed (all phases)
+
+| File                                   | Change                                                    | Phase |
+| -------------------------------------- | --------------------------------------------------------- | ----- |
+| `src/domain/items/consumable_usage.rs` | **Created** — pure-domain effect helper + result type     | 1     |
+| `src/domain/items/mod.rs`              | Added `pub mod consumable_usage`; re-exports              | 1     |
+| `src/domain/combat/item_usage.rs`      | Delegated effect match to shared helper; regression tests | 1, 4  |
+| `src/game/systems/inventory_ui.rs`     | Messages, enum variants, systems, keyboard routing, docs  | 2, 3  |
+| `docs/explanation/implementations.md`  | This file                                                 | 4     |
+
+---
+
+## Phase 4: Harden Contracts, Docs, and Cross-Mode Regression Coverage (Complete)
+
+### Overview
+
+Finalized documentation across all three implementation files, verified no
+stray `ConsumableEffect` match arms exist outside the two designated files
+(`consumable_usage.rs` and `item_usage.rs`), confirmed `combat.rs`
+`perform_use_item_action_with_rng` still delegates correctly, and added three
+cross-mode regression tests to `src/domain/combat/item_usage.rs`.
+
+### Phase 4 Deliverables Checklist
+
+- [x] `src/domain/combat/item_usage.rs` module doc updated to note that effect
+      application is delegated to `apply_consumable_effect` in
+      `src/domain/items/consumable_usage.rs`; added `## Effect Application —
+Shared Helper` and `## Design Notes` sections.
+- [x] `execute_item_use_by_slot` doc comment updated with numbered step list
+      explicitly calling out the delegation; `# Arguments` section rewritten
+      with plain 2-space continuation (fixes `doc_overindented_list_items`
+      Clippy lint); `# Errors` section added.
+- [x] `src/game/systems/inventory_ui.rs` module-level key-routing table updated: - Phase 1 table: added `U` row — "Use the highlighted consumable directly
+      (bypasses Action Navigation)". - Phase 2 table: `←` `→` description updated to include `Use`.
+- [x] `UseItemExplorationAction` doc comment expanded with: - `## Self-target contract` — explains self-target-only scope. - `## Valid ranges` — documents `party_index` and `slot_index` bounds and
+      the `GameLog` behaviour when they are exceeded. - `## Charge semantics` — documents decrement/remove/reject behaviour. - Field-level `///` comments updated with `Valid range:` notation.
+- [x] Stray `ConsumableEffect` audit: no duplicate match arms outside
+      `consumable_usage.rs` (authoritative) and `item_usage.rs` (`IsFood`
+      guard only). `item_editor.rs` uses constructors, not match arms on
+      effects, which is correct.
+- [x] `combat.rs` `perform_use_item_action_with_rng` confirmed to call
+      `execute_item_use_by_slot` unchanged — no duplicated effect logic.
+- [x] Three Phase 4 cross-mode regression tests added to
+      `src/domain/combat/item_usage.rs` `mod tests`: - `test_combat_still_rejects_non_combat_usable` — confirms combat gate
+      returns `Err(NotUsableInCombat)` for `is_combat_usable: false` items
+      after Phase 1 refactor. - `test_combat_boost_attribute_via_shared_helper` — `BoostAttribute` stat
+      delta in combat matches a direct call to `apply_consumable_effect`. - `test_combat_boost_resistance_via_shared_helper` — `BoostResistance`
+      delta in combat matches a direct call to `apply_consumable_effect`.
+- [x] `cargo fmt --all`, `cargo check --all-targets --all-features`,
+      `cargo clippy --all-targets --all-features -- -D warnings`, and
+      `cargo nextest run --all-features` all pass with zero warnings and
+      **3415 tests passing** (3 new Phase 4 tests).
+
+### Files Changed
+
+| File                                  | Change                                                                                                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `src/domain/combat/item_usage.rs`     | Module doc rewritten; `execute_item_use_by_slot` doc expanded; 3 regression tests added (ids 215, 216, 217) |
+| `src/game/systems/inventory_ui.rs`    | Module doc table updated (`U` key row); `UseItemExplorationAction` doc expanded with contract sections      |
+| `docs/explanation/implementations.md` | This entry added; full feature summary added at top                                                         |
+
+### Architecture Audit Results
+
+#### Single Source of Truth Confirmed
+
+A codebase-wide search for `ConsumableEffect::` match arms found:
+
+- **`src/domain/items/consumable_usage.rs`** — authoritative `match effect { … }`
+  covering all six variants (`HealHp`, `RestoreSp`, `CureCondition`,
+  `BoostAttribute`, `BoostResistance`, `IsFood`). ✅ correct location.
+- **`src/domain/combat/item_usage.rs`** — one `matches!(effect, ConsumableEffect::IsFood(_))`
+  guard to reject food items from the combat path (IsFood is not a real combat
+  consumable). ✅ intentional and documented.
+- All other occurrences are constructors (`ConsumableEffect::HealHp(20)`) in
+  test helpers and the CLI item editor — not duplicate match arms. ✅
+
+#### Combat Delegation Chain
+
+```text
+handle_use_item_action (Bevy system, combat.rs)
+  └─ perform_use_item_action_with_rng (combat.rs)
+       └─ execute_item_use_by_slot (item_usage.rs)
+            └─ apply_consumable_effect (consumable_usage.rs)  ← shared helper
+```
+
+```text
+handle_use_item_action_exploration (Bevy system, inventory_ui.rs)
+  └─ validate_item_use_slot (item_usage.rs)
+  └─ apply_consumable_effect (consumable_usage.rs)            ← same shared helper
+```
+
+Both paths converge on the same leaf function. Logic drift between modes is
+structurally impossible.
+
+---
+
+## Phase 3: Consumables Outside Combat — Handler System and Feedback (Complete)
+
+### Overview
+
+Added `handle_use_item_action_exploration`, the Bevy system that processes
+`UseItemExplorationAction` messages emitted by the inventory UI. The system
+validates each use request via the shared `validate_item_use_slot` gate (with
+`in_combat = false`), applies the effect via `apply_consumable_effect`, consumes
+charges (decrement or remove), resets navigation state, and writes a
+player-visible `GameLog` entry for every outcome — success or failure. All 14
+required Phase 3 tests pass.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `handle_use_item_action_exploration` system added to
+      `src/game/systems/inventory_ui.rs` after `inventory_action_system`.
+- [x] System registered as the **last** entry in `InventoryPlugin::build()`'s
+      `.chain()` set:
+      `(inventory_input_system, inventory_ui_system, inventory_action_system, handle_use_item_action_exploration).chain()`.
+- [x] `GameLog` import added:
+      `use crate::game::systems::ui::GameLog;`
+- [x] `validate_item_use_slot` and `ItemUseError` imported:
+      `use crate::domain::combat::item_usage::{validate_item_use_slot, ItemUseError};`
+- [x] `apply_consumable_effect` imported:
+      `use crate::domain::items::consumable_usage::apply_consumable_effect;`
+- [x] `ConsumableEffect` imported for the success message match:
+      `use crate::domain::items::types::{ConsumableEffect, ItemType};`
+- [x] All 10 `ItemUseError` variants produce a distinct, player-readable
+      `GameLog` message as specified in the plan's error table.
+- [x] Charge consumption semantics match the combat path: decrement when
+      `charges > 1`, remove the slot entirely when `charges == 1`, defensive
+      check + log entry when `charges == 0`.
+- [x] Effect-specific `GameLog` success messages implemented for all six
+      `ConsumableEffect` variants including the "already at full" cases for
+      `HealHp` and `RestoreSp`.
+- [x] Navigation state fully reset after every use attempt (success or failure):
+      `selected_slot = None`, `selected_slot_index = None`,
+      `focused_action_index = 0`, `phase = SlotNavigation`.
+- [x] Helper functions `make_heal_potion_db`, `make_sp_potion_db`, and
+      `make_exploration_use_app` added to `mod tests` to reduce repetition
+      across the 14 new tests.
+- [x] All 14 Phase 3 tests added and passing:
+      `test_exploration_use_heals_character`,
+      `test_exploration_use_restores_sp`,
+      `test_exploration_use_cures_condition`,
+      `test_exploration_use_boosts_attribute`,
+      `test_exploration_use_boosts_resistance`,
+      `test_exploration_use_decrements_multi_charge_item`,
+      `test_exploration_use_removes_last_charge`,
+      `test_exploration_use_resets_nav_state`,
+      `test_exploration_use_writes_game_log`,
+      `test_exploration_use_invalid_slot_writes_log`,
+      `test_exploration_use_non_consumable_writes_log`,
+      `test_exploration_use_zero_charges_writes_log`,
+      `test_exploration_use_non_combat_usable_item_succeeds`,
+      `test_exploration_use_invalid_party_index_writes_log`.
+- [x] `cargo fmt --all`, `cargo check --all-targets --all-features`,
+      `cargo clippy --all-targets --all-features -- -D warnings`, and
+      `cargo nextest run --all-features` all pass with zero warnings and 3412
+      tests passing (14 new).
+
+### Files Changed
+
+| File                                  | Change                                                                                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/game/systems/inventory_ui.rs`    | 4 new imports; `handle_use_item_action_exploration` system added; plugin chain extended; 14 new tests; 2 test helpers + 1 app helper added |
+| `docs/explanation/implementations.md` | This entry added                                                                                                                           |
+
+### Architecture Details
+
+#### `handle_use_item_action_exploration` System
+
+The system signature follows the exact contract from the plan:
+
+```text
+fn handle_use_item_action_exploration(
+    mut reader: MessageReader<UseItemExplorationAction>,
+    mut global_state: ResMut<GlobalState>,
+    mut nav_state: ResMut<InventoryNavigationState>,
+    game_content: Option<Res<GameContent>>,
+    mut game_log: Option<ResMut<GameLog>>,
+)
+```
+
+Messages are collected upfront into a `Vec<(usize, usize)>` to avoid borrow
+conflicts between the immutable `game_content` reference and the mutable
+`global_state`. The system returns early (writing one `GameLog` entry) if
+`game_content` is `None`.
+
+#### Validation → Charge Consumption → Effect → Log ordering
+
+The logic for each message follows these ordered steps:
+
+1. **Resolve game_content** — early return if unavailable.
+2. **Bounds-check party_index** — `continue` with log if out of range.
+3. **`validate_item_use_slot(…, false)`** — all 10 error arms produce a
+   distinct `GameLog` message; navigation state is reset even on failure.
+4. **Capture item name and effect** — short immutable borrow, releases before
+   mutation.
+5. **Consume one charge** — decrement or remove; defensive zero-charge guard.
+6. **`apply_consumable_effect`** — mutates character stats via the shared
+   pure-domain helper.
+7. **Write success `GameLog`** — effect-specific template; "already at full"
+   fallback for `HealHp`/`RestoreSp` when `result.healing == 0` /
+   `result.sp_restored == 0`.
+8. **Reset navigation state** — `selected_slot`, `selected_slot_index`,
+   `focused_action_index`, `phase`.
+
+#### `is_combat_usable: false` Items
+
+`validate_item_use_slot` returns `NotUsableInCombat` only when
+`in_combat == true && !consumable.is_combat_usable`. Calling it with
+`in_combat = false` means exploration-only items pass validation normally.
+The dedicated test `test_exploration_use_non_combat_usable_item_succeeds`
+exercises this boundary explicitly.
+
+#### Navigation Reset on All Paths
+
+Both success and all failure paths (except the `game_content = None` early
+return which resets nothing — there is no character state to reset) perform the
+identical four-field navigation reset. This prevents the UI being stuck in
+`ActionNavigation` after a failed use attempt.
+
+---
+
+## Phase 2: Consumables Outside Combat — Inventory UI Integration (Complete)
+
+### Overview
+
+Wired the consumable-use pathway into the exploration-mode inventory UI
+(`src/game/systems/inventory_ui.rs`). Players can now use consumable items
+directly from the inventory screen without entering combat. The implementation
+adds a new `UseItemExplorationAction` message, a `PanelAction::Use` variant, a
+`U` keyboard shortcut, and a "Use" button in the action strip — all gated on the
+item being a `ItemType::Consumable(_)` according to the content database.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `UseItemExplorationAction { party_index, slot_index }` struct added with
+      `#[derive(Message)]`, full `///` doc comment, and doctest.
+- [x] `PanelAction::Use { party_index, slot_index }` variant added as the first
+      variant in the enum; doc example updated to cover all three variants.
+- [x] `build_action_list` signature extended to accept `selected_slot_index`,
+      `character: &Character`, and `game_content: Option<&GameContent>`;
+      `Use` is prepended only when the slot holds a consumable item.
+- [x] `inventory_input_system` updated: two new parameters
+      (`game_content: Option<Res<GameContent>>`, `use_writer: MessageWriter<UseItemExplorationAction>`);
+      `build_action_list` call updated; `PanelAction::Use` arm added in the
+      `Enter` handler; `U` shortcut added in `SlotNavigation` phase.
+- [x] `inventory_ui_system` updated: `use_writer` parameter added; status line
+      appends `"  [U: use]"` for consumable slots; hint text updated to include
+      `"U: use consumable"`; `PanelAction::Use` arm added in the
+      `pending_action` match.
+- [x] `render_character_panel` action strip updated: "Use" button rendered before
+      "Drop" when the selected slot is a consumable; Drop and Transfer button
+      focus indices adjusted accordingly (`drop_focused_idx` and
+      `action_btn_idx` conditioned on `is_consumable`).
+- [x] `InventoryPlugin::build()` registers `UseItemExplorationAction` with
+      `app.add_message::<UseItemExplorationAction>()`.
+- [x] Existing `build_action_list` tests updated to the new 5-argument signature
+      (character with empty inventory, `game_content = None`).
+- [x] Existing `test_panel_action_drop_variant` and
+      `test_panel_action_transfer_variant` updated with `PanelAction::Use { .. }`
+      arms to satisfy exhaustiveness.
+- [x] 5 new Phase 2 tests added:
+      `test_build_action_list_use_first_for_consumable`,
+      `test_build_action_list_no_use_for_non_consumable`,
+      `test_build_action_list_no_use_when_no_content`,
+      `test_panel_action_use_variant`,
+      `test_build_action_list_drop_transfer_unchanged`.
+- [x] `cargo fmt --all`, `cargo check --all-targets --all-features`,
+      `cargo clippy --all-targets --all-features -- -D warnings`, and
+      `cargo nextest run --all-features` all pass with zero warnings and 3398
+      tests passing.
+
+### Files Changed
+
+| File                                  | Change                                                                                                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/game/systems/inventory_ui.rs`    | `UseItemExplorationAction` struct added; `PanelAction::Use` variant added; `build_action_list` extended; systems updated; 7 new tests; 5 tests updated |
+| `docs/explanation/implementations.md` | This entry added                                                                                                                                       |
+
+### Architecture Details
+
+#### `UseItemExplorationAction`
+
+A `#[derive(Message)]` struct with two `pub usize` fields:
+
+- `party_index` — which party member owns the item (0-based).
+- `slot_index` — which slot in that character's `inventory.items` to consume.
+
+Mirrors the shape of `DropItemAction` and `TransferItemAction` to keep the
+action message pattern consistent across the inventory system.
+
+#### `PanelAction::Use` Variant
+
+Added as the **first** variant in `PanelAction` so that when keyboard focus
+enters `ActionNavigation`, index 0 maps to `Use` for consumables (and index 0
+maps to `Drop` for non-consumables). This preserves the invariant that the most
+destructive irreversible action (`Drop`) is not the default focus when a safer
+action (`Use`) is available.
+
+#### `build_action_list` Consumable Guard
+
+```text
+character.inventory.items.get(selected_slot_index)
+    → game_content.db().items.get_item(slot.item_id)
+    → matches!(item.item_type, ItemType::Consumable(_))
+```
+
+If `game_content` is `None` or the item ID is not found, `is_consumable`
+defaults to `false` and no `Use` action is emitted. This makes the function
+safe to call in tests without a content database.
+
+#### Button Index Offsets in `render_character_panel`
+
+When a consumable slot is selected the action strip renders:
+`[Use] [Drop] [→ Ally] [→ Mage] …`
+
+The Drop button focus index becomes `1` (was `0`) and Transfer buttons start at
+`2` (were `1`). These offsets are computed from the same `is_consumable` boolean
+so keyboard and mouse paths always agree.
+
+#### `U` Keyboard Shortcut
+
+Inserted in `SlotNavigation` phase, before the arrow-key handler and after the
+`Esc`/`Tab`/`Enter` blocks. If the highlighted slot is a consumable the shortcut
+fires `UseItemExplorationAction` immediately, clears the slot selection, and
+resets the nav phase — bypassing `ActionNavigation` entirely for the common case.
+
+---
+
+## Phase 1: Extract Shared Consumable Domain Logic (Complete)
+
+### Overview
+
+Extracted the authoritative `ConsumableEffect` match from `execute_item_use_by_slot`
+in `src/domain/combat/item_usage.rs` into a new standalone pure-domain module
+`src/domain/items/consumable_usage.rs`. Both the existing combat path and the
+future exploration/menu path now share a single implementation, eliminating any
+risk of logic drift between the two. `ResistanceType` was also added to the
+public re-export surface of `src/domain/items/mod.rs` so callers can import it
+via `antares::domain::items::ResistanceType` without reaching into the `types`
+submodule directly.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `src/domain/items/consumable_usage.rs` created with SPDX header,
+      `ConsumableApplyResult` struct, and `apply_consumable_effect` covering all
+      six `ConsumableEffect` variants (`HealHp`, `RestoreSp`, `CureCondition`,
+      `BoostAttribute`, `BoostResistance`, `IsFood`).
+- [x] `src/domain/items/mod.rs` updated: `pub mod consumable_usage;` added;
+      `ResistanceType` added to `pub use types::...`; `apply_consumable_effect`
+      and `ConsumableApplyResult` re-exported from `consumable_usage`.
+- [x] `execute_item_use_by_slot` in `src/domain/combat/item_usage.rs` delegates
+      the `ConsumableEffect` match to `apply_consumable_effect`; all combat-only
+      responsibilities (user identity check, charge consumption, `advance_turn`,
+      `check_combat_end`) remain in the combat executor.
+- [x] All ten domain and regression tests listed in the plan pass.
+- [x] Two additional combat-path regression tests for `BoostResistance` and
+      `BoostAttribute` added to `item_usage.rs` to exercise the new helper
+      through the full combat stack.
+- [x] `cargo fmt --all`, `cargo check --all-targets --all-features`,
+      `cargo clippy --all-targets --all-features -- -D warnings`, and
+      `cargo nextest run --all-features` all pass with zero warnings.
+
+### Files Changed
+
+| File                                   | Change                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/items/consumable_usage.rs` | **Created** — `ConsumableApplyResult`, `apply_consumable_effect`, 18 unit tests                                     |
+| `src/domain/items/mod.rs`              | Added `pub mod consumable_usage;`, re-exported `apply_consumable_effect`, `ConsumableApplyResult`, `ResistanceType` |
+| `src/domain/combat/item_usage.rs`      | Phase B match replaced with `apply_consumable_effect` delegation; 5 new regression tests added                      |
+
+### Architecture Details
+
+#### `ConsumableApplyResult`
+
+A plain `#[derive(Default)]` struct with five `i32`/`i16`/`u8` fields:
+
+- `healing: i32` — HP delta actually applied (zero for non-heal effects).
+- `sp_restored: i32` — SP delta actually applied.
+- `conditions_cleared: u8` — bitflags cleared from `character.conditions`.
+- `attribute_delta: i16` — stat delta applied by `BoostAttribute`.
+- `resistance_delta: i16` — resistance delta applied by `BoostResistance`.
+
+Callers receive the result and can compose player-visible feedback messages
+without re-deriving deltas from a before/after snapshot.
+
+#### `apply_consumable_effect` Contract
+
+| Variant                             | Mutation                                                                 | Cap        |
+| ----------------------------------- | ------------------------------------------------------------------------ | ---------- |
+| `HealHp(amount)`                    | `hp.modify(amount as i32)` then clamp `hp.current` to `hp.base`          | `hp.base`  |
+| `RestoreSp(amount)`                 | `sp.modify(amount as i32)` then clamp `sp.current` to `sp.base`          | `sp.base`  |
+| `CureCondition(flags)`              | `conditions.remove(flags)` — bitflag only, `active_conditions` untouched | none       |
+| `BoostAttribute(attr, amount)`      | `stats.<field>.modify(amount as i16)`                                    | saturating |
+| `BoostResistance(res_type, amount)` | `resistances.<field>.modify(amount as i16)`                              | saturating |
+| `IsFood(_)`                         | No-op; returns zeroed `ConsumableApplyResult`                            | —          |
+
+#### Refactored Combat Path
+
+`execute_item_use_by_slot` retains all combat-only responsibilities. Phase B now
+consists of a single `get_combatant_mut` call followed by a call to
+`apply_consumable_effect(pc_target, effect)`. The returned `ConsumableApplyResult`
+is used to populate `total_healing`, `effected_indices`, and `applied_conditions`
+exactly as before, preserving full backward compatibility with existing callers and
+tests.
+
+#### `ResistanceType` Re-export
+
+`ResistanceType` was defined in `src/domain/items/types.rs` but was previously not
+re-exported from `src/domain/items/mod.rs`. It is now available as
+`antares::domain::items::ResistanceType` alongside `AttributeType`,
+`ConsumableEffect`, and the rest of the public items API.
+
+### Quality Gate Results
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt         → clean (no output)
+cargo check       → Finished (0 errors, 0 warnings)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3393 passed, 8 skipped
+```
+
+---
+
 ## Phase 5E: Months and Years — Call-Site Audit & Quality Gates (Complete)
 
 ### Overview
