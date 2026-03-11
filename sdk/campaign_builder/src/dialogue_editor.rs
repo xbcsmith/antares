@@ -2629,6 +2629,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::HealHp(50),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 50,
             sell_cost: 25,

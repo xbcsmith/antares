@@ -320,6 +320,7 @@ impl TemplateManager {
                 item_type: ItemType::Consumable(ConsumableData {
                     effect: antares::domain::items::types::ConsumableEffect::HealHp(10),
                     is_combat_usable: true,
+                    duration_minutes: None,
                 }),
                 base_cost: 50,
                 sell_cost: 25,
@@ -339,6 +340,7 @@ impl TemplateManager {
                 item_type: ItemType::Consumable(ConsumableData {
                     effect: antares::domain::items::types::ConsumableEffect::RestoreSp(10),
                     is_combat_usable: false,
+                    duration_minutes: None,
                 }),
                 base_cost: 60,
                 sell_cost: 30,

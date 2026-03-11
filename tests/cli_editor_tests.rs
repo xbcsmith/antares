@@ -166,6 +166,7 @@ fn create_test_consumable() -> Item {
         item_type: ItemType::Consumable(ConsumableData {
             effect: ConsumableEffect::HealHp(50),
             is_combat_usable: true,
+            duration_minutes: None,
         }),
         base_cost: 50,
         sell_cost: 25,
@@ -845,6 +846,7 @@ fn test_item_consumable_effect_variants() {
             item_type: ItemType::Consumable(ConsumableData {
                 effect,
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 50,
             sell_cost: 25,

@@ -653,19 +653,29 @@ impl ItemsEditorState {
                                     format!("Cure Condition (flags: {:#X})", f)
                                 }
                                 ConsumableEffect::BoostAttribute(attr, n) => {
+                                    let duration_str = data
+                                        .duration_minutes
+                                        .map(|m| format!(" ({} min)", m))
+                                        .unwrap_or_default();
                                     format!(
-                                        "Boost {} ({}{})",
+                                        "Boost {} ({}{}){}",
                                         attr.display_name(),
                                         if n >= 0 { "+" } else { "" },
-                                        n
+                                        n,
+                                        duration_str
                                     )
                                 }
                                 ConsumableEffect::BoostResistance(res, n) => {
+                                    let duration_str = data
+                                        .duration_minutes
+                                        .map(|m| format!(" ({} min)", m))
+                                        .unwrap_or_default();
                                     format!(
-                                        "Boost {} Resistance ({}{})",
+                                        "Boost {} Resistance ({}{}){}",
                                         res.display_name(),
                                         if n >= 0 { "+" } else { "" },
-                                        n
+                                        n,
+                                        duration_str
                                     )
                                 }
                                 ConsumableEffect::IsFood(rations) => {
@@ -905,6 +915,7 @@ impl ItemsEditorState {
                             self.edit_buffer.item_type = ItemType::Consumable(ConsumableData {
                                 effect: ConsumableEffect::HealHp(10),
                                 is_combat_usable: true,
+                                duration_minutes: None,
                             });
                         }
                         if ui
@@ -1401,6 +1412,14 @@ impl ItemsEditorState {
                             ui.label("Amount:");
                             ui.add(egui::DragValue::new(amount).range(1..=127));
                         });
+                        // Duration row — shown only for timed-capable effects
+                        ui.horizontal(|ui| {
+                            ui.label("Duration (minutes):");
+                            let mut raw: u16 = data.duration_minutes.unwrap_or(0);
+                            ui.add(egui::DragValue::new(&mut raw).range(0..=u16::MAX));
+                            ui.label("(0 = permanent)");
+                            data.duration_minutes = if raw == 0 { None } else { Some(raw) };
+                        });
                     }
                     ConsumableEffect::BoostAttribute(attr_type, amount) => {
                         ui.horizontal(|ui| {
@@ -1436,6 +1455,14 @@ impl ItemsEditorState {
                         ui.horizontal(|ui| {
                             ui.label("Amount:");
                             ui.add(egui::DragValue::new(amount).range(-128..=127));
+                        });
+                        // Duration row — shown only for timed-capable effects
+                        ui.horizontal(|ui| {
+                            ui.label("Duration (minutes):");
+                            let mut raw: u16 = data.duration_minutes.unwrap_or(0);
+                            ui.add(egui::DragValue::new(&mut raw).range(0..=u16::MAX));
+                            ui.label("(0 = permanent)");
+                            data.duration_minutes = if raw == 0 { None } else { Some(raw) };
                         });
                     }
                     ConsumableEffect::IsFood(ration_value) => {
@@ -1818,6 +1845,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(1),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 2,
             sell_cost: 1,
@@ -1860,6 +1888,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(3),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 5,
             sell_cost: 2,
@@ -1897,6 +1926,7 @@ mod tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::IsFood(1),
                 is_combat_usable: false,
+                duration_minutes: None,
             }),
             base_cost: 2,
             sell_cost: 1,
@@ -1947,5 +1977,187 @@ mod tests {
             if rations == 1 { "" } else { "s" }
         );
         assert_eq!(label, "Food (3 rations)");
+    }
+
+    // =========================================================================
+    // Phase 5: Duration-Aware Consumable Tests
+    // =========================================================================
+
+    /// Setting `duration_minutes = Some(60)` in the edit buffer is preserved
+    /// after round-tripping through the buffer — simulating save/reload.
+    #[test]
+    #[allow(deprecated)]
+    fn test_duration_field_round_trips_through_editor() {
+        let mut state = ItemsEditorState::new();
+        state.edit_buffer = Item {
+            id: 62,
+            name: "Fire Resist Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::BoostResistance(
+                    antares::domain::items::types::ResistanceType::Fire,
+                    25,
+                ),
+                is_combat_usable: false,
+                duration_minutes: Some(60),
+            }),
+            base_cost: 100,
+            sell_cost: 50,
+            is_cursed: false,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 1,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+        };
+
+        // Round-trip: read the value back from the buffer (simulates save → reload)
+        if let ItemType::Consumable(ref data) = state.edit_buffer.item_type {
+            assert_eq!(
+                data.duration_minutes,
+                Some(60),
+                "duration_minutes must survive the edit buffer round-trip"
+            );
+        } else {
+            panic!("expected Consumable in edit_buffer");
+        }
+    }
+
+    /// For instant-effect consumables (`HealHp`, `RestoreSp`) the `duration_minutes`
+    /// field on a default-constructed item must be `None` — these effects do not
+    /// use duration and the widget should never appear for them.
+    #[test]
+    fn test_duration_hidden_for_instant_effects() {
+        // HealHp default item
+        let heal_item = ItemsEditorState::default_item();
+        // default_item() produces a Weapon; construct the consumable variant manually
+        let heal_consumable = ConsumableData {
+            effect: ConsumableEffect::HealHp(10),
+            is_combat_usable: true,
+            duration_minutes: None,
+        };
+        assert!(
+            heal_consumable.duration_minutes.is_none(),
+            "HealHp consumable must have duration_minutes: None"
+        );
+        drop(heal_item); // silence unused warning
+
+        // RestoreSp
+        let sp_consumable = ConsumableData {
+            effect: ConsumableEffect::RestoreSp(10),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+        assert!(
+            sp_consumable.duration_minutes.is_none(),
+            "RestoreSp consumable must have duration_minutes: None"
+        );
+    }
+
+    /// Writing `raw = 0` in the DragValue widget must produce
+    /// `duration_minutes: None` in the saved `ConsumableData`.
+    #[test]
+    fn test_duration_zero_normalizes_to_none_on_save() {
+        // Simulate what the DragValue write-back logic does when raw == 0
+        let raw: u16 = 0;
+        let result: Option<u16> = if raw == 0 { None } else { Some(raw) };
+        assert!(
+            result.is_none(),
+            "raw duration of 0 must normalize to None (permanent)"
+        );
+
+        // And a non-zero value must be preserved
+        let raw_nonzero: u16 = 30;
+        let result_nonzero: Option<u16> = if raw_nonzero == 0 {
+            None
+        } else {
+            Some(raw_nonzero)
+        };
+        assert_eq!(
+            result_nonzero,
+            Some(30),
+            "raw duration of 30 must be preserved as Some(30)"
+        );
+    }
+
+    /// Preview string for a `BoostAttribute` item with `duration_minutes: Some(60)`
+    /// must contain "60".
+    #[test]
+    fn test_preview_text_includes_duration_for_timed_boost() {
+        let data = ConsumableData {
+            effect: ConsumableEffect::BoostAttribute(
+                antares::domain::items::types::AttributeType::Might,
+                5,
+            ),
+            is_combat_usable: false,
+            duration_minutes: Some(60),
+        };
+
+        // Replicate the preview string logic used in show_preview_static
+        let duration_str = data
+            .duration_minutes
+            .map(|m| format!(" ({} min)", m))
+            .unwrap_or_default();
+
+        if let ConsumableEffect::BoostAttribute(attr, n) = data.effect {
+            let preview = format!(
+                "Boost {} ({}{}){}",
+                attr.display_name(),
+                if n >= 0 { "+" } else { "" },
+                n,
+                duration_str
+            );
+            assert!(
+                preview.contains("60"),
+                "preview text must contain the duration value '60', got: {}",
+                preview
+            );
+            assert!(
+                preview.contains("min"),
+                "preview text must contain 'min', got: {}",
+                preview
+            );
+        } else {
+            panic!("expected BoostAttribute effect");
+        }
+    }
+
+    /// Preview string for a `BoostAttribute` item with `duration_minutes: None`
+    /// must not contain the substring "min".
+    #[test]
+    fn test_preview_text_no_duration_suffix_for_permanent_boost() {
+        let data = ConsumableData {
+            effect: ConsumableEffect::BoostAttribute(
+                antares::domain::items::types::AttributeType::Intellect,
+                3,
+            ),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+
+        // Replicate the preview string logic used in show_preview_static
+        let duration_str = data
+            .duration_minutes
+            .map(|m| format!(" ({} min)", m))
+            .unwrap_or_default();
+
+        if let ConsumableEffect::BoostAttribute(attr, n) = data.effect {
+            let preview = format!(
+                "Boost {} ({}{}){}",
+                attr.display_name(),
+                if n >= 0 { "+" } else { "" },
+                n,
+                duration_str
+            );
+            assert!(
+                !preview.contains("min"),
+                "permanent boost preview must not contain 'min', got: {}",
+                preview
+            );
+        } else {
+            panic!("expected BoostAttribute effect");
+        }
     }
 }

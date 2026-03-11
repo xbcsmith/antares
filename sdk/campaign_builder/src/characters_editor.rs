@@ -2265,6 +2265,7 @@ fn create_test_item(id: ItemId, name: &str) -> Item {
         item_type: ItemType::Consumable(ConsumableData {
             effect: ConsumableEffect::HealHp(0),
             is_combat_usable: false,
+            duration_minutes: None,
         }),
         base_cost: 10,
         sell_cost: 5,

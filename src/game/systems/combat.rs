@@ -2716,6 +2716,7 @@ pub fn perform_attack_action_with_rng(
         action.attacker,
         action.target,
         &attack_data,
+        Some(&global_state.0.active_spells),
         rng,
     )?;
 
@@ -2896,6 +2897,7 @@ pub fn perform_ranged_attack_action_with_rng(
         action.attacker,
         action.target,
         &attack_data,
+        Some(&global_state.0.active_spells),
         rng,
     )?;
 
@@ -3388,6 +3390,7 @@ mod perform_use_item_tests {
             item_type: ItemType::Consumable(ConsumableData {
                 effect: ConsumableEffect::HealHp(20),
                 is_combat_usable: true,
+                duration_minutes: None,
             }),
             base_cost: 10,
             sell_cost: 5,
@@ -4015,7 +4018,14 @@ pub fn perform_monster_turn_with_rng(
     }
 
     // Resolve attack (pure calculation, uses immutable state)
-    let (damage, special) = resolve_attack(&combat_res.state, attacker, target, &attack_data, rng)?;
+    let (damage, special) = resolve_attack(
+        &combat_res.state,
+        attacker,
+        target,
+        &attack_data,
+        Some(&global_state.0.active_spells),
+        rng,
+    )?;
 
     // Apply damage (mutably modify combat state)
     if damage > 0 {

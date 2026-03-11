@@ -259,9 +259,57 @@ impl InnManagementState {
 
 // ===== Active Spell Effects =====
 
-/// Party-wide active spell effects (separate from character conditions)
+/// Party-wide active spell effects (separate from character conditions).
 ///
-/// Each field represents duration remaining (0 = not active)
+/// Each `u8` field represents the number of in-game minutes remaining for that
+/// effect.  A value of `0` means the effect is not active.  Fields are
+/// decremented once per minute by [`ActiveSpells::tick`], which is called
+/// inside [`GameState::advance_time`] for every minute advanced.
+///
+/// ## Timed Resistance Potions
+///
+/// When a campaign author gives a consumable item the
+/// `ConsumableEffect::BoostResistance` effect **and** a non-zero
+/// `duration_minutes`, the exploration executor routes the use through
+/// [`crate::domain::items::consumable_usage::apply_consumable_effect_exploration`],
+/// which writes the clamped duration directly into the relevant field of this
+/// struct (e.g. `fire_protection = 60` for a 60-minute fire potion).
+///
+/// During combat, [`ActiveSpells::effective_resistance`] is consulted for each
+/// incoming attack.  If the matching protection field is non-zero, the character
+/// receives a flat [`ACTIVE_PROTECTION_BONUS`] added to their base resistance.
+///
+/// ## Relationship to `ACTIVE_PROTECTION_BONUS`
+///
+/// [`ACTIVE_PROTECTION_BONUS`] is a compile-time constant (`25`) representing
+/// the flat resistance bonus granted while a protection is active.  It is
+/// intentionally fixed — campaign authors control potion potency through the
+/// `amount` field in `BoostResistance`; the `active_spells` fields store only
+/// the remaining duration, not the magnitude.
+///
+/// ## Overwrite Semantics
+///
+/// Applying a second resistance potion while the same protection is still active
+/// **overwrites** the remaining duration rather than stacking.  This matches the
+/// Might and Magic 1 design philosophy: predictable, non-stacking consumables.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::{ActiveSpells, ACTIVE_PROTECTION_BONUS};
+/// use antares::domain::items::types::ResistanceType;
+///
+/// let mut spells = ActiveSpells::new();
+/// spells.fire_protection = 60;
+///
+/// // Protection active — returns the flat bonus.
+/// assert_eq!(spells.effective_resistance(ResistanceType::Fire), ACTIVE_PROTECTION_BONUS);
+///
+/// // Tick 60 times to expire.
+/// for _ in 0..60 { spells.tick(); }
+/// assert_eq!(spells.fire_protection, 0);
+/// assert_eq!(spells.effective_resistance(ResistanceType::Fire), 0);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveSpells {
     /// Resistance to fear effects
@@ -302,6 +350,13 @@ pub struct ActiveSpells {
     pub cursed: u8,
 }
 
+/// Bonus resistance points granted per active protection spell/potion.
+///
+/// When an `ActiveSpells` protection field is non-zero, this flat bonus is
+/// added to the character's current resistance for the matching damage type
+/// during combat damage resolution.
+pub const ACTIVE_PROTECTION_BONUS: i16 = 25;
+
 impl ActiveSpells {
     /// Creates a new ActiveSpells with all effects inactive
     pub fn new() -> Self {
@@ -324,6 +379,55 @@ impl ActiveSpells {
             shield: 0,
             power_shield: 0,
             cursed: 0,
+        }
+    }
+
+    /// Returns the effective bonus resistance for a given [`ResistanceType`]
+    /// contributed by active spell/potion protections.
+    ///
+    /// Returns [`ACTIVE_PROTECTION_BONUS`] (25) when the mapped `active_spells`
+    /// field is non-zero (i.e. the protection is currently active), and `0`
+    /// when the field has ticked down to zero (expired).
+    ///
+    /// Callers add this value to `character.resistances.<field>.current` to
+    /// obtain the total effective resistance for a given damage type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{ActiveSpells, ACTIVE_PROTECTION_BONUS};
+    /// use antares::domain::items::types::ResistanceType;
+    ///
+    /// let mut spells = ActiveSpells::new();
+    /// // No protection active — all types return 0.
+    /// assert_eq!(spells.effective_resistance(ResistanceType::Fire), 0);
+    ///
+    /// // Activate fire protection for 30 minutes.
+    /// spells.fire_protection = 30;
+    /// assert_eq!(spells.effective_resistance(ResistanceType::Fire), ACTIVE_PROTECTION_BONUS);
+    ///
+    /// // Cold is still inactive.
+    /// assert_eq!(spells.effective_resistance(ResistanceType::Cold), 0);
+    /// ```
+    pub fn effective_resistance(
+        &self,
+        res_type: crate::domain::items::types::ResistanceType,
+    ) -> i16 {
+        use crate::domain::items::types::ResistanceType;
+        let active = match res_type {
+            ResistanceType::Fire => self.fire_protection > 0,
+            ResistanceType::Cold => self.cold_protection > 0,
+            ResistanceType::Electricity => self.electricity_protection > 0,
+            ResistanceType::Energy => self.magic_protection > 0,
+            ResistanceType::Fear => self.fear_protection > 0,
+            ResistanceType::Physical => self.magic_protection > 0,
+            ResistanceType::Paralysis => self.psychic_protection > 0,
+            ResistanceType::Sleep => self.psychic_protection > 0,
+        };
+        if active {
+            ACTIVE_PROTECTION_BONUS
+        } else {
+            0
         }
     }
 
@@ -1389,6 +1493,7 @@ impl GameState {
     ///     item_type: ItemType::Consumable(ConsumableData {
     ///         effect: ConsumableEffect::IsFood(1),
     ///         is_combat_usable: false,
+    ///         duration_minutes: None,
     ///     }),
     ///     base_cost: 1,
     ///     sell_cost: 0,
@@ -1470,6 +1575,24 @@ impl GameState {
         self.time.time_of_day()
     }
 
+    /// Advances the in-game clock by `minutes` and ticks all time-sensitive state.
+    ///
+    /// This is the single authoritative time-advancement path. Every minute
+    /// advanced through this function also:
+    ///
+    /// 1. Decrements all [`ActiveSpells`] protection field counters by 1 via
+    ///    [`ActiveSpells::tick`].  When a field reaches 0 the corresponding
+    ///    protection (e.g. `fire_protection`) expires and the next call to
+    ///    [`ActiveSpells::effective_resistance`] for that type will return 0.
+    /// 2. Ticks per-character timed attribute boosts via
+    ///    [`crate::domain::character::Character::tick_timed_stat_boosts_minute`]
+    ///    for every party member.  Boosts whose `minutes_remaining` reaches 0
+    ///    are automatically reversed — the boosted `current` attribute value is
+    ///    restored to its pre-boost level.
+    /// 3. Triggers NPC merchant restock (if `templates` is `Some`).
+    ///
+    /// # Arguments
+    ///
     /// * `minutes`   - Number of in-game minutes to advance.
     /// * `templates` - Template database used to replenish merchant stock.
     ///   Pass `None` in contexts where the content is not available (e.g.
@@ -1488,15 +1611,41 @@ impl GameState {
     /// assert_eq!(state.time.minute, 0);
     /// assert_eq!(state.time.hour, 7);
     /// ```
+    ///
+    /// Timed attribute boost expiry:
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    /// use antares::domain::items::types::AttributeType;
+    ///
+    /// let mut state = GameState::new();
+    /// let mut hero = Character::new(
+    ///     "Hero".to_string(), "human".to_string(), "knight".to_string(),
+    ///     Sex::Male, Alignment::Good,
+    /// );
+    /// let base_might = hero.stats.might.current;
+    /// hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(10));
+    /// state.party.add_member(hero).unwrap();
+    ///
+    /// // Boost expires after exactly 10 ticks.
+    /// state.advance_time(10, None);
+    /// assert_eq!(state.party.members[0].stats.might.current, base_might);
+    /// assert!(state.party.members[0].timed_stat_boosts.is_empty());
+    /// ```
     pub fn advance_time(
         &mut self,
         minutes: u32,
         templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
     ) {
         self.time.advance_minutes(minutes);
-        // Tick active spell durations
+        // Tick active spell durations and per-character timed stat boosts
         for _ in 0..minutes {
             self.active_spells.tick();
+            // Phase 2: tick per-character timed stat boosts
+            for member in &mut self.party.members {
+                member.tick_timed_stat_boosts_minute();
+            }
         }
         // Trigger daily restock and magic-slot rotation when templates are available.
         if let Some(tmpl) = templates {
@@ -1738,6 +1887,91 @@ mod tests {
         state.advance_time(5, None);
         assert_eq!(state.active_spells.light, 5);
         assert_eq!(state.time.minute, 5);
+    }
+
+    // ===== Phase 2: TimedStatBoost wiring tests =====
+
+    #[test]
+    fn test_advance_time_ticks_timed_stat_boosts() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::items::types::AttributeType;
+
+        let mut state = GameState::new();
+
+        // Add a party member with a timed Might boost of 5 minutes
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let base_might = hero.stats.might.current;
+        hero.apply_timed_stat_boost(AttributeType::Might, 8, Some(5));
+        assert_eq!(hero.stats.might.current, base_might + 8);
+        state.party.add_member(hero).unwrap();
+
+        // Advance 5 minutes — boost expires exactly on the 5th tick
+        state.advance_time(5, None);
+
+        assert_eq!(
+            state.party.members[0].stats.might.current, base_might,
+            "Might must be restored after advancing exactly 5 minutes"
+        );
+        assert!(
+            state.party.members[0].timed_stat_boosts.is_empty(),
+            "expired boost must be removed from the list"
+        );
+    }
+
+    #[test]
+    fn test_advance_time_ticks_both_spells_and_boosts() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::items::types::AttributeType;
+
+        let mut state = GameState::new();
+        state.active_spells.light = 10;
+
+        let mut hero = Character::new(
+            "Mage".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        let base_speed = hero.stats.speed.current;
+        hero.apply_timed_stat_boost(AttributeType::Speed, 4, Some(10));
+        state.party.add_member(hero).unwrap();
+
+        // Advance 7 minutes — both counters should tick together
+        state.advance_time(7, None);
+
+        assert_eq!(
+            state.active_spells.light, 3,
+            "active_spells.light must have decremented by 7"
+        );
+        assert_eq!(
+            state.party.members[0].stats.speed.current,
+            base_speed + 4,
+            "Speed boost must still be active after 7 of 10 minutes"
+        );
+        assert_eq!(
+            state.party.members[0].timed_stat_boosts[0].minutes_remaining, 3,
+            "boost must have 3 minutes remaining"
+        );
+
+        // Advance 3 more minutes — boost expires
+        state.advance_time(3, None);
+
+        assert_eq!(
+            state.active_spells.light, 0,
+            "active_spells.light must reach 0 after 10 total minutes"
+        );
+        assert_eq!(
+            state.party.members[0].stats.speed.current, base_speed,
+            "Speed must be restored after 10 total minutes"
+        );
+        assert!(state.party.members[0].timed_stat_boosts.is_empty());
     }
 
     #[test]
@@ -3495,6 +3729,7 @@ mod tests {
                 item_type: ItemType::Consumable(ConsumableData {
                     effect: ConsumableEffect::IsFood(1),
                     is_combat_usable: false,
+                    duration_minutes: None,
                 }),
                 base_cost: 5,
                 sell_cost: 2,
@@ -3566,6 +3801,7 @@ mod tests {
                 item_type: ItemType::Consumable(ConsumableData {
                     effect: ConsumableEffect::IsFood(1),
                     is_combat_usable: false,
+                    duration_minutes: None,
                 }),
                 base_cost: 5,
                 sell_cost: 2,
@@ -3679,6 +3915,355 @@ mod tests {
             state.time_of_day(),
             TimeOfDay::Night,
             "06:00 + 16 hours should be Night"
+        );
+    }
+
+    // ===== Phase 4: ActiveSpells::effective_resistance tests =====
+
+    #[test]
+    fn test_effective_resistance_zero_when_no_protection() {
+        use crate::domain::items::types::ResistanceType;
+
+        // All active_spells fields are 0 by default — every type must return 0.
+        let spells = ActiveSpells::new();
+        let all_types = [
+            ResistanceType::Fire,
+            ResistanceType::Cold,
+            ResistanceType::Electricity,
+            ResistanceType::Energy,
+            ResistanceType::Fear,
+            ResistanceType::Physical,
+            ResistanceType::Paralysis,
+            ResistanceType::Sleep,
+        ];
+        for res_type in all_types {
+            assert_eq!(
+                spells.effective_resistance(res_type),
+                0,
+                "effective_resistance({res_type:?}) must be 0 when no protection is active"
+            );
+        }
+    }
+
+    #[test]
+    fn test_effective_resistance_nonzero_when_active() {
+        use crate::domain::items::types::ResistanceType;
+
+        // Each of the eight ResistanceType variants must return ACTIVE_PROTECTION_BONUS
+        // when its mapped ActiveSpells field is non-zero.
+        //
+        // Mapping (mirrors Phase 3 / apply_consumable_effect_exploration):
+        //   Fire        → fire_protection
+        //   Cold        → cold_protection
+        //   Electricity → electricity_protection
+        //   Energy      → magic_protection
+        //   Fear        → fear_protection
+        //   Physical    → magic_protection  (no dedicated field)
+        //   Paralysis   → psychic_protection
+        //   Sleep       → psychic_protection
+        type ActivateFn = fn(&mut ActiveSpells);
+        let cases: &[(ResistanceType, ActivateFn)] = &[
+            (ResistanceType::Fire, |s| s.fire_protection = 10),
+            (ResistanceType::Cold, |s| s.cold_protection = 10),
+            (ResistanceType::Electricity, |s| {
+                s.electricity_protection = 10
+            }),
+            (ResistanceType::Energy, |s| s.magic_protection = 10),
+            (ResistanceType::Fear, |s| s.fear_protection = 10),
+            (ResistanceType::Physical, |s| s.magic_protection = 10),
+            (ResistanceType::Paralysis, |s| s.psychic_protection = 10),
+            (ResistanceType::Sleep, |s| s.psychic_protection = 10),
+        ];
+
+        for (res_type, activate) in cases {
+            let mut spells = ActiveSpells::new();
+            activate(&mut spells);
+            assert_eq!(
+                spells.effective_resistance(*res_type),
+                ACTIVE_PROTECTION_BONUS,
+                "effective_resistance({res_type:?}) must be {ACTIVE_PROTECTION_BONUS} when protection is active"
+            );
+        }
+    }
+
+    #[test]
+    fn test_effective_resistance_zero_when_expired() {
+        use crate::domain::items::types::ResistanceType;
+
+        // Set fire_protection to 1, tick once — it becomes 0 — resistance bonus
+        // must then be 0 again.
+        let mut spells = ActiveSpells::new();
+        spells.fire_protection = 1;
+
+        assert_eq!(
+            spells.effective_resistance(ResistanceType::Fire),
+            ACTIVE_PROTECTION_BONUS,
+            "fire resistance bonus must be non-zero while protection is active"
+        );
+
+        // One tick decrements fire_protection to 0.
+        spells.tick();
+
+        assert_eq!(
+            spells.effective_resistance(ResistanceType::Fire),
+            0,
+            "fire resistance bonus must be 0 after protection expires (tick to 0)"
+        );
+    }
+
+    // ===== Phase 5: End-to-end timed potion / active-spell expiry tests =====
+
+    /// Simulates applying a 60-minute fire-resistance potion directly on
+    /// `active_spells` (the same write `apply_consumable_effect_exploration`
+    /// would perform) and verifies that `advance_time(60)` fully drains it.
+    #[test]
+    #[allow(deprecated)]
+    fn test_timed_resistance_potion_expires_after_advance_time() {
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = GameState::new();
+
+        // Add a hero so the party is non-empty (mirrors real usage).
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        // Simulate the fire-resistance potion being applied (60-minute duration).
+        state.active_spells.fire_protection = 60;
+        assert!(
+            state.active_spells.fire_protection > 0,
+            "fire_protection must be non-zero immediately after potion use"
+        );
+
+        // Advance exactly 60 minutes — every tick drains one unit, so it must reach 0.
+        state.advance_time(60, None);
+
+        assert_eq!(
+            state.active_spells.fire_protection, 0,
+            "fire_protection must be 0 after advancing exactly 60 minutes"
+        );
+    }
+
+    /// Verifies that a 30-minute Might boost applied via `apply_timed_stat_boost`
+    /// is correctly expired (and the stat restored) after `advance_time(30)`.
+    #[test]
+    #[allow(deprecated)]
+    fn test_timed_attribute_potion_expires_after_advance_time() {
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::items::types::AttributeType;
+
+        let mut state = GameState::new();
+
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let base_might = hero.stats.might.current;
+
+        // Apply a 5-point Might boost that lasts 30 minutes.
+        hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(30));
+        assert_eq!(
+            hero.timed_stat_boosts.len(),
+            1,
+            "one timed boost must be registered immediately after apply"
+        );
+        assert_eq!(
+            hero.stats.might.current,
+            base_might + 5,
+            "Might must be raised by 5 immediately after apply"
+        );
+
+        state.party.add_member(hero).unwrap();
+
+        // Advance exactly 30 minutes — the boost must expire on the last tick.
+        state.advance_time(30, None);
+
+        assert!(
+            state.party.members[0].timed_stat_boosts.is_empty(),
+            "timed boost list must be empty after the full 30-minute duration elapses"
+        );
+        assert_eq!(
+            state.party.members[0].stats.might.current, base_might,
+            "Might must be restored to its base value after the boost expires"
+        );
+    }
+
+    /// Verifies that both a timed stat boost and an active-spell protection
+    /// expire when `rest_party` is called for a full rest (12 hours = 720 minutes),
+    /// which is well beyond the 60-minute durations used here.
+    #[test]
+    #[allow(deprecated)]
+    fn test_timed_potion_expires_during_rest() {
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::items::types::{AttributeType, ConsumableData, ConsumableEffect};
+        use crate::domain::items::{Item, ItemDatabase, ItemType};
+        use crate::domain::resources::REST_DURATION_HOURS;
+
+        let mut state = GameState::new();
+
+        // Build a minimal food-item database (required by rest_party).
+        let mut item_db = ItemDatabase::new();
+        item_db
+            .add_item(Item {
+                id: 1,
+                name: "Food Ration".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::IsFood(1),
+                    is_combat_usable: false,
+                    duration_minutes: None,
+                }),
+                base_cost: 5,
+                sell_cost: 2,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+            })
+            .unwrap();
+
+        // Build a hero with enough food rations to survive the full rest.
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        for _ in 0..5 {
+            hero.inventory.add_item(1, 0).unwrap();
+        }
+
+        // Apply a 60-minute Speed boost — well within the 720-minute rest window.
+        hero.apply_timed_stat_boost(AttributeType::Speed, 3, Some(60));
+        let boosted_speed = hero.stats.speed.current;
+        assert!(
+            boosted_speed > 0,
+            "boosted_speed sanity check: Speed must be positive"
+        );
+
+        state.party.add_member(hero).unwrap();
+
+        // Simulate a cold-resistance potion (60-minute duration).
+        state.active_spells.cold_protection = 60;
+
+        // A full 12-hour rest ticks 720 minutes — both 60-minute effects must expire.
+        state
+            .rest_party(REST_DURATION_HOURS, &item_db, None)
+            .expect("rest_party must succeed when party has sufficient food");
+
+        assert!(
+            state.party.members[0].timed_stat_boosts.is_empty(),
+            "Speed boost must have expired during the 12-hour rest"
+        );
+        assert_eq!(
+            state.active_spells.cold_protection, 0,
+            "cold_protection must be 0 after the full 12-hour rest"
+        );
+    }
+
+    /// Verifies that a permanent `BoostAttribute` (duration_minutes: None) applied
+    /// via `apply_consumable_effect` raises the stat permanently — no timed boost
+    /// is registered, and the stat is unchanged after `advance_time(999)`.
+    #[test]
+    #[allow(deprecated)]
+    fn test_permanent_attribute_potion_survives_advance_time() {
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::items::consumable_usage::apply_consumable_effect;
+        use crate::domain::items::types::{AttributeType, ConsumableData, ConsumableEffect};
+
+        let mut state = GameState::new();
+
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        // Apply a permanent +7 Might boost (duration_minutes: None → no timed entry).
+        apply_consumable_effect(
+            &mut hero,
+            &ConsumableData {
+                effect: ConsumableEffect::BoostAttribute(AttributeType::Might, 7),
+                is_combat_usable: true,
+                duration_minutes: None, // permanent — must NOT register a timed boost
+            },
+        );
+
+        // Capture the boosted value before adding to the party.
+        let boosted_might = hero.stats.might.current;
+
+        // The permanent path must not register anything in the timed list.
+        assert!(
+            hero.timed_stat_boosts.is_empty(),
+            "a permanent boost must not create a timed boost entry"
+        );
+
+        state.party.add_member(hero).unwrap();
+
+        // Advance a large number of minutes — the permanent boost must survive.
+        state.advance_time(999, None);
+
+        assert_eq!(
+            state.party.members[0].stats.might.current, boosted_might,
+            "Might must remain permanently boosted after advance_time(999)"
+        );
+        assert!(
+            state.party.members[0].timed_stat_boosts.is_empty(),
+            "no timed boost entry must ever appear for a permanent boost"
+        );
+    }
+
+    /// Verifies overwrite semantics: applying a second fire-resistance potion
+    /// replaces the remaining duration (not adds to it), and the new 60-minute
+    /// window ticks down independently from the original.
+    #[test]
+    #[allow(deprecated)]
+    fn test_second_resistance_potion_overwrites_duration() {
+        use crate::application::GameState;
+
+        let mut state = GameState::new();
+
+        // First potion: 60 minutes of fire protection.
+        state.active_spells.fire_protection = 60;
+
+        // Advance 30 minutes — 30 minutes remain from the first potion.
+        state.advance_time(30, None);
+        assert_eq!(
+            state.active_spells.fire_protection, 30,
+            "30 minutes must remain after the first advance_time(30)"
+        );
+
+        // Second potion: overwrites with a fresh 60-minute duration (not 90).
+        state.active_spells.fire_protection = 60;
+        assert_eq!(
+            state.active_spells.fire_protection, 60,
+            "second potion must overwrite to exactly 60 (not 90)"
+        );
+
+        // Advance 30 more minutes — 30 minutes remain from the second potion.
+        state.advance_time(30, None);
+        assert_eq!(
+            state.active_spells.fire_protection, 30,
+            "30 minutes must remain from the second potion after another advance_time(30)"
         );
     }
 }

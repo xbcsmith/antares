@@ -377,6 +377,7 @@ pub fn healing_potion(id: ItemId, name: &str, healing_amount: u16) -> Item {
         item_type: ItemType::Consumable(ConsumableData {
             effect: ConsumableEffect::HealHp(healing_amount),
             is_combat_usable: true,
+            duration_minutes: None,
         }),
         base_cost: (healing_amount as u32) * 5,
         sell_cost: (healing_amount as u32) * 2,
@@ -410,6 +411,7 @@ pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item {
         item_type: ItemType::Consumable(ConsumableData {
             effect: ConsumableEffect::RestoreSp(sp_amount),
             is_combat_usable: true,
+            duration_minutes: None,
         }),
         base_cost: (sp_amount as u32) * 10,
         sell_cost: (sp_amount as u32) * 5,
@@ -418,6 +420,104 @@ pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item {
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
+        is_cursed: false,
+        icon_path: None,
+        tags: vec![],
+        mesh_descriptor_override: None,
+    }
+}
+
+/// Creates a timed fire resistance potion item with the given duration.
+///
+/// The potion boosts the consumer's Fire resistance by 25 points for the
+/// specified number of minutes. Passing `duration_minutes = 0` produces a
+/// permanent (non-expiring) item via [`normalize_duration`].
+///
+/// # Arguments
+///
+/// * `id` - Item ID
+/// * `duration_minutes` - Duration in minutes; `0` means permanent
+/// * `name` - Item name
+///
+/// # Returns
+///
+/// Returns an `Item` configured as a timed `BoostResistance(Fire, 25)` consumable.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::templates::timed_fire_resist_potion;
+///
+/// let item = timed_fire_resist_potion(62, 60, "Fire Resist Potion");
+/// assert_eq!(item.name, "Fire Resist Potion");
+/// ```
+#[allow(deprecated)]
+pub fn timed_fire_resist_potion(id: ItemId, duration_minutes: u16, name: &str) -> Item {
+    use crate::domain::items::types::{normalize_duration, ResistanceType};
+    Item {
+        id,
+        name: name.to_string(),
+        item_type: ItemType::Consumable(ConsumableData {
+            effect: ConsumableEffect::BoostResistance(ResistanceType::Fire, 25),
+            is_combat_usable: false,
+            duration_minutes: normalize_duration(Some(duration_minutes)),
+        }),
+        base_cost: 100,
+        sell_cost: 50,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 1,
+        is_cursed: false,
+        icon_path: None,
+        tags: vec![],
+        mesh_descriptor_override: None,
+    }
+}
+
+/// Creates a timed Might boost potion item with the given duration.
+///
+/// The potion raises the consumer's Might attribute by 5 points for the
+/// specified number of minutes. Passing `duration_minutes = 0` produces a
+/// permanent (non-expiring) item via [`normalize_duration`].
+///
+/// # Arguments
+///
+/// * `id` - Item ID
+/// * `duration_minutes` - Duration in minutes; `0` means permanent
+/// * `name` - Item name
+///
+/// # Returns
+///
+/// Returns an `Item` configured as a timed `BoostAttribute(Might, 5)` consumable.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::templates::timed_might_potion;
+///
+/// let item = timed_might_potion(63, 30, "Might Potion");
+/// assert_eq!(item.name, "Might Potion");
+/// ```
+#[allow(deprecated)]
+pub fn timed_might_potion(id: ItemId, duration_minutes: u16, name: &str) -> Item {
+    use crate::domain::items::types::{normalize_duration, AttributeType};
+    Item {
+        id,
+        name: name.to_string(),
+        item_type: ItemType::Consumable(ConsumableData {
+            effect: ConsumableEffect::BoostAttribute(AttributeType::Might, 5),
+            is_combat_usable: false,
+            duration_minutes: normalize_duration(Some(duration_minutes)),
+        }),
+        base_cost: 80,
+        sell_cost: 40,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 1,
         is_cursed: false,
         icon_path: None,
         tags: vec![],
@@ -845,5 +945,50 @@ mod tests {
 
         let armor = basic_armor(2, "Armor", 5);
         assert!(!armor.is_cursed);
+    }
+
+    /// `timed_fire_resist_potion` must produce a `BoostResistance(Fire, 25)` consumable
+    /// with `duration_minutes` set to the requested value.
+    #[test]
+    fn test_timed_fire_resist_potion_has_correct_duration() {
+        let item = timed_fire_resist_potion(62, 90, "Fire Resist Potion");
+        assert_eq!(item.id, 62);
+        assert_eq!(item.name, "Fire Resist Potion");
+        assert!(item.is_consumable());
+        if let ItemType::Consumable(ref data) = item.item_type {
+            assert_eq!(
+                data.duration_minutes,
+                Some(90),
+                "duration_minutes must be Some(90)"
+            );
+            assert!(
+                matches!(data.effect, ConsumableEffect::BoostResistance(_, 25)),
+                "effect must be BoostResistance with amount 25"
+            );
+        } else {
+            panic!("expected Consumable item type");
+        }
+    }
+
+    /// `timed_might_potion` called with `duration_minutes = 0` must produce
+    /// `duration_minutes: None` (permanent) via `normalize_duration`.
+    #[test]
+    fn test_timed_might_potion_zero_duration_is_none() {
+        let item = timed_might_potion(63, 0, "Might Potion");
+        assert_eq!(item.id, 63);
+        assert_eq!(item.name, "Might Potion");
+        assert!(item.is_consumable());
+        if let ItemType::Consumable(ref data) = item.item_type {
+            assert!(
+                data.duration_minutes.is_none(),
+                "duration_minutes must be None when 0 is passed (permanent)"
+            );
+            assert!(
+                matches!(data.effect, ConsumableEffect::BoostAttribute(_, 5)),
+                "effect must be BoostAttribute with amount 5"
+            );
+        } else {
+            panic!("expected Consumable item type");
+        }
     }
 }
