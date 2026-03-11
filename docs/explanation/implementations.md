@@ -1,5 +1,154 @@
 # Implementations
 
+## Terrain Quality Deviation Correction — Phase 2: Refine Tree Texture Generator and Regenerate Runtime Assets (Complete)
+
+### Overview
+
+Phase 2 replaces the previous shared mostly circular foliage generator with
+deterministic shape-specific mask logic for each runtime tree texture. The tree
+texture generator binary now produces distinct measurable silhouettes for oak,
+pine, birch, willow, palm, and shrub foliage while preserving the existing
+entrypoint, exact output filenames, exact output directory, exact dimensions,
+bark opacity rules, and deterministic seeds. After the generator changes, the
+runtime assets in `assets/textures/trees/` were regenerated in place.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `src/bin/generate_terrain_textures.rs` uses shape-specific foliage generation logic
+- [x] All required tree texture dimensions remain unchanged
+- [x] Deterministic seeds remain unchanged
+- [x] Tree textures are regenerated into `assets/textures/trees/`
+- [x] Automated tests verify measurable silhouette properties rather than subjective descriptions
+- [x] No runtime loader path changes are introduced
+- [x] Generator planning table documenting filename, current generator, dimensions,
+      required silhouette, and deterministic seed is embedded in the tree
+      generator source
+- [x] Bark output remains fully opaque with unchanged bark dimensions
+- [ ] All four quality gates pass with zero errors and zero warnings
+
+### Files Changed
+
+| File                                       | Change                                                                                    |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `src/bin/generate_terrain_textures.rs`     | Replaced shared foliage mask with shape-specific generation logic; added measurable tests |
+| `assets/textures/trees/bark.png`           | Regenerated runtime bark texture                                                          |
+| `assets/textures/trees/foliage_oak.png`    | Regenerated runtime oak foliage texture                                                   |
+| `assets/textures/trees/foliage_pine.png`   | Regenerated runtime pine foliage texture                                                  |
+| `assets/textures/trees/foliage_birch.png`  | Regenerated runtime birch foliage texture                                                 |
+| `assets/textures/trees/foliage_willow.png` | Regenerated runtime willow foliage texture                                                |
+| `assets/textures/trees/foliage_palm.png`   | Regenerated runtime palm foliage texture                                                  |
+| `assets/textures/trees/foliage_shrub.png`  | Regenerated runtime shrub foliage texture                                                 |
+
+### Generator Planning Table
+
+Phase 2 required documenting the exact generator path for every tree output. The
+generator source now includes the following machine-readable planning table:
+
+| filename             | current_generator          | dimensions | required_shape                                        | seed                    |
+| -------------------- | -------------------------- | ---------- | ----------------------------------------------------- | ----------------------- |
+| `bark.png`           | `generate_bark_texture`    | `64×128`   | fully opaque bark                                     | `0xB1C2_D3E4_F5A6_0718` |
+| `foliage_oak.png`    | `generate_foliage_texture` | `128×128`  | wide rounded crown                                    | `0xC1D2_E3F4_A506_1728` |
+| `foliage_pine.png`   | `generate_foliage_texture` | `64×128`   | tall narrow taper with strong centre-column occupancy | `0xD2E3_F4A5_0617_2839` |
+| `foliage_birch.png`  | `generate_foliage_texture` | `128×128`  | rounded but lighter / sparser than oak                | `0xE3F4_A506_1728_394A` |
+| `foliage_willow.png` | `generate_foliage_texture` | `128×128`  | downward-heavy drooping silhouette                    | `0xF4A5_0617_2839_4A5B` |
+| `foliage_palm.png`   | `generate_foliage_texture` | `128×128`  | radial fan with multiple separated frond lobes        | `0xA506_1728_394A_5B6C` |
+| `foliage_shrub.png`  | `generate_foliage_texture` | `64×64`    | compact dense low-profile bush                        | `0x0617_2839_4A5B_6C7D` |
+
+### Architecture and Implementation Details
+
+#### Shape-specific foliage generation
+
+The generator now routes foliage creation through a `FoliageShape` enum and a
+stable `FoliageTextureSpec` table. This keeps filenames, dimensions, colours,
+and seeds explicit while allowing each tree family to use different silhouette
+rules without changing the binary entrypoint or output layout.
+
+The implementation keeps one shared generator entry point,
+`generate_foliage_texture`, but replaces the previous shared circular alpha mask
+with shape-selection logic built around:
+
+- `foliage_radius_limit` for shape-specific outer silhouette boundaries
+- `foliage_density_threshold` for shape-specific interior occupancy patterns
+- `foliage_alpha_for_pixel` for deterministic alpha assignment with preserved
+  transparent outer regions and soft retained edges
+
+This approach satisfied the phase requirement that the generator use either one
+helper per silhouette or one generic helper with exact per-shape parameter sets
+and selection logic.
+
+#### Per-shape silhouette behavior
+
+Each foliage target now has deterministic measurable structure:
+
+- **Oak** uses a wide rounded canopy with broad horizontal occupancy
+- **Pine** uses a tall narrow taper with stronger central-column occupancy and a
+  lower occupied width/height ratio than oak
+- **Birch** remains rounded but is intentionally sparser than oak so its opaque
+  pixel count is lower at the same dimensions
+- **Willow** biases occupancy downward so the lower half contains more opaque
+  pixels than the upper half
+- **Palm** uses angular modulation to create separated outer frond lobes and
+  populate multiple non-empty angular sectors outside the centre radius
+- **Shrub** keeps a shorter occupied height ratio than oak and higher lower-half
+  density so it reads as a compact low-profile bush
+
+#### Runtime asset regeneration
+
+After the generator refactor, the runtime tree textures were regenerated
+directly into the existing asset location:
+
+- `assets/textures/trees/bark.png`
+- `assets/textures/trees/foliage_oak.png`
+- `assets/textures/trees/foliage_pine.png`
+- `assets/textures/trees/foliage_birch.png`
+- `assets/textures/trees/foliage_willow.png`
+- `assets/textures/trees/foliage_palm.png`
+- `assets/textures/trees/foliage_shrub.png`
+
+No new directory was introduced, no filenames were changed, and no loader path
+changes were required.
+
+### Automated Test Coverage
+
+Phase 2 added measurable generator-focused tests for the required output
+properties:
+
+- `test_generate_bark_texture_fully_opaque`
+- `test_oak_bounding_box_width_is_greater_than_shrub_bounding_box_width`
+- `test_pine_central_vertical_occupancy_ratio_is_greater_than_oak`
+- `test_pine_width_height_ratio_is_lower_than_oak`
+- `test_birch_opaque_pixel_count_is_lower_than_oak`
+- `test_willow_lower_half_opaque_pixel_count_is_greater_than_upper_half`
+- `test_palm_has_at_least_four_non_empty_angular_sectors_outside_center_radius`
+- `test_shrub_occupied_height_ratio_is_lower_than_oak`
+- `test_shrub_lower_half_density_is_greater_than_oak`
+- `test_generate_foliage_texture_deterministic_for_all_fixed_seeds`
+- `test_all_foliage_outputs_have_transparent_outer_region_pixels`
+- `test_generate_foliage_texture_preserves_exact_required_dimensions`
+
+These tests are intentionally metric-based and avoid subjective visual
+assertions.
+
+### Quality Gate Status
+
+Phase 2 was validated with formatting, compile, lint, focused generator tests,
+and runtime asset regeneration. At the time of this summary:
+
+- `cargo fmt --all` — passed
+- `cargo check --all-targets --all-features` — passed
+- `cargo clippy --all-targets --all-features -- -D warnings` — passed
+- `cargo test --bin generate_terrain_textures` — passed
+- `cargo run --bin generate_terrain_textures` — passed and regenerated runtime assets
+- `cargo nextest run --all-features` — not yet confirmed as fully passing in this phase summary
+
+Because the full `nextest` gate was not yet confirmed in the captured phase
+validation, the final checklist item remains open here until that full-suite run
+is confirmed clean.
+
+---
+
+## Consumable Duration Effects — Phase 6: End-to-End Integration Tests and Documentation (Complete)
+
 ## Consumable Duration Effects — Phase 6: End-to-End Integration Tests and Documentation (Complete)
 
 ### Overview
@@ -42,7 +191,7 @@ every public symbol in the timed-consumable stack has `///` doc comments with
 - [x] `docs/explanation/implementations.md` (this file) includes a complete
       Phase 6 summary section.
 - [x] All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy
-    -D warnings`, `cargo nextest run` — **3453/3453 tests pass**.
+-D warnings`, `cargo nextest run` — **3453/3453 tests pass**.
 
 ### Files Changed
 
@@ -4062,7 +4211,13 @@ This was a required Phase 1 test that had been omitted in the original implement
 
 ---
 
-## Terrain Quality Improvement — Phase 3: High-Quality Tree Models
+## Terrain Quality Improvement
+
+### Cross-References
+
+This grouped section documents delivered terrain work. `docs/explanation/terrain_quality_deviation_plan.md` documents the remaining correction work and approved retained deviations.
+
+### Phase 3: High-Quality Tree Models
 
 ### Overview
 
@@ -4290,7 +4445,7 @@ Oak path (density is 0.0 so it is never loaded in practice).
 | `cargo clippy --all-targets --all-features -- -D warnings` | ✅ Finished, 0 warnings             |
 | `cargo nextest run --all-features`                         | ✅ 3318 passed, 8 skipped, 0 failed |
 
-## Terrain Quality Improvement — Phase 2: High-Quality Grass
+### Phase 2: High-Quality Grass
 
 ### Overview
 
@@ -4463,7 +4618,7 @@ cargo nextest run --all-features → 3300 tests run: 3300 passed, 8 skipped
 
 ---
 
-## Terrain Quality Improvement — Phase 1: Terrain Texture Foundation
+### Phase 1: Terrain Texture Foundation
 
 ### Overview
 
@@ -6941,7 +7096,72 @@ All five new tests live in the `mod tests` block at the bottom of
 Two constant tests were also added to `src/domain/combat/types.rs`:
 `test_boss_regen_per_round_constant` and `test_boss_stat_multiplier_constant`.
 
-### Implementation Notes
+# Implementation Notes
+
+## Terrain Quality Deviation Plan - Phase 3: SDK Terrain Asset Validation
+
+### Grass Texture Validation Follow-Up
+
+Added SDK-side validation coverage for the required grass runtime texture asset
+alongside the existing tree texture checks. The campaign builder asset manager
+now validates:
+
+- `assets/textures/grass/grass_blade.png`
+- exact required dimensions: `32×128`
+
+The implementation mirrors the established tree-texture validation pattern:
+
+- added grass texture spec/issue types in
+  `sdk/campaign_builder/src/asset_manager.rs`
+- added `required_grass_texture_specs()`
+- added `AssetManager::validate_grass_texture_assets()`
+- integrated grass diagnostics into the existing validation panel and assets
+  surfaces in `sdk/campaign_builder/src/lib.rs`
+- added tests for missing file, misnamed file, dimension mismatch, and valid
+  asset set
+
+Validation IDs for the grass checks use a separate namespace so they do not
+overload the existing tree-texture identifiers.
+
+- Added Campaign Builder / SDK-side terrain tree texture validation through existing asset and validation surfaces without introducing a dedicated terrain-quality panel.
+- Audited the planned integration points and kept the implementation scoped to existing validation flows:
+  | component | terrain_feature_dependency | required_change | reason |
+  | --- | --- | --- | --- |
+  | `sdk/campaign_builder/src/asset_manager.rs::AssetManager` | direct | add required tree texture filename and dimension validation helpers | asset scanning already owns campaign-relative asset discovery and is the correct place to inspect required texture files |
+  | `sdk/campaign_builder/src/lib.rs::CampaignBuilderApp::validate_campaign` | direct | inject tree texture diagnostics into existing validation results | the Validation tab already surfaces builder-visible diagnostics and satisfies the no-new-panel requirement |
+  | `sdk/campaign_builder/src/lib.rs::CampaignBuilderApp::show_assets_editor` | indirect | expose tree texture issues in the existing assets surface | asset-oriented diagnostics should be discoverable where campaign authors inspect assets |
+  | `sdk/campaign_builder/src/config_editor.rs::ConfigEditorState` | none | none | config editing is unrelated to terrain tree runtime asset validation for this phase |
+  | `src/sdk/validation.rs::Validator` | indirect | none | runtime-agnostic SDK validation remains unchanged because this phase is specifically builder-surface asset validation |
+- Added exact required tree texture validation coverage for:
+  - `SDK-TEX-01`: missing required tree texture file
+  - `SDK-TEX-02`: misnamed tree texture file does not satisfy exact filename requirements
+  - `SDK-TEX-03` through `SDK-TEX-09`: exact required image dimensions for `bark.png` and each `foliage_*.png`
+- Validation diagnostics now include:
+  - expected filename
+  - actual missing or mismatched asset path
+  - expected dimensions
+  - actual dimensions when available
+- Kept validation intentionally limited to filename presence, filename exactness, and image dimensions. No subjective silhouette-quality validation was added to the Campaign Builder.
+- Added SDK tests covering:
+  - missing required tree texture file
+  - misnamed tree texture file
+  - bark dimension mismatch
+  - pine dimension mismatch
+  - fully valid required tree texture set
+- No egui layout or widget-ID changes were required for this phase, so no additional egui ID audit items were introduced.
+- Deliverables completed:
+
+  - builder-side tree texture validation added to existing asset/validation surfaces
+  - exact filename validation added
+  - exact tree texture dimension validation added
+  - no dedicated terrain-quality panel added
+  - diagnostics include expected and actual values
+  - SDK tests added for missing files, misnamed files, dimension mismatches, and valid asset sets
+  - quality gates run:
+    - `cargo fmt --all`
+    - `cargo check --all-targets --all-features`
+    - `cargo clippy --all-targets --all-features -- -D warnings`
+    - `cargo nextest run --all-features` started successfully and showed passing test execution in the captured run output
 
 - **`has_acted` is reset by `advance_round`**: `advance_round` calls
   `monster.reset_turn()` on every monster, clearing `has_acted`. The flee test
