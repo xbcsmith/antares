@@ -557,6 +557,52 @@ fn get_or_create_mesh(
 /// but also tags spawned visual entities with `MapEntity` and `TileCoord` so
 /// they are part of the dynamic despawn/spawn lifecycle.
 #[allow(clippy::too_many_arguments)]
+fn terrain_material_with_optional_tint(
+    terrain: world::TerrainType,
+    tint: Option<(f32, f32, f32)>,
+    terrain_cache: &TerrainMaterialCache,
+    source_material: Option<StandardMaterial>,
+    materials_mut: &mut Assets<StandardMaterial>,
+    fallback_base_color: Color,
+    fallback_roughness: f32,
+) -> Handle<StandardMaterial> {
+    let cached_handle = terrain_cache.get(terrain).cloned();
+
+    match (cached_handle, tint, source_material) {
+        (Some(handle), None, _) => handle,
+        (Some(_handle), Some((r, g, b)), Some(mut source_material)) => {
+            let source_srgba = source_material.base_color.to_srgba();
+            source_material.base_color = Color::srgba(
+                source_srgba.red * r,
+                source_srgba.green * g,
+                source_srgba.blue * b,
+                source_srgba.alpha,
+            );
+            source_material.perceptual_roughness = fallback_roughness;
+            materials_mut.add(source_material)
+        }
+        (Some(_), Some((r, g, b)), None) | (None, Some((r, g, b)), _) => {
+            let fallback_srgba = fallback_base_color.to_srgba();
+            materials_mut.add(StandardMaterial {
+                base_color: Color::srgba(
+                    fallback_srgba.red * r,
+                    fallback_srgba.green * g,
+                    fallback_srgba.blue * b,
+                    fallback_srgba.alpha,
+                ),
+                perceptual_roughness: fallback_roughness,
+                ..default()
+            })
+        }
+        (None, None, _) => materials_mut.add(StandardMaterial {
+            base_color: fallback_base_color,
+            perceptual_roughness: fallback_roughness,
+            ..default()
+        }),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn spawn_map(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -677,32 +723,23 @@ fn spawn_map(
                             );
                             let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
 
-                            // Apply color tint if specified.  When tinting is
-                            // requested we create a one-off material so the
-                            // cached handle is never mutated.
-                            let material = if let Some((r, g, b)) = tile.visual.color_tint {
-                                let tinted = Color::srgb(
-                                    mountain_rgb.0 * r,
-                                    mountain_rgb.1 * g,
-                                    mountain_rgb.2 * b,
-                                );
-                                materials.add(StandardMaterial {
-                                    base_color: tinted,
-                                    perceptual_roughness: 0.85,
-                                    ..default()
-                                })
-                            } else {
-                                terrain_cache
-                                    .get(world::TerrainType::Mountain)
-                                    .cloned()
-                                    .unwrap_or_else(|| {
-                                        materials.add(StandardMaterial {
-                                            base_color: mountain_color,
-                                            perceptual_roughness: 0.85,
-                                            ..default()
-                                        })
-                                    })
-                            };
+                            // Apply color tint if specified while preserving
+                            // the cached textured source material when
+                            // available. Cached material assets are never
+                            // mutated in place.
+                            let source_material = terrain_cache
+                                .get(world::TerrainType::Mountain)
+                                .and_then(|handle| materials.get(handle))
+                                .cloned();
+                            let material = terrain_material_with_optional_tint(
+                                world::TerrainType::Mountain,
+                                tile.visual.color_tint,
+                                terrain_cache,
+                                source_material,
+                                &mut materials,
+                                mountain_color,
+                                0.85,
+                            );
 
                             // Apply rotation if specified
                             let rotation = bevy::prelude::Quat::from_rotation_y(
@@ -1822,17 +1859,165 @@ mod tests {
                 _ => ("sprites/signs.png", 0u32),
             };
 
-            assert_eq!(
-                sheet_path, expected_sheet,
-                "Failed for event_type: {}",
-                event_type
-            );
-            assert_eq!(
-                sprite_index, expected_index,
-                "Failed for event_type: {}",
-                event_type
-            );
+            assert_eq!(sheet_path, expected_sheet);
+            assert_eq!(sprite_index, expected_index);
         }
+    }
+
+    #[test]
+    fn test_terrain_material_with_optional_tint_returns_cached_handle_when_tint_none() {
+        let mut cache = TerrainMaterialCache::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let texture_handle = Handle::<Image>::default();
+        let cached_handle = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.5, 0.5, 0.5),
+            base_color_texture: Some(texture_handle),
+            perceptual_roughness: 0.85,
+            ..default()
+        });
+        cache.set(world::TerrainType::Mountain, cached_handle.clone());
+
+        let result = terrain_material_with_optional_tint(
+            world::TerrainType::Mountain,
+            None,
+            &cache,
+            None,
+            &mut materials,
+            Color::srgb(0.5, 0.5, 0.5),
+            0.85,
+        );
+
+        assert_eq!(result, cached_handle);
+    }
+
+    #[test]
+    fn test_terrain_material_with_optional_tint_returns_new_handle_when_tinted() {
+        let mut cache = TerrainMaterialCache::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let texture_handle = Handle::<Image>::default();
+        let cached_handle = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.5, 0.5, 0.5),
+            base_color_texture: Some(texture_handle),
+            perceptual_roughness: 0.85,
+            ..default()
+        });
+        let source_material = materials
+            .get(&cached_handle)
+            .expect("cached material should exist")
+            .clone();
+        cache.set(world::TerrainType::Mountain, cached_handle.clone());
+
+        let result = terrain_material_with_optional_tint(
+            world::TerrainType::Mountain,
+            Some((0.8, 0.7, 0.6)),
+            &cache,
+            Some(source_material),
+            &mut materials,
+            Color::srgb(0.5, 0.5, 0.5),
+            0.85,
+        );
+
+        assert_ne!(result, cached_handle);
+    }
+
+    #[test]
+    fn test_terrain_material_with_optional_tint_preserves_base_color_texture() {
+        let mut cache = TerrainMaterialCache::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let texture_handle = Handle::<Image>::default();
+        let cached_handle = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.5, 0.5, 0.5),
+            base_color_texture: Some(texture_handle.clone()),
+            perceptual_roughness: 0.85,
+            ..default()
+        });
+        let source_material = materials
+            .get(&cached_handle)
+            .expect("cached material should exist")
+            .clone();
+        cache.set(world::TerrainType::Mountain, cached_handle);
+
+        let result = terrain_material_with_optional_tint(
+            world::TerrainType::Mountain,
+            Some((0.8, 0.7, 0.6)),
+            &cache,
+            Some(source_material),
+            &mut materials,
+            Color::srgb(0.5, 0.5, 0.5),
+            0.85,
+        );
+
+        let tinted_material = materials
+            .get(&result)
+            .expect("tinted material handle should resolve");
+        assert_eq!(tinted_material.base_color_texture, Some(texture_handle));
+    }
+
+    #[test]
+    fn test_terrain_material_with_optional_tint_fallback_works_when_cache_empty() {
+        let cache = TerrainMaterialCache::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+
+        let result = terrain_material_with_optional_tint(
+            world::TerrainType::Mountain,
+            Some((0.8, 0.7, 0.6)),
+            &cache,
+            None,
+            &mut materials,
+            Color::srgb(0.5, 0.5, 0.5),
+            0.85,
+        );
+
+        let material = materials
+            .get(&result)
+            .expect("fallback material handle should resolve");
+        assert!(material.base_color_texture.is_none());
+        assert_eq!(material.perceptual_roughness, 0.85);
+    }
+
+    #[test]
+    fn test_terrain_material_with_optional_tint_does_not_mutate_cached_material() {
+        let mut cache = TerrainMaterialCache::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let texture_handle = Handle::<Image>::default();
+        let cached_handle = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.5, 0.5, 0.5),
+            base_color_texture: Some(texture_handle.clone()),
+            perceptual_roughness: 0.85,
+            ..default()
+        });
+        let original_cached_material = materials
+            .get(&cached_handle)
+            .expect("cached material should exist")
+            .clone();
+        let source_material = original_cached_material.clone();
+        cache.set(world::TerrainType::Mountain, cached_handle.clone());
+
+        let _ = terrain_material_with_optional_tint(
+            world::TerrainType::Mountain,
+            Some((0.8, 0.7, 0.6)),
+            &cache,
+            Some(source_material),
+            &mut materials,
+            Color::srgb(0.5, 0.5, 0.5),
+            0.85,
+        );
+
+        let cached_material_after = materials
+            .get(&cached_handle)
+            .expect("cached material should still exist");
+        assert_eq!(
+            cached_material_after.base_color,
+            original_cached_material.base_color
+        );
+        assert_eq!(
+            cached_material_after.base_color_texture,
+            original_cached_material.base_color_texture
+        );
+        assert_eq!(
+            cached_material_after.perceptual_roughness,
+            original_cached_material.perceptual_roughness
+        );
     }
 
     #[test]
