@@ -2705,15 +2705,17 @@ impl CampaignBuilderApp {
         self.validation_errors
             .extend(self.generate_category_status_checks());
 
-        // Validate required runtime terrain tree textures through existing SDK surfaces.
+        // Validate required runtime terrain tree and grass textures through existing SDK surfaces.
         if let Some(asset_manager) = self.asset_manager.as_ref() {
             self.validation_errors
                 .extend(self.validate_tree_texture_assets(asset_manager));
+            self.validation_errors
+                .extend(self.validate_grass_texture_assets(asset_manager));
         } else {
             self.validation_errors
                 .push(validation::ValidationResult::warning(
                 validation::ValidationCategory::Assets,
-                "Tree texture validation skipped because asset scanning has not been initialized",
+                "Terrain texture validation skipped because asset scanning has not been initialized",
             ));
         }
 
@@ -3512,11 +3514,43 @@ impl CampaignBuilderApp {
             .collect()
     }
 
+    /// Converts asset-manager grass texture diagnostics into validation-panel results.
+    fn validate_grass_texture_assets(
+        &self,
+        asset_manager: &asset_manager::AssetManager,
+    ) -> Vec<validation::ValidationResult> {
+        asset_manager
+            .validate_grass_texture_assets()
+            .into_iter()
+            .map(|issue| {
+                let mut result = validation::ValidationResult::error(
+                    validation::ValidationCategory::Assets,
+                    issue.message,
+                )
+                .with_file_path(issue.expected_path.clone());
+
+                if let Some(actual_path) = issue.actual_path {
+                    result = result.with_file_path(actual_path);
+                }
+
+                result
+            })
+            .collect()
+    }
+
     /// Returns tree texture asset diagnostics for direct display in the Assets view.
     fn tree_texture_asset_issues(&self) -> Vec<asset_manager::TreeTextureValidationIssue> {
         self.asset_manager
             .as_ref()
             .map(|manager| manager.validate_tree_texture_assets())
+            .unwrap_or_default()
+    }
+
+    /// Returns grass texture asset diagnostics for direct display in the Assets view.
+    fn grass_texture_asset_issues(&self) -> Vec<asset_manager::GrassTextureValidationIssue> {
+        self.asset_manager
+            .as_ref()
+            .map(|manager| manager.validate_grass_texture_assets())
             .unwrap_or_default()
     }
 

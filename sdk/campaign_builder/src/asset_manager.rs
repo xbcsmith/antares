@@ -357,7 +357,6 @@ impl Asset {
 }
 
 /// Asset manager for organizing and tracking campaign assets
-#[derive(Debug, Clone)]
 /// Expected specification for a required terrain tree texture asset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TreeTextureSpec {
@@ -371,13 +370,46 @@ pub struct TreeTextureSpec {
     pub expected_height: u32,
 }
 
-/// Builder-visible terrain texture validation result.
+/// Expected specification for a required grass texture asset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GrassTextureSpec {
+    /// Validation identifier for this required asset.
+    pub validation_id: &'static str,
+    /// Exact relative path required by the runtime and SDK.
+    pub relative_path: &'static str,
+    /// Expected pixel width.
+    pub expected_width: u32,
+    /// Expected pixel height.
+    pub expected_height: u32,
+}
+
+/// Builder-visible terrain tree texture validation result.
 ///
 /// These diagnostics are surfaced through existing asset and validation views
 /// rather than a dedicated terrain-quality panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeTextureValidationIssue {
     /// Validation identifier from the terrain quality deviation plan.
+    pub validation_id: &'static str,
+    /// Expected relative asset path.
+    pub expected_path: PathBuf,
+    /// Path of the conflicting asset when available.
+    pub actual_path: Option<PathBuf>,
+    /// Expected image dimensions for the required asset.
+    pub expected_dimensions: (u32, u32),
+    /// Actual image dimensions when the file could be loaded.
+    pub actual_dimensions: Option<(u32, u32)>,
+    /// Human-readable diagnostic message.
+    pub message: String,
+}
+
+/// Builder-visible grass texture validation result.
+///
+/// These diagnostics are surfaced through existing asset and validation views
+/// rather than a dedicated terrain-quality panel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrassTextureValidationIssue {
+    /// Validation identifier for the grass texture check.
     pub validation_id: &'static str,
     /// Expected relative asset path.
     pub expected_path: PathBuf,
@@ -475,6 +507,90 @@ impl TreeTextureValidationIssue {
     }
 }
 
+impl GrassTextureValidationIssue {
+    /// Creates a missing-file validation issue.
+    fn missing(spec: GrassTextureSpec) -> Self {
+        Self {
+            validation_id: spec.validation_id,
+            expected_path: PathBuf::from(spec.relative_path),
+            actual_path: None,
+            expected_dimensions: (spec.expected_width, spec.expected_height),
+            actual_dimensions: None,
+            message: format!(
+                "{}: expected filename '{}' with dimensions {}x{}, but the asset is missing",
+                spec.validation_id, spec.relative_path, spec.expected_width, spec.expected_height
+            ),
+        }
+    }
+
+    /// Creates a dimension-mismatch validation issue.
+    fn dimension_mismatch(spec: GrassTextureSpec, actual_dimensions: (u32, u32)) -> Self {
+        Self {
+            validation_id: spec.validation_id,
+            expected_path: PathBuf::from(spec.relative_path),
+            actual_path: Some(PathBuf::from(spec.relative_path)),
+            expected_dimensions: (spec.expected_width, spec.expected_height),
+            actual_dimensions: Some(actual_dimensions),
+            message: format!(
+                "{}: expected filename '{}' with dimensions {}x{}, but found {}x{}",
+                spec.validation_id,
+                spec.relative_path,
+                spec.expected_width,
+                spec.expected_height,
+                actual_dimensions.0,
+                actual_dimensions.1
+            ),
+        }
+    }
+
+    /// Creates an image-load validation issue.
+    fn unreadable(spec: GrassTextureSpec, actual_path: PathBuf, error: &image::ImageError) -> Self {
+        Self {
+            validation_id: spec.validation_id,
+            expected_path: PathBuf::from(spec.relative_path),
+            actual_path: Some(actual_path),
+            expected_dimensions: (spec.expected_width, spec.expected_height),
+            actual_dimensions: None,
+            message: format!(
+                "{}: expected filename '{}' with dimensions {}x{}, but failed to read image metadata from '{}': {}",
+                spec.validation_id,
+                spec.relative_path,
+                spec.expected_width,
+                spec.expected_height,
+                actual_path.display(),
+                error
+            ),
+        }
+    }
+
+    /// Creates a misnamed-file validation issue.
+    fn misnamed(
+        spec: GrassTextureSpec,
+        actual_path: PathBuf,
+        actual_dimensions: Option<(u32, u32)>,
+    ) -> Self {
+        let actual_dimensions_text = actual_dimensions
+            .map(|(width, height)| format!("{}x{}", width, height))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        Self {
+            validation_id: "SDK-GRASS-02",
+            expected_path: PathBuf::from(spec.relative_path),
+            actual_path: Some(actual_path.clone()),
+            expected_dimensions: (spec.expected_width, spec.expected_height),
+            actual_dimensions,
+            message: format!(
+                "SDK-GRASS-02: expected exact filename '{}' with dimensions {}x{}, but found misnamed asset '{}' with dimensions {}",
+                spec.relative_path,
+                spec.expected_width,
+                spec.expected_height,
+                actual_path.display(),
+                actual_dimensions_text
+            ),
+        }
+    }
+}
+
 /// Returns the required terrain tree texture specifications.
 pub const fn required_tree_texture_specs() -> [TreeTextureSpec; 7] {
     [
@@ -521,6 +637,16 @@ pub const fn required_tree_texture_specs() -> [TreeTextureSpec; 7] {
             expected_height: 64,
         },
     ]
+}
+
+/// Returns the required grass texture specifications.
+pub const fn required_grass_texture_specs() -> [GrassTextureSpec; 1] {
+    [GrassTextureSpec {
+        validation_id: "SDK-GRASS-01",
+        relative_path: "assets/textures/grass/grass_blade.png",
+        expected_width: 32,
+        expected_height: 128,
+    }]
 }
 
 pub struct AssetManager {
@@ -1536,6 +1662,103 @@ impl AssetManager {
 
         issues
     }
+
+    /// Validates the required runtime grass textures for the current campaign.
+    ///
+    /// This checks exact required filenames and exact image dimensions for the
+    /// runtime-generated grass textures expected by the terrain system.
+    pub fn validate_grass_texture_assets(&self) -> Vec<GrassTextureValidationIssue> {
+        let mut issues = Vec::new();
+        let required_specs = required_grass_texture_specs();
+        let grass_texture_dir = PathBuf::from("assets/textures/grass");
+
+        for spec in required_specs {
+            let expected_path = PathBuf::from(spec.relative_path);
+            let full_expected_path = self.campaign_dir.join(&expected_path);
+
+            if !full_expected_path.exists() {
+                issues.push(GrassTextureValidationIssue::missing(spec));
+            } else {
+                match image::open(&full_expected_path) {
+                    Ok(image) => {
+                        let actual_dimensions = image.dimensions();
+                        if actual_dimensions != (spec.expected_width, spec.expected_height) {
+                            issues.push(GrassTextureValidationIssue::dimension_mismatch(
+                                spec,
+                                actual_dimensions,
+                            ));
+                        }
+                    }
+                    Err(error) => issues.push(GrassTextureValidationIssue::unreadable(
+                        spec,
+                        expected_path.clone(),
+                        &error,
+                    )),
+                }
+            }
+
+            let expected_file_name = Path::new(spec.relative_path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+
+            let stem = Path::new(expected_file_name)
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+
+            let extension = Path::new(expected_file_name)
+                .extension()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+
+            for asset_path in self.assets.keys() {
+                if asset_path == &expected_path {
+                    continue;
+                }
+
+                let parent_matches = asset_path.parent() == Some(grass_texture_dir.as_path());
+                if !parent_matches {
+                    continue;
+                }
+
+                let Some(file_name) = asset_path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+
+                let Some(asset_stem) = Path::new(file_name)
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                else {
+                    continue;
+                };
+
+                let asset_extension = Path::new(file_name)
+                    .extension()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+
+                let is_misnamed_variant =
+                    asset_stem.starts_with(stem) && asset_extension.eq_ignore_ascii_case(extension);
+
+                if !is_misnamed_variant {
+                    continue;
+                }
+
+                let full_asset_path = self.campaign_dir.join(asset_path);
+                let dimensions = image::open(&full_asset_path)
+                    .ok()
+                    .map(|image| image.dimensions());
+                issues.push(GrassTextureValidationIssue::misnamed(
+                    spec,
+                    asset_path.clone(),
+                    dimensions,
+                ));
+            }
+        }
+
+        issues
+    }
 }
 
 #[cfg(test)]
@@ -1562,6 +1785,16 @@ mod tests {
 
     fn create_valid_tree_texture_set(root: &Path) {
         for spec in required_tree_texture_specs() {
+            write_test_png(
+                &root.join(spec.relative_path),
+                spec.expected_width,
+                spec.expected_height,
+            );
+        }
+    }
+
+    fn create_valid_grass_texture_set(root: &Path) {
+        for spec in required_grass_texture_specs() {
             write_test_png(
                 &root.join(spec.relative_path),
                 spec.expected_width,
@@ -2632,6 +2865,112 @@ mod tests {
         manager.scan_directory().unwrap();
 
         let issues = manager.validate_tree_texture_assets();
+        assert!(issues.is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_validate_grass_texture_assets_reports_missing_required_file() {
+        let tmp_dir = tree_texture_test_dir("test_validate_grass_texture_assets_missing");
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        create_valid_grass_texture_set(&tmp_dir);
+        std::fs::remove_file(tmp_dir.join("assets/textures/grass/grass_blade.png")).unwrap();
+
+        let mut manager = AssetManager::new(tmp_dir.clone());
+        manager.scan_directory().unwrap();
+
+        let issues = manager.validate_grass_texture_assets();
+        assert!(issues.iter().any(|issue| {
+            issue.validation_id == "SDK-GRASS-01"
+                && issue.expected_path == PathBuf::from("assets/textures/grass/grass_blade.png")
+                && issue.actual_path.is_none()
+                && issue
+                    .message
+                    .contains("expected filename 'assets/textures/grass/grass_blade.png'")
+                && issue.message.contains("32x128")
+                && issue.message.contains("missing")
+        }));
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_validate_grass_texture_assets_reports_misnamed_grass_texture_file() {
+        let tmp_dir = tree_texture_test_dir("test_validate_grass_texture_assets_misnamed");
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        create_valid_grass_texture_set(&tmp_dir);
+        std::fs::remove_file(tmp_dir.join("assets/textures/grass/grass_blade.png")).unwrap();
+        write_test_png(
+            &tmp_dir.join("assets/textures/grass/grass_blade_variant.png"),
+            32,
+            128,
+        );
+
+        let mut manager = AssetManager::new(tmp_dir.clone());
+        manager.scan_directory().unwrap();
+
+        let issues = manager.validate_grass_texture_assets();
+        assert!(issues.iter().any(|issue| {
+            issue.validation_id == "SDK-GRASS-02"
+                && issue.expected_path == PathBuf::from("assets/textures/grass/grass_blade.png")
+                && issue.actual_path
+                    == Some(PathBuf::from(
+                        "assets/textures/grass/grass_blade_variant.png",
+                    ))
+                && issue.actual_dimensions == Some((32, 128))
+                && issue
+                    .message
+                    .contains("expected exact filename 'assets/textures/grass/grass_blade.png'")
+                && issue
+                    .message
+                    .contains("misnamed asset 'assets/textures/grass/grass_blade_variant.png'")
+        }));
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_validate_grass_texture_assets_reports_dimension_mismatch() {
+        let tmp_dir = tree_texture_test_dir("test_validate_grass_texture_assets_dimensions");
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        create_valid_grass_texture_set(&tmp_dir);
+        write_test_png(
+            &tmp_dir.join("assets/textures/grass/grass_blade.png"),
+            32,
+            127,
+        );
+
+        let mut manager = AssetManager::new(tmp_dir.clone());
+        manager.scan_directory().unwrap();
+
+        let issues = manager.validate_grass_texture_assets();
+        assert!(issues.iter().any(|issue| {
+            issue.validation_id == "SDK-GRASS-01"
+                && issue.expected_path == PathBuf::from("assets/textures/grass/grass_blade.png")
+                && issue.actual_path == Some(PathBuf::from("assets/textures/grass/grass_blade.png"))
+                && issue.expected_dimensions == (32, 128)
+                && issue.actual_dimensions == Some((32, 127))
+                && issue
+                    .message
+                    .contains("expected filename 'assets/textures/grass/grass_blade.png'")
+                && issue.message.contains("32x128")
+                && issue.message.contains("32x127")
+        }));
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_validate_grass_texture_assets_accepts_fully_valid_required_grass_texture_set() {
+        let tmp_dir = tree_texture_test_dir("test_validate_grass_texture_assets_valid");
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        create_valid_grass_texture_set(&tmp_dir);
+
+        let mut manager = AssetManager::new(tmp_dir.clone());
+        manager.scan_directory().unwrap();
+
+        let issues = manager.validate_grass_texture_assets();
         assert!(issues.is_empty());
 
         let _ = std::fs::remove_dir_all(&tmp_dir);

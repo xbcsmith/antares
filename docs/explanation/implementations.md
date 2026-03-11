@@ -7100,6 +7100,29 @@ Two constant tests were also added to `src/domain/combat/types.rs`:
 
 ## Terrain Quality Deviation Plan - Phase 3: SDK Terrain Asset Validation
 
+### Grass Texture Validation Follow-Up
+
+Added SDK-side validation coverage for the required grass runtime texture asset
+alongside the existing tree texture checks. The campaign builder asset manager
+now validates:
+
+- `assets/textures/grass/grass_blade.png`
+- exact required dimensions: `32×128`
+
+The implementation mirrors the established tree-texture validation pattern:
+
+- added grass texture spec/issue types in
+  `sdk/campaign_builder/src/asset_manager.rs`
+- added `required_grass_texture_specs()`
+- added `AssetManager::validate_grass_texture_assets()`
+- integrated grass diagnostics into the existing validation panel and assets
+  surfaces in `sdk/campaign_builder/src/lib.rs`
+- added tests for missing file, misnamed file, dimension mismatch, and valid
+  asset set
+
+Validation IDs for the grass checks use a separate namespace so they do not
+overload the existing tree-texture identifiers.
+
 - Added Campaign Builder / SDK-side terrain tree texture validation through existing asset and validation surfaces without introducing a dedicated terrain-quality panel.
 - Audited the planned integration points and kept the implementation scoped to existing validation flows:
   | component | terrain_feature_dependency | required_change | reason |
