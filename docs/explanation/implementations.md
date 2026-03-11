@@ -4211,7 +4211,13 @@ This was a required Phase 1 test that had been omitted in the original implement
 
 ---
 
-## Terrain Quality Improvement — Phase 3: High-Quality Tree Models
+## Terrain Quality Improvement
+
+### Cross-References
+
+This grouped section documents delivered terrain work. `docs/explanation/terrain_quality_deviation_plan.md` documents the remaining correction work and approved retained deviations.
+
+### Phase 3: High-Quality Tree Models
 
 ### Overview
 
@@ -4439,7 +4445,7 @@ Oak path (density is 0.0 so it is never loaded in practice).
 | `cargo clippy --all-targets --all-features -- -D warnings` | ✅ Finished, 0 warnings             |
 | `cargo nextest run --all-features`                         | ✅ 3318 passed, 8 skipped, 0 failed |
 
-## Terrain Quality Improvement — Phase 2: High-Quality Grass
+### Phase 2: High-Quality Grass
 
 ### Overview
 
@@ -4612,7 +4618,7 @@ cargo nextest run --all-features → 3300 tests run: 3300 passed, 8 skipped
 
 ---
 
-## Terrain Quality Improvement — Phase 1: Terrain Texture Foundation
+### Phase 1: Terrain Texture Foundation
 
 ### Overview
 
