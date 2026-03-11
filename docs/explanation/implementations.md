@@ -7090,7 +7090,49 @@ All five new tests live in the `mod tests` block at the bottom of
 Two constant tests were also added to `src/domain/combat/types.rs`:
 `test_boss_regen_per_round_constant` and `test_boss_stat_multiplier_constant`.
 
-### Implementation Notes
+# Implementation Notes
+
+## Terrain Quality Deviation Plan - Phase 3: SDK Terrain Asset Validation
+
+- Added Campaign Builder / SDK-side terrain tree texture validation through existing asset and validation surfaces without introducing a dedicated terrain-quality panel.
+- Audited the planned integration points and kept the implementation scoped to existing validation flows:
+  | component | terrain_feature_dependency | required_change | reason |
+  | --- | --- | --- | --- |
+  | `sdk/campaign_builder/src/asset_manager.rs::AssetManager` | direct | add required tree texture filename and dimension validation helpers | asset scanning already owns campaign-relative asset discovery and is the correct place to inspect required texture files |
+  | `sdk/campaign_builder/src/lib.rs::CampaignBuilderApp::validate_campaign` | direct | inject tree texture diagnostics into existing validation results | the Validation tab already surfaces builder-visible diagnostics and satisfies the no-new-panel requirement |
+  | `sdk/campaign_builder/src/lib.rs::CampaignBuilderApp::show_assets_editor` | indirect | expose tree texture issues in the existing assets surface | asset-oriented diagnostics should be discoverable where campaign authors inspect assets |
+  | `sdk/campaign_builder/src/config_editor.rs::ConfigEditorState` | none | none | config editing is unrelated to terrain tree runtime asset validation for this phase |
+  | `src/sdk/validation.rs::Validator` | indirect | none | runtime-agnostic SDK validation remains unchanged because this phase is specifically builder-surface asset validation |
+- Added exact required tree texture validation coverage for:
+  - `SDK-TEX-01`: missing required tree texture file
+  - `SDK-TEX-02`: misnamed tree texture file does not satisfy exact filename requirements
+  - `SDK-TEX-03` through `SDK-TEX-09`: exact required image dimensions for `bark.png` and each `foliage_*.png`
+- Validation diagnostics now include:
+  - expected filename
+  - actual missing or mismatched asset path
+  - expected dimensions
+  - actual dimensions when available
+- Kept validation intentionally limited to filename presence, filename exactness, and image dimensions. No subjective silhouette-quality validation was added to the Campaign Builder.
+- Added SDK tests covering:
+  - missing required tree texture file
+  - misnamed tree texture file
+  - bark dimension mismatch
+  - pine dimension mismatch
+  - fully valid required tree texture set
+- No egui layout or widget-ID changes were required for this phase, so no additional egui ID audit items were introduced.
+- Deliverables completed:
+
+  - builder-side tree texture validation added to existing asset/validation surfaces
+  - exact filename validation added
+  - exact tree texture dimension validation added
+  - no dedicated terrain-quality panel added
+  - diagnostics include expected and actual values
+  - SDK tests added for missing files, misnamed files, dimension mismatches, and valid asset sets
+  - quality gates run:
+    - `cargo fmt --all`
+    - `cargo check --all-targets --all-features`
+    - `cargo clippy --all-targets --all-features -- -D warnings`
+    - `cargo nextest run --all-features` started successfully and showed passing test execution in the captured run output
 
 - **`has_acted` is reset by `advance_round`**: `advance_round` calls
   `monster.reset_turn()` on every monster, clearing `has_acted`. The flee test

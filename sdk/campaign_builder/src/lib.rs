@@ -108,6 +108,7 @@ use monsters_editor::MonstersEditorState;
 use quest_editor::QuestEditorState;
 use serde::{Deserialize, Serialize};
 use spells_editor::SpellsEditorState;
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use stock_templates_editor::StockTemplatesEditorState;
@@ -2704,6 +2705,18 @@ impl CampaignBuilderApp {
         self.validation_errors
             .extend(self.generate_category_status_checks());
 
+        // Validate required runtime terrain tree textures through existing SDK surfaces.
+        if let Some(asset_manager) = self.asset_manager.as_ref() {
+            self.validation_errors
+                .extend(self.validate_tree_texture_assets(asset_manager));
+        } else {
+            self.validation_errors
+                .push(validation::ValidationResult::warning(
+                validation::ValidationCategory::Assets,
+                "Tree texture validation skipped because asset scanning has not been initialized",
+            ));
+        }
+
         // Required fields - Metadata category
         if self.campaign.id.is_empty() {
             self.validation_errors
@@ -3473,6 +3486,38 @@ impl CampaignBuilderApp {
         state.maps = self.maps.clone();
         state.quests = self.quests.clone();
         state.dialogues = self.dialogues.clone();
+    }
+
+    /// Converts asset-manager tree texture diagnostics into validation-panel results.
+    fn validate_tree_texture_assets(
+        &self,
+        asset_manager: &asset_manager::AssetManager,
+    ) -> Vec<validation::ValidationResult> {
+        asset_manager
+            .validate_tree_texture_assets()
+            .into_iter()
+            .map(|issue| {
+                let mut result = validation::ValidationResult::error(
+                    validation::ValidationCategory::Assets,
+                    issue.message,
+                )
+                .with_file_path(issue.expected_path.clone());
+
+                if let Some(actual_path) = issue.actual_path {
+                    result = result.with_file_path(actual_path);
+                }
+
+                result
+            })
+            .collect()
+    }
+
+    /// Returns tree texture asset diagnostics for direct display in the Assets view.
+    fn tree_texture_asset_issues(&self) -> Vec<asset_manager::TreeTextureValidationIssue> {
+        self.asset_manager
+            .as_ref()
+            .map(|manager| manager.validate_tree_texture_assets())
+            .unwrap_or_default()
     }
 
     /// Run advanced validation and generate report
