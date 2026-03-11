@@ -42,7 +42,7 @@ every public symbol in the timed-consumable stack has `///` doc comments with
 - [x] `docs/explanation/implementations.md` (this file) includes a complete
       Phase 6 summary section.
 - [x] All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy
-    -D warnings`, `cargo nextest run` — **3453/3453 tests pass**.
+  -D warnings`, `cargo nextest run` — **3453/3453 tests pass**.
 
 ### Files Changed
 

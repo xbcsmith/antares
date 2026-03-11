@@ -161,7 +161,6 @@ pub fn load_terrain_materials_system(
 mod tests {
     use super::*;
 
-    // §1.4 — test_texture_path_constants_non_empty
     /// All nine `TEXTURE_*` constants must be non-empty strings that start
     /// with `"textures/terrain/"`.
     #[test]
@@ -224,7 +223,7 @@ mod tests {
     }
 
     /// `roughness_for` must return the values specified in the implementation
-    /// plan (Section 1.3) for every terrain variant.
+    /// plan for every terrain variant.
     #[test]
     fn test_roughness_for_all_variants() {
         let expected: &[(TerrainType, f32)] = &[
@@ -265,24 +264,20 @@ mod tests {
         ];
 
         for terrain in variants {
-            let r = roughness_for(terrain);
+            let roughness = roughness_for(terrain);
             assert!(
-                (0.0..=1.0).contains(&r),
-                "roughness_for({terrain:?}) = {r} is outside [0.0, 1.0]"
+                (0.0..=1.0).contains(&roughness),
+                "roughness_for({terrain:?}) = {roughness} is outside [0.0, 1.0]"
             );
         }
     }
 
-    // §1.4 — test_load_terrain_materials_system_inserts_cache_resource
     /// Build a minimal `App`, run the startup system, and assert that
     /// `TerrainMaterialCache` exists and `is_fully_loaded()` returns `true`.
     #[test]
     fn test_load_terrain_materials_system_inserts_cache_resource() {
         let mut app = App::new();
 
-        // MinimalPlugins initialises the IoTaskPool and other core plumbing
-        // that AssetServer requires.  We then register the asset types we need
-        // so the material-creation path works without a GPU/window.
         app.add_plugins(bevy::app::PluginGroup::set(
             bevy::MinimalPlugins,
             bevy::app::ScheduleRunnerPlugin::default(),
@@ -292,10 +287,8 @@ mod tests {
         .init_asset::<StandardMaterial>()
         .add_systems(Startup, load_terrain_materials_system);
 
-        // Run the startup schedule.
         app.update();
 
-        // The resource must now exist.
         let cache = app
             .world()
             .get_resource::<TerrainMaterialCache>()
@@ -345,6 +338,59 @@ mod tests {
             assert!(
                 cache.get(terrain).is_some(),
                 "get({terrain:?}) must return Some after startup system runs"
+            );
+        }
+    }
+
+    /// Cache-populated terrain materials must preserve their texture handles for
+    /// every terrain variant.
+    #[test]
+    fn test_load_terrain_materials_system_populates_textured_materials_for_all_variants() {
+        let mut app = App::new();
+
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<Image>()
+        .init_asset::<StandardMaterial>()
+        .add_systems(Startup, load_terrain_materials_system);
+
+        app.update();
+
+        let cache = app
+            .world()
+            .get_resource::<TerrainMaterialCache>()
+            .expect("TerrainMaterialCache should be inserted by startup system");
+        let materials = app
+            .world()
+            .get_resource::<Assets<StandardMaterial>>()
+            .expect("Assets<StandardMaterial> resource should exist");
+
+        let variants = [
+            TerrainType::Ground,
+            TerrainType::Grass,
+            TerrainType::Stone,
+            TerrainType::Mountain,
+            TerrainType::Dirt,
+            TerrainType::Water,
+            TerrainType::Lava,
+            TerrainType::Swamp,
+            TerrainType::Forest,
+        ];
+
+        for terrain in variants {
+            let handle = cache
+                .get(terrain)
+                .unwrap_or_else(|| panic!("Expected cached material handle for {terrain:?}"));
+            let material = materials
+                .get(handle)
+                .unwrap_or_else(|| panic!("Expected material asset for {terrain:?}"));
+
+            assert!(
+                material.base_color_texture.is_some(),
+                "Cached material for {terrain:?} must preserve base_color_texture"
             );
         }
     }
