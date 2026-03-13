@@ -2,15 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::application::resources::GameContent;
+use crate::domain::transactions::pickup_item;
+use crate::domain::types::{ItemId, MapId, Position};
 use crate::domain::world::EventResult;
 use crate::domain::world::{FurnitureType, MapEvent};
 use crate::game::resources::GlobalState;
 use crate::game::systems::dialogue::{SimpleDialogue, StartDialogue};
+use crate::game::systems::item_world_events::ItemPickedUpEvent;
 use crate::game::systems::map::{EventTrigger, MapChangeEvent, NpcMarker, TileCoord};
 use crate::game::systems::procedural_meshes::{
     spawn_bench, spawn_chair, spawn_chest, spawn_table, spawn_throne, spawn_torch, BenchConfig,
     ChairConfig, ChestConfig, ProceduralMeshCache, TableConfig, ThroneConfig, TorchConfig,
 };
+use crate::game::systems::ui::GameLog;
 use bevy::prelude::*;
 
 pub struct EventPlugin;
@@ -18,7 +22,9 @@ pub struct EventPlugin;
 impl Plugin for EventPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MapEventTriggered>()
-            .add_systems(Update, (check_for_events, handle_events));
+            .add_message::<PickupDroppedItemRequest>()
+            .add_systems(Update, (check_for_events, handle_events))
+            .add_systems(Update, handle_pickup_dropped_item);
     }
 }
 
@@ -29,14 +35,54 @@ pub struct MapEventTriggered {
     pub position: crate::domain::types::Position,
 }
 
+/// Emitted when the party steps onto a tile that contains a dropped item and
+/// no static map event.  The [`handle_pickup_dropped_item`] system processes
+/// this request by calling [`pickup_item`] and emitting [`ItemPickedUpEvent`].
+///
+/// # Fields
+///
+/// * `item_id`      – Logical item ID to pick up (first FIFO item on the tile).
+/// * `map_id`       – Map on which the item is lying.
+/// * `position`     – Tile coordinate of the dropped item.
+/// * `party_index`  – Index of the party member who will receive the item.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::events::PickupDroppedItemRequest;
+/// use antares::domain::types::Position;
+///
+/// let req = PickupDroppedItemRequest {
+///     item_id: 5,
+///     map_id: 1,
+///     position: Position::new(3, 7),
+///     party_index: 0,
+/// };
+/// assert_eq!(req.item_id, 5);
+/// assert_eq!(req.party_index, 0);
+/// ```
+#[derive(Message, Clone, Debug)]
+pub struct PickupDroppedItemRequest {
+    /// Logical item ID to pick up (first FIFO item on the tile).
+    pub item_id: ItemId,
+    /// Map on which the dropped item lies.
+    pub map_id: MapId,
+    /// Tile coordinate of the dropped item.
+    pub position: Position,
+    /// Index of the party member who receives the item (0-based).
+    pub party_index: usize,
+}
+
 /// System to check if the party is standing on an event
 fn check_for_events(
     global_state: Res<GlobalState>,
     mut event_writer: MessageWriter<MapEventTriggered>,
+    mut pickup_writer: MessageWriter<PickupDroppedItemRequest>,
     mut last_position: Local<Option<crate::domain::types::Position>>,
 ) {
     let game_state = &global_state.0;
     let current_pos = game_state.world.party_position;
+    let current_map_id = game_state.world.current_map;
 
     // Only check if position changed
     if *last_position != Some(current_pos) {
@@ -83,6 +129,97 @@ fn check_for_events(
                         });
                     }
                 }
+            } else {
+                // No static map event at this tile — check for dropped items.
+                //
+                // When the party steps onto a tile that contains one or more
+                // dropped items (and no static map event), emit a
+                // `PickupDroppedItemRequest` for the first item (FIFO order).
+                // `handle_pickup_dropped_item` will call `pickup_item()` on the
+                // next system in the chain and fire `ItemPickedUpEvent` so the
+                // visual marker is despawned.
+                let dropped = map.dropped_items_at(current_pos);
+                if let Some(first) = dropped.first() {
+                    info!(
+                        "Party stepped onto tile {:?} with dropped item_id={} — emitting pickup request",
+                        current_pos, first.item_id
+                    );
+                    pickup_writer.write(PickupDroppedItemRequest {
+                        item_id: first.item_id,
+                        map_id: current_map_id,
+                        position: current_pos,
+                        party_index: 0, // first party member picks up by default
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Processes [`PickupDroppedItemRequest`] messages emitted by [`check_for_events`].
+///
+/// For each request, calls [`pickup_item`] from the domain transactions layer to
+/// move the item from the world map into the party member's inventory.  On
+/// success, emits an [`ItemPickedUpEvent`] so the visual marker is despawned by
+/// [`despawn_picked_up_item_system`].  Failures are logged as warnings without
+/// panicking.
+fn handle_pickup_dropped_item(
+    mut requests: MessageReader<PickupDroppedItemRequest>,
+    mut global_state: ResMut<GlobalState>,
+    mut picked_up_writer: Option<MessageWriter<ItemPickedUpEvent>>,
+    mut game_log: Option<ResMut<GameLog>>,
+) {
+    // Collect requests to avoid holding a borrow while mutating global_state.
+    let requests: Vec<PickupDroppedItemRequest> = requests.read().cloned().collect();
+
+    for req in requests {
+        // Bounds-check party index before splitting the borrow.
+        if req.party_index >= global_state.0.party.members.len() {
+            warn!(
+                "PickupDroppedItemRequest: party_index {} out of bounds (party size {})",
+                req.party_index,
+                global_state.0.party.members.len()
+            );
+            continue;
+        }
+
+        // Call pickup_item() — splits the borrow across party.members[i] and world
+        // (two disjoint fields of GameState; allowed by Rust NLL).
+        let game_state = &mut global_state.0;
+        match pickup_item(
+            &mut game_state.party.members[req.party_index],
+            req.party_index,
+            &mut game_state.world,
+            req.map_id,
+            req.position,
+            req.item_id,
+        ) {
+            Ok(slot) => {
+                let msg = format!(
+                    "Picked up item {} (charges={}) from map {} tile {:?}",
+                    slot.item_id, slot.charges, req.map_id, req.position
+                );
+                info!("{}", msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
+
+                // Notify the visual system to despawn the 3-D marker.
+                if let Some(ref mut writer) = picked_up_writer {
+                    writer.write(ItemPickedUpEvent {
+                        item_id: req.item_id,
+                        map_id: req.map_id,
+                        tile_x: req.position.x,
+                        tile_y: req.position.y,
+                    });
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "handle_pickup_dropped_item: pickup_item failed for party[{}] \
+                     item_id={} at {:?}: {}",
+                    req.party_index, req.item_id, req.position, e
+                );
             }
         }
     }
