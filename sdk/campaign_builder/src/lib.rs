@@ -40,6 +40,7 @@ pub mod creatures_editor;
 pub mod creatures_manager;
 pub mod creatures_workflow;
 pub mod dialogue_editor;
+pub mod icon;
 pub mod item_mesh_editor;
 pub mod item_mesh_undo_redo;
 pub mod item_mesh_workflow;
@@ -132,12 +133,17 @@ pub fn run() -> Result<(), eframe::Error> {
         eprintln!("[VERBOSE] Verbose logging enabled - showing detailed trace information");
     }
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 720.0])
-            .with_min_inner_size([800.0, 600.0])
-            .with_title("Antares Campaign Builder"),
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1280.0, 720.0])
+        .with_min_inner_size([800.0, 600.0])
+        .with_title("Antares Campaign Builder");
 
+    if let Some(icon_data) = icon::app_icon_data() {
+        viewport = viewport.with_icon(icon_data);
+    }
+
+    let options = eframe::NativeOptions {
+        viewport,
         renderer: eframe::Renderer::default(),
         ..Default::default()
     };

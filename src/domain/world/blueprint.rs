@@ -240,6 +240,7 @@ impl From<MapBlueprint> for Map {
             encounter_table: None,
             allow_random_encounters: true,
             npc_placements,
+            dropped_items: Vec::new(),
         }
     }
 }

@@ -1,5 +1,151 @@
 # Implementations
 
+## macOS Window and Dock Icon — Phase 1: Window and Dock Icon (Complete)
+
+### Overview
+
+Phase 1 wires the Antares icon (`assets/icons/antares_tray.png`) into the
+Campaign Builder's eframe `ViewportBuilder::with_icon()` call so the window
+title-bar and macOS Dock entry display the Antares logo instead of a generic
+system icon. This is a pure-Rust change — no new dependencies are required
+because the `image` crate (with `png` feature) is already present in
+`sdk/campaign_builder/Cargo.toml`. Three pre-existing test failures
+(`asset_manager`, `mesh_obj_io`) that blocked `cargo nextest run` were also
+corrected as part of making all quality gates pass.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `sdk/campaign_builder/assets/antares_tray.png` — source icon copied into SDK so `include_bytes!` is workspace-root independent
+- [x] `sdk/campaign_builder/src/icon.rs` — new module: embeds PNG at compile time, decodes to RGBA8 via `image` crate, exposes `pub fn app_icon_data() -> Option<Arc<egui::IconData>>`
+- [x] `sdk/campaign_builder/src/lib.rs` — `pub mod icon;` declaration added; `run()` updated to call `icon::app_icon_data()` and pass the result to `ViewportBuilder::with_icon()`
+- [x] Four required unit tests in `icon.rs` all pass:
+  - `test_app_icon_data_returns_some`
+  - `test_app_icon_data_dimensions_non_zero`
+  - `test_app_icon_data_rgba_length_matches_dimensions`
+  - `test_app_icon_data_is_valid_png`
+- [x] Pre-existing `asset_manager.rs` borrow-after-move errors fixed (`actual_path.clone()`)
+- [x] Pre-existing `asset_manager.rs` `Rgba<i32>` type error fixed (`Rgba([255u8, …])` with explicit `ImageBuffer<Rgba<u8>, Vec<u8>>` annotation)
+- [x] Pre-existing `asset_manager::tests::test_scan_npcs_detects_sprite_sheet_reference_in_metadata` assertion corrected to match the NPC created in the test
+- [x] Pre-existing `asset_manager` misnamed-variant logic fixed: `validate_tree_texture_assets` now pre-computes all expected paths and skips any asset that belongs to the required spec set (not just the current spec's path), preventing sibling foliage files from being flagged as misnamed variants of each other
+- [x] Pre-existing `mesh_obj_io` f32 precision assertions fixed: `metallic` and `roughness` use `(value - expected).abs() < 1e-5` instead of `assert_eq!`
+- [x] All four quality gates pass with zero errors and zero warnings
+
+### Files Changed
+
+| File                                           | Change                                                                                                                                           |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sdk/campaign_builder/assets/antares_tray.png` | **New** — icon asset copied from `assets/icons/antares_tray.png`                                                                                 |
+| `sdk/campaign_builder/src/icon.rs`             | **New** — embed + decode module; `ICON_PNG` const, `app_icon_data()`, 4 unit tests                                                               |
+| `sdk/campaign_builder/src/lib.rs`              | Added `pub mod icon;`; `run()` now conditionally calls `viewport.with_icon(icon_data)`                                                           |
+| `sdk/campaign_builder/src/asset_manager.rs`    | Fixed borrow-after-move (`.clone()`), `Rgba<i32>` type error, incorrect NPC assertion, misnamed-variant false-positive for sibling foliage specs |
+| `sdk/campaign_builder/src/mesh_obj_io.rs`      | Fixed f32 exact-equality assertions for `metallic` and `roughness`                                                                               |
+
+### Architecture Notes
+
+#### Why `ViewportBuilder::with_icon()` is conditional
+
+`egui::IconData` does not implement `Default`, so `Option::unwrap_or_default()`
+cannot be used. The implementation stores the decoded icon in a `mut viewport`
+binding and only calls `.with_icon(icon_data)` when `app_icon_data()` returns
+`Some`. In practice decoding always succeeds because `include_bytes!` verifies
+file presence at compile time; the `None` path exists only as a defensive
+fallback.
+
+#### Misnamed-variant logic fix (root cause)
+
+`validate_tree_texture_assets` iterates over all seven required specs. For
+each spec with a `foliage_` prefix it checked whether other assets in
+`assets/textures/trees/` share the same prefix — but the only exclusion was
+`asset_path == &expected_path` (the _current_ spec's path). When all seven
+required foliage files were present, each foliage spec incorrectly flagged the
+other six as misnamed variants. The fix pre-computes a `HashSet` of all
+required paths and skips any asset whose path is in that set.
+
+#### f32 precision (root cause)
+
+`derive_metallic` and `derive_roughness` perform a chain of f32 arithmetic
+operations on values parsed from MTL file strings. IEEE 754 rounding at each
+step produces values like `0.21000001_f32` rather than the exact decimal
+`0.21_f32`. Using `assert_eq!` on f32 results is always fragile; the fix
+replaces both assertions with `(computed - expected).abs() < 1e-5`.
+
+---
+
+## Dropped Item World Persistence — Phase 1: Domain Data Model (Complete)
+
+### Overview
+
+Phase 1 adds the pure domain-layer foundation required for items that have been
+dropped on the ground to survive a full save/load round-trip. No Bevy
+dependencies are introduced; all changes are within `src/domain/world/`.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `src/domain/world/dropped_items.rs` — `DroppedItem` struct with `item_id: ItemId`, `charges: u8`, `position: Position`, `map_id: MapId`; full `///` doc comments with runnable doctest; RON round-trip tests
+- [x] `dropped_items` field added to `Map` struct with `#[serde(default, skip_serializing_if = "Vec::is_empty")]` (backward-compatible with all existing RON map files)
+- [x] `Map::new()` initialises `dropped_items: Vec::new()`
+- [x] `Map::add_dropped_item` helper — appends a `DroppedItem` to the collection
+- [x] `Map::remove_dropped_item` helper — removes and returns the first matching entry by `(position, item_id)`; returns `None` when absent
+- [x] `Map::dropped_items_at` helper — returns references to all items at a given tile (stacking supported)
+- [x] `DroppedItem` re-exported from `src/domain/world/mod.rs` as `pub use dropped_items::DroppedItem`
+- [x] `src/domain/world/blueprint.rs` and `src/sdk/templates.rs` struct-literal `Map` initialisers updated with `dropped_items: Vec::new()`
+- [x] All five required domain tests pass:
+  - `test_add_dropped_item_appends_entry`
+  - `test_remove_dropped_item_returns_correct_entry`
+  - `test_remove_dropped_item_missing_returns_none`
+  - `test_dropped_items_at_position_returns_all`
+  - `test_dropped_items_field_default_is_empty` (RON round-trip confirming `skip_serializing_if` and `default` behaviour)
+- [x] All four quality gates pass with zero errors and zero warnings
+
+### Files Changed
+
+| File                                | Change                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/world/dropped_items.rs` | **New** — `DroppedItem` struct, derives, doc comments, RON round-trip tests                                                                                                                                                                                                                                            |
+| `src/domain/world/mod.rs`           | Added `pub mod dropped_items;` module declaration and `pub use dropped_items::DroppedItem;` re-export; updated module-level doc comment                                                                                                                                                                                |
+| `src/domain/world/types.rs`         | Added `use crate::domain::world::dropped_items::DroppedItem;` import; added `dropped_items` field to `Map` struct; added `dropped_items: Vec::new()` to `Map::new()`; added `add_dropped_item`, `remove_dropped_item`, `dropped_items_at` helper methods; added `DroppedItem` import and five new tests to `mod tests` |
+| `src/domain/world/blueprint.rs`     | Added `dropped_items: Vec::new()` to struct-literal `Map` initialiser                                                                                                                                                                                                                                                  |
+| `src/sdk/templates.rs`              | Added `dropped_items: Vec::new()` to all three struct-literal `Map` initialisers (`town_map`, `dungeon_map`, `forest_map`)                                                                                                                                                                                             |
+
+### Architecture Notes
+
+#### Why a separate `Vec<DroppedItem>` instead of reusing `MapEvent::DroppedItem`?
+
+`Map::events` is a `HashMap<Position, MapEvent>` — keyed by position — so it
+can hold at most one event per tile. The new `dropped_items: Vec<DroppedItem>`
+field is unkeyed and supports arbitrary stacking: any number of distinct items
+(or multiple copies of the same item) may occupy a single tile. This is the
+correct model for runtime drops, where a player might drop a whole pack of
+potions on one tile.
+
+`MapEvent::DroppedItem` remains in place for campaign-authored static triggers
+(placed by level designers in RON map files via the event HashMap). The two
+mechanisms are complementary and independent.
+
+#### Serde backward compatibility
+
+`#[serde(default, skip_serializing_if = "Vec::is_empty")]` means:
+
+- Existing RON map files that predate this field deserialise without change (the
+  missing field defaults to `Vec::new()`).
+- Maps with no dropped items do not grow in serialised size (the field is
+  omitted entirely).
+- Maps with dropped items round-trip losslessly through `SaveGameManager::save`
+  and `SaveGameManager::load` with no additional wiring.
+
+#### Type compliance
+
+`DroppedItem` uses only the project's canonical type aliases:
+
+- `item_id: ItemId` (`u8`)
+- `map_id: MapId` (`u16`)
+- `position: Position` (domain struct with `i32` coordinates)
+- `charges: u8`
+
+No raw integer types are used anywhere in the new code.
+
+---
+
 ## Terrain Quality Deviation Correction — Phase 2: Refine Tree Texture Generator and Regenerate Runtime Assets (Complete)
 
 ### Overview
