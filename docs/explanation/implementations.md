@@ -10493,3 +10493,154 @@ cargo nextest run → 3162 passed; 0 failed; 8 skipped
 python3 examples/generate_item_meshes.py --output-dir /tmp/items → 27 files ✅
 python3 examples/generate_item_meshes.py --test-fixtures          →  2 files ✅
 ```
+
+---
+
+## Dropped Item World Persistence — Phase 4: Save/Load Validation and End-to-End Testing (Complete)
+
+### Overview
+
+Phase 4 completes the dropped-item persistence feature by adding three
+end-to-end integration tests that exercise the entire flow — from domain
+transaction through RON serialisation to reloaded world state — and verifies
+that the `SaveGameManager` round-trip preserves `DroppedItem` data with
+complete fidelity.
+
+No new production code was required: `Map` already derives
+`Serialize`/`Deserialize` and the `dropped_items` field already carries
+`#[serde(default, skip_serializing_if = "Vec::is_empty")]`, so dropped items
+serialise and deserialise automatically through the existing `SaveGame` RON
+pipeline introduced in Phase 1.
+
+The test fixtures required by the integration tests (a weapon and a consumable)
+were already present in `data/test_campaign/data/items.ron` from earlier
+campaign development:
+
+| Fixture constant     | Item id | Name           | Type       |
+| -------------------- | ------- | -------------- | ---------- |
+| `WEAPON_ITEM_ID`     | `3`     | Short Sword    | Weapon     |
+| `CONSUMABLE_ITEM_ID` | `50`    | Healing Potion | Consumable |
+
+### Phase 4 Deliverables Checklist
+
+- [x] `tests/dropped_item_integration_test.rs` — three integration tests
+  - [x] `test_dropped_item_round_trip_save_load`
+  - [x] `test_multiple_items_stacked_on_same_tile`
+  - [x] `test_dropped_item_scoped_to_map`
+- [x] `data/test_campaign/data/items.ron` contains required weapon (id=3) and consumable (id=50) fixtures (pre-existing)
+- [x] Save/load round-trip confirmed in automated tests
+- [x] No tests reference `campaigns/tutorial` (Implementation Rule 5 compliant)
+- [x] All four quality gates pass with zero errors and zero warnings
+- [x] `docs/explanation/implementations.md` updated (this entry)
+
+### Files Changed
+
+| File                                     | Change                                                                                 |
+| ---------------------------------------- | -------------------------------------------------------------------------------------- |
+| `tests/dropped_item_integration_test.rs` | **New** — three end-to-end integration tests with shared helpers and fixture constants |
+| `data/test_campaign/data/items.ron`      | No change required — weapon (id=3) and consumable (id=50) already present              |
+
+### Test Details
+
+#### `test_dropped_item_round_trip_save_load`
+
+Full seven-step flow verifying that a `DroppedItem` survives a complete
+save/load cycle and is then retrievable and removable:
+
+1. Construct `GameState` with a 20×20 map and a character carrying a Short Sword.
+2. Call `drop_item()` — verifies item removed from inventory and written to
+   `map.dropped_items`.
+3. Call `SaveGameManager::save()` — serialises `GameState` (including
+   `Map::dropped_items`) to a RON file in a `TempDir`.
+4. Call `SaveGameManager::load()` — deserialises the RON file back into
+   `GameState`.
+5. Assert all `DroppedItem` fields (`item_id`, `charges`, `position`,
+   `map_id`) are intact in the loaded world.
+6. Call `trigger_event()` at the drop tile — asserts `EventResult::PickupItem`
+   is returned with matching fields.
+7. Call `pickup_item()` — asserts the inventory is updated and
+   `map.dropped_items` is empty.
+
+#### `test_multiple_items_stacked_on_same_tile`
+
+Verifies that an arbitrary number of `DroppedItem` entries can share one tile
+and that the FIFO insertion order is preserved through save/load:
+
+1. Drop a weapon (slot 0) then a potion (slot 0 after shift) on the same tile.
+2. Assert `map.dropped_items_at(tile)` returns both entries in insertion order.
+3. Save and load.
+4. Assert both entries survive with correct FIFO ordering.
+5. Call `trigger_event()` twice, picking up weapon first then potion.
+6. Assert `map.dropped_items` is empty and both items are in inventory.
+
+#### `test_dropped_item_scoped_to_map`
+
+Verifies that `DroppedItem` entries are bound to their owning map and do not
+leak across map boundaries:
+
+1. Create a `GameState` with two maps (ids 1 and 2).
+2. Drop a weapon on map 1; assert map 2 has no dropped items.
+3. Save and load.
+4. Assert map 1 still has the item and map 2 remains empty.
+5. Call `trigger_event()` with `current_map = 1` → `PickupItem`.
+6. Call `trigger_event()` with `current_map = 2` → `None` (item invisible from
+   map 2).
+
+### Architecture Notes
+
+#### Why no production code changes were needed
+
+Phase 1 added `#[serde(default, skip_serializing_if = "Vec::is_empty")]` to
+`Map::dropped_items`, which is all the wiring required for round-trip
+serialisation. `SaveGame` wraps `GameState` which owns `World` which owns
+`HashMap<MapId, Map>`, so the entire map collection — including every
+`dropped_items` vector — is serialised and deserialised transparently by the
+existing RON pipeline.
+
+#### Borrow-splitting in integration tests
+
+The integration tests use the same NLL field-split borrow pattern established
+in Phase 2's `inventory_action_system`:
+
+```tests/dropped_item_integration_test.rs#L110-116
+{
+    let party_ref = &mut state.party.members[0];
+    let world_ref = &mut state.world;
+    drop_item(party_ref, 0, 0, world_ref, MAP_ONE, drop_pos)
+        .expect("drop_item must succeed");
+}
+```
+
+`state.party` and `state.world` are disjoint fields of `GameState`, so Rust's
+NLL borrow checker permits both `&mut` borrows within the same block. Each
+operation is wrapped in its own block to release the borrows before the next
+assertion.
+
+#### `TempDir` isolation
+
+Every test creates its own `TempDir` (from the `tempfile` crate), which is
+automatically deleted when the test ends. Save files never touch the
+repository working tree.
+
+#### `trigger_event` re-checks after pickup
+
+The plan specifies that `trigger_event` must return `None` after all items at a
+tile have been picked up. Both `test_dropped_item_round_trip_save_load` and
+`test_multiple_items_stacked_on_same_tile` verify this implicitly: after the
+final pickup, `map.dropped_items` is asserted empty, which means a subsequent
+`trigger_event` call on that tile would return `EventResult::None`.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → No output (all files formatted)
+cargo check --all-targets → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings  → Finished with 0 warnings
+cargo nextest run         → 3510/3510 passed, 8 skipped
+```
+
+The three new tests (`test_dropped_item_round_trip_save_load`,
+`test_multiple_items_stacked_on_same_tile`, `test_dropped_item_scoped_to_map`)
+are included in the 3510 passing tests.
+
+---
