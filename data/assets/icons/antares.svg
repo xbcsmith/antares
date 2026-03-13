@@ -29,14 +29,14 @@
      inkscape:document-units="px"
      showgrid="true"
      inkscape:zoom="1.4297265"
-     inkscape:cx="319.99128"
-     inkscape:cy="318.59241"
+     inkscape:cx="358.46017"
+     inkscape:cy="319.29184"
      inkscape:window-width="1820"
      inkscape:window-height="1100"
      inkscape:window-x="26"
      inkscape:window-y="30"
      inkscape:window-maximized="0"
-     inkscape:current-layer="g14">
+     inkscape:current-layer="g4">
     <inkscape:grid
        id="grid1"
        units="px"
@@ -195,14 +195,16 @@
      inkscape:label="Base Icon"
      inkscape:groupmode="layer"
      id="g1"
-     style="display:none"
-     sodipodi:insensitive="true">
+     style="display:inline">
     <circle
        style="fill:url(#linearGradient3);stroke:#ff5f05;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
        id="circle1"
        cx="84.666664"
        cy="84.666664"
-       r="52.231033" />
+       r="52.231033"
+       inkscape:export-filename="antares_sdk.png"
+       inkscape:export-xdpi="300"
+       inkscape:export-ydpi="300" />
     <path
        style="fill:#18203f;fill-opacity:1;stroke:#ff5f05;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
        id="rect1"
@@ -262,5 +264,52 @@
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-opacity:1"
          x="34.047993"
          y="89.460289">Antares</tspan></text>
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="g2"
+     inkscape:label="SDK"
+     sodipodi:insensitive="true"
+     style="display:inline">
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+       x="61.67971"
+       y="103.52474"
+       id="text1"><tspan
+         sodipodi:role="line"
+         id="tspan1"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-opacity:1"
+         x="61.67971"
+         y="103.52474">SDK</tspan></text>
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="g4"
+     inkscape:label="Campain Builder"
+     style="display:none"
+     sodipodi:insensitive="true">
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:14.1111px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+       x="40.13908"
+       y="101.46181"
+       id="text3"><tspan
+         sodipodi:role="line"
+         id="tspan3"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:14.1111px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-opacity:1"
+         x="40.13908"
+         y="101.46181">Campaign</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:14.1111px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+       x="45.324913"
+       y="113.2162"
+       id="text4"><tspan
+         sodipodi:role="line"
+         id="tspan4"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:14.1111px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-opacity:1"
+         x="45.324913"
+         y="113.2162">Buidler</tspan></text>
   </g>
 </svg>

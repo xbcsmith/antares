@@ -11,7 +11,9 @@ into eframe's `ViewportBuilder::with_icon()` — a pure-Rust change that require
 no new dependencies. Phase 2 adds a real macOS menu-bar status item
 (NSStatusItem) using the `tray-icon` crate so the Campaign Builder can live in
 the top-right menu bar, survive window closure, and expose Show/Hide and Quit
-actions.
+actions. Phase 4 (this addendum) extends the tray icon to Linux using GTK via a
+dedicated thread, so the Campaign Builder gains a system tray on GNOME, KDE,
+and XFCE without affecting the macOS or Windows builds.
 
 ## Current State Analysis
 
@@ -285,3 +287,246 @@ Add to `sdk/campaign_builder/src/tray.rs` under `#[cfg(test)]`:
 - The Antares icon remains in the menu bar while the window is hidden.
 - `cargo nextest run -p campaign_builder` reports 2 new passing tray tests.
 - Non-macOS builds compile without warnings.
+
+---
+
+### Phase 4: Linux GTK System Tray (Addendum)
+
+#### 4.1 Foundation Work — System Package Prerequisites
+
+`tray-icon` on Linux requires GTK and `libappindicator` (or the modern
+`libayatana-appindicator`) as OS-level packages. Add the following to the
+project `README.md` under a **Linux Prerequisites** heading:
+
+| Distro family   | Command                                                         |
+| --------------- | --------------------------------------------------------------- |
+| Arch / Manjaro  | `pacman -S gtk3 xdotool libappindicator-gtk3`                   |
+| Debian / Ubuntu | `sudo apt install libgtk-3-dev libxdo-dev libappindicator3-dev` |
+
+The `libayatana-appindicator` variant (`libayatana-appindicator-gtk3` /
+`libayatana-appindicator3-dev`) is an acceptable substitute on distros where
+`libappindicator` is no longer packaged.
+
+The existing tray assets in `sdk/campaign_builder/assets/icons/` are
+platform-agnostic PNGs and are reused directly — no new art or generation
+step is required.
+
+#### 4.2 Expand `tray-icon` Dependency in `Cargo.toml`
+
+The existing macOS dep in `sdk/campaign_builder/Cargo.toml` is kept unchanged.
+Add a separate Linux entry beneath it:
+
+```toml
+[target.'cfg(target_os = "macos")'.dependencies]
+tray-icon = { version = "0.19", features = [] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tray-icon = { version = "0.19", features = ["gtk"] }
+gtk = "0.18"
+```
+
+The `"gtk"` feature flag on the Linux dep is **required** — without it
+`tray-icon` does not compile the GTK backend. The macOS dep keeps
+`features = []` because the GTK feature is Linux-only.
+
+`gtk 0.18` is already present in `Cargo.lock` as a transitive dependency of
+`tray-icon`; the explicit entry pins the version and allows calling
+`gtk::init()` and `gtk::main()` without `unsafe` casting.
+
+`crossbeam-channel` does **not** need to be added explicitly — it is already
+a transitive dependency of `tray-icon` and backs `MenuEvent::receiver()`
+internally.
+
+#### 4.3 Broaden the Tray Module Platform Gate
+
+`sdk/campaign_builder/src/tray.rs` currently opens with:
+
+```rust
+#![cfg(target_os = "macos")]
+```
+
+Change this to:
+
+```rust
+#![cfg(any(target_os = "macos", target_os = "linux"))]
+```
+
+All existing code in the module (`TRAY_ICON_1X`, `TRAY_ICON_2X`,
+`build_tray_icon`, `handle_tray_events`, `TrayCommand`, `TRAY_CMD_TX`) uses
+the cross-platform `tray-icon` API and compiles unchanged on Linux. No
+modifications to the body of any existing function are required.
+
+Update `sdk/campaign_builder/src/lib.rs` in the same way:
+
+```rust
+// before:
+#[cfg(target_os = "macos")]
+pub mod tray;
+
+// after:
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub mod tray;
+```
+
+#### 4.4 Add `spawn_gtk_tray_thread()` to `tray.rs`
+
+On Linux, `tray-icon` requires both the `TrayIcon` creation and GTK event
+processing to happen on the thread that runs the GTK main loop. eframe uses
+winit for window management (Wayland or X11), which is incompatible with
+GTK's main loop on the same thread. The solution is a dedicated GTK thread,
+matching the pattern from the official `tray-icon` examples.
+
+Add the following function to `sdk/campaign_builder/src/tray.rs`, compiled
+only on Linux:
+
+```rust
+/// Spawns a dedicated GTK thread that initialises GTK, creates the
+/// menu-bar status item, and runs `gtk::main()`.
+///
+/// **Must be called before `eframe::run_native`** so that the GTK event
+/// loop is running before the first eframe frame is painted.
+///
+/// GTK signal handlers registered by `tray-icon` push [`MenuEvent`] values
+/// into the crossbeam channel backing [`tray_icon::menu::MenuEvent::receiver()`].
+/// The eframe `update()` loop drains that channel directly each frame — no
+/// intermediate `TrayCommand` channel is needed on Linux.
+///
+/// # Panics
+///
+/// Panics if GTK cannot be initialised (no display server available).  A
+/// headless server should not run the Campaign Builder.
+#[cfg(target_os = "linux")]
+pub fn spawn_gtk_tray_thread() {
+    std::thread::Builder::new()
+        .name("gtk-tray".to_string())
+        .spawn(|| {
+            gtk::init().expect("failed to initialise GTK for tray icon");
+            // build_tray_icon() returns (TrayIcon, Receiver<TrayCommand>).
+            // The Receiver is intentionally dropped here — on Linux, update()
+            // polls MenuEvent::receiver() directly rather than going through
+            // the TrayCommand channel used on macOS.
+            let (_tray, _rx) = build_tray_icon();
+            // Blocks this thread; GTK callbacks fire and populate
+            // MenuEvent::receiver() as menu items are clicked.
+            gtk::main();
+        })
+        .expect("failed to spawn gtk-tray thread");
+}
+```
+
+#### 4.5 Wire into `run()` and `update()`
+
+**`sdk/campaign_builder/src/lib.rs` — `run()`**
+
+Add the Linux GTK thread spawn immediately after the existing macOS tray
+binding, before `eframe::run_native`:
+
+```rust
+// Existing macOS binding (unchanged):
+#[cfg(target_os = "macos")]
+let (_tray, tray_cmd_rx) = tray::build_tray_icon();
+
+// New Linux GTK thread (fire-and-forget; no binding needed):
+#[cfg(target_os = "linux")]
+tray::spawn_gtk_tray_thread();
+```
+
+No receiver is stored in `CampaignBuilderApp` for Linux — the event source is
+`MenuEvent::receiver()`, polled directly in `update()`. The `tray_cmd_rx`
+field on `CampaignBuilderApp` remains macOS-only and requires no changes.
+
+**`sdk/campaign_builder/src/lib.rs` — `update()`**
+
+Add a Linux block immediately after the existing macOS tray drain block:
+
+```rust
+// Existing macOS block (unchanged):
+#[cfg(target_os = "macos")]
+tray::handle_tray_events();
+
+#[cfg(target_os = "macos")]
+if let Some(ref rx) = self.tray_cmd_rx {
+    while let Ok(cmd) = rx.try_recv() { /* ... */ }
+}
+
+// New Linux block:
+// On Linux, GTK callbacks on the gtk-tray thread populate
+// MenuEvent::receiver() directly; poll it here without an intermediate
+// TrayCommand channel.
+#[cfg(target_os = "linux")]
+while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
+    if event.id == tray::MENU_ID_SHOW {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    } else if event.id == tray::MENU_ID_HIDE {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+    } else if event.id == tray::MENU_ID_QUIT {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+}
+```
+
+`MENU_ID_SHOW`, `MENU_ID_HIDE`, and `MENU_ID_QUIT` are the existing `&str`
+constants in `tray.rs`; change their visibility from `const` to `pub const`
+so the Linux block in `lib.rs` can reference them.
+
+#### 4.6 macOS vs. Linux Event Dispatch Comparison
+
+| Concern             | macOS (Phases 2–3)                                                 | Linux (Phase 4)                                                |
+| ------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------- |
+| Event loop          | macOS run loop; `TrayIcon` on main thread                          | GTK main loop on dedicated `"gtk-tray"` OS thread              |
+| `TrayIcon` lifetime | `NonSend`-equivalent: `_tray` binding in `run()`                   | Local `_tray` binding on the GTK thread's stack                |
+| Event polling       | `handle_tray_events()` called in `update()` each frame             | `MenuEvent::receiver().try_recv()` polled in `update()`        |
+| Command dispatch    | `OnceLock<SyncSender>` → `TrayCommand` channel → `update()` drains | GTK callbacks → crossbeam channel → `update()` drains directly |
+| `ViewportCommand`   | Issued from `TrayCommand` match in `update()`                      | Issued inline from `MenuEvent` match in `update()`             |
+| System dependencies | None (macOS frameworks linked automatically)                       | `libgtk-3-dev`, `libxdo-dev`, `libappindicator3-dev`           |
+
+#### 4.7 Testing Requirements
+
+No new test functions are required. Broadening the module gate to
+`any(target_os = "macos", target_os = "linux")` means all seven existing
+tray tests now compile and run on Linux:
+
+| Existing test                                  | Linux coverage                                      |
+| ---------------------------------------------- | --------------------------------------------------- |
+| `test_tray_icon_1x_png_magic`                  | Verifies `TRAY_ICON_1X` embed is valid PNG on Linux |
+| `test_tray_icon_2x_png_magic`                  | Verifies `TRAY_ICON_2X` embed is valid PNG on Linux |
+| `test_tray_icon_1x_dimensions`                 | Decoded 22×22 on Linux                              |
+| `test_tray_icon_2x_dimensions`                 | Decoded 44×44 on Linux                              |
+| `test_tray_icon_1x_rgba_length`                | RGBA buffer length on Linux                         |
+| `test_tray_command_show_is_distinct_from_hide` | `TrayCommand` enum distinctness on Linux            |
+| `test_tray_command_channel_send_recv`          | mpsc channel round-trip on Linux                    |
+
+All seven tests are pure PNG-decode or channel tests; no GTK initialisation
+or display server is required, so they run in any Linux CI environment.
+
+#### 4.8 Deliverables
+
+- [ ] `sdk/campaign_builder/Cargo.toml` — Linux `tray-icon` dep with
+      `features = ["gtk"]` and `gtk = "0.18"` added under
+      `[target.'cfg(target_os = "linux")'.dependencies]`
+- [ ] `README.md` — Linux system package prerequisites documented
+- [ ] `sdk/campaign_builder/src/tray.rs` — module gate broadened to
+      `any(target_os = "macos", target_os = "linux")`; `spawn_gtk_tray_thread()`
+      added under `#[cfg(target_os = "linux")]`; `MENU_ID_SHOW`,
+      `MENU_ID_HIDE`, `MENU_ID_QUIT` changed to `pub const`
+- [ ] `sdk/campaign_builder/src/lib.rs` — `pub mod tray` gate broadened;
+      `tray::spawn_gtk_tray_thread()` call added in `run()` under
+      `#[cfg(target_os = "linux")]`; Linux `MenuEvent` drain block added in
+      `update()` under `#[cfg(target_os = "linux")]`
+- [ ] All quality gates pass on Linux (`cargo fmt`, `cargo check`,
+      `cargo clippy -D warnings`, `cargo nextest run`)
+
+#### 4.9 Success Criteria
+
+- Antares icon appears in the Linux system tray (GNOME, KDE, XFCE) when the
+  Campaign Builder is running with `libappindicator` or
+  `libayatana-appindicator` installed.
+- Clicking **Show Antares Campaign Builder** raises and focuses the window.
+- Clicking **Hide** hides the window; the tray icon remains visible.
+- Clicking **Quit** closes the Campaign Builder cleanly via
+  `ViewportCommand::Close`.
+- `cargo nextest run -p campaign_builder` reports all 7 existing tray tests
+  passing on Linux with no new failures.
+- macOS build is unaffected; all Phase 1–3 behaviour is unchanged.
+- Windows and other non-Linux/non-macOS builds compile without warnings.
