@@ -461,22 +461,21 @@ impl TreeTextureValidationIssue {
 
     /// Creates an image-load validation issue.
     fn unreadable(spec: TreeTextureSpec, actual_path: PathBuf, error: &image::ImageError) -> Self {
-        let message = format!(
-            "{}: expected filename '{}' with dimensions {}x{}, but failed to read image metadata from '{}': {}",
-            spec.validation_id,
-            spec.relative_path,
-            spec.expected_width,
-            spec.expected_height,
-            actual_path.display(),
-            error
-        );
         Self {
             validation_id: spec.validation_id,
             expected_path: PathBuf::from(spec.relative_path),
             actual_path: Some(actual_path),
             expected_dimensions: (spec.expected_width, spec.expected_height),
             actual_dimensions: None,
-            message,
+            message: format!(
+                "{}: expected filename '{}' with dimensions {}x{}, but failed to read image metadata from '{}': {}",
+                spec.validation_id,
+                spec.relative_path,
+                spec.expected_width,
+                spec.expected_height,
+                actual_path.display(),
+                error
+            ),
         }
     }
 
@@ -546,22 +545,21 @@ impl GrassTextureValidationIssue {
 
     /// Creates an image-load validation issue.
     fn unreadable(spec: GrassTextureSpec, actual_path: PathBuf, error: &image::ImageError) -> Self {
-        let message = format!(
-            "{}: expected filename '{}' with dimensions {}x{}, but failed to read image metadata from '{}': {}",
-            spec.validation_id,
-            spec.relative_path,
-            spec.expected_width,
-            spec.expected_height,
-            actual_path.display(),
-            error
-        );
         Self {
             validation_id: spec.validation_id,
             expected_path: PathBuf::from(spec.relative_path),
             actual_path: Some(actual_path),
             expected_dimensions: (spec.expected_width, spec.expected_height),
             actual_dimensions: None,
-            message,
+            message: format!(
+                "{}: expected filename '{}' with dimensions {}x{}, but failed to read image metadata from '{}': {}",
+                spec.validation_id,
+                spec.relative_path,
+                spec.expected_width,
+                spec.expected_height,
+                actual_path.display(),
+                error
+            ),
         }
     }
 
@@ -1773,7 +1771,7 @@ mod tests {
             std::fs::create_dir_all(parent).unwrap();
         }
 
-        let image = ImageBuffer::from_pixel(width, height, Rgba([255u8, 255, 255, 255]));
+        let image = ImageBuffer::from_pixel(width, height, Rgba([255, 255, 255, 255]));
         image.save(path).unwrap();
     }
 
