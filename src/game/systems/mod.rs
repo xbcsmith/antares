@@ -18,6 +18,7 @@ pub mod dialogue;
 pub mod dialogue_choices;
 pub mod dialogue_validation;
 pub mod dialogue_visuals;
+pub mod dropped_item_visuals;
 pub mod events;
 pub mod facing;
 pub mod furniture_rendering;

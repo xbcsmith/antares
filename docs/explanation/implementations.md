@@ -324,6 +324,178 @@ changes.
 
 ---
 
+## Dropped Item World Persistence — Phase 3: Visual Representation in the Game Engine (Complete)
+
+### Overview
+
+Phase 3 adds the Bevy game-engine systems that give dropped items a visible
+presence on the game map. When an item is placed on the ground (either dropped
+by the party at runtime or authored as a static `MapEvent::DroppedItem` in a
+campaign file), a 3-D visual marker is spawned at the tile's world-space centre.
+The marker is despawned when the item is picked up and cleaned up when the party
+transitions to a different map.
+
+Two independent spawn paths feed the same marker lifecycle:
+
+| Path                      | Trigger                    | System                      |
+| ------------------------- | -------------------------- | --------------------------- |
+| Event-driven (full mesh)  | `ItemDroppedEvent` message | `spawn_dropped_item_system` |
+| Direct helper (flat quad) | Direct call                | `spawn_dropped_item_marker` |
+
+Both paths tag entities with `DroppedItemComponent`, `MapEntity`, and
+`TileCoord` so they are uniformly managed by the map render system and the
+pickup despawn system.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `src/game/systems/dropped_item_visuals.rs` — marker helper and cleanup system
+- [x] `spawn_dropped_item_marker` — golden cuboid stand-in visual, registers in registry
+- [x] `cleanup_stale_dropped_item_visuals` — purges registry on map unload
+- [x] `DroppedItemVisualsPlugin` — registers the cleanup system
+- [x] `load_map_dropped_items_system` updated — now emits `ItemDroppedEvent` for both
+      `MapEvent::DroppedItem` (static) **and** `map.dropped_items` (runtime) entries
+- [x] `ItemWorldPlugin` updated — adds `DroppedItemVisualsPlugin`
+- [x] `src/game/systems/mod.rs` updated — exposes `dropped_item_visuals` module
+- [x] All Phase 3.6 integration tests pass
+
+### Files Changed
+
+| File                                       | Change                                                                                          |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `src/game/systems/dropped_item_visuals.rs` | **NEW** — visual helper, cleanup system, plugin, tests                                          |
+| `src/game/systems/item_world_events.rs`    | `load_map_dropped_items_system` extended; `DroppedItemVisualsPlugin` added to `ItemWorldPlugin` |
+| `src/game/systems/mod.rs`                  | `pub mod dropped_item_visuals;` added                                                           |
+
+### Architecture Details
+
+#### `spawn_dropped_item_marker` — Direct Spawn Path
+
+```src/game/systems/dropped_item_visuals.rs#L60-145
+pub fn spawn_dropped_item_marker(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    registry: &mut DroppedItemRegistry,
+    item: &DomainDroppedItem,
+) -> Entity
+```
+
+Creates a `0.35 × 0.05 × 0.35` golden cuboid (`Color::srgb(1.0, 0.85, 0.1)`)
+with a faint emissive glow (`LinearRgba::new(0.6, 0.5, 0.0, 1.0)`) at
+`y = DROPPED_ITEM_MARKER_Y + MARKER_QUAD_HEIGHT * 0.5`. The entity receives:
+
+- `DroppedItemComponent { item_id, map_id, tile_x, tile_y, charges }`
+- `MapEntity(map_id)` — picked up by `spawn_map_markers` for bulk despawn
+- `TileCoord(position)` — used for position-based lookup
+- `Name::new("DroppedItemMarker(N)")` — visible in Bevy inspector
+
+After spawning, the entity is registered in `DroppedItemRegistry` under the
+key `(map_id, tile_x, tile_y, item_id)`.
+
+#### `load_map_dropped_items_system` — Phase 3.2 Extension
+
+The system previously only iterated `map.events` for `MapEvent::DroppedItem`
+(static campaign-authored items). Phase 3.2 adds a **second loop** that
+iterates `map.dropped_items` — the `Vec<DroppedItem>` stored on the domain
+`Map` struct that holds runtime-dropped items:
+
+```src/game/systems/item_world_events.rs#L404-420
+// ── Source 2: runtime-dropped items stored in map.dropped_items ───────
+for dropped in &map.dropped_items {
+    event_writer.write(ItemDroppedEvent {
+        item_id: dropped.item_id,
+        charges: dropped.charges as u16,
+        map_id: current_map_id,
+        tile_x: dropped.position.x,
+        tile_y: dropped.position.y,
+    });
+}
+```
+
+This means items dropped by the party at runtime — which survive save/load
+via `Map::dropped_items` (Phase 1) — now also gain visual markers when the
+map is reloaded after a save/load cycle.
+
+#### `cleanup_stale_dropped_item_visuals` — Registry Safety
+
+When `spawn_map_markers` despawns all `MapEntity` entities on a map change it
+removes the Bevy entities but leaves the `DroppedItemRegistry` intact. If
+`despawn_picked_up_item_system` later receives a stale `ItemPickedUpEvent` for
+a now-dead entity, Bevy panics. `cleanup_stale_dropped_item_visuals` prevents
+this by removing all registry entries for the previous map whenever the active
+map changes:
+
+```src/game/systems/dropped_item_visuals.rs#L190-215
+pub fn cleanup_stale_dropped_item_visuals(
+    mut registry: ResMut<DroppedItemRegistry>,
+    global_state: Res<GlobalState>,
+    mut last_map_id: Local<Option<MapId>>,
+) {
+    let current_map_id = global_state.0.world.current_map;
+    if *last_map_id == Some(current_map_id) { return; }
+    let prev_map_id = *last_map_id;
+    *last_map_id = Some(current_map_id);
+    let Some(prev_map) = prev_map_id else { return; };
+    registry.entries.retain(|key, _| key.0 != prev_map);
+}
+```
+
+The system uses a `Local<Option<MapId>>` to track the previously active map.
+On the very first frame `prev_map_id` is `None` and the system returns without
+touching the registry.
+
+#### Two-Plugin Architecture
+
+`DroppedItemVisualsPlugin` is a focused plugin that registers only the cleanup
+system. It is added to the app automatically by `ItemWorldPlugin`:
+
+```src/game/systems/item_world_events.rs#L191-205
+impl Plugin for ItemWorldPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ItemDroppedEvent>()
+            .add_message::<ItemPickedUpEvent>()
+            .init_resource::<DroppedItemRegistry>()
+            .add_plugins(DroppedItemVisualsPlugin)
+            .add_systems(Update, (
+                load_map_dropped_items_system,
+                spawn_dropped_item_system,
+                despawn_picked_up_item_system,
+            ).chain());
+    }
+}
+```
+
+The `.chain()` ordering ensures map-load events are emitted before the spawn
+system processes them in the same frame.
+
+### Tests Added
+
+#### `src/game/systems/dropped_item_visuals.rs` — 8 new tests
+
+| Test                                         | Covers                                                                                                                                                    |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_spawn_marker_on_map_load`              | §3.6: `load_map_dropped_items_system` emits `ItemDroppedEvent` for `map.dropped_items`; marker entity has correct `DroppedItemComponent` at tile position |
+| `test_spawn_marker_on_drop_event`            | §3.6: spawned entity carries `DroppedItemComponent` and is registered in `DroppedItemRegistry`                                                            |
+| `test_despawn_marker_on_pickup_event`        | §3.6: `despawn_picked_up_item_system` clears registry on `ItemPickedUpEvent`                                                                              |
+| `test_marker_cleanup_on_map_unload`          | §3.6: registry entries for previous map are purged on map transition                                                                                      |
+| `test_marker_y_is_positive`                  | `DROPPED_ITEM_MARKER_Y > 0.0`                                                                                                                             |
+| `test_tile_center_offset_is_half`            | `TILE_CENTER_OFFSET == 0.5`                                                                                                                               |
+| `test_marker_quad_dimensions_are_positive`   | `MARKER_QUAD_SIZE` and `MARKER_QUAD_HEIGHT` positive                                                                                                      |
+| `test_cleanup_does_not_clear_on_first_frame` | No cleanup on the very first update (prev map is `None`)                                                                                                  |
+| `test_cleanup_keeps_entries_for_new_map`     | Only entries for the _previous_ map are removed; new-map entries survive                                                                                  |
+| `test_despawn_unknown_key_does_not_panic`    | Stale/unknown pickup key is silently ignored                                                                                                              |
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → No output (all files formatted)
+cargo check --all-targets → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings  → Finished with 0 warnings
+cargo nextest run         → 3507/3507 passed, 8 skipped
+```
+
+---
+
 ## Terrain Quality Deviation Correction — Phase 2: Refine Tree Texture Generator and Regenerate Runtime Assets (Complete)
 
 ### Overview

@@ -192,6 +192,8 @@ impl Plugin for ItemWorldPlugin {
         app.add_message::<ItemDroppedEvent>()
             .add_message::<ItemPickedUpEvent>()
             .init_resource::<DroppedItemRegistry>()
+            // Phase 3.5: register map-unload registry cleanup via the visuals plugin.
+            .add_plugins(crate::game::systems::dropped_item_visuals::DroppedItemVisualsPlugin)
             .add_systems(
                 Update,
                 (
@@ -355,9 +357,17 @@ pub fn despawn_picked_up_item_system(
     }
 }
 
-/// Fires [`ItemDroppedEvent`] for every `MapEvent::DroppedItem` on the current
-/// map so that static map-authored dropped items go through the same spawn path
-/// as runtime drops.
+/// Fires [`ItemDroppedEvent`] for every dropped item on the current map so that
+/// all dropped items — both static map-authored entries and items dropped at
+/// runtime by the party — go through the same visual spawn path.
+///
+/// Two sources are iterated on each map load:
+///
+/// 1. **`map.events` (`MapEvent::DroppedItem` variants)** — static drops
+///    authored in campaign data files.
+/// 2. **`map.dropped_items` (Vec of [`DroppedItem`](crate::domain::world::DroppedItem))** —
+///    runtime drops placed in the world by the party via `drop_item()`.  These
+///    are stored in the domain `Map` struct and survive save/load round-trips.
 ///
 /// This system runs every frame but is effectively a one-shot per map load: it
 /// compares the current map ID against the last processed map ID stored in a
@@ -380,6 +390,7 @@ pub fn load_map_dropped_items_system(
         return;
     };
 
+    // ── Source 1: static map-authored DroppedItem events ─────────────────
     for (position, event) in &map.events {
         if let MapEvent::DroppedItem {
             item_id, charges, ..
@@ -393,6 +404,22 @@ pub fn load_map_dropped_items_system(
                 tile_y: position.y,
             });
         }
+    }
+
+    // ── Source 2: runtime-dropped items stored in map.dropped_items ───────
+    //
+    // Phase 3.2 addition: items placed in the world by the party at runtime
+    // (via `drop_item()`) are stored in `Map::dropped_items`.  Emit an event
+    // for each so that `spawn_dropped_item_system` spawns their visual markers,
+    // giving dropped items persistent visuals that survive save/load.
+    for dropped in &map.dropped_items {
+        event_writer.write(ItemDroppedEvent {
+            item_id: dropped.item_id,
+            charges: dropped.charges as u16,
+            map_id: current_map_id,
+            tile_x: dropped.position.x,
+            tile_y: dropped.position.y,
+        });
     }
 }
 
