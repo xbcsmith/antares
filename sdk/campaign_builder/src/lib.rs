@@ -150,11 +150,12 @@ pub fn run() -> Result<(), eframe::Error> {
         ..Default::default()
     };
 
-    // Build the macOS menu-bar status item (NSStatusItem).  The binding must
-    // remain live for the entire duration of `run_native`; dropping it removes
-    // the icon from the menu bar.
+    // Build the macOS menu-bar status item (NSStatusItem).  The TrayIcon binding
+    // must remain live for the entire duration of `run_native`; dropping it
+    // removes the icon from the menu bar.  The Receiver is moved into the app
+    // inside the closure so that `update()` can drain TrayCommand values each frame.
     #[cfg(target_os = "macos")]
-    let _tray = tray::build_tray_icon();
+    let (_tray, tray_cmd_rx) = tray::build_tray_icon();
 
     eframe::run_native(
         "Antares Campaign Builder",
@@ -164,6 +165,13 @@ pub fn run() -> Result<(), eframe::Error> {
                 logger: logger.clone(),
                 ..Default::default()
             };
+
+            // Wire the tray-command receiver into the app so that `update()`
+            // can drain ShowWindow / HideWindow / Quit commands each frame.
+            #[cfg(target_os = "macos")]
+            {
+                app.tray_cmd_rx = Some(tray_cmd_rx);
+            }
 
             // Load persisted ToolConfig if available; otherwise fall back to defaults.
             // This makes display/editor preferences persistent across sessions.
@@ -767,6 +775,14 @@ struct CampaignBuilderApp {
     /// Cached texture handle for the Antares logo shown in the sidebar.
     /// Loaded once on first render and reused every frame thereafter.
     logo_texture: Option<egui::TextureHandle>,
+
+    /// Receiver for commands dispatched by the macOS menu-bar tray item.
+    ///
+    /// [`tray::handle_tray_events`] sends [`tray::TrayCommand`] values here;
+    /// `update()` drains the channel once per frame and issues the
+    /// corresponding [`egui::ViewportCommand`]s.
+    #[cfg(target_os = "macos")]
+    tray_cmd_rx: Option<std::sync::mpsc::Receiver<tray::TrayCommand>>,
 }
 
 #[derive(Debug, Clone)]
@@ -892,6 +908,9 @@ impl Default for CampaignBuilderApp {
             debug_panel_auto_scroll: true,
 
             logo_texture: None,
+
+            #[cfg(target_os = "macos")]
+            tray_cmd_rx: None,
         }
     }
 }
@@ -4210,9 +4229,37 @@ impl CampaignBuilderApp {
 impl eframe::App for CampaignBuilderApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Poll macOS menu-bar status item events once per frame.
-        // Handles "Quit" and any future tray menu actions without a separate thread.
+        // `handle_tray_events` translates raw MenuEvent IDs into TrayCommand
+        // values and sends them over the mpsc channel.  The Receiver is drained
+        // immediately below.
         #[cfg(target_os = "macos")]
         tray::handle_tray_events();
+
+        // Drain tray commands and issue the corresponding egui ViewportCommands.
+        // This runs on every frame so the window responds within one paint cycle.
+        #[cfg(target_os = "macos")]
+        if let Some(ref rx) = self.tray_cmd_rx {
+            while let Ok(cmd) = rx.try_recv() {
+                match cmd {
+                    tray::TrayCommand::ShowWindow => {
+                        // Restore visibility first, then bring the window to
+                        // the front so it is immediately usable.
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    }
+                    tray::TrayCommand::HideWindow => {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                    }
+                    tray::TrayCommand::Quit => {
+                        // Close the egui viewport gracefully.  The tray's Quit
+                        // item also calls `process::exit` directly in
+                        // `handle_tray_events`, so this path is a belt-and-
+                        // suspenders fallback.
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                }
+            }
+        }
 
         // Top menu bar
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {

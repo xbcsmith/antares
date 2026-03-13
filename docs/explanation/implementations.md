@@ -10828,3 +10828,176 @@ The three new tests (`test_dropped_item_round_trip_save_load`,
 are included in the 3510 passing tests.
 
 ---
+
+## macOS Menu-Bar Status Item — Phase 3: Show/Hide Window from Menu Bar (Complete)
+
+### Overview
+
+Extends the macOS menu-bar tray integration (Phase 2) with a Show/Hide window
+toggle driven by a `std::sync::mpsc` channel. The tray's context menu now
+exposes three items — **Show Antares Campaign Builder**, **Hide**, and **Quit**
+— and dispatches `TrayCommand` values over a bounded sync channel so that the
+`update()` loop can issue the appropriate `egui::ViewportCommand`s without
+blocking any OS callback thread.
+
+Key design decisions:
+
+- A `TrayCommand` enum (`ShowWindow`, `HideWindow`, `Quit`) carries intent
+  across the thread boundary from the tray event handler to the egui render
+  loop.
+- A `SyncSender<TrayCommand>` (which is both `Send` and `Sync`) is stored in
+  a module-level `OnceLock`, satisfying the `static` bound without a `Mutex`.
+- `build_tray_icon()` now returns `(tray_icon::TrayIcon, Receiver<TrayCommand>)`;
+  the `TrayIcon` stays alive in `run()` outside the closure, and the `Receiver`
+  is moved into `CampaignBuilderApp` inside the closure.
+- `handle_tray_events()` retains its zero-argument signature: it retrieves the
+  sender from the `OnceLock` and sends commands without requiring the caller to
+  pass anything extra.
+- `Quit` remains a direct `process::exit(0)` call for immediate, synchronous
+  termination; `TrayCommand::Quit` is also provided as a belt-and-suspenders
+  `ViewportCommand::Close` path drained in `update()`.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `sdk/campaign_builder/src/tray.rs` — `TrayCommand` enum (`PartialEq`,
+      `Debug`, `Clone`); `MENU_ID_SHOW` / `MENU_ID_HIDE` constants; module-level
+      `TRAY_CMD_TX: OnceLock<SyncSender<TrayCommand>>`; `build_tray_icon()` returns
+      `(TrayIcon, Receiver<TrayCommand>)`; Show + Hide menu items appended;
+      `handle_tray_events()` sends `ShowWindow` / `HideWindow` over the channel;
+      2 new unit tests
+- [x] `sdk/campaign_builder/src/lib.rs` — `tray_cmd_rx:
+Option<std::sync::mpsc::Receiver<tray::TrayCommand>>` field on
+      `CampaignBuilderApp` (cfg-gated); `Default` impl initialises it to `None`;
+      `run()` destructures `build_tray_icon()` and wires the receiver into the app;
+      `update()` drains the receiver and issues `ViewportCommand`s
+- [x] All quality gates pass (`cargo fmt`, `cargo check`, `cargo clippy -D
+warnings`, `cargo nextest run`)
+
+### Files Changed
+
+| File                               | Change                                                                                                          |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/tray.rs` | `TrayCommand` enum, `OnceLock` sender, updated `build_tray_icon()`, updated `handle_tray_events()`, 2 new tests |
+| `sdk/campaign_builder/src/lib.rs`  | `tray_cmd_rx` field, `Default` init, `run()` wiring, `update()` drain loop                                      |
+
+### Architecture Details
+
+#### `TrayCommand` Enum
+
+```sdk/campaign_builder/src/tray.rs#L113-125
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrayCommand {
+    /// Raise the window to the front and make it visible.
+    ShowWindow,
+    /// Hide the window without terminating the process.
+    HideWindow,
+    /// Close the egui viewport (counterpart to the direct `process::exit` path).
+    Quit,
+}
+```
+
+#### `OnceLock<SyncSender>` Pattern
+
+`SyncSender<T>` implements both `Send` and `Sync` (unlike `Sender<T>` which is
+only `Send`). This makes it eligible for storage in a `OnceLock<T>` static,
+which requires `T: Send + Sync`. The bounded channel capacity of 32 ensures
+that even rapid menu clicks cannot block the OS callback thread.
+
+```sdk/campaign_builder/src/tray.rs#L133-136
+static TRAY_CMD_TX: OnceLock<SyncSender<TrayCommand>> = OnceLock::new();
+```
+
+#### `build_tray_icon()` — Updated Signature
+
+```sdk/campaign_builder/src/tray.rs#L193-196
+pub fn build_tray_icon() -> (tray_icon::TrayIcon, Receiver<TrayCommand>) {
+    let (tx, rx) = mpsc::sync_channel(32);
+    let _ = TRAY_CMD_TX.set(tx);
+    // ...
+```
+
+The `TrayIcon` is kept in `run()` via `let (_tray, tray_cmd_rx) =
+tray::build_tray_icon();` outside the `run_native` closure. The `Receiver` is
+moved into the closure and stored as `app.tray_cmd_rx = Some(tray_cmd_rx)`.
+
+#### Menu Items
+
+Three items are appended in order: **Show Antares Campaign Builder** (ID
+`"show"`), **Hide** (ID `"hide"`), **Quit** (ID `"quit"`).
+
+#### `handle_tray_events()` — Channel Dispatch
+
+The function retrieves the sender from `TRAY_CMD_TX.get()` (returning early if
+not yet initialised) and maps raw `MenuEvent` IDs to channel sends or a direct
+`process::exit(0)`:
+
+- `"quit"` → `std::process::exit(0)` (synchronous, immediate)
+- `"show"` → `tx.send(TrayCommand::ShowWindow)` (non-blocking; error ignored
+  if receiver dropped)
+- `"hide"` → `tx.send(TrayCommand::HideWindow)`
+- Unknown IDs → silently ignored
+
+#### `update()` — Receiver Drain
+
+Each frame, after calling `tray::handle_tray_events()`, the app drains
+`self.tray_cmd_rx` with `try_recv()` and issues `ViewportCommand`s:
+
+```sdk/campaign_builder/src/lib.rs#L4241-4266
+#[cfg(target_os = "macos")]
+if let Some(ref rx) = self.tray_cmd_rx {
+    while let Ok(cmd) = rx.try_recv() {
+        match cmd {
+            tray::TrayCommand::ShowWindow => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            tray::TrayCommand::HideWindow => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            }
+            tray::TrayCommand::Quit => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+}
+```
+
+`Visible(true)` is issued before `Focus` so the window exists in the window
+manager before the focus request is processed.
+
+#### Non-macOS Builds
+
+All new code is gated with `#[cfg(target_os = "macos")]`. The `tray` module
+itself has `#![cfg(target_os = "macos")]` at the file level, so non-macOS
+builds see neither the module nor the struct field.
+
+### Tests Added
+
+#### `sdk/campaign_builder/src/tray.rs` — 2 new tests (Phase 3)
+
+| Test name                                      | What it verifies                                                                                            |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `test_tray_command_show_is_distinct_from_hide` | `TrayCommand::ShowWindow != TrayCommand::HideWindow`; confirms `PartialEq` derivation                       |
+| `test_tray_command_channel_send_recv`          | A `TrayCommand::ShowWindow` sent over an `mpsc::sync_channel` is received via `try_recv()` without blocking |
+
+Both tests are purely data-structure / channel tests; no `NSApp` or
+`NSStatusItem` is touched. They run anywhere the crate compiles (macOS only,
+due to the file-level `#![cfg(target_os = "macos")]` gate).
+
+### Quality Gate Results
+
+```text
+cargo fmt --all                                → No output (all files formatted)
+cargo check --all-targets --all-features       → Finished with 0 errors, 0 warnings
+cargo clippy --all-targets --all-features
+  -- -D warnings                               → Finished with 0 warnings
+cargo nextest run --all-features
+  -p campaign_builder                          → 2047/2047 passed (2 new tray tests included)
+```
+
+The 2 new tray tests:
+
+- `campaign_builder tray::tests::test_tray_command_show_is_distinct_from_hide` ✅
+- `campaign_builder tray::tests::test_tray_command_channel_send_recv` ✅
+
+---
