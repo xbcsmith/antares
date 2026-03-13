@@ -31,7 +31,7 @@ const GRASS_BLADE_Y_OFFSET: f32 = 0.0;
 const TILE_CENTER_OFFSET: f32 = 0.5;
 
 /// Path to the grass blade alpha-cutout texture (relative to the `assets/` directory).
-const GRASS_BLADE_TEXTURE: &str = "textures/grass/grass_blade.png";
+const GRASS_BLADE_TEXTURE: &str = "assets/textures/grass/grass_blade.png";
 
 /// Alpha threshold for the grass blade mask cutout.
 ///
@@ -1745,8 +1745,8 @@ mod tests {
     #[test]
     fn test_grass_blade_texture_path_constant() {
         assert!(
-            GRASS_BLADE_TEXTURE.starts_with("textures/grass/"),
-            "GRASS_BLADE_TEXTURE must start with 'textures/grass/', got '{GRASS_BLADE_TEXTURE}'"
+            GRASS_BLADE_TEXTURE.starts_with("assets/textures/grass/"),
+            "GRASS_BLADE_TEXTURE must start with 'assets/textures/grass/', got '{GRASS_BLADE_TEXTURE}'"
         );
         assert!(
             GRASS_BLADE_TEXTURE.ends_with(".png"),
