@@ -73,6 +73,8 @@ pub mod template_metadata;
 pub mod templates;
 pub mod test_play;
 pub mod test_utils;
+#[cfg(target_os = "macos")]
+pub mod tray;
 pub mod ui_helpers;
 pub mod undo_redo;
 pub mod validation;
@@ -147,6 +149,12 @@ pub fn run() -> Result<(), eframe::Error> {
         renderer: eframe::Renderer::default(),
         ..Default::default()
     };
+
+    // Build the macOS menu-bar status item (NSStatusItem).  The binding must
+    // remain live for the entire duration of `run_native`; dropping it removes
+    // the icon from the menu bar.
+    #[cfg(target_os = "macos")]
+    let _tray = tray::build_tray_icon();
 
     eframe::run_native(
         "Antares Campaign Builder",
@@ -4201,6 +4209,11 @@ impl CampaignBuilderApp {
 
 impl eframe::App for CampaignBuilderApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Poll macOS menu-bar status item events once per frame.
+        // Handles "Quit" and any future tray menu actions without a separate thread.
+        #[cfg(target_os = "macos")]
+        tray::handle_tray_events();
+
         // Top menu bar
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {

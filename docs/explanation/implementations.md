@@ -10496,6 +10496,190 @@ python3 examples/generate_item_meshes.py --test-fixtures          →  2 files �
 
 ---
 
+## macOS Menu-Bar Status Item — Phase 2: macOS Menu-Bar Status Item (Complete)
+
+### Overview
+
+Phase 2 adds a real macOS menu-bar status item (`NSStatusItem`) to the Campaign
+Builder using the [`tray-icon`](https://crates.io/crates/tray-icon) crate (Tauri
+ecosystem). When the application is running, the Antares icon appears in the
+top-right macOS menu bar. Clicking it opens a context menu with a single
+**Quit** action that terminates the process cleanly via
+`std::process::exit(0)`.
+
+All tray code is gated on `#[cfg(target_os = "macos")]` — non-macOS targets
+compile and link without any change in behaviour or warnings.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `scripts/generate_icons.sh` verified — already existed; generates
+      `assets/icons/generated/macos/tray_icon_1x.png` (22×22) and
+      `tray_icon_2x.png` (44×44) from the source 1513×1513 PNG
+- [x] `assets/icons/generated/macos/tray_icon_1x.png` (22×22) — generated
+- [x] `assets/icons/generated/macos/tray_icon_2x.png` (44×44) — generated
+- [x] `sdk/campaign_builder/assets/icons/tray_icon_1x.png` (22×22) — copied
+      into SDK for compile-time embedding
+- [x] `sdk/campaign_builder/assets/icons/tray_icon_2x.png` (44×44) — copied
+      into SDK for Retina / future HiDPI use
+- [x] `sdk/campaign_builder/Cargo.toml` — `tray-icon = "0.19"` added under
+      `[target.'cfg(target_os = "macos")'.dependencies]`
+- [x] `sdk/campaign_builder/src/tray.rs` — new module with:
+  - `TRAY_ICON_1X` / `TRAY_ICON_2X` embedded constants
+  - `MENU_ID_QUIT` constant (`"quit"`)
+  - `build_tray_icon() -> tray_icon::TrayIcon` — decodes icon, builds
+    context menu, constructs `NSStatusItem`
+  - `handle_tray_events()` — drains menu-event channel; dispatches `"quit"`
+    → `std::process::exit(0)`
+  - 5 unit tests (see below)
+- [x] `sdk/campaign_builder/src/lib.rs`:
+  - `#[cfg(target_os = "macos")] pub mod tray;` module declaration added
+  - `#[cfg(target_os = "macos")] let _tray = tray::build_tray_icon();` in
+    `run()` after `NativeOptions` construction and before `eframe::run_native`
+  - `#[cfg(target_os = "macos")] tray::handle_tray_events();` at the top of
+    `CampaignBuilderApp::update()`
+- [x] All five required tray tests pass
+- [x] All four quality gates pass with zero errors and zero warnings
+
+### Files Changed
+
+| File                                                 | Change                                                                                                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `assets/icons/generated/macos/tray_icon_1x.png`      | **New** — 22×22 menu-bar icon generated from source PNG by Python/Pillow                                                                    |
+| `assets/icons/generated/macos/tray_icon_2x.png`      | **New** — 44×44 Retina icon generated from source PNG by Python/Pillow                                                                      |
+| `sdk/campaign_builder/assets/icons/tray_icon_1x.png` | **New** — 22×22 icon embedded in the SDK crate via `include_bytes!`                                                                         |
+| `sdk/campaign_builder/assets/icons/tray_icon_2x.png` | **New** — 44×44 icon embedded in the SDK crate via `include_bytes!`                                                                         |
+| `sdk/campaign_builder/Cargo.toml`                    | Added `[target.'cfg(target_os = "macos")'.dependencies]` section with `tray-icon = { version = "0.19", features = [] }`                     |
+| `sdk/campaign_builder/src/tray.rs`                   | **New** — tray module: embedded constants, `build_tray_icon`, `handle_tray_events`, 5 unit tests; file-level `#![cfg(target_os = "macos")]` |
+| `sdk/campaign_builder/src/lib.rs`                    | Added `#[cfg(target_os = "macos")] pub mod tray;`; `_tray` binding in `run()`; `handle_tray_events()` call in `update()`                    |
+
+### Architecture Details
+
+#### `tray.rs` — File-Level Platform Gate
+
+The entire file is wrapped with `#![cfg(target_os = "macos")]`. On non-macOS
+targets the file compiles to an empty module; neither the `tray_icon` crate
+imports nor the embedded asset bytes are compiled or linked. The
+`tray-icon` dependency is itself declared in a
+`[target.'cfg(target_os = "macos")'.dependencies]` section, so it is not
+fetched or linked on other platforms at all.
+
+```sdk/campaign_builder/src/tray.rs#L37-L40
+#![cfg(target_os = "macos")]
+
+use tray_icon::{
+    menu::{Menu, MenuItem},
+```
+
+#### `build_tray_icon()` — Four-Step Construction
+
+```sdk/campaign_builder/src/tray.rs#L102-L128
+pub fn build_tray_icon() -> tray_icon::TrayIcon {
+    // 1. Decode the 22×22 PNG to RGBA8.
+    let img = image::load_from_memory(TRAY_ICON_1X)
+        .expect("failed to decode tray_icon_1x.png — embedded bytes must be valid PNG")
+        .into_rgba8();
+    let width = img.width();
+    let height = img.height();
+    let rgba = img.into_raw();
+
+    // 2. Construct the platform icon from raw RGBA bytes.
+    let icon = Icon::from_rgba(rgba, width, height)
+        .expect("failed to construct tray_icon::Icon — RGBA dimensions must be consistent");
+
+    // 3. Build the context menu: one "Quit" item.
+    let menu = Menu::new();
+    let quit_item = MenuItem::with_id(MENU_ID_QUIT, "Quit", true, None);
+    menu.append(&quit_item)
+        .expect("failed to append Quit item to tray context menu");
+
+    // 4. Assemble and return the TrayIcon.
+    TrayIconBuilder::new()
+        .with_icon(icon)
+        .with_menu(Box::new(menu))
+        .with_tooltip("Antares Campaign Builder")
+        .build()
+        .expect("failed to build macOS NSStatusItem — must be called on the main thread")
+}
+```
+
+#### `handle_tray_events()` — Non-Blocking Channel Drain
+
+`tray_icon::menu::MenuEvent::receiver()` returns a reference to a
+`crossbeam_channel::Receiver<MenuEvent>`. `try_recv()` is non-blocking —
+it returns `Err(TryRecvError::Empty)` immediately when no events are pending,
+so calling it once per frame adds negligible overhead:
+
+```sdk/campaign_builder/src/tray.rs#L147-L154
+pub fn handle_tray_events() {
+    while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
+        if event.id == MENU_ID_QUIT {
+            std::process::exit(0);
+        }
+    }
+}
+```
+
+`event.id` is a `MenuId(String)` that implements `PartialEq<&str>`, so the
+string comparison is direct and allocation-free.
+
+#### `_tray` Lifetime in `run()`
+
+`TrayIcon` is `!Send + !Sync`. The binding is created on the main thread
+before `eframe::run_native` and is dropped only when `run()` returns (after
+the eframe event loop exits):
+
+```sdk/campaign_builder/src/lib.rs#L152-L157
+// Build the macOS menu-bar status item (NSStatusItem).  The binding must
+// remain live for the entire duration of `run_native`; dropping it removes
+// the icon from the menu bar.
+#[cfg(target_os = "macos")]
+let _tray = tray::build_tray_icon();
+```
+
+eframe's event loop also runs on the main thread, so no cross-thread
+constraints are violated.
+
+#### Per-Frame Poll in `update()`
+
+`handle_tray_events()` is the first statement in `update()`, before any UI
+rendering. This ensures tray menu actions are processed at the start of each
+frame rather than after potentially expensive UI work:
+
+```sdk/campaign_builder/src/lib.rs#L4212-L4215
+// Poll macOS menu-bar status item events once per frame.
+// Handles "Quit" and any future tray menu actions without a separate thread.
+#[cfg(target_os = "macos")]
+tray::handle_tray_events();
+```
+
+### Tests Added
+
+All 5 tests live in `sdk/campaign_builder/src/tray.rs` under
+`#[cfg(test)]`. They decode pixel data only — no `NSApp` or `NSStatusItem`
+is touched — so they are safe to run in any headless CI environment on macOS.
+
+| Test                            | What it verifies                                             |
+| ------------------------------- | ------------------------------------------------------------ |
+| `test_tray_icon_1x_png_magic`   | `TRAY_ICON_1X` bytes begin with PNG magic `[137,80,78,71,…]` |
+| `test_tray_icon_2x_png_magic`   | `TRAY_ICON_2X` bytes begin with PNG magic `[137,80,78,71,…]` |
+| `test_tray_icon_1x_dimensions`  | Decoded `width == 22`, `height == 22`                        |
+| `test_tray_icon_2x_dimensions`  | Decoded `width == 44`, `height == 44`                        |
+| `test_tray_icon_1x_rgba_length` | `rgba.len() == 22 × 22 × 4 == 1936`                          |
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → No output (all files formatted)
+cargo check --all-targets → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings  → Finished with 0 warnings
+cargo nextest run         → 3510/3510 passed, 8 skipped
+  (campaign_builder: 2045/2045 passed, including 5 new tray tests)
+```
+
+---
+
+---
+
 ## Dropped Item World Persistence — Phase 4: Save/Load Validation and End-to-End Testing (Complete)
 
 ### Overview
