@@ -33,6 +33,8 @@ CampaignMetadata(
     creatures_file: "data/creatures.ron",
     stock_templates_file: "data/npc_stock_templates.ron",
     starting_time: GameTime(
+        year: 1,
+        month: 1,
         day: 1,
         hour: 8,
         minute: 0,

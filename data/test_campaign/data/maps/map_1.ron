@@ -8303,7 +8303,7 @@
         ): RecruitableCharacter(
             name: "Whisper",
             description: "A nimble elf watches from the shadows near the alley.",
-            character_id: "npc_whisper",
+            character_id: "whisper",
             dialogue_id: Some(102),
         ),
         (
@@ -8312,7 +8312,7 @@
         ): RecruitableCharacter(
             name: "Apprentice Zara",
             description: "A young gnome apprentice studies a spellbook intently.",
-            character_id: "npc_apprentice_zara",
+            character_id: "apprentice_zara",
             dialogue_id: Some(101),
         ),
         (
@@ -8338,7 +8338,7 @@
         ): RecruitableCharacter(
             name: "Old Gareth",
             description: "A grizzled dwarf veteran stands here, repairing armor.",
-            character_id: "npc_old_gareth",
+            character_id: "old_gareth",
             dialogue_id: Some(100),
         ),
         (

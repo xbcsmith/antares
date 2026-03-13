@@ -22,23 +22,23 @@ use bevy::prelude::*;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Asset-server path for the ground terrain texture.
-pub const TEXTURE_GROUND: &str = "textures/terrain/ground.png";
+pub const TEXTURE_GROUND: &str = "assets/textures/terrain/ground.png";
 /// Asset-server path for the grass terrain texture.
-pub const TEXTURE_GRASS: &str = "textures/terrain/grass.png";
+pub const TEXTURE_GRASS: &str = "assets/textures/terrain/grass.png";
 /// Asset-server path for the stone terrain texture.
-pub const TEXTURE_STONE: &str = "textures/terrain/stone.png";
+pub const TEXTURE_STONE: &str = "assets/textures/terrain/stone.png";
 /// Asset-server path for the mountain terrain texture.
-pub const TEXTURE_MOUNTAIN: &str = "textures/terrain/mountain.png";
+pub const TEXTURE_MOUNTAIN: &str = "assets/textures/terrain/mountain.png";
 /// Asset-server path for the dirt terrain texture.
-pub const TEXTURE_DIRT: &str = "textures/terrain/dirt.png";
+pub const TEXTURE_DIRT: &str = "assets/textures/terrain/dirt.png";
 /// Asset-server path for the water terrain texture.
-pub const TEXTURE_WATER: &str = "textures/terrain/water.png";
+pub const TEXTURE_WATER: &str = "assets/textures/terrain/water.png";
 /// Asset-server path for the lava terrain texture.
-pub const TEXTURE_LAVA: &str = "textures/terrain/lava.png";
+pub const TEXTURE_LAVA: &str = "assets/textures/terrain/lava.png";
 /// Asset-server path for the swamp terrain texture.
-pub const TEXTURE_SWAMP: &str = "textures/terrain/swamp.png";
+pub const TEXTURE_SWAMP: &str = "assets/textures/terrain/swamp.png";
 /// Asset-server path for the forest-floor terrain texture.
-pub const TEXTURE_FOREST_FLOOR: &str = "textures/terrain/forest_floor.png";
+pub const TEXTURE_FOREST_FLOOR: &str = "assets/textures/terrain/forest_floor.png";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -183,8 +183,8 @@ mod tests {
                 "Texture path constant must not be empty: got empty string"
             );
             assert!(
-                constant.starts_with("textures/terrain/"),
-                "Texture path constant '{constant}' must start with 'textures/terrain/'"
+                constant.starts_with("assets/textures/terrain/"),
+                "Texture path constant '{constant}' must start with 'assets/textures/terrain/'"
             );
         }
     }

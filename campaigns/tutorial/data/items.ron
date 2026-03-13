@@ -22,6 +22,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 2,
@@ -46,6 +47,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 3,
@@ -70,6 +72,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 4,
@@ -94,6 +97,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 5,
@@ -118,6 +122,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 6,
@@ -142,6 +147,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 7,
@@ -169,6 +175,7 @@
             "large_weapon",
             "two_handed",
         ],
+        mesh_descriptor_override: None,
     ),
     (
         id: 8,
@@ -196,6 +203,7 @@
             "large_weapon",
             "two_handed",
         ],
+        mesh_descriptor_override: None,
     ),
     (
         id: 9,
@@ -222,6 +230,7 @@
         tags: [
             "two_handed",
         ],
+        mesh_descriptor_override: None,
     ),
     (
         id: 10,
@@ -246,6 +255,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 11,
@@ -273,6 +283,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 12,
@@ -303,6 +314,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 20,
@@ -322,6 +334,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 21,
@@ -341,6 +354,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 22,
@@ -362,6 +376,7 @@
         tags: [
             "heavy_armor",
         ],
+        mesh_descriptor_override: None,
     ),
     (
         id: 23,
@@ -381,6 +396,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 30,
@@ -403,6 +419,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 31,
@@ -425,6 +442,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 40,
@@ -446,6 +464,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 41,
@@ -467,6 +486,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 42,
@@ -488,6 +508,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 43,
@@ -509,6 +530,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 44,
@@ -530,6 +552,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 50,
@@ -537,6 +560,7 @@
         item_type: Consumable((
             effect: HealHp(20),
             is_combat_usable: true,
+            duration_minutes: None,
         )),
         base_cost: 50,
         sell_cost: 25,
@@ -548,6 +572,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 51,
@@ -555,6 +580,7 @@
         item_type: Consumable((
             effect: RestoreSp(10),
             is_combat_usable: false,
+            duration_minutes: None,
         )),
         base_cost: 100,
         sell_cost: 50,
@@ -566,6 +592,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 52,
@@ -573,6 +600,7 @@
         item_type: Consumable((
             effect: CureCondition(4),
             is_combat_usable: true,
+            duration_minutes: None,
         )),
         base_cost: 75,
         sell_cost: 37,
@@ -584,6 +612,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 60,
@@ -602,6 +631,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 61,
@@ -620,6 +650,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 100,
@@ -641,6 +672,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 101,
@@ -665,6 +697,7 @@
         is_cursed: true,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 102,
@@ -683,6 +716,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 103,
@@ -701,6 +735,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 104,
@@ -719,6 +754,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 105,
@@ -746,6 +782,7 @@
             "large_weapon",
             "two_handed",
         ],
+        mesh_descriptor_override: None,
     ),
     (
         id: 106,
@@ -770,6 +807,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 107,
@@ -789,6 +827,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 108,
@@ -796,6 +835,7 @@
         item_type: Consumable((
             effect: HealHp(20),
             is_combat_usable: true,
+            duration_minutes: None,
         )),
         base_cost: 10,
         sell_cost: 5,
@@ -807,6 +847,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 109,
@@ -814,6 +855,7 @@
         item_type: Consumable((
             effect: CureCondition(255),
             is_combat_usable: true,
+            duration_minutes: None,
         )),
         base_cost: 10,
         sell_cost: 5,
@@ -825,6 +867,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 110,
@@ -832,6 +875,7 @@
         item_type: Consumable((
             effect: CureCondition(255),
             is_combat_usable: false,
+            duration_minutes: None,
         )),
         base_cost: 100,
         sell_cost: 50,
@@ -843,21 +887,15 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
-
-    // ===== Food Items =====
-    // Added in Phase 3 of the food system migration so that tutorial campaign
-    // merchants and innkeepers can sell rations to the party.
-    // Food Ration (id 111): provides 1 ration unit (IsFood 1).
-    // Trail Ration (id 112): provides 3 ration units (IsFood 3) — efficient for
-    //   parties that want to carry fewer inventory slots of food.
-
     (
         id: 111,
         name: "Food Ration",
         item_type: Consumable((
             effect: IsFood(1),
             is_combat_usable: false,
+            duration_minutes: None,
         )),
         base_cost: 2,
         sell_cost: 1,
@@ -869,6 +907,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
     (
         id: 112,
@@ -876,6 +915,7 @@
         item_type: Consumable((
             effect: IsFood(3),
             is_combat_usable: false,
+            duration_minutes: None,
         )),
         base_cost: 5,
         sell_cost: 2,
@@ -887,5 +927,6 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_descriptor_override: None,
     ),
 ]

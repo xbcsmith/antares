@@ -750,19 +750,19 @@ const TREE_FOLIAGE_COLOR: Color = Color::srgb(0.2, 0.6, 0.2); // Green
 
 // Tree texture asset paths
 /// Asset path for the bark texture applied to all non-Dead tree trunks.
-const TREE_BARK_TEXTURE: &str = "textures/trees/bark.png";
+const TREE_BARK_TEXTURE: &str = "assets/textures/trees/bark.png";
 /// Asset path for the Oak foliage alpha-mask texture.
-const TREE_FOLIAGE_TEXTURE_OAK: &str = "textures/trees/foliage_oak.png";
+const TREE_FOLIAGE_TEXTURE_OAK: &str = "assets/textures/trees/foliage_oak.png";
 /// Asset path for the Pine foliage alpha-mask texture.
-const TREE_FOLIAGE_TEXTURE_PINE: &str = "textures/trees/foliage_pine.png";
+const TREE_FOLIAGE_TEXTURE_PINE: &str = "assets/textures/trees/foliage_pine.png";
 /// Asset path for the Birch foliage alpha-mask texture.
-const TREE_FOLIAGE_TEXTURE_BIRCH: &str = "textures/trees/foliage_birch.png";
+const TREE_FOLIAGE_TEXTURE_BIRCH: &str = "assets/textures/trees/foliage_birch.png";
 /// Asset path for the Willow foliage alpha-mask texture.
-const TREE_FOLIAGE_TEXTURE_WILLOW: &str = "textures/trees/foliage_willow.png";
+const TREE_FOLIAGE_TEXTURE_WILLOW: &str = "assets/textures/trees/foliage_willow.png";
 /// Asset path for the Palm foliage alpha-mask texture.
-const TREE_FOLIAGE_TEXTURE_PALM: &str = "textures/trees/foliage_palm.png";
+const TREE_FOLIAGE_TEXTURE_PALM: &str = "assets/textures/trees/foliage_palm.png";
 /// Asset path for the Shrub foliage alpha-mask texture.
-const TREE_FOLIAGE_TEXTURE_SHRUB: &str = "textures/trees/foliage_shrub.png";
+const TREE_FOLIAGE_TEXTURE_SHRUB: &str = "assets/textures/trees/foliage_shrub.png";
 /// Alpha cutoff for foliage `AlphaMode::Mask` — pixels with alpha below this are clipped.
 const TREE_FOLIAGE_ALPHA_CUTOFF: f32 = 0.35_f32;
 // Color constants for shrubs and grass (used in spawn_shrub and spawn_grass)
