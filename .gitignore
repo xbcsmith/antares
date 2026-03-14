@@ -4,10 +4,10 @@ debug
 target
 saves
 *.log
-*.png
-*.jpg
-*.txt
-*.sh
+/*.png
+/*.jpg
+/*.txt
+/*.sh
 /*.py
 screenshots/
 

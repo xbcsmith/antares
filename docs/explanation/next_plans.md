@@ -102,7 +102,7 @@ Work required:
 
 This item is tracked here for future planning. It does not need to be addressed in the current inventory system implementation plan.
 
-✅ PLAN WRITTEN - [Dropped Item Persistence Implementation Plan](./dropped_item_persistence_implementation_plan.md)
+✅ COMPLETED - [Dropped Item Persistence Implementation Plan](./dropped_item_persistence_implementation_plan.md)
 
 ### Encounter Visibility Follow-up (Skeleton)
 
@@ -181,7 +181,5 @@ Foliage particularly Bushes clip tree trunks. And seems like editing them in the
 Door are really bad. Fat half tile blocks. No wood textures either.
 
 Combat. Characters with 0 HP are unconcious and should not be allowed to attack monsters.
-
-Dropped items on the ground are not visible. 2026-03-12T22:44:43.112399Z INFO antares::game::systems::item_world_events: Spawned dropped item mesh: item_id=3 at map=1 tile=(3, 17)
 
 Time does not advance when the party moves. The clock only ever increments the hour when resting. Time should advance every time the party moves a tile (the minutes should advance). Time should advance when the party travels between maps.
