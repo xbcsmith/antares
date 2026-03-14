@@ -22,6 +22,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_id: Some(9006),
     ),
     (
         id: 2,
@@ -46,6 +47,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_id: Some(9002),
     ),
     (
         id: 3,
@@ -70,6 +72,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_id: Some(9003),
     ),
     (
         id: 4,
@@ -94,6 +97,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_id: Some(9004),
     ),
     (
         id: 5,
@@ -169,6 +173,7 @@
             "large_weapon",
             "two_handed",
         ],
+        mesh_id: Some(9005),
     ),
     (
         id: 8,
@@ -196,6 +201,7 @@
             "large_weapon",
             "two_handed",
         ],
+        mesh_id: Some(9008),
     ),
     (
         id: 9,
@@ -222,6 +228,7 @@
         tags: [
             "two_handed",
         ],
+        mesh_id: Some(9008),
     ),
     (
         id: 10,
@@ -246,6 +253,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_id: Some(9006),
     ),
     (
         id: 11,
@@ -273,6 +281,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_id: Some(9001),
     ),
     (
         id: 12,
@@ -303,6 +312,7 @@
         is_cursed: false,
         icon_path: None,
         tags: [],
+        mesh_id: Some(9001),
     ),
     (
         id: 20,

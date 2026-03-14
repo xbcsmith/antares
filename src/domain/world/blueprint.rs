@@ -4,7 +4,7 @@
 use crate::domain::types::{MapId, Position};
 use crate::domain::world::{Map, MapEvent, NpcPlacement, TerrainType, Tile, WallType};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize)]
 pub struct MapBlueprint {
@@ -156,7 +156,7 @@ impl From<MapBlueprint> for Map {
             }
         }
 
-        let mut events = HashMap::new();
+        let mut events = BTreeMap::new();
         for bp_event in bp.events {
             let event = match bp_event.event_type {
                 BlueprintEventType::Text(text) => MapEvent::Sign {
@@ -240,6 +240,7 @@ impl From<MapBlueprint> for Map {
             encounter_table: None,
             allow_random_encounters: true,
             npc_placements,
+            dropped_items: Vec::new(),
         }
     }
 }

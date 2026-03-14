@@ -4,6 +4,38 @@
 
 ## SDK
 
+## Add Mac Os Tray Icon
+
+We need to add a Mac OS tray icon for Antares Campaign Builder SDK. A good macOS tray icon is usually:
+
+square
+high-contrast
+simple silhouette
+readable at 22×22 and 44×44
+not overly detailed
+
+Here is the icon @assets/icons/antares_tray.png
+
+Here is the egui code that shows how to set an app icon:
+
+<https://github.com/emilk/egui/blob/a5973e5cac461a23c853cb174b28c8e9317ecce6/crates/eframe/src/native/app_icon.rs#L200>
+
+The @scripts/generate_icons.sh script generates icons for the web and macOS platforms from a source PNG.
+
+Write a plan with a phased approach for adding a Mac OS tray icon. THINK HARD and follow the rules in @PLAN.md
+
+[MacOS Tray Icon](./macos_tray_icon.md)
+
+## OBJ to RON Conversion
+
+Add an OBJ-to-RON conversion pipeline to the Campaign Builder SDK. Users will
+be able to load a Wavefront OBJ file, see each mesh/object-group listed in the
+UI, assign colors via a color picker and preset palette, and export the result
+as a `CreatureDefinition` RON file (used for both creatures and items). The
+default export paths are `assets/creatures/` and `assets/items/` respectively.
+
+✅ COMPLETE - [obj to ron conversion](./obj_to_ron_implementation_plan.md)
+
 ## Game Engine
 
 ### Clean up

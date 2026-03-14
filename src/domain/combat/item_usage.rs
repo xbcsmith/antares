@@ -480,6 +480,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -504,6 +505,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -653,6 +655,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -677,6 +680,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -1175,6 +1179,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         content.items.add_item(potion).unwrap();
 
@@ -1245,6 +1250,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         content.items.add_item(potion).unwrap();
 

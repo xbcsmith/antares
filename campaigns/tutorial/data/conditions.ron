@@ -1,54 +1,13 @@
 [
     (
-        id: "blind",
-        name: "Blind",
-        description: "Reduces accuracy and perception.",
+        id: "awake",
+        name: "Awake",
+        description: "Awakens a sleeping character or monster",
         effects: [
-            StatusEffect("blind"),
-            AttributeModifier(
-                attribute: "accuracy",
-                value: -5,
-            ),
+            StatusEffect("Awake"),
         ],
-        default_duration: Rounds(5),
-        icon_id: Some("icon_blind"),
-    ),
-    (
-        id: "sleep",
-        name: "Sleep",
-        description: "Target is asleep and cannot act.",
-        effects: [
-            StatusEffect("asleep"),
-        ],
-        default_duration: Rounds(3),
-        icon_id: Some("icon_sleep"),
-    ),
-    (
-        id: "poison",
-        name: "Poison",
-        description: "Takes damage over time from poison.",
-        effects: [
-            DamageOverTime(
-                damage: (
-                    count: 1,
-                    sides: 4,
-                    bonus: 0,
-                ),
-                element: "poison",
-            ),
-        ],
-        default_duration: Permanent,
-        icon_id: Some("icon_poison"),
-    ),
-    (
-        id: "silenced",
-        name: "Silenced",
-        description: "Cannot cast spells.",
-        effects: [
-            StatusEffect("silenced"),
-        ],
-        default_duration: Rounds(5),
-        icon_id: Some("icon_silenced"),
+        default_duration: Instant,
+        icon_id: Some("1"),
     ),
     (
         id: "bless",
@@ -64,21 +23,44 @@
         icon_id: Some("icon_bless"),
     ),
     (
-        id: "heroism",
-        name: "Heroism",
-        description: "Improved combat effectiveness.",
+        id: "blind",
+        name: "Blind",
+        description: "Reduces accuracy and perception.",
         effects: [
+            StatusEffect("blind"),
             AttributeModifier(
                 attribute: "accuracy",
-                value: 3,
-            ),
-            AttributeModifier(
-                attribute: "might",
-                value: 2,
+                value: -5,
             ),
         ],
-        default_duration: Rounds(10),
-        icon_id: Some("icon_heroism"),
+        default_duration: Rounds(5),
+        icon_id: Some("icon_blind"),
+    ),
+    (
+        id: "cold_resistance",
+        name: "Cold Resistance",
+        description: "Resistance to cold damage.",
+        effects: [
+            AttributeModifier(
+                attribute: "resist_cold",
+                value: 50,
+            ),
+        ],
+        default_duration: Minutes(10),
+        icon_id: Some("icon_cold_resistance"),
+    ),
+    (
+        id: "fire_resistance",
+        name: "Fire Resistance",
+        description: "Resistance to fire damage.",
+        effects: [
+            AttributeModifier(
+                attribute: "resist_fire",
+                value: 50,
+            ),
+        ],
+        default_duration: Minutes(10),
+        icon_id: Some("icon_fire_resistance"),
     ),
     (
         id: "giants_strength",
@@ -107,6 +89,23 @@
         icon_id: Some("icon_haste"),
     ),
     (
+        id: "heroism",
+        name: "Heroism",
+        description: "Improved combat effectiveness.",
+        effects: [
+            AttributeModifier(
+                attribute: "accuracy",
+                value: 3,
+            ),
+            AttributeModifier(
+                attribute: "might",
+                value: 2,
+            ),
+        ],
+        default_duration: Rounds(10),
+        icon_id: Some("icon_heroism"),
+    ),
+    (
         id: "invisibility",
         name: "Invisibility",
         description: "Harder to detect and hit.",
@@ -117,30 +116,21 @@
         icon_id: Some("icon_invisibility"),
     ),
     (
-        id: "fire_resistance",
-        name: "Fire Resistance",
-        description: "Resistance to fire damage.",
+        id: "poison",
+        name: "Poison",
+        description: "Takes damage over time from poison.",
         effects: [
-            AttributeModifier(
-                attribute: "resist_fire",
-                value: 50,
+            DamageOverTime(
+                damage: (
+                    count: 1,
+                    sides: 4,
+                    bonus: 0,
+                ),
+                element: "poison",
             ),
         ],
-        default_duration: Minutes(10),
-        icon_id: Some("icon_fire_resistance"),
-    ),
-    (
-        id: "cold_resistance",
-        name: "Cold Resistance",
-        description: "Resistance to cold damage.",
-        effects: [
-            AttributeModifier(
-                attribute: "resist_cold",
-                value: 50,
-            ),
-        ],
-        default_duration: Minutes(10),
-        icon_id: Some("icon_cold_resistance"),
+        default_duration: Permanent,
+        icon_id: Some("icon_poison"),
     ),
     (
         id: "poison_resistance",
@@ -156,13 +146,23 @@
         icon_id: Some("icon_poison_resistance"),
     ),
     (
-        id: "awake",
-        name: "Awake",
-        description: "Awakens a sleeping character or monster",
+        id: "silenced",
+        name: "Silenced",
+        description: "Cannot cast spells.",
         effects: [
-            StatusEffect("Awake"),
+            StatusEffect("silenced"),
         ],
-        default_duration: Instant,
-        icon_id: Some("1"),
+        default_duration: Rounds(5),
+        icon_id: Some("icon_silenced"),
+    ),
+    (
+        id: "sleep",
+        name: "Sleep",
+        description: "Target is asleep and cannot act.",
+        effects: [
+            StatusEffect("asleep"),
+        ],
+        default_duration: Rounds(3),
+        icon_id: Some("icon_sleep"),
     ),
 ]

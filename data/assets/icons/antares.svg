@@ -7,7 +7,7 @@
    viewBox="0 0 169.33333 169.33333"
    version="1.1"
    id="svg1"
-   inkscape:version="1.4.2 (ebf0e940d0, 2025-05-08)"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
    sodipodi:docname="antares.svg"
    inkscape:export-filename="antares.png"
    inkscape:export-xdpi="300"
@@ -28,15 +28,15 @@
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="px"
      showgrid="true"
-     inkscape:zoom="1.0333895"
-     inkscape:cx="396.75265"
-     inkscape:cy="328.53055"
+     inkscape:zoom="1.4297265"
+     inkscape:cx="358.46017"
+     inkscape:cy="319.29184"
      inkscape:window-width="1820"
      inkscape:window-height="1100"
      inkscape:window-x="26"
-     inkscape:window-y="23"
+     inkscape:window-y="30"
      inkscape:window-maximized="0"
-     inkscape:current-layer="g14">
+     inkscape:current-layer="g4">
     <inkscape:grid
        id="grid1"
        units="px"
@@ -54,6 +54,57 @@
   </sodipodi:namedview>
   <defs
      id="defs1">
+    <inkscape:path-effect
+       effect="fillet_chamfer"
+       id="path-effect3"
+       is_visible="true"
+       lpeversion="1"
+       nodesatellites_param="F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1"
+       radius="0"
+       unit="px"
+       method="auto"
+       mode="F"
+       chamfer_steps="1"
+       flexible="false"
+       use_knot_distance="true"
+       apply_no_radius="true"
+       apply_with_radius="true"
+       only_selected="false"
+       hide_knots="false" />
+    <inkscape:path-effect
+       effect="fillet_chamfer"
+       id="path-effect2"
+       is_visible="true"
+       lpeversion="1"
+       nodesatellites_param="F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1"
+       radius="0"
+       unit="px"
+       method="auto"
+       mode="F"
+       chamfer_steps="1"
+       flexible="false"
+       use_knot_distance="true"
+       apply_no_radius="true"
+       apply_with_radius="true"
+       only_selected="false"
+       hide_knots="false" />
+    <inkscape:path-effect
+       effect="fillet_chamfer"
+       id="path-effect1"
+       is_visible="true"
+       lpeversion="1"
+       nodesatellites_param="F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1"
+       radius="0"
+       unit="px"
+       method="auto"
+       mode="F"
+       chamfer_steps="1"
+       flexible="false"
+       use_knot_distance="true"
+       apply_no_radius="true"
+       apply_with_radius="true"
+       only_selected="false"
+       hide_knots="false" />
     <linearGradient
        id="linearGradient16"
        inkscape:collect="always">
@@ -106,13 +157,23 @@
        x2="139.55588"
        y2="81.162926"
        gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient11"
+       id="linearGradient3"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="translate(-2.1290198,3.5037414)"
+       x1="34.035484"
+       y1="81.162926"
+       x2="139.55588"
+       y2="81.162926" />
   </defs>
   <g
      inkscape:label="Base"
      inkscape:groupmode="layer"
      id="layer1"
-     sodipodi:insensitive="true"
-     style="display:inline">
+     style="display:none"
+     sodipodi:insensitive="true">
     <circle
        style="fill:url(#linearGradient13);stroke:#ff5f05;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
        id="path1"
@@ -125,14 +186,46 @@
        width="169.2388"
        height="169.75085"
        x="0"
-       y="-0.51206899" />
+       y="-0.51206899"
+       inkscape:export-filename="antares_icon.png"
+       inkscape:export-xdpi="300"
+       inkscape:export-ydpi="300" />
+  </g>
+  <g
+     inkscape:label="Base Icon"
+     inkscape:groupmode="layer"
+     id="g1"
+     style="display:inline">
+    <circle
+       style="fill:url(#linearGradient3);stroke:#ff5f05;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+       id="circle1"
+       cx="84.666664"
+       cy="84.666664"
+       r="52.231033"
+       inkscape:export-filename="antares_sdk.png"
+       inkscape:export-xdpi="300"
+       inkscape:export-ydpi="300" />
+    <path
+       style="fill:#18203f;fill-opacity:1;stroke:#ff5f05;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+       id="rect1"
+       height="127"
+       x="0"
+       y="-0.51206899"
+       sodipodi:type="rect"
+       inkscape:path-effect="#path-effect3"
+       d="M 26.458332,-0.51206899 H 100.54167 C 115.19958,-0.51206899 127,11.288347 127,25.946263 V 100.0296 c 0,14.65791 -11.80042,26.45833 -26.45833,26.45833 H 26.458332 C 11.800416,126.48793 0,114.68751 0,100.0296 V 25.946263 C 0,11.288347 11.800416,-0.51206899 26.458332,-0.51206899 Z"
+       width="127"
+       rx="26.458332"
+       transform="translate(21.166665,21.678734)"
+       inkscape:export-filename="antares_tray.png"
+       inkscape:export-xdpi="300"
+       inkscape:export-ydpi="300" />
   </g>
   <g
      inkscape:label="Circle"
      inkscape:groupmode="layer"
      id="g13"
-     style="display:inline;fill:#e2fe31;fill-opacity:1;stroke:#ff5f05;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
-     sodipodi:insensitive="true">
+     style="display:inline;fill:#e2fe31;fill-opacity:1;stroke:#ff5f05;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1">
     <circle
        style="fill:#e2fe31;fill-opacity:1;stroke:#e2fe31;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
        id="circle13"
@@ -151,7 +244,10 @@
        id="circle14"
        cx="86.795685"
        cy="81.162926"
-       r="52.231033" />
+       r="52.231033"
+       inkscape:export-filename="antares_sun.png"
+       inkscape:export-xdpi="300"
+       inkscape:export-ydpi="300" />
   </g>
   <g
      inkscape:groupmode="layer"
@@ -168,5 +264,52 @@
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-opacity:1"
          x="34.047993"
          y="89.460289">Antares</tspan></text>
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="g2"
+     inkscape:label="SDK"
+     sodipodi:insensitive="true"
+     style="display:inline">
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+       x="61.67971"
+       y="103.52474"
+       id="text1"><tspan
+         sodipodi:role="line"
+         id="tspan1"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16.9333px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-opacity:1"
+         x="61.67971"
+         y="103.52474">SDK</tspan></text>
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="g4"
+     inkscape:label="Campain Builder"
+     style="display:none"
+     sodipodi:insensitive="true">
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:14.1111px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+       x="40.13908"
+       y="101.46181"
+       id="text3"><tspan
+         sodipodi:role="line"
+         id="tspan3"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:14.1111px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-opacity:1"
+         x="40.13908"
+         y="101.46181">Campaign</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:14.1111px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+       x="45.324913"
+       y="113.2162"
+       id="text4"><tspan
+         sodipodi:role="line"
+         id="tspan4"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:14.1111px;font-family:'Space Age';-inkscape-font-specification:'Space Age, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#18203f;fill-opacity:1;stroke:none;stroke-width:1.05833;stroke-opacity:1"
+         x="45.324913"
+         y="113.2162">Buidler</tspan></text>
   </g>
 </svg>

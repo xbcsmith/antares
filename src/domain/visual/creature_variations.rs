@@ -13,7 +13,7 @@
 //! ```
 //! use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 //! use antares::domain::visual::creature_variations::{CreatureVariation, apply_variation};
-//! use std::collections::HashMap;
+//! use std::collections::BTreeMap;
 //!
 //! // Create a base creature
 //! let base = CreatureDefinition {
@@ -39,7 +39,7 @@
 //! };
 //!
 //! // Create a red color variation
-//! let mut color_overrides = HashMap::new();
+//! let mut color_overrides = BTreeMap::new();
 //! color_overrides.insert(0, [1.0, 0.0, 0.0, 1.0]); // Red
 //!
 //! let variation = CreatureVariation {
@@ -47,7 +47,7 @@
 //!     name: "Red Dragon".to_string(),
 //!     scale_override: None,
 //!     mesh_color_overrides: color_overrides,
-//!     mesh_scale_overrides: HashMap::new(),
+//!     mesh_scale_overrides: BTreeMap::new(),
 //! };
 //!
 //! let red_dragon = apply_variation(&base, &variation);
@@ -56,7 +56,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::domain::types::CreatureId;
 use crate::domain::visual::CreatureDefinition;
@@ -79,10 +79,10 @@ use crate::domain::visual::CreatureDefinition;
 ///
 /// ```
 /// use antares::domain::visual::creature_variations::CreatureVariation;
-/// use std::collections::HashMap;
+/// use std::collections::BTreeMap;
 ///
 /// // Create a blue color variant
-/// let mut color_overrides = HashMap::new();
+/// let mut color_overrides = BTreeMap::new();
 /// color_overrides.insert(0, [0.0, 0.0, 1.0, 1.0]); // Blue
 ///
 /// let variation = CreatureVariation {
@@ -90,7 +90,7 @@ use crate::domain::visual::CreatureDefinition;
 ///     name: "Blue Dragon".to_string(),
 ///     scale_override: None,
 ///     mesh_color_overrides: color_overrides,
-///     mesh_scale_overrides: HashMap::new(),
+///     mesh_scale_overrides: BTreeMap::new(),
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -113,14 +113,14 @@ pub struct CreatureVariation {
     /// Keys are mesh indices (0-based), values are RGBA colors.
     /// Only specified meshes will have their colors overridden.
     #[serde(default)]
-    pub mesh_color_overrides: HashMap<usize, [f32; 4]>,
+    pub mesh_color_overrides: BTreeMap<usize, [f32; 4]>,
 
     /// Per-mesh scale overrides as [x, y, z]
     ///
     /// Keys are mesh indices (0-based), values are scale vectors.
     /// Only specified meshes will have their scales overridden.
     #[serde(default)]
-    pub mesh_scale_overrides: HashMap<usize, [f32; 3]>,
+    pub mesh_scale_overrides: BTreeMap<usize, [f32; 3]>,
 }
 
 impl CreatureVariation {
@@ -146,8 +146,8 @@ impl CreatureVariation {
             base_creature_id,
             name: name.into(),
             scale_override: None,
-            mesh_color_overrides: HashMap::new(),
-            mesh_scale_overrides: HashMap::new(),
+            mesh_color_overrides: BTreeMap::new(),
+            mesh_scale_overrides: BTreeMap::new(),
         }
     }
 

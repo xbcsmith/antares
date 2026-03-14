@@ -12,7 +12,7 @@
 
 use super::types::{EncounterGroup, MapEvent, World};
 use crate::domain::combat::types::CombatEventType;
-use crate::domain::types::{GameTime, Position};
+use crate::domain::types::{GameTime, ItemId, Position};
 use thiserror::Error;
 
 /// Result of triggering an event
@@ -86,6 +86,20 @@ pub enum EventResult {
         container_name: String,
         /// Current item contents of the container.
         items: Vec<crate::domain::character::InventorySlot>,
+    },
+    /// A dropped item is lying on the ground at this position and may be picked up.
+    ///
+    /// Returned by [`trigger_event`] when `map.dropped_items_at(position)` is
+    /// non-empty and no other [`MapEvent`] is registered at that tile.  Only the
+    /// first item (FIFO insertion order) is surfaced per call; the caller must
+    /// re-trigger the event to surface additional stacked items.
+    PickupItem {
+        /// Logical item identifier from the item database.
+        item_id: ItemId,
+        /// Remaining charges on the item (`0` = non-magical / fully consumed).
+        charges: u8,
+        /// Tile coordinate where the item is lying.
+        position: Position,
     },
 }
 
@@ -181,6 +195,22 @@ pub fn trigger_event(
     // Check position is valid
     if !map.is_valid_position(position) {
         return Err(EventError::OutOfBounds(position.x, position.y));
+    }
+
+    // Check for dropped items BEFORE the event HashMap lookup.
+    //
+    // When items are lying on the ground at this tile and no static map event
+    // is registered here, surface the first item (FIFO insertion order) for
+    // pickup.  If a static event IS present it takes priority; the party will
+    // encounter the event first and can interact with dropped items afterwards.
+    let dropped_at = map.dropped_items_at(position);
+    if !dropped_at.is_empty() && map.get_event(position).is_none() {
+        let first = dropped_at[0];
+        return Ok(EventResult::PickupItem {
+            item_id: first.item_id,
+            charges: first.charges,
+            position,
+        });
     }
 
     // Check if there's an event at this position
@@ -1407,6 +1437,141 @@ mod tests {
             matches!(r2, Ok(EventResult::EnterContainer { .. })),
             "Container event must be repeatable"
         );
+    }
+
+    // ===== PickupItem tests =====
+
+    /// `trigger_event` returns `PickupItem` when dropped items exist and no
+    /// static map event is registered at that tile.
+    #[test]
+    fn test_trigger_event_returns_pickup_when_item_present() {
+        use crate::domain::world::{DroppedItem, Map};
+
+        let mut world = World::new();
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let pos = crate::domain::types::Position::new(5, 5);
+
+        map.add_dropped_item(DroppedItem {
+            item_id: 7,
+            charges: 3,
+            position: pos,
+            map_id: 1,
+        });
+
+        world.add_map(map);
+        world.set_current_map(1);
+
+        let game_time = GameTime::new(1, 12, 0);
+        let result = trigger_event(&mut world, pos, &game_time).expect("trigger must succeed");
+
+        match result {
+            EventResult::PickupItem {
+                item_id,
+                charges,
+                position,
+            } => {
+                assert_eq!(item_id, 7);
+                assert_eq!(charges, 3);
+                assert_eq!(position, pos);
+            }
+            other => panic!("expected PickupItem, got {:?}", other),
+        }
+    }
+
+    /// `trigger_event` returns the static map event (not `PickupItem`) when
+    /// both a dropped item and a static event exist at the same tile.
+    #[test]
+    fn test_trigger_event_static_event_takes_priority_over_dropped_item() {
+        use crate::domain::world::{DroppedItem, Map, MapEvent};
+
+        let mut world = World::new();
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let pos = crate::domain::types::Position::new(3, 3);
+
+        // Both a sign and a dropped item at the same tile
+        map.add_event(
+            pos,
+            MapEvent::Sign {
+                name: "A sign".to_string(),
+                description: "desc".to_string(),
+                text: "Hello".to_string(),
+                time_condition: None,
+                facing: None,
+            },
+        );
+        map.add_dropped_item(DroppedItem {
+            item_id: 9,
+            charges: 1,
+            position: pos,
+            map_id: 1,
+        });
+
+        world.add_map(map);
+        world.set_current_map(1);
+
+        let game_time = GameTime::new(1, 12, 0);
+        let result = trigger_event(&mut world, pos, &game_time).expect("trigger must succeed");
+
+        // Sign takes priority
+        assert!(
+            matches!(result, EventResult::Sign { .. }),
+            "expected Sign, got {:?}",
+            result
+        );
+    }
+
+    /// `trigger_event` returns `None` when there are no dropped items and no
+    /// static map event at the queried position.
+    #[test]
+    fn test_trigger_event_none_when_no_event_and_no_dropped_items() {
+        use crate::domain::world::Map;
+
+        let mut world = World::new();
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        world.add_map(map);
+        world.set_current_map(1);
+
+        let pos = crate::domain::types::Position::new(7, 7);
+        let game_time = GameTime::new(1, 12, 0);
+        let result = trigger_event(&mut world, pos, &game_time).expect("trigger must succeed");
+
+        assert_eq!(result, EventResult::None);
+    }
+
+    /// `trigger_event` returns the first stacked dropped item (FIFO).
+    #[test]
+    fn test_trigger_event_pickup_fifo_ordering() {
+        use crate::domain::world::{DroppedItem, Map};
+
+        let mut world = World::new();
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let pos = crate::domain::types::Position::new(2, 2);
+
+        // Two items stacked on the same tile; item_id 4 was added first
+        map.add_dropped_item(DroppedItem {
+            item_id: 4,
+            charges: 0,
+            position: pos,
+            map_id: 1,
+        });
+        map.add_dropped_item(DroppedItem {
+            item_id: 8,
+            charges: 1,
+            position: pos,
+            map_id: 1,
+        });
+
+        world.add_map(map);
+        world.set_current_map(1);
+
+        let game_time = GameTime::new(1, 12, 0);
+        let result = trigger_event(&mut world, pos, &game_time).expect("trigger must succeed");
+
+        // Should surface item_id 4 first (FIFO)
+        match result {
+            EventResult::PickupItem { item_id, .. } => assert_eq!(item_id, 4),
+            other => panic!("expected PickupItem, got {:?}", other),
+        }
     }
 
     #[test]

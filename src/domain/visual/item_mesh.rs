@@ -1822,6 +1822,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -1855,6 +1856,7 @@ mod tests {
             icon_path: None,
             tags,
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -1878,6 +1880,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -2013,6 +2016,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         let desc = ItemMeshDescriptor::from_item(&magic_ring);
         assert!(
@@ -2148,6 +2152,7 @@ mod tests {
                 icon_path: None,
                 tags: vec![],
                 mesh_descriptor_override: None,
+                mesh_id: None,
             },
             Item {
                 id: 8,
@@ -2167,6 +2172,7 @@ mod tests {
                 icon_path: None,
                 tags: vec![],
                 mesh_descriptor_override: None,
+                mesh_id: None,
             },
             Item {
                 id: 9,
@@ -2186,6 +2192,7 @@ mod tests {
                 icon_path: None,
                 tags: vec![],
                 mesh_descriptor_override: None,
+                mesh_id: None,
             },
             Item {
                 id: 10,
@@ -2205,6 +2212,7 @@ mod tests {
                 icon_path: None,
                 tags: vec![],
                 mesh_descriptor_override: None,
+                mesh_id: None,
             },
         ];
 
@@ -2364,6 +2372,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         let desc = ItemMeshDescriptor::from_item(&quest_item);
@@ -2402,6 +2411,7 @@ mod tests {
                 icon_path: None,
                 tags: vec![],
                 mesh_descriptor_override: None,
+                mesh_id: None,
             };
             let desc = ItemMeshDescriptor::from_item(&item);
             let def = desc.to_creature_definition();
@@ -2441,6 +2451,7 @@ mod tests {
                 icon_path: None,
                 tags: vec![],
                 mesh_descriptor_override: None,
+                mesh_id: None,
             };
             let desc = ItemMeshDescriptor::from_item(&item);
             let def = desc.to_creature_definition();
@@ -2472,6 +2483,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         let desc = ItemMeshDescriptor::from_item(&arrows);
         assert_eq!(desc.category, ItemMeshCategory::Ammo);
@@ -2665,6 +2677,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         let desc = ItemMeshDescriptor::from_item(&cloak);
         assert!(

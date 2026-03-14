@@ -38,6 +38,7 @@ use crate::domain::items::consumable_usage::{
     apply_consumable_effect_exploration, ConsumableApplyResult,
 };
 use crate::domain::items::types::{ConsumableEffect, ItemType};
+use crate::domain::transactions::drop_item;
 use crate::game::resources::GlobalState;
 use crate::game::systems::item_world_events::ItemDroppedEvent;
 use crate::game::systems::ui::GameLog;
@@ -1406,20 +1407,21 @@ fn inventory_action_system(
 
     // ── Drop events ─────────────────────────────────────────────────────────
     for (party_index, slot_index) in drop_events {
-        let party = &mut global_state.0.party;
-
-        // Bounds-check party index
-        if party_index >= party.members.len() {
+        // ── Bounds-check party index ────────────────────────────────────────
+        if party_index >= global_state.0.party.members.len() {
             warn!(
                 "DropItemAction: party_index {} out of bounds (party size {})",
                 party_index,
-                party.members.len()
+                global_state.0.party.members.len()
             );
             continue;
         }
 
-        // Bounds-check slot index
-        let inv_len = party.members[party_index].inventory.items.len();
+        // ── Bounds-check slot index ─────────────────────────────────────────
+        let inv_len = global_state.0.party.members[party_index]
+            .inventory
+            .items
+            .len();
         if slot_index >= inv_len {
             warn!(
                 "DropItemAction: slot_index {} out of bounds (inventory size {}) for party[{}]",
@@ -1428,26 +1430,48 @@ fn inventory_action_system(
             continue;
         }
 
-        // Remove the item — remove_item returns Option<InventorySlot>
-        if let Some(dropped) = party.members[party_index].inventory.remove_item(slot_index) {
-            info!(
-                "Dropped item from party[{}] slot {} (item_id={})",
-                party_index, slot_index, dropped.item_id
-            );
+        // ── Read world position values as copies before splitting the borrow ─
+        let map_id = global_state.0.world.current_map;
+        let pos = global_state.0.world.party_position;
 
-            // Fire ItemDroppedEvent so the 3-D world mesh spawns at the party's
-            // current tile position.
-            let world = &global_state.0.world;
-            let map_id = world.current_map;
-            let pos = world.party_position;
-            if let Some(ref mut writer) = item_dropped_writer {
-                writer.write(ItemDroppedEvent {
-                    item_id: dropped.item_id,
-                    charges: dropped.charges as u16,
-                    map_id,
-                    tile_x: pos.x,
-                    tile_y: pos.y,
-                });
+        // ── Call drop_item() — splits borrow across party and world fields ───
+        //
+        // Rust's NLL (Non-Lexical Lifetimes) allows simultaneous mutable borrows
+        // of distinct struct fields.  `game_state.party.members[i]` and
+        // `game_state.world` are disjoint fields of `GameState`.
+        let game_state = &mut global_state.0;
+        match drop_item(
+            &mut game_state.party.members[party_index],
+            party_index,
+            slot_index,
+            &mut game_state.world,
+            map_id,
+            pos,
+        ) {
+            Ok(dropped) => {
+                info!(
+                    "Dropped item from party[{}] slot {} (item_id={}, charges={}) \
+                     onto map {} at {:?}",
+                    party_index, slot_index, dropped.item_id, dropped.charges, map_id, pos
+                );
+
+                // Fire ItemDroppedEvent so the 3-D world mesh spawns at the
+                // party's current tile position (Phase 3 visual system).
+                if let Some(ref mut writer) = item_dropped_writer {
+                    writer.write(ItemDroppedEvent {
+                        item_id: dropped.item_id,
+                        charges: dropped.charges as u16,
+                        map_id,
+                        tile_x: pos.x,
+                        tile_y: pos.y,
+                    });
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "DropItemAction: drop_item failed for party[{}] slot {}: {}",
+                    party_index, slot_index, e
+                );
             }
         }
 
@@ -2109,6 +2133,14 @@ mod tests {
         character.inventory.items.push(slot1);
         game_state.party.add_member(character).unwrap();
 
+        // Add a default map to the world (map id=0 matches world.current_map default)
+        // so that drop_item() can persist the dropped item to the map.
+        {
+            use crate::domain::world::Map;
+            let map = Map::new(0, "Default Map".to_string(), "Test".to_string(), 20, 20);
+            game_state.world.add_map(map);
+        }
+
         // Set mode to Inventory so the action system runs
         game_state.enter_inventory();
         app.insert_resource(GlobalState(game_state));
@@ -2237,6 +2269,13 @@ mod tests {
             charges: 3,
         });
         game_state.party.add_member(character).unwrap();
+
+        // Add a default map so drop_item() can persist the item to the world.
+        {
+            use crate::domain::world::Map;
+            let map = Map::new(0, "Default Map".to_string(), "Test".to_string(), 20, 20);
+            game_state.world.add_map(map);
+        }
 
         // Open inventory with slot 0 pre-selected
         game_state.enter_inventory();
@@ -3091,6 +3130,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         db.items.add_item(item).unwrap();
         db
@@ -3121,6 +3161,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         db.items.add_item(item).unwrap();
         db
@@ -3267,6 +3308,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         db.items.add_item(item).unwrap();
 
@@ -3347,6 +3389,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         db.items.add_item(item).unwrap();
 
@@ -3419,6 +3462,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         db.items.add_item(item).unwrap();
 
@@ -3688,6 +3732,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         db.items.add_item(weapon).unwrap();
 
@@ -3792,6 +3837,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         db.items.add_item(item).unwrap();
 
@@ -3896,6 +3942,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         content_db.items.add_item(item).unwrap();
         let game_content = GameContent::new(content_db);
@@ -3963,6 +4010,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         content_db.items.add_item(weapon).unwrap();
         let game_content = GameContent::new(content_db);

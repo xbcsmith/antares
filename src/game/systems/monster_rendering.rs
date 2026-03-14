@@ -152,13 +152,23 @@ pub fn spawn_monster_with_visual(
     if let Some(creature_id) = monster.creature_id {
         // Look up creature definition
         if let Some(creature_def) = game_data.get_creature(creature_id) {
+            // Lift the spawn position so the creature's lowest vertex rests on
+            // the floor rather than sinking through it.  The caller passes the
+            // tile-centre position (Y = floor level); foot_ground_offset()
+            // returns the additional Y needed based on the creature geometry.
+            let grounded_position = bevy::math::Vec3::new(
+                position.x,
+                position.y + creature_def.foot_ground_offset(),
+                position.z,
+            );
+
             // Spawn creature visual
             let visual_entity = spawn_creature(
                 commands,
                 creature_def,
                 meshes,
                 materials,
-                position,
+                grounded_position,
                 None,
                 None,
                 None, // facing: preserve existing behaviour (North default)

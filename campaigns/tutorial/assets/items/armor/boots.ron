@@ -28,6 +28,6 @@
             scale: (1.0, 1.0, 1.0),
         ),
     ],
-    scale: 0.3500,
+    scale: 1.0,
     color_tint: None,
 )

@@ -13,6 +13,8 @@
 //! - `buy_item` - Party purchases an item from a merchant
 //! - `sell_item` - Party sells an item to a merchant
 //! - `consume_service` - Party pays for a priest/innkeeper service
+//! - `drop_item` - Character drops an item onto the game world map
+//! - `pickup_item` - Character picks up a dropped item from the game world map
 //!
 //! # Architecture Reference
 //!
@@ -23,9 +25,10 @@ use crate::domain::character::Party;
 use crate::domain::character::{Character, InventorySlot};
 use crate::domain::inventory::ServiceCatalog;
 use crate::domain::items::ItemDatabase;
-use crate::domain::types::{CharacterId, ItemId};
+use crate::domain::types::{CharacterId, ItemId, MapId, Position};
 use crate::domain::world::npc::NpcDefinition;
 use crate::domain::world::npc_runtime::NpcRuntimeState;
+use crate::domain::world::{DroppedItem, World};
 use thiserror::Error;
 
 // ===== TransactionError =====
@@ -88,6 +91,10 @@ pub enum TransactionError {
     /// A quantity argument was zero or otherwise invalid
     #[error("Invalid quantity")]
     InvalidQuantity,
+
+    /// The map with the given ID was not found in the world
+    #[error("Map {map_id} not found in world")]
+    MapNotFound { map_id: MapId },
 }
 
 // ===== ServiceOutcome =====
@@ -637,7 +644,227 @@ fn character_roster_id(_character: &Character) -> CharacterId {
     0
 }
 
-// ===== Tests =====
+// ===== drop_item =====
+
+/// Drop an item from a character's inventory onto the game world map.
+///
+/// Removes the item at `slot_index` from `character.inventory`, creates a
+/// [`DroppedItem`] record at `position` on the given `map_id`, appends it to
+/// the map's `dropped_items` list, and returns the created record.
+///
+/// # Arguments
+///
+/// * `character`     – The character dropping the item.
+/// * `character_id`  – Roster/party index of `character` (used in error messages).
+/// * `slot_index`    – Zero-based index of the inventory slot to drop.
+/// * `world`         – Mutable reference to the game world (map lookup target).
+/// * `map_id`        – ID of the map on which the item is being dropped.
+/// * `position`      – Tile coordinate where the item lands.
+///
+/// # Returns
+///
+/// Returns `Ok(DroppedItem)` – the record that was added to the map.
+///
+/// # Errors
+///
+/// Returns [`TransactionError::ItemNotInInventory`] if `slot_index` is out of
+/// bounds for `character.inventory`.
+/// Returns [`TransactionError::MapNotFound`] if no map with `map_id` exists in
+/// `world`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::transactions::drop_item;
+/// use antares::domain::character::{Character, Alignment, Sex};
+/// use antares::domain::world::{World, Map};
+/// use antares::domain::types::Position;
+///
+/// let mut world = World::new();
+/// let mut map = Map::new(1, "Test Map".to_string(), "Desc".to_string(), 20, 20);
+/// world.add_map(map);
+/// world.set_current_map(1);
+///
+/// let mut character = Character::new(
+///     "Hero".to_string(), "human".to_string(), "knight".to_string(),
+///     Sex::Male, Alignment::Good,
+/// );
+/// character.inventory.add_item(5, 3).unwrap();
+///
+/// let pos = Position::new(10, 10);
+/// let dropped = drop_item(&mut character, 0, 0, &mut world, 1, pos)
+///     .expect("drop must succeed");
+///
+/// assert_eq!(dropped.item_id, 5);
+/// assert_eq!(dropped.charges, 3);
+/// assert!(character.inventory.items.is_empty());
+/// assert_eq!(world.get_map(1).unwrap().dropped_items.len(), 1);
+/// ```
+pub fn drop_item(
+    character: &mut Character,
+    character_id: CharacterId,
+    slot_index: usize,
+    world: &mut World,
+    map_id: MapId,
+    position: Position,
+) -> Result<DroppedItem, TransactionError> {
+    // Step 1: Bounds-check slot index without yet removing the item.
+    // We must confirm both the slot and the map are valid before mutating
+    // either, so that a MapNotFound error does not cause item loss.
+    let item_id_check = character
+        .inventory
+        .items
+        .get(slot_index)
+        .map(|s| s.item_id)
+        .ok_or(TransactionError::ItemNotInInventory {
+            item_id: 0,
+            character_id,
+        })?;
+
+    // Step 2: Verify the target map exists before touching the inventory.
+    if world.get_map(map_id).is_none() {
+        return Err(TransactionError::MapNotFound { map_id });
+    }
+
+    // Step 3: Remove the item — safe because bounds were verified in step 1.
+    // Use `remove_item` which returns `Option`; treat `None` as a logic error.
+    let slot = character
+        .inventory
+        .remove_item(slot_index)
+        .expect("slot must exist after bounds check");
+
+    debug_assert_eq!(
+        slot.item_id, item_id_check,
+        "item_id changed between bounds check and removal"
+    );
+
+    // Step 4: Build and persist the dropped-item record.
+    let dropped = DroppedItem {
+        item_id: slot.item_id,
+        charges: slot.charges,
+        position,
+        map_id,
+    };
+    // SAFETY: map existence was confirmed in step 2; no interleaving mutations.
+    world
+        .get_map_mut(map_id)
+        .expect("map must exist after pre-check")
+        .add_dropped_item(dropped.clone());
+
+    Ok(dropped)
+}
+
+// ===== pickup_item =====
+
+/// Pick up a dropped item from the game world map into a character's inventory.
+///
+/// Verifies that `character.inventory` has space, removes the first
+/// [`DroppedItem`] at `position` with matching `item_id` from the map's
+/// `dropped_items` list, and adds it to the character's inventory.
+///
+/// # Arguments
+///
+/// * `character`    – The character picking up the item.
+/// * `character_id` – Roster/party index of `character` (used in error messages).
+/// * `world`        – Mutable reference to the game world (map lookup target).
+/// * `map_id`       – ID of the map from which the item is being picked up.
+/// * `position`     – Tile coordinate where the item lies.
+/// * `item_id`      – Logical item identifier to pick up.
+///
+/// # Returns
+///
+/// Returns `Ok(InventorySlot)` – the slot that was added to the character's
+/// inventory, carrying the same `item_id` and `charges` as the dropped record.
+///
+/// # Errors
+///
+/// Returns [`TransactionError::InventoryFull`] if `character.inventory` has no
+/// free slot.
+/// Returns [`TransactionError::MapNotFound`] if no map with `map_id` exists in
+/// `world`.
+/// Returns [`TransactionError::ItemNotInInventory`] if no dropped item matching
+/// both `position` and `item_id` is found on the map.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::transactions::{drop_item, pickup_item};
+/// use antares::domain::character::{Character, Alignment, Sex};
+/// use antares::domain::world::{World, Map};
+/// use antares::domain::types::Position;
+///
+/// let mut world = World::new();
+/// let map = Map::new(1, "Test Map".to_string(), "Desc".to_string(), 20, 20);
+/// world.add_map(map);
+/// world.set_current_map(1);
+///
+/// let pos = Position::new(5, 5);
+///
+/// let mut dropper = Character::new(
+///     "Dropper".to_string(), "human".to_string(), "knight".to_string(),
+///     Sex::Male, Alignment::Good,
+/// );
+/// dropper.inventory.add_item(7, 2).unwrap();
+/// drop_item(&mut dropper, 0, 0, &mut world, 1, pos).unwrap();
+///
+/// let mut picker = Character::new(
+///     "Picker".to_string(), "human".to_string(), "knight".to_string(),
+///     Sex::Male, Alignment::Good,
+/// );
+///
+/// let slot = pickup_item(&mut picker, 1, &mut world, 1, pos, 7)
+///     .expect("pickup must succeed");
+///
+/// assert_eq!(slot.item_id, 7);
+/// assert_eq!(slot.charges, 2);
+/// assert!(world.get_map(1).unwrap().dropped_items.is_empty());
+/// ```
+pub fn pickup_item(
+    character: &mut Character,
+    character_id: CharacterId,
+    world: &mut World,
+    map_id: MapId,
+    position: Position,
+    item_id: ItemId,
+) -> Result<InventorySlot, TransactionError> {
+    // Step 1: Verify inventory has space before mutating the world.
+    if character.inventory.is_full() {
+        return Err(TransactionError::InventoryFull { character_id });
+    }
+
+    // Step 2: Look up the target map.
+    let map = world
+        .get_map_mut(map_id)
+        .ok_or(TransactionError::MapNotFound { map_id })?;
+
+    // Step 3: Remove the dropped-item record from the map (FIFO for stacked items).
+    let dropped =
+        map.remove_dropped_item(position, item_id)
+            .ok_or(TransactionError::ItemNotInInventory {
+                item_id,
+                character_id,
+            })?;
+
+    // Step 4: Add item to the character's inventory.
+    // is_full was already checked, so add_item should not fail; if it somehow
+    // does (e.g. MAX_ITEMS changed between check and add), the dropped item
+    // record has already been removed — we re-insert it to avoid item loss.
+    if let Err(_inventory_err) = character
+        .inventory
+        .add_item(dropped.item_id, dropped.charges)
+    {
+        // Rollback: re-insert the dropped item so it is not lost.
+        if let Some(m) = world.get_map_mut(map_id) {
+            m.add_dropped_item(dropped.clone());
+        }
+        return Err(TransactionError::InventoryFull { character_id });
+    }
+
+    Ok(InventorySlot {
+        item_id: dropped.item_id,
+        charges: dropped.charges,
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -648,6 +875,7 @@ mod tests {
     use crate::domain::types::DiceRoll;
     use crate::domain::world::npc::NpcDefinition;
     use crate::domain::world::npc_runtime::NpcRuntimeState;
+    use crate::domain::world::Map;
 
     // ===== Helpers =====
 
@@ -672,6 +900,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -1434,6 +1663,188 @@ mod tests {
     }
 
     // ===== TransactionError display tests =====
+
+    // ===== drop_item tests =====
+
+    fn make_world_with_map(map_id: MapId) -> World {
+        let mut world = World::new();
+        let map = Map::new(
+            map_id,
+            format!("Map {map_id}"),
+            "Test map".to_string(),
+            20,
+            20,
+        );
+        world.add_map(map);
+        world.set_current_map(map_id);
+        world
+    }
+
+    fn character_with_single_item(item_id: ItemId, charges: u8) -> Character {
+        let mut c = make_character();
+        c.inventory.add_item(item_id, charges).unwrap();
+        c
+    }
+
+    /// `drop_item` appends a `DroppedItem` to the correct map.
+    #[test]
+    fn test_drop_item_records_in_world() {
+        let mut world = make_world_with_map(1);
+        let mut character = character_with_single_item(5, 3);
+        let pos = Position::new(10, 10);
+
+        let dropped =
+            drop_item(&mut character, 0, 0, &mut world, 1, pos).expect("drop must succeed");
+
+        let map = world.get_map(1).unwrap();
+        assert_eq!(map.dropped_items.len(), 1);
+        assert_eq!(map.dropped_items[0].item_id, 5);
+        assert_eq!(map.dropped_items[0].charges, 3);
+        assert_eq!(map.dropped_items[0].position, pos);
+        assert_eq!(map.dropped_items[0].map_id, 1);
+        assert_eq!(dropped.item_id, 5);
+        assert_eq!(dropped.charges, 3);
+    }
+
+    /// `drop_item` removes the item from the character's inventory.
+    #[test]
+    fn test_drop_item_removes_from_inventory() {
+        let mut world = make_world_with_map(1);
+        let mut character = character_with_single_item(7, 0);
+
+        drop_item(&mut character, 0, 0, &mut world, 1, Position::new(5, 5))
+            .expect("drop must succeed");
+
+        assert!(character.inventory.items.is_empty());
+    }
+
+    /// `drop_item` returns `ItemNotInInventory` when slot index is out of bounds.
+    #[test]
+    fn test_drop_item_out_of_bounds_slot_returns_error() {
+        let mut world = make_world_with_map(1);
+        let mut character = make_character(); // empty inventory
+
+        let result = drop_item(&mut character, 0, 99, &mut world, 1, Position::new(0, 0));
+
+        assert!(matches!(
+            result,
+            Err(TransactionError::ItemNotInInventory { .. })
+        ));
+    }
+
+    /// `drop_item` returns `MapNotFound` when the map ID does not exist.
+    #[test]
+    fn test_drop_item_map_not_found_returns_error() {
+        let mut world = make_world_with_map(1);
+        let mut character = character_with_single_item(3, 0);
+
+        let result = drop_item(&mut character, 0, 0, &mut world, 999, Position::new(0, 0));
+
+        assert!(matches!(
+            result,
+            Err(TransactionError::MapNotFound { map_id: 999 })
+        ));
+        // Item should still be in inventory since drop failed
+        assert_eq!(character.inventory.items.len(), 1);
+    }
+
+    // ===== pickup_item tests =====
+
+    /// `pickup_item` adds the item to the character's inventory.
+    #[test]
+    fn test_pickup_item_adds_to_inventory() {
+        let mut world = make_world_with_map(2);
+        let mut dropper = character_with_single_item(9, 5);
+        let pos = Position::new(3, 7);
+        drop_item(&mut dropper, 0, 0, &mut world, 2, pos).unwrap();
+
+        let mut picker = make_character();
+        let slot = pickup_item(&mut picker, 1, &mut world, 2, pos, 9).expect("pickup must succeed");
+
+        assert_eq!(slot.item_id, 9);
+        assert_eq!(slot.charges, 5);
+        assert_eq!(picker.inventory.items.len(), 1);
+        assert_eq!(picker.inventory.items[0].item_id, 9);
+        assert_eq!(picker.inventory.items[0].charges, 5);
+    }
+
+    /// `pickup_item` removes the `DroppedItem` entry from the map.
+    #[test]
+    fn test_pickup_item_removes_from_map() {
+        let mut world = make_world_with_map(3);
+        let mut dropper = character_with_single_item(4, 1);
+        let pos = Position::new(1, 1);
+        drop_item(&mut dropper, 0, 0, &mut world, 3, pos).unwrap();
+
+        let mut picker = make_character();
+        pickup_item(&mut picker, 0, &mut world, 3, pos, 4).unwrap();
+
+        assert!(world.get_map(3).unwrap().dropped_items.is_empty());
+    }
+
+    /// `pickup_item` returns `InventoryFull` when the character cannot accept more items.
+    #[test]
+    fn test_pickup_item_inventory_full_returns_error() {
+        let mut world = make_world_with_map(1);
+
+        // Drop the item first using a temporary dropper
+        let mut dropper = character_with_single_item(2, 0);
+        let pos = Position::new(5, 5);
+        drop_item(&mut dropper, 0, 0, &mut world, 1, pos).unwrap();
+
+        // Fill picker inventory to capacity
+        let mut picker = make_character();
+        for i in 0..crate::domain::character::Inventory::MAX_ITEMS {
+            picker
+                .inventory
+                .add_item((i % 256) as u8, 0)
+                .expect("should have space");
+        }
+
+        let result = pickup_item(&mut picker, 0, &mut world, 1, pos, 2);
+
+        assert!(matches!(
+            result,
+            Err(TransactionError::InventoryFull { .. })
+        ));
+        // Item must still be on the map (was not consumed)
+        assert_eq!(world.get_map(1).unwrap().dropped_items.len(), 1);
+    }
+
+    /// `pickup_item` returns `ItemNotInInventory` when no matching dropped item exists.
+    #[test]
+    fn test_pickup_item_missing_returns_error() {
+        let mut world = make_world_with_map(1);
+        let mut picker = make_character();
+
+        let result = pickup_item(&mut picker, 0, &mut world, 1, Position::new(5, 5), 42);
+
+        assert!(matches!(
+            result,
+            Err(TransactionError::ItemNotInInventory { item_id: 42, .. })
+        ));
+    }
+
+    /// `pickup_item` returns `MapNotFound` when the map ID does not exist.
+    #[test]
+    fn test_pickup_item_map_not_found_returns_error() {
+        let mut world = World::new(); // empty world, no maps
+        let mut picker = make_character();
+
+        let result = pickup_item(&mut picker, 0, &mut world, 99, Position::new(0, 0), 1);
+
+        assert!(matches!(
+            result,
+            Err(TransactionError::MapNotFound { map_id: 99 })
+        ));
+    }
+
+    /// `TransactionError::MapNotFound` displays the map ID.
+    #[test]
+    fn test_transaction_error_map_not_found_display() {
+        let err = TransactionError::MapNotFound { map_id: 7 };
+        assert!(err.to_string().contains("7"));
+    }
 
     #[test]
     fn test_transaction_error_insufficient_gold_display() {

@@ -324,6 +324,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -348,6 +349,7 @@ mod tests {
             icon_path: None,
             tags: vec!["heavy_armor".to_string()],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -475,6 +477,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         items.add_item(potion).unwrap();
 
@@ -579,6 +582,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         items.add_item(evil_sword).unwrap();
 
@@ -630,6 +634,7 @@ mod tests {
             icon_path: None,
             tags: vec!["large_weapon".to_string(), "two_handed".to_string()],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         items.add_item(large_sword).unwrap();
 
@@ -679,6 +684,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         items.add_item(ring).unwrap();
 

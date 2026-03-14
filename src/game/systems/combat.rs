@@ -3403,6 +3403,7 @@ mod perform_use_item_tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         // Mutate the inner DB directly so tests can set up content in-place
         content.0.items.add_item(potion).unwrap();
@@ -9761,6 +9762,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -10124,6 +10126,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 

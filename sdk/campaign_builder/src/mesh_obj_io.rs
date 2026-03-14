@@ -2079,8 +2079,16 @@ mod tests {
         assert_eq!(material.base_color, [0.1, 0.2, 0.3, 0.75]);
         assert_eq!(material.emissive, Some([0.7, 0.1, 0.0]));
         assert_eq!(material.alpha_mode, AlphaMode::Blend);
-        assert_eq!(material.metallic, 0.21);
-        assert_eq!(material.roughness, 0.4940356);
+        assert!(
+            (material.metallic - 0.21_f32).abs() < 1e-5,
+            "metallic expected ~0.21, got {}",
+            material.metallic
+        );
+        assert!(
+            (material.roughness - 0.4940356_f32).abs() < 1e-5,
+            "roughness expected ~0.4940356, got {}",
+            material.roughness
+        );
         assert_eq!(mesh.texture_path.as_deref(), Some("textures/hero.png"));
     }
 

@@ -6008,6 +6008,28 @@
     ],
     events: {
         (
+            x: 0,
+            y: 7,
+        ): Teleport(
+            name: "Harrow Downs Portal",
+            description: "The portal to the Harrow Downs",
+            destination: (
+                x: 0,
+                y: 18,
+            ),
+            map_id: 6,
+        ),
+        (
+            x: 4,
+            y: 4,
+        ): Sign(
+            name: "Inn Sign",
+            description: "A welcoming sign for the Cozy Inn offering rest and lodging.",
+            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+            time_condition: None,
+            facing: None,
+        ),
+        (
             x: 10,
             y: 10,
         ): Sign(
@@ -6028,34 +6050,12 @@
             facing: None,
         ),
         (
-            x: 0,
-            y: 7,
-        ): Teleport(
-            name: "Harrow Downs Portal",
-            description: "The portal to the Harrow Downs",
-            destination: (
-                x: 0,
-                y: 18,
-            ),
-            map_id: 6,
-        ),
-        (
             x: 18,
             y: 8,
         ): Sign(
             name: "Forest Direction Sign",
             description: "A directional sign pointing to the nearby forest.",
             text: "To the Forrest",
-            time_condition: None,
-            facing: None,
-        ),
-        (
-            x: 4,
-            y: 4,
-        ): Sign(
-            name: "Inn Sign",
-            description: "A welcoming sign for the Cozy Inn offering rest and lodging.",
-            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
             time_condition: None,
             facing: None,
         ),

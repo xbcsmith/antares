@@ -12,8 +12,9 @@
 
 use crate::domain::combat::types::CombatEventType;
 use crate::domain::types::{Direction, GameTime, ItemId, MapId, Position, TimeOfDay};
+use crate::domain::world::dropped_items::DroppedItem;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 // ===== Tile Types =====
 
@@ -31,7 +32,7 @@ pub enum WallType {
 }
 
 /// Terrain type for tiles
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TerrainType {
     /// Normal walkable ground
     Ground,
@@ -344,7 +345,7 @@ pub enum SpriteSelectionRule {
         /// Mapping from 4-bit neighbor bitmask to sprite index
         /// Bits: [North, East, South, West]
         /// E.g., 0b0011 = North and East neighbors = index 5
-        rules: std::collections::HashMap<u8, u32>,
+        rules: HashMap<u8, u32>,
     },
 }
 
@@ -2247,8 +2248,8 @@ pub struct EncounterTable {
     pub groups: Vec<EncounterGroup>,
 
     /// Terrain-based modifiers to multiply the base encounter rate
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub terrain_modifiers: HashMap<TerrainType, f32>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub terrain_modifiers: BTreeMap<TerrainType, f32>,
 }
 
 // ===== Resolved NPC =====
@@ -2410,8 +2411,8 @@ pub struct Map {
     /// 2D grid of tiles (row-major order: y * width + x)
     pub tiles: Vec<Tile>,
     /// Events at specific positions
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub events: HashMap<Position, MapEvent>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub events: BTreeMap<Position, MapEvent>,
 
     /// Optional random encounter table for this map
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2424,6 +2425,19 @@ pub struct Map {
     /// NPC placements (references to NPC definitions)
     #[serde(default)]
     pub npc_placements: Vec<crate::domain::world::npc::NpcPlacement>,
+
+    /// Items lying on the ground on this map.
+    ///
+    /// Each entry represents an item that has been dropped at runtime by a
+    /// character or placed in world state directly.  Unlike the static
+    /// `MapEvent::DroppedItem` trigger (which is keyed in the event `HashMap`
+    /// and therefore limited to one per tile), multiple `DroppedItem` entries
+    /// may share the same tile position.
+    ///
+    /// The field is omitted from serialised RON output when empty so that
+    /// existing map files are unaffected by this addition.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped_items: Vec<DroppedItem>,
 }
 
 fn default_map_name() -> String {
@@ -2473,10 +2487,11 @@ impl Map {
             width,
             height,
             tiles,
-            events: HashMap::new(),
+            events: BTreeMap::new(),
             encounter_table: None,
             allow_random_encounters: default_allow_random_encounters(),
             npc_placements: Vec::new(),
+            dropped_items: Vec::new(),
         }
     }
 
@@ -2605,6 +2620,119 @@ impl Map {
     /// ```
     pub fn get_event_at_position(&self, position: Position) -> Option<&MapEvent> {
         self.get_event(position)
+    }
+
+    /// Appends a [`DroppedItem`] to this map's `dropped_items` collection.
+    ///
+    /// Multiple items may share the same tile position; this method places them
+    /// all in the `dropped_items` vector without enforcing uniqueness.  The
+    /// items at a given position are therefore maintained in FIFO insertion order,
+    /// which is the order used by [`remove_dropped_item`](Map::remove_dropped_item)
+    /// when selecting which item to remove first.
+    ///
+    /// # Arguments
+    ///
+    /// * `item` - The [`DroppedItem`] to append.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Map, DroppedItem};
+    /// use antares::domain::types::Position;
+    ///
+    /// let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+    /// let pos = Position::new(5, 5);
+    ///
+    /// map.add_dropped_item(DroppedItem { item_id: 3, charges: 1, position: pos, map_id: 1 });
+    ///
+    /// assert_eq!(map.dropped_items.len(), 1);
+    /// assert_eq!(map.dropped_items[0].item_id, 3);
+    /// ```
+    pub fn add_dropped_item(&mut self, item: DroppedItem) {
+        self.dropped_items.push(item);
+    }
+
+    /// Removes and returns the first dropped item at `position` with the given `item_id`.
+    ///
+    /// When multiple copies of the same item are stacked on one tile, only the
+    /// first match (FIFO insertion order) is removed.  The caller may invoke
+    /// this method again to retrieve subsequent copies.
+    ///
+    /// Returns `None` if no item matching both `position` and `item_id` is found.
+    ///
+    /// # Arguments
+    ///
+    /// * `position` - The tile coordinate to search.
+    /// * `item_id`  - The item identifier to match.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Map, DroppedItem};
+    /// use antares::domain::types::Position;
+    ///
+    /// let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+    /// let pos = Position::new(3, 7);
+    ///
+    /// map.add_dropped_item(DroppedItem { item_id: 5, charges: 1, position: pos, map_id: 1 });
+    ///
+    /// let removed = map.remove_dropped_item(pos, 5);
+    /// assert!(removed.is_some());
+    /// assert_eq!(removed.unwrap().item_id, 5);
+    /// assert!(map.dropped_items.is_empty());
+    ///
+    /// // Missing item returns None
+    /// assert_eq!(map.remove_dropped_item(pos, 99), None);
+    /// ```
+    pub fn remove_dropped_item(
+        &mut self,
+        position: Position,
+        item_id: ItemId,
+    ) -> Option<DroppedItem> {
+        if let Some(index) = self
+            .dropped_items
+            .iter()
+            .position(|d| d.position == position && d.item_id == item_id)
+        {
+            Some(self.dropped_items.remove(index))
+        } else {
+            None
+        }
+    }
+
+    /// Returns references to all dropped items located at the given tile position.
+    ///
+    /// Items are returned in insertion order.  An empty `Vec` is returned when
+    /// no dropped items exist at `position`.  Multiple items can share a tile;
+    /// all of them are included in the result.
+    ///
+    /// # Arguments
+    ///
+    /// * `position` - The tile coordinate to inspect.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Map, DroppedItem};
+    /// use antares::domain::types::Position;
+    ///
+    /// let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+    /// let pos = Position::new(4, 4);
+    ///
+    /// map.add_dropped_item(DroppedItem { item_id: 1, charges: 0, position: pos, map_id: 1 });
+    /// map.add_dropped_item(DroppedItem { item_id: 2, charges: 5, position: pos, map_id: 1 });
+    ///
+    /// let at_pos = map.dropped_items_at(pos);
+    /// assert_eq!(at_pos.len(), 2);
+    ///
+    /// // Different position returns nothing
+    /// assert!(map.dropped_items_at(Position::new(0, 0)).is_empty());
+    /// ```
+    pub fn dropped_items_at(&self, position: Position) -> Vec<&DroppedItem> {
+        self.dropped_items
+            .iter()
+            .filter(|d| d.position == position)
+            .collect()
     }
 
     /// Resolves NPC placements using the NPC database
@@ -3003,7 +3131,7 @@ mod map_npc_resolution_tests {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct World {
     /// All maps in the world
-    pub maps: HashMap<MapId, Map>,
+    pub maps: BTreeMap<MapId, Map>,
     /// Current map ID
     pub current_map: MapId,
     /// Party position on current map
@@ -3016,7 +3144,7 @@ impl World {
     /// Creates a new empty world
     pub fn new() -> Self {
         Self {
-            maps: HashMap::new(),
+            maps: BTreeMap::new(),
             current_map: 0,
             party_position: Position::new(0, 0),
             party_facing: Direction::North,
@@ -3692,6 +3820,7 @@ mod time_condition_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::world::dropped_items::DroppedItem;
 
     // ===== TileVisualMetadata Tests =====
 
@@ -5125,5 +5254,134 @@ mod tests {
         // Test intermediate
         meta.snow_coverage = Some(0.5);
         assert_eq!(meta.snow_coverage(), 0.5);
+    }
+
+    // ===== DroppedItem Helper Method Tests =====
+
+    #[test]
+    fn test_add_dropped_item_appends_entry() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(5, 5);
+        let item = DroppedItem {
+            item_id: 3,
+            charges: 2,
+            position: pos,
+            map_id: 1,
+        };
+        map.add_dropped_item(item.clone());
+        assert_eq!(map.dropped_items.len(), 1);
+        assert_eq!(map.dropped_items[0], item);
+    }
+
+    #[test]
+    fn test_remove_dropped_item_returns_correct_entry() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(3, 7);
+        let item = DroppedItem {
+            item_id: 5,
+            charges: 1,
+            position: pos,
+            map_id: 1,
+        };
+        map.add_dropped_item(item.clone());
+        let removed = map.remove_dropped_item(pos, 5);
+        assert_eq!(removed, Some(item));
+        assert!(map.dropped_items.is_empty());
+    }
+
+    #[test]
+    fn test_remove_dropped_item_missing_returns_none() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        // Nothing in the map – must return None
+        let result = map.remove_dropped_item(Position::new(1, 1), 99);
+        assert_eq!(result, None);
+        // Item present at a different position – still None for the requested tile
+        map.add_dropped_item(DroppedItem {
+            item_id: 10,
+            charges: 0,
+            position: Position::new(9, 9),
+            map_id: 1,
+        });
+        assert_eq!(map.remove_dropped_item(Position::new(1, 1), 10), None);
+    }
+
+    #[test]
+    fn test_dropped_items_at_position_returns_all() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(4, 4);
+        let other_pos = Position::new(8, 8);
+        map.add_dropped_item(DroppedItem {
+            item_id: 1,
+            charges: 0,
+            position: pos,
+            map_id: 1,
+        });
+        map.add_dropped_item(DroppedItem {
+            item_id: 2,
+            charges: 3,
+            position: pos,
+            map_id: 1,
+        });
+        map.add_dropped_item(DroppedItem {
+            item_id: 3,
+            charges: 1,
+            position: other_pos,
+            map_id: 1,
+        });
+        let at_pos = map.dropped_items_at(pos);
+        assert_eq!(at_pos.len(), 2, "both items at pos should be returned");
+        assert!(at_pos.iter().any(|d| d.item_id == 1));
+        assert!(at_pos.iter().any(|d| d.item_id == 2));
+
+        let at_other = map.dropped_items_at(other_pos);
+        assert_eq!(at_other.len(), 1);
+        assert_eq!(at_other[0].item_id, 3);
+
+        // Position with no items returns empty vec
+        assert!(map.dropped_items_at(Position::new(0, 0)).is_empty());
+    }
+
+    #[test]
+    fn test_dropped_items_field_default_is_empty() {
+        // A freshly-constructed map must have no dropped items
+        let map = Map::new(1, "Round Trip".to_string(), "Desc".to_string(), 5, 5);
+        assert!(
+            map.dropped_items.is_empty(),
+            "new map should have empty dropped_items"
+        );
+
+        // Empty vec must be omitted from RON output (skip_serializing_if)
+        let serialized = ron::to_string(&map).expect("serialize map");
+        assert!(
+            !serialized.contains("dropped_items"),
+            "empty dropped_items must be skipped in serialisation"
+        );
+
+        // Deserialising a RON string without dropped_items must produce an empty vec
+        let deserialized: Map = ron::from_str(&serialized).expect("deserialize map");
+        assert!(
+            deserialized.dropped_items.is_empty(),
+            "missing field should deserialise to empty vec"
+        );
+
+        // A map with items must survive a full RON round-trip
+        let mut map_with_items = Map::new(1, "Round Trip".to_string(), "Desc".to_string(), 5, 5);
+        map_with_items.add_dropped_item(DroppedItem {
+            item_id: 7,
+            charges: 2,
+            position: Position::new(2, 2),
+            map_id: 1,
+        });
+        let serialized_items = ron::to_string(&map_with_items).expect("serialize map with items");
+        assert!(
+            serialized_items.contains("dropped_items"),
+            "non-empty dropped_items must appear in serialisation"
+        );
+        let round_tripped: Map =
+            ron::from_str(&serialized_items).expect("deserialize map with items");
+        assert_eq!(round_tripped.dropped_items.len(), 1);
+        assert_eq!(round_tripped.dropped_items[0].item_id, 7);
+        assert_eq!(round_tripped.dropped_items[0].charges, 2);
+        assert_eq!(round_tripped.dropped_items[0].position, Position::new(2, 2));
     }
 }

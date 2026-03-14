@@ -247,6 +247,7 @@ impl ItemEditor {
             icon_path: None,
             tags,
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         self.items.push(item);
@@ -1414,6 +1415,7 @@ mod tests {
                     icon_path: None,
                     tags: vec![],
                     mesh_descriptor_override: None,
+                    mesh_id: None,
                 },
                 Item {
                     id: 5,
@@ -1435,6 +1437,7 @@ mod tests {
                     icon_path: None,
                     tags: vec![],
                     mesh_descriptor_override: None,
+                    mesh_id: None,
                 },
             ],
             file_path: PathBuf::from("test.ron"),
@@ -1641,6 +1644,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         // Simulate the edit_item_classification "5" branch logic.
@@ -1687,6 +1691,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(
@@ -1720,6 +1725,7 @@ mod tests {
             icon_path: None,
             tags: vec!["two_handed".to_string(), "large_weapon".to_string()],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(item.tags.len(), 2);
@@ -1749,6 +1755,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(item.is_cursed);
@@ -1777,6 +1784,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(item.max_charges, 10);

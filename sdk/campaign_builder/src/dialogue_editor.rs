@@ -2642,6 +2642,7 @@ mod tests {
             icon_path: None,
             tags: vec!["healing".to_string()],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }];
 
         editor.quests = vec![quest.clone()];

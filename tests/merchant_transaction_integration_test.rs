@@ -55,6 +55,7 @@ fn make_test_item(id: ItemId, base_cost: u32, sell_cost: u32) -> Item {
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 

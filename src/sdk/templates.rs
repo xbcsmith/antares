@@ -81,6 +81,7 @@ pub fn basic_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -117,6 +118,7 @@ pub fn two_handed_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
         icon_path: None,
         tags: vec!["two_handed".to_string()],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -157,6 +159,7 @@ pub fn magical_weapon(id: ItemId, name: &str, damage: DiceRoll, bonus: i8) -> It
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -205,6 +208,7 @@ pub fn basic_armor(id: ItemId, name: &str, ac_bonus: u8) -> Item {
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -239,6 +243,7 @@ pub fn shield(id: ItemId, name: &str, ac_bonus: u8) -> Item {
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -278,6 +283,7 @@ pub fn magical_armor(id: ItemId, name: &str, ac_bonus: u8, magic_bonus: i8) -> I
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -317,6 +323,7 @@ pub fn basic_ring(id: ItemId, name: &str, bonus: Bonus) -> Item {
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -354,6 +361,7 @@ pub fn basic_amulet(id: ItemId, name: &str, bonus: Bonus) -> Item {
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -390,6 +398,7 @@ pub fn healing_potion(id: ItemId, name: &str, healing_amount: u16) -> Item {
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -424,6 +433,7 @@ pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item {
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -473,6 +483,7 @@ pub fn timed_fire_resist_potion(id: ItemId, duration_minutes: u16, name: &str) -
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -522,6 +533,7 @@ pub fn timed_might_potion(id: ItemId, duration_minutes: u16, name: &str) -> Item
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -557,6 +569,7 @@ pub fn arrow_bundle(id: ItemId, count: u16) -> Item {
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -590,6 +603,7 @@ pub fn bolt_bundle(id: ItemId, count: u16) -> Item {
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -625,6 +639,7 @@ pub fn quest_item(id: ItemId, name: &str, quest_id: &str) -> Item {
         icon_path: None,
         tags: vec![],
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 
@@ -669,10 +684,11 @@ pub fn town_map(id: MapId, name: &str, description: &str, width: u32, height: u3
         width,
         height,
         tiles,
-        events: std::collections::HashMap::new(),
+        events: std::collections::BTreeMap::new(),
         encounter_table: None,
         allow_random_encounters: true,
         npc_placements: Vec::new(),
+        dropped_items: Vec::new(),
     }
 }
 
@@ -716,10 +732,11 @@ pub fn dungeon_map(id: MapId, name: &str, description: &str, width: u32, height:
         width,
         height,
         tiles,
-        events: std::collections::HashMap::new(),
+        events: std::collections::BTreeMap::new(),
         encounter_table: None,
         allow_random_encounters: true,
         npc_placements: Vec::new(),
+        dropped_items: Vec::new(),
     }
 }
 
@@ -751,10 +768,11 @@ pub fn forest_map(id: MapId, name: &str, description: &str, width: u32, height: 
         width,
         height,
         tiles,
-        events: std::collections::HashMap::new(),
+        events: std::collections::BTreeMap::new(),
         encounter_table: None,
         allow_random_encounters: true,
         npc_placements: Vec::new(),
+        dropped_items: Vec::new(),
     }
 }
 
