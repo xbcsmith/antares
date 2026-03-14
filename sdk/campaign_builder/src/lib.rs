@@ -3401,6 +3401,22 @@ impl CampaignBuilderApp {
 
                     self.sync_obj_importer_campaign_state();
 
+                    // Load item mesh assets into the Item Mesh Editor registry.
+                    // Must happen after campaign_dir is set (above) and after
+                    // load_items() so mesh IDs on items are already known.
+                    if let Some(ref dir) = self.campaign_dir.clone() {
+                        self.logger
+                            .debug(category::FILE_IO, "Loading item mesh assets...");
+                        self.item_mesh_editor_state.load_from_campaign(dir);
+                        self.logger.info(
+                            category::FILE_IO,
+                            &format!(
+                                "Loaded {} item mesh entries",
+                                self.item_mesh_editor_state.registry.len()
+                            ),
+                        );
+                    }
+
                     // Reset editor state before loading so stale data from any
                     // previously opened campaign is cleared first.  The explicit
                     // load below will clear needs_initial_load on success; on

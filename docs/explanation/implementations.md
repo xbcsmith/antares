@@ -1,5 +1,86 @@
 # Implementations
 
+## Item Mesh Editor — Registry Loading Fix (Complete)
+
+### Problem
+
+Opening the Item Mesh Editor tab always showed an empty registry regardless of
+which campaign was loaded. No item mesh assets were ever displayed, and the
+"Reload" button had no effect.
+
+### Root Causes (three separate bugs)
+
+| #   | Location                                           | Bug                                                                                                                                                                                  |
+| --- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `lib.rs` → `do_open_campaign`                      | No `load_item_meshes()` call exists — the `item_mesh_editor_state.registry` is initialised empty and never populated when a campaign is opened                                       |
+| 2   | `item_mesh_editor.rs` → `refresh_available_assets` | Used `std::fs::read_dir` (one level only) on `assets/items/`; all actual RON files live in **subdirectories** (`weapons/`, `armor/`, `accessories/`, etc.) so nothing was ever found |
+| 3   | `item_mesh_editor.rs` → `show_registry_mode`       | Contained a duplicate inline asset-scan with the same non-recursive bug; this was the code path triggered when the tab became visible for the first time                             |
+
+**Format note**: The tutorial campaign stores item mesh geometry as
+`CreatureDefinition` RON files (the game's internal format with explicit
+vertices/faces). The editor's existing `execute_register_asset` path expects
+`ItemMeshDescriptor` format (the editor's procedural-parameter format). The
+loading code needs to handle both.
+
+### Fix
+
+#### 1. New `load_from_campaign` method (`item_mesh_editor.rs`)
+
+Added a public method that:
+
+- Recursively scans `<campaign_dir>/assets/items/**/*.ron`
+- For each file, tries `ItemMeshDescriptor` deserialization first (editor-created files)
+- Falls back to `CreatureDefinition` deserialization (game/legacy files), deriving
+  an approximate `ItemMeshDescriptor` from mesh color, scale, and emissive data
+- Uses `infer_category_from_path()` (file stem → folder name → default) to
+  determine `ItemMeshCategory` for legacy files
+- Replaces `self.registry` entirely so repeated loads don't accumulate stale entries
+- Keeps `available_item_assets` in sync after loading
+
+#### 2. New `collect_ron_files_recursive` helper (`item_mesh_editor.rs`)
+
+Replaces the flat `read_dir` calls with a recursive walk so all files in
+subdirectory trees are found.
+
+#### 3. New `infer_category_from_path` helper (`item_mesh_editor.rs`)
+
+Maps file stem (e.g. `"short_sword"` → `Dagger`, `"chain_mail"` → `BodyArmor`)
+and parent folder name (`"weapons"` → `Sword`, `"accessories"` → `Ring`, etc.)
+to `ItemMeshCategory`.
+
+#### 4. `refresh_available_assets` fixed to use recursive helper
+
+Replaced the non-recursive `read_dir` loop with a call to
+`collect_ron_files_recursive`.
+
+#### 5. `show_registry_mode` inline scan replaced (`item_mesh_editor.rs`)
+
+Replaced the duplicate non-recursive inline scan block (triggered on first
+tab visit) with a call to `load_from_campaign` so the registry is also
+populated when the tab is shown for the first time after opening a campaign.
+
+#### 6. `do_open_campaign` wired up (`lib.rs`)
+
+Added a call to `self.item_mesh_editor_state.load_from_campaign(dir)` in the
+data-loading block alongside all other `load_*` calls. The call is guarded by
+`if let Some(ref dir) = self.campaign_dir.clone()` and logged at info level.
+
+| File                                           | Change                                                                                                                                                                                        |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/item_mesh_editor.rs` | Added `load_from_campaign`, `collect_ron_files_recursive`, `stem_to_display_name`, `infer_category_from_path`; fixed `refresh_available_assets`; replaced inline scan in `show_registry_mode` |
+| `sdk/campaign_builder/src/lib.rs`              | Added `load_from_campaign` call in `do_open_campaign`                                                                                                                                         |
+
+All four quality gates pass after the fix:
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors, 0 warnings)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3518 passed, 0 failed
+```
+
+---
+
 ## Campaign Builder Context Menu Fix (Complete)
 
 ### Problem
