@@ -8294,6 +8294,14 @@
     ],
     events: {
         (
+            x: 3,
+            y: 17,
+        ): DroppedItem(
+            name: "Dropped Sword",
+            item_id: 3,
+            charges: 0,
+        ),
+        (
             x: 5,
             y: 4,
         ): Sign(
@@ -8304,19 +8312,14 @@
             facing: None,
         ),
         (
-            x: 13,
-            y: 15,
-        ): Encounter(
-            name: "Skeleton",
-            description: "Skeleton",
-            monster_group: [
-                11,
-            ],
+            x: 5,
+            y: 10,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store\'s wares and services.",
+            text: "General Store - Buy and Sell items for your party!",
             time_condition: None,
-            facing: Some(West),
-            proximity_facing: false,
-            rotation_speed: None,
-            combat_event_type: Normal,
+            facing: None,
         ),
         (
             x: 5,
@@ -8325,6 +8328,17 @@
             name: "Elder",
             description: "The Village Elder",
             text: "The Village Elder",
+            time_condition: None,
+            facing: None,
+        ),
+        (
+            x: 7,
+            y: 15,
+        ): RecruitableCharacter(
+            name: "Whisper",
+            description: "A nimble elf watches from the shadows near the alley.",
+            character_id: "whisper",
+            dialogue_id: Some(102),
             time_condition: None,
             facing: None,
         ),
@@ -8344,14 +8358,28 @@
             combat_event_type: Normal,
         ),
         (
-            x: 13,
-            y: 3,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice outside the temple detailing its services.",
-            text: "Temple of Healing - The priests can restore your health.",
+            x: 9,
+            y: 0,
+        ): Encounter(
+            name: "Ancient Wolf",
+            description: "Ancient Wolf",
+            monster_group: [
+                32,
+            ],
             time_condition: None,
-            facing: None,
+            facing: Some(South),
+            proximity_facing: false,
+            rotation_speed: None,
+            combat_event_type: Normal,
+        ),
+        (
+            x: 9,
+            y: 9,
+        ): Trap(
+            name: "Water Trap",
+            description: "A trap in the town square fountain",
+            damage: 10,
+            effect: Some("Poison"),
         ),
         (
             x: 11,
@@ -8365,12 +8393,29 @@
             facing: None,
         ),
         (
-            x: 3,
-            y: 17,
-        ): DroppedItem(
-            name: "Dropped Sword",
-            item_id: 3,
-            charges: 0,
+            x: 13,
+            y: 3,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice outside the temple detailing its services.",
+            text: "Temple of Healing - The priests can restore your health.",
+            time_condition: None,
+            facing: None,
+        ),
+        (
+            x: 13,
+            y: 15,
+        ): Encounter(
+            name: "Skeleton",
+            description: "Skeleton",
+            monster_group: [
+                11,
+            ],
+            time_condition: None,
+            facing: Some(West),
+            proximity_facing: false,
+            rotation_speed: None,
+            combat_event_type: Normal,
         ),
         (
             x: 13,
@@ -8383,14 +8428,15 @@
             facing: None,
         ),
         (
-            x: 5,
-            y: 10,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store\'s wares and services.",
-            text: "General Store - Buy and Sell items for your party!",
+            x: 15,
+            y: 7,
+        ): RecruitableCharacter(
+            name: "Old Gareth",
+            description: "A grizzled dwarf veteran stands here, repairing armor.",
+            character_id: "old_gareth",
+            dialogue_id: Some(100),
             time_condition: None,
-            facing: None,
+            facing: Some(West),
         ),
         (
             x: 16,
@@ -8408,26 +8454,6 @@
             combat_event_type: Normal,
         ),
         (
-            x: 9,
-            y: 9,
-        ): Trap(
-            name: "Water Trap",
-            description: "A trap in the town square fountain",
-            damage: 10,
-            effect: Some("Poison"),
-        ),
-        (
-            x: 15,
-            y: 7,
-        ): RecruitableCharacter(
-            name: "Old Gareth",
-            description: "A grizzled dwarf veteran stands here, repairing armor.",
-            character_id: "old_gareth",
-            dialogue_id: Some(100),
-            time_condition: None,
-            facing: Some(West),
-        ),
-        (
             x: 18,
             y: 18,
         ): Teleport(
@@ -8438,32 +8464,6 @@
                 y: 12,
             ),
             map_id: 2,
-        ),
-        (
-            x: 7,
-            y: 15,
-        ): RecruitableCharacter(
-            name: "Whisper",
-            description: "A nimble elf watches from the shadows near the alley.",
-            character_id: "whisper",
-            dialogue_id: Some(102),
-            time_condition: None,
-            facing: None,
-        ),
-        (
-            x: 9,
-            y: 0,
-        ): Encounter(
-            name: "Ancient Wolf",
-            description: "Ancient Wolf",
-            monster_group: [
-                32,
-            ],
-            time_condition: None,
-            facing: Some(South),
-            proximity_facing: false,
-            rotation_speed: None,
-            combat_event_type: Normal,
         ),
     },
     allow_random_encounters: true,

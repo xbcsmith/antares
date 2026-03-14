@@ -1,5 +1,53 @@
 # Implementations
 
+## Campaign Builder Context Menu Fix (Complete)
+
+### Problem
+
+Right-click edit action on items in the Campaign Builder Items Editor was not
+triggering. When users right-clicked on an item and selected "Edit", the context
+menu would close but no edit action would be returned to the caller, leaving the
+UI unresponsive.
+
+### Root Cause
+
+The `show_standard_list_item()` function in `ui_helpers.rs` was using a broken
+implementation with deprecated egui APIs (`popup_below_widget`, `toggle_popup`,
+`is_popup_open`, `close_popup`). These deprecated methods didn't properly persist
+state across frames, causing the action variable mutations inside the popup
+closure to be lost.
+
+### Fix
+
+Rewrote `show_standard_list_item()` to use the correct egui pattern:
+
+1. **Use `response.context_menu()` directly** instead of manually managing popup
+   state with deprecated memory APIs
+2. **Use `ui.close()` instead of `ui.close_menu()`** (which is also deprecated)
+3. **Simplified badge rendering** by removing unnecessary background color
+   alpha calculations
+4. **Proper action capture** by initializing `action` before the closure so
+   mutations properly propagate
+
+| File                                     | Changes                                                                              |
+| ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| `sdk/campaign_builder/src/ui_helpers.rs` | Replaced entire `show_standard_list_item()` implementation with correct egui pattern |
+
+The fix was validated against the implementation plan in
+`docs/explanation/finished/left_panel_standardization_plan.md` (lines 152-218).
+
+All four quality gates pass after the fix:
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors, 0 warnings)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3518 passed, 0 failed
+```
+
+**Test Coverage**: The fix is covered by existing item editor tests that exercise
+the right-click context menu path.
+
 ## Serialized HashMap → BTreeMap Migration (Complete)
 
 ### Problem

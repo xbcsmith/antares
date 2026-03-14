@@ -1621,57 +1621,56 @@ pub fn show_standard_list_item(
 ) -> (bool, ItemAction) {
     let mut action = ItemAction::None;
 
-    // Build the primary label text with optional icon prefix
-    let label_text = match config.icon {
-        Some(icon) => format!("{icon} {}", config.label),
-        None => config.label.clone(),
+    // Main selectable label with optional icon
+    let label_text = if let Some(icon) = config.icon {
+        format!("{} {}", icon, config.label)
+    } else {
+        config.label.clone()
     };
 
     let response = ui.selectable_label(config.selected, &label_text);
     let clicked = response.clicked();
 
-    // Wire up the right-click context menu when enabled.
+    // Context menu
     if config.context_menu_enabled {
-        response.context_menu(|ctx_ui| {
-            if ctx_ui.button("✏️ Edit").clicked() {
+        response.context_menu(|ui| {
+            if ui.button("✏️ Edit").clicked() {
                 action = ItemAction::Edit;
-                ctx_ui.close();
+                ui.close();
             }
-            if ctx_ui.button("🗑️ Delete").clicked() {
+            if ui.button("🗑️ Delete").clicked() {
                 action = ItemAction::Delete;
-                ctx_ui.close();
+                ui.close();
             }
-            if ctx_ui.button("📋 Duplicate").clicked() {
+            if ui.button("📋 Duplicate").clicked() {
                 action = ItemAction::Duplicate;
-                ctx_ui.close();
+                ui.close();
             }
-            if ctx_ui.button("📤 Export").clicked() {
+            if ui.button("📤 Export").clicked() {
                 action = ItemAction::Export;
-                ctx_ui.close();
+                ui.close();
             }
         });
     }
 
-    // Render the metadata badges row below the primary label
+    // Metadata badges (indented)
     if !config.badges.is_empty() || config.id.is_some() {
         ui.horizontal(|ui| {
-            ui.add_space(16.0);
+            ui.add_space(20.0); // Indent for hierarchy
+
+            // Show badges
             for badge in &config.badges {
-                let [r, g, b, _] = badge.color.to_array();
-                let bg = egui::Color32::from_rgba_unmultiplied(r, g, b, 40);
-                let badge_response = ui.label(
-                    egui::RichText::new(&badge.text)
-                        .small()
-                        .color(badge.color)
-                        .background_color(bg),
-                );
-                if let Some(ref tooltip) = badge.tooltip {
+                let badge_text = egui::RichText::new(&badge.text).small().color(badge.color);
+                let badge_response = ui.label(badge_text);
+                if let Some(tooltip) = &badge.tooltip {
                     badge_response.on_hover_text(tooltip);
                 }
-                ui.add_space(2.0);
             }
-            if let Some(ref id) = config.id {
-                ui.label(egui::RichText::new(format!("#{id}")).small().weak());
+
+            // Show ID if present
+            if let Some(id) = config.id {
+                let id_text = egui::RichText::new(format!("#{}", id)).small().weak();
+                ui.label(id_text);
             }
         });
     }
