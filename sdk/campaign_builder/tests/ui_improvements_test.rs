@@ -9,11 +9,11 @@
 #[cfg(test)]
 mod ui_improvements_tests {
     use antares::domain::dialogue::{DialogueNode, DialogueTree};
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_dialogue_tree_structure_for_preview() {
-        let mut nodes = HashMap::new();
+        let mut nodes = BTreeMap::new();
 
         let node1 = DialogueNode {
             id: 0,
@@ -35,8 +35,8 @@ mod ui_improvements_tests {
             is_terminal: true,
         };
 
-        nodes.insert(0, node1);
-        nodes.insert(1, node2);
+        nodes.insert(0u16, node1);
+        nodes.insert(1u16, node2);
 
         let dialogue = DialogueTree {
             id: 1,
@@ -55,7 +55,7 @@ mod ui_improvements_tests {
         assert_eq!(dialogue.associated_quest, Some(5));
 
         // Verify text excerpt logic (first 60 chars)
-        if let Some(first_node) = dialogue.nodes.get(&0) {
+        if let Some(first_node) = dialogue.nodes.get(&0u16) {
             let excerpt: String = first_node.text.chars().take(60).collect();
             assert_eq!(excerpt.len(), 60);
             assert!(first_node.text.len() > 60); // Ensures we're testing truncation
@@ -67,7 +67,7 @@ mod ui_improvements_tests {
         }
 
         // Verify terminal node detection
-        if let Some(end_node) = dialogue.nodes.get(&1) {
+        if let Some(end_node) = dialogue.nodes.get(&1u16) {
             assert!(end_node.is_terminal);
         }
     }
@@ -89,10 +89,10 @@ mod ui_improvements_tests {
 
     #[test]
     fn test_dialogue_node_count_for_preview_limit() {
-        let mut nodes = HashMap::new();
+        let mut nodes = BTreeMap::new();
 
         // Create 10 nodes
-        for i in 0..10 {
+        for i in 0u16..10u16 {
             let node = DialogueNode {
                 id: i,
                 text: format!("Node {} text", i),
@@ -128,7 +128,7 @@ mod ui_improvements_tests {
 
     #[test]
     fn test_dialogue_with_speaker_and_quest() {
-        let nodes = HashMap::new();
+        let nodes = BTreeMap::new();
 
         let dialogue = DialogueTree {
             id: 42,
@@ -148,7 +148,7 @@ mod ui_improvements_tests {
 
     #[test]
     fn test_dialogue_repeatable_flag() {
-        let nodes = HashMap::new();
+        let nodes: BTreeMap<u16, DialogueNode> = BTreeMap::new();
 
         let repeatable_dialogue = DialogueTree {
             id: 1,

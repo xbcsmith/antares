@@ -462,8 +462,8 @@ mod tests {
             base_creature_id: 0,
             name: "Test".to_string(),
             scale_override: Some(1.0),
-            mesh_color_overrides: std::collections::HashMap::new(),
-            mesh_scale_overrides: std::collections::HashMap::new(),
+            mesh_color_overrides: std::collections::BTreeMap::new(),
+            mesh_scale_overrides: std::collections::BTreeMap::new(),
         };
 
         let action = VariationAction::Apply(variation.clone());
@@ -474,7 +474,6 @@ mod tests {
 
         let action = VariationAction::Duplicate(variation.clone());
         assert!(matches!(action, VariationAction::Duplicate(_)));
-
         let action = VariationAction::Delete(0);
         assert!(matches!(action, VariationAction::Delete(0)));
     }
