@@ -19,6 +19,7 @@ use antares::domain::items::types::{
     ArmorClassification, ArmorData, ConsumableData, Item, ItemType, WeaponClassification,
     WeaponData,
 };
+use std::collections::BTreeMap;
 
 use antares::domain::quest::{Quest, QuestId, QuestObjective, QuestReward, QuestStage};
 use antares::domain::types::{DiceRoll, MonsterId};
@@ -719,11 +720,11 @@ impl TemplateManager {
     pub fn create_dialogue(&self, template_id: &str, id: u32) -> Option<DialogueTree> {
         let id: u16 = id.try_into().ok()?;
         use antares::domain::dialogue::DialogueChoice;
-        use std::collections::HashMap;
+        use std::collections::{BTreeMap, HashMap};
 
         match template_id {
             "merchant" => {
-                let mut nodes = HashMap::new();
+                let mut nodes = BTreeMap::new();
                 nodes.insert(
                     0,
                     DialogueNode {
@@ -751,7 +752,7 @@ impl TemplateManager {
                 })
             }
             "quest_giver" => {
-                let mut nodes = HashMap::new();
+                let mut nodes = BTreeMap::new();
                 nodes.insert(
                     0,
                     DialogueNode {
@@ -778,7 +779,7 @@ impl TemplateManager {
                 })
             }
             "guard" => {
-                let mut nodes = HashMap::new();
+                let mut nodes = BTreeMap::new();
                 nodes.insert(
                     0,
                     DialogueNode {
@@ -806,7 +807,7 @@ impl TemplateManager {
                 })
             }
             "innkeeper" => {
-                let mut nodes = HashMap::new();
+                let mut nodes = BTreeMap::new();
                 nodes.insert(
                     0,
                     DialogueNode {

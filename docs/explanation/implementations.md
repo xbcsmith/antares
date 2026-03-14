@@ -1,5 +1,177 @@
 # Implementations
 
+## Serialized HashMap → BTreeMap Migration (Complete)
+
+### Problem
+
+The SDK campaign save always produced reordered output on successive saves
+because several serialised domain structs used `HashMap` (random iteration
+order) instead of `BTreeMap` (sorted iteration order). This caused spurious
+diffs whenever a campaign was saved, making it impossible to track real changes
+in version control.
+
+### Root Cause
+
+Rust's `std::collections::HashMap` uses a random seed per process to prevent
+hash-flooding attacks. Any struct that is serialised (via `serde` + `ron`) and
+contains a `HashMap` field will have its keys written in an unpredictable order
+each time the program runs.
+
+### Fix
+
+Replaced every serialised `HashMap` field with `BTreeMap` across seven domain
+files, plus two downstream caller files that were caught by the compiler:
+
+| File                                           | Fields changed                                                                                                                                |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/types.rs`                          | Added `PartialOrd, Ord` to `Position` derive (required as `BTreeMap` key)                                                                     |
+| `src/domain/world/types.rs`                    | Added `PartialOrd, Ord` to `TerrainType` derive; `Map::events`, `EncounterTable::terrain_modifiers`, `World::maps`                            |
+| `src/domain/dialogue.rs`                       | `DialogueTree::nodes`                                                                                                                         |
+| `src/domain/campaign.rs`                       | `Campaign::content_overrides`, `CampaignConfig::custom_rules`                                                                                 |
+| `src/domain/visual/animation_state_machine.rs` | `AnimationStateMachine::states`, `AnimationStateMachine::parameters`; `TransitionCondition::evaluate` signature updated to accept `&BTreeMap` |
+| `src/domain/visual/creature_variations.rs`     | `CreatureVariation::mesh_color_overrides`, `CreatureVariation::mesh_scale_overrides`                                                          |
+| `src/domain/visual/skeletal_animation.rs`      | `SkeletalAnimation::bone_tracks`                                                                                                              |
+| `src/domain/world/blueprint.rs`                | `events` local variable in `From<MapBlueprint>`                                                                                               |
+| `src/sdk/templates.rs`                         | `events` field in `grass_map`, `dungeon_map`, `forest_map` template functions                                                                 |
+
+`HashMap` was **not** changed for fields that are purely runtime/lookup
+structures (`SpriteSelectionRule::Autotile::rules`, `TransitionCondition`
+parameter maps passed in from callers, etc.).
+
+### Key design points
+
+- `BTreeMap` and `HashMap` share the same call-site API (`insert`, `get`,
+  `remove`, `iter`, `entry`, `is_empty`, `len`). No logic changes were needed
+  beyond the type name and constructor.
+- `serde` attributes that referenced `"HashMap::is_empty"` as a
+  `skip_serializing_if` predicate were updated to `"BTreeMap::is_empty"`.
+- All doc-test examples that constructed `HashMap::new()` to pass as parameter
+  maps were updated to `BTreeMap::new()` to keep them compilable.
+- All four quality gates pass after the change:
+  - `cargo fmt --all` — no output
+  - `cargo check --all-targets --all-features` — 0 errors, 0 warnings
+  - `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+  - `cargo nextest run --all-features` — 3518/3518 pass
+
+### Part 2 — SDK Vec save functions sort by ID (Complete)
+
+Even with `BTreeMap` fixing map-field ordering, `Vec`-backed collections
+(`items`, `spells`, `monsters`, etc.) can still land out of ID order if the
+user adds an item with a low ID after items with higher IDs already exist. The
+SDK save functions now sort a clone of each collection by ID before serializing
+so the file always comes out in ascending-ID order regardless of insertion
+history.
+
+The sort is done on a **clone** (not in-place) so the editor's in-memory list
+and any UI selection state are not disturbed.
+
+| Save function            | ID type  | Sort expression                     |
+| ------------------------ | -------- | ----------------------------------- |
+| `save_items`             | `u8`     | `sort_by_key(\|i\| i.id)`           |
+| `save_spells`            | `u16`    | `sort_by_key(\|s\| s.id)`           |
+| `save_monsters`          | `u8`     | `sort_by_key(\|m\| m.id)`           |
+| `save_conditions`        | `String` | `sort_by(\|a, b\| a.id.cmp(&b.id))` |
+| `save_proficiencies`     | `String` | `sort_by(\|a, b\| a.id.cmp(&b.id))` |
+| `save_dialogues_to_file` | `u16`    | `sort_by_key(\|d\| d.id)`           |
+| `save_npcs_to_file`      | `String` | `sort_by(\|a, b\| a.id.cmp(&b.id))` |
+| `save_quests`            | `u16`    | `sort_by_key(\|q\| q.id)`           |
+
+All four quality gates pass after the addition:
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3518 passed, 0 failed
+```
+
+## Dropped Item Visibility Fix — Terrain-Aware Grass Clearance (Complete)
+
+### Problem
+
+After the upright-spawn-rotation fix, a short sword dropped on a **grass** or
+**forest** tile still appeared visually buried — only a thin sliver of blade
+was visible above the surface. The root cause was a mismatch between the
+floor-clearance constant and the actual height of the procedural grass blades:
+
+| Value                          | World units | Notes                                  |
+| ------------------------------ | ----------- | -------------------------------------- |
+| `DROPPED_ITEM_FLOOR_CLEARANCE` | 0.30        | Pommel height on flat ground           |
+| `GRASS_BLADE_HEIGHT_BASE`      | 0.40        | Base height of a spawned grass blade   |
+| Max grass blade (`base × 1.3`) | 0.52        | Tallest possible blade after variation |
+| Short sword pommel (scale 1.5) | **0.30**    | **Below** the tallest grass blade      |
+
+The camera eye-height is **1.2** units. A pommel sitting at Y = 0.30 inside a
+grass field that reaches Y = 0.52 means the lower ~40 % of the weapon is
+hidden by grass geometry, making the sword look buried even though its spawn
+position was technically above the mathematical floor.
+
+### Root Cause
+
+`DROPPED_ITEM_FLOOR_CLEARANCE` was a single global constant (0.3) used for all
+terrain types. It was tuned for flat stone / dirt floors and was too low for
+grass and forest tiles, where the `advanced_grass` system spawns blade meshes
+that can reach 0.52 world units above Y = 0.
+
+### Fix
+
+`spawn_dropped_item_system` (`src/game/systems/item_world_events.rs`) was made
+**terrain-aware**:
+
+1. **New constant** `DROPPED_ITEM_GRASS_FLOOR_CLEARANCE = 0.6` — ensures the
+   pommel clears even the tallest grass blade (0.52) with an 8 cm margin.
+2. **`GlobalState` parameter added** to the system so it can query the tile
+   terrain under each drop position.
+3. **`effective_floor_clearance`** is computed per-event:
+   - `Grass | Forest` → `DROPPED_ITEM_GRASS_FLOOR_CLEARANCE` (0.6)
+   - all other terrain → `DROPPED_ITEM_FLOOR_CLEARANCE` (0.3)
+4. The `item_spawn_y` calculation uses `effective_floor_clearance` instead of
+   the hard-coded constant in both branches (negative-Z geometry and flat items).
+5. The `else` branch (items with no negative-Z vertices, e.g. rings / scrolls)
+   was also updated to use `effective_floor_clearance.max(DROPPED_ITEM_MIN_HEIGHT)`
+   so flat items on grass also sit above the blades.
+
+#### Short sword — world Y extents after fix (grass tile)
+
+| Part                | World Y |
+| ------------------- | ------- |
+| Pommel (lowest)     | 0.60    |
+| Crossguard (centre) | 0.73    |
+| Blade tip (highest) | 1.17    |
+| Camera eye height   | 1.20    |
+
+The entire sword is now above the grass blades (max 0.52) and the tip is just
+below the camera's eye line — well within the first-person field of view.
+
+### Files Changed
+
+- `src/game/systems/item_world_events.rs`
+  - Added `DROPPED_ITEM_GRASS_FLOOR_CLEARANCE: f32 = 0.6` constant with full
+    doc comment explaining the grass-blade height calculation.
+  - Updated `DROPPED_ITEM_FLOOR_CLEARANCE` and `DROPPED_ITEM_MIN_HEIGHT` doc
+    comments to clarify their flat-terrain scope.
+  - Added `global_state: Option<Res<GlobalState>>` parameter.
+  - Added `Position` to `crate::domain::types` import.
+  - Added `TerrainType` to `crate::domain::world` import.
+  - Added terrain lookup + `effective_floor_clearance` computation inside the
+    event loop, before `item_spawn_y`.
+  - Replaced `DROPPED_ITEM_FLOOR_CLEARANCE` with `effective_floor_clearance` in
+    both branches of the `item_spawn_y` calculation.
+  - Added two new `const` assertion tests:
+    - `test_dropped_item_grass_clearance_exceeds_max_grass_blade_height`
+    - `test_grass_clearance_exceeds_standard_clearance`
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3518 passed, 0 failed
+```
+
+---
+
 ## Dropped Item Visibility Fix — Upright Spawn Rotation (Complete)
 
 ### Problem
@@ -610,7 +782,7 @@ identified and fixed:
       constant; primary mesh and charge gem `MeshTransform` now use a −π/2 X
       rotation so they stand upright in the XY plane instead of lying flat
 - [x] `src/game/systems/item_world_events.rs` — added `Billboard { lock_y: true
-  }` component insertion; removed obsolete Y-jitter `entry::<Transform>()`
+}` component insertion; removed obsolete Y-jitter `entry::<Transform>()`
       block; added `.after(map_change_handler)` ordering constraint to the
       system chain; updated module-level and function-level doc comments
 - [x] `src/game/systems/map.rs` — `map_change_handler` visibility changed from

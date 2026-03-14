@@ -21,10 +21,10 @@
 //!
 //! ```
 //! use antares::domain::visual::skeletal_animation::{SkeletalAnimation, BoneKeyframe};
-//! use std::collections::HashMap;
+//! use std::collections::BTreeMap;
 //!
 //! // Create a simple arm wave animation
-//! let mut bone_tracks = HashMap::new();
+//! let mut bone_tracks = BTreeMap::new();
 //! bone_tracks.insert(0, vec![
 //!     BoneKeyframe {
 //!         time: 0.0,
@@ -52,7 +52,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::domain::visual::skeleton::BoneId;
 
@@ -175,9 +175,9 @@ impl BoneKeyframe {
 ///
 /// ```
 /// use antares::domain::visual::skeletal_animation::{SkeletalAnimation, BoneKeyframe};
-/// use std::collections::HashMap;
+/// use std::collections::BTreeMap;
 ///
-/// let mut bone_tracks = HashMap::new();
+/// let mut bone_tracks = BTreeMap::new();
 /// bone_tracks.insert(0, vec![
 ///     BoneKeyframe::identity(0.0),
 ///     BoneKeyframe::identity(1.0),
@@ -201,7 +201,7 @@ pub struct SkeletalAnimation {
     pub duration: f32,
 
     /// Map of bone IDs to their keyframe sequences
-    pub bone_tracks: HashMap<BoneId, Vec<BoneKeyframe>>,
+    pub bone_tracks: BTreeMap<BoneId, Vec<BoneKeyframe>>,
 
     /// Whether the animation loops
     pub looping: bool,
@@ -231,7 +231,7 @@ impl SkeletalAnimation {
         Self {
             name,
             duration,
-            bone_tracks: HashMap::new(),
+            bone_tracks: BTreeMap::new(),
             looping,
         }
     }

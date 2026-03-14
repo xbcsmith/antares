@@ -14,7 +14,7 @@ use crate::domain::combat::types::CombatEventType;
 use crate::domain::types::{Direction, GameTime, ItemId, MapId, Position, TimeOfDay};
 use crate::domain::world::dropped_items::DroppedItem;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 // ===== Tile Types =====
 
@@ -32,7 +32,7 @@ pub enum WallType {
 }
 
 /// Terrain type for tiles
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TerrainType {
     /// Normal walkable ground
     Ground,
@@ -345,7 +345,7 @@ pub enum SpriteSelectionRule {
         /// Mapping from 4-bit neighbor bitmask to sprite index
         /// Bits: [North, East, South, West]
         /// E.g., 0b0011 = North and East neighbors = index 5
-        rules: std::collections::HashMap<u8, u32>,
+        rules: HashMap<u8, u32>,
     },
 }
 
@@ -2248,8 +2248,8 @@ pub struct EncounterTable {
     pub groups: Vec<EncounterGroup>,
 
     /// Terrain-based modifiers to multiply the base encounter rate
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub terrain_modifiers: HashMap<TerrainType, f32>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub terrain_modifiers: BTreeMap<TerrainType, f32>,
 }
 
 // ===== Resolved NPC =====
@@ -2411,8 +2411,8 @@ pub struct Map {
     /// 2D grid of tiles (row-major order: y * width + x)
     pub tiles: Vec<Tile>,
     /// Events at specific positions
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub events: HashMap<Position, MapEvent>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub events: BTreeMap<Position, MapEvent>,
 
     /// Optional random encounter table for this map
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2487,7 +2487,7 @@ impl Map {
             width,
             height,
             tiles,
-            events: HashMap::new(),
+            events: BTreeMap::new(),
             encounter_table: None,
             allow_random_encounters: default_allow_random_encounters(),
             npc_placements: Vec::new(),
@@ -3131,7 +3131,7 @@ mod map_npc_resolution_tests {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct World {
     /// All maps in the world
-    pub maps: HashMap<MapId, Map>,
+    pub maps: BTreeMap<MapId, Map>,
     /// Current map ID
     pub current_map: MapId,
     /// Party position on current map
@@ -3144,7 +3144,7 @@ impl World {
     /// Creates a new empty world
     pub fn new() -> Self {
         Self {
-            maps: HashMap::new(),
+            maps: BTreeMap::new(),
             current_map: 0,
             party_position: Position::new(0, 0),
             party_facing: Direction::North,

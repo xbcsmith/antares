@@ -6008,22 +6008,22 @@
     ],
     events: {
         (
-            x: 10,
-            y: 10,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice describing the Temple of Healing and the services it provides.",
-            text: "Temple of Healing - The priests can restore your health.",
-            time_condition: None,
-            facing: None,
-        ),
-        (
             x: 15,
             y: 4,
         ): Sign(
             name: "General Store Sign",
             description: "A sign advertising the general store where adventurers can buy and sell goods.",
             text: "General Store - Buy and sell items for your adventures.",
+            time_condition: None,
+            facing: None,
+        ),
+        (
+            x: 10,
+            y: 10,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice describing the Temple of Healing and the services it provides.",
+            text: "Temple of Healing - The priests can restore your health.",
             time_condition: None,
             facing: None,
         ),
@@ -6040,14 +6040,16 @@
             map_id: 6,
         ),
         (
-            x: 18,
-            y: 8,
-        ): Sign(
-            name: "Forest Direction Sign",
-            description: "A directional sign pointing to the nearby forest.",
-            text: "To the Forrest",
-            time_condition: None,
-            facing: None,
+            x: 19,
+            y: 7,
+        ): Teleport(
+            name: "Portal to Dark Forrest",
+            description: "A portal that transports the party to Dark Forrest (map 4) at (10,19).",
+            destination: (
+                x: 10,
+                y: 19,
+            ),
+            map_id: 4,
         ),
         (
             x: 4,
@@ -6060,16 +6062,14 @@
             facing: None,
         ),
         (
-            x: 19,
-            y: 7,
-        ): Teleport(
-            name: "Portal to Dark Forrest",
-            description: "A portal that transports the party to Dark Forrest (map 4) at (10,19).",
-            destination: (
-                x: 10,
-                y: 19,
-            ),
-            map_id: 4,
+            x: 18,
+            y: 8,
+        ): Sign(
+            name: "Forest Direction Sign",
+            description: "A directional sign pointing to the nearby forest.",
+            text: "To the Forrest",
+            time_condition: None,
+            facing: None,
         ),
     },
     allow_random_encounters: true,

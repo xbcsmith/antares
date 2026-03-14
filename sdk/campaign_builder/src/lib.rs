@@ -1850,7 +1850,12 @@ impl CampaignBuilderApp {
                 .struct_names(false)
                 .enumerate_arrays(false);
 
-            let contents = ron::ser::to_string_pretty(&self.items, ron_config)
+            // Sort by ID before serializing so the file order is always
+            // deterministic regardless of the order items were added/edited.
+            let mut sorted_items = self.items.clone();
+            sorted_items.sort_by_key(|i| i.id);
+
+            let contents = ron::ser::to_string_pretty(&sorted_items, ron_config)
                 .map_err(|e| format!("Failed to serialize items: {}", e))?;
 
             fs::write(&items_path, &contents)
@@ -1942,7 +1947,11 @@ impl CampaignBuilderApp {
                 .struct_names(false)
                 .enumerate_arrays(false);
 
-            let contents = ron::ser::to_string_pretty(&self.spells, ron_config)
+            // Sort by ID before serializing for stable file order.
+            let mut sorted_spells = self.spells.clone();
+            sorted_spells.sort_by_key(|s| s.id);
+
+            let contents = ron::ser::to_string_pretty(&sorted_spells, ron_config)
                 .map_err(|e| format!("Failed to serialize spells: {}", e))?;
 
             fs::write(&spells_path, contents)
@@ -2018,7 +2027,11 @@ impl CampaignBuilderApp {
                 .struct_names(false)
                 .enumerate_arrays(false);
 
-            let contents = ron::ser::to_string_pretty(&self.conditions, ron_config)
+            // Sort by ID (String) before serializing for stable file order.
+            let mut sorted_conditions = self.conditions.clone();
+            sorted_conditions.sort_by(|a, b| a.id.cmp(&b.id));
+
+            let contents = ron::ser::to_string_pretty(&sorted_conditions, ron_config)
                 .map_err(|e| format!("Failed to serialize conditions: {}", e))?;
 
             fs::write(&conditions_path, contents)
@@ -2138,7 +2151,11 @@ impl CampaignBuilderApp {
                 .struct_names(false)
                 .enumerate_arrays(false);
 
-            let contents = ron::ser::to_string_pretty(&self.proficiencies, ron_config)
+            // Sort by ID (String) before serializing for stable file order.
+            let mut sorted_proficiencies = self.proficiencies.clone();
+            sorted_proficiencies.sort_by(|a, b| a.id.cmp(&b.id));
+
+            let contents = ron::ser::to_string_pretty(&sorted_proficiencies, ron_config)
                 .map_err(|e| format!("Failed to serialize proficiencies: {}", e))?;
 
             fs::write(&proficiencies_path, &contents)
@@ -2183,7 +2200,11 @@ impl CampaignBuilderApp {
             .struct_names(false)
             .enumerate_arrays(false);
 
-        let contents = ron::ser::to_string_pretty(&self.dialogues, ron_config)
+        // Sort by dialogue ID before serializing for stable file order.
+        let mut sorted_dialogues = self.dialogues.clone();
+        sorted_dialogues.sort_by_key(|d| d.id);
+
+        let contents = ron::ser::to_string_pretty(&sorted_dialogues, ron_config)
             .map_err(|e| format!("Failed to serialize dialogues: {}", e))?;
 
         std::fs::write(path, contents)
@@ -2212,7 +2233,11 @@ impl CampaignBuilderApp {
             .struct_names(false)
             .enumerate_arrays(false);
 
-        let contents = ron::ser::to_string_pretty(&self.npc_editor_state.npcs, ron_config)
+        // Sort by NPC ID (String) before serializing for stable file order.
+        let mut sorted_npcs = self.npc_editor_state.npcs.clone();
+        sorted_npcs.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let contents = ron::ser::to_string_pretty(&sorted_npcs, ron_config)
             .map_err(|e| format!("Failed to serialize NPCs: {}", e))?;
 
         std::fs::write(path, contents).map_err(|e| format!("Failed to write NPCs file: {}", e))?;
@@ -2382,7 +2407,11 @@ impl CampaignBuilderApp {
                 .struct_names(false)
                 .enumerate_arrays(false);
 
-            let contents = ron::ser::to_string_pretty(&self.monsters, ron_config)
+            // Sort by ID before serializing for stable file order.
+            let mut sorted_monsters = self.monsters.clone();
+            sorted_monsters.sort_by_key(|m| m.id);
+
+            let contents = ron::ser::to_string_pretty(&sorted_monsters, ron_config)
                 .map_err(|e| format!("Failed to serialize monsters: {}", e))?;
 
             fs::write(&monsters_path, contents)
@@ -5181,7 +5210,11 @@ impl CampaignBuilderApp {
                 fs::create_dir_all(parent).map_err(CampaignError::Io)?;
             }
 
-            let contents = ron::ser::to_string_pretty(&self.quests, Default::default())?;
+            // Sort by ID before serializing for stable file order.
+            let mut sorted_quests = self.quests.clone();
+            sorted_quests.sort_by_key(|q| q.id);
+
+            let contents = ron::ser::to_string_pretty(&sorted_quests, Default::default())?;
             fs::write(&quests_path, contents)?;
         }
         Ok(())

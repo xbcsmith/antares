@@ -14,7 +14,7 @@
 use crate::domain::quest::QuestId;
 use crate::domain::types::ItemId;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Dialogue identifier
 pub type DialogueId = u16;
@@ -51,7 +51,7 @@ pub struct DialogueTree {
     pub root_node: NodeId,
 
     /// All nodes in the dialogue tree
-    pub nodes: HashMap<NodeId, DialogueNode>,
+    pub nodes: BTreeMap<NodeId, DialogueNode>,
 
     /// NPC speaker name (optional, can be overridden per node)
     pub speaker_name: Option<String>,
@@ -82,7 +82,7 @@ impl DialogueTree {
             id,
             name: name.into(),
             root_node,
-            nodes: HashMap::new(),
+            nodes: BTreeMap::new(),
             speaker_name: None,
             repeatable: true,
             associated_quest: None,

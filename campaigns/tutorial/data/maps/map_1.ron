@@ -8294,136 +8294,12 @@
     ],
     events: {
         (
-            x: 16,
-            y: 17,
-        ): Encounter(
-            name: "Ancient Skeleton",
-            description: "Ancient Skeleton",
-            monster_group: [
-                133,
-            ],
-            time_condition: None,
-            facing: Some(West),
-            proximity_facing: false,
-            rotation_speed: None,
-            combat_event_type: Normal,
-        ),
-        (
-            x: 13,
-            y: 3,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice outside the temple detailing its services.",
-            text: "Temple of Healing - The priests can restore your health.",
-            time_condition: None,
-            facing: None,
-        ),
-        (
-            x: 9,
-            y: 0,
-        ): Encounter(
-            name: "Ancient Wolf",
-            description: "Ancient Wolf",
-            monster_group: [
-                32,
-            ],
-            time_condition: None,
-            facing: Some(South),
-            proximity_facing: false,
-            rotation_speed: None,
-            combat_event_type: Normal,
-        ),
-        (
-            x: 9,
-            y: 9,
-        ): Trap(
-            name: "Water Trap",
-            description: "A trap in the town square fountain",
-            damage: 10,
-            effect: Some("Poison"),
-        ),
-        (
             x: 5,
             y: 4,
         ): Sign(
             name: "Cozy Inn Entrance",
             description: "A welcoming inn where you can rest and manage your party.",
             text: "Welcome to the Cozy Inn",
-            time_condition: None,
-            facing: None,
-        ),
-        (
-            x: 15,
-            y: 7,
-        ): RecruitableCharacter(
-            name: "Old Gareth",
-            description: "A grizzled dwarf veteran stands here, repairing armor.",
-            character_id: "old_gareth",
-            dialogue_id: Some(100),
-            time_condition: None,
-            facing: Some(West),
-        ),
-        (
-            x: 8,
-            y: 2,
-        ): Encounter(
-            name: "Wolf",
-            description: "Wolf",
-            monster_group: [
-                12,
-            ],
-            time_condition: None,
-            facing: Some(South),
-            proximity_facing: false,
-            rotation_speed: None,
-            combat_event_type: Normal,
-        ),
-        (
-            x: 3,
-            y: 17,
-        ): DroppedItem(
-            name: "Dropped Sword",
-            item_id: 3,
-            charges: 0,
-        ),
-        (
-            x: 11,
-            y: 6,
-        ): RecruitableCharacter(
-            name: "Apprentice Zara",
-            description: "A young gnome apprentice studies a spellbook intently.",
-            character_id: "apprentice_zara",
-            dialogue_id: Some(101),
-            time_condition: None,
-            facing: None,
-        ),
-        (
-            x: 13,
-            y: 18,
-        ): Sign(
-            name: "Directional Sign",
-            description: "A wooden sign pointing toward the Dark Forrest.",
-            text: "To the Dark Forrest",
-            time_condition: None,
-            facing: None,
-        ),
-        (
-            x: 5,
-            y: 17,
-        ): Sign(
-            name: "Elder",
-            description: "The Village Elder",
-            text: "The Village Elder",
-            time_condition: None,
-            facing: None,
-        ),
-        (
-            x: 5,
-            y: 10,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store\'s wares and services.",
-            text: "General Store - Buy and Sell items for your party!",
             time_condition: None,
             facing: None,
         ),
@@ -8441,6 +8317,115 @@
             proximity_facing: false,
             rotation_speed: None,
             combat_event_type: Normal,
+        ),
+        (
+            x: 5,
+            y: 17,
+        ): Sign(
+            name: "Elder",
+            description: "The Village Elder",
+            text: "The Village Elder",
+            time_condition: None,
+            facing: None,
+        ),
+        (
+            x: 8,
+            y: 2,
+        ): Encounter(
+            name: "Wolf",
+            description: "Wolf",
+            monster_group: [
+                12,
+            ],
+            time_condition: None,
+            facing: Some(South),
+            proximity_facing: false,
+            rotation_speed: None,
+            combat_event_type: Normal,
+        ),
+        (
+            x: 13,
+            y: 3,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice outside the temple detailing its services.",
+            text: "Temple of Healing - The priests can restore your health.",
+            time_condition: None,
+            facing: None,
+        ),
+        (
+            x: 11,
+            y: 6,
+        ): RecruitableCharacter(
+            name: "Apprentice Zara",
+            description: "A young gnome apprentice studies a spellbook intently.",
+            character_id: "apprentice_zara",
+            dialogue_id: Some(101),
+            time_condition: None,
+            facing: None,
+        ),
+        (
+            x: 3,
+            y: 17,
+        ): DroppedItem(
+            name: "Dropped Sword",
+            item_id: 3,
+            charges: 0,
+        ),
+        (
+            x: 13,
+            y: 18,
+        ): Sign(
+            name: "Directional Sign",
+            description: "A wooden sign pointing toward the Dark Forrest.",
+            text: "To the Dark Forrest",
+            time_condition: None,
+            facing: None,
+        ),
+        (
+            x: 5,
+            y: 10,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store\'s wares and services.",
+            text: "General Store - Buy and Sell items for your party!",
+            time_condition: None,
+            facing: None,
+        ),
+        (
+            x: 16,
+            y: 17,
+        ): Encounter(
+            name: "Ancient Skeleton",
+            description: "Ancient Skeleton",
+            monster_group: [
+                133,
+            ],
+            time_condition: None,
+            facing: Some(West),
+            proximity_facing: false,
+            rotation_speed: None,
+            combat_event_type: Normal,
+        ),
+        (
+            x: 9,
+            y: 9,
+        ): Trap(
+            name: "Water Trap",
+            description: "A trap in the town square fountain",
+            damage: 10,
+            effect: Some("Poison"),
+        ),
+        (
+            x: 15,
+            y: 7,
+        ): RecruitableCharacter(
+            name: "Old Gareth",
+            description: "A grizzled dwarf veteran stands here, repairing armor.",
+            character_id: "old_gareth",
+            dialogue_id: Some(100),
+            time_condition: None,
+            facing: Some(West),
         ),
         (
             x: 18,
@@ -8464,6 +8449,21 @@
             dialogue_id: Some(102),
             time_condition: None,
             facing: None,
+        ),
+        (
+            x: 9,
+            y: 0,
+        ): Encounter(
+            name: "Ancient Wolf",
+            description: "Ancient Wolf",
+            monster_group: [
+                32,
+            ],
+            time_condition: None,
+            facing: Some(South),
+            proximity_facing: false,
+            rotation_speed: None,
+            combat_event_type: Normal,
         ),
     },
     allow_random_encounters: true,

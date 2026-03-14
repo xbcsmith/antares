@@ -377,8 +377,8 @@ impl VariationCreateBuffer {
             base_creature_id: 0, // Will be set by caller
             name: self.name.clone(),
             scale_override: Some(self.scale_multiplier),
-            mesh_color_overrides: std::collections::HashMap::new(),
-            mesh_scale_overrides: std::collections::HashMap::new(),
+            mesh_color_overrides: std::collections::BTreeMap::new(),
+            mesh_scale_overrides: std::collections::BTreeMap::new(),
         }
     }
 }

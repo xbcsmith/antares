@@ -47,6 +47,8 @@
         starting_items: [
             50,
             50,
+            8,
+            60,
         ],
         starting_equipment: (
             weapon: Some(3),
@@ -110,10 +112,11 @@
             51,
             51,
             50,
+            2,
         ],
         starting_equipment: (
-            weapon: Some(1),
-            armor: None,
+            weapon: Some(106),
+            armor: Some(107),
             shield: None,
             helmet: None,
             boots: None,
@@ -246,8 +249,8 @@
         ),
         description: "A grizzled dwarf veteran who runs the town\'s smithy. Though his adventuring days are behind him, Old Gareth can be convinced to join a worthy cause one last time.",
         is_premade: true,
-        creature_id: Some(1007),
         starts_in_party: false,
+        creature_id: Some(1007),
     ),
     (
         id: "whisper",
@@ -310,10 +313,10 @@
             accessory1: None,
             accessory2: None,
         ),
-        description: "A nimble elf with quick fingers and quicker feet. Whisper claims to be a 'locksmith' but her skills with traps suggest a more colorful past.",
+        description: "A nimble elf with quick fingers and quicker feet. Whisper claims to be a \'locksmith\' but her skills with traps suggest a more colorful past.",
         is_premade: true,
-        creature_id: Some(1012),
         starts_in_party: false,
+        creature_id: Some(1012),
     ),
     (
         id: "apprentice_zara",
@@ -376,10 +379,10 @@
             accessory1: None,
             accessory2: None,
         ),
-        description: "An enthusiastic gnome apprentice from the Mage's Guild. Zara was separated from her mentor and seeks adventurers to help her complete her studies.",
+        description: "An enthusiastic gnome apprentice from the Mage\'s Guild. Zara was separated from her mentor and seeks adventurers to help her complete her studies.",
         is_premade: true,
-        creature_id: Some(1008),
         starts_in_party: false,
+        creature_id: Some(1008),
     ),
     (
         id: "template_human_fighter",
