@@ -63,7 +63,7 @@ pub type MeshId = u32;
 /// let start = Position { x: 5, y: 10 };
 /// let offset = Position { x: -2, y: 3 };
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Position {
     pub x: i32,
     pub y: i32,

@@ -260,6 +260,6 @@
             scale: (1.0, 1.0, 1.0),
         ),
     ],
-    scale: 0.78,
+    scale: 0.55,
     color_tint: None,
 )

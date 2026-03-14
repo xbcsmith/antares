@@ -24,7 +24,7 @@
 //!     AnimationStateMachine, AnimationState, Transition, TransitionCondition
 //! };
 //! use antares::domain::visual::blend_tree::BlendNode;
-//! use std::collections::HashMap;
+//! use std::collections::BTreeMap;
 //!
 //! // Create a simple state machine for locomotion
 //! let mut state_machine = AnimationStateMachine::new("Locomotion".to_string());
@@ -56,7 +56,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::domain::visual::blend_tree::BlendNode;
 
@@ -145,19 +145,19 @@ impl TransitionCondition {
     ///
     /// ```
     /// use antares::domain::visual::animation_state_machine::TransitionCondition;
-    /// use std::collections::HashMap;
+    /// use std::collections::BTreeMap;
     ///
     /// let condition = TransitionCondition::GreaterThan {
     ///     parameter: "speed".to_string(),
     ///     threshold: 1.0,
     /// };
     ///
-    /// let mut params = HashMap::new();
+    /// let mut params = BTreeMap::new();
     /// params.insert("speed".to_string(), 2.0);
     ///
     /// assert!(condition.evaluate(&params));
     /// ```
-    pub fn evaluate(&self, parameters: &HashMap<String, f32>) -> bool {
+    pub fn evaluate(&self, parameters: &BTreeMap<String, f32>) -> bool {
         match self {
             TransitionCondition::Always => true,
             TransitionCondition::GreaterThan {
@@ -319,7 +319,7 @@ pub struct AnimationStateMachine {
     pub name: String,
 
     /// All animation states
-    pub states: HashMap<String, AnimationState>,
+    pub states: BTreeMap<String, AnimationState>,
 
     /// All transitions
     pub transitions: Vec<Transition>,
@@ -328,7 +328,7 @@ pub struct AnimationStateMachine {
     pub current_state: String,
 
     /// Runtime parameters for condition evaluation
-    pub parameters: HashMap<String, f32>,
+    pub parameters: BTreeMap<String, f32>,
 }
 
 impl AnimationStateMachine {
@@ -349,10 +349,10 @@ impl AnimationStateMachine {
     pub fn new(name: String) -> Self {
         Self {
             name,
-            states: HashMap::new(),
+            states: BTreeMap::new(),
             transitions: Vec::new(),
             current_state: String::new(),
-            parameters: HashMap::new(),
+            parameters: BTreeMap::new(),
         }
     }
 
@@ -566,7 +566,7 @@ mod tests {
     #[test]
     fn test_transition_condition_always() {
         let condition = TransitionCondition::Always;
-        let params = HashMap::new();
+        let params = BTreeMap::new();
         assert!(condition.evaluate(&params));
     }
 
@@ -577,7 +577,7 @@ mod tests {
             threshold: 1.0,
         };
 
-        let mut params = HashMap::new();
+        let mut params = BTreeMap::new();
         params.insert("speed".to_string(), 2.0);
         assert!(condition.evaluate(&params));
 
@@ -592,7 +592,7 @@ mod tests {
             threshold: 10.0,
         };
 
-        let mut params = HashMap::new();
+        let mut params = BTreeMap::new();
         params.insert("health".to_string(), 5.0);
         assert!(condition.evaluate(&params));
 
@@ -608,7 +608,7 @@ mod tests {
             max: 90.0,
         };
 
-        let mut params = HashMap::new();
+        let mut params = BTreeMap::new();
         params.insert("angle".to_string(), 0.0);
         assert!(condition.evaluate(&params));
 
@@ -629,7 +629,7 @@ mod tests {
             },
         ]);
 
-        let mut params = HashMap::new();
+        let mut params = BTreeMap::new();
         params.insert("speed".to_string(), 3.0);
         assert!(condition.evaluate(&params));
 

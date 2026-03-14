@@ -1265,88 +1265,6 @@
         has_acted: false,
     ),
     (
-        id: 133,
-        name: "Ancient Skeleton",
-        stats: (
-            might: (
-                base: 12,
-                current: 12,
-            ),
-            intellect: (
-                base: 8,
-                current: 8,
-            ),
-            personality: (
-                base: 4,
-                current: 4,
-            ),
-            endurance: (
-                base: 12,
-                current: 12,
-            ),
-            speed: (
-                base: 11,
-                current: 11,
-            ),
-            accuracy: (
-                base: 10,
-                current: 10,
-            ),
-            luck: (
-                base: 6,
-                current: 6,
-            ),
-        ),
-        hp: (
-            base: 40,
-            current: 40,
-        ),
-        ac: (
-            base: 13,
-            current: 13,
-        ),
-        attacks: [
-            (
-                damage: (
-                    count: 1,
-                    sides: 6,
-                    bonus: 0,
-                ),
-                attack_type: Physical,
-                special_effect: None,
-                is_ranged: false,
-            ),
-        ],
-        flee_threshold: 0,
-        special_attack_threshold: 10,
-        resistances: (
-            physical: false,
-            fire: false,
-            cold: true,
-            electricity: true,
-            energy: true,
-            paralysis: true,
-            fear: true,
-            sleep: true,
-        ),
-        can_regenerate: true,
-        can_advance: true,
-        is_undead: true,
-        magic_resistance: 10,
-        loot: (
-            gold_min: 5,
-            gold_max: 100,
-            gems_min: 1,
-            gems_max: 3,
-            items: [],
-            experience: 80,
-        ),
-        creature_id: Some(11),
-        conditions: Normal,
-        active_conditions: [],
-        has_acted: false,
-    ),
-    (
         id: 34,
         name: "SkeletonWarrior",
         stats: (
@@ -1422,6 +1340,88 @@
             gems_max: 1,
             items: [],
             experience: 60,
+        ),
+        creature_id: Some(11),
+        conditions: Normal,
+        active_conditions: [],
+        has_acted: false,
+    ),
+    (
+        id: 133,
+        name: "Ancient Skeleton",
+        stats: (
+            might: (
+                base: 12,
+                current: 12,
+            ),
+            intellect: (
+                base: 8,
+                current: 8,
+            ),
+            personality: (
+                base: 4,
+                current: 4,
+            ),
+            endurance: (
+                base: 12,
+                current: 12,
+            ),
+            speed: (
+                base: 11,
+                current: 11,
+            ),
+            accuracy: (
+                base: 10,
+                current: 10,
+            ),
+            luck: (
+                base: 6,
+                current: 6,
+            ),
+        ),
+        hp: (
+            base: 40,
+            current: 40,
+        ),
+        ac: (
+            base: 13,
+            current: 13,
+        ),
+        attacks: [
+            (
+                damage: (
+                    count: 1,
+                    sides: 6,
+                    bonus: 0,
+                ),
+                attack_type: Physical,
+                special_effect: None,
+                is_ranged: false,
+            ),
+        ],
+        flee_threshold: 0,
+        special_attack_threshold: 10,
+        resistances: (
+            physical: false,
+            fire: false,
+            cold: true,
+            electricity: true,
+            energy: true,
+            paralysis: true,
+            fear: true,
+            sleep: true,
+        ),
+        can_regenerate: true,
+        can_advance: true,
+        is_undead: true,
+        magic_resistance: 10,
+        loot: (
+            gold_min: 5,
+            gold_max: 100,
+            gems_min: 1,
+            gems_max: 3,
+            items: [],
+            experience: 80,
         ),
         creature_id: Some(11),
         conditions: Normal,

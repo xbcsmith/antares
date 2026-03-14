@@ -11,7 +11,7 @@
 //! ```
 //! use antares::domain::campaign::{Campaign, CampaignConfig};
 //! use antares::domain::types::{MapId, Position};
-//! use std::collections::HashMap;
+//! use std::collections::BTreeMap;
 //!
 //! let campaign = Campaign {
 //!     id: "tutorial".to_string(),
@@ -25,10 +25,10 @@
 //!     starting_innkeeper: Some("innkeeper_1".to_string()),
 //!     required_data_version: "1.0.0".to_string(),
 //!     dependencies: vec![],
-//!     content_overrides: HashMap::new(),
+//!     content_overrides: BTreeMap::new(),
 //! };
 //! ```
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,7 +43,7 @@ use crate::domain::types::{Direction, MapId, Position};
 /// ```
 /// use antares::domain::campaign::Campaign;
 /// use antares::domain::types::{MapId, Position};
-/// use std::collections::HashMap;
+/// use std::collections::BTreeMap;
 ///
 /// let campaign = Campaign {
 ///     id: "tutorial".to_string(),
@@ -57,7 +57,7 @@ use crate::domain::types::{Direction, MapId, Position};
 ///     starting_innkeeper: None,
 ///     required_data_version: "1.0.0".to_string(),
 ///     dependencies: vec![],
-///     content_overrides: HashMap::new(),
+///     content_overrides: BTreeMap::new(),
 /// };
 ///
 /// assert_eq!(campaign.id, "tutorial");
@@ -98,7 +98,7 @@ pub struct Campaign {
     pub dependencies: Vec<String>,
 
     /// File path overrides (file -> override path)
-    pub content_overrides: HashMap<String, String>,
+    pub content_overrides: BTreeMap<String, String>,
 }
 
 /// Campaign metadata and configuration
@@ -109,7 +109,7 @@ pub struct Campaign {
 ///
 /// ```
 /// use antares::domain::campaign::CampaignConfig;
-/// use std::collections::HashMap;
+/// use std::collections::BTreeMap;
 ///
 /// let config = CampaignConfig {
 ///     max_party_level: Some(20),
@@ -118,7 +118,7 @@ pub struct Campaign {
 ///     gold_rate: 1.0,
 ///     random_encounter_rate: 1.0,
 ///     rest_healing_rate: 1.0,
-///     custom_rules: HashMap::new(),
+///     custom_rules: BTreeMap::new(),
 /// };
 ///
 /// assert_eq!(config.max_party_level, Some(20));
@@ -144,7 +144,7 @@ pub struct CampaignConfig {
     pub rest_healing_rate: f32,
 
     /// Custom campaign-specific rules
-    pub custom_rules: HashMap<String, String>,
+    pub custom_rules: BTreeMap<String, String>,
 }
 
 impl Default for CampaignConfig {
@@ -156,7 +156,7 @@ impl Default for CampaignConfig {
             gold_rate: 1.0,
             random_encounter_rate: 1.0,
             rest_healing_rate: 1.0,
-            custom_rules: HashMap::new(),
+            custom_rules: BTreeMap::new(),
         }
     }
 }
@@ -179,7 +179,7 @@ mod tests {
             starting_innkeeper: Some("innkeeper_1".to_string()),
             required_data_version: "1.0.0".to_string(),
             dependencies: vec![],
-            content_overrides: HashMap::new(),
+            content_overrides: BTreeMap::new(),
         };
 
         assert_eq!(campaign.id, "test");
@@ -211,7 +211,7 @@ mod tests {
             starting_innkeeper: None,
             required_data_version: "1.0.0".to_string(),
             dependencies: vec!["base_campaign".to_string()],
-            content_overrides: HashMap::new(),
+            content_overrides: BTreeMap::new(),
         };
 
         assert_eq!(campaign.dependencies.len(), 1);
@@ -232,7 +232,7 @@ mod tests {
             starting_innkeeper: None,
             required_data_version: "1.0.0".to_string(),
             dependencies: vec![],
-            content_overrides: HashMap::new(),
+            content_overrides: BTreeMap::new(),
         };
 
         let serialized = ron::to_string(&campaign).expect("Serialization failed");

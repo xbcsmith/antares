@@ -464,7 +464,7 @@ impl TreeTextureValidationIssue {
         Self {
             validation_id: spec.validation_id,
             expected_path: PathBuf::from(spec.relative_path),
-            actual_path: Some(actual_path),
+            actual_path: Some(actual_path.clone()),
             expected_dimensions: (spec.expected_width, spec.expected_height),
             actual_dimensions: None,
             message: format!(
@@ -548,7 +548,7 @@ impl GrassTextureValidationIssue {
         Self {
             validation_id: spec.validation_id,
             expected_path: PathBuf::from(spec.relative_path),
-            actual_path: Some(actual_path),
+            actual_path: Some(actual_path.clone()),
             expected_dimensions: (spec.expected_width, spec.expected_height),
             actual_dimensions: None,
             message: format!(
@@ -1563,6 +1563,14 @@ impl AssetManager {
     pub fn validate_tree_texture_assets(&self) -> Vec<TreeTextureValidationIssue> {
         let mut issues = Vec::new();
         let required_specs = required_tree_texture_specs();
+        // Pre-compute the set of all expected paths so that valid sibling
+        // foliage files (e.g. foliage_pine.png, foliage_birch.png …) are not
+        // incorrectly flagged as misnamed variants of each other in the inner
+        // loop below.
+        let expected_paths: std::collections::HashSet<PathBuf> = required_specs
+            .iter()
+            .map(|s| PathBuf::from(s.relative_path))
+            .collect();
         let tree_texture_dir = PathBuf::from("assets/textures/trees");
 
         for spec in required_specs {
@@ -1612,7 +1620,9 @@ impl AssetManager {
             };
 
             for asset_path in self.assets.keys() {
-                if asset_path == &expected_path {
+                // Skip any path that belongs to the required spec set —
+                // these are valid files, not misnamed variants.
+                if expected_paths.contains(asset_path) {
                     continue;
                 }
 
@@ -1771,7 +1781,8 @@ mod tests {
             std::fs::create_dir_all(parent).unwrap();
         }
 
-        let image = ImageBuffer::from_pixel(width, height, Rgba([255, 255, 255, 255]));
+        let image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_pixel(width, height, Rgba([255u8, 255u8, 255u8, 255u8]));
         image.save(path).unwrap();
     }
 
@@ -2329,6 +2340,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         // Scan references
@@ -2729,8 +2741,8 @@ mod tests {
         assert_eq!(asset.references.len(), 1);
         match &asset.references[0] {
             AssetReference::Npc { id, name } => {
-                assert_eq!(id, "sprite_npc");
-                assert_eq!(name, "Sprite NPC");
+                assert_eq!(id, "test_npc");
+                assert_eq!(name, "Test NPC");
             }
             _ => panic!("Expected NPC reference"),
         }

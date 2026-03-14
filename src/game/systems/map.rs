@@ -30,10 +30,6 @@ type MeshCache = HashMap<MeshDimensions, Handle<Mesh>>;
 /// Offset to center map objects within their tile (matches camera centering)
 const TILE_CENTER_OFFSET: f32 = 0.5;
 
-/// Small vertical lift for encounter markers so they remain visually distinct
-/// from floor geometry and easier to spot before interaction.
-const ENCOUNTER_VISUAL_Y_OFFSET: f32 = 0.18;
-
 /// Plugin that renders the current map using Bevy meshes/materials.
 ///
 /// Note: The visual rendering plugin remains focused on rendering. The map
@@ -1144,7 +1140,11 @@ fn spawn_map(
                         creature_def,
                         &mut meshes,
                         &mut materials,
-                        Vec3::new(x + TILE_CENTER_OFFSET, 0.0, y + TILE_CENTER_OFFSET),
+                        Vec3::new(
+                            x + TILE_CENTER_OFFSET,
+                            creature_def.foot_ground_offset(),
+                            y + TILE_CENTER_OFFSET,
+                        ),
                         None,
                         None,
                         // Phase 2: event-level NpcDialogue.facing overrides NpcPlacement.facing
@@ -1331,7 +1331,7 @@ fn spawn_map(
                                 &mut materials,
                                 Vec3::new(
                                     x + TILE_CENTER_OFFSET,
-                                    ENCOUNTER_VISUAL_Y_OFFSET,
+                                    creature_def.foot_ground_offset(),
                                     y + TILE_CENTER_OFFSET,
                                 ),
                                 None,
@@ -1394,7 +1394,11 @@ fn spawn_map(
                                 creature_def,
                                 &mut meshes,
                                 &mut materials,
-                                Vec3::new(x + TILE_CENTER_OFFSET, 0.0, y + TILE_CENTER_OFFSET),
+                                Vec3::new(
+                                    x + TILE_CENTER_OFFSET,
+                                    creature_def.foot_ground_offset(),
+                                    y + TILE_CENTER_OFFSET,
+                                ),
                                 None,
                                 None,
                                 *facing, // Phase 2: wire RecruitableCharacter.facing

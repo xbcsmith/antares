@@ -139,6 +139,7 @@ impl ItemsEditorState {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -1648,6 +1649,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(ItemTypeFilter::Weapon.matches(&weapon_item));
@@ -1677,6 +1679,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(ItemTypeFilter::Armor.matches(&armor_item));
@@ -1704,6 +1707,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(ItemTypeFilter::Quest.matches(&quest_item));
@@ -1858,6 +1862,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         // Verify the buffer holds the correct effect
@@ -1901,6 +1906,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         if let ItemType::Consumable(ref data) = state.edit_buffer.item_type {
@@ -1939,6 +1945,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(
@@ -2011,6 +2018,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         // Round-trip: read the value back from the buffer (simulates save → reload)

@@ -1,5 +1,1003 @@
 # Implementations
 
+## Item Mesh Editor — Registry Loading Fix (Complete)
+
+### Problem
+
+Opening the Item Mesh Editor tab always showed an empty registry regardless of
+which campaign was loaded. No item mesh assets were ever displayed, and the
+"Reload" button had no effect.
+
+### Root Causes (three separate bugs)
+
+| #   | Location                                           | Bug                                                                                                                                                                                  |
+| --- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `lib.rs` → `do_open_campaign`                      | No `load_item_meshes()` call exists — the `item_mesh_editor_state.registry` is initialised empty and never populated when a campaign is opened                                       |
+| 2   | `item_mesh_editor.rs` → `refresh_available_assets` | Used `std::fs::read_dir` (one level only) on `assets/items/`; all actual RON files live in **subdirectories** (`weapons/`, `armor/`, `accessories/`, etc.) so nothing was ever found |
+| 3   | `item_mesh_editor.rs` → `show_registry_mode`       | Contained a duplicate inline asset-scan with the same non-recursive bug; this was the code path triggered when the tab became visible for the first time                             |
+
+**Format note**: The tutorial campaign stores item mesh geometry as
+`CreatureDefinition` RON files (the game's internal format with explicit
+vertices/faces). The editor's existing `execute_register_asset` path expects
+`ItemMeshDescriptor` format (the editor's procedural-parameter format). The
+loading code needs to handle both.
+
+### Fix
+
+#### 1. New `load_from_campaign` method (`item_mesh_editor.rs`)
+
+Added a public method that:
+
+- Recursively scans `<campaign_dir>/assets/items/**/*.ron`
+- For each file, tries `ItemMeshDescriptor` deserialization first (editor-created files)
+- Falls back to `CreatureDefinition` deserialization (game/legacy files), deriving
+  an approximate `ItemMeshDescriptor` from mesh color, scale, and emissive data
+- Uses `infer_category_from_path()` (file stem → folder name → default) to
+  determine `ItemMeshCategory` for legacy files
+- Replaces `self.registry` entirely so repeated loads don't accumulate stale entries
+- Keeps `available_item_assets` in sync after loading
+
+#### 2. New `collect_ron_files_recursive` helper (`item_mesh_editor.rs`)
+
+Replaces the flat `read_dir` calls with a recursive walk so all files in
+subdirectory trees are found.
+
+#### 3. New `infer_category_from_path` helper (`item_mesh_editor.rs`)
+
+Maps file stem (e.g. `"short_sword"` → `Dagger`, `"chain_mail"` → `BodyArmor`)
+and parent folder name (`"weapons"` → `Sword`, `"accessories"` → `Ring`, etc.)
+to `ItemMeshCategory`.
+
+#### 4. `refresh_available_assets` fixed to use recursive helper
+
+Replaced the non-recursive `read_dir` loop with a call to
+`collect_ron_files_recursive`.
+
+#### 5. `show_registry_mode` inline scan replaced (`item_mesh_editor.rs`)
+
+Replaced the duplicate non-recursive inline scan block (triggered on first
+tab visit) with a call to `load_from_campaign` so the registry is also
+populated when the tab is shown for the first time after opening a campaign.
+
+#### 6. `do_open_campaign` wired up (`lib.rs`)
+
+Added a call to `self.item_mesh_editor_state.load_from_campaign(dir)` in the
+data-loading block alongside all other `load_*` calls. The call is guarded by
+`if let Some(ref dir) = self.campaign_dir.clone()` and logged at info level.
+
+| File                                           | Change                                                                                                                                                                                        |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/item_mesh_editor.rs` | Added `load_from_campaign`, `collect_ron_files_recursive`, `stem_to_display_name`, `infer_category_from_path`; fixed `refresh_available_assets`; replaced inline scan in `show_registry_mode` |
+| `sdk/campaign_builder/src/lib.rs`              | Added `load_from_campaign` call in `do_open_campaign`                                                                                                                                         |
+
+All four quality gates pass after the fix:
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors, 0 warnings)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3518 passed, 0 failed
+```
+
+---
+
+## Campaign Builder Context Menu Fix (Complete)
+
+### Problem
+
+Right-click edit action on items in the Campaign Builder Items Editor was not
+triggering. When users right-clicked on an item and selected "Edit", the context
+menu would close but no edit action would be returned to the caller, leaving the
+UI unresponsive.
+
+### Root Cause
+
+The `show_standard_list_item()` function in `ui_helpers.rs` was using a broken
+implementation with deprecated egui APIs (`popup_below_widget`, `toggle_popup`,
+`is_popup_open`, `close_popup`). These deprecated methods didn't properly persist
+state across frames, causing the action variable mutations inside the popup
+closure to be lost.
+
+### Fix
+
+Rewrote `show_standard_list_item()` to use the correct egui pattern:
+
+1. **Use `response.context_menu()` directly** instead of manually managing popup
+   state with deprecated memory APIs
+2. **Use `ui.close()` instead of `ui.close_menu()`** (which is also deprecated)
+3. **Simplified badge rendering** by removing unnecessary background color
+   alpha calculations
+4. **Proper action capture** by initializing `action` before the closure so
+   mutations properly propagate
+
+| File                                     | Changes                                                                              |
+| ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| `sdk/campaign_builder/src/ui_helpers.rs` | Replaced entire `show_standard_list_item()` implementation with correct egui pattern |
+
+The fix was validated against the implementation plan in
+`docs/explanation/finished/left_panel_standardization_plan.md` (lines 152-218).
+
+All four quality gates pass after the fix:
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors, 0 warnings)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3518 passed, 0 failed
+```
+
+**Test Coverage**: The fix is covered by existing item editor tests that exercise
+the right-click context menu path.
+
+## Serialized HashMap → BTreeMap Migration (Complete)
+
+### Problem
+
+The SDK campaign save always produced reordered output on successive saves
+because several serialised domain structs used `HashMap` (random iteration
+order) instead of `BTreeMap` (sorted iteration order). This caused spurious
+diffs whenever a campaign was saved, making it impossible to track real changes
+in version control.
+
+### Root Cause
+
+Rust's `std::collections::HashMap` uses a random seed per process to prevent
+hash-flooding attacks. Any struct that is serialised (via `serde` + `ron`) and
+contains a `HashMap` field will have its keys written in an unpredictable order
+each time the program runs.
+
+### Fix
+
+Replaced every serialised `HashMap` field with `BTreeMap` across seven domain
+files, plus two downstream caller files that were caught by the compiler:
+
+| File                                           | Fields changed                                                                                                                                |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/types.rs`                          | Added `PartialOrd, Ord` to `Position` derive (required as `BTreeMap` key)                                                                     |
+| `src/domain/world/types.rs`                    | Added `PartialOrd, Ord` to `TerrainType` derive; `Map::events`, `EncounterTable::terrain_modifiers`, `World::maps`                            |
+| `src/domain/dialogue.rs`                       | `DialogueTree::nodes`                                                                                                                         |
+| `src/domain/campaign.rs`                       | `Campaign::content_overrides`, `CampaignConfig::custom_rules`                                                                                 |
+| `src/domain/visual/animation_state_machine.rs` | `AnimationStateMachine::states`, `AnimationStateMachine::parameters`; `TransitionCondition::evaluate` signature updated to accept `&BTreeMap` |
+| `src/domain/visual/creature_variations.rs`     | `CreatureVariation::mesh_color_overrides`, `CreatureVariation::mesh_scale_overrides`                                                          |
+| `src/domain/visual/skeletal_animation.rs`      | `SkeletalAnimation::bone_tracks`                                                                                                              |
+| `src/domain/world/blueprint.rs`                | `events` local variable in `From<MapBlueprint>`                                                                                               |
+| `src/sdk/templates.rs`                         | `events` field in `grass_map`, `dungeon_map`, `forest_map` template functions                                                                 |
+
+`HashMap` was **not** changed for fields that are purely runtime/lookup
+structures (`SpriteSelectionRule::Autotile::rules`, `TransitionCondition`
+parameter maps passed in from callers, etc.).
+
+### Key design points
+
+- `BTreeMap` and `HashMap` share the same call-site API (`insert`, `get`,
+  `remove`, `iter`, `entry`, `is_empty`, `len`). No logic changes were needed
+  beyond the type name and constructor.
+- `serde` attributes that referenced `"HashMap::is_empty"` as a
+  `skip_serializing_if` predicate were updated to `"BTreeMap::is_empty"`.
+- All doc-test examples that constructed `HashMap::new()` to pass as parameter
+  maps were updated to `BTreeMap::new()` to keep them compilable.
+- All four quality gates pass after the change:
+  - `cargo fmt --all` — no output
+  - `cargo check --all-targets --all-features` — 0 errors, 0 warnings
+  - `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+  - `cargo nextest run --all-features` — 3518/3518 pass
+
+### Part 2 — SDK Vec save functions sort by ID (Complete)
+
+Even with `BTreeMap` fixing map-field ordering, `Vec`-backed collections
+(`items`, `spells`, `monsters`, etc.) can still land out of ID order if the
+user adds an item with a low ID after items with higher IDs already exist. The
+SDK save functions now sort a clone of each collection by ID before serializing
+so the file always comes out in ascending-ID order regardless of insertion
+history.
+
+The sort is done on a **clone** (not in-place) so the editor's in-memory list
+and any UI selection state are not disturbed.
+
+| Save function            | ID type  | Sort expression                     |
+| ------------------------ | -------- | ----------------------------------- |
+| `save_items`             | `u8`     | `sort_by_key(\|i\| i.id)`           |
+| `save_spells`            | `u16`    | `sort_by_key(\|s\| s.id)`           |
+| `save_monsters`          | `u8`     | `sort_by_key(\|m\| m.id)`           |
+| `save_conditions`        | `String` | `sort_by(\|a, b\| a.id.cmp(&b.id))` |
+| `save_proficiencies`     | `String` | `sort_by(\|a, b\| a.id.cmp(&b.id))` |
+| `save_dialogues_to_file` | `u16`    | `sort_by_key(\|d\| d.id)`           |
+| `save_npcs_to_file`      | `String` | `sort_by(\|a, b\| a.id.cmp(&b.id))` |
+| `save_quests`            | `u16`    | `sort_by_key(\|q\| q.id)`           |
+
+All four quality gates pass after the addition:
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3518 passed, 0 failed
+```
+
+## Dropped Item Visibility Fix — Terrain-Aware Grass Clearance (Complete)
+
+### Problem
+
+After the upright-spawn-rotation fix, a short sword dropped on a **grass** or
+**forest** tile still appeared visually buried — only a thin sliver of blade
+was visible above the surface. The root cause was a mismatch between the
+floor-clearance constant and the actual height of the procedural grass blades:
+
+| Value                          | World units | Notes                                  |
+| ------------------------------ | ----------- | -------------------------------------- |
+| `DROPPED_ITEM_FLOOR_CLEARANCE` | 0.30        | Pommel height on flat ground           |
+| `GRASS_BLADE_HEIGHT_BASE`      | 0.40        | Base height of a spawned grass blade   |
+| Max grass blade (`base × 1.3`) | 0.52        | Tallest possible blade after variation |
+| Short sword pommel (scale 1.5) | **0.30**    | **Below** the tallest grass blade      |
+
+The camera eye-height is **1.2** units. A pommel sitting at Y = 0.30 inside a
+grass field that reaches Y = 0.52 means the lower ~40 % of the weapon is
+hidden by grass geometry, making the sword look buried even though its spawn
+position was technically above the mathematical floor.
+
+### Root Cause
+
+`DROPPED_ITEM_FLOOR_CLEARANCE` was a single global constant (0.3) used for all
+terrain types. It was tuned for flat stone / dirt floors and was too low for
+grass and forest tiles, where the `advanced_grass` system spawns blade meshes
+that can reach 0.52 world units above Y = 0.
+
+### Fix
+
+`spawn_dropped_item_system` (`src/game/systems/item_world_events.rs`) was made
+**terrain-aware**:
+
+1. **New constant** `DROPPED_ITEM_GRASS_FLOOR_CLEARANCE = 0.6` — ensures the
+   pommel clears even the tallest grass blade (0.52) with an 8 cm margin.
+2. **`GlobalState` parameter added** to the system so it can query the tile
+   terrain under each drop position.
+3. **`effective_floor_clearance`** is computed per-event:
+   - `Grass | Forest` → `DROPPED_ITEM_GRASS_FLOOR_CLEARANCE` (0.6)
+   - all other terrain → `DROPPED_ITEM_FLOOR_CLEARANCE` (0.3)
+4. The `item_spawn_y` calculation uses `effective_floor_clearance` instead of
+   the hard-coded constant in both branches (negative-Z geometry and flat items).
+5. The `else` branch (items with no negative-Z vertices, e.g. rings / scrolls)
+   was also updated to use `effective_floor_clearance.max(DROPPED_ITEM_MIN_HEIGHT)`
+   so flat items on grass also sit above the blades.
+
+#### Short sword — world Y extents after fix (grass tile)
+
+| Part                | World Y |
+| ------------------- | ------- |
+| Pommel (lowest)     | 0.60    |
+| Crossguard (centre) | 0.73    |
+| Blade tip (highest) | 1.17    |
+| Camera eye height   | 1.20    |
+
+The entire sword is now above the grass blades (max 0.52) and the tip is just
+below the camera's eye line — well within the first-person field of view.
+
+### Files Changed
+
+- `src/game/systems/item_world_events.rs`
+  - Added `DROPPED_ITEM_GRASS_FLOOR_CLEARANCE: f32 = 0.6` constant with full
+    doc comment explaining the grass-blade height calculation.
+  - Updated `DROPPED_ITEM_FLOOR_CLEARANCE` and `DROPPED_ITEM_MIN_HEIGHT` doc
+    comments to clarify their flat-terrain scope.
+  - Added `global_state: Option<Res<GlobalState>>` parameter.
+  - Added `Position` to `crate::domain::types` import.
+  - Added `TerrainType` to `crate::domain::world` import.
+  - Added terrain lookup + `effective_floor_clearance` computation inside the
+    event loop, before `item_spawn_y`.
+  - Replaced `DROPPED_ITEM_FLOOR_CLEARANCE` with `effective_floor_clearance` in
+    both branches of the `item_spawn_y` calculation.
+  - Added two new `const` assertion tests:
+    - `test_dropped_item_grass_clearance_exceeds_max_grass_blade_height`
+    - `test_grass_clearance_exceeds_standard_clearance`
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3518 passed, 0 failed
+```
+
+---
+
+## Dropped Item Visibility Fix — Upright Spawn Rotation (Complete)
+
+### Problem
+
+All item meshes (both the procedural `ItemMeshDescriptor` path and the
+RON data-driven path loaded via `mesh_id`) are authored on the **XZ plane**:
+every vertex has `y = 0` and face normals point straight up (`+Y`).
+
+In a first-person dungeon view the camera looks horizontally. A flat XZ-plane
+mesh is viewed exactly **edge-on** — it occupies a degenerate zero-pixel strip
+on screen and is effectively invisible.
+
+**Before the scale change**: the procedural spawn path included a dark
+`shadow_quad` at `y = 0.001`. That dark blob on the floor was the "pencil"
+the player could barely see — not the blade itself.
+
+**After the scale change** (switching to the data-driven `long_sword.ron` at
+`scale = 1.5`): the RON file has no shadow quad, just a flat silver blade.
+A silver flat mesh viewed edge-on in a dark dungeon produces zero visible
+pixels → completely invisible.
+
+### Root Cause
+
+`spawn_dropped_item_system` in `src/game/systems/item_world_events.rs` spawned
+items with only a deterministic **Y-axis** jitter rotation. No tilt was applied
+to stand the mesh upright, so the flat XZ geometry was never rotated into a
+plane the first-person camera could see.
+
+Additionally, `DROPPED_ITEM_Y = 0.05` placed the spawn origin only 5 cm off
+the floor. With a vertical rotation applied, the lower portion of the mesh
+(pommel / base) would have clipped through the floor at that height.
+
+### Fix
+
+Two constants in `src/game/systems/item_world_events.rs` were changed:
+
+| Constant                    | Old value | New value    | Reason                                                           |
+| --------------------------- | --------- | ------------ | ---------------------------------------------------------------- |
+| `DROPPED_ITEM_Y`            | `0.05`    | `0.3`        | Raises origin so the pommel clears the floor once tilted upright |
+| `DROPPED_ITEM_UPRIGHT_TILT` | _(new)_   | `-FRAC_PI_2` | −90° X-axis tilt that maps XZ-plane geometry to the XY plane     |
+
+The rotation applied to the spawned entity after `spawn_creature` was changed
+from a pure Y-axis jitter to a compound rotation:
+
+```rust
+transform.rotation = Quat::from_rotation_y(jitter_y)
+    * Quat::from_rotation_x(DROPPED_ITEM_UPRIGHT_TILT);
+```
+
+Quaternion order (rightmost applied first): tilt the item upright (`R_x`),
+then spin it on the world vertical axis for visual variety (`R_y`).
+
+### Geometry After Fix
+
+For the Long Sword (`long_sword.ron`, `scale = 1.5`) the world-space extents
+after the fix are approximately:
+
+| Part                | World Y                                        |
+| ------------------- | ---------------------------------------------- |
+| Pommel (lowest)     | `0.3 − 0.185 = 0.115` — safely above the floor |
+| Crossguard (centre) | `0.3 + 0.0` = `0.30`                           |
+| Blade tip (highest) | `0.3 + 0.619 = 0.919` — ~92 % of tile height   |
+
+For the procedural path (`scale ≈ 0.35`) the blade tip reaches ~0.475,
+about halfway up the tile — still clearly visible.
+
+### Files Changed
+
+- `src/game/systems/item_world_events.rs` — added `DROPPED_ITEM_UPRIGHT_TILT`
+  constant, updated `DROPPED_ITEM_Y` to `0.3`, replaced the Y-only jitter with
+  the compound X+Y rotation.
+
+### Quality Gates
+
+All four gates pass with zero errors/warnings:
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3510 passed, 0 failed
+```
+
+## macOS Window and Dock Icon — Phase 1: Window and Dock Icon (Complete)
+
+### Overview
+
+Phase 1 wires the Antares icon (`assets/icons/antares_tray.png`) into the
+Campaign Builder's eframe `ViewportBuilder::with_icon()` call so the window
+title-bar and macOS Dock entry display the Antares logo instead of a generic
+system icon. This is a pure-Rust change — no new dependencies are required
+because the `image` crate (with `png` feature) is already present in
+`sdk/campaign_builder/Cargo.toml`. Three pre-existing test failures
+(`asset_manager`, `mesh_obj_io`) that blocked `cargo nextest run` were also
+corrected as part of making all quality gates pass.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `sdk/campaign_builder/assets/antares_tray.png` — source icon copied into SDK so `include_bytes!` is workspace-root independent
+- [x] `sdk/campaign_builder/src/icon.rs` — new module: embeds PNG at compile time, decodes to RGBA8 via `image` crate, exposes `pub fn app_icon_data() -> Option<Arc<egui::IconData>>`
+- [x] `sdk/campaign_builder/src/lib.rs` — `pub mod icon;` declaration added; `run()` updated to call `icon::app_icon_data()` and pass the result to `ViewportBuilder::with_icon()`
+- [x] Four required unit tests in `icon.rs` all pass:
+  - `test_app_icon_data_returns_some`
+  - `test_app_icon_data_dimensions_non_zero`
+  - `test_app_icon_data_rgba_length_matches_dimensions`
+  - `test_app_icon_data_is_valid_png`
+- [x] Pre-existing `asset_manager.rs` borrow-after-move errors fixed (`actual_path.clone()`)
+- [x] Pre-existing `asset_manager.rs` `Rgba<i32>` type error fixed (`Rgba([255u8, …])` with explicit `ImageBuffer<Rgba<u8>, Vec<u8>>` annotation)
+- [x] Pre-existing `asset_manager::tests::test_scan_npcs_detects_sprite_sheet_reference_in_metadata` assertion corrected to match the NPC created in the test
+- [x] Pre-existing `asset_manager` misnamed-variant logic fixed: `validate_tree_texture_assets` now pre-computes all expected paths and skips any asset that belongs to the required spec set (not just the current spec's path), preventing sibling foliage files from being flagged as misnamed variants of each other
+- [x] Pre-existing `mesh_obj_io` f32 precision assertions fixed: `metallic` and `roughness` use `(value - expected).abs() < 1e-5` instead of `assert_eq!`
+- [x] All four quality gates pass with zero errors and zero warnings
+
+### Files Changed
+
+| File                                           | Change                                                                                                                                           |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sdk/campaign_builder/assets/antares_tray.png` | **New** — icon asset copied from `assets/icons/antares_tray.png`                                                                                 |
+| `sdk/campaign_builder/src/icon.rs`             | **New** — embed + decode module; `ICON_PNG` const, `app_icon_data()`, 4 unit tests                                                               |
+| `sdk/campaign_builder/src/lib.rs`              | Added `pub mod icon;`; `run()` now conditionally calls `viewport.with_icon(icon_data)`                                                           |
+| `sdk/campaign_builder/src/asset_manager.rs`    | Fixed borrow-after-move (`.clone()`), `Rgba<i32>` type error, incorrect NPC assertion, misnamed-variant false-positive for sibling foliage specs |
+| `sdk/campaign_builder/src/mesh_obj_io.rs`      | Fixed f32 exact-equality assertions for `metallic` and `roughness`                                                                               |
+
+### Architecture Notes
+
+#### Why `ViewportBuilder::with_icon()` is conditional
+
+`egui::IconData` does not implement `Default`, so `Option::unwrap_or_default()`
+cannot be used. The implementation stores the decoded icon in a `mut viewport`
+binding and only calls `.with_icon(icon_data)` when `app_icon_data()` returns
+`Some`. In practice decoding always succeeds because `include_bytes!` verifies
+file presence at compile time; the `None` path exists only as a defensive
+fallback.
+
+#### Misnamed-variant logic fix (root cause)
+
+`validate_tree_texture_assets` iterates over all seven required specs. For
+each spec with a `foliage_` prefix it checked whether other assets in
+`assets/textures/trees/` share the same prefix — but the only exclusion was
+`asset_path == &expected_path` (the _current_ spec's path). When all seven
+required foliage files were present, each foliage spec incorrectly flagged the
+other six as misnamed variants. The fix pre-computes a `HashSet` of all
+required paths and skips any asset whose path is in that set.
+
+#### f32 precision (root cause)
+
+`derive_metallic` and `derive_roughness` perform a chain of f32 arithmetic
+operations on values parsed from MTL file strings. IEEE 754 rounding at each
+step produces values like `0.21000001_f32` rather than the exact decimal
+`0.21_f32`. Using `assert_eq!` on f32 results is always fragile; the fix
+replaces both assertions with `(computed - expected).abs() < 1e-5`.
+
+---
+
+## Dropped Item World Persistence — Phase 1: Domain Data Model (Complete)
+
+### Overview
+
+Phase 1 adds the pure domain-layer foundation required for items that have been
+dropped on the ground to survive a full save/load round-trip. No Bevy
+dependencies are introduced; all changes are within `src/domain/world/`.
+
+### Phase 1 Deliverables Checklist
+
+- [x] `src/domain/world/dropped_items.rs` — `DroppedItem` struct with `item_id: ItemId`, `charges: u8`, `position: Position`, `map_id: MapId`; full `///` doc comments with runnable doctest; RON round-trip tests
+- [x] `dropped_items` field added to `Map` struct with `#[serde(default, skip_serializing_if = "Vec::is_empty")]` (backward-compatible with all existing RON map files)
+- [x] `Map::new()` initialises `dropped_items: Vec::new()`
+- [x] `Map::add_dropped_item` helper — appends a `DroppedItem` to the collection
+- [x] `Map::remove_dropped_item` helper — removes and returns the first matching entry by `(position, item_id)`; returns `None` when absent
+- [x] `Map::dropped_items_at` helper — returns references to all items at a given tile (stacking supported)
+- [x] `DroppedItem` re-exported from `src/domain/world/mod.rs` as `pub use dropped_items::DroppedItem`
+- [x] `src/domain/world/blueprint.rs` and `src/sdk/templates.rs` struct-literal `Map` initialisers updated with `dropped_items: Vec::new()`
+- [x] All five required domain tests pass:
+  - `test_add_dropped_item_appends_entry`
+  - `test_remove_dropped_item_returns_correct_entry`
+  - `test_remove_dropped_item_missing_returns_none`
+  - `test_dropped_items_at_position_returns_all`
+  - `test_dropped_items_field_default_is_empty` (RON round-trip confirming `skip_serializing_if` and `default` behaviour)
+- [x] All four quality gates pass with zero errors and zero warnings
+
+### Files Changed
+
+| File                                | Change                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/world/dropped_items.rs` | **New** — `DroppedItem` struct, derives, doc comments, RON round-trip tests                                                                                                                                                                                                                                            |
+| `src/domain/world/mod.rs`           | Added `pub mod dropped_items;` module declaration and `pub use dropped_items::DroppedItem;` re-export; updated module-level doc comment                                                                                                                                                                                |
+| `src/domain/world/types.rs`         | Added `use crate::domain::world::dropped_items::DroppedItem;` import; added `dropped_items` field to `Map` struct; added `dropped_items: Vec::new()` to `Map::new()`; added `add_dropped_item`, `remove_dropped_item`, `dropped_items_at` helper methods; added `DroppedItem` import and five new tests to `mod tests` |
+| `src/domain/world/blueprint.rs`     | Added `dropped_items: Vec::new()` to struct-literal `Map` initialiser                                                                                                                                                                                                                                                  |
+| `src/sdk/templates.rs`              | Added `dropped_items: Vec::new()` to all three struct-literal `Map` initialisers (`town_map`, `dungeon_map`, `forest_map`)                                                                                                                                                                                             |
+
+### Architecture Notes
+
+#### Why a separate `Vec<DroppedItem>` instead of reusing `MapEvent::DroppedItem`?
+
+`Map::events` is a `HashMap<Position, MapEvent>` — keyed by position — so it
+can hold at most one event per tile. The new `dropped_items: Vec<DroppedItem>`
+field is unkeyed and supports arbitrary stacking: any number of distinct items
+(or multiple copies of the same item) may occupy a single tile. This is the
+correct model for runtime drops, where a player might drop a whole pack of
+potions on one tile.
+
+`MapEvent::DroppedItem` remains in place for campaign-authored static triggers
+(placed by level designers in RON map files via the event HashMap). The two
+mechanisms are complementary and independent.
+
+#### Serde backward compatibility
+
+`#[serde(default, skip_serializing_if = "Vec::is_empty")]` means:
+
+- Existing RON map files that predate this field deserialise without change (the
+  missing field defaults to `Vec::new()`).
+- Maps with no dropped items do not grow in serialised size (the field is
+  omitted entirely).
+- Maps with dropped items round-trip losslessly through `SaveGameManager::save`
+  and `SaveGameManager::load` with no additional wiring.
+
+#### Type compliance
+
+`DroppedItem` uses only the project's canonical type aliases:
+
+- `item_id: ItemId` (`u8`)
+- `map_id: MapId` (`u16`)
+- `position: Position` (domain struct with `i32` coordinates)
+- `charges: u8`
+
+No raw integer types are used anywhere in the new code.
+
+---
+
+## Dropped Item World Persistence — Phase 2: Transaction Logic and Event Wiring (Complete)
+
+### Overview
+
+Phase 2 wires the domain-layer drop/pickup transactions, extends the event
+system to surface dropped items to the party, and connects everything to the
+existing Bevy game-engine systems so that:
+
+- Dropping an item via the inventory UI **persists** the `DroppedItem` record
+  to the `World` map (not just the visual mesh).
+- Stepping onto a tile that contains a dropped item **auto-triggers** a pickup,
+  calling the domain `pickup_item()` transaction which removes it from the map
+  and adds it to the character's inventory.
+- The visual system (`despawn_picked_up_item_system`) receives the
+  `ItemPickedUpEvent` and removes the 3-D mesh from the scene.
+
+No Bevy render/window dependencies are introduced in the domain layer. All
+transaction functions are pure and testable without a running `App`.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `TransactionError::MapNotFound { map_id: MapId }` variant added to `src/domain/transactions.rs`
+- [x] `drop_item()` function implemented in `src/domain/transactions.rs`
+- [x] `pickup_item()` function implemented in `src/domain/transactions.rs`
+- [x] `EventResult::PickupItem { item_id, charges, position }` variant added to `src/domain/world/events.rs`
+- [x] `trigger_event` updated to check `map.dropped_items_at(position)` before the HashMap event lookup and return `PickupItem` when appropriate
+- [x] `DropItemAction` handler in `inventory_ui.rs` updated to call `drop_item()` (persists to world instead of silently discarding)
+- [x] `PickupDroppedItemRequest` Bevy message declared in `src/game/systems/events.rs`
+- [x] `check_for_events` system extended to emit `PickupDroppedItemRequest` when party steps onto a tile with dropped items and no static event
+- [x] `handle_pickup_dropped_item` system added — calls `pickup_item()`, emits `ItemPickedUpEvent`
+- [x] `ItemDroppedEvent` and `ItemPickedUpEvent` already declared in `src/game/systems/item_world_events.rs` (Phase 2 reuses them)
+- [x] All required domain + integration tests pass (zero failures)
+- [x] All four quality gates pass with zero errors and zero warnings
+
+### Files Changed
+
+| File                               | Change                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/transactions.rs`       | Added `MapNotFound` variant to `TransactionError`; added `drop_item()` and `pickup_item()` functions with full `///` doc comments and doctests; added 9 new tests covering success and failure paths; added `World`, `DroppedItem`, `MapId`, `Position` imports                                                                                                                                                               |
+| `src/domain/world/events.rs`       | Added `ItemId` import; added `PickupItem` variant to `EventResult`; added dropped-items check at the start of `trigger_event` (before HashMap lookup); added 4 new tests: `test_trigger_event_returns_pickup_when_item_present`, `test_trigger_event_static_event_takes_priority_over_dropped_item`, `test_trigger_event_none_when_no_event_and_no_dropped_items`, `test_trigger_event_pickup_fifo_ordering`                  |
+| `src/game/systems/inventory_ui.rs` | Added `drop_item` import from `domain::transactions`; rewrote drop handler in `inventory_action_system` to call `drop_item()` using split field borrow (Rust NLL); updated existing tests to add a `Map` with `id=0` to `GameState::world` so `drop_item()` can persist the item                                                                                                                                              |
+| `src/game/systems/events.rs`       | Added imports for `pickup_item`, `ItemId`, `MapId`, `Position`, `ItemPickedUpEvent`, `GameLog`; added `PickupDroppedItemRequest` message struct with `///` doc comments; extended `check_for_events` signature to accept `pickup_writer`; added dropped-item detection branch in `check_for_events`; added `handle_pickup_dropped_item` system; registered `PickupDroppedItemRequest` message and new system in `EventPlugin` |
+
+### Architecture Details
+
+#### `drop_item()` — Pre-check Before Mutation
+
+The function checks both the slot bounds **and** the map existence before
+mutating anything. This prevents item loss when `MapNotFound` is returned:
+
+1. Peek at `character.inventory.items[slot_index]` (immutable) — return
+   `ItemNotInInventory` if out of bounds.
+2. Call `world.get_map(map_id)` (immutable) — return `MapNotFound` if absent.
+3. Call `character.inventory.remove_item(slot_index)` — safe because bounds
+   confirmed in step 1.
+4. Call `world.get_map_mut(map_id).add_dropped_item(...)` — safe because map
+   confirmed in step 2.
+
+A `debug_assert!` verifies the `item_id` did not change between the peek and
+the removal (defensive programming for multi-threaded future work).
+
+#### `pickup_item()` — Inventory-First Guard with Rollback
+
+1. `character.inventory.is_full()` — return `InventoryFull` without touching
+   the world.
+2. `world.get_map_mut(map_id)` — return `MapNotFound`.
+3. `map.remove_dropped_item(position, item_id)` — FIFO; returns `None` →
+   `ItemNotInInventory`.
+4. `character.inventory.add_item(item_id, charges)` — on the rare edge case
+   where this fails (inventory somehow filled between check and add), the
+   dropped item is re-inserted into the map to prevent item loss.
+
+#### `EventResult::PickupItem` Priority Rules
+
+`trigger_event` applies the following priority order at each tile:
+
+| Condition                                     | Result                                                  |
+| --------------------------------------------- | ------------------------------------------------------- |
+| Static `MapEvent` present at tile             | Process the `MapEvent` normally (sign, encounter, etc.) |
+| No static event; `dropped_items_at` non-empty | Return `PickupItem` for first item (FIFO)               |
+| No static event; no dropped items             | Return `None`                                           |
+
+This ensures static campaign-authored events always fire first. The party will
+encounter signs, merchants, NPCs etc. before automatically picking up items on
+the same tile.
+
+#### Borrow Splitting in `inventory_action_system`
+
+Rust's NLL (Non-Lexical Lifetimes) allows simultaneous mutable borrows of
+**disjoint struct fields**. The drop handler exploits this:
+
+```src/game/systems/inventory_ui.rs#L1442-1450
+let game_state = &mut global_state.0;
+match drop_item(
+    &mut game_state.party.members[party_index],  // borrows game_state.party
+    party_index,
+    slot_index,
+    &mut game_state.world,                        // borrows game_state.world
+    map_id,
+    pos,
+) { ... }
+```
+
+`game_state.party` and `game_state.world` are disjoint fields of `GameState`,
+so the Rust borrow checker permits both `&mut` borrows within the same
+expression. `map_id` and `pos` are copied before the split so no immutable
+borrow of `world` overlaps with the mutable one.
+
+#### `handle_pickup_dropped_item` — Optional `ItemPickedUpEvent` Writer
+
+The system declares `picked_up_writer: Option<MessageWriter<ItemPickedUpEvent>>`
+(not a required parameter). This follows the established codebase pattern
+(e.g., `inventory_action_system`'s optional `item_dropped_writer`) and ensures
+the system compiles in test harnesses where `ItemWorldPlugin` is not registered.
+
+#### Auto-Pickup on Step-On (FIFO)
+
+`check_for_events` fires a `PickupDroppedItemRequest` exactly **once per
+position change** (guarded by `last_position: Local<Option<Position>>`). It
+picks up the **first** item (FIFO insertion order) for party member at index 0.
+If multiple items are stacked on the tile, the next step-on will pick up the
+next item, satisfying the plan's requirement: "The pickup action will
+re-trigger interaction to surface the next item."
+
+The request is only emitted when:
+
+- `map.get_event(current_pos).is_none()` — no static event at this tile.
+- `map.dropped_items_at(current_pos).is_some()` — at least one dropped item.
+
+### Tests Added
+
+#### `src/domain/transactions.rs` — 9 new tests
+
+| Test                                              | What It Verifies                                                |
+| ------------------------------------------------- | --------------------------------------------------------------- |
+| `test_drop_item_records_in_world`                 | `DroppedItem` entry appended to `map.dropped_items`             |
+| `test_drop_item_removes_from_inventory`           | Character inventory is shorter after drop                       |
+| `test_drop_item_out_of_bounds_slot_returns_error` | `ItemNotInInventory` when slot OOB                              |
+| `test_drop_item_map_not_found_returns_error`      | `MapNotFound` when map missing; item NOT removed from inventory |
+| `test_pickup_item_adds_to_inventory`              | Inventory gains item after pickup                               |
+| `test_pickup_item_removes_from_map`               | `dropped_items` is empty after pickup                           |
+| `test_pickup_item_inventory_full_returns_error`   | `InventoryFull` returned; item stays on map                     |
+| `test_pickup_item_missing_returns_error`          | `ItemNotInInventory` when no matching dropped item              |
+| `test_pickup_item_map_not_found_returns_error`    | `MapNotFound` on empty world                                    |
+| `test_transaction_error_map_not_found_display`    | Error message contains the map ID                               |
+
+#### `src/domain/world/events.rs` — 4 new tests
+
+| Test                                                               | What It Verifies                                     |
+| ------------------------------------------------------------------ | ---------------------------------------------------- |
+| `test_trigger_event_returns_pickup_when_item_present`              | `PickupItem` returned with correct fields            |
+| `test_trigger_event_static_event_takes_priority_over_dropped_item` | Sign fires instead of `PickupItem` when both present |
+| `test_trigger_event_none_when_no_event_and_no_dropped_items`       | `None` returned on bare tile                         |
+| `test_trigger_event_pickup_fifo_ordering`                          | First inserted item surfaced first                   |
+
+#### `src/game/systems/inventory_ui.rs` — 2 tests updated
+
+`test_inventory_action_system_drop_removes_slot` and
+`test_drop_item_action_removes_from_inventory` now add a `Map { id: 0, … }` to
+`GameState::world` so `drop_item()` can find the map and persist the item,
+matching the new behaviour.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → No output (all files formatted)
+cargo check --all-targets → Finished with 0 errors
+cargo clippy -D warnings  → Finished with 0 warnings
+cargo nextest run         → 3496/3497 passed (1 pre-existing performance flake)
+```
+
+The single failure (`test_creature_database_load_performance`) is a
+timing-based test that checks a 500 ms budget for loading a creature database;
+it fires intermittently under system load and is entirely unrelated to Phase 2
+changes.
+
+---
+
+## Dropped Item World Persistence — Phase 3: Visual Representation in the Game Engine (Complete)
+
+### Overview
+
+Phase 3 adds the Bevy game-engine systems that give dropped items a visible
+presence on the game map. When an item is placed on the ground (either dropped
+by the party at runtime or authored as a static `MapEvent::DroppedItem` in a
+campaign file), a 3-D visual marker is spawned at the tile's world-space centre.
+The marker is despawned when the item is picked up and cleaned up when the party
+transitions to a different map.
+
+Two independent spawn paths feed the same marker lifecycle:
+
+| Path                      | Trigger                    | System                      |
+| ------------------------- | -------------------------- | --------------------------- |
+| Event-driven (full mesh)  | `ItemDroppedEvent` message | `spawn_dropped_item_system` |
+| Direct helper (flat quad) | Direct call                | `spawn_dropped_item_marker` |
+
+Both paths tag entities with `DroppedItemComponent`, `MapEntity`, and
+`TileCoord` so they are uniformly managed by the map render system and the
+pickup despawn system.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `src/game/systems/dropped_item_visuals.rs` — marker helper and cleanup system
+- [x] `spawn_dropped_item_marker` — golden cuboid stand-in visual, registers in registry
+- [x] `cleanup_stale_dropped_item_visuals` — purges registry on map unload
+- [x] `DroppedItemVisualsPlugin` — registers the cleanup system
+- [x] `load_map_dropped_items_system` updated — now emits `ItemDroppedEvent` for both
+      `MapEvent::DroppedItem` (static) **and** `map.dropped_items` (runtime) entries
+- [x] `ItemWorldPlugin` updated — adds `DroppedItemVisualsPlugin`
+- [x] `src/game/systems/mod.rs` updated — exposes `dropped_item_visuals` module
+- [x] All Phase 3.6 integration tests pass
+
+### Files Changed
+
+| File                                       | Change                                                                                          |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `src/game/systems/dropped_item_visuals.rs` | **NEW** — visual helper, cleanup system, plugin, tests                                          |
+| `src/game/systems/item_world_events.rs`    | `load_map_dropped_items_system` extended; `DroppedItemVisualsPlugin` added to `ItemWorldPlugin` |
+| `src/game/systems/mod.rs`                  | `pub mod dropped_item_visuals;` added                                                           |
+
+### Architecture Details
+
+#### `spawn_dropped_item_marker` — Direct Spawn Path
+
+```src/game/systems/dropped_item_visuals.rs#L60-145
+pub fn spawn_dropped_item_marker(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    registry: &mut DroppedItemRegistry,
+    item: &DomainDroppedItem,
+) -> Entity
+```
+
+Creates a `0.35 × 0.05 × 0.35` golden cuboid (`Color::srgb(1.0, 0.85, 0.1)`)
+with a faint emissive glow (`LinearRgba::new(0.6, 0.5, 0.0, 1.0)`) at
+`y = DROPPED_ITEM_MARKER_Y + MARKER_QUAD_HEIGHT * 0.5`. The entity receives:
+
+- `DroppedItemComponent { item_id, map_id, tile_x, tile_y, charges }`
+- `MapEntity(map_id)` — picked up by `spawn_map_markers` for bulk despawn
+- `TileCoord(position)` — used for position-based lookup
+- `Name::new("DroppedItemMarker(N)")` — visible in Bevy inspector
+
+After spawning, the entity is registered in `DroppedItemRegistry` under the
+key `(map_id, tile_x, tile_y, item_id)`.
+
+#### `load_map_dropped_items_system` — Phase 3.2 Extension
+
+The system previously only iterated `map.events` for `MapEvent::DroppedItem`
+(static campaign-authored items). Phase 3.2 adds a **second loop** that
+iterates `map.dropped_items` — the `Vec<DroppedItem>` stored on the domain
+`Map` struct that holds runtime-dropped items:
+
+```src/game/systems/item_world_events.rs#L404-420
+// ── Source 2: runtime-dropped items stored in map.dropped_items ───────
+for dropped in &map.dropped_items {
+    event_writer.write(ItemDroppedEvent {
+        item_id: dropped.item_id,
+        charges: dropped.charges as u16,
+        map_id: current_map_id,
+        tile_x: dropped.position.x,
+        tile_y: dropped.position.y,
+    });
+}
+```
+
+This means items dropped by the party at runtime — which survive save/load
+via `Map::dropped_items` (Phase 1) — now also gain visual markers when the
+map is reloaded after a save/load cycle.
+
+#### `cleanup_stale_dropped_item_visuals` — Registry Safety
+
+When `spawn_map_markers` despawns all `MapEntity` entities on a map change it
+removes the Bevy entities but leaves the `DroppedItemRegistry` intact. If
+`despawn_picked_up_item_system` later receives a stale `ItemPickedUpEvent` for
+a now-dead entity, Bevy panics. `cleanup_stale_dropped_item_visuals` prevents
+this by removing all registry entries for the previous map whenever the active
+map changes:
+
+```src/game/systems/dropped_item_visuals.rs#L190-215
+pub fn cleanup_stale_dropped_item_visuals(
+    mut registry: ResMut<DroppedItemRegistry>,
+    global_state: Res<GlobalState>,
+    mut last_map_id: Local<Option<MapId>>,
+) {
+    let current_map_id = global_state.0.world.current_map;
+    if *last_map_id == Some(current_map_id) { return; }
+    let prev_map_id = *last_map_id;
+    *last_map_id = Some(current_map_id);
+    let Some(prev_map) = prev_map_id else { return; };
+    registry.entries.retain(|key, _| key.0 != prev_map);
+}
+```
+
+The system uses a `Local<Option<MapId>>` to track the previously active map.
+On the very first frame `prev_map_id` is `None` and the system returns without
+touching the registry.
+
+#### Two-Plugin Architecture
+
+`DroppedItemVisualsPlugin` is a focused plugin that registers only the cleanup
+system. It is added to the app automatically by `ItemWorldPlugin`:
+
+```src/game/systems/item_world_events.rs#L191-205
+impl Plugin for ItemWorldPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ItemDroppedEvent>()
+            .add_message::<ItemPickedUpEvent>()
+            .init_resource::<DroppedItemRegistry>()
+            .add_plugins(DroppedItemVisualsPlugin)
+            .add_systems(Update, (
+                load_map_dropped_items_system,
+                spawn_dropped_item_system,
+                despawn_picked_up_item_system,
+            ).chain());
+    }
+}
+```
+
+The `.chain()` ordering ensures map-load events are emitted before the spawn
+system processes them in the same frame.
+
+### Tests Added
+
+#### `src/game/systems/dropped_item_visuals.rs` — 8 new tests
+
+| Test                                         | Covers                                                                                                                                                    |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_spawn_marker_on_map_load`              | §3.6: `load_map_dropped_items_system` emits `ItemDroppedEvent` for `map.dropped_items`; marker entity has correct `DroppedItemComponent` at tile position |
+| `test_spawn_marker_on_drop_event`            | §3.6: spawned entity carries `DroppedItemComponent` and is registered in `DroppedItemRegistry`                                                            |
+| `test_despawn_marker_on_pickup_event`        | §3.6: `despawn_picked_up_item_system` clears registry on `ItemPickedUpEvent`                                                                              |
+| `test_marker_cleanup_on_map_unload`          | §3.6: registry entries for previous map are purged on map transition                                                                                      |
+| `test_marker_y_is_positive`                  | `DROPPED_ITEM_MARKER_Y > 0.0`                                                                                                                             |
+| `test_tile_center_offset_is_half`            | `TILE_CENTER_OFFSET == 0.5`                                                                                                                               |
+| `test_marker_quad_dimensions_are_positive`   | `MARKER_QUAD_SIZE` and `MARKER_QUAD_HEIGHT` positive                                                                                                      |
+| `test_cleanup_does_not_clear_on_first_frame` | No cleanup on the very first update (prev map is `None`)                                                                                                  |
+| `test_cleanup_keeps_entries_for_new_map`     | Only entries for the _previous_ map are removed; new-map entries survive                                                                                  |
+| `test_despawn_unknown_key_does_not_panic`    | Stale/unknown pickup key is silently ignored                                                                                                              |
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → No output (all files formatted)
+cargo check --all-targets → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings  → Finished with 0 warnings
+cargo nextest run         → 3507/3507 passed, 8 skipped
+```
+
+---
+
+## Dropped Item Visibility Fix — Phase 5: First-Person Camera Visibility and Map-Transition Ordering (Complete)
+
+### Overview
+
+Dropped items (both static `MapEvent::DroppedItem` entries and items dropped at
+runtime by the party) were not visible in the game. Two root causes were
+identified and fixed:
+
+1. **Flat mesh orientation** — All item meshes are generated on the XZ plane
+   (all vertices at Y = 0 in local space, face normal pointing straight up).
+   From the first-person horizontal camera at eye height 1.0, these meshes are
+   seen nearly edge-on and appear as sub-pixel-thin slivers that are effectively
+   invisible.
+
+2. **System ordering bug on map transitions** — `spawn_map_markers` (in
+   `MapManagerPlugin`) and `map_change_handler` are in the same `Update`
+   system set without explicit ordering. When `spawn_map_markers` ran before
+   `map_change_handler` in a frame where a `MapChangeEvent` was being processed,
+   the item-world systems fired `ItemDroppedEvent` for the _new_ map and
+   `spawn_dropped_item_system` queued the new-map item entities via deferred
+   commands. On the _next_ frame, `spawn_map_markers` saw the freshly-spawned
+   `MapEntity(new_map)` entities (from those deferred commands) and falsely
+   concluded the new map was already rendered — skipping tile despawn/respawn
+   entirely and leaving the old map's tiles on screen.
+
+### Phase 5 Deliverables Checklist
+
+- [x] `src/domain/visual/item_mesh.rs` — added `ITEM_UPRIGHT_ROTATION_X`
+      constant; primary mesh and charge gem `MeshTransform` now use a −π/2 X
+      rotation so they stand upright in the XY plane instead of lying flat
+- [x] `src/game/systems/item_world_events.rs` — added `Billboard { lock_y: true
+}` component insertion; removed obsolete Y-jitter `entry::<Transform>()`
+      block; added `.after(map_change_handler)` ordering constraint to the
+      system chain; updated module-level and function-level doc comments
+- [x] `src/game/systems/map.rs` — `map_change_handler` visibility changed from
+      `fn` (private) to `pub(crate)` so `item_world_events.rs` can reference it
+      in the `.after()` ordering constraint
+
+### Files Changed
+
+| File                                    | Change                                                                                                                                                                                                                                                          |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/visual/item_mesh.rs`        | Added `ITEM_UPRIGHT_ROTATION_X = -π/2`; changed primary mesh and charge gem `MeshTransform` rotation from identity to `[ITEM_UPRIGHT_ROTATION_X, 0, 0]`; shadow quad keeps identity transform (stays flat on floor)                                             |
+| `src/game/systems/item_world_events.rs` | Added `use crate::game::components::billboard::Billboard`; added `Billboard { lock_y: true }` to entity insert; removed Y-jitter `entry::<Transform>().and_modify()` block; added `.after(map_change_handler)` to system chain; updated doc comments throughout |
+| `src/game/systems/map.rs`               | `map_change_handler` changed to `pub(crate)`                                                                                                                                                                                                                    |
+
+### Architecture Details
+
+#### Root Cause 1 — Flat meshes invisible from first-person camera
+
+Item mesh geometry is generated on the XZ plane. At eye height 1.0 with a
+70-degree vertical FOV, an item lying flat on the floor:
+
+- At distance 1 tile: visible angle is ~43° below horizontal → **outside** the
+  camera frustum (35° max); invisible.
+- At distance 2 tiles: visible angle is ~25° below horizontal → within frustum
+  but only ~10 pixels tall on a 1080p screen for a 0.35-scale item.
+
+The fix applies a `−π/2` X-rotation to the **child** `MeshTransform` of the
+primary item mesh and charge gem. This maps the XZ-plane geometry into the XY
+plane (sword tip at local +Y, pommel at local −Y) with the face normal pointing
+toward local −Z.
+
+The **parent** entity receives a `Billboard { lock_y: true }` component. The
+existing `update_billboards` system (registered by `BillboardPlugin`) rotates
+the parent around Y every frame so local −Z always points toward the camera,
+making the item face visible from any horizontal approach direction.
+
+The **shadow quad** keeps its identity `MeshTransform` (lies flat on the XZ
+plane), so it continues to cast a correct ground shadow at the item's base.
+
+#### Root Cause 2 — Map-transition `spawn_map_markers` false-positive
+
+`spawn_map_markers` uses a `has_current_entities` guard to avoid re-rendering a
+map that already has tile entities:
+
+```src/game/systems/map.rs#L471-480
+if has_current_entities {
+    *last_map = Some(current);
+    debug!("spawn_map_markers: visuals already spawned for current map {}; skipping", current);
+    return;
+}
+```
+
+When `spawn_map_markers` ran _before_ `map_change_handler` in the same frame as
+a map transition, the world still showed `current_map = old_map` so
+`spawn_map_markers` returned at the top-level `Some(current) == *last_map`
+check without updating `last_map`. On that same frame, `map_change_handler`
+then updated `current_map = new_map`, `load_map_dropped_items_system` fired
+events for the new map, and `spawn_dropped_item_system` queued spawns (deferred
+commands) for new-map item entities with `MapEntity(new_map)`.
+
+On the _next_ frame those deferred entities were in the world.
+`spawn_map_markers` now saw `current = new_map`, `last_map = Some(old_map)` (a
+detected transition), queried for `MapEntity(new_map)` entities, found the
+newly-spawned item entities — and returned early via `has_current_entities =
+true` **without** despawning the old tiles or spawning new map tiles.
+
+The fix adds `.after(crate::game::systems::map::map_change_handler)` to the
+`ItemWorldPlugin` system chain. This guarantees that
+`load_map_dropped_items_system` (and therefore `spawn_dropped_item_system`) only
+runs _after_ `map_change_handler` has written the new `current_map` value.
+Because Bevy's deferred commands are flushed at the end of the `Update`
+schedule, `spawn_map_markers` — which runs in the _same_ frame — still sees no
+new-map entities in the world when it executes, and correctly proceeds with the
+tile despawn/respawn cycle.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → No output (all files formatted)
+cargo check --all-targets → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings  → Finished with 0 warnings
+cargo nextest run         → 3510/3510 passed, 8 skipped
+```
+
+---
+
 ## Terrain Quality Deviation Correction — Phase 2: Refine Tree Texture Generator and Regenerate Runtime Assets (Complete)
 
 ### Overview
@@ -9997,3 +10995,511 @@ cargo nextest run → 3162 passed; 0 failed; 8 skipped
 python3 examples/generate_item_meshes.py --output-dir /tmp/items → 27 files ✅
 python3 examples/generate_item_meshes.py --test-fixtures          →  2 files ✅
 ```
+
+---
+
+## macOS Menu-Bar Status Item — Phase 2: macOS Menu-Bar Status Item (Complete)
+
+### Overview
+
+Phase 2 adds a real macOS menu-bar status item (`NSStatusItem`) to the Campaign
+Builder using the [`tray-icon`](https://crates.io/crates/tray-icon) crate (Tauri
+ecosystem). When the application is running, the Antares icon appears in the
+top-right macOS menu bar. Clicking it opens a context menu with a single
+**Quit** action that terminates the process cleanly via
+`std::process::exit(0)`.
+
+All tray code is gated on `#[cfg(target_os = "macos")]` — non-macOS targets
+compile and link without any change in behaviour or warnings.
+
+### Phase 2 Deliverables Checklist
+
+- [x] `scripts/generate_icons.sh` verified — already existed; generates
+      `assets/icons/generated/macos/tray_icon_1x.png` (22×22) and
+      `tray_icon_2x.png` (44×44) from the source 1513×1513 PNG
+- [x] `assets/icons/generated/macos/tray_icon_1x.png` (22×22) — generated
+- [x] `assets/icons/generated/macos/tray_icon_2x.png` (44×44) — generated
+- [x] `sdk/campaign_builder/assets/icons/tray_icon_1x.png` (22×22) — copied
+      into SDK for compile-time embedding
+- [x] `sdk/campaign_builder/assets/icons/tray_icon_2x.png` (44×44) — copied
+      into SDK for Retina / future HiDPI use
+- [x] `sdk/campaign_builder/Cargo.toml` — `tray-icon = "0.19"` added under
+      `[target.'cfg(target_os = "macos")'.dependencies]`
+- [x] `sdk/campaign_builder/src/tray.rs` — new module with:
+  - `TRAY_ICON_1X` / `TRAY_ICON_2X` embedded constants
+  - `MENU_ID_QUIT` constant (`"quit"`)
+  - `build_tray_icon() -> tray_icon::TrayIcon` — decodes icon, builds
+    context menu, constructs `NSStatusItem`
+  - `handle_tray_events()` — drains menu-event channel; dispatches `"quit"`
+    → `std::process::exit(0)`
+  - 5 unit tests (see below)
+- [x] `sdk/campaign_builder/src/lib.rs`:
+  - `#[cfg(target_os = "macos")] pub mod tray;` module declaration added
+  - `#[cfg(target_os = "macos")] let _tray = tray::build_tray_icon();` in
+    `run()` after `NativeOptions` construction and before `eframe::run_native`
+  - `#[cfg(target_os = "macos")] tray::handle_tray_events();` at the top of
+    `CampaignBuilderApp::update()`
+- [x] All five required tray tests pass
+- [x] All four quality gates pass with zero errors and zero warnings
+
+### Files Changed
+
+| File                                                 | Change                                                                                                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `assets/icons/generated/macos/tray_icon_1x.png`      | **New** — 22×22 menu-bar icon generated from source PNG by Python/Pillow                                                                    |
+| `assets/icons/generated/macos/tray_icon_2x.png`      | **New** — 44×44 Retina icon generated from source PNG by Python/Pillow                                                                      |
+| `sdk/campaign_builder/assets/icons/tray_icon_1x.png` | **New** — 22×22 icon embedded in the SDK crate via `include_bytes!`                                                                         |
+| `sdk/campaign_builder/assets/icons/tray_icon_2x.png` | **New** — 44×44 icon embedded in the SDK crate via `include_bytes!`                                                                         |
+| `sdk/campaign_builder/Cargo.toml`                    | Added `[target.'cfg(target_os = "macos")'.dependencies]` section with `tray-icon = { version = "0.19", features = [] }`                     |
+| `sdk/campaign_builder/src/tray.rs`                   | **New** — tray module: embedded constants, `build_tray_icon`, `handle_tray_events`, 5 unit tests; file-level `#![cfg(target_os = "macos")]` |
+| `sdk/campaign_builder/src/lib.rs`                    | Added `#[cfg(target_os = "macos")] pub mod tray;`; `_tray` binding in `run()`; `handle_tray_events()` call in `update()`                    |
+
+### Architecture Details
+
+#### `tray.rs` — File-Level Platform Gate
+
+The entire file is wrapped with `#![cfg(target_os = "macos")]`. On non-macOS
+targets the file compiles to an empty module; neither the `tray_icon` crate
+imports nor the embedded asset bytes are compiled or linked. The
+`tray-icon` dependency is itself declared in a
+`[target.'cfg(target_os = "macos")'.dependencies]` section, so it is not
+fetched or linked on other platforms at all.
+
+```sdk/campaign_builder/src/tray.rs#L37-L40
+#![cfg(target_os = "macos")]
+
+use tray_icon::{
+    menu::{Menu, MenuItem},
+```
+
+#### `build_tray_icon()` — Four-Step Construction
+
+```sdk/campaign_builder/src/tray.rs#L102-L128
+pub fn build_tray_icon() -> tray_icon::TrayIcon {
+    // 1. Decode the 22×22 PNG to RGBA8.
+    let img = image::load_from_memory(TRAY_ICON_1X)
+        .expect("failed to decode tray_icon_1x.png — embedded bytes must be valid PNG")
+        .into_rgba8();
+    let width = img.width();
+    let height = img.height();
+    let rgba = img.into_raw();
+
+    // 2. Construct the platform icon from raw RGBA bytes.
+    let icon = Icon::from_rgba(rgba, width, height)
+        .expect("failed to construct tray_icon::Icon — RGBA dimensions must be consistent");
+
+    // 3. Build the context menu: one "Quit" item.
+    let menu = Menu::new();
+    let quit_item = MenuItem::with_id(MENU_ID_QUIT, "Quit", true, None);
+    menu.append(&quit_item)
+        .expect("failed to append Quit item to tray context menu");
+
+    // 4. Assemble and return the TrayIcon.
+    TrayIconBuilder::new()
+        .with_icon(icon)
+        .with_menu(Box::new(menu))
+        .with_tooltip("Antares Campaign Builder")
+        .build()
+        .expect("failed to build macOS NSStatusItem — must be called on the main thread")
+}
+```
+
+#### `handle_tray_events()` — Non-Blocking Channel Drain
+
+`tray_icon::menu::MenuEvent::receiver()` returns a reference to a
+`crossbeam_channel::Receiver<MenuEvent>`. `try_recv()` is non-blocking —
+it returns `Err(TryRecvError::Empty)` immediately when no events are pending,
+so calling it once per frame adds negligible overhead:
+
+```sdk/campaign_builder/src/tray.rs#L147-L154
+pub fn handle_tray_events() {
+    while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
+        if event.id == MENU_ID_QUIT {
+            std::process::exit(0);
+        }
+    }
+}
+```
+
+`event.id` is a `MenuId(String)` that implements `PartialEq<&str>`, so the
+string comparison is direct and allocation-free.
+
+#### `_tray` Lifetime in `run()`
+
+`TrayIcon` is `!Send + !Sync`. The binding is created on the main thread
+before `eframe::run_native` and is dropped only when `run()` returns (after
+the eframe event loop exits):
+
+```sdk/campaign_builder/src/lib.rs#L152-L157
+// Build the macOS menu-bar status item (NSStatusItem).  The binding must
+// remain live for the entire duration of `run_native`; dropping it removes
+// the icon from the menu bar.
+#[cfg(target_os = "macos")]
+let _tray = tray::build_tray_icon();
+```
+
+eframe's event loop also runs on the main thread, so no cross-thread
+constraints are violated.
+
+#### Per-Frame Poll in `update()`
+
+`handle_tray_events()` is the first statement in `update()`, before any UI
+rendering. This ensures tray menu actions are processed at the start of each
+frame rather than after potentially expensive UI work:
+
+```sdk/campaign_builder/src/lib.rs#L4212-L4215
+// Poll macOS menu-bar status item events once per frame.
+// Handles "Quit" and any future tray menu actions without a separate thread.
+#[cfg(target_os = "macos")]
+tray::handle_tray_events();
+```
+
+### Tests Added
+
+All 5 tests live in `sdk/campaign_builder/src/tray.rs` under
+`#[cfg(test)]`. They decode pixel data only — no `NSApp` or `NSStatusItem`
+is touched — so they are safe to run in any headless CI environment on macOS.
+
+| Test                            | What it verifies                                             |
+| ------------------------------- | ------------------------------------------------------------ |
+| `test_tray_icon_1x_png_magic`   | `TRAY_ICON_1X` bytes begin with PNG magic `[137,80,78,71,…]` |
+| `test_tray_icon_2x_png_magic`   | `TRAY_ICON_2X` bytes begin with PNG magic `[137,80,78,71,…]` |
+| `test_tray_icon_1x_dimensions`  | Decoded `width == 22`, `height == 22`                        |
+| `test_tray_icon_2x_dimensions`  | Decoded `width == 44`, `height == 44`                        |
+| `test_tray_icon_1x_rgba_length` | `rgba.len() == 22 × 22 × 4 == 1936`                          |
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → No output (all files formatted)
+cargo check --all-targets → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings  → Finished with 0 warnings
+cargo nextest run         → 3510/3510 passed, 8 skipped
+  (campaign_builder: 2045/2045 passed, including 5 new tray tests)
+```
+
+---
+
+---
+
+## Dropped Item World Persistence — Phase 4: Save/Load Validation and End-to-End Testing (Complete)
+
+### Overview
+
+Phase 4 completes the dropped-item persistence feature by adding three
+end-to-end integration tests that exercise the entire flow — from domain
+transaction through RON serialisation to reloaded world state — and verifies
+that the `SaveGameManager` round-trip preserves `DroppedItem` data with
+complete fidelity.
+
+No new production code was required: `Map` already derives
+`Serialize`/`Deserialize` and the `dropped_items` field already carries
+`#[serde(default, skip_serializing_if = "Vec::is_empty")]`, so dropped items
+serialise and deserialise automatically through the existing `SaveGame` RON
+pipeline introduced in Phase 1.
+
+The test fixtures required by the integration tests (a weapon and a consumable)
+were already present in `data/test_campaign/data/items.ron` from earlier
+campaign development:
+
+| Fixture constant     | Item id | Name           | Type       |
+| -------------------- | ------- | -------------- | ---------- |
+| `WEAPON_ITEM_ID`     | `3`     | Short Sword    | Weapon     |
+| `CONSUMABLE_ITEM_ID` | `50`    | Healing Potion | Consumable |
+
+### Phase 4 Deliverables Checklist
+
+- [x] `tests/dropped_item_integration_test.rs` — three integration tests
+  - [x] `test_dropped_item_round_trip_save_load`
+  - [x] `test_multiple_items_stacked_on_same_tile`
+  - [x] `test_dropped_item_scoped_to_map`
+- [x] `data/test_campaign/data/items.ron` contains required weapon (id=3) and consumable (id=50) fixtures (pre-existing)
+- [x] Save/load round-trip confirmed in automated tests
+- [x] No tests reference `campaigns/tutorial` (Implementation Rule 5 compliant)
+- [x] All four quality gates pass with zero errors and zero warnings
+- [x] `docs/explanation/implementations.md` updated (this entry)
+
+### Files Changed
+
+| File                                     | Change                                                                                 |
+| ---------------------------------------- | -------------------------------------------------------------------------------------- |
+| `tests/dropped_item_integration_test.rs` | **New** — three end-to-end integration tests with shared helpers and fixture constants |
+| `data/test_campaign/data/items.ron`      | No change required — weapon (id=3) and consumable (id=50) already present              |
+
+### Test Details
+
+#### `test_dropped_item_round_trip_save_load`
+
+Full seven-step flow verifying that a `DroppedItem` survives a complete
+save/load cycle and is then retrievable and removable:
+
+1. Construct `GameState` with a 20×20 map and a character carrying a Short Sword.
+2. Call `drop_item()` — verifies item removed from inventory and written to
+   `map.dropped_items`.
+3. Call `SaveGameManager::save()` — serialises `GameState` (including
+   `Map::dropped_items`) to a RON file in a `TempDir`.
+4. Call `SaveGameManager::load()` — deserialises the RON file back into
+   `GameState`.
+5. Assert all `DroppedItem` fields (`item_id`, `charges`, `position`,
+   `map_id`) are intact in the loaded world.
+6. Call `trigger_event()` at the drop tile — asserts `EventResult::PickupItem`
+   is returned with matching fields.
+7. Call `pickup_item()` — asserts the inventory is updated and
+   `map.dropped_items` is empty.
+
+#### `test_multiple_items_stacked_on_same_tile`
+
+Verifies that an arbitrary number of `DroppedItem` entries can share one tile
+and that the FIFO insertion order is preserved through save/load:
+
+1. Drop a weapon (slot 0) then a potion (slot 0 after shift) on the same tile.
+2. Assert `map.dropped_items_at(tile)` returns both entries in insertion order.
+3. Save and load.
+4. Assert both entries survive with correct FIFO ordering.
+5. Call `trigger_event()` twice, picking up weapon first then potion.
+6. Assert `map.dropped_items` is empty and both items are in inventory.
+
+#### `test_dropped_item_scoped_to_map`
+
+Verifies that `DroppedItem` entries are bound to their owning map and do not
+leak across map boundaries:
+
+1. Create a `GameState` with two maps (ids 1 and 2).
+2. Drop a weapon on map 1; assert map 2 has no dropped items.
+3. Save and load.
+4. Assert map 1 still has the item and map 2 remains empty.
+5. Call `trigger_event()` with `current_map = 1` → `PickupItem`.
+6. Call `trigger_event()` with `current_map = 2` → `None` (item invisible from
+   map 2).
+
+### Architecture Notes
+
+#### Why no production code changes were needed
+
+Phase 1 added `#[serde(default, skip_serializing_if = "Vec::is_empty")]` to
+`Map::dropped_items`, which is all the wiring required for round-trip
+serialisation. `SaveGame` wraps `GameState` which owns `World` which owns
+`HashMap<MapId, Map>`, so the entire map collection — including every
+`dropped_items` vector — is serialised and deserialised transparently by the
+existing RON pipeline.
+
+#### Borrow-splitting in integration tests
+
+The integration tests use the same NLL field-split borrow pattern established
+in Phase 2's `inventory_action_system`:
+
+```tests/dropped_item_integration_test.rs#L110-116
+{
+    let party_ref = &mut state.party.members[0];
+    let world_ref = &mut state.world;
+    drop_item(party_ref, 0, 0, world_ref, MAP_ONE, drop_pos)
+        .expect("drop_item must succeed");
+}
+```
+
+`state.party` and `state.world` are disjoint fields of `GameState`, so Rust's
+NLL borrow checker permits both `&mut` borrows within the same block. Each
+operation is wrapped in its own block to release the borrows before the next
+assertion.
+
+#### `TempDir` isolation
+
+Every test creates its own `TempDir` (from the `tempfile` crate), which is
+automatically deleted when the test ends. Save files never touch the
+repository working tree.
+
+#### `trigger_event` re-checks after pickup
+
+The plan specifies that `trigger_event` must return `None` after all items at a
+tile have been picked up. Both `test_dropped_item_round_trip_save_load` and
+`test_multiple_items_stacked_on_same_tile` verify this implicitly: after the
+final pickup, `map.dropped_items` is asserted empty, which means a subsequent
+`trigger_event` call on that tile would return `EventResult::None`.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → No output (all files formatted)
+cargo check --all-targets → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings  → Finished with 0 warnings
+cargo nextest run         → 3510/3510 passed, 8 skipped
+```
+
+The three new tests (`test_dropped_item_round_trip_save_load`,
+`test_multiple_items_stacked_on_same_tile`, `test_dropped_item_scoped_to_map`)
+are included in the 3510 passing tests.
+
+---
+
+## macOS Menu-Bar Status Item — Phase 3: Show/Hide Window from Menu Bar (Complete)
+
+### Overview
+
+Extends the macOS menu-bar tray integration (Phase 2) with a Show/Hide window
+toggle driven by a `std::sync::mpsc` channel. The tray's context menu now
+exposes three items — **Show Antares Campaign Builder**, **Hide**, and **Quit**
+— and dispatches `TrayCommand` values over a bounded sync channel so that the
+`update()` loop can issue the appropriate `egui::ViewportCommand`s without
+blocking any OS callback thread.
+
+Key design decisions:
+
+- A `TrayCommand` enum (`ShowWindow`, `HideWindow`, `Quit`) carries intent
+  across the thread boundary from the tray event handler to the egui render
+  loop.
+- A `SyncSender<TrayCommand>` (which is both `Send` and `Sync`) is stored in
+  a module-level `OnceLock`, satisfying the `static` bound without a `Mutex`.
+- `build_tray_icon()` now returns `(tray_icon::TrayIcon, Receiver<TrayCommand>)`;
+  the `TrayIcon` stays alive in `run()` outside the closure, and the `Receiver`
+  is moved into `CampaignBuilderApp` inside the closure.
+- `handle_tray_events()` retains its zero-argument signature: it retrieves the
+  sender from the `OnceLock` and sends commands without requiring the caller to
+  pass anything extra.
+- `Quit` remains a direct `process::exit(0)` call for immediate, synchronous
+  termination; `TrayCommand::Quit` is also provided as a belt-and-suspenders
+  `ViewportCommand::Close` path drained in `update()`.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `sdk/campaign_builder/src/tray.rs` — `TrayCommand` enum (`PartialEq`,
+      `Debug`, `Clone`); `MENU_ID_SHOW` / `MENU_ID_HIDE` constants; module-level
+      `TRAY_CMD_TX: OnceLock<SyncSender<TrayCommand>>`; `build_tray_icon()` returns
+      `(TrayIcon, Receiver<TrayCommand>)`; Show + Hide menu items appended;
+      `handle_tray_events()` sends `ShowWindow` / `HideWindow` over the channel;
+      2 new unit tests
+- [x] `sdk/campaign_builder/src/lib.rs` — `tray_cmd_rx:
+Option<std::sync::mpsc::Receiver<tray::TrayCommand>>` field on
+      `CampaignBuilderApp` (cfg-gated); `Default` impl initialises it to `None`;
+      `run()` destructures `build_tray_icon()` and wires the receiver into the app;
+      `update()` drains the receiver and issues `ViewportCommand`s
+- [x] All quality gates pass (`cargo fmt`, `cargo check`, `cargo clippy -D
+warnings`, `cargo nextest run`)
+
+### Files Changed
+
+| File                               | Change                                                                                                          |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/tray.rs` | `TrayCommand` enum, `OnceLock` sender, updated `build_tray_icon()`, updated `handle_tray_events()`, 2 new tests |
+| `sdk/campaign_builder/src/lib.rs`  | `tray_cmd_rx` field, `Default` init, `run()` wiring, `update()` drain loop                                      |
+
+### Architecture Details
+
+#### `TrayCommand` Enum
+
+```sdk/campaign_builder/src/tray.rs#L113-125
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrayCommand {
+    /// Raise the window to the front and make it visible.
+    ShowWindow,
+    /// Hide the window without terminating the process.
+    HideWindow,
+    /// Close the egui viewport (counterpart to the direct `process::exit` path).
+    Quit,
+}
+```
+
+#### `OnceLock<SyncSender>` Pattern
+
+`SyncSender<T>` implements both `Send` and `Sync` (unlike `Sender<T>` which is
+only `Send`). This makes it eligible for storage in a `OnceLock<T>` static,
+which requires `T: Send + Sync`. The bounded channel capacity of 32 ensures
+that even rapid menu clicks cannot block the OS callback thread.
+
+```sdk/campaign_builder/src/tray.rs#L133-136
+static TRAY_CMD_TX: OnceLock<SyncSender<TrayCommand>> = OnceLock::new();
+```
+
+#### `build_tray_icon()` — Updated Signature
+
+```sdk/campaign_builder/src/tray.rs#L193-196
+pub fn build_tray_icon() -> (tray_icon::TrayIcon, Receiver<TrayCommand>) {
+    let (tx, rx) = mpsc::sync_channel(32);
+    let _ = TRAY_CMD_TX.set(tx);
+    // ...
+```
+
+The `TrayIcon` is kept in `run()` via `let (_tray, tray_cmd_rx) =
+tray::build_tray_icon();` outside the `run_native` closure. The `Receiver` is
+moved into the closure and stored as `app.tray_cmd_rx = Some(tray_cmd_rx)`.
+
+#### Menu Items
+
+Three items are appended in order: **Show Antares Campaign Builder** (ID
+`"show"`), **Hide** (ID `"hide"`), **Quit** (ID `"quit"`).
+
+#### `handle_tray_events()` — Channel Dispatch
+
+The function retrieves the sender from `TRAY_CMD_TX.get()` (returning early if
+not yet initialised) and maps raw `MenuEvent` IDs to channel sends or a direct
+`process::exit(0)`:
+
+- `"quit"` → `std::process::exit(0)` (synchronous, immediate)
+- `"show"` → `tx.send(TrayCommand::ShowWindow)` (non-blocking; error ignored
+  if receiver dropped)
+- `"hide"` → `tx.send(TrayCommand::HideWindow)`
+- Unknown IDs → silently ignored
+
+#### `update()` — Receiver Drain
+
+Each frame, after calling `tray::handle_tray_events()`, the app drains
+`self.tray_cmd_rx` with `try_recv()` and issues `ViewportCommand`s:
+
+```sdk/campaign_builder/src/lib.rs#L4241-4266
+#[cfg(target_os = "macos")]
+if let Some(ref rx) = self.tray_cmd_rx {
+    while let Ok(cmd) = rx.try_recv() {
+        match cmd {
+            tray::TrayCommand::ShowWindow => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            tray::TrayCommand::HideWindow => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            }
+            tray::TrayCommand::Quit => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+}
+```
+
+`Visible(true)` is issued before `Focus` so the window exists in the window
+manager before the focus request is processed.
+
+#### Non-macOS Builds
+
+All new code is gated with `#[cfg(target_os = "macos")]`. The `tray` module
+itself has `#![cfg(target_os = "macos")]` at the file level, so non-macOS
+builds see neither the module nor the struct field.
+
+### Tests Added
+
+#### `sdk/campaign_builder/src/tray.rs` — 2 new tests (Phase 3)
+
+| Test name                                      | What it verifies                                                                                            |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `test_tray_command_show_is_distinct_from_hide` | `TrayCommand::ShowWindow != TrayCommand::HideWindow`; confirms `PartialEq` derivation                       |
+| `test_tray_command_channel_send_recv`          | A `TrayCommand::ShowWindow` sent over an `mpsc::sync_channel` is received via `try_recv()` without blocking |
+
+Both tests are purely data-structure / channel tests; no `NSApp` or
+`NSStatusItem` is touched. They run anywhere the crate compiles (macOS only,
+due to the file-level `#![cfg(target_os = "macos")]` gate).
+
+### Quality Gate Results
+
+```text
+cargo fmt --all                                → No output (all files formatted)
+cargo check --all-targets --all-features       → Finished with 0 errors, 0 warnings
+cargo clippy --all-targets --all-features
+  -- -D warnings                               → Finished with 0 warnings
+cargo nextest run --all-features
+  -p campaign_builder                          → 2047/2047 passed (2 new tray tests included)
+```
+
+The 2 new tray tests:
+
+- `campaign_builder tray::tests::test_tray_command_show_is_distinct_from_hide` ✅
+- `campaign_builder tray::tests::test_tray_command_channel_send_recv` ✅
+
+---

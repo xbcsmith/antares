@@ -40,6 +40,7 @@ pub mod creatures_editor;
 pub mod creatures_manager;
 pub mod creatures_workflow;
 pub mod dialogue_editor;
+pub mod icon;
 pub mod item_mesh_editor;
 pub mod item_mesh_undo_redo;
 pub mod item_mesh_workflow;
@@ -72,6 +73,8 @@ pub mod template_metadata;
 pub mod templates;
 pub mod test_play;
 pub mod test_utils;
+#[cfg(target_os = "macos")]
+pub mod tray;
 pub mod ui_helpers;
 pub mod undo_redo;
 pub mod validation;
@@ -132,15 +135,27 @@ pub fn run() -> Result<(), eframe::Error> {
         eprintln!("[VERBOSE] Verbose logging enabled - showing detailed trace information");
     }
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 720.0])
-            .with_min_inner_size([800.0, 600.0])
-            .with_title("Antares Campaign Builder"),
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1280.0, 720.0])
+        .with_min_inner_size([800.0, 600.0])
+        .with_title("Antares Campaign Builder");
 
+    if let Some(icon_data) = icon::app_icon_data() {
+        viewport = viewport.with_icon(icon_data);
+    }
+
+    let options = eframe::NativeOptions {
+        viewport,
         renderer: eframe::Renderer::default(),
         ..Default::default()
     };
+
+    // Build the macOS menu-bar status item (NSStatusItem).  The TrayIcon binding
+    // must remain live for the entire duration of `run_native`; dropping it
+    // removes the icon from the menu bar.  The Receiver is moved into the app
+    // inside the closure so that `update()` can drain TrayCommand values each frame.
+    #[cfg(target_os = "macos")]
+    let (_tray, tray_cmd_rx) = tray::build_tray_icon();
 
     eframe::run_native(
         "Antares Campaign Builder",
@@ -150,6 +165,13 @@ pub fn run() -> Result<(), eframe::Error> {
                 logger: logger.clone(),
                 ..Default::default()
             };
+
+            // Wire the tray-command receiver into the app so that `update()`
+            // can drain ShowWindow / HideWindow / Quit commands each frame.
+            #[cfg(target_os = "macos")]
+            {
+                app.tray_cmd_rx = Some(tray_cmd_rx);
+            }
 
             // Load persisted ToolConfig if available; otherwise fall back to defaults.
             // This makes display/editor preferences persistent across sessions.
@@ -753,6 +775,14 @@ struct CampaignBuilderApp {
     /// Cached texture handle for the Antares logo shown in the sidebar.
     /// Loaded once on first render and reused every frame thereafter.
     logo_texture: Option<egui::TextureHandle>,
+
+    /// Receiver for commands dispatched by the macOS menu-bar tray item.
+    ///
+    /// [`tray::handle_tray_events`] sends [`tray::TrayCommand`] values here;
+    /// `update()` drains the channel once per frame and issues the
+    /// corresponding [`egui::ViewportCommand`]s.
+    #[cfg(target_os = "macos")]
+    tray_cmd_rx: Option<std::sync::mpsc::Receiver<tray::TrayCommand>>,
 }
 
 #[derive(Debug, Clone)]
@@ -878,6 +908,9 @@ impl Default for CampaignBuilderApp {
             debug_panel_auto_scroll: true,
 
             logo_texture: None,
+
+            #[cfg(target_os = "macos")]
+            tray_cmd_rx: None,
         }
     }
 }
@@ -930,6 +963,7 @@ impl CampaignBuilderApp {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -1816,7 +1850,12 @@ impl CampaignBuilderApp {
                 .struct_names(false)
                 .enumerate_arrays(false);
 
-            let contents = ron::ser::to_string_pretty(&self.items, ron_config)
+            // Sort by ID before serializing so the file order is always
+            // deterministic regardless of the order items were added/edited.
+            let mut sorted_items = self.items.clone();
+            sorted_items.sort_by_key(|i| i.id);
+
+            let contents = ron::ser::to_string_pretty(&sorted_items, ron_config)
                 .map_err(|e| format!("Failed to serialize items: {}", e))?;
 
             fs::write(&items_path, &contents)
@@ -1908,7 +1947,11 @@ impl CampaignBuilderApp {
                 .struct_names(false)
                 .enumerate_arrays(false);
 
-            let contents = ron::ser::to_string_pretty(&self.spells, ron_config)
+            // Sort by ID before serializing for stable file order.
+            let mut sorted_spells = self.spells.clone();
+            sorted_spells.sort_by_key(|s| s.id);
+
+            let contents = ron::ser::to_string_pretty(&sorted_spells, ron_config)
                 .map_err(|e| format!("Failed to serialize spells: {}", e))?;
 
             fs::write(&spells_path, contents)
@@ -1984,7 +2027,11 @@ impl CampaignBuilderApp {
                 .struct_names(false)
                 .enumerate_arrays(false);
 
-            let contents = ron::ser::to_string_pretty(&self.conditions, ron_config)
+            // Sort by ID (String) before serializing for stable file order.
+            let mut sorted_conditions = self.conditions.clone();
+            sorted_conditions.sort_by(|a, b| a.id.cmp(&b.id));
+
+            let contents = ron::ser::to_string_pretty(&sorted_conditions, ron_config)
                 .map_err(|e| format!("Failed to serialize conditions: {}", e))?;
 
             fs::write(&conditions_path, contents)
@@ -2104,7 +2151,11 @@ impl CampaignBuilderApp {
                 .struct_names(false)
                 .enumerate_arrays(false);
 
-            let contents = ron::ser::to_string_pretty(&self.proficiencies, ron_config)
+            // Sort by ID (String) before serializing for stable file order.
+            let mut sorted_proficiencies = self.proficiencies.clone();
+            sorted_proficiencies.sort_by(|a, b| a.id.cmp(&b.id));
+
+            let contents = ron::ser::to_string_pretty(&sorted_proficiencies, ron_config)
                 .map_err(|e| format!("Failed to serialize proficiencies: {}", e))?;
 
             fs::write(&proficiencies_path, &contents)
@@ -2149,7 +2200,11 @@ impl CampaignBuilderApp {
             .struct_names(false)
             .enumerate_arrays(false);
 
-        let contents = ron::ser::to_string_pretty(&self.dialogues, ron_config)
+        // Sort by dialogue ID before serializing for stable file order.
+        let mut sorted_dialogues = self.dialogues.clone();
+        sorted_dialogues.sort_by_key(|d| d.id);
+
+        let contents = ron::ser::to_string_pretty(&sorted_dialogues, ron_config)
             .map_err(|e| format!("Failed to serialize dialogues: {}", e))?;
 
         std::fs::write(path, contents)
@@ -2178,7 +2233,11 @@ impl CampaignBuilderApp {
             .struct_names(false)
             .enumerate_arrays(false);
 
-        let contents = ron::ser::to_string_pretty(&self.npc_editor_state.npcs, ron_config)
+        // Sort by NPC ID (String) before serializing for stable file order.
+        let mut sorted_npcs = self.npc_editor_state.npcs.clone();
+        sorted_npcs.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let contents = ron::ser::to_string_pretty(&sorted_npcs, ron_config)
             .map_err(|e| format!("Failed to serialize NPCs: {}", e))?;
 
         std::fs::write(path, contents).map_err(|e| format!("Failed to write NPCs file: {}", e))?;
@@ -2348,7 +2407,11 @@ impl CampaignBuilderApp {
                 .struct_names(false)
                 .enumerate_arrays(false);
 
-            let contents = ron::ser::to_string_pretty(&self.monsters, ron_config)
+            // Sort by ID before serializing for stable file order.
+            let mut sorted_monsters = self.monsters.clone();
+            sorted_monsters.sort_by_key(|m| m.id);
+
+            let contents = ron::ser::to_string_pretty(&sorted_monsters, ron_config)
                 .map_err(|e| format!("Failed to serialize monsters: {}", e))?;
 
             fs::write(&monsters_path, contents)
@@ -3338,6 +3401,22 @@ impl CampaignBuilderApp {
 
                     self.sync_obj_importer_campaign_state();
 
+                    // Load item mesh assets into the Item Mesh Editor registry.
+                    // Must happen after campaign_dir is set (above) and after
+                    // load_items() so mesh IDs on items are already known.
+                    if let Some(ref dir) = self.campaign_dir.clone() {
+                        self.logger
+                            .debug(category::FILE_IO, "Loading item mesh assets...");
+                        self.item_mesh_editor_state.load_from_campaign(dir);
+                        self.logger.info(
+                            category::FILE_IO,
+                            &format!(
+                                "Loaded {} item mesh entries",
+                                self.item_mesh_editor_state.registry.len()
+                            ),
+                        );
+                    }
+
                     // Reset editor state before loading so stale data from any
                     // previously opened campaign is cleared first.  The explicit
                     // load below will clear needs_initial_load on success; on
@@ -4195,6 +4274,39 @@ impl CampaignBuilderApp {
 
 impl eframe::App for CampaignBuilderApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Poll macOS menu-bar status item events once per frame.
+        // `handle_tray_events` translates raw MenuEvent IDs into TrayCommand
+        // values and sends them over the mpsc channel.  The Receiver is drained
+        // immediately below.
+        #[cfg(target_os = "macos")]
+        tray::handle_tray_events();
+
+        // Drain tray commands and issue the corresponding egui ViewportCommands.
+        // This runs on every frame so the window responds within one paint cycle.
+        #[cfg(target_os = "macos")]
+        if let Some(ref rx) = self.tray_cmd_rx {
+            while let Ok(cmd) = rx.try_recv() {
+                match cmd {
+                    tray::TrayCommand::ShowWindow => {
+                        // Restore visibility first, then bring the window to
+                        // the front so it is immediately usable.
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    }
+                    tray::TrayCommand::HideWindow => {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                    }
+                    tray::TrayCommand::Quit => {
+                        // Close the egui viewport gracefully.  The tray's Quit
+                        // item also calls `process::exit` directly in
+                        // `handle_tray_events`, so this path is a belt-and-
+                        // suspenders fallback.
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                }
+            }
+        }
+
         // Top menu bar
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
@@ -5114,7 +5226,11 @@ impl CampaignBuilderApp {
                 fs::create_dir_all(parent).map_err(CampaignError::Io)?;
             }
 
-            let contents = ron::ser::to_string_pretty(&self.quests, Default::default())?;
+            // Sort by ID before serializing for stable file order.
+            let mut sorted_quests = self.quests.clone();
+            sorted_quests.sort_by_key(|q| q.id);
+
+            let contents = ron::ser::to_string_pretty(&sorted_quests, Default::default())?;
             fs::write(&quests_path, contents)?;
         }
         Ok(())
@@ -8618,6 +8734,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         let armor_item = Item {
@@ -8639,6 +8756,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(ItemTypeFilter::Weapon.matches(&weapon_item));
@@ -8755,6 +8873,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         // Export to RON
@@ -8809,6 +8928,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         assert!(weapon.is_weapon());
 
@@ -8832,6 +8952,7 @@ mod tests {
             icon_path: None,
             tags: vec!["heavy_armor".to_string()],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         assert!(armor.is_armor());
 
@@ -8855,6 +8976,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         assert!(potion.is_consumable());
     }
@@ -8890,6 +9012,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         let cursed_armor = Item {
@@ -8911,6 +9034,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         app.items.push(magical_weapon.clone());
@@ -9010,6 +9134,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         // Verify item has all expected properties

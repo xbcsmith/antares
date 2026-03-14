@@ -27,6 +27,7 @@ use crate::keyboard_shortcuts::ShortcutManager;
 use crate::preview_renderer::PreviewRenderer;
 use crate::ui_helpers::TwoColumnLayout;
 use antares::domain::visual::item_mesh::{ItemMeshCategory, ItemMeshDescriptor};
+use antares::domain::visual::CreatureDefinition;
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -274,6 +275,195 @@ impl ItemMeshEditorState {
     /// ```
     pub fn new() -> Self {
         Self::default()
+    }
+
+    // ── Campaign loading ──────────────────────────────────────────────────
+
+    /// Loads all item mesh assets from the campaign directory into the registry.
+    ///
+    /// Recursively scans `<campaign_dir>/assets/items/` for `.ron` files.
+    /// Each file is first attempted as [`ItemMeshDescriptor`] (editor format).
+    /// If that fails, it falls back to [`CreatureDefinition`] (game/legacy
+    /// format) and derives an approximate descriptor from the mesh data.
+    ///
+    /// Replaces the entire registry on each call so repeated loads (e.g. after
+    /// the user switches campaigns) do not accumulate stale entries.
+    ///
+    /// # Arguments
+    ///
+    /// * `campaign_dir` — Root directory of the open campaign.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use campaign_builder::item_mesh_editor::ItemMeshEditorState;
+    /// use std::path::PathBuf;
+    ///
+    /// let mut state = ItemMeshEditorState::new();
+    /// let dir = PathBuf::from("/tmp/my_campaign");
+    /// state.load_from_campaign(&dir);
+    /// // registry is now populated from assets/items/**/*.ron
+    /// ```
+    pub fn load_from_campaign(&mut self, campaign_dir: &PathBuf) {
+        let assets_dir = campaign_dir.join("assets").join("items");
+        if !assets_dir.exists() {
+            return;
+        }
+
+        self.registry.clear();
+
+        let ron_files = Self::collect_ron_files_recursive(&assets_dir);
+
+        for full_path in ron_files {
+            let rel_path = match full_path.strip_prefix(campaign_dir) {
+                Ok(p) => p.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+
+            let content = match std::fs::read_to_string(&full_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let stem = full_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
+            let name = Self::stem_to_display_name(stem);
+
+            // ── Attempt 1: native ItemMeshDescriptor format ───────────────
+            if let Ok(descriptor) = ron::de::from_str::<ItemMeshDescriptor>(&content) {
+                self.registry.push(ItemMeshEntry {
+                    name,
+                    category: descriptor.category,
+                    file_path: rel_path,
+                    descriptor,
+                });
+                continue;
+            }
+
+            // ── Attempt 2: CreatureDefinition (game/legacy format) ────────
+            if let Ok(def) = ron::de::from_str::<CreatureDefinition>(&content) {
+                let category = Self::infer_category_from_path(&full_path);
+                let primary_color = def
+                    .meshes
+                    .first()
+                    .map(|m| m.color)
+                    .unwrap_or([0.7, 0.7, 0.7, 1.0]);
+                let accent_color = def
+                    .meshes
+                    .get(1)
+                    .map(|m| m.color)
+                    .unwrap_or([0.5, 0.3, 0.1, 1.0]);
+                let emissive = def
+                    .meshes
+                    .first()
+                    .and_then(|m| m.material.as_ref())
+                    .and_then(|mat| mat.emissive)
+                    .is_some();
+                let descriptor = ItemMeshDescriptor {
+                    category,
+                    blade_length: 0.5,
+                    primary_color,
+                    accent_color,
+                    emissive,
+                    emissive_color: [0.0, 0.0, 0.0],
+                    scale: def.scale,
+                };
+                self.registry.push(ItemMeshEntry {
+                    name,
+                    category,
+                    file_path: rel_path,
+                    descriptor,
+                });
+            }
+        }
+
+        // Keep available_item_assets in sync so the register-asset dialog
+        // shows the correct list after loading.
+        self.available_item_assets = self.registry.iter().map(|e| e.file_path.clone()).collect();
+        self.last_campaign_dir = Some(campaign_dir.clone());
+    }
+
+    /// Recursively collects all `.ron` files under `dir`.
+    fn collect_ron_files_recursive(dir: &PathBuf) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    files.extend(Self::collect_ron_files_recursive(&path));
+                } else if path.extension().and_then(|e| e.to_str()) == Some("ron") {
+                    files.push(path);
+                }
+            }
+        }
+        files
+    }
+
+    /// Converts a file stem like `"short_sword"` to `"Short Sword"`.
+    fn stem_to_display_name(stem: &str) -> String {
+        stem.replace('_', " ")
+            .split_whitespace()
+            .map(|w| {
+                let mut chars = w.chars();
+                match chars.next() {
+                    Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Infers an [`ItemMeshCategory`] from the file path.
+    ///
+    /// Checks the file stem first (most specific), then the parent folder name
+    /// as a fallback, then defaults to [`ItemMeshCategory::Sword`].
+    fn infer_category_from_path(path: &PathBuf) -> ItemMeshCategory {
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let folder = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        match stem.as_str() {
+            "sword" | "long_sword" | "great_sword" => ItemMeshCategory::Sword,
+            "short_sword" | "dagger" | "knife" => ItemMeshCategory::Dagger,
+            "club" | "mace" | "hammer" | "flail" => ItemMeshCategory::Blunt,
+            "staff" | "spear" | "halberd" | "polearm" => ItemMeshCategory::Staff,
+            "bow" | "crossbow" => ItemMeshCategory::Bow,
+            "helmet" | "helm" | "cap" | "hood" => ItemMeshCategory::Helmet,
+            "shield" | "buckler" | "tower_shield" => ItemMeshCategory::Shield,
+            "boots" | "greaves" | "sabatons" | "sandals" => ItemMeshCategory::Boots,
+            "chain_mail" | "plate_mail" | "leather_armor" | "armor" | "mail" | "breastplate"
+            | "cuirass" => ItemMeshCategory::BodyArmor,
+            "ring" | "band" => ItemMeshCategory::Ring,
+            "amulet" | "necklace" | "pendant" | "talisman" => ItemMeshCategory::Amulet,
+            "belt" | "girdle" | "sash" => ItemMeshCategory::Belt,
+            "cloak" | "cape" | "robe" | "mantle" => ItemMeshCategory::Cloak,
+            "potion" | "vial" | "flask" | "elixir" => ItemMeshCategory::Potion,
+            "scroll" | "tome" | "grimoire" => ItemMeshCategory::Scroll,
+            "arrow" | "bolt" | "ammo" | "quiver" | "stone" => ItemMeshCategory::Ammo,
+            "key_item" | "artifact" | "relic" | "quest_scroll" | "key" => {
+                ItemMeshCategory::QuestItem
+            }
+            _ => match folder.as_str() {
+                "weapons" => ItemMeshCategory::Sword,
+                "armor" => ItemMeshCategory::BodyArmor,
+                "accessories" => ItemMeshCategory::Ring,
+                "consumables" => ItemMeshCategory::Potion,
+                "ammo" => ItemMeshCategory::Ammo,
+                "quest" => ItemMeshCategory::QuestItem,
+                _ => ItemMeshCategory::Sword,
+            },
+        }
     }
 
     // ── Navigation ────────────────────────────────────────────────────────
@@ -556,14 +746,11 @@ impl ItemMeshEditorState {
         let assets_dir = campaign_dir.join("assets").join("items");
         let mut found = Vec::new();
 
-        if let Ok(entries) = std::fs::read_dir(&assets_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("ron") {
-                    if let Ok(rel) = path.strip_prefix(campaign_dir) {
-                        found.push(rel.to_string_lossy().replace('\\', "/"));
-                    }
-                }
+        // Recursively collect all .ron files under assets/items/ including subdirectories.
+        let ron_files = Self::collect_ron_files_recursive(&assets_dir);
+        for path in ron_files {
+            if let Ok(rel) = path.strip_prefix(campaign_dir) {
+                found.push(rel.to_string_lossy().replace('\\', "/"));
             }
         }
 
@@ -1134,24 +1321,12 @@ impl ItemMeshEditorState {
         // can hold a live borrow while the other mutates — so we snapshot all
         // display data upfront and collect deferred mutations in local vars.
 
-        // Refresh available assets if the campaign dir changed.
+        // Refresh available assets and populate the registry if the campaign
+        // dir changed (e.g. user opened a different campaign while the tab was
+        // visible, or the tab is first shown after open_campaign).
         if let Some(dir) = campaign_dir {
             if self.last_campaign_dir.as_ref() != Some(dir) {
-                self.last_campaign_dir = Some(dir.clone());
-                let assets_dir = dir.join("assets").join("items");
-                let mut found = Vec::new();
-                if let Ok(entries) = std::fs::read_dir(&assets_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().and_then(|e| e.to_str()) == Some("ron") {
-                            if let Ok(rel) = path.strip_prefix(dir) {
-                                found.push(rel.to_string_lossy().replace('\\', "/"));
-                            }
-                        }
-                    }
-                }
-                found.sort();
-                self.available_item_assets = found;
+                self.load_from_campaign(dir);
             }
         }
 

@@ -651,6 +651,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         db.add_item(sword).unwrap();
@@ -688,6 +689,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         db.add_item(sword).unwrap();
@@ -727,6 +729,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -905,6 +908,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         })
         .unwrap();
 
@@ -928,6 +932,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         })
         .unwrap();
 
@@ -950,6 +955,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         })
         .unwrap();
 
@@ -973,6 +979,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         })
         .unwrap();
 
@@ -995,6 +1002,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         })
         .unwrap();
 
@@ -1017,6 +1025,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         })
         .unwrap();
 
@@ -1180,6 +1189,7 @@ mod tests {
                     scale: Some(0.4),
                     emissive: None,
                 }),
+                mesh_id: None,
             })
             .unwrap();
 

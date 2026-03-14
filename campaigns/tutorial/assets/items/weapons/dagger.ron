@@ -43,6 +43,6 @@
         (translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
         (translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
     ],
-    scale: 0.3150,
+    scale: 1.2,
     color_tint: None,
 )
