@@ -2519,6 +2519,7 @@ mod tests {
     #[test]
     fn test_scan_dialogues_references() {
         use antares::domain::dialogue::{DialogueId, DialogueNode, DialogueTree, NodeId};
+        use std::collections::BTreeMap;
         use std::path::PathBuf;
 
         let mut manager = AssetManager::new(PathBuf::from("/tmp/test_campaign"));
@@ -2537,8 +2538,7 @@ mod tests {
             },
         );
 
-        use std::collections::HashMap;
-        let mut nodes = HashMap::new();
+        let mut nodes = BTreeMap::new();
         nodes.insert(
             1 as NodeId,
             DialogueNode {
@@ -2561,7 +2561,6 @@ mod tests {
             repeatable: false,
             associated_quest: None,
         };
-
         manager.scan_references(&[], &[], &[dialogue], &[], &[], &[], &[]);
 
         let asset = manager.assets.get(&portrait_path).unwrap();
