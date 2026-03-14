@@ -2278,6 +2278,7 @@ fn create_test_item(id: ItemId, name: &str) -> Item {
         icon_path: None,
         tags: Vec::new(),
         mesh_descriptor_override: None,
+        mesh_id: None,
     }
 }
 

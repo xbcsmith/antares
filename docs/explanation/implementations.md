@@ -1,5 +1,88 @@
 # Implementations
 
+## Dropped Item Visibility Fix — Upright Spawn Rotation (Complete)
+
+### Problem
+
+All item meshes (both the procedural `ItemMeshDescriptor` path and the
+RON data-driven path loaded via `mesh_id`) are authored on the **XZ plane**:
+every vertex has `y = 0` and face normals point straight up (`+Y`).
+
+In a first-person dungeon view the camera looks horizontally. A flat XZ-plane
+mesh is viewed exactly **edge-on** — it occupies a degenerate zero-pixel strip
+on screen and is effectively invisible.
+
+**Before the scale change**: the procedural spawn path included a dark
+`shadow_quad` at `y = 0.001`. That dark blob on the floor was the "pencil"
+the player could barely see — not the blade itself.
+
+**After the scale change** (switching to the data-driven `long_sword.ron` at
+`scale = 1.5`): the RON file has no shadow quad, just a flat silver blade.
+A silver flat mesh viewed edge-on in a dark dungeon produces zero visible
+pixels → completely invisible.
+
+### Root Cause
+
+`spawn_dropped_item_system` in `src/game/systems/item_world_events.rs` spawned
+items with only a deterministic **Y-axis** jitter rotation. No tilt was applied
+to stand the mesh upright, so the flat XZ geometry was never rotated into a
+plane the first-person camera could see.
+
+Additionally, `DROPPED_ITEM_Y = 0.05` placed the spawn origin only 5 cm off
+the floor. With a vertical rotation applied, the lower portion of the mesh
+(pommel / base) would have clipped through the floor at that height.
+
+### Fix
+
+Two constants in `src/game/systems/item_world_events.rs` were changed:
+
+| Constant                    | Old value | New value    | Reason                                                           |
+| --------------------------- | --------- | ------------ | ---------------------------------------------------------------- |
+| `DROPPED_ITEM_Y`            | `0.05`    | `0.3`        | Raises origin so the pommel clears the floor once tilted upright |
+| `DROPPED_ITEM_UPRIGHT_TILT` | _(new)_   | `-FRAC_PI_2` | −90° X-axis tilt that maps XZ-plane geometry to the XY plane     |
+
+The rotation applied to the spawned entity after `spawn_creature` was changed
+from a pure Y-axis jitter to a compound rotation:
+
+```rust
+transform.rotation = Quat::from_rotation_y(jitter_y)
+    * Quat::from_rotation_x(DROPPED_ITEM_UPRIGHT_TILT);
+```
+
+Quaternion order (rightmost applied first): tilt the item upright (`R_x`),
+then spin it on the world vertical axis for visual variety (`R_y`).
+
+### Geometry After Fix
+
+For the Long Sword (`long_sword.ron`, `scale = 1.5`) the world-space extents
+after the fix are approximately:
+
+| Part                | World Y                                        |
+| ------------------- | ---------------------------------------------- |
+| Pommel (lowest)     | `0.3 − 0.185 = 0.115` — safely above the floor |
+| Crossguard (centre) | `0.3 + 0.0` = `0.30`                           |
+| Blade tip (highest) | `0.3 + 0.619 = 0.919` — ~92 % of tile height   |
+
+For the procedural path (`scale ≈ 0.35`) the blade tip reaches ~0.475,
+about halfway up the tile — still clearly visible.
+
+### Files Changed
+
+- `src/game/systems/item_world_events.rs` — added `DROPPED_ITEM_UPRIGHT_TILT`
+  constant, updated `DROPPED_ITEM_Y` to `0.3`, replaced the Y-only jitter with
+  the compound X+Y rotation.
+
+### Quality Gates
+
+All four gates pass with zero errors/warnings:
+
+```text
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3510 passed, 0 failed
+```
+
 ## macOS Window and Dock Icon — Phase 1: Window and Dock Icon (Complete)
 
 ### Overview
@@ -492,6 +575,124 @@ cargo fmt --all           → No output (all files formatted)
 cargo check --all-targets → Finished with 0 errors, 0 warnings
 cargo clippy -D warnings  → Finished with 0 warnings
 cargo nextest run         → 3507/3507 passed, 8 skipped
+```
+
+---
+
+## Dropped Item Visibility Fix — Phase 5: First-Person Camera Visibility and Map-Transition Ordering (Complete)
+
+### Overview
+
+Dropped items (both static `MapEvent::DroppedItem` entries and items dropped at
+runtime by the party) were not visible in the game. Two root causes were
+identified and fixed:
+
+1. **Flat mesh orientation** — All item meshes are generated on the XZ plane
+   (all vertices at Y = 0 in local space, face normal pointing straight up).
+   From the first-person horizontal camera at eye height 1.0, these meshes are
+   seen nearly edge-on and appear as sub-pixel-thin slivers that are effectively
+   invisible.
+
+2. **System ordering bug on map transitions** — `spawn_map_markers` (in
+   `MapManagerPlugin`) and `map_change_handler` are in the same `Update`
+   system set without explicit ordering. When `spawn_map_markers` ran before
+   `map_change_handler` in a frame where a `MapChangeEvent` was being processed,
+   the item-world systems fired `ItemDroppedEvent` for the _new_ map and
+   `spawn_dropped_item_system` queued the new-map item entities via deferred
+   commands. On the _next_ frame, `spawn_map_markers` saw the freshly-spawned
+   `MapEntity(new_map)` entities (from those deferred commands) and falsely
+   concluded the new map was already rendered — skipping tile despawn/respawn
+   entirely and leaving the old map's tiles on screen.
+
+### Phase 5 Deliverables Checklist
+
+- [x] `src/domain/visual/item_mesh.rs` — added `ITEM_UPRIGHT_ROTATION_X`
+      constant; primary mesh and charge gem `MeshTransform` now use a −π/2 X
+      rotation so they stand upright in the XY plane instead of lying flat
+- [x] `src/game/systems/item_world_events.rs` — added `Billboard { lock_y: true
+  }` component insertion; removed obsolete Y-jitter `entry::<Transform>()`
+      block; added `.after(map_change_handler)` ordering constraint to the
+      system chain; updated module-level and function-level doc comments
+- [x] `src/game/systems/map.rs` — `map_change_handler` visibility changed from
+      `fn` (private) to `pub(crate)` so `item_world_events.rs` can reference it
+      in the `.after()` ordering constraint
+
+### Files Changed
+
+| File                                    | Change                                                                                                                                                                                                                                                          |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/visual/item_mesh.rs`        | Added `ITEM_UPRIGHT_ROTATION_X = -π/2`; changed primary mesh and charge gem `MeshTransform` rotation from identity to `[ITEM_UPRIGHT_ROTATION_X, 0, 0]`; shadow quad keeps identity transform (stays flat on floor)                                             |
+| `src/game/systems/item_world_events.rs` | Added `use crate::game::components::billboard::Billboard`; added `Billboard { lock_y: true }` to entity insert; removed Y-jitter `entry::<Transform>().and_modify()` block; added `.after(map_change_handler)` to system chain; updated doc comments throughout |
+| `src/game/systems/map.rs`               | `map_change_handler` changed to `pub(crate)`                                                                                                                                                                                                                    |
+
+### Architecture Details
+
+#### Root Cause 1 — Flat meshes invisible from first-person camera
+
+Item mesh geometry is generated on the XZ plane. At eye height 1.0 with a
+70-degree vertical FOV, an item lying flat on the floor:
+
+- At distance 1 tile: visible angle is ~43° below horizontal → **outside** the
+  camera frustum (35° max); invisible.
+- At distance 2 tiles: visible angle is ~25° below horizontal → within frustum
+  but only ~10 pixels tall on a 1080p screen for a 0.35-scale item.
+
+The fix applies a `−π/2` X-rotation to the **child** `MeshTransform` of the
+primary item mesh and charge gem. This maps the XZ-plane geometry into the XY
+plane (sword tip at local +Y, pommel at local −Y) with the face normal pointing
+toward local −Z.
+
+The **parent** entity receives a `Billboard { lock_y: true }` component. The
+existing `update_billboards` system (registered by `BillboardPlugin`) rotates
+the parent around Y every frame so local −Z always points toward the camera,
+making the item face visible from any horizontal approach direction.
+
+The **shadow quad** keeps its identity `MeshTransform` (lies flat on the XZ
+plane), so it continues to cast a correct ground shadow at the item's base.
+
+#### Root Cause 2 — Map-transition `spawn_map_markers` false-positive
+
+`spawn_map_markers` uses a `has_current_entities` guard to avoid re-rendering a
+map that already has tile entities:
+
+```src/game/systems/map.rs#L471-480
+if has_current_entities {
+    *last_map = Some(current);
+    debug!("spawn_map_markers: visuals already spawned for current map {}; skipping", current);
+    return;
+}
+```
+
+When `spawn_map_markers` ran _before_ `map_change_handler` in the same frame as
+a map transition, the world still showed `current_map = old_map` so
+`spawn_map_markers` returned at the top-level `Some(current) == *last_map`
+check without updating `last_map`. On that same frame, `map_change_handler`
+then updated `current_map = new_map`, `load_map_dropped_items_system` fired
+events for the new map, and `spawn_dropped_item_system` queued spawns (deferred
+commands) for new-map item entities with `MapEntity(new_map)`.
+
+On the _next_ frame those deferred entities were in the world.
+`spawn_map_markers` now saw `current = new_map`, `last_map = Some(old_map)` (a
+detected transition), queried for `MapEntity(new_map)` entities, found the
+newly-spawned item entities — and returned early via `has_current_entities =
+true` **without** despawning the old tiles or spawning new map tiles.
+
+The fix adds `.after(crate::game::systems::map::map_change_handler)` to the
+`ItemWorldPlugin` system chain. This guarantees that
+`load_map_dropped_items_system` (and therefore `spawn_dropped_item_system`) only
+runs _after_ `map_change_handler` has written the new `current_map` value.
+Because Bevy's deferred commands are flushed at the end of the `Update`
+schedule, `spawn_map_markers` — which runs in the _same_ frame — still sees no
+new-map entities in the world when it executes, and correctly proceeds with the
+tile despawn/respawn cycle.
+
+### Quality Gate Results
+
+```text
+cargo fmt --all           → No output (all files formatted)
+cargo check --all-targets → Finished with 0 errors, 0 warnings
+cargo clippy -D warnings  → Finished with 0 warnings
+cargo nextest run         → 3510/3510 passed, 8 skipped
 ```
 
 ---

@@ -30,7 +30,9 @@ use crate::application::resources::GameContent;
 use crate::domain::types::{ItemId, MapId};
 use crate::domain::visual::item_mesh::ItemMeshDescriptor;
 use crate::domain::world::MapEvent;
+use crate::game::components::billboard::Billboard;
 use crate::game::components::dropped_item::DroppedItem;
+use crate::game::resources::game_data::GameDataResource;
 use crate::game::resources::{DroppedItemRegistry, GlobalState};
 use crate::game::systems::creature_spawning::spawn_creature;
 use crate::game::systems::map::{MapEntity, TileCoord};
@@ -44,8 +46,33 @@ use bevy::prelude::MessageWriter;
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Y-axis height at which dropped items sit above the floor (world units).
-const DROPPED_ITEM_Y: f32 = 0.05;
+/// Minimum Y-axis height (world units) for the dropped-item spawn origin.
+///
+/// The actual spawn height is computed dynamically in
+/// [`spawn_dropped_item_system`] from the item's Z-axis geometry extent.
+/// After the upright −π/2 X-rotation, the minimum-Z vertex of each mesh maps
+/// to the lowest world-Y point; the spawn origin is raised so that point
+/// clears [`DROPPED_ITEM_FLOOR_CLEARANCE`].  This constant acts as a lower
+/// bound so items with no negative-Z geometry (rings, scrolls, …) are still
+/// raised high enough to be clearly visible in a first-person view.
+const DROPPED_ITEM_MIN_HEIGHT: f32 = 0.3;
+
+/// Minimum gap (world units) between the floor plane and the lowest vertex of
+/// a dropped item after the upright tilt is applied.
+/// Prevents Z-fighting between the item base and the floor tile.
+const DROPPED_ITEM_FLOOR_CLEARANCE: f32 = 0.05;
+
+/// X-axis rotation (radians) baked into every non-shadow child mesh transform
+/// so that items stand upright in the XY plane.
+///
+/// All item mesh geometry (procedural and RON data-driven) is authored on the
+/// XZ plane with normals pointing straight up (+Y).  Viewed edge-on from a
+/// first-person camera the flat mesh is invisible.  Applying −π/2 around X to
+/// the **child** mesh transforms maps +Z → +Y (blade tip points up) and
+/// turns the face normal from +Y to local −Z.  Combined with the
+/// [`Billboard`] component on the parent entity the face always points toward
+/// the camera regardless of approach direction.
+const DROPPED_ITEM_UPRIGHT_TILT: f32 = -std::f32::consts::FRAC_PI_2;
 
 /// Full circle in radians — used to convert the deterministic hash to an angle.
 const DROP_ROTATION_FULL_CIRCLE: f32 = std::f32::consts::TAU; // 360°
@@ -241,6 +268,7 @@ pub fn spawn_dropped_item_system(
     mut registry: ResMut<DroppedItemRegistry>,
     mut events: MessageReader<ItemDroppedEvent>,
     content: Option<Res<GameContent>>,
+    game_data: Option<Res<GameDataResource>>,
 ) {
     let Some(content) = content else {
         // Content not loaded yet; events will be lost this frame.
@@ -257,24 +285,107 @@ pub fn spawn_dropped_item_system(
             continue;
         };
 
-        // Build mesh descriptor.  Pass the charge fraction for the gem indicator
-        // (Phase 4.3): compute fraction = charges / max_charges, or None when the
-        // item has no charges.
-        let descriptor = ItemMeshDescriptor::from_item(item);
+        // Compute per-drop charge fraction for the gem indicator (Phase 4.3).
         let charges_fraction = if item.max_charges > 0 {
             Some(ev.charges as f32 / item.max_charges as f32)
         } else {
             None
         };
-        let creature_def = descriptor.to_creature_definition_with_charges(charges_fraction);
+
+        // Resolve the CreatureDefinition for this dropped item.
+        //
+        // Data-driven path (preferred): if the item carries a `mesh_id` that
+        // resolves to an entry in the campaign's `ItemMeshDatabase`, clone that
+        // pre-authored `CreatureDefinition` directly.  This lets campaign authors
+        // control scale and mesh geometry via RON files without touching Rust.
+        //
+        // Procedural fallback: if no `mesh_id` is present, or `GameDataResource`
+        // is not yet loaded, or the ID is not found in the database, fall back to
+        // the procedural `ItemMeshDescriptor::from_item` path.
+        let mut creature_def = if let Some(mesh_id) = item.mesh_id {
+            if let Some(gd) = game_data.as_ref() {
+                if let Some(def) = gd
+                    .data()
+                    .item_meshes
+                    .as_creature_database()
+                    .get_creature(mesh_id)
+                {
+                    def.clone()
+                } else {
+                    warn!(
+                        "spawn_dropped_item_system: mesh_id {} not found in item_meshes for \
+                         item_id {}; falling back to procedural mesh",
+                        mesh_id, ev.item_id
+                    );
+                    ItemMeshDescriptor::from_item(item)
+                        .to_creature_definition_with_charges(charges_fraction)
+                }
+            } else {
+                ItemMeshDescriptor::from_item(item)
+                    .to_creature_definition_with_charges(charges_fraction)
+            }
+        } else {
+            ItemMeshDescriptor::from_item(item)
+                .to_creature_definition_with_charges(charges_fraction)
+        };
+
+        // Stand every non-shadow child mesh upright.
+        //
+        // Both the procedural path (shadow_quad + blade + optional gem) and the
+        // data-driven RON path author geometry on the XZ plane (all vertices at
+        // Y = 0, face normals pointing up).  A first-person camera looking
+        // horizontally sees such a mesh exactly edge-on — invisible.
+        //
+        // Fix: apply −π/2 X rotation to each child MeshTransform except the
+        // shadow quad (kept flat so it remains a floor shadow).  The rotation
+        // maps the mesh's +Z axis to world +Y (blade tip points up) and turns
+        // the face normal from +Y to local −Z.  The Billboard component added
+        // below then rotates the parent around Y so local −Z always faces the
+        // camera.
+        for (i, mt) in creature_def.mesh_transforms.iter_mut().enumerate() {
+            let is_shadow =
+                creature_def.meshes.get(i).and_then(|m| m.name.as_deref()) == Some("shadow_quad");
+            if !is_shadow {
+                mt.rotation[0] = DROPPED_ITEM_UPRIGHT_TILT;
+            }
+        }
 
         // Phase 4.2 — Deterministic Y-axis rotation derived from tile coords.
+        // Used as the initial facing direction; Billboard keeps the item facing
+        // the camera every frame so this only affects the starting orientation.
         let jitter_y = deterministic_drop_rotation(ev.map_id, ev.tile_x, ev.tile_y, ev.item_id);
 
-        // World-space position: tile centre, just above the floor.
+        // Compute the item's dynamic spawn Y so its lowest vertex clears the floor.
+        //
+        // Item geometry is authored on the XZ plane (all Y ≈ 0).  After the
+        // upright tilt (−π/2 around X), a vertex at (x, 0, z) becomes (x, z, 0)
+        // in child-local space and is then scaled by `creature_def.scale`.  The
+        // world-space Y of the item bottom is therefore:
+        //   spawn_y + min_z × scale
+        // We want that to be at least DROPPED_ITEM_FLOOR_CLEARANCE:
+        //   spawn_y ≥ DROPPED_ITEM_FLOOR_CLEARANCE − min_z × scale
+        // Shadow-quad meshes are excluded because they remain flat on the floor
+        // and their Z values are irrelevant to the upright geometry.
+        let item_min_z = creature_def
+            .meshes
+            .iter()
+            .filter(|m| m.name.as_deref() != Some("shadow_quad"))
+            .flat_map(|m| m.vertices.iter().map(|v| v[2]))
+            .fold(f32::INFINITY, f32::min);
+
+        let item_spawn_y = if item_min_z.is_finite() && item_min_z < 0.0 {
+            // Raise the origin so the lowest vertex clears the floor, but never
+            // below DROPPED_ITEM_MIN_HEIGHT (keeps small items visible).
+            (DROPPED_ITEM_FLOOR_CLEARANCE - item_min_z * creature_def.scale)
+                .max(DROPPED_ITEM_MIN_HEIGHT)
+        } else {
+            DROPPED_ITEM_MIN_HEIGHT
+        };
+
+        // World-space position: tile centre at the dynamically computed height.
         let world_pos = Vec3::new(
             ev.tile_x as f32 + TILE_CENTER_OFFSET,
-            DROPPED_ITEM_Y,
+            item_spawn_y,
             ev.tile_y as f32 + TILE_CENTER_OFFSET,
         );
 
@@ -307,15 +418,23 @@ pub fn spawn_dropped_item_system(
             Name::new(format!("DroppedItem({})", item.name)),
         ));
 
-        // Apply extra Y-axis jitter via transform patch.
-        // We can't do this in spawn_creature without changing its signature,
-        // so we append the rotation here via a separate insert.
+        // Apply the deterministic Y-axis spin and add a Billboard so the item
+        // always faces the camera.
+        //
+        // The upright tilt is already baked into each child MeshTransform
+        // (see the loop above), so only a Y rotation is needed here to set the
+        // initial facing direction.  The Billboard component (lock_y: true)
+        // updates the parent Y rotation every frame so the item face — whose
+        // normal is local −Z after the X tilt — always points toward the player
+        // regardless of which direction they approach from.
         commands
             .entity(entity)
             .entry::<Transform>()
             .and_modify(move |mut transform| {
-                transform.rotation *= Quat::from_rotation_y(jitter_y);
+                transform.rotation = Quat::from_rotation_y(jitter_y);
             });
+
+        commands.entity(entity).insert(Billboard { lock_y: true });
 
         // Register in the lookup table.
         registry.insert(ev.map_id, ev.tile_x, ev.tile_y, ev.item_id, entity);
@@ -605,10 +724,10 @@ mod tests {
         assert_eq!(ev.tile_y, -7);
     }
 
-    /// The `DROPPED_ITEM_Y` constant must be positive so items sit above the floor.
+    /// The `DROPPED_ITEM_MIN_HEIGHT` constant must be positive so items sit above the floor.
     #[test]
     fn test_dropped_item_y_is_positive() {
-        const { assert!(DROPPED_ITEM_Y > 0.0) }
+        const { assert!(DROPPED_ITEM_MIN_HEIGHT > 0.0) }
     }
 
     /// The tile-centre offset must be 0.5 (half a 1-unit tile).

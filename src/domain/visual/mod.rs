@@ -517,6 +517,80 @@ impl CreatureDefinition {
     pub fn total_triangles(&self) -> usize {
         self.meshes.iter().map(|m| m.indices.len() / 3).sum()
     }
+
+    /// Computes the Y offset needed to raise the creature so its lowest vertex
+    /// sits exactly on the ground plane (world Y = 0).
+    ///
+    /// Creature meshes are authored with the body origin (waist) at local Y = 0
+    /// and the feet extending into negative Y.  When spawned at world Y = 0 the
+    /// legs would sink through the floor.  This method returns the amount to
+    /// add to the spawn Y so the creature's lowest vertex touches the floor.
+    ///
+    /// The calculation accounts for per-mesh Y translation and Y scale stored in
+    /// `mesh_transforms`, then multiplies by the global `scale` field.
+    ///
+    /// # Returns
+    ///
+    /// `(-min_local_y * self.scale).max(0.0)` — the world-space lift to apply.
+    /// Returns `0.0` when all vertices are at or above the local origin.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
+    ///
+    /// // A creature with legs extending 0.6 units below the origin at scale 0.72
+    /// let creature = CreatureDefinition {
+    ///     id: 1,
+    ///     name: "Goblin".to_string(),
+    ///     meshes: vec![MeshDefinition {
+    ///         name: Some("left_leg".to_string()),
+    ///         vertices: vec![
+    ///             [-0.15, -0.6, -0.1],
+    ///             [ 0.15, -0.6, -0.1],
+    ///             [ 0.15,  0.0, -0.1],
+    ///             [-0.15,  0.0, -0.1],
+    ///         ],
+    ///         indices: vec![0, 1, 2, 2, 3, 0],
+    ///         normals: None,
+    ///         uvs: None,
+    ///         color: [0.36, 0.5, 0.22, 1.0],
+    ///         lod_levels: None,
+    ///         lod_distances: None,
+    ///         material: None,
+    ///         texture_path: None,
+    ///     }],
+    ///     mesh_transforms: vec![MeshTransform::identity()],
+    ///     scale: 0.72,
+    ///     color_tint: None,
+    /// };
+    ///
+    /// // min vertex Y = -0.6; at scale 0.72 the offset is 0.432
+    /// let offset = creature.foot_ground_offset();
+    /// assert!((offset - 0.432).abs() < 1e-5, "offset was {}", offset);
+    /// ```
+    pub fn foot_ground_offset(&self) -> f32 {
+        // Find the minimum Y in the creature's local mesh space, respecting
+        // per-mesh Y translation and Y scale from mesh_transforms.
+        // (Mesh-level rotations are not accounted for here; all shipped RON
+        // assets use identity rotations for individual mesh parts.)
+        let min_local_y = self
+            .meshes
+            .iter()
+            .zip(self.mesh_transforms.iter())
+            .flat_map(|(mesh, transform)| {
+                let ty = transform.translation[1];
+                let sy = transform.scale[1];
+                mesh.vertices.iter().map(move |v| v[1] * sy + ty)
+            })
+            .fold(f32::INFINITY, f32::min);
+
+        if min_local_y.is_finite() && min_local_y < 0.0 {
+            -min_local_y * self.scale
+        } else {
+            0.0
+        }
+    }
 }
 
 /// Lightweight creature registry entry
@@ -769,6 +843,202 @@ mod tests {
 
         assert!(creature.color_tint.is_some());
         assert_eq!(creature.color_tint.unwrap(), [0.5, 0.5, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_foot_ground_offset_legs_below_origin() {
+        // Creature with legs extending 0.6 units below origin at scale 0.72
+        let leg_mesh = MeshDefinition {
+            name: Some("left_leg".to_string()),
+            vertices: vec![
+                [-0.15, -0.6, -0.1],
+                [0.15, -0.6, -0.1],
+                [0.15, 0.0, -0.1],
+                [-0.15, 0.0, -0.1],
+            ],
+            indices: vec![0, 1, 2, 2, 3, 0],
+            normals: None,
+            uvs: None,
+            color: [0.36, 0.5, 0.22, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let creature = CreatureDefinition {
+            id: 1,
+            name: "Goblin-like".to_string(),
+            meshes: vec![leg_mesh],
+            mesh_transforms: vec![MeshTransform::identity()],
+            scale: 0.72,
+            color_tint: None,
+        };
+        // min_y = -0.6, scale = 0.72  →  offset = 0.6 × 0.72 = 0.432
+        let offset = creature.foot_ground_offset();
+        assert!(
+            (offset - 0.432).abs() < 1e-5,
+            "expected 0.432, got {offset}"
+        );
+    }
+
+    #[test]
+    fn test_foot_ground_offset_all_above_origin() {
+        // Creature whose geometry is entirely above Y = 0 (e.g. a hat or floating orb)
+        let orb_mesh = MeshDefinition {
+            name: Some("orb".to_string()),
+            vertices: vec![[0.0, 0.5, 0.0], [0.5, 1.0, 0.0], [-0.5, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let creature = CreatureDefinition {
+            id: 2,
+            name: "FloatingOrb".to_string(),
+            meshes: vec![orb_mesh],
+            mesh_transforms: vec![MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+        };
+        // All vertices at Y >= 0 → no lift needed
+        assert_eq!(creature.foot_ground_offset(), 0.0);
+    }
+
+    #[test]
+    fn test_foot_ground_offset_exactly_at_origin() {
+        // Mesh with lowest vertex exactly at Y = 0
+        let mesh = MeshDefinition {
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let creature = CreatureDefinition {
+            id: 3,
+            name: "FloorLevel".to_string(),
+            meshes: vec![mesh],
+            mesh_transforms: vec![MeshTransform::identity()],
+            scale: 2.0,
+            color_tint: None,
+        };
+        assert_eq!(creature.foot_ground_offset(), 0.0);
+    }
+
+    #[test]
+    fn test_foot_ground_offset_bandit_scale() {
+        // Simulate Bandit: legs from Y = -1.0 to 0.0 at scale = 1.0
+        let leg_mesh = MeshDefinition {
+            name: Some("left_leg".to_string()),
+            vertices: vec![
+                [-0.15, -1.0, -0.1],
+                [0.15, -1.0, -0.1],
+                [0.15, 0.0, -0.1],
+                [-0.15, 0.0, -0.1],
+            ],
+            indices: vec![0, 1, 2, 2, 3, 0],
+            normals: None,
+            uvs: None,
+            color: [0.7, 0.72, 0.76, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let creature = CreatureDefinition {
+            id: 4,
+            name: "Bandit-like".to_string(),
+            meshes: vec![leg_mesh],
+            mesh_transforms: vec![MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+        };
+        // min_y = -1.0, scale = 1.0  →  offset = 1.0
+        let offset = creature.foot_ground_offset();
+        assert!((offset - 1.0).abs() < 1e-5, "expected 1.0, got {offset}");
+    }
+
+    #[test]
+    fn test_foot_ground_offset_multi_mesh_deepest_wins() {
+        // Two meshes: one with feet at -0.3, one with feet at -0.8 — the deeper one wins
+        let shallow_mesh = MeshDefinition {
+            name: Some("torso".to_string()),
+            vertices: vec![[0.0, -0.3, 0.0], [0.5, 0.5, 0.0], [-0.5, 0.5, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let deep_mesh = MeshDefinition {
+            name: Some("left_leg".to_string()),
+            vertices: vec![[0.0, -0.8, 0.0], [0.2, 0.0, 0.0], [-0.2, 0.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let creature = CreatureDefinition {
+            id: 5,
+            name: "MultiMesh".to_string(),
+            meshes: vec![shallow_mesh, deep_mesh],
+            mesh_transforms: vec![MeshTransform::identity(), MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+        };
+        // min_y = -0.8, scale = 1.0  →  offset = 0.8
+        let offset = creature.foot_ground_offset();
+        assert!((offset - 0.8).abs() < 1e-5, "expected 0.8, got {offset}");
+    }
+
+    #[test]
+    fn test_foot_ground_offset_respects_mesh_transform_y_translation() {
+        // A mesh with lowest vertex at Y = -0.2, but its mesh_transform translates it down by -0.4.
+        // Effective min_y in parent space = -0.2 + (-0.4) = -0.6
+        let mesh = MeshDefinition {
+            name: None,
+            vertices: vec![[0.0, -0.2, 0.0], [0.5, 0.5, 0.0], [-0.5, 0.5, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let shifted_transform = MeshTransform {
+            translation: [0.0, -0.4, 0.0],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        };
+        let creature = CreatureDefinition {
+            id: 6,
+            name: "ShiftedMesh".to_string(),
+            meshes: vec![mesh],
+            mesh_transforms: vec![shifted_transform],
+            scale: 1.0,
+            color_tint: None,
+        };
+        // min_y (in parent space) = -0.2 * 1.0 + (-0.4) = -0.6; scale = 1.0  →  offset = 0.6
+        let offset = creature.foot_ground_offset();
+        assert!((offset - 0.6).abs() < 1e-5, "expected 0.6, got {offset}");
     }
 
     #[test]

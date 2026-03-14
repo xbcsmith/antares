@@ -963,6 +963,7 @@ impl CampaignBuilderApp {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         }
     }
 
@@ -8684,6 +8685,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         let armor_item = Item {
@@ -8705,6 +8707,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(ItemTypeFilter::Weapon.matches(&weapon_item));
@@ -8821,6 +8824,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         // Export to RON
@@ -8875,6 +8879,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         assert!(weapon.is_weapon());
 
@@ -8898,6 +8903,7 @@ mod tests {
             icon_path: None,
             tags: vec!["heavy_armor".to_string()],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         assert!(armor.is_armor());
 
@@ -8921,6 +8927,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         assert!(potion.is_consumable());
     }
@@ -8956,6 +8963,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         let cursed_armor = Item {
@@ -8977,6 +8985,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         app.items.push(magical_weapon.clone());
@@ -9076,6 +9085,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         // Verify item has all expected properties

@@ -703,6 +703,14 @@ pub struct Item {
     /// ```
     #[serde(default)]
     pub mesh_descriptor_override: Option<ItemMeshDescriptorOverride>,
+
+    /// ID of the pre-authored mesh RON entry (e.g. 9003 = ItemMeshShortSword).
+    ///
+    /// When `Some`, `spawn_dropped_item_system` looks up the full `CreatureDefinition`
+    /// from `GameDataResource` and uses its `scale` and mesh data directly.
+    /// When `None`, the system falls back to the procedural `ItemMeshDescriptor::from_item` path.
+    #[serde(default)]
+    pub mesh_id: Option<u32>,
 }
 
 impl Item {
@@ -921,6 +929,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(weapon.is_weapon());
@@ -953,6 +962,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(magical_sword.is_magical());
@@ -981,6 +991,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(item.to_string(), "Basic Sword");
@@ -1010,6 +1021,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(cursed.to_string(), "Cursed Mace (Cursed)");
@@ -1040,6 +1052,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(
@@ -1071,6 +1084,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(
@@ -1102,6 +1116,7 @@ mod tests {
             icon_path: None,
             tags: vec!["large_weapon".to_string(), "two_handed".to_string()],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(
@@ -1133,6 +1148,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(
@@ -1163,6 +1179,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(
@@ -1193,6 +1210,7 @@ mod tests {
             icon_path: None,
             tags: vec!["heavy_armor".to_string()],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(
@@ -1223,6 +1241,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(shield.required_proficiency(), Some("shield".to_string()));
@@ -1249,6 +1268,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(wand.required_proficiency(), Some("arcane_item".to_string()));
@@ -1276,6 +1296,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(
@@ -1305,6 +1326,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         // Universal magic items have no proficiency requirement
@@ -1333,6 +1355,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         // Mundane accessories have no proficiency requirement
@@ -1361,6 +1384,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(potion.required_proficiency(), None);
@@ -1388,6 +1412,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(arrows.required_proficiency(), None);
@@ -1414,6 +1439,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert_eq!(quest_item.required_proficiency(), None);
@@ -1444,6 +1470,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(item.can_use_alignment(Alignment::Good));
@@ -1474,6 +1501,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(holy_sword.can_use_alignment(Alignment::Good));
@@ -1504,6 +1532,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
 
         assert!(!dark_blade.can_use_alignment(Alignment::Good));
@@ -1739,6 +1768,7 @@ mod tests {
             icon_path: None,
             tags: vec![],
             mesh_descriptor_override: None,
+            mesh_id: None,
         };
         assert_eq!(
             food_item.required_proficiency(),
