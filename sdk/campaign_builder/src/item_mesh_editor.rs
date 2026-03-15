@@ -25,7 +25,9 @@ use crate::item_mesh_undo_redo::{ItemMeshEditAction, ItemMeshUndoRedo};
 use crate::item_mesh_workflow::{ItemMeshEditorMode, ItemMeshWorkflow};
 use crate::keyboard_shortcuts::ShortcutManager;
 use crate::preview_renderer::PreviewRenderer;
-use crate::ui_helpers::TwoColumnLayout;
+use crate::ui_helpers::{
+    show_standard_list_item, ItemAction, MetadataBadge, StandardListItemConfig, TwoColumnLayout,
+};
 use antares::domain::visual::item_mesh::{ItemMeshCategory, ItemMeshDescriptor};
 use antares::domain::visual::CreatureDefinition;
 use eframe::egui;
@@ -1453,7 +1455,8 @@ impl ItemMeshEditorState {
         #[derive(Clone)]
         struct RowData {
             real_idx: usize,
-            label: String,
+            name: String,
+            category: ItemMeshCategory,
             is_selected: bool,
         }
         let row_data: Vec<RowData> = filtered
@@ -1462,7 +1465,8 @@ impl ItemMeshEditorState {
                 let entry = &self.registry[real_idx];
                 RowData {
                     real_idx,
-                    label: format!("[{:?}] {}", entry.category, entry.name),
+                    name: entry.name.clone(),
+                    category: entry.category,
                     is_selected: self.selected_entry == Some(real_idx),
                 }
             })
@@ -1665,41 +1669,37 @@ impl ItemMeshEditorState {
                             let real_idx = row.real_idx;
                             // sdk/AGENTS.md Rule 1: push_id in every loop body.
                             ui.push_id(display_idx, |ui| {
-                                let resp = ui.selectable_label(row.is_selected, &row.label);
+                                let badge = item_mesh_category_badge(row.category);
+                                let config = StandardListItemConfig::new(&row.name)
+                                    .with_badges(vec![badge])
+                                    .selected(row.is_selected);
 
-                                if resp.clicked() {
+                                let (clicked, ctx_action) = show_standard_list_item(ui, config);
+
+                                if clicked {
                                     pending_select = Some(real_idx);
                                     ui.ctx().request_repaint();
                                 }
-                                if resp.double_clicked() {
-                                    left_open_edit = Some(real_idx);
-                                    ui.ctx().request_repaint();
-                                }
 
-                                resp.context_menu(|ui| {
-                                    if ui.button("✏️ Edit").clicked() {
+                                match ctx_action {
+                                    ItemAction::Edit => {
                                         left_open_edit = Some(real_idx);
-                                        ui.close();
                                         ui.ctx().request_repaint();
                                     }
-                                    if ui.button("📋 Duplicate").clicked() {
+                                    ItemAction::Duplicate => {
                                         left_duplicate = Some(real_idx);
-                                        ui.close();
                                         ui.ctx().request_repaint();
                                     }
-                                    ui.separator();
-                                    if ui.button("🗑 Delete").clicked() {
+                                    ItemAction::Delete => {
                                         left_delete_confirm = true;
-                                        ui.close();
                                         ui.ctx().request_repaint();
                                     }
-                                    ui.separator();
-                                    if ui.button("📤 Export RON").clicked() {
+                                    ItemAction::Export => {
                                         left_export_ron = Some(real_idx);
-                                        ui.close();
                                         ui.ctx().request_repaint();
                                     }
-                                });
+                                    ItemAction::None => {}
+                                }
                             });
                         }
                     });
@@ -2462,6 +2462,37 @@ impl ItemMeshEditorState {
             ui.ctx().request_repaint();
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Left-panel badge helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Returns a [`MetadataBadge`] with the display name and color for an
+/// [`ItemMeshCategory`], used in the registry list left panel.
+fn item_mesh_category_badge(category: ItemMeshCategory) -> MetadataBadge {
+    let (label, color) = match category {
+        ItemMeshCategory::Sword => ("Sword", egui::Color32::from_rgb(180, 80, 80)),
+        ItemMeshCategory::Dagger => ("Dagger", egui::Color32::from_rgb(180, 100, 80)),
+        ItemMeshCategory::Blunt => ("Blunt", egui::Color32::from_rgb(160, 100, 60)),
+        ItemMeshCategory::Staff => ("Staff", egui::Color32::from_rgb(140, 100, 60)),
+        ItemMeshCategory::Bow => ("Bow", egui::Color32::from_rgb(160, 120, 60)),
+        ItemMeshCategory::BodyArmor => ("Body Armor", egui::Color32::from_rgb(80, 100, 180)),
+        ItemMeshCategory::Helmet => ("Helmet", egui::Color32::from_rgb(80, 120, 180)),
+        ItemMeshCategory::Shield => ("Shield", egui::Color32::from_rgb(80, 140, 180)),
+        ItemMeshCategory::Boots => ("Boots", egui::Color32::from_rgb(100, 120, 160)),
+        ItemMeshCategory::Ring => ("Ring", egui::Color32::from_rgb(200, 160, 0)),
+        ItemMeshCategory::Amulet => ("Amulet", egui::Color32::from_rgb(180, 140, 0)),
+        ItemMeshCategory::Belt => ("Belt", egui::Color32::from_rgb(160, 120, 20)),
+        ItemMeshCategory::Cloak => ("Cloak", egui::Color32::from_rgb(100, 80, 160)),
+        ItemMeshCategory::Potion => ("Potion", egui::Color32::from_rgb(80, 180, 80)),
+        ItemMeshCategory::Scroll => ("Scroll", egui::Color32::from_rgb(200, 200, 80)),
+        ItemMeshCategory::Ammo => ("Ammo", egui::Color32::from_rgb(150, 150, 150)),
+        ItemMeshCategory::QuestItem => ("Quest", egui::Color32::from_rgb(200, 160, 60)),
+    };
+    MetadataBadge::new(label)
+        .with_color(color)
+        .with_tooltip(format!("Category: {label}"))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

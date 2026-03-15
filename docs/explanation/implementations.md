@@ -1,5 +1,47 @@
 # Implementations
 
+## Item Mesh Editor — Left Panel Standardization (Complete)
+
+### Problem
+
+The Item Mesh Editor registry left panel used an ad-hoc `RowData { label: String }` pattern where the category was embedded directly into the label string as `format!("[{:?}] {}", entry.category, entry.name)`. This diverged from the standardized `StandardListItemConfig` / `MetadataBadge` / `show_standard_list_item` convention established across all other Campaign Builder editors (Items, Monsters, Spells, Classes, Conditions, Maps, Characters, Races, Proficiencies, NPCs, Creatures, Campaign).
+
+The custom context menu was also wired inline via `resp.context_menu(|ui| { … })` instead of delegating to the `ItemAction` return value of `show_standard_list_item`.
+
+### Fix
+
+**File**: `sdk/campaign_builder/src/item_mesh_editor.rs`
+
+1. **Updated `use crate::ui_helpers` import** to bring in `show_standard_list_item`, `ItemAction`, `MetadataBadge`, and `StandardListItemConfig` alongside the existing `TwoColumnLayout`.
+
+2. **Replaced `RowData.label: String`** with `RowData.name: String` + `RowData.category: ItemMeshCategory` so that the pre-snapshot carries the raw data instead of a pre-formatted string.
+
+3. **Replaced the rendering loop** inside `show_registry_mode`'s left closure:
+
+   - Old: `ui.selectable_label(row.is_selected, &row.label)` + inline `resp.context_menu { … }`
+   - New: `show_standard_list_item(ui, config)` with a `StandardListItemConfig` carrying a category `MetadataBadge`
+
+4. **Added `item_mesh_category_badge(category: ItemMeshCategory) -> MetadataBadge`** free function that maps every `ItemMeshCategory` variant to a display label and a color-coded `MetadataBadge` (weapon categories in red/brown tones, armor in blue, accessories in gold, consumables in green/yellow, misc in gray).
+
+5. **Removed the `double_clicked()` shortcut** to open edit mode — the `ItemAction::Edit` context-menu action and the Edit button in the right panel continue to provide edit access, consistent with all other standardized editors.
+
+### Files Changed
+
+| File                                           | Change                                                                                                                                                                   |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sdk/campaign_builder/src/item_mesh_editor.rs` | Updated imports; replaced `RowData.label` with `name`+`category`; replaced ad-hoc list rendering with `show_standard_list_item`; added `item_mesh_category_badge` helper |
+
+### Quality Gate Results
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings)
+✅ cargo nextest run → 3560 passed, 0 failed
+```
+
+---
+
 ## ItemMesh Full Coverage — All Items Data-Driven (Complete)
 
 ### Problem
