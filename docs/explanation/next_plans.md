@@ -76,7 +76,9 @@ Work required:
 
 This change is not backward compatible with existing RON item data that uses `tags` for helmet and boot slot routing. All affected item definitions must be migrated at the same time.
 
-✅ PLAN WRITTEN - [Armor Classification Expansion Implementation Plan](./armor_classification_expansion_implementation_plan.md)
+✅ COMPLETED - [Armor Classification Expansion Implementation Plan](./armor_classification_expansion_implementation_plan.md)
+
+✅ COMPLETED - [Equipped Weapon Damage in Combat Implementation Plan](./equipped_weapon_damage_implementation_plan.md)
 
 ### Dropped Items World Persistence
 
@@ -205,7 +207,7 @@ Characters with 0 HP are unconcious and should not be allowed to attack monsters
 
 Write a plan with a phased approach to implementing unconcious characters in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-[Unconcious Characters Implementation Plan](./unconcious_characters_implementation_plan.md)
+✅ PLAN WRITTEN - [Unconcious Characters Implementation Plan](./unconcious_characters_implementation_plan.md)
 
 ### Notes
 
