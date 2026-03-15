@@ -1,5 +1,91 @@
 # Implementations
 
+## SDK: Stock-Template Wipe-Prevention Fix (Complete)
+
+### Problem
+
+Every time the user saved the tutorial campaign from the Campaign Builder,
+`campaigns/tutorial/data/npc_stock_templates.ron` was silently overwritten with
+an empty array `[]`, destroying all merchant stock template definitions. The
+user had to restore the file by hand after every save session.
+
+### Root Cause
+
+`do_save_campaign` in `sdk/campaign_builder/src/lib.rs` called
+`stock_templates_editor_state.save_to_file(...)` **unconditionally** on every
+campaign save. `save_to_file` serialises whatever is in
+`stock_templates_editor_state.templates` — which is `Vec::new()` until
+`load_from_file` is called. So any save that occurred before the Stock
+Templates tab had been visited (or before `load_stock_templates()` completed)
+wrote `[]` to disk. Once the file contained `[]`, every subsequent load read
+it back as an empty list, perpetuating the cycle.
+
+### Fix
+
+**`sdk/campaign_builder/src/stock_templates_editor.rs`**
+
+Added a `loaded_from_file: bool` field to `StockTemplatesEditorState`
+(`#[serde(skip)]`, default `false`):
+
+- `load_from_file` sets `loaded_from_file = true` on success.
+- `reset_for_new_campaign` resets it to `false` so a stale loaded state from
+  a previous campaign cannot authorise writes for a freshly opened one.
+
+**`sdk/campaign_builder/src/lib.rs`**
+
+The stock-templates write block in `do_save_campaign` is now guarded:
+
+```sdk/campaign_builder/src/lib.rs#L1-4
+let should_save_templates = self.stock_templates_editor_state.loaded_from_file
+    || self.stock_templates_editor_state.has_unsaved_changes;
+if should_save_templates {
+    ...save_to_file...
+```
+
+This means:
+
+- **Templates loaded from disk** → written back (safe, data exists in memory).
+- **User made explicit in-editor changes** → written back (user intent respected,
+  even if they deleted all templates).
+- **Empty default Vec, never loaded** → skipped (file left untouched).
+
+**`campaigns/tutorial/data/npc_stock_templates.ron`**
+
+Restored to the correct three-template content and fixed a template-ID mismatch
+that would have caused SDK validation errors:
+
+| Template ID                | Referenced by NPC                                  |
+| -------------------------- | -------------------------------------------------- |
+| `"town_merchant_basic"`    | `tutorial_merchant_town`                           |
+| `"mountain_pass_merchant"` | `tutorial_merchant_town2`                          |
+| `"holy_temple_menu"`       | `tutorial_priestess_town`, `tutorial_priest_town2` |
+
+The previous file used `"temple_basic_stock"` for the third template while the
+NPCs referenced `"holy_temple_menu"` — a mismatch the SDK validator would flag
+as an unknown stock template error. The template was renamed and food items
+(ids 111 and 112) were added to all three templates.
+
+### New Tests (4 new — in `sdk/campaign_builder/src/`)
+
+| Test                                                                       | File                        | Covers                                                                                                                                  |
+| -------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_loaded_from_file_is_false_on_default`                                | `stock_templates_editor.rs` | Guard starts `false` on a fresh editor state                                                                                            |
+| `test_load_from_file_sets_loaded_from_file_true`                           | `stock_templates_editor.rs` | Successful `load_from_file` sets guard to `true`                                                                                        |
+| `test_reset_for_new_campaign_clears_loaded_from_file`                      | `stock_templates_editor.rs` | `reset_for_new_campaign` clears guard back to `false`                                                                                   |
+| `test_do_save_campaign_does_not_overwrite_stock_templates_when_not_loaded` | `lib.rs`                    | Full regression: `do_save_campaign` leaves the on-disk file untouched when `loaded_from_file = false` and `has_unsaved_changes = false` |
+
+### Quality Gates
+
+```
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run (antares)           → 3560 passed
+cargo nextest run (campaign_builder)  → 28 passed (3 new guard tests + 1 regression)
+```
+
+---
+
 ## Phase 5: Character Equipment — Documentation and Final Validation (Complete)
 
 ### Summary

@@ -233,14 +233,19 @@ Create a mesh registry file at `campaigns/tutorial/data/furniture_mesh_registry.
 - `FurnitureMeshDatabase` struct similar to `ItemMeshDatabase` — loads registry, resolves mesh definition files
 - When a `FurnitureDefinition` has `mesh_id: Some(10001)`, the rendering system loads the custom RON mesh instead of calling the procedural `spawn_*` function
 
-#### 4.2 OBJ Import for Furniture
+#### 4.2 OBJ Import for Furniture and Category Support
 
-Extend the OBJ importer:
+Extend the OBJ importer to support Furniture and better directory organization:
 
 - Add `ExportType::Furniture` variant to [obj_importer.rs:L49-L56](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/sdk/campaign_builder/src/obj_importer.rs#L49-L56)
-- When exporting as Furniture: write RON mesh definition to `assets/furniture/{name}.ron` and create a `furniture_mesh_registry.ron` entry
-- Add `furniture_id` field to `ObjImporterState` for suggested next ID (same pattern as `creature_id`)
-- UI: when `ExportType::Furniture` is selected, show furniture name field and suggested mesh ID
+- Add a "Category" text field (or combo box) to the OBJ importer UI and `ObjImporterState`.
+- Update `preview_export_relative_path` in `obj_importer_ui.rs` to use the category:
+  - If category is "Weapons", export path becomes `assets/items/weapons/{name}.ron`.
+  - If category is "Tables", export path becomes `assets/furniture/tables/{name}.ron`.
+  - Fallback to root `assets/items/{name}.ron` or `assets/furniture/{name}.ron` if category is empty.
+- Update `item_mesh_editor.rs` to also support category subfolders when saving new meshes (the existing `assets/items/**/*.ron` glob already reads them, but `default_save_as_path` hardcodes the root directory).
+- When exporting as Furniture: write RON mesh definition to the respective path and create a `furniture_mesh_registry.ron` entry.
+- Add `furniture_id` field to `ObjImporterState` for suggested next ID (same pattern as `creature_id`).
 
 #### 4.3 Rendering Integration
 
@@ -257,8 +262,9 @@ Extend the OBJ importer:
 
 - Unit test: `FurnitureMeshDatabase` loads registry from `data/test_campaign`
 - Unit test: `ExportType::Furniture` variant exists and default values are correct
+- Unit test: OBJ export path generator uses category subfolders (e.g. `assets/items/weapons/sword.ron`)
 - Unit test: furniture with `mesh_id` loads custom mesh definition instead of procedural mesh
-- Round-trip test: OBJ → export as furniture RON mesh → load in `FurnitureMeshDatabase` → render
+- Round-trip test: OBJ → export as furniture RON mesh in category folder → load in `FurnitureMeshDatabase` → render
 
 #### 4.6 Deliverables
 
@@ -266,6 +272,7 @@ Extend the OBJ importer:
 - [ ] `FurnitureMeshDatabase` struct and loader
 - [ ] `furniture_mesh_registry.ron` file format and campaign data
 - [ ] `ExportType::Furniture` in OBJ importer
+- [ ] Category subfolder support in OBJ importer and Item Mesh Editor
 - [ ] Custom mesh rendering path in `spawn_furniture()`
 - [ ] Furniture editor ↔ OBJ importer cross-tab navigation
 - [ ] Tests passing
