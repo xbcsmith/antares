@@ -294,9 +294,7 @@
         starting_gold: 150,
         starting_gems: 1,
         starting_food: 5,
-        starting_items: [
-            2,
-        ],
+        starting_items: [],
         starting_equipment: (
             weapon: Some(2),
             armor: Some(20),

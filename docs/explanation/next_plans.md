@@ -24,7 +24,7 @@ The @scripts/generate_icons.sh script generates icons for the web and macOS plat
 
 Write a plan with a phased approach for adding a Mac OS tray icon. THINK HARD and follow the rules in @PLAN.md
 
-[MacOS Tray Icon](./macos_tray_icon.md)
+✅ COMPLETED - [MacOS Tray Icon](./macos_tray_icon.md)
 
 ## OBJ to RON Conversion
 
@@ -34,7 +34,7 @@ UI, assign colors via a color picker and preset palette, and export the result
 as a `CreatureDefinition` RON file (used for both creatures and items). The
 default export paths are `assets/creatures/` and `assets/items/` respectively.
 
-✅ COMPLETE - [obj to ron conversion](./obj_to_ron_implementation_plan.md)
+✅ COMPLETED - [obj to ron conversion](./obj_to_ron_implementation_plan.md)
 
 ## Game Engine
 
@@ -169,6 +169,23 @@ We need to implement an automap and mini map in the game engine. The automap sho
 Write a plan with a phased approach to implementing an automap and mini map in the game engine. THINK HARD and follow the rules in @PLAN.md
 
 ✅ PLAN WRITTEN - [Automap and Mini Map Implementation Plan](./automap_and_mini_map_implementation_plan.md)
+
+### Doors as Furniture
+
+Doors should be classified as furniture and should be placed on the map as furniture. They should not be classified as walls and should not be placed on the map as walls. They should be placed on the map as furniture and should be placed on the map as furniture.
+
+
+Doors are environmental objects with state — they can be open/closed/locked, just like chests can be locked/unlocked. The existing FurnitureFlags already has locked: bool and blocking: bool, which are exactly what doors need.
+
+Doors need procedural mesh — Adding FurnitureType::Door (or DoorSingle / DoorDouble) gives doors the same procedural mesh pipeline that already builds detailed 3D geometry for thrones, bookshelves, etc. You'd create a DoorConfig and a spawn_door function alongside the existing ones.
+
+Material support for free — FurnitureMaterial::Wood already has appropriate PBR properties for a wooden door. You could also have Metal gates, Stone doors, etc.
+
+DoorFrameConfig and StructureType::DoorFrame you already have in the architecture are the perfect companion — the frame is a structure, the door panel itself becomes furniture. They compose together on the same tile.
+
+Write a plan with a phased approach to implementing doors as furniture in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Doors as Furniture Implementation Plan](./doors_as_furniture_implementation_plan.md)
 
 ### Notes
 

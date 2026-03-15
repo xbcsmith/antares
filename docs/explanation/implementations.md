@@ -1,5 +1,76 @@
 # Implementations
 
+## Phase 3: Starting Equipment in Inventory (Complete)
+
+### Summary
+
+Replaced the direct-copy `create_starting_equipment` helper with a two-pass
+"add-to-inventory, then equip" flow inside `CharacterDefinition::instantiate`.
+Every starting equipment item now passes through `equip_item` (proficiency,
+race, alignment, and slot validation). Added `CharacterDefinitionError::InvalidStartingEquipment`
+to surface bad data to campaign authors. Audited and fixed duplicate item IDs
+in both `data/test_campaign/data/characters.ron` and
+`campaigns/tutorial/data/characters.ron` (Whisper had Dagger in both
+`starting_items` and `starting_equipment.weapon`).
+
+### Files Changed
+
+| File                                     | Change                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/character_definition.rs`     | Added `AC_DEFAULT`, `calculate_armor_class`, and `equip_item` imports; added `InvalidStartingEquipment` error variant; rewrote `instantiate` to use two-pass flow; removed `create_starting_equipment` helper; removed its two tests; updated `test_instantiate_with_real_databases`; added 5 new Phase 3 tests |
+| `data/test_campaign/data/characters.ron` | Removed duplicate item 2 (Dagger) from `whisper.starting_items` — it is authoritative in `starting_equipment.weapon`                                                                                                                                                                                            |
+| `campaigns/tutorial/data/characters.ron` | Removed duplicate item 2 (Dagger) from `whisper.starting_items`                                                                                                                                                                                                                                                 |
+
+### Design Decisions
+
+- **Two-pass order**: Equipment items are appended to inventory in
+  `StartingEquipment::all_item_ids()` order (weapon → armor → shield →
+  helmet → boots → accessory1 → accessory2). Pass 2 iterates **in reverse**
+  so that removing a higher-indexed slot does not shift the indices of
+  items not yet processed, keeping the index arithmetic O(1) and correct.
+
+- **`Equipment::new()` in character struct**: The character is built with
+  all equipment slots empty, then the two-pass flow populates them through
+  `equip_item`. This means equipment always satisfies the same validation
+  contract as runtime equipping.
+
+- **AC recalculation once, after all equips**: `calculate_armor_class` is
+  called once after the entire Pass 2 loop rather than after each equip.
+  This matches the plan and avoids redundant work.
+
+- **`InventoryFull` on Pass 1**: If the inventory is full before a starting
+  equipment item can be added, the existing `CharacterDefinitionError::InventoryFull`
+  variant is returned. The `InvalidStartingEquipment` variant is reserved for
+  validation failures inside `equip_item`.
+
+- **Duplicate-ID audit**: `starting_equipment` is authoritative for equipped
+  items. Duplicate entries in `starting_items` were removed from the bag list
+  to prevent characters receiving two copies of the same item.
+
+### New Tests (7 total — 5 new + 2 removed, test count net change: +5)
+
+| Test                                                            | Location               | What it verifies                                                |
+| --------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------- |
+| `test_instantiate_starting_weapon_in_equipment_slot`            | `character_definition` | Weapon lands in slot, not inventory                             |
+| `test_instantiate_starting_weapon_equippable_then_unequippable` | `character_definition` | Unequip after instantiate moves weapon to inventory             |
+| `test_instantiate_starting_armor_updates_ac`                    | `character_definition` | Leather Armor (+2) yields `ac.current == 12`                    |
+| `test_instantiate_no_starting_equipment_ac_is_default`          | `character_definition` | Empty starting equipment yields `ac.current == AC_DEFAULT (10)` |
+| `test_instantiate_invalid_starting_equipment_returns_error`     | `character_definition` | Human sorcerer + Short Sword returns `InvalidStartingEquipment` |
+
+_Removed_: `test_create_starting_equipment_empty` and
+`test_create_starting_equipment_with_items` (function deleted).
+
+### Quality Gates
+
+```text
+cargo fmt         → No output (all files formatted)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 3549 tests run: 3549 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Phase 2: Domain Transaction Functions and AC Calculation (Complete)
 
 ### Summary

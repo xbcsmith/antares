@@ -55,11 +55,14 @@
 use crate::domain::character::{
     Alignment, AttributePair, AttributePair16, Character, Condition, Equipment, Inventory,
     InventorySlot, QuestFlags, Resistances as CharacterResistances, Sex, SpellBook, Stats,
+    AC_DEFAULT,
 };
 use crate::domain::classes::{ClassDatabase, ClassDefinition, ClassId, SpellStat};
+use crate::domain::items::calculate_armor_class;
 use crate::domain::items::types::{ConsumableEffect, ItemType};
 use crate::domain::items::ItemDatabase;
 use crate::domain::races::{RaceDatabase, RaceDefinition};
+use crate::domain::transactions::equip_item;
 use crate::domain::types::{CreatureId, ItemId, RaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -125,6 +128,17 @@ pub enum CharacterDefinitionError {
     InventoryFull {
         character_id: String,
         item_id: ItemId,
+    },
+
+    /// A starting equipment item cannot be equipped due to class/race/alignment restriction
+    ///
+    /// Returned when an item listed in `starting_equipment` fails equip validation.
+    /// Campaign authors will see this error during campaign loading or validation.
+    #[error("Invalid starting equipment item {item_id} in character '{character_id}': {reason}")]
+    InvalidStartingEquipment {
+        character_id: String,
+        item_id: ItemId,
+        reason: String,
     },
 }
 
@@ -811,11 +825,11 @@ impl CharacterDefinition {
         let mut inventory = populate_starting_inventory(&self.id, &self.starting_items)?;
         grant_starting_food(&self.id, &mut inventory, self.starting_food, items)?;
 
-        // Create equipment from starting equipment
-        let equipment = create_starting_equipment(&self.starting_equipment);
-
-        // Build the Character
-        let character = Character {
+        // Build the character with empty equipment and default AC.
+        // Starting equipment will be added to inventory and equipped via the two-pass
+        // flow below, ensuring all equip validation is applied and the item is visible
+        // in inventory before being moved to the equipment slot.
+        let mut character = Character {
             name: self.name.clone(),
             race_id: self.race_id.clone(),
             class_id: self.class_id.clone(),
@@ -829,10 +843,10 @@ impl CharacterDefinition {
             stats,
             hp,
             sp,
-            ac: AttributePair::new(0), // AC calculated from equipment separately
+            ac: AttributePair::new(AC_DEFAULT),
             spell_level: AttributePair::new(calculate_starting_spell_level(class_def)),
             inventory,
-            equipment,
+            equipment: Equipment::new(),
             spells: SpellBook::new(),
             conditions: Condition::new(),
             active_conditions: Vec::new(),
@@ -846,6 +860,48 @@ impl CharacterDefinition {
             #[allow(deprecated)]
             food: 0,
         };
+
+        // Two-pass starting equipment:
+        //   Pass 1 — add every starting equipment item to inventory.
+        //   Pass 2 — equip each item via `equip_item`, which validates proficiency,
+        //            race compatibility, alignment, and slot availability.
+        // Iterating Pass 2 in reverse index order avoids index-shifting issues
+        // that would arise if we removed items from the front of the vector first.
+        let equip_ids: Vec<ItemId> = self.starting_equipment.all_item_ids();
+        if !equip_ids.is_empty() {
+            // Pass 1: add starting equipment items to the end of inventory.
+            let equip_start_idx = character.inventory.items.len();
+            for &item_id in &equip_ids {
+                if character.inventory.is_full() {
+                    return Err(CharacterDefinitionError::InventoryFull {
+                        character_id: self.id.clone(),
+                        item_id,
+                    });
+                }
+                character.inventory.add_item(item_id, 0).map_err(|_| {
+                    CharacterDefinitionError::InventoryFull {
+                        character_id: self.id.clone(),
+                        item_id,
+                    }
+                })?;
+            }
+
+            // Pass 2: equip each item from inventory, iterating in reverse so
+            // that removing a higher-indexed slot does not shift lower indices.
+            for (offset, &item_id) in equip_ids.iter().enumerate().rev() {
+                let slot_index = equip_start_idx + offset;
+                equip_item(&mut character, slot_index, items, classes, races).map_err(|e| {
+                    CharacterDefinitionError::InvalidStartingEquipment {
+                        character_id: self.id.clone(),
+                        item_id,
+                        reason: e.to_string(),
+                    }
+                })?;
+            }
+
+            // Recalculate AC once after all equipment is in place.
+            character.ac.current = calculate_armor_class(&character.equipment, items);
+        }
 
         Ok(character)
     }
@@ -1112,27 +1168,6 @@ fn populate_starting_inventory(
     }
 
     Ok(inventory)
-}
-
-/// Creates equipment from starting equipment definition
-///
-/// # Arguments
-///
-/// * `starting_equipment` - The starting equipment configuration
-///
-/// # Returns
-///
-/// Returns an Equipment struct with the specified items equipped.
-fn create_starting_equipment(starting_equipment: &StartingEquipment) -> Equipment {
-    Equipment {
-        weapon: starting_equipment.weapon,
-        armor: starting_equipment.armor,
-        shield: starting_equipment.shield,
-        helmet: starting_equipment.helmet,
-        boots: starting_equipment.boots,
-        accessory1: starting_equipment.accessory1,
-        accessory2: starting_equipment.accessory2,
-    }
 }
 
 // ===== Character Database =====
@@ -3123,41 +3158,6 @@ mod tests {
     }
 
     #[test]
-    fn test_create_starting_equipment_empty() {
-        let starting = StartingEquipment::new();
-        let equipment = create_starting_equipment(&starting);
-        assert!(equipment.weapon.is_none());
-        assert!(equipment.armor.is_none());
-        assert!(equipment.shield.is_none());
-        assert!(equipment.helmet.is_none());
-        assert!(equipment.boots.is_none());
-        assert!(equipment.accessory1.is_none());
-        assert!(equipment.accessory2.is_none());
-    }
-
-    #[test]
-    fn test_create_starting_equipment_with_items() {
-        let starting = StartingEquipment {
-            weapon: Some(1),
-            armor: Some(20),
-            shield: Some(30),
-            helmet: None,
-            boots: None,
-            accessory1: Some(40),
-            accessory2: None,
-        };
-
-        let equipment = create_starting_equipment(&starting);
-        assert_eq!(equipment.weapon, Some(1));
-        assert_eq!(equipment.armor, Some(20));
-        assert_eq!(equipment.shield, Some(30));
-        assert!(equipment.helmet.is_none());
-        assert!(equipment.boots.is_none());
-        assert_eq!(equipment.accessory1, Some(40));
-        assert!(equipment.accessory2.is_none());
-    }
-
-    #[test]
     fn test_instantiate_with_real_databases() {
         // Load real databases for integration test
         let races =
@@ -3183,8 +3183,8 @@ mod tests {
             starting_food: 15,
             starting_items: vec![50], // A consumable
             starting_equipment: StartingEquipment {
-                weapon: Some(1), // Basic weapon
-                armor: Some(20), // Basic armor
+                weapon: Some(1), // Basic weapon (Club, Simple — knight has simple_weapon)
+                armor: Some(20), // Leather Armor (Light — knight has light_armor)
                 ..Default::default()
             },
             description: "A test knight".to_string(),
@@ -3236,14 +3236,302 @@ mod tests {
         // Verify HP was calculated (should be > 0)
         assert!(character.hp.base > 0);
 
-        // Verify inventory has starting item (item 50) plus 15 food rations = 16 total
+        // Phase 3: two-pass equip — starting equipment items land in equipment slots,
+        // not in inventory. Total inventory = starting_items[50] + 15 food rations.
         assert_eq!(character.inventory.items.len(), 16);
         assert_eq!(character.inventory.items[0].item_id, 50);
 
-        // Verify equipment was set
+        // Verify starting equipment is in equipment slots, not in inventory.
         assert_eq!(character.equipment.weapon, Some(1));
         assert_eq!(character.equipment.armor, Some(20));
         assert!(character.equipment.shield.is_none());
+        let weapon_in_inv = character.inventory.items.iter().any(|s| s.item_id == 1);
+        let armor_in_inv = character.inventory.items.iter().any(|s| s.item_id == 20);
+        assert!(
+            !weapon_in_inv,
+            "weapon should be in equipment slot, not inventory"
+        );
+        assert!(
+            !armor_in_inv,
+            "armor should be in equipment slot, not inventory"
+        );
+
+        // Phase 3: AC is calculated from equipment after equipping.
+        // Leather Armor (item 20) grants ac_bonus 2, so AC = AC_DEFAULT(10) + 2 = 12.
+        assert_eq!(
+            character.ac.current, 12,
+            "AC should be 12 with Leather Armor equipped"
+        );
+    }
+
+    // ===== Phase 3 Tests: Starting Equipment in Inventory =====
+
+    #[test]
+    fn test_instantiate_starting_weapon_in_equipment_slot() {
+        // A character definition with starting_equipment.weapon should result in
+        // the weapon being placed in the equipment slot, NOT in inventory.
+        let races = RaceDatabase::load_from_file("data/test_campaign/data/races.ron")
+            .expect("Failed to load races");
+        let classes = ClassDatabase::load_from_file("data/test_campaign/data/classes.ron")
+            .expect("Failed to load classes");
+        let items = ItemDatabase::load_from_file("data/test_campaign/data/items.ron")
+            .expect("Failed to load items");
+
+        // Knight with Long Sword (item 4, MartialMelee — knight has martial_melee)
+        let definition = CharacterDefinition {
+            id: "test_phase3_weapon".to_string(),
+            name: "Phase3 Knight".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Good,
+            base_stats: Stats::new(14, 10, 10, 12, 10, 12, 10),
+            hp_override: None,
+            portrait_id: "1".to_string(),
+            starting_gold: 0,
+            starting_gems: 0,
+            starting_food: 0,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment {
+                weapon: Some(4), // Long Sword
+                ..Default::default()
+            },
+            description: "Phase 3 weapon test".to_string(),
+            is_premade: false,
+            starts_in_party: false,
+            creature_id: None,
+        };
+
+        let character = definition
+            .instantiate(&races, &classes, &items)
+            .expect("Failed to instantiate character");
+
+        // Weapon must be in the equipment slot.
+        assert_eq!(
+            character.equipment.weapon,
+            Some(4),
+            "Long Sword should be in weapon slot"
+        );
+
+        // Weapon must NOT be in inventory.
+        let weapon_in_inv = character.inventory.items.iter().any(|s| s.item_id == 4);
+        assert!(
+            !weapon_in_inv,
+            "weapon should be in equipment slot, not in inventory"
+        );
+
+        // Inventory should be empty (no starting_items, no food).
+        assert!(
+            character.inventory.items.is_empty(),
+            "inventory should be empty when all starting gear is equipped"
+        );
+    }
+
+    #[test]
+    fn test_instantiate_starting_weapon_equippable_then_unequippable() {
+        // After instantiate, unequip_item should move the weapon back to inventory.
+        use crate::domain::character::EquipmentSlot;
+        use crate::domain::transactions::unequip_item;
+
+        let races = RaceDatabase::load_from_file("data/test_campaign/data/races.ron")
+            .expect("Failed to load races");
+        let classes = ClassDatabase::load_from_file("data/test_campaign/data/classes.ron")
+            .expect("Failed to load classes");
+        let items = ItemDatabase::load_from_file("data/test_campaign/data/items.ron")
+            .expect("Failed to load items");
+
+        let definition = CharacterDefinition {
+            id: "test_phase3_unequip".to_string(),
+            name: "Phase3 Unequip".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Good,
+            base_stats: Stats::new(14, 10, 10, 12, 10, 12, 10),
+            hp_override: None,
+            portrait_id: "1".to_string(),
+            starting_gold: 0,
+            starting_gems: 0,
+            starting_food: 0,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment {
+                weapon: Some(4), // Long Sword
+                ..Default::default()
+            },
+            description: "Phase 3 unequip test".to_string(),
+            is_premade: false,
+            starts_in_party: false,
+            creature_id: None,
+        };
+
+        let mut character = definition
+            .instantiate(&races, &classes, &items)
+            .expect("Failed to instantiate character");
+
+        // Confirm weapon is equipped after instantiation.
+        assert_eq!(character.equipment.weapon, Some(4));
+        assert!(character.inventory.items.is_empty());
+
+        // Unequip the weapon.
+        unequip_item(&mut character, EquipmentSlot::Weapon, &items)
+            .expect("unequip_item should succeed");
+
+        // Weapon slot should now be empty.
+        assert!(
+            character.equipment.weapon.is_none(),
+            "weapon slot should be empty after unequip"
+        );
+
+        // Weapon should now be in inventory.
+        let weapon_in_inv = character.inventory.items.iter().any(|s| s.item_id == 4);
+        assert!(
+            weapon_in_inv,
+            "unequipped weapon should appear in inventory"
+        );
+    }
+
+    #[test]
+    fn test_instantiate_starting_armor_updates_ac() {
+        // A character with Leather Armor (item 20, ac_bonus: 2) should have
+        // ac.current == AC_DEFAULT(10) + 2 == 12 after instantiation.
+        let races = RaceDatabase::load_from_file("data/test_campaign/data/races.ron")
+            .expect("Failed to load races");
+        let classes = ClassDatabase::load_from_file("data/test_campaign/data/classes.ron")
+            .expect("Failed to load classes");
+        let items = ItemDatabase::load_from_file("data/test_campaign/data/items.ron")
+            .expect("Failed to load items");
+
+        let definition = CharacterDefinition {
+            id: "test_phase3_ac".to_string(),
+            name: "Phase3 AC".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Good,
+            base_stats: Stats::new(14, 10, 10, 12, 10, 12, 10),
+            hp_override: None,
+            portrait_id: "1".to_string(),
+            starting_gold: 0,
+            starting_gems: 0,
+            starting_food: 0,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment {
+                armor: Some(20), // Leather Armor (Light, ac_bonus: 2)
+                ..Default::default()
+            },
+            description: "Phase 3 AC test".to_string(),
+            is_premade: false,
+            starts_in_party: false,
+            creature_id: None,
+        };
+
+        let character = definition
+            .instantiate(&races, &classes, &items)
+            .expect("Failed to instantiate character");
+
+        assert_eq!(
+            character.ac.current, 12,
+            "AC should be AC_DEFAULT(10) + Leather Armor ac_bonus(2) = 12"
+        );
+        assert_eq!(character.equipment.armor, Some(20));
+    }
+
+    #[test]
+    fn test_instantiate_no_starting_equipment_ac_is_default() {
+        // A character with empty starting_equipment should have ac.current == AC_DEFAULT (10).
+        let races = RaceDatabase::load_from_file("data/test_campaign/data/races.ron")
+            .expect("Failed to load races");
+        let classes = ClassDatabase::load_from_file("data/test_campaign/data/classes.ron")
+            .expect("Failed to load classes");
+        let items = ItemDatabase::load_from_file("data/test_campaign/data/items.ron")
+            .expect("Failed to load items");
+
+        let definition = CharacterDefinition {
+            id: "test_phase3_no_eq".to_string(),
+            name: "Phase3 NoEquip".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Neutral,
+            base_stats: Stats::new(14, 10, 10, 12, 10, 12, 10),
+            hp_override: None,
+            portrait_id: "1".to_string(),
+            starting_gold: 0,
+            starting_gems: 0,
+            starting_food: 0,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment::new(), // empty
+            description: "Phase 3 no-equipment test".to_string(),
+            is_premade: false,
+            starts_in_party: false,
+            creature_id: None,
+        };
+
+        let character = definition
+            .instantiate(&races, &classes, &items)
+            .expect("Failed to instantiate character");
+
+        assert_eq!(
+            character.ac.current, AC_DEFAULT,
+            "AC should equal AC_DEFAULT (10) when no equipment is worn"
+        );
+        assert!(character.equipment.weapon.is_none());
+        assert!(character.equipment.armor.is_none());
+        assert!(character.inventory.items.is_empty());
+    }
+
+    #[test]
+    fn test_instantiate_invalid_starting_equipment_returns_error() {
+        // A character definition whose starting_equipment.weapon references an item
+        // the character's class cannot use should return InvalidStartingEquipment.
+        //
+        // A human sorcerer has proficiencies: [simple_weapon, arcane_item].
+        // Item 3 (Short Sword) requires martial_melee, which sorcerer lacks.
+        // Human race has no racial proficiencies, so the union still excludes martial_melee.
+        let races = RaceDatabase::load_from_file("data/test_campaign/data/races.ron")
+            .expect("Failed to load races");
+        let classes = ClassDatabase::load_from_file("data/test_campaign/data/classes.ron")
+            .expect("Failed to load classes");
+        let items = ItemDatabase::load_from_file("data/test_campaign/data/items.ron")
+            .expect("Failed to load items");
+
+        let definition = CharacterDefinition {
+            id: "test_phase3_invalid_eq".to_string(),
+            name: "Phase3 InvalidEq".to_string(),
+            race_id: "human".to_string(),
+            class_id: "sorcerer".to_string(),
+            sex: Sex::Female,
+            alignment: Alignment::Neutral,
+            base_stats: Stats::new(8, 16, 10, 9, 11, 10, 12),
+            hp_override: None,
+            portrait_id: "1".to_string(),
+            starting_gold: 0,
+            starting_gems: 0,
+            starting_food: 0,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment {
+                weapon: Some(3), // Short Sword (MartialMelee) — sorcerer cannot use
+                ..Default::default()
+            },
+            description: "Phase 3 invalid-equip test".to_string(),
+            is_premade: false,
+            starts_in_party: false,
+            creature_id: None,
+        };
+
+        let result = definition.instantiate(&races, &classes, &items);
+
+        assert!(
+            result.is_err(),
+            "instantiate should fail with invalid starting equipment"
+        );
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                CharacterDefinitionError::InvalidStartingEquipment { item_id: 3, .. }
+            ),
+            "error should be InvalidStartingEquipment for item_id 3"
+        );
     }
 
     #[test]
