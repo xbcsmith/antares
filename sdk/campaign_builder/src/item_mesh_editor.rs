@@ -722,6 +722,7 @@ impl ItemMeshEditorState {
     ///         emissive_color: [0.0, 0.0, 0.0],
     ///         scale: 1.0,
     ///     },
+    ///     native_creature_def: None,
     /// });
     /// state.open_for_editing(0);
     /// state.refresh_validation_state();
@@ -810,6 +811,7 @@ impl ItemMeshEditorState {
     ///         emissive_color: [0.0, 0.0, 0.0],
     ///         scale: 1.0,
     ///     },
+    ///     native_creature_def: None,
     /// });
     /// state.selected_entry = Some(0);
     /// assert_eq!(state.default_save_as_path(), "assets/items/iron_sword.ron");
@@ -855,6 +857,7 @@ impl ItemMeshEditorState {
     ///         emissive_color: [0.0, 0.0, 0.0],
     ///         scale: 1.0,
     ///     },
+    ///     native_creature_def: None,
     /// });
     /// state.open_for_editing(0);
     /// let result = state.perform_save_as_with_path(
@@ -1162,6 +1165,7 @@ impl ItemMeshEditorState {
     ///     category: ItemMeshCategory::Sword,
     ///     file_path: "assets/items/sword.ron".to_string(),
     ///     descriptor: desc.clone(),
+    ///     native_creature_def: None,
     /// });
     /// state.open_for_editing(0);
     ///
@@ -1823,6 +1827,7 @@ impl ItemMeshEditorState {
                     emissive_color: [0.0, 0.0, 0.0],
                     scale: 1.0,
                 },
+                native_creature_def: None,
             });
             self.selected_entry = Some(self.registry.len() - 1);
             self.preview_dirty = true;
@@ -1868,6 +1873,7 @@ impl ItemMeshEditorState {
                     category: src.category,
                     file_path: new_path,
                     descriptor: src.descriptor.clone(),
+                    native_creature_def: src.native_creature_def.clone(),
                 });
             }
             ui.ctx().request_repaint();
@@ -2688,6 +2694,7 @@ mod tests {
             category: ItemMeshCategory::Sword,
             file_path: "assets/items/sword.ron".to_string(),
             descriptor: make_descriptor(1.0),
+            native_creature_def: None,
         });
 
         state.register_asset_path_buffer = "assets/items/sword.ron".to_string();
@@ -2921,6 +2928,7 @@ mod tests {
             category: ItemMeshCategory::Potion,
             file_path: "assets/items/potion.ron".to_string(),
             descriptor: make_descriptor(1.0),
+            native_creature_def: None,
         });
 
         let counts = state.count_by_category();
