@@ -605,7 +605,7 @@ Add a collapsible equipment strip to each character panel in the inventory UI,
 rendered between the character name header and the inventory slot grid. The
 strip shows all seven equipment slots in two rows:
 
-**Row 1** (weapons / body armor): Weapon · Armor · Shield  
+**Row 1** (weapons / body armor): Weapon · Armor · Shield
 **Row 2** (accessories / extremities): Helmet · Boots · Ring · Ring
 
 Each cell shows:

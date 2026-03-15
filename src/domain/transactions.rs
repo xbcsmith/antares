@@ -15,16 +15,23 @@
 //! - `consume_service` - Party pays for a priest/innkeeper service
 //! - `drop_item` - Character drops an item onto the game world map
 //! - `pickup_item` - Character picks up a dropped item from the game world map
+//! - `equip_item` - Character equips an item from inventory into an equipment slot
+//! - `unequip_item` - Character unequips an item from a slot back to inventory
 //!
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 4.3 (Character/Party) and the
 //! inventory system implementation plan Phase 2 for complete specifications.
 
-use crate::domain::character::Party;
 use crate::domain::character::{Character, InventorySlot};
+use crate::domain::character::{EquipmentSlot, Party};
+use crate::domain::classes::ClassDatabase;
 use crate::domain::inventory::ServiceCatalog;
+use crate::domain::items::equipment_validation::{
+    calculate_armor_class, can_equip_item, EquipError,
+};
 use crate::domain::items::ItemDatabase;
+use crate::domain::races::RaceDatabase;
 use crate::domain::types::{CharacterId, ItemId, MapId, Position};
 use crate::domain::world::npc::NpcDefinition;
 use crate::domain::world::npc_runtime::NpcRuntimeState;
@@ -866,12 +873,169 @@ pub fn pickup_item(
     })
 }
 
+// ===== equip_item =====
+
+/// Equip an item from a character's inventory into the appropriate equipment slot.
+///
+/// The target slot is determined automatically from the item's type and
+/// classification.  If the slot already contains an item, the old item is
+/// moved back to inventory (swap behaviour).  All mutations are atomic: if
+/// any step fails the character state is left unchanged.
+///
+/// # Arguments
+///
+/// * `character`            – The character equipping the item.
+/// * `inventory_slot_index` – Index into `character.inventory.items`.
+/// * `item_db`              – Item database for look-up and AC recalculation.
+/// * `classes`              – Class database for proficiency validation.
+/// * `races`                – Race database for race-restriction validation.
+///
+/// # Returns
+///
+/// `Ok(())` on success.
+///
+/// # Errors
+///
+/// * [`EquipError::ItemNotFound`]        – `inventory_slot_index` is out of bounds.
+/// * [`EquipError::ClassRestriction`]    – Character class lacks required proficiency.
+/// * [`EquipError::RaceRestriction`]     – Character race has an incompatible item tag.
+/// * [`EquipError::AlignmentRestriction`]– Character alignment cannot use the item.
+/// * [`EquipError::NoSlotAvailable`]     – Item type is not equippable.
+pub fn equip_item(
+    character: &mut Character,
+    inventory_slot_index: usize,
+    item_db: &ItemDatabase,
+    classes: &ClassDatabase,
+    races: &RaceDatabase,
+) -> Result<(), EquipError> {
+    // Step 1: Bounds-check the inventory slot index.
+    let item_id = character
+        .inventory
+        .items
+        .get(inventory_slot_index)
+        .map(|s| s.item_id)
+        .ok_or(EquipError::ItemNotFound(0))?;
+
+    // Step 2: Validate proficiency, race, alignment, and slot availability.
+    can_equip_item(character, item_id, item_db, classes, races)?;
+
+    // Step 3: Look up the item (guaranteed to exist — can_equip_item verified it).
+    let item = item_db
+        .get_item(item_id)
+        .expect("item must exist in db after can_equip_item succeeded");
+
+    // Step 4: Determine the target equipment slot.
+    let target_slot =
+        EquipmentSlot::for_item(item, &character.equipment).ok_or(EquipError::NoSlotAvailable)?;
+
+    // Step 5: Record any item currently occupying the target slot (for swap).
+    let displaced_id = target_slot.get(&character.equipment);
+
+    // Step 6: Remove the item from inventory.
+    let removed_slot = character
+        .inventory
+        .remove_item(inventory_slot_index)
+        .expect("slot must exist after bounds-check in step 1");
+
+    debug_assert_eq!(
+        removed_slot.item_id, item_id,
+        "item_id changed between bounds check and removal"
+    );
+
+    // Step 7: Place the item in the equipment slot.
+    target_slot.set(&mut character.equipment, Some(item_id));
+
+    // Step 8: Move the displaced item (if any) back to inventory.
+    // Because a slot was freed in step 6, add_item should always succeed.
+    if let Some(old_id) = displaced_id {
+        if character.inventory.add_item(old_id, 0).is_err() {
+            // Rollback: undo steps 7 and 6.
+            target_slot.set(&mut character.equipment, displaced_id);
+            character.inventory.items.insert(
+                inventory_slot_index.min(character.inventory.items.len()),
+                removed_slot,
+            );
+            return Err(EquipError::NoSlotAvailable);
+        }
+    }
+
+    // Step 9: Recalculate AC when an armour item was equipped.
+    use crate::domain::items::types::ItemType;
+    if matches!(&item.item_type, ItemType::Armor(_)) {
+        character.ac.current = calculate_armor_class(&character.equipment, item_db);
+    }
+
+    Ok(())
+}
+
+// ===== unequip_item =====
+
+/// Unequip an item from a specific equipment slot and return it to inventory.
+///
+/// If the slot is already empty, returns `Ok(())` without modifying any state.
+/// If the unequipped item is armour, `character.ac.current` is recalculated.
+///
+/// # Arguments
+///
+/// * `character` – The character unequipping the item.
+/// * `slot`      – Which equipment slot to clear.
+/// * `item_db`   – Item database used for AC recalculation.
+///
+/// # Returns
+///
+/// `Ok(())` on success or when the slot was already empty.
+///
+/// # Errors
+///
+/// * [`TransactionError::InventoryFull`] – No inventory space for the unequipped item.
+pub fn unequip_item(
+    character: &mut Character,
+    slot: EquipmentSlot,
+    item_db: &ItemDatabase,
+) -> Result<(), TransactionError> {
+    // Step 1: Nothing to do when the slot is already empty.
+    let item_id = match slot.get(&character.equipment) {
+        Some(id) => id,
+        None => return Ok(()),
+    };
+
+    // Step 2: Ensure inventory has space before mutating anything.
+    if character.inventory.is_full() {
+        return Err(TransactionError::InventoryFull { character_id: 0 });
+    }
+
+    // Step 3: Clear the equipment slot.
+    slot.set(&mut character.equipment, None);
+
+    // Step 4: Add the item to inventory.
+    // Cannot fail: we verified !is_full() in step 2 and just cleared a slot.
+    character
+        .inventory
+        .add_item(item_id, 0)
+        .expect("inventory must accept item after is_full check");
+
+    // Step 5: Recalculate AC if an armour item was removed.
+    use crate::domain::items::types::ItemType;
+    if let Some(item) = item_db.get_item(item_id) {
+        if matches!(&item.item_type, ItemType::Armor(_)) {
+            character.ac.current = calculate_armor_class(&character.equipment, item_db);
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Alignment, Condition, Inventory, Sex};
+    use crate::domain::character::{Alignment, Condition, EquipmentSlot, Inventory, Sex};
+    use crate::domain::classes::{ClassDatabase, ClassDefinition};
     use crate::domain::inventory::{MerchantStock, ServiceCatalog, ServiceEntry, StockEntry};
-    use crate::domain::items::{Item, ItemType, WeaponClassification, WeaponData};
+    use crate::domain::items::{
+        ArmorClassification, ArmorData, ConsumableData, ConsumableEffect, EquipError, Item,
+        ItemType, WeaponClassification, WeaponData,
+    };
+    use crate::domain::races::{RaceDatabase, RaceDefinition};
     use crate::domain::types::DiceRoll;
     use crate::domain::world::npc::NpcDefinition;
     use crate::domain::world::npc_runtime::NpcRuntimeState;
@@ -947,6 +1111,118 @@ mod tests {
             c.inventory.add_item(id, 0).unwrap();
         }
         c
+    }
+
+    // ===== equip_item / unequip_item helpers =====
+
+    /// Build a ClassDatabase containing a single class with the given proficiencies.
+    /// The class id and the character's class_id must match (default: "knight").
+    fn make_class_db_with_profs(class_id: &str, proficiencies: &[&str]) -> ClassDatabase {
+        let mut db = ClassDatabase::new();
+        db.add_class(ClassDefinition {
+            id: class_id.to_string(),
+            name: class_id.to_string(),
+            description: String::new(),
+            hp_die: DiceRoll::new(1, 10, 0),
+            spell_school: None,
+            is_pure_caster: false,
+            spell_stat: None,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+            proficiencies: proficiencies.iter().map(|s| s.to_string()).collect(),
+        })
+        .unwrap();
+        db
+    }
+
+    /// Build a RaceDatabase containing a basic human race (no restrictions).
+    fn make_race_db_human() -> RaceDatabase {
+        let mut db = RaceDatabase::new();
+        db.add_race(RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        ))
+        .unwrap();
+        db
+    }
+
+    /// Create a MartialMelee weapon item.
+    fn make_weapon_item_tx(id: ItemId) -> Item {
+        Item {
+            id,
+            name: format!("Sword {id}"),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 15,
+            sell_cost: 7,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        }
+    }
+
+    /// Create an armor item with the given AC bonus and classification.
+    fn make_armor_item_tx(id: ItemId, ac_bonus: u8, classification: ArmorClassification) -> Item {
+        Item {
+            id,
+            name: format!("Armor {id}"),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus,
+                weight: 10,
+                classification,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        }
+    }
+
+    /// Create a consumable item (not equippable).
+    fn make_consumable_item_tx(id: ItemId) -> Item {
+        Item {
+            id,
+            name: format!("Potion {id}"),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(10),
+                is_combat_usable: true,
+                duration_minutes: None,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 1,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        }
     }
 
     // ===== buy_item tests =====
@@ -1856,7 +2132,301 @@ mod tests {
 
     #[test]
     fn test_transaction_error_item_not_in_stock_display() {
-        let err = TransactionError::ItemNotInStock { item_id: 42 };
-        assert!(err.to_string().contains("42"));
+        let err = TransactionError::ItemNotInStock { item_id: 7 };
+        assert!(err.to_string().contains("7"));
+    }
+
+    // ===== Phase 2: equip_item Tests =====
+
+    #[test]
+    fn test_equip_item_weapon_moves_from_inventory_to_slot() {
+        // Arrange: sword in inventory slot 0
+        let item_db = item_db_with(vec![make_weapon_item_tx(1)]);
+        let mut character = character_with_items(vec![1]);
+        let classes = make_class_db_with_profs("knight", &["simple_weapon", "martial_melee"]);
+        let races = make_race_db_human();
+
+        // Act
+        let result = equip_item(&mut character, 0, &item_db, &classes, &races);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert_eq!(character.equipment.weapon, Some(1));
+        assert!(
+            character.inventory.items.is_empty(),
+            "inventory should be empty after equipping"
+        );
+    }
+
+    #[test]
+    fn test_equip_item_swaps_old_weapon_back_to_inventory() {
+        // Arrange: sword 1 already equipped, sword 2 in inventory slot 0
+        let item_db = item_db_with(vec![make_weapon_item_tx(1), make_weapon_item_tx(2)]);
+        let mut character = make_character();
+        character.equipment.weapon = Some(1);
+        character.inventory.add_item(2, 0).unwrap();
+        let classes = make_class_db_with_profs("knight", &["simple_weapon", "martial_melee"]);
+        let races = make_race_db_human();
+
+        // Act
+        let result = equip_item(&mut character, 0, &item_db, &classes, &races);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert_eq!(
+            character.equipment.weapon,
+            Some(2),
+            "new sword must be equipped"
+        );
+        assert_eq!(
+            character.inventory.items.len(),
+            1,
+            "displaced sword must have returned to inventory"
+        );
+        assert_eq!(
+            character.inventory.items[0].item_id, 1,
+            "original sword ID must be in inventory"
+        );
+    }
+
+    #[test]
+    fn test_equip_item_armor_updates_ac() {
+        // Arrange: +5 chain mail (Medium) in inventory; AC starts at AC_DEFAULT (10)
+        let item_db = item_db_with(vec![make_armor_item_tx(21, 5, ArmorClassification::Medium)]);
+        let mut character = character_with_items(vec![21]);
+        let classes = make_class_db_with_profs("knight", &["medium_armor"]);
+        let races = make_race_db_human();
+
+        assert_eq!(character.ac.current, 10, "AC must start at AC_DEFAULT (10)");
+
+        // Act
+        let result = equip_item(&mut character, 0, &item_db, &classes, &races);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert_eq!(
+            character.ac.current, 15,
+            "AC must be AC_DEFAULT (10) + ac_bonus (5) = 15"
+        );
+    }
+
+    #[test]
+    fn test_equip_item_helmet_routes_to_helmet_slot() {
+        // Arrange: Iron Helmet (Helmet classification) in inventory
+        let item_db = item_db_with(vec![make_armor_item_tx(25, 1, ArmorClassification::Helmet)]);
+        let mut character = character_with_items(vec![25]);
+        let classes = make_class_db_with_profs("knight", &["light_armor"]);
+        let races = make_race_db_human();
+
+        // Act
+        let result = equip_item(&mut character, 0, &item_db, &classes, &races);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert_eq!(
+            character.equipment.helmet,
+            Some(25),
+            "Helmet item must route to the helmet slot"
+        );
+        assert!(
+            character.equipment.armor.is_none(),
+            "body armor slot must remain unchanged"
+        );
+    }
+
+    #[test]
+    fn test_equip_item_boots_routes_to_boots_slot() {
+        // Arrange: Leather Boots (Boots classification) in inventory
+        let item_db = item_db_with(vec![make_armor_item_tx(26, 1, ArmorClassification::Boots)]);
+        let mut character = character_with_items(vec![26]);
+        let classes = make_class_db_with_profs("knight", &["light_armor"]);
+        let races = make_race_db_human();
+
+        // Act
+        let result = equip_item(&mut character, 0, &item_db, &classes, &races);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert_eq!(
+            character.equipment.boots,
+            Some(26),
+            "Boots item must route to the boots slot"
+        );
+        assert!(
+            character.equipment.armor.is_none(),
+            "body armor slot must remain unchanged"
+        );
+    }
+
+    #[test]
+    fn test_equip_item_invalid_class_returns_error() {
+        // Arrange: Plate armor (Heavy — needs "heavy_armor"); class only has "simple_weapon"
+        let item_db = item_db_with(vec![make_armor_item_tx(22, 6, ArmorClassification::Heavy)]);
+        let mut character = character_with_items(vec![22]);
+        let classes = make_class_db_with_profs("knight", &["simple_weapon"]); // no heavy_armor
+        let races = make_race_db_human();
+
+        // Act
+        let result = equip_item(&mut character, 0, &item_db, &classes, &races);
+
+        // Assert
+        assert!(
+            matches!(result, Err(EquipError::ClassRestriction)),
+            "expected ClassRestriction, got {:?}",
+            result
+        );
+        // Inventory must be unchanged — no mutations on failure
+        assert_eq!(
+            character.inventory.items.len(),
+            1,
+            "inventory must be unchanged after failed equip"
+        );
+    }
+
+    #[test]
+    fn test_equip_item_out_of_bounds_returns_error() {
+        // Arrange: empty inventory; attempt to equip slot index 5
+        let item_db = item_db_with(vec![]);
+        let mut character = make_character(); // empty inventory
+        let classes = make_class_db_with_profs("knight", &["martial_melee"]);
+        let races = make_race_db_human();
+
+        // Act
+        let result = equip_item(&mut character, 5, &item_db, &classes, &races);
+
+        // Assert
+        assert!(
+            matches!(result, Err(EquipError::ItemNotFound(_))),
+            "expected ItemNotFound for out-of-bounds index, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_equip_item_non_equipable_item_returns_error() {
+        // Arrange: consumable in inventory (consumables have no equipment slot)
+        let item_db = item_db_with(vec![make_consumable_item_tx(50)]);
+        let mut character = character_with_items(vec![50]);
+        let classes = make_class_db_with_profs("knight", &["simple_weapon", "light_armor"]);
+        let races = make_race_db_human();
+
+        // Act
+        let result = equip_item(&mut character, 0, &item_db, &classes, &races);
+
+        // Assert
+        assert!(
+            matches!(result, Err(EquipError::NoSlotAvailable)),
+            "expected NoSlotAvailable for consumable, got {:?}",
+            result
+        );
+        assert_eq!(
+            character.inventory.items.len(),
+            1,
+            "inventory must be unchanged after failed equip"
+        );
+    }
+
+    // ===== Phase 2: unequip_item Tests =====
+
+    #[test]
+    fn test_unequip_item_moves_to_inventory() {
+        // Arrange: sword equipped in weapon slot, empty inventory
+        let item_db = item_db_with(vec![make_weapon_item_tx(1)]);
+        let mut character = make_character();
+        character.equipment.weapon = Some(1);
+
+        // Act
+        let result = unequip_item(&mut character, EquipmentSlot::Weapon, &item_db);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert!(
+            character.equipment.weapon.is_none(),
+            "weapon slot must be cleared after unequip"
+        );
+        assert_eq!(
+            character.inventory.items.len(),
+            1,
+            "item must move to inventory"
+        );
+        assert_eq!(
+            character.inventory.items[0].item_id, 1,
+            "unequipped item ID must appear in inventory"
+        );
+    }
+
+    #[test]
+    fn test_unequip_item_reduces_ac() {
+        // Arrange: leather armor +4 equipped; set AC to reflect equipped state
+        let item_db = item_db_with(vec![make_armor_item_tx(20, 4, ArmorClassification::Light)]);
+        let mut character = make_character();
+        character.equipment.armor = Some(20);
+
+        use crate::domain::items::calculate_armor_class;
+        character.ac.current = calculate_armor_class(&character.equipment, &item_db);
+        assert_eq!(character.ac.current, 14, "AC should be 14 before unequip");
+
+        // Act
+        let result = unequip_item(&mut character, EquipmentSlot::Armor, &item_db);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert_eq!(
+            character.ac.current, 10,
+            "AC must return to AC_DEFAULT (10) after unequipping armor"
+        );
+    }
+
+    #[test]
+    fn test_unequip_item_empty_slot_is_noop() {
+        // Arrange: weapon slot is empty
+        let item_db = item_db_with(vec![]);
+        let mut character = make_character();
+        let initial_len = character.inventory.items.len();
+
+        // Act
+        let result = unequip_item(&mut character, EquipmentSlot::Weapon, &item_db);
+
+        // Assert: Ok(()) and no state change
+        assert!(result.is_ok(), "unequip of empty slot must return Ok");
+        assert_eq!(
+            character.inventory.items.len(),
+            initial_len,
+            "inventory must not change when slot was already empty"
+        );
+    }
+
+    #[test]
+    fn test_unequip_item_inventory_full_returns_error() {
+        // Arrange: armor equipped AND inventory completely full
+        let item_db = item_db_with(vec![make_armor_item_tx(20, 4, ArmorClassification::Light)]);
+        let mut character = make_character();
+        character.equipment.armor = Some(20);
+        character.ac.current = 14; // 10 + 4
+
+        // Fill inventory to capacity with dummy item IDs
+        for i in 0..crate::domain::character::Inventory::MAX_ITEMS {
+            character.inventory.add_item(i as ItemId + 100, 0).unwrap();
+        }
+        assert!(
+            character.inventory.is_full(),
+            "inventory must be full before test"
+        );
+
+        // Act
+        let result = unequip_item(&mut character, EquipmentSlot::Armor, &item_db);
+
+        // Assert
+        assert!(
+            matches!(result, Err(TransactionError::InventoryFull { .. })),
+            "expected InventoryFull, got {:?}",
+            result
+        );
+        // Armor slot must still be occupied — no partial mutation
+        assert_eq!(
+            character.equipment.armor,
+            Some(20),
+            "armor slot must be unchanged after failed unequip"
+        );
     }
 }

@@ -1,5 +1,89 @@
 # Implementations
 
+## Phase 2: Domain Transaction Functions and AC Calculation (Complete)
+
+### Summary
+
+Added the `EquipmentSlot` enum with slot-routing, `get`, and `set` methods;
+fixed `Equipment::MAX_EQUIPPED` and `equipped_count()`; implemented
+`calculate_armor_class` as a pure domain function; fixed `Character::new()` AC
+initialisation; and added `equip_item` / `unequip_item` transaction functions
+with full atomic swap semantics.
+
+### Files Changed
+
+| File                                       | Change                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/character.rs`                  | Added `EquipmentSlot` enum (7 variants) with `get` and `set` methods; fixed `MAX_EQUIPPED` from 6 → 7; added `accessory2` to `equipped_count()` slice; changed `ac: AttributePair::new(0)` → `ac: AttributePair::new(AC_DEFAULT)` in `Character::new()`; updated `test_equipment_count` |
+| `src/domain/items/equipment_validation.rs` | Added `impl EquipmentSlot { fn for_item(...) }` (in same crate, separate module to avoid circular dependency); added `calculate_armor_class(equipment, item_db) -> u8`; added 5 new AC tests                                                                                            |
+| `src/domain/items/mod.rs`                  | Re-exported `calculate_armor_class`                                                                                                                                                                                                                                                     |
+| `src/domain/transactions.rs`               | Added imports (`EquipmentSlot`, `ClassDatabase`, `RaceDatabase`, `EquipError`, `calculate_armor_class`, `can_equip_item`); added `equip_item` (returns `Result<(), EquipError>`); added `unequip_item` (returns `Result<(), TransactionError>`); added 12 new tests                     |
+
+### Design Decisions
+
+- **`EquipmentSlot::for_item` placement**: `character.rs` already imports
+  `character::Alignment` from `items::types`, so adding an `Item` import in
+  `character.rs` would create a circular dependency. The method is instead
+  added via an `impl EquipmentSlot` block in `equipment_validation.rs`, which
+  already imports both worlds. This is valid Rust — inherent impl blocks for a
+  type in the same crate can live in any module.
+
+- **`equip_item` return type `Result<(), EquipError>`**: The plan permits
+  either `EquipError` directly or wrapping in `TransactionError::EquipFailed`.
+  Since all equip-side test assertions check `EquipError` variants and the
+  existing `can_equip_item` already surfaces `EquipError`, returning it directly
+  avoids an unnecessary wrapping layer and keeps callers' pattern-matches
+  concise.
+
+- **`unequip_item` `character_id` in `InventoryFull`**: `unequip_item` does not
+  accept a `character_id` parameter (per plan signature), so the
+  `InventoryFull { character_id: 0 }` sentinel is used. Tests only check the
+  variant, not the field value.
+
+- **Atomicity in `equip_item`**: The item is removed from inventory (step 6)
+  before the equipment slot is written (step 7). This means there is always
+  a free inventory slot when the displaced item is written back in step 8.
+  The explicit rollback path in step 8 (theoretically unreachable under normal
+  conditions) re-inserts the removed slot and restores the equipment slot to
+  its previous value.
+
+- **`AC_DEFAULT` in `Character::new()`**: Corrected from `0` to `AC_DEFAULT`
+  (10) so an unarmed, unarmoured fresh character correctly starts with AC 10,
+  consistent with the success criterion.
+
+### New Tests (17 total)
+
+| Test                                                  | Location               |
+| ----------------------------------------------------- | ---------------------- |
+| `test_calculate_ac_no_armor`                          | `equipment_validation` |
+| `test_calculate_ac_body_armor_only`                   | `equipment_validation` |
+| `test_calculate_ac_all_slots`                         | `equipment_validation` |
+| `test_calculate_ac_clamps_to_max`                     | `equipment_validation` |
+| `test_calculate_ac_missing_item_id_skips_slot`        | `equipment_validation` |
+| `test_equip_item_weapon_moves_from_inventory_to_slot` | `transactions`         |
+| `test_equip_item_swaps_old_weapon_back_to_inventory`  | `transactions`         |
+| `test_equip_item_armor_updates_ac`                    | `transactions`         |
+| `test_equip_item_helmet_routes_to_helmet_slot`        | `transactions`         |
+| `test_equip_item_boots_routes_to_boots_slot`          | `transactions`         |
+| `test_equip_item_invalid_class_returns_error`         | `transactions`         |
+| `test_equip_item_out_of_bounds_returns_error`         | `transactions`         |
+| `test_equip_item_non_equipable_item_returns_error`    | `transactions`         |
+| `test_unequip_item_moves_to_inventory`                | `transactions`         |
+| `test_unequip_item_reduces_ac`                        | `transactions`         |
+| `test_unequip_item_empty_slot_is_noop`                | `transactions`         |
+| `test_unequip_item_inventory_full_returns_error`      | `transactions`         |
+
+### Quality Gates
+
+```text
+cargo fmt         → No output (all files formatted)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 3546 tests run: 3546 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Phase 1: ArmorClassification Expansion (Complete)
 
 ### Summary
