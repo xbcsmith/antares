@@ -1,5 +1,993 @@
 # Implementations
 
+## Item Mesh Editor — Left Panel Standardization (Complete)
+
+### Problem
+
+The Item Mesh Editor registry left panel used an ad-hoc `RowData { label: String }` pattern where the category was embedded directly into the label string as `format!("[{:?}] {}", entry.category, entry.name)`. This diverged from the standardized `StandardListItemConfig` / `MetadataBadge` / `show_standard_list_item` convention established across all other Campaign Builder editors (Items, Monsters, Spells, Classes, Conditions, Maps, Characters, Races, Proficiencies, NPCs, Creatures, Campaign).
+
+The custom context menu was also wired inline via `resp.context_menu(|ui| { … })` instead of delegating to the `ItemAction` return value of `show_standard_list_item`.
+
+### Fix
+
+**File**: `sdk/campaign_builder/src/item_mesh_editor.rs`
+
+1. **Updated `use crate::ui_helpers` import** to bring in `show_standard_list_item`, `ItemAction`, `MetadataBadge`, and `StandardListItemConfig` alongside the existing `TwoColumnLayout`.
+
+2. **Replaced `RowData.label: String`** with `RowData.name: String` + `RowData.category: ItemMeshCategory` so that the pre-snapshot carries the raw data instead of a pre-formatted string.
+
+3. **Replaced the rendering loop** inside `show_registry_mode`'s left closure:
+
+   - Old: `ui.selectable_label(row.is_selected, &row.label)` + inline `resp.context_menu { … }`
+   - New: `show_standard_list_item(ui, config)` with a `StandardListItemConfig` carrying a category `MetadataBadge`
+
+4. **Added `item_mesh_category_badge(category: ItemMeshCategory) -> MetadataBadge`** free function that maps every `ItemMeshCategory` variant to a display label and a color-coded `MetadataBadge` (weapon categories in red/brown tones, armor in blue, accessories in gold, consumables in green/yellow, misc in gray).
+
+5. **Removed the `double_clicked()` shortcut** to open edit mode — the `ItemAction::Edit` context-menu action and the Edit button in the right panel continue to provide edit access, consistent with all other standardized editors.
+
+### Files Changed
+
+| File                                           | Change                                                                                                                                                                   |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sdk/campaign_builder/src/item_mesh_editor.rs` | Updated imports; replaced `RowData.label` with `name`+`category`; replaced ad-hoc list rendering with `show_standard_list_item`; added `item_mesh_category_badge` helper |
+
+### Quality Gate Results
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings)
+✅ cargo nextest run → 3560 passed, 0 failed
+```
+
+---
+
+## ItemMesh Full Coverage — All Items Data-Driven (Complete)
+
+### Problem
+
+`ItemMeshCategory` and `ItemMeshDescriptor::from_item` form a hard-coded
+procedural fallback in the game engine. The fallback derives mesh shapes
+entirely from Rust code — `WeaponClassification::Simple + sides ≤ 4 →
+Dagger shape`, `ArmorClassification::Medium → iron chain-mail pile`, etc.
+Because 33 of the 43 tutorial items had `mesh_id: None` in `items.ron`, the
+data-driven path was bypassed for the vast majority of items. Several items
+received actively wrong shapes: `Staff` rendered as a blunt club (its
+`Simple` classification + `sides = 6` mapped to Blunt), `Healing Scroll` and
+`Resurection Scroll` rendered as red potion flasks (their `HealHp`/
+`CureCondition` effect mapped to Potion), and `Mage Robe` rendered as a
+leather-armor pile.
+
+Food items (`Food Ration`, `Trail Ration`) had no entry in the registry at
+all — the fallback generated an earthy-brown flask, but any `mesh_id` pointer
+would have resulted in the wrong colour since no food-coloured mesh existed.
+
+### Root Cause
+
+`spawn_dropped_item_system` only takes the data-driven path when
+`item.mesh_id = Some(id)` AND the id resolves in `GameDataResource`. For
+`mesh_id: None` the fallback is always triggered regardless of what RON mesh
+files exist in the campaign. The 27-entry registry had full coverage; the
+item definitions simply had not been wired up to it.
+
+### Fix
+
+#### 1. `campaigns/tutorial/assets/items/consumables/food_item.ron` (new file)
+
+A new `CreatureDefinition` asset — id `9205` — using the same six-vertex
+hexagonal disc geometry as the potion meshes, coloured earthy brown
+`(0.55, 0.35, 0.10)` with high roughness `(0.85)` and no emissive glow.
+The colour exactly matches what the procedural fallback generated for
+`ConsumableEffect::IsFood` items, ensuring visual consistency between the
+data-driven path and any future fallback use. Scale is `0.8` (slightly
+smaller than the `0.9` potion scale) to read as a plain, mundane consumable.
+
+#### 2. `campaigns/tutorial/data/item_mesh_registry.ron`
+
+Added entry `/*[27]*/` for id `9205 ItemMeshFoodItem` pointing to the new
+`assets/items/consumables/food_item.ron`. The registry now has 28 entries
+covering all weapon, armor, accessory, consumable, ammo, and quest categories.
+
+#### 3. `campaigns/tutorial/data/items.ron`
+
+Assigned `mesh_id` to all 33 items that previously had `mesh_id: None`.
+The game engine's `from_item` procedural fallback is now unreachable for
+every item in the tutorial campaign. Full mapping:
+
+| Item                  | id      | mesh_id | Rationale                                                  |
+| --------------------- | ------- | ------- | ---------------------------------------------------------- |
+| Mace                  | 5       | 9006    | Club — only blunt-weapon mesh available                    |
+| Battle Axe            | 6       | 9001    | Sword — closest martial 1H shape; no axe mesh yet          |
+| Leather Armor         | 20      | 9101    | Exact match                                                |
+| Chain Mail            | 21      | 9102    | Exact match                                                |
+| Plate Mail            | 22      | 9103    | Exact match                                                |
+| Wooden Shield         | 23      | 9104    | Exact match                                                |
+| Iron Helmet           | 25      | 9105    | Exact match                                                |
+| Leather Boots         | 26      | 9106    | Exact match                                                |
+| Chain Mail +1         | 30      | 9102    | Same shape, enchanted variant                              |
+| Dragon Scale Mail     | 31      | 9103    | Plate shape — high-AC, full-coverage armour                |
+| Ring of Protection    | 40      | 9301    | Exact match                                                |
+| Amulet of Might       | 41      | 9302    | Exact match                                                |
+| Belt of Speed         | 42      | 9303    | Exact match                                                |
+| Arcane Wand           | 43      | 9007    | Staff — rod/wand silhouette                                |
+| Holy Symbol           | 44      | 9302    | Amulet — worn as pendant                                   |
+| Healing Potion        | 50      | 9201    | Exact match                                                |
+| Magic Potion          | 51      | 9202    | Mana Potion — same flask shape                             |
+| Cure Poison Potion    | 52      | 9203    | Cure Potion — exact match                                  |
+| Arrows                | 60      | 9401    | Exact match                                                |
+| Crossbow Bolts        | 61      | 9402    | Exact match                                                |
+| Ruby Whistle          | 100     | 9502    | Key Item — quest object                                    |
+| Mace of Undead        | 101     | 9006    | Club — blunt weapon shape                                  |
+| Foo / Foo Stand / Bar | 102–104 | 9502    | Key Item — test placeholders                               |
+| Long Bow +1           | 105     | 9008    | Bow — exact match                                          |
+| Staff                 | 106     | 9007    | **Critical fix** — fallback gave it a club shape           |
+| Mage Robe             | 107     | 9304    | Cloak — fabric garment, far better than leather-armor pile |
+| Healing Scroll        | 108     | 9501    | **Critical fix** — fallback gave it a red potion flask     |
+| Cure Disease Potion   | 109     | 9203    | Cure Potion                                                |
+| Resurection Scroll    | 110     | 9501    | **Critical fix** — fallback gave it a red potion flask     |
+| Food Ration           | 111     | 9205    | New food mesh — earthy brown flask                         |
+| Trail Ration          | 112     | 9205    | New food mesh — earthy brown flask                         |
+
+### Files Changed
+
+| File                                                        | Change                                                     |
+| ----------------------------------------------------------- | ---------------------------------------------------------- |
+| `campaigns/tutorial/assets/items/consumables/food_item.ron` | New — earthy-brown hexagonal flask, id 9205                |
+| `campaigns/tutorial/data/item_mesh_registry.ron`            | Added entry 27: id 9205 `ItemMeshFoodItem`                 |
+| `campaigns/tutorial/data/items.ron`                         | `mesh_id` assigned for all 43 items; zero `None` remaining |
+
+### Quality Gates
+
+```text
+cargo fmt --all          → clean
+cargo check --all-targets --all-features → 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → 0 warnings
+cargo nextest run --all-features → 3560 passed, 0 failed
+```
+
+---
+
+## ItemMesh Format Mismatch — Dropped Items and SDK Preview Fix (Complete)
+
+### Problem
+
+Dropped items in the game world always displayed the same procedural mesh
+regardless of which `mesh_id` was assigned to the item. Importing a new OBJ
+(as RON) in the Item Mesh Editor and moving it to `assets/items/weapons/` also
+had no visible effect — the SDK preview always showed the same generic sword
+shape.
+
+### Root Cause 1 — `short_sword.ron` in Wrong Format (Critical)
+
+`campaigns/tutorial/assets/items/weapons/short_sword.ron` was serialised in
+`ItemMeshDescriptor` format:
+
+```campaigns/tutorial/assets/items/weapons/short_sword.ron#L1-9
+(
+    category: Dagger,
+    blade_length: 0.5,
+    primary_color: (0.75, 0.75, 0.78, 1.0),
+    ...
+    scale: 1.5,
+)
+```
+
+Every other asset file under `assets/items/` was already in `CreatureDefinition`
+format (with `id:`, `name:`, `meshes:`, etc.). When
+`CreatureDatabase::load_from_registry` tried to deserialise `short_sword.ron`
+as a `CreatureDefinition` it returned a `ParseError`. That error propagated
+through `ItemMeshDatabase::load_from_registry` → `load_item_meshes` →
+`load_game_data` → `load_campaign_data`, which caught the top-level error,
+logged it, and inserted an **empty** `GameDataResource`.
+
+Consequence: every `spawn_dropped_item_system` call found `item_meshes` empty,
+hit the `mesh_id not found` warning branch, and fell back to the procedural
+`ItemMeshDescriptor::from_item` path — making all items look identical.
+
+### Root Cause 2 — SDK `perform_save_as_with_path` Serialised Wrong Type
+
+`perform_save_as_with_path` was serialising the raw `ItemMeshDescriptor` struct
+to disk:
+
+```sdk/campaign_builder/src/item_mesh_editor.rs#L870-L875
+let ron_text = ron::ser::to_string_pretty(&descriptor, ...)
+```
+
+Any file written from the SDK editor was therefore in `ItemMeshDescriptor`
+format, which the runtime `CreatureDatabase` loader cannot parse. New meshes
+created inside the SDK would silently fail to load in-game.
+
+### Root Cause 3 — `execute_register_asset` Rejected `CreatureDefinition` Files
+
+`execute_register_asset_validation` tried to parse the file only as
+`ItemMeshDescriptor` and rejected it with an error if that failed — meaning any
+correctly-formatted `CreatureDefinition` RON (e.g. an OBJ imported outside the
+SDK) could not be registered at all.
+
+### Root Cause 4 — SDK Preview Lost Custom Geometry
+
+When `load_from_campaign` encountered a file in `CreatureDefinition` format
+(Attempt 2 code path), it discarded the vertex data and stored only a
+simplified `ItemMeshDescriptor` inferred from the first mesh's colour.
+`sync_preview_renderer_from_descriptor` always called
+`descriptor.to_creature_definition()`, so the preview showed a procedurally
+regenerated shape instead of the imported OBJ geometry.
+
+### Fix
+
+#### 1. `campaigns/tutorial/assets/items/weapons/short_sword.ron`
+
+Converted from `ItemMeshDescriptor` format to `CreatureDefinition` format,
+consistent with all other asset files. Blade vertices computed from the
+original descriptor parameters (category `Dagger`, `blade_length: 0.5`,
+`scale: 1.5`):
+
+- `half_len = (0.3 + 0.5 × 0.7) × 0.5 = 0.3250`
+- `half_width = half_len × 0.12 = 0.0390`
+- `pommel_z = −half_len × 0.30 = −0.0975`
+
+Cross-guard proportioned between `dagger.ron` (±0.0700) and `sword.ron`
+(±0.1100): ±0.0850 wide, ±0.0150 deep. Both meshes receive steel colours and
+metallic materials matching the original descriptor.
+
+This single fix unblocks the entire item mesh registry: `load_game_data` now
+succeeds, `GameDataResource` is populated, and all items with a `mesh_id`
+resolve to their correct `CreatureDefinition`.
+
+#### 2. `sdk/campaign_builder/src/item_mesh_editor.rs` — `perform_save_as_with_path`
+
+Now serialises a `CreatureDefinition` (the canonical game-engine format) instead
+of an `ItemMeshDescriptor`. If the entry being saved originated from an
+imported `CreatureDefinition` (see fix 4 below), that native definition is
+reused with `scale` updated from the descriptor; otherwise
+`descriptor.to_creature_definition()` generates the mesh. Files written by the
+SDK can now be loaded by `CreatureDatabase::load_from_registry` without error.
+
+#### 3. `execute_register_asset_validation` / `execute_register_asset`
+
+Both methods now accept either format. Validation checks
+`ron::de::from_str::<ItemMeshDescriptor>` **and** `ron::de::from_str::<CreatureDefinition>`
+and rejects the file only when neither succeeds. The registration path
+constructs an `ItemMeshEntry` with `native_creature_def: Some(def)` when the
+file is a `CreatureDefinition`, preserving the custom geometry for use in the
+preview and in subsequent saves.
+
+#### 4. `ItemMeshEntry` — `native_creature_def` Field
+
+Added `pub native_creature_def: Option<CreatureDefinition>` to `ItemMeshEntry`.
+
+- `load_from_campaign` Attempt 1 (ItemMeshDescriptor path): `native_creature_def: None`.
+- `load_from_campaign` Attempt 2 (CreatureDefinition path): `native_creature_def: Some(def)`.
+- `execute_register_asset` (CreatureDefinition file): `native_creature_def: Some(def)`.
+- SDK-authored saves: `native_creature_def: None` (descriptor is source of truth).
+
+`sync_preview_renderer_from_descriptor` now checks the selected entry for a
+`native_creature_def` and passes it directly to the preview renderer when
+present, so imported OBJ geometry is faithfully shown instead of a procedural
+approximation.
+
+### Files Changed
+
+| File                                                      | Change                                                                                        |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `campaigns/tutorial/assets/items/weapons/short_sword.ron` | Converted from `ItemMeshDescriptor` to `CreatureDefinition` format                            |
+| `sdk/campaign_builder/src/item_mesh_editor.rs`            | `ItemMeshEntry` new field; save path fix; register-asset dual-format; preview uses native def |
+
+### Quality Gates
+
+```text
+cargo fmt --all          → clean
+cargo check --all-targets --all-features → 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → 0 warnings
+cargo nextest run --all-features → 3560 passed, 0 failed
+```
+
+---
+
+## SDK: Reload Sweep — Centralized and Fixed Across All Editors (Complete)
+
+### Problem
+
+The Campaign Builder's **Reload** toolbar action (F5) was broken in two editors
+and inconsistently implemented across all others:
+
+1. **Creatures Editor** — `ToolbarAction::Reload` was silently discarded with a
+   `// Handled by parent` comment, but the parent (`CampaignBuilderApp`) never
+   handled it. Clicking Reload in the Creatures tab did nothing.
+
+2. **NPC Editor** — `ToolbarAction::Reload` fell through a `_ => {}` wildcard
+   arm and was silently ignored. Clicking Reload in the NPCs tab did nothing.
+
+3. **Six simple editors** (Items, Monsters, Spells, Conditions, Proficiencies,
+   Quests) — Each contained its own copy of identical `std::fs::read_to_string`
+   - `ron::from_str` logic instead of using the centralised `handle_reload`
+     helper that already existed in `ui_helpers.rs` but was never called.
+
+### Root Cause — Creatures Editor
+
+The creatures editor uses a two-step load sequence (registry file →
+per-creature asset files) that lives in `CampaignBuilderApp::load_creatures()`.
+The editor's `show()` returns `Option<String>` (a status message) rather than a
+`ToolbarAction`, so the parent has no typed channel to receive an action request.
+The `// Handled by parent` comment was aspirational but never wired up.
+
+### Root Cause — NPC Editor
+
+The NPC editor's `match toolbar_action` block had only three explicit arms
+(`New`, `Import`, `Export`) and a catch-all `_ => {}`. `Reload` fell into the
+catch-all without any effect. Additionally, because `show()` returns `bool`
+(unsaved-changes flag) rather than a status string, there was no mechanism to
+report the reload outcome to the global status bar.
+
+### Fix
+
+**`sdk/campaign_builder/src/creatures_editor.rs`**
+
+- Added `pub const RELOAD_CREATURES_SENTINEL` — a namespaced sentinel string
+  modelled on the existing `OPEN_CREATURE_TEMPLATES_SENTINEL`.
+- Changed the `ToolbarAction::Reload` arm from `// Handled by parent` to
+  `return Some(RELOAD_CREATURES_SENTINEL.to_string())`, so the editor signals
+  its intent without duplicating load logic.
+
+**`sdk/campaign_builder/src/lib.rs` (creatures)**
+
+- In the `EditorTab::Creatures` handler, added an `else if` branch for
+  `RELOAD_CREATURES_SENTINEL` that calls `self.load_creatures()`, the same
+  full two-step reload that runs on campaign open.
+
+**`sdk/campaign_builder/src/npc_editor.rs`**
+
+- Added `pub pending_status: Option<String>` (`#[serde(skip)]`) to
+  `NpcEditorState` — a side-channel the parent polls with `.take()` after
+  every `show()` call to pick up status messages.
+- Added `pub fn load_from_file(&mut self, path: &Path) -> Result<(), String>`
+  which deserialises `Vec<NpcDefinition>` from disk, replaces `self.npcs`,
+  clears the selection, resets to List mode, and clears the unsaved-changes
+  flag.
+- Added an explicit `ToolbarAction::Reload` arm in `show()` that calls
+  `load_from_file` and stores the result in `pending_status`.
+
+**`sdk/campaign_builder/src/lib.rs` (NPCs)**
+
+- After the `npc_editor_state.show()` call, added:
+  `if let Some(status) = self.npc_editor_state.pending_status.take() { ... }`
+  to forward reload (and any future) status messages to the global status bar.
+
+**Six simple editors — migrated to `handle_reload`**
+
+Replaced the duplicated inline reload blocks in each of the following files
+with a single call to `handle_reload(data, campaign_dir, filename, status)`:
+
+| File                                               | Data type                    |
+| -------------------------------------------------- | ---------------------------- |
+| `sdk/campaign_builder/src/items_editor.rs`         | `Vec<Item>`                  |
+| `sdk/campaign_builder/src/monsters_editor.rs`      | `Vec<MonsterDefinition>`     |
+| `sdk/campaign_builder/src/spells_editor.rs`        | `Vec<Spell>`                 |
+| `sdk/campaign_builder/src/conditions_editor.rs`    | `Vec<ConditionDefinition>`   |
+| `sdk/campaign_builder/src/proficiencies_editor.rs` | `Vec<ProficiencyDefinition>` |
+| `sdk/campaign_builder/src/quest_editor.rs`         | `Vec<Quest>`                 |
+
+Each file also gained `handle_reload` in its `use crate::ui_helpers::` import.
+
+### Editors Left Unchanged
+
+The following editors already had correct, custom reload logic and were not
+touched:
+
+- `characters_editor.rs` — calls `self.load_from_file(&path)` (handles extra state)
+- `classes_editor.rs` — calls `self.load_from_file(&path)`
+- `races_editor.rs` — calls `self.load_from_file(&path)`
+- `dialogue_editor.rs` — calls `self.load_from_file(&path)` + syncs `*dialogues`
+- `config_editor.rs` — calls `self.load_config(campaign_dir)`
+- `map_editor.rs` — calls `self.load_maps(...)` (multi-file directory load)
+- `stock_templates_editor.rs` — auto-loads on first display; Reload not in toolbar
+
+### New Tests (8 new)
+
+**`creatures_editor::tests`**
+
+- `test_reload_sentinel_is_nonempty_and_namespaced` — sentinel is non-empty and
+  starts with `__campaign_builder`.
+- `test_reload_sentinel_differs_from_template_sentinel` — the two sentinels are
+  distinct so the parent can route them to different handlers.
+
+**`npc_editor::tests`**
+
+- `test_pending_status_initial_state` — `pending_status` starts as `None`.
+- `test_load_from_file_replaces_npcs` — round-trip: writes two NPCs to a temp
+  file, loads into an editor that had a stale NPC, asserts list replaced and
+  editor state reset.
+- `test_load_from_file_missing_file_returns_err` — error message mentions
+  "Failed to read" when the path does not exist.
+- `test_load_from_file_bad_ron_returns_err` — error message mentions "Failed to
+  parse" when the file contains invalid RON.
+- `test_reload_sets_pending_status_on_success` — `pending_status` contains a
+  "Reloaded" message after a successful reload; `.take()` clears the field.
+- `test_reload_sets_pending_status_when_file_missing` — `pending_status`
+  contains "not found" and `self.npcs` is left unchanged.
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run (workspace)          → 3560 passed, 8 skipped
+cargo nextest run -p campaign_builder  → 2059 passed, 2 skipped
+```
+
+---
+
+## SDK: Stock-Template Wipe-Prevention Fix (Complete)
+
+### Problem
+
+Every time the user saved the tutorial campaign from the Campaign Builder,
+`campaigns/tutorial/data/npc_stock_templates.ron` was silently overwritten with
+an empty array `[]`, destroying all merchant stock template definitions. The
+user had to restore the file by hand after every save session.
+
+### Root Cause
+
+`do_save_campaign` in `sdk/campaign_builder/src/lib.rs` called
+`stock_templates_editor_state.save_to_file(...)` **unconditionally** on every
+campaign save. `save_to_file` serialises whatever is in
+`stock_templates_editor_state.templates` — which is `Vec::new()` until
+`load_from_file` is called. So any save that occurred before the Stock
+Templates tab had been visited (or before `load_stock_templates()` completed)
+wrote `[]` to disk. Once the file contained `[]`, every subsequent load read
+it back as an empty list, perpetuating the cycle.
+
+### Fix
+
+**`sdk/campaign_builder/src/stock_templates_editor.rs`**
+
+Added a `loaded_from_file: bool` field to `StockTemplatesEditorState`
+(`#[serde(skip)]`, default `false`):
+
+- `load_from_file` sets `loaded_from_file = true` on success.
+- `reset_for_new_campaign` resets it to `false` so a stale loaded state from
+  a previous campaign cannot authorise writes for a freshly opened one.
+
+**`sdk/campaign_builder/src/lib.rs`**
+
+The stock-templates write block in `do_save_campaign` is now guarded:
+
+```sdk/campaign_builder/src/lib.rs#L1-4
+let should_save_templates = self.stock_templates_editor_state.loaded_from_file
+    || self.stock_templates_editor_state.has_unsaved_changes;
+if should_save_templates {
+    ...save_to_file...
+```
+
+This means:
+
+- **Templates loaded from disk** → written back (safe, data exists in memory).
+- **User made explicit in-editor changes** → written back (user intent respected,
+  even if they deleted all templates).
+- **Empty default Vec, never loaded** → skipped (file left untouched).
+
+**`campaigns/tutorial/data/npc_stock_templates.ron`**
+
+Restored to the correct three-template content and fixed a template-ID mismatch
+that would have caused SDK validation errors:
+
+| Template ID                | Referenced by NPC                                  |
+| -------------------------- | -------------------------------------------------- |
+| `"town_merchant_basic"`    | `tutorial_merchant_town`                           |
+| `"mountain_pass_merchant"` | `tutorial_merchant_town2`                          |
+| `"holy_temple_menu"`       | `tutorial_priestess_town`, `tutorial_priest_town2` |
+
+The previous file used `"temple_basic_stock"` for the third template while the
+NPCs referenced `"holy_temple_menu"` — a mismatch the SDK validator would flag
+as an unknown stock template error. The template was renamed and food items
+(ids 111 and 112) were added to all three templates.
+
+### New Tests (4 new — in `sdk/campaign_builder/src/`)
+
+| Test                                                                       | File                        | Covers                                                                                                                                  |
+| -------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_loaded_from_file_is_false_on_default`                                | `stock_templates_editor.rs` | Guard starts `false` on a fresh editor state                                                                                            |
+| `test_load_from_file_sets_loaded_from_file_true`                           | `stock_templates_editor.rs` | Successful `load_from_file` sets guard to `true`                                                                                        |
+| `test_reset_for_new_campaign_clears_loaded_from_file`                      | `stock_templates_editor.rs` | `reset_for_new_campaign` clears guard back to `false`                                                                                   |
+| `test_do_save_campaign_does_not_overwrite_stock_templates_when_not_loaded` | `lib.rs`                    | Full regression: `do_save_campaign` leaves the on-disk file untouched when `loaded_from_file = false` and `has_unsaved_changes = false` |
+
+### Quality Gates
+
+```
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run (antares)           → 3560 passed
+cargo nextest run (campaign_builder)  → 28 passed (3 new guard tests + 1 regression)
+```
+
+---
+
+## Phase 5: Character Equipment — Documentation and Final Validation (Complete)
+
+### Summary
+
+Phase 5 closes out the five-phase Character Equipment feature by auditing test
+coverage for all new variants and functions introduced in Phases 1–4, adding
+the missing unit tests found during the audit, and running the full four-gate
+quality pipeline to confirm zero errors and zero warnings.
+
+### Coverage Audit Results
+
+The four priority targets from the plan were inspected:
+
+| Target file                                                   | Gap found                                                                    | Action taken     |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------- |
+| `src/domain/items/types.rs` — `required_proficiency`          | No tests for `Helmet` and `Boots` classifications                            | Added 2 tests    |
+| `src/domain/items/equipment_validation.rs` — `can_equip_item` | `Helmet` and `Boots` fully covered by Phase 1 tests                          | No action needed |
+| `src/domain/proficiency.rs` — `proficiency_for_armor`         | `Helmet` and `Boots` fully covered by Phase 1 tests                          | No action needed |
+| `src/domain/character_definition.rs` — `instantiate`          | Weapon and body-armor tested in Phase 3; no tests for `helmet`/`boots` slots | Added 2 tests    |
+
+### New Tests (4 new)
+
+| Test                                                 | File                                 | Covers                                                                                                            |
+| ---------------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `test_armor_required_proficiency_helmet`             | `src/domain/items/types.rs`          | `Item::required_proficiency()` returns `Some("light_armor")` for a `Helmet`-classified armor item                 |
+| `test_armor_required_proficiency_boots`              | `src/domain/items/types.rs`          | `Item::required_proficiency()` returns `Some("light_armor")` for a `Boots`-classified armor item                  |
+| `test_instantiate_starting_helmet_in_equipment_slot` | `src/domain/character_definition.rs` | `instantiate` places a helmet (item 25, Iron Helmet) into `equipment.helmet`; item absent from inventory; AC = 11 |
+| `test_instantiate_starting_boots_in_equipment_slot`  | `src/domain/character_definition.rs` | `instantiate` places boots (item 26, Leather Boots) into `equipment.boots`; item absent from inventory; AC = 11   |
+
+### Cross-Phase Feature Summary
+
+The complete Character Equipment feature (Phases 1–5) delivered:
+
+#### Phase 1 — `ArmorClassification` Expansion
+
+- Added `Helmet` and `Boots` variants to `ArmorClassification` enum
+  (`src/domain/items/types.rs`)
+- Extended `ProficiencyDatabase::proficiency_for_armor` to map both new
+  variants to `"light_armor"` (`src/domain/proficiency.rs`)
+- Made `has_slot_for_item` exhaustive over all six `ArmorClassification`
+  variants — no `_` wildcard (`src/domain/items/equipment_validation.rs`)
+- Made `EquipmentSlot::for_item` exhaustive over the same variants
+  (`src/domain/items/equipment_validation.rs`)
+- Migrated `data/test_campaign/data/items.ron` and `data/items.ron` to use
+  `classification: Helmet` / `classification: Boots` in RON data
+- Extended SDK validation to accept the two new classifications
+  (`src/sdk/validation.rs`)
+
+#### Phase 2 — Domain Transaction Functions and AC Calculation
+
+- Added `EquipmentSlot` enum with seven variants and `get`/`set`/`for_item`
+  methods (`src/domain/character.rs`)
+- Added `calculate_armor_class` pure function — reads `equipment` and
+  `item_db`, returns a clamped `[AC_MIN, AC_MAX]` value
+  (`src/domain/items/equipment_validation.rs`)
+- Added `equip_item` domain transaction: validates class/race proficiency
+  and alignment, adds item to inventory, then moves it to the correct slot,
+  then recalculates AC (`src/domain/transactions.rs`)
+- Added `unequip_item` domain transaction: clears the slot, returns item to
+  inventory, recalculates AC (`src/domain/transactions.rs`)
+- Fixed `Character::new()` to initialise `ac.current = AC_DEFAULT` (was 0)
+  (`src/domain/character.rs`)
+- Fixed `equipped_count()` to iterate all seven slots including `helmet` and
+  `boots` (`src/domain/character.rs`)
+
+#### Phase 3 — Starting Equipment in Inventory
+
+- Changed `CharacterDefinition::instantiate` to a two-pass flow: first add
+  all `starting_items` to inventory, then call `equip_item` for each slot in
+  `starting_equipment` (`src/domain/character_definition.rs`)
+- Removed `create_starting_equipment` helper (logic merged into `instantiate`)
+- Added `CharacterDefinitionError::InvalidStartingEquipment` — returned when
+  a starting equipment item fails proficiency or alignment validation
+- Audited `data/test_campaign/data/characters.ron` and
+  `campaigns/tutorial/data/characters.ron` to verify all `starting_equipment`
+  item IDs are present in the corresponding items databases
+
+#### Phase 4 — Inventory UI — Equip and Unequip
+
+- Added `EquipItemAction` and `UnequipItemAction` message types, registered in
+  `InventoryPlugin::build` (`src/game/systems/inventory_ui.rs`)
+- Added `PanelAction::Equip` and `PanelAction::Unequip` variants to the action
+  strip; `build_action_list` prepends `Equip` (index 0) for equipable items
+- Added equipment display strip: two rows of seven cells rendered above the
+  inventory grid in every character panel
+- Added **E** keyboard shortcut to dispatch `EquipItemAction` from the
+  `SlotNavigation` phase; **Enter** on a focused strip cell dispatches
+  `UnequipItemAction`
+- Extended `inventory_action_system` to handle both new message types, writing
+  `GameLog` errors on all failure paths
+
+### Architecture Compliance
+
+- [x] `ArmorClassification` match arms exhaustive — no `_` wildcard
+- [x] `EquipmentSlot::for_item` match exhaustive over all six `ArmorClassification` variants
+- [x] Proficiency IDs are string values from `ProficiencyDatabase`, never hard-coded in callers
+- [x] RON data files use `classification: Helmet` / `Boots`
+- [x] No tests reference `campaigns/tutorial` — all use `data/test_campaign`
+- [x] Helmet and Boots fixture items exist in `data/test_campaign/data/items.ron` (ids 25 and 26)
+- [x] `equip_item` and `unequip_item` are pure-domain functions in `transactions.rs` — no Bevy dependencies
+- [x] `calculate_armor_class` only reads `equipment` and `item_db` — no mutable state
+- [x] AC recalculation is triggered inside `equip_item` and `unequip_item`, never in callers
+- [x] Starting equipment items added to inventory then equip-validated via `equip_item`
+- [x] `EquipItemAction` / `UnequipItemAction` follow existing message pattern
+- [x] All new public functions have `///` doc comments
+- [x] SPDX `FileCopyrightText` and `License-Identifier` headers present in all modified `.rs` files
+
+### Quality Gates
+
+```
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 3560 passed (8 skipped); was 3556 before Phase 5
+```
+
+---
+
+## Phase 4: Inventory UI — Equip and Unequip (Complete)
+
+### Summary
+
+Added full equip/unequip support to the inventory UI overlay. Players can now
+select an item in the inventory grid and press **E** (or click the **Equip**
+button in the action strip) to move it into the appropriate equipment slot.
+An equipment display strip — two rows of seven cells — is rendered between
+the character name header and the inventory slot grid in every character panel,
+showing all equipped items. Selecting a cell in the strip (keyboard or mouse)
+and pressing **Enter** (or clicking **Unequip**) returns the item to inventory.
+All failure paths write a human-readable `GameLog` entry instead of panicking.
+
+### Files Changed
+
+- **`src/game/systems/inventory_ui.rs`** — primary implementation file:
+  - `EquipItemAction` and `UnequipItemAction` message types added and
+    registered in `InventoryPlugin::build`
+  - `PanelAction::Equip` and `PanelAction::Unequip` variants added
+  - `InventoryNavigationState.selected_equip_slot: Option<EquipmentSlot>`
+    added to track equipment strip focus
+  - `build_action_list` extended: `Equip` prepended as index-0 action for
+    any equipable item (weapons, armour, accessories)
+  - `inventory_input_system` extended:
+    - **E key** shortcut dispatches `EquipItemAction` directly from
+      `SlotNavigation` phase (mirrors existing **U** shortcut for Use)
+    - Equipment strip keyboard navigation: **↑** from grid row 0 enters
+      the strip; **↓** returns to grid row 0; **←**/**→** cycle the seven
+      cells; **Enter** dispatches `UnequipItemAction`
+    - `ActionNavigation` `Enter` handler updated to handle `Equip` and
+      `Unequip` variants
+    - `Tab` clears `selected_equip_slot`
+    - **↑** wrapping from row 0 now enters the equipment strip instead of
+      wrapping to the last grid row
+  - `inventory_ui_system` extended: passes `panel_equip_slot` to
+    `render_character_panel`; handles `PanelAction::Equip` and
+    `PanelAction::Unequip`; hint line updated for equipment strip phase
+  - `render_character_panel` extended:
+    - `selected_equip_slot: Option<EquipmentSlot>` parameter added
+    - Equipment strip (`EQUIP_STRIP_H = 76px`) rendered between header and
+      grid — two rows (Weapon/Armor/Shield, Helmet/Boots/Ring/Ring)
+    - Each cell shows a dimmed slot label and the equipped item name (or
+      `—` when empty); focused cell has a green highlight border
+    - Mouse click on an occupied cell dispatches `PanelAction::Unequip`
+    - Unequip action button shown below the strip when a cell is focused
+    - **Equip** button added to the action strip (index 0, green) for
+      equipable items; existing Use/Drop/Transfer index offsets updated
+    - `painter` cloned to owned `Painter` so `ui.allocate_rect()` and
+      `ui.new_child()` can be called without borrow conflicts
+  - `inventory_action_system` extended:
+    - `EquipItemAction` handler: bounds-checks, resolves `GameContent`,
+      calls `equip_item()`, clears nav state on success, writes `GameLog`
+      error on failure
+    - `UnequipItemAction` handler: bounds-checks, resolves `GameContent`,
+      calls `unequip_item()`, clears `selected_equip_slot` on success,
+      writes "inventory is full" `GameLog` entry on `InventoryFull` error
+  - All six existing `render_character_panel` test call sites updated to
+    pass `None` for the new `selected_equip_slot` parameter
+  - All ten existing `inventory_action_system` test setups updated to
+    register `EquipItemAction` and `UnequipItemAction`
+  - `test_build_action_list_no_use_for_non_consumable` updated: first
+    action for a weapon is now `Equip`, not `Drop`
+  - `test_panel_action_drop_variant` and `test_panel_action_transfer_variant`
+    updated with `Equip`/`Unequip` catch-all arms
+
+### Design Decisions
+
+#### `Painter::clone()` to resolve egui borrow conflict
+
+`egui::Ui::painter()` returns `&Painter` — an immutable reference to the
+`Ui`. Calling `ui.allocate_rect()` (mutable) while `painter` is alive fails
+the borrow checker. Cloning the painter at the start of
+`render_character_panel` gives an owned `Painter` whose internal `Arc`
+state still writes to the same draw list, eliminating the conflict without
+any observable behavioural difference.
+
+#### E key test uses nav-state side-effect, not message-queue inspection
+
+`Messages<T>` is not re-exported from `bevy::prelude`. Rather than depend
+on the internal `bevy_ecs::message::Messages` path, the E key test verifies
+the nav-state side-effect: `selected_slot_index` is set to `None` and
+`phase` stays `SlotNavigation` — a code path that is only reached inside
+the `if is_equipable { equip_writer.write(...) }` branch. This is a
+sufficient proxy for "the message was dispatched".
+
+#### `ButtonInput<KeyCode>` initialised without `InputPlugin`
+
+Bevy's `InputPlugin` registers a `First`-schedule system that calls
+`ButtonInput::clear()` at the start of every frame, wiping `just_pressed`
+before `Update` systems run. In tests this means pressing a key before
+`app.update()` would be invisible to the input system. By registering
+`ButtonInput<KeyCode>` with `app.init_resource::<ButtonInput<KeyCode>>()`
+(without `InputPlugin`), `just_pressed` persists through the update frame
+as needed.
+
+#### Up-arrow from row 0 enters the equipment strip (no bottom-wrap)
+
+Before Phase 4, pressing **↑** from grid row 0 wrapped to the last grid
+row (standard grid wrapping). Now it navigates to the equipment strip
+above the grid. Bottom-to-top grid wrapping is removed for row 0 because
+the strip is the natural "above row 0" destination. Pressing **↓** from
+the strip returns to slot 0 of the grid, completing the bidirectional
+navigation.
+
+#### Action button index offsets computed with a running `btn_idx`
+
+The action strip previously used hard-coded offsets
+(`if is_consumable { 1 } else { 0 }`) for the Drop index. With the new
+`Equip` button potentially preceding both `Use` and `Drop`, a running
+`btn_idx` counter replaces all hard-coded offsets, making the order
+table self-documenting and easy to extend.
+
+### New Tests (7 new)
+
+| Test                                                   | Covers                                                          |
+| ------------------------------------------------------ | --------------------------------------------------------------- |
+| `test_equip_action_dispatched_on_e_key`                | E key in `SlotNavigation` clears nav state (proxy for dispatch) |
+| `test_equip_button_absent_for_consumable`              | `build_action_list` omits Equip for consumables                 |
+| `test_equip_button_present_for_weapon`                 | `build_action_list` puts Equip first for weapons                |
+| `test_equip_action_system_moves_item_to_slot`          | `EquipItemAction` moves item to `equipment.weapon`              |
+| `test_unequip_action_system_returns_item_to_inventory` | `UnequipItemAction` clears slot and restores inventory          |
+| `test_unequip_action_system_inventory_full_logs_error` | Full inventory → GameLog "inventory is full", slot unchanged    |
+| `test_equipment_strip_shows_equipped_item_name`        | Panel renders with equipped weapon; item accessible via struct  |
+
+### Quality Gates
+
+```
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 3555 passed (excluding pre-existing flaky perf benchmark)
+```
+
+---
+
+## Phase 3: Starting Equipment in Inventory (Complete)
+
+### Summary
+
+Replaced the direct-copy `create_starting_equipment` helper with a two-pass
+"add-to-inventory, then equip" flow inside `CharacterDefinition::instantiate`.
+Every starting equipment item now passes through `equip_item` (proficiency,
+race, alignment, and slot validation). Added `CharacterDefinitionError::InvalidStartingEquipment`
+to surface bad data to campaign authors. Audited and fixed duplicate item IDs
+in both `data/test_campaign/data/characters.ron` and
+`campaigns/tutorial/data/characters.ron` (Whisper had Dagger in both
+`starting_items` and `starting_equipment.weapon`).
+
+### Files Changed
+
+| File                                     | Change                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/character_definition.rs`     | Added `AC_DEFAULT`, `calculate_armor_class`, and `equip_item` imports; added `InvalidStartingEquipment` error variant; rewrote `instantiate` to use two-pass flow; removed `create_starting_equipment` helper; removed its two tests; updated `test_instantiate_with_real_databases`; added 5 new Phase 3 tests |
+| `data/test_campaign/data/characters.ron` | Removed duplicate item 2 (Dagger) from `whisper.starting_items` — it is authoritative in `starting_equipment.weapon`                                                                                                                                                                                            |
+| `campaigns/tutorial/data/characters.ron` | Removed duplicate item 2 (Dagger) from `whisper.starting_items`                                                                                                                                                                                                                                                 |
+
+### Design Decisions
+
+- **Two-pass order**: Equipment items are appended to inventory in
+  `StartingEquipment::all_item_ids()` order (weapon → armor → shield →
+  helmet → boots → accessory1 → accessory2). Pass 2 iterates **in reverse**
+  so that removing a higher-indexed slot does not shift the indices of
+  items not yet processed, keeping the index arithmetic O(1) and correct.
+
+- **`Equipment::new()` in character struct**: The character is built with
+  all equipment slots empty, then the two-pass flow populates them through
+  `equip_item`. This means equipment always satisfies the same validation
+  contract as runtime equipping.
+
+- **AC recalculation once, after all equips**: `calculate_armor_class` is
+  called once after the entire Pass 2 loop rather than after each equip.
+  This matches the plan and avoids redundant work.
+
+- **`InventoryFull` on Pass 1**: If the inventory is full before a starting
+  equipment item can be added, the existing `CharacterDefinitionError::InventoryFull`
+  variant is returned. The `InvalidStartingEquipment` variant is reserved for
+  validation failures inside `equip_item`.
+
+- **Duplicate-ID audit**: `starting_equipment` is authoritative for equipped
+  items. Duplicate entries in `starting_items` were removed from the bag list
+  to prevent characters receiving two copies of the same item.
+
+### New Tests (7 total — 5 new + 2 removed, test count net change: +5)
+
+| Test                                                            | Location               | What it verifies                                                |
+| --------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------- |
+| `test_instantiate_starting_weapon_in_equipment_slot`            | `character_definition` | Weapon lands in slot, not inventory                             |
+| `test_instantiate_starting_weapon_equippable_then_unequippable` | `character_definition` | Unequip after instantiate moves weapon to inventory             |
+| `test_instantiate_starting_armor_updates_ac`                    | `character_definition` | Leather Armor (+2) yields `ac.current == 12`                    |
+| `test_instantiate_no_starting_equipment_ac_is_default`          | `character_definition` | Empty starting equipment yields `ac.current == AC_DEFAULT (10)` |
+| `test_instantiate_invalid_starting_equipment_returns_error`     | `character_definition` | Human sorcerer + Short Sword returns `InvalidStartingEquipment` |
+
+_Removed_: `test_create_starting_equipment_empty` and
+`test_create_starting_equipment_with_items` (function deleted).
+
+### Quality Gates
+
+```text
+cargo fmt         → No output (all files formatted)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 3549 tests run: 3549 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Phase 2: Domain Transaction Functions and AC Calculation (Complete)
+
+### Summary
+
+Added the `EquipmentSlot` enum with slot-routing, `get`, and `set` methods;
+fixed `Equipment::MAX_EQUIPPED` and `equipped_count()`; implemented
+`calculate_armor_class` as a pure domain function; fixed `Character::new()` AC
+initialisation; and added `equip_item` / `unequip_item` transaction functions
+with full atomic swap semantics.
+
+### Files Changed
+
+| File                                       | Change                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/character.rs`                  | Added `EquipmentSlot` enum (7 variants) with `get` and `set` methods; fixed `MAX_EQUIPPED` from 6 → 7; added `accessory2` to `equipped_count()` slice; changed `ac: AttributePair::new(0)` → `ac: AttributePair::new(AC_DEFAULT)` in `Character::new()`; updated `test_equipment_count` |
+| `src/domain/items/equipment_validation.rs` | Added `impl EquipmentSlot { fn for_item(...) }` (in same crate, separate module to avoid circular dependency); added `calculate_armor_class(equipment, item_db) -> u8`; added 5 new AC tests                                                                                            |
+| `src/domain/items/mod.rs`                  | Re-exported `calculate_armor_class`                                                                                                                                                                                                                                                     |
+| `src/domain/transactions.rs`               | Added imports (`EquipmentSlot`, `ClassDatabase`, `RaceDatabase`, `EquipError`, `calculate_armor_class`, `can_equip_item`); added `equip_item` (returns `Result<(), EquipError>`); added `unequip_item` (returns `Result<(), TransactionError>`); added 12 new tests                     |
+
+### Design Decisions
+
+- **`EquipmentSlot::for_item` placement**: `character.rs` already imports
+  `character::Alignment` from `items::types`, so adding an `Item` import in
+  `character.rs` would create a circular dependency. The method is instead
+  added via an `impl EquipmentSlot` block in `equipment_validation.rs`, which
+  already imports both worlds. This is valid Rust — inherent impl blocks for a
+  type in the same crate can live in any module.
+
+- **`equip_item` return type `Result<(), EquipError>`**: The plan permits
+  either `EquipError` directly or wrapping in `TransactionError::EquipFailed`.
+  Since all equip-side test assertions check `EquipError` variants and the
+  existing `can_equip_item` already surfaces `EquipError`, returning it directly
+  avoids an unnecessary wrapping layer and keeps callers' pattern-matches
+  concise.
+
+- **`unequip_item` `character_id` in `InventoryFull`**: `unequip_item` does not
+  accept a `character_id` parameter (per plan signature), so the
+  `InventoryFull { character_id: 0 }` sentinel is used. Tests only check the
+  variant, not the field value.
+
+- **Atomicity in `equip_item`**: The item is removed from inventory (step 6)
+  before the equipment slot is written (step 7). This means there is always
+  a free inventory slot when the displaced item is written back in step 8.
+  The explicit rollback path in step 8 (theoretically unreachable under normal
+  conditions) re-inserts the removed slot and restores the equipment slot to
+  its previous value.
+
+- **`AC_DEFAULT` in `Character::new()`**: Corrected from `0` to `AC_DEFAULT`
+  (10) so an unarmed, unarmoured fresh character correctly starts with AC 10,
+  consistent with the success criterion.
+
+### New Tests (17 total)
+
+| Test                                                  | Location               |
+| ----------------------------------------------------- | ---------------------- |
+| `test_calculate_ac_no_armor`                          | `equipment_validation` |
+| `test_calculate_ac_body_armor_only`                   | `equipment_validation` |
+| `test_calculate_ac_all_slots`                         | `equipment_validation` |
+| `test_calculate_ac_clamps_to_max`                     | `equipment_validation` |
+| `test_calculate_ac_missing_item_id_skips_slot`        | `equipment_validation` |
+| `test_equip_item_weapon_moves_from_inventory_to_slot` | `transactions`         |
+| `test_equip_item_swaps_old_weapon_back_to_inventory`  | `transactions`         |
+| `test_equip_item_armor_updates_ac`                    | `transactions`         |
+| `test_equip_item_helmet_routes_to_helmet_slot`        | `transactions`         |
+| `test_equip_item_boots_routes_to_boots_slot`          | `transactions`         |
+| `test_equip_item_invalid_class_returns_error`         | `transactions`         |
+| `test_equip_item_out_of_bounds_returns_error`         | `transactions`         |
+| `test_equip_item_non_equipable_item_returns_error`    | `transactions`         |
+| `test_unequip_item_moves_to_inventory`                | `transactions`         |
+| `test_unequip_item_reduces_ac`                        | `transactions`         |
+| `test_unequip_item_empty_slot_is_noop`                | `transactions`         |
+| `test_unequip_item_inventory_full_returns_error`      | `transactions`         |
+
+### Quality Gates
+
+```text
+cargo fmt         → No output (all files formatted)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 3546 tests run: 3546 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Phase 1: ArmorClassification Expansion (Complete)
+
+### Summary
+
+Expanded `ArmorClassification` with two new variants (`Helmet` and `Boots`),
+extended the proficiency mapping, made the equipment-slot routing match
+exhaustive, migrated all three RON item data files, and added SDK validation
+that enforces slot-type integrity at campaign-pack time.
+
+### Files Changed
+
+| File                                       | Change                                                                                                                                                                                                      |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/items/types.rs`                | Added `Helmet` and `Boots` variants to `ArmorClassification`; updated doc example                                                                                                                           |
+| `src/domain/proficiency.rs`                | Extended `proficiency_for_armor` match with `Helmet => "light_armor"` and `Boots => "light_armor"`; updated doctest and added two dedicated test functions                                                  |
+| `src/domain/items/equipment_validation.rs` | Replaced blanket `ItemType::Armor(_) => true` arm with exhaustive `ArmorClassification` match; added 6 new unit tests                                                                                       |
+| `src/domain/visual/item_mesh.rs`           | Added `Helmet` and `Boots` arms to `from_armor`; added both variants to the all-classifications test array                                                                                                  |
+| `src/bin/item_editor.rs`                   | Added options `[5] Helmet` and `[6] Boots` to `select_armor_classification`                                                                                                                                 |
+| `src/sdk/validation.rs`                    | Added `HelmetSlotTypeMismatch` and `BootsSlotTypeMismatch` `ValidationError` variants (both `Error` severity); added validation logic in `validate_character_references`; added 3 new SDK integration tests |
+| `src/sdk/error_formatter.rs`               | Added `get_suggestions` arms for `HelmetSlotTypeMismatch` and `BootsSlotTypeMismatch`                                                                                                                       |
+| `tests/proficiency_integration_test.rs`    | Extended `get_armor_proficiency` helper with `Helmet` and `Boots` arms                                                                                                                                      |
+| `data/items.ron`                           | Added Iron Helmet (id 25, `classification: Helmet`) and Leather Boots (id 26, `classification: Boots`)                                                                                                      |
+| `data/test_campaign/data/items.ron`        | Same two items added — required by Phase 2 tests                                                                                                                                                            |
+| `campaigns/tutorial/data/items.ron`        | Same two items added — live campaign kept in sync                                                                                                                                                           |
+
+### Design Decisions
+
+- **Proficiency mapping**: Both `Helmet` and `Boots` map to `"light_armor"`.
+  Headgear and footwear are universally lightweight and do not warrant their
+  own proficiency tracks; any class or race that can wear light armour can wear
+  them. This matches the Might and Magic 1 design where helmets and boots are
+  accessible to all adventurers.
+
+- **IDs 25 and 26**: The plan suggested IDs 50/51, but those were already
+  occupied by potions in every data file. IDs 25 and 26 are the next free
+  slots in the armor ID block (20–29) and are available across all three item
+  data files.
+
+- **Exhaustive match in `has_slot_for_item`**: All six `ArmorClassification`
+  arms return `true` because the function checks whether a slot _type_ exists,
+  not whether it is vacant. The exhaustive form guarantees any future
+  classification variant causes a compile-time error rather than silently
+  defaulting to an incorrect value.
+
+- **SDK validation severity**: `HelmetSlotTypeMismatch` and
+  `BootsSlotTypeMismatch` are `Error`-severity (not `Warning`) because placing
+  the wrong item type in a dedicated slot is always a data-authoring bug, not
+  an intentional design choice.
+
+### New Tests (11 total)
+
+| Test                                                    | Location               |
+| ------------------------------------------------------- | ---------------------- |
+| `test_armor_classification_helmet_variant_exists`       | `equipment_validation` |
+| `test_armor_classification_boots_variant_exists`        | `equipment_validation` |
+| `test_has_slot_for_helmet_item`                         | `equipment_validation` |
+| `test_has_slot_for_boots_item`                          | `equipment_validation` |
+| `test_can_equip_helmet_succeeds`                        | `equipment_validation` |
+| `test_can_equip_boots_succeeds`                         | `equipment_validation` |
+| `test_proficiency_for_armor_helmet_maps_to_light_armor` | `proficiency`          |
+| `test_proficiency_for_armor_boots_maps_to_light_armor`  | `proficiency`          |
+| `test_sdk_validation_helmet_in_wrong_slot_fails`        | `sdk::validation`      |
+| `test_sdk_validation_boots_in_wrong_slot_fails`         | `sdk::validation`      |
+| `test_sdk_validation_correct_helmet_passes`             | `sdk::validation`      |
+
+### Quality Gates
+
+```text
+cargo fmt         → No output (all files formatted)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 3529 tests run: 3529 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Item Mesh Editor — Registry Loading Fix (Complete)
 
 ### Problem

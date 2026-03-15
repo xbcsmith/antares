@@ -36,8 +36,8 @@
 //! ```
 
 use crate::ui_helpers::{
-    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout,
+    handle_reload, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::Item;
@@ -445,33 +445,12 @@ impl ProficienciesEditorState {
                 }
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(proficiencies_file);
-                    if path.exists() {
-                        match std::fs::read_to_string(&path) {
-                            Ok(contents) => {
-                                match ron::from_str::<Vec<ProficiencyDefinition>>(&contents) {
-                                    Ok(loaded_proficiencies) => {
-                                        *proficiencies = loaded_proficiencies;
-                                        *status_message = format!(
-                                            "Loaded proficiencies from: {}",
-                                            path.display()
-                                        );
-                                    }
-                                    Err(e) => {
-                                        *status_message =
-                                            format!("Failed to parse proficiencies: {}", e)
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to read proficiencies: {}", e)
-                            }
-                        }
-                    } else {
-                        *status_message = "Proficiencies file does not exist".to_string();
-                    }
-                }
+                handle_reload(
+                    proficiencies,
+                    campaign_dir,
+                    proficiencies_file,
+                    status_message,
+                );
             }
             ToolbarAction::None => {}
         }

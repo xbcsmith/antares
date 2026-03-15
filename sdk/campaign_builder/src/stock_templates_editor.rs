@@ -358,6 +358,23 @@ pub struct StockTemplatesEditorState {
     #[serde(skip)]
     pub needs_initial_load: bool,
 
+    /// Whether `load_from_file` has successfully populated `templates` at
+    /// least once since the last `reset_for_new_campaign` call.
+    ///
+    /// This flag is the primary guard in `do_save_campaign`: stock templates
+    /// are only written back to disk if this flag is `true` **or** the user
+    /// has made explicit in-editor changes (`has_unsaved_changes`).  Without
+    /// the guard, the default empty `Vec` that exists before any file is
+    /// loaded would overwrite a valid on-disk file with `[]` the first time
+    /// the user triggers a campaign save — which is the root cause of the
+    /// repeated stock-template wipe bug.
+    ///
+    /// Reset to `false` by `reset_for_new_campaign`; set to `true` by a
+    /// successful `load_from_file`.  Skipped on serde so it always starts
+    /// as `false` on app restart, forcing a reload before any save.
+    #[serde(skip)]
+    pub loaded_from_file: bool,
+
     /// Item database snapshot for name lookups. Refreshed from the caller on
     /// every `show()` call (skipped on serde).
     #[serde(skip)]
@@ -379,6 +396,7 @@ impl Default for StockTemplatesEditorState {
             last_campaign_dir: None,
             last_templates_file: None,
             needs_initial_load: true,
+            loaded_from_file: false,
             available_items: Vec::new(),
         }
     }
@@ -484,6 +502,9 @@ impl StockTemplatesEditorState {
         self.validation_warnings.clear();
         self.show_delete_confirm = false;
         self.needs_initial_load = true;
+        // Clear the load-guard so a save cannot overwrite the file with an
+        // empty list before the new campaign's templates have been read.
+        self.loaded_from_file = false;
         // Preserve last_campaign_dir / last_templates_file / available_items —
         // they are refreshed from the caller on the next show() call anyway.
     }
@@ -1354,6 +1375,11 @@ impl StockTemplatesEditorState {
 
         self.templates = templates;
         self.selected_template = None;
+        // Mark that in-memory templates are now backed by the on-disk file.
+        // `do_save_campaign` uses this flag to decide whether it is safe to
+        // write back — preventing an empty default Vec from overwriting a
+        // valid file before any load has occurred.
+        self.loaded_from_file = true;
         Ok(())
     }
 
@@ -1874,6 +1900,62 @@ mod tests {
     }
 
     // ── load_from_file clears needs_initial_load indirectly ──────────────────
+
+    // ── loaded_from_file guard (wipe-prevention fix) ─────────────────────────
+
+    #[test]
+    fn test_loaded_from_file_is_false_on_default() {
+        // The guard must start as false so that do_save_campaign cannot
+        // overwrite an on-disk file with [] before any load has occurred.
+        let state = StockTemplatesEditorState::default();
+        assert!(
+            !state.loaded_from_file,
+            "loaded_from_file must start as false to prevent premature overwrites"
+        );
+    }
+
+    #[test]
+    fn test_load_from_file_sets_loaded_from_file_true() {
+        // After a successful load, the guard must be true so that
+        // do_save_campaign is permitted to write the file back.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("npc_stock_templates.ron");
+
+        // Create a valid file with one template.
+        let mut writer = StockTemplatesEditorState::default();
+        writer.templates.push(make_template("guard_test"));
+        writer.save_to_file(&path).expect("save");
+
+        let mut reader = StockTemplatesEditorState::default();
+        assert!(!reader.loaded_from_file, "starts false");
+        reader.load_from_file(&path).expect("load");
+        assert!(
+            reader.loaded_from_file,
+            "loaded_from_file must be true after a successful load_from_file call"
+        );
+    }
+
+    #[test]
+    fn test_reset_for_new_campaign_clears_loaded_from_file() {
+        // reset_for_new_campaign must clear the guard so that a stale loaded
+        // state from a previous campaign cannot allow writes for a freshly
+        // opened campaign whose templates have not yet been read from disk.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("npc_stock_templates.ron");
+
+        let mut state = StockTemplatesEditorState::default();
+        state.templates.push(make_template("reset_guard_test"));
+        state.save_to_file(&path).expect("save");
+        state.load_from_file(&path).expect("load");
+        assert!(state.loaded_from_file, "loaded after load_from_file");
+
+        state.reset_for_new_campaign();
+
+        assert!(
+            !state.loaded_from_file,
+            "loaded_from_file must be false after reset_for_new_campaign"
+        );
+    }
 
     #[test]
     fn test_load_from_file_does_not_mutate_needs_initial_load() {

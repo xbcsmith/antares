@@ -17,8 +17,8 @@
 //! - Quest validation and preview
 
 use crate::ui_helpers::{
-    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout,
+    handle_reload, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
@@ -1151,27 +1151,7 @@ impl QuestEditorState {
                 }
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let quests_path = dir.join(quests_file);
-                    if quests_path.exists() {
-                        match std::fs::read_to_string(&quests_path) {
-                            Ok(contents) => match ron::from_str::<Vec<Quest>>(&contents) {
-                                Ok(loaded_quests) => {
-                                    *quests = loaded_quests;
-                                    *status_message = format!("Reloaded {} quests", quests.len());
-                                }
-                                Err(e) => {
-                                    *status_message = format!("Failed to parse quests: {}", e);
-                                }
-                            },
-                            Err(e) => {
-                                *status_message = format!("Failed to read quests file: {}", e);
-                            }
-                        }
-                    } else {
-                        *status_message = "Quests file does not exist".to_string();
-                    }
-                }
+                handle_reload(quests, campaign_dir, quests_file, status_message);
             }
             ToolbarAction::None => {}
         }

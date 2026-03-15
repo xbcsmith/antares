@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{
-    autocomplete_condition_selector, show_standard_list_item, EditorToolbar, ItemAction,
-    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    autocomplete_condition_selector, handle_reload, show_standard_list_item, EditorToolbar,
+    ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::conditions::ConditionDefinition;
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
@@ -178,26 +178,7 @@ impl SpellsEditorState {
                 }
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(spells_file);
-                    if path.exists() {
-                        match std::fs::read_to_string(&path) {
-                            Ok(contents) => match ron::from_str::<Vec<Spell>>(&contents) {
-                                Ok(loaded_spells) => {
-                                    *spells = loaded_spells;
-                                    *status_message =
-                                        format!("Loaded spells from: {}", path.display());
-                                }
-                                Err(e) => {
-                                    *status_message = format!("Failed to parse spells: {}", e)
-                                }
-                            },
-                            Err(e) => *status_message = format!("Failed to read spells: {}", e),
-                        }
-                    } else {
-                        *status_message = "Spells file does not exist".to_string();
-                    }
-                }
+                handle_reload(spells, campaign_dir, spells_file, status_message);
             }
             ToolbarAction::None => {}
         }

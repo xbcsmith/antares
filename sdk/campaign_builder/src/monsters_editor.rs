@@ -3,8 +3,9 @@
 
 use crate::creature_assets::CreatureAssetManager;
 use crate::ui_helpers::{
-    show_standard_list_item, AttributePair16Input, AttributePairInput, EditorToolbar, ItemAction,
-    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    handle_reload, show_standard_list_item, AttributePair16Input, AttributePairInput,
+    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
+    TwoColumnLayout,
 };
 use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
@@ -215,28 +216,7 @@ impl MonstersEditorState {
                 }
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(monsters_file);
-                    if path.exists() {
-                        match std::fs::read_to_string(&path) {
-                            Ok(contents) => {
-                                match ron::from_str::<Vec<MonsterDefinition>>(&contents) {
-                                    Ok(loaded_monsters) => {
-                                        *monsters = loaded_monsters;
-                                        *status_message =
-                                            format!("Loaded monsters from: {}", path.display());
-                                    }
-                                    Err(e) => {
-                                        *status_message = format!("Failed to parse monsters: {}", e)
-                                    }
-                                }
-                            }
-                            Err(e) => *status_message = format!("Failed to read monsters: {}", e),
-                        }
-                    } else {
-                        *status_message = "Monsters file does not exist".to_string();
-                    }
-                }
+                handle_reload(monsters, campaign_dir, monsters_file, status_message);
             }
             ToolbarAction::None => {}
         }

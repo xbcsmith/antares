@@ -3258,11 +3258,20 @@ impl CampaignBuilderApp {
             }
 
             let stock_templates_path = dir.join(&self.campaign.stock_templates_file);
-            if let Err(e) = self
-                .stock_templates_editor_state
-                .save_to_file(&stock_templates_path)
-            {
-                save_warnings.push(format!("StockTemplates: {}", e));
+            // Guard: only write stock templates if they were successfully loaded
+            // from disk during this session OR the user made explicit in-editor
+            // changes.  An empty Vec that was never backed by a real file must
+            // NOT overwrite an existing file with `[]` — that is the root cause
+            // of the repeated stock-template wipe bug.
+            let should_save_templates = self.stock_templates_editor_state.loaded_from_file
+                || self.stock_templates_editor_state.has_unsaved_changes;
+            if should_save_templates {
+                if let Err(e) = self
+                    .stock_templates_editor_state
+                    .save_to_file(&stock_templates_path)
+                {
+                    save_warnings.push(format!("StockTemplates: {}", e));
+                }
             }
         }
 
@@ -4766,6 +4775,11 @@ impl eframe::App for CampaignBuilderApp {
                 ) {
                     if msg == creatures_editor::OPEN_CREATURE_TEMPLATES_SENTINEL {
                         self.show_creature_template_browser = true;
+                    } else if msg == creatures_editor::RELOAD_CREATURES_SENTINEL {
+                        // User pressed Reload in the Creatures toolbar.  The editor
+                        // cannot perform the two-step registry → per-file load itself,
+                        // so it returns a sentinel and we call load_creatures() here.
+                        self.load_creatures();
                     } else {
                         self.status_message = msg;
                     }
@@ -4905,6 +4919,13 @@ impl eframe::App for CampaignBuilderApp {
                     npc_creature_manager.as_ref(),
                 ) {
                     self.unsaved_changes = true;
+                }
+
+                // Forward any status message produced inside show() (e.g. Reload result)
+                // to the app's global status bar.  The NPC editor returns bool rather than
+                // a status string, so it uses pending_status as a side-channel.
+                if let Some(status) = self.npc_editor_state.pending_status.take() {
+                    self.status_message = status;
                 }
 
                 // If the NPC editor requested cross-tab navigation to edit a stock template,
@@ -7281,6 +7302,101 @@ mod tests {
         let result = app.save_campaign();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), CampaignError::NoPath));
+    }
+
+    // ── Stock-template wipe-prevention regression test ────────────────────────
+    //
+    // Root cause: `do_save_campaign` was calling `save_to_file` unconditionally,
+    // so the default empty `Vec<MerchantStockTemplate>` (present before any load)
+    // was written to disk as `[]`, wiping whatever the file contained.
+    //
+    // Fix: the save is now guarded by `loaded_from_file || has_unsaved_changes`.
+    // This test confirms the guard holds: a campaign save with templates that
+    // were *never loaded* must not touch the on-disk file.
+    #[test]
+    fn test_do_save_campaign_does_not_overwrite_stock_templates_when_not_loaded() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("tempdir");
+        let campaign_path = dir.path().join("campaign.ron");
+
+        // --- Write a minimal valid campaign.ron ---
+        let campaign_ron = r#"CampaignConfig(
+    id: "wipe_test",
+    name: "Wipe Test",
+    version: "0.1.0",
+    author: "Tester",
+    description: "",
+    engine_version: "0.1.0",
+    starting_map: "map_1",
+    starting_position: (0, 0),
+    starting_direction: "North",
+    starting_gold: 100,
+    starting_food: 10,
+    starting_innkeeper: "",
+    max_party_size: 6,
+    max_roster_size: 20,
+    difficulty: Normal,
+    permadeath: false,
+    allow_multiclassing: false,
+    starting_level: 1,
+    max_level: 20,
+    items_file: "data/items.ron",
+    spells_file: "data/spells.ron",
+    monsters_file: "data/monsters.ron",
+    classes_file: "data/classes.ron",
+    races_file: "data/races.ron",
+    npcs_file: "data/npcs.ron",
+    maps_file: "data/maps.ron",
+    characters_file: "data/characters.ron",
+    conditions_file: "data/conditions.ron",
+    quests_file: "data/quests.ron",
+    dialogue_file: "data/dialogues.ron",
+    proficiencies_file: "data/proficiencies.ron",
+    creatures_file: "data/creatures.ron",
+    stock_templates_file: "data/npc_stock_templates.ron",
+    starting_time: GameTime(year: 1, month: 1, day: 1, hour: 8, minute: 0),
+)"#;
+        std::fs::write(&campaign_path, campaign_ron).expect("write campaign.ron");
+
+        // --- Write a non-empty stock-templates file ---
+        let data_dir = dir.path().join("data");
+        std::fs::create_dir_all(&data_dir).expect("create data dir");
+        let templates_path = data_dir.join("npc_stock_templates.ron");
+        let original_content = r#"[MerchantStockTemplate(id:"sentinel_template",entries:[],magic_item_pool:[],magic_slot_count:0,magic_refresh_days:7)]"#;
+        std::fs::write(&templates_path, original_content).expect("write templates");
+
+        // --- Build app state that mirrors "opened campaign, never visited
+        //     Stock Templates tab, stock_templates_editor_state.loaded_from_file = false" ---
+        let mut app = CampaignBuilderApp::default();
+        app.campaign_path = Some(campaign_path.clone());
+        app.campaign_dir = Some(dir.path().to_path_buf());
+        // stock_templates_editor_state starts with loaded_from_file = false
+        // and templates = Vec::new() — the exact pre-bug state.
+        assert!(
+            !app.stock_templates_editor_state.loaded_from_file,
+            "loaded_from_file must be false before any load"
+        );
+        assert!(
+            app.stock_templates_editor_state.templates.is_empty(),
+            "templates must be empty before any load"
+        );
+
+        // --- Trigger the campaign save ---
+        // We use do_save_campaign directly because save_campaign checks for a
+        // valid campaign_path (already set above).  The RON parse for the
+        // minimal campaign.ron above may fail due to missing fields; we only
+        // care that the stock-templates file is untouched.
+        let _ = app.do_save_campaign();
+
+        // --- Assert the stock-templates file was NOT overwritten ---
+        let on_disk = std::fs::read_to_string(&templates_path).expect("read back");
+        assert_eq!(
+            on_disk, original_content,
+            "do_save_campaign must not overwrite npc_stock_templates.ron \
+             when loaded_from_file = false and has_unsaved_changes = false"
+        );
     }
 
     #[test]

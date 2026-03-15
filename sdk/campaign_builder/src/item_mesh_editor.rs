@@ -25,7 +25,9 @@ use crate::item_mesh_undo_redo::{ItemMeshEditAction, ItemMeshUndoRedo};
 use crate::item_mesh_workflow::{ItemMeshEditorMode, ItemMeshWorkflow};
 use crate::keyboard_shortcuts::ShortcutManager;
 use crate::preview_renderer::PreviewRenderer;
-use crate::ui_helpers::TwoColumnLayout;
+use crate::ui_helpers::{
+    show_standard_list_item, ItemAction, MetadataBadge, StandardListItemConfig, TwoColumnLayout,
+};
 use antares::domain::visual::item_mesh::{ItemMeshCategory, ItemMeshDescriptor};
 use antares::domain::visual::CreatureDefinition;
 use eframe::egui;
@@ -77,6 +79,7 @@ pub enum ItemMeshRegistrySortBy {
 ///         emissive_color: [0.0, 0.0, 0.0],
 ///         scale: 1.0,
 ///     },
+///     native_creature_def: None,
 /// };
 /// assert_eq!(entry.name, "Iron Sword");
 /// ```
@@ -90,6 +93,17 @@ pub struct ItemMeshEntry {
     pub file_path: String,
     /// The descriptor loaded from (or about to be saved to) `file_path`.
     pub descriptor: ItemMeshDescriptor,
+    /// The original [`CreatureDefinition`] loaded from disk when the asset file
+    /// was in `CreatureDefinition` format (e.g. an OBJ imported as RON or a
+    /// hand-crafted mesh authored outside the SDK editor).
+    ///
+    /// When `Some`, [`sync_preview_renderer_from_descriptor`] uses this
+    /// definition directly so custom vertex geometry is faithfully shown in the
+    /// preview instead of the procedurally-generated approximation.
+    ///
+    /// `None` for entries whose disk file is in `ItemMeshDescriptor` format or
+    /// for entries that were created (not imported) inside the SDK editor.
+    pub native_creature_def: Option<CreatureDefinition>,
 }
 
 /// Signal emitted by [`ItemMeshEditorState::show`] to request cross-tab
@@ -338,11 +352,16 @@ impl ItemMeshEditorState {
                     category: descriptor.category,
                     file_path: rel_path,
                     descriptor,
+                    native_creature_def: None,
                 });
                 continue;
             }
 
-            // ── Attempt 2: CreatureDefinition (game/legacy format) ────────
+            // ── Attempt 2: CreatureDefinition (game-engine / imported-OBJ format) ──
+            // This is the canonical on-disk format used by the game engine.
+            // We derive a simplified ItemMeshDescriptor for the editor controls
+            // while storing the full CreatureDefinition so the preview can show
+            // the real custom geometry instead of a procedural approximation.
             if let Ok(def) = ron::de::from_str::<CreatureDefinition>(&content) {
                 let category = Self::infer_category_from_path(&full_path);
                 let primary_color = def
@@ -375,6 +394,7 @@ impl ItemMeshEditorState {
                     category,
                     file_path: rel_path,
                     descriptor,
+                    native_creature_def: Some(def),
                 });
             }
         }
@@ -498,6 +518,7 @@ impl ItemMeshEditorState {
     ///         emissive_color: [0.0, 0.0, 0.0],
     ///         scale: 1.0,
     ///     },
+    ///     native_creature_def: None,
     /// });
     /// state.open_for_editing(0);
     /// assert!(state.edit_buffer.is_some());
@@ -538,6 +559,7 @@ impl ItemMeshEditorState {
     ///         emissive_color: [0.0, 0.0, 0.0],
     ///         scale: 1.0,
     ///     },
+    ///     native_creature_def: None,
     /// });
     /// state.open_for_editing(0);
     /// state.back_to_registry();
@@ -702,6 +724,7 @@ impl ItemMeshEditorState {
     ///         emissive_color: [0.0, 0.0, 0.0],
     ///         scale: 1.0,
     ///     },
+    ///     native_creature_def: None,
     /// });
     /// state.open_for_editing(0);
     /// state.refresh_validation_state();
@@ -790,6 +813,7 @@ impl ItemMeshEditorState {
     ///         emissive_color: [0.0, 0.0, 0.0],
     ///         scale: 1.0,
     ///     },
+    ///     native_creature_def: None,
     /// });
     /// state.selected_entry = Some(0);
     /// assert_eq!(state.default_save_as_path(), "assets/items/iron_sword.ron");
@@ -835,6 +859,7 @@ impl ItemMeshEditorState {
     ///         emissive_color: [0.0, 0.0, 0.0],
     ///         scale: 1.0,
     ///     },
+    ///     native_creature_def: None,
     /// });
     /// state.open_for_editing(0);
     /// let result = state.perform_save_as_with_path(
@@ -870,7 +895,26 @@ impl ItemMeshEditorState {
             .clone();
 
         // Serialize to RON.
-        let ron_text = ron::ser::to_string_pretty(&descriptor, ron::ser::PrettyConfig::default())
+        //
+        // Always write CreatureDefinition format so the game engine's
+        // CreatureDatabase::load_from_registry can load the file directly.
+        //
+        // If the entry being edited originated from a hand-crafted
+        // CreatureDefinition (e.g. an imported OBJ), we reuse its geometry but
+        // propagate the current descriptor's scale so any SDK scale edits are
+        // preserved.  For procedural-only entries we generate the mesh from the
+        // descriptor.
+        let mut creature_def = if let Some(idx) = self.selected_entry {
+            self.registry
+                .get(idx)
+                .and_then(|e| e.native_creature_def.clone())
+                .unwrap_or_else(|| descriptor.to_creature_definition())
+        } else {
+            descriptor.to_creature_definition()
+        };
+        // Propagate scale edits from the descriptor so SDK changes are visible.
+        creature_def.scale = descriptor.scale;
+        let ron_text = ron::ser::to_string_pretty(&creature_def, ron::ser::PrettyConfig::default())
             .map_err(|e| format!("RON serialization failed: {}", e))?;
 
         // Write to disk.
@@ -901,11 +945,14 @@ impl ItemMeshEditorState {
             .join(" ");
 
         // Append new entry to registry.
+        // native_creature_def is None for newly saved entries: the descriptor
+        // is the source of truth and the file was just written from it.
         self.registry.push(ItemMeshEntry {
             name: cap_name,
             category: descriptor.category,
             file_path: path.to_string(),
             descriptor,
+            native_creature_def: None,
         });
 
         // Update workflow file reference and mark clean.
@@ -975,10 +1022,16 @@ impl ItemMeshEditorState {
             }
         };
 
-        // Try to deserialize as ItemMeshDescriptor.
-        if let Err(e) = ron::de::from_str::<ItemMeshDescriptor>(&content) {
-            self.register_asset_error =
-                Some(format!("Invalid ItemMeshDescriptor in '{}': {}", path, e));
+        // Accept either ItemMeshDescriptor format (legacy/editor-authored) or
+        // CreatureDefinition format (game-engine canonical / imported-OBJ).
+        // Reject the file only if neither can be parsed.
+        let is_descriptor = ron::de::from_str::<ItemMeshDescriptor>(&content).is_ok();
+        let is_creature_def = ron::de::from_str::<CreatureDefinition>(&content).is_ok();
+        if !is_descriptor && !is_creature_def {
+            self.register_asset_error = Some(format!(
+                "'{}' is not a valid ItemMeshDescriptor or CreatureDefinition",
+                path
+            ));
             return false;
         }
 
@@ -1016,8 +1069,45 @@ impl ItemMeshEditorState {
         let content = std::fs::read_to_string(&full_path)
             .map_err(|e| format!("Cannot read '{}': {}", full_path.display(), e))?;
 
-        let descriptor: ItemMeshDescriptor =
-            ron::de::from_str(&content).map_err(|e| format!("Invalid descriptor: {}", e))?;
+        // Try ItemMeshDescriptor first (editor-authored format), then fall back
+        // to CreatureDefinition (game-engine / imported-OBJ format).
+        let (descriptor, native_creature_def) =
+            if let Ok(desc) = ron::de::from_str::<ItemMeshDescriptor>(&content) {
+                (desc, None)
+            } else if let Ok(def) = ron::de::from_str::<CreatureDefinition>(&content) {
+                let category = Self::infer_category_from_path(&full_path);
+                let primary_color = def
+                    .meshes
+                    .first()
+                    .map(|m| m.color)
+                    .unwrap_or([0.7, 0.7, 0.7, 1.0]);
+                let accent_color = def
+                    .meshes
+                    .get(1)
+                    .map(|m| m.color)
+                    .unwrap_or([0.5, 0.3, 0.1, 1.0]);
+                let emissive = def
+                    .meshes
+                    .first()
+                    .and_then(|m| m.material.as_ref())
+                    .and_then(|mat| mat.emissive)
+                    .is_some();
+                let desc = ItemMeshDescriptor {
+                    category,
+                    blade_length: 0.5,
+                    primary_color,
+                    accent_color,
+                    emissive,
+                    emissive_color: [0.0, 0.0, 0.0],
+                    scale: def.scale,
+                };
+                (desc, Some(def))
+            } else {
+                return Err(format!(
+                    "'{}' is not a valid ItemMeshDescriptor or CreatureDefinition",
+                    path
+                ));
+            };
 
         let stem = full_path
             .file_stem()
@@ -1041,6 +1131,7 @@ impl ItemMeshEditorState {
             category: descriptor.category,
             file_path: path,
             descriptor,
+            native_creature_def,
         });
 
         Ok(())
@@ -1076,6 +1167,7 @@ impl ItemMeshEditorState {
     ///     category: ItemMeshCategory::Sword,
     ///     file_path: "assets/items/sword.ron".to_string(),
     ///     descriptor: desc.clone(),
+    ///     native_creature_def: None,
     /// });
     /// state.open_for_editing(0);
     ///
@@ -1116,8 +1208,26 @@ impl ItemMeshEditorState {
     /// Creates the renderer on first call if it doesn't exist.  Clears
     /// `preview_dirty` after synchronization.
     fn sync_preview_renderer_from_descriptor(&mut self) {
-        if let Some(desc) = &self.edit_buffer {
-            let creature_def = desc.to_creature_definition();
+        // If the selected entry has a native CreatureDefinition (imported OBJ
+        // or hand-crafted mesh), use that for the preview so the user sees the
+        // real custom geometry instead of a procedural approximation.
+        // Otherwise, generate the mesh from the descriptor in the edit buffer.
+        let creature_def = if let Some(idx) = self.selected_entry {
+            self.registry
+                .get(idx)
+                .and_then(|e| e.native_creature_def.clone())
+                .or_else(|| {
+                    self.edit_buffer
+                        .as_ref()
+                        .map(|d| d.to_creature_definition())
+                })
+        } else {
+            self.edit_buffer
+                .as_ref()
+                .map(|d| d.to_creature_definition())
+        };
+
+        if let Some(creature_def) = creature_def {
             if let Some(renderer) = &mut self.preview_renderer {
                 renderer.update_creature(Some(creature_def));
             } else {
@@ -1345,7 +1455,8 @@ impl ItemMeshEditorState {
         #[derive(Clone)]
         struct RowData {
             real_idx: usize,
-            label: String,
+            name: String,
+            category: ItemMeshCategory,
             is_selected: bool,
         }
         let row_data: Vec<RowData> = filtered
@@ -1354,7 +1465,8 @@ impl ItemMeshEditorState {
                 let entry = &self.registry[real_idx];
                 RowData {
                     real_idx,
-                    label: format!("[{:?}] {}", entry.category, entry.name),
+                    name: entry.name.clone(),
+                    category: entry.category,
                     is_selected: self.selected_entry == Some(real_idx),
                 }
             })
@@ -1557,41 +1669,37 @@ impl ItemMeshEditorState {
                             let real_idx = row.real_idx;
                             // sdk/AGENTS.md Rule 1: push_id in every loop body.
                             ui.push_id(display_idx, |ui| {
-                                let resp = ui.selectable_label(row.is_selected, &row.label);
+                                let badge = item_mesh_category_badge(row.category);
+                                let config = StandardListItemConfig::new(&row.name)
+                                    .with_badges(vec![badge])
+                                    .selected(row.is_selected);
 
-                                if resp.clicked() {
+                                let (clicked, ctx_action) = show_standard_list_item(ui, config);
+
+                                if clicked {
                                     pending_select = Some(real_idx);
                                     ui.ctx().request_repaint();
                                 }
-                                if resp.double_clicked() {
-                                    left_open_edit = Some(real_idx);
-                                    ui.ctx().request_repaint();
-                                }
 
-                                resp.context_menu(|ui| {
-                                    if ui.button("✏️ Edit").clicked() {
+                                match ctx_action {
+                                    ItemAction::Edit => {
                                         left_open_edit = Some(real_idx);
-                                        ui.close();
                                         ui.ctx().request_repaint();
                                     }
-                                    if ui.button("📋 Duplicate").clicked() {
+                                    ItemAction::Duplicate => {
                                         left_duplicate = Some(real_idx);
-                                        ui.close();
                                         ui.ctx().request_repaint();
                                     }
-                                    ui.separator();
-                                    if ui.button("🗑 Delete").clicked() {
+                                    ItemAction::Delete => {
                                         left_delete_confirm = true;
-                                        ui.close();
                                         ui.ctx().request_repaint();
                                     }
-                                    ui.separator();
-                                    if ui.button("📤 Export RON").clicked() {
+                                    ItemAction::Export => {
                                         left_export_ron = Some(real_idx);
-                                        ui.close();
                                         ui.ctx().request_repaint();
                                     }
-                                });
+                                    ItemAction::None => {}
+                                }
                             });
                         }
                     });
@@ -1719,6 +1827,7 @@ impl ItemMeshEditorState {
                     emissive_color: [0.0, 0.0, 0.0],
                     scale: 1.0,
                 },
+                native_creature_def: None,
             });
             self.selected_entry = Some(self.registry.len() - 1);
             self.preview_dirty = true;
@@ -1764,6 +1873,7 @@ impl ItemMeshEditorState {
                     category: src.category,
                     file_path: new_path,
                     descriptor: src.descriptor.clone(),
+                    native_creature_def: src.native_creature_def.clone(),
                 });
             }
             ui.ctx().request_repaint();
@@ -2355,6 +2465,37 @@ impl ItemMeshEditorState {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Left-panel badge helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Returns a [`MetadataBadge`] with the display name and color for an
+/// [`ItemMeshCategory`], used in the registry list left panel.
+fn item_mesh_category_badge(category: ItemMeshCategory) -> MetadataBadge {
+    let (label, color) = match category {
+        ItemMeshCategory::Sword => ("Sword", egui::Color32::from_rgb(180, 80, 80)),
+        ItemMeshCategory::Dagger => ("Dagger", egui::Color32::from_rgb(180, 100, 80)),
+        ItemMeshCategory::Blunt => ("Blunt", egui::Color32::from_rgb(160, 100, 60)),
+        ItemMeshCategory::Staff => ("Staff", egui::Color32::from_rgb(140, 100, 60)),
+        ItemMeshCategory::Bow => ("Bow", egui::Color32::from_rgb(160, 120, 60)),
+        ItemMeshCategory::BodyArmor => ("Body Armor", egui::Color32::from_rgb(80, 100, 180)),
+        ItemMeshCategory::Helmet => ("Helmet", egui::Color32::from_rgb(80, 120, 180)),
+        ItemMeshCategory::Shield => ("Shield", egui::Color32::from_rgb(80, 140, 180)),
+        ItemMeshCategory::Boots => ("Boots", egui::Color32::from_rgb(100, 120, 160)),
+        ItemMeshCategory::Ring => ("Ring", egui::Color32::from_rgb(200, 160, 0)),
+        ItemMeshCategory::Amulet => ("Amulet", egui::Color32::from_rgb(180, 140, 0)),
+        ItemMeshCategory::Belt => ("Belt", egui::Color32::from_rgb(160, 120, 20)),
+        ItemMeshCategory::Cloak => ("Cloak", egui::Color32::from_rgb(100, 80, 160)),
+        ItemMeshCategory::Potion => ("Potion", egui::Color32::from_rgb(80, 180, 80)),
+        ItemMeshCategory::Scroll => ("Scroll", egui::Color32::from_rgb(200, 200, 80)),
+        ItemMeshCategory::Ammo => ("Ammo", egui::Color32::from_rgb(150, 150, 150)),
+        ItemMeshCategory::QuestItem => ("Quest", egui::Color32::from_rgb(200, 160, 60)),
+    };
+    MetadataBadge::new(label)
+        .with_color(color)
+        .with_tooltip(format!("Category: {label}"))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Action application helpers (free functions)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2412,6 +2553,7 @@ mod tests {
             category: ItemMeshCategory::Sword,
             file_path: format!("assets/items/{}.ron", name.to_lowercase().replace(' ', "_")),
             descriptor: make_descriptor(1.0),
+            native_creature_def: None,
         }
     }
 
@@ -2583,6 +2725,7 @@ mod tests {
             category: ItemMeshCategory::Sword,
             file_path: "assets/items/sword.ron".to_string(),
             descriptor: make_descriptor(1.0),
+            native_creature_def: None,
         });
 
         state.register_asset_path_buffer = "assets/items/sword.ron".to_string();
@@ -2816,6 +2959,7 @@ mod tests {
             category: ItemMeshCategory::Potion,
             file_path: "assets/items/potion.ron".to_string(),
             descriptor: make_descriptor(1.0),
+            native_creature_def: None,
         });
 
         let counts = state.count_by_category();

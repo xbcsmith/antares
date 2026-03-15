@@ -219,6 +219,42 @@ pub enum ValidationError {
         /// Human-readable description of why the descriptor is invalid
         message: String,
     },
+
+    /// Item placed in `equipment.helmet` is not classified as `ArmorClassification::Helmet`
+    ///
+    /// Emitted when a character definition's `starting_equipment.helmet` references
+    /// an item whose `ArmorData.classification` is not `Helmet`.  This catches
+    /// copy-paste errors such as putting a pair of boots in the helmet slot.
+    #[error(
+        "Character '{character_id}' equipment.helmet references item {item_id} \
+         which is not classified as Helmet (got {actual_classification})"
+    )]
+    HelmetSlotTypeMismatch {
+        /// The character definition ID whose equipment was validated
+        character_id: String,
+        /// The item ID that was found in the helmet slot
+        item_id: crate::domain::types::ItemId,
+        /// String representation of the item's actual ArmorClassification
+        actual_classification: String,
+    },
+
+    /// Item placed in `equipment.boots` is not classified as `ArmorClassification::Boots`
+    ///
+    /// Emitted when a character definition's `starting_equipment.boots` references
+    /// an item whose `ArmorData.classification` is not `Boots`.  This catches
+    /// copy-paste errors such as putting a helmet in the boots slot.
+    #[error(
+        "Character '{character_id}' equipment.boots references item {item_id} \
+         which is not classified as Boots (got {actual_classification})"
+    )]
+    BootsSlotTypeMismatch {
+        /// The character definition ID whose equipment was validated
+        character_id: String,
+        /// The item ID that was found in the boots slot
+        item_id: crate::domain::types::ItemId,
+        /// String representation of the item's actual ArmorClassification
+        actual_classification: String,
+    },
 }
 
 impl ValidationError {
@@ -252,7 +288,9 @@ impl ValidationError {
             | ValidationError::CreatureMeshTopology { .. }
             | ValidationError::CreatureDuplicateMeshNames { .. }
             | ValidationError::MissingStockTemplateItem { .. }
-            | ValidationError::ItemMeshDescriptorInvalid { .. } => Severity::Error,
+            | ValidationError::ItemMeshDescriptorInvalid { .. }
+            | ValidationError::HelmetSlotTypeMismatch { .. }
+            | ValidationError::BootsSlotTypeMismatch { .. } => Severity::Error,
 
             ValidationError::DisconnectedMap { .. } | ValidationError::InvalidServiceId { .. } => {
                 Severity::Warning
@@ -473,6 +511,58 @@ impl<'a> Validator<'a> {
                         context: format!("{} starting equipment", context),
                         item_id,
                     });
+                }
+            }
+
+            // Validate helmet slot: item must have ArmorClassification::Helmet
+            if let Some(helmet_id) = character.starting_equipment.helmet {
+                if let Some(item) = self.db.items.get_item(helmet_id) {
+                    use crate::domain::items::types::{ArmorClassification, ItemType};
+                    match &item.item_type {
+                        ItemType::Armor(data)
+                            if data.classification != ArmorClassification::Helmet =>
+                        {
+                            errors.push(ValidationError::HelmetSlotTypeMismatch {
+                                character_id: character.id.clone(),
+                                item_id: helmet_id,
+                                actual_classification: format!("{:?}", data.classification),
+                            });
+                        }
+                        ItemType::Armor(_) => {} // correct classification — ok
+                        _ => {
+                            errors.push(ValidationError::HelmetSlotTypeMismatch {
+                                character_id: character.id.clone(),
+                                item_id: helmet_id,
+                                actual_classification: format!("{:?}", item.item_type),
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Validate boots slot: item must have ArmorClassification::Boots
+            if let Some(boots_id) = character.starting_equipment.boots {
+                if let Some(item) = self.db.items.get_item(boots_id) {
+                    use crate::domain::items::types::{ArmorClassification, ItemType};
+                    match &item.item_type {
+                        ItemType::Armor(data)
+                            if data.classification != ArmorClassification::Boots =>
+                        {
+                            errors.push(ValidationError::BootsSlotTypeMismatch {
+                                character_id: character.id.clone(),
+                                item_id: boots_id,
+                                actual_classification: format!("{:?}", data.classification),
+                            });
+                        }
+                        ItemType::Armor(_) => {} // correct classification — ok
+                        _ => {
+                            errors.push(ValidationError::BootsSlotTypeMismatch {
+                                character_id: character.id.clone(),
+                                item_id: boots_id,
+                                actual_classification: format!("{:?}", item.item_type),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -2424,6 +2514,274 @@ mod tests {
             ),
             "Expected InvalidServiceId for 'transmute_gold' but got: {:?}",
             warnings[0]
+        );
+    }
+
+    // ===== Phase 1: Helmet / Boots Slot Integrity Tests =====
+
+    #[test]
+    fn test_sdk_validation_helmet_in_wrong_slot_fails() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::{CharacterDefinition, StartingEquipment};
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::items::types::{ArmorClassification, ArmorData, Item, ItemType};
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add valid race and class
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add a Boots-classified item to the item database
+        let boots_item = Item {
+            id: 26,
+            name: "Leather Boots".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 2,
+                classification: ArmorClassification::Boots,
+            }),
+            base_cost: 20,
+            sell_cost: 10,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(boots_item).unwrap();
+
+        // Create a character that places the Boots item in the helmet slot — wrong!
+        let mut knight = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Sir Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        knight.starting_equipment = StartingEquipment {
+            helmet: Some(26), // Boots item in helmet slot — should fail
+            ..StartingEquipment::new()
+        };
+        db.characters.add_character(knight).unwrap();
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+
+        // Should have exactly one HelmetSlotTypeMismatch error
+        let mismatch_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::HelmetSlotTypeMismatch { .. }))
+            .collect();
+
+        assert_eq!(
+            mismatch_errors.len(),
+            1,
+            "Expected one HelmetSlotTypeMismatch error but got: {:?}",
+            errors
+        );
+
+        // Verify the error message contains the expected details
+        let err_str = mismatch_errors[0].to_string();
+        assert!(
+            err_str.contains("test_knight"),
+            "Error should mention character ID 'test_knight', got: {}",
+            err_str
+        );
+        assert!(
+            err_str.contains("Boots"),
+            "Error should mention actual classification 'Boots', got: {}",
+            err_str
+        );
+        assert_eq!(
+            mismatch_errors[0].severity(),
+            Severity::Error,
+            "HelmetSlotTypeMismatch should be Error severity"
+        );
+    }
+
+    #[test]
+    fn test_sdk_validation_boots_in_wrong_slot_fails() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::{CharacterDefinition, StartingEquipment};
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::items::types::{ArmorClassification, ArmorData, Item, ItemType};
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add valid race and class
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add a Helmet-classified item to the item database
+        let helmet_item = Item {
+            id: 25,
+            name: "Iron Helmet".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 5,
+                classification: ArmorClassification::Helmet,
+            }),
+            base_cost: 40,
+            sell_cost: 20,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(helmet_item).unwrap();
+
+        // Create a character that places the Helmet item in the boots slot — wrong!
+        let mut knight = CharacterDefinition::new(
+            "test_knight2".to_string(),
+            "Sir Test2".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        knight.starting_equipment = StartingEquipment {
+            boots: Some(25), // Helmet item in boots slot — should fail
+            ..StartingEquipment::new()
+        };
+        db.characters.add_character(knight).unwrap();
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+
+        // Should have exactly one BootsSlotTypeMismatch error
+        let mismatch_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::BootsSlotTypeMismatch { .. }))
+            .collect();
+
+        assert_eq!(
+            mismatch_errors.len(),
+            1,
+            "Expected one BootsSlotTypeMismatch error but got: {:?}",
+            errors
+        );
+
+        // Verify the error message contains the expected details
+        let err_str = mismatch_errors[0].to_string();
+        assert!(
+            err_str.contains("test_knight2"),
+            "Error should mention character ID 'test_knight2', got: {}",
+            err_str
+        );
+        assert!(
+            err_str.contains("Helmet"),
+            "Error should mention actual classification 'Helmet', got: {}",
+            err_str
+        );
+        assert_eq!(
+            mismatch_errors[0].severity(),
+            Severity::Error,
+            "BootsSlotTypeMismatch should be Error severity"
+        );
+    }
+
+    #[test]
+    fn test_sdk_validation_correct_helmet_passes() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::{CharacterDefinition, StartingEquipment};
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::items::types::{ArmorClassification, ArmorData, Item, ItemType};
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add valid race and class
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add a correctly-classified Helmet item
+        let helmet_item = Item {
+            id: 25,
+            name: "Iron Helmet".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 5,
+                classification: ArmorClassification::Helmet,
+            }),
+            base_cost: 40,
+            sell_cost: 20,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(helmet_item).unwrap();
+
+        // Character correctly places a Helmet item in the helmet slot
+        let mut knight = CharacterDefinition::new(
+            "test_knight3".to_string(),
+            "Sir Test3".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        knight.starting_equipment = StartingEquipment {
+            helmet: Some(25), // Correctly-classified Helmet item
+            ..StartingEquipment::new()
+        };
+        db.characters.add_character(knight).unwrap();
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+
+        // Should have NO HelmetSlotTypeMismatch errors
+        let mismatch_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::HelmetSlotTypeMismatch { .. }))
+            .collect();
+
+        assert!(
+            mismatch_errors.is_empty(),
+            "Expected no HelmetSlotTypeMismatch errors but got: {:?}",
+            mismatch_errors
         );
     }
 }

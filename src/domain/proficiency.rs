@@ -661,6 +661,12 @@ impl ProficiencyDatabase {
     ///
     /// let prof = ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Shield);
     /// assert_eq!(prof, "shield");
+    ///
+    /// let prof = ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Helmet);
+    /// assert_eq!(prof, "light_armor");
+    ///
+    /// let prof = ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Boots);
+    /// assert_eq!(prof, "light_armor");
     /// ```
     pub fn proficiency_for_armor(classification: ArmorClassification) -> ProficiencyId {
         match classification {
@@ -668,6 +674,8 @@ impl ProficiencyDatabase {
             ArmorClassification::Medium => "medium_armor".to_string(),
             ArmorClassification::Heavy => "heavy_armor".to_string(),
             ArmorClassification::Shield => "shield".to_string(),
+            ArmorClassification::Helmet => "light_armor".to_string(),
+            ArmorClassification::Boots => "light_armor".to_string(),
         }
     }
 
@@ -1108,6 +1116,30 @@ mod tests {
         assert_eq!(
             ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Shield),
             "shield"
+        );
+        assert_eq!(
+            ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Helmet),
+            "light_armor"
+        );
+        assert_eq!(
+            ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Boots),
+            "light_armor"
+        );
+    }
+
+    #[test]
+    fn test_proficiency_for_armor_helmet_maps_to_light_armor() {
+        assert_eq!(
+            ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Helmet),
+            "light_armor"
+        );
+    }
+
+    #[test]
+    fn test_proficiency_for_armor_boots_maps_to_light_armor() {
+        assert_eq!(
+            ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Boots),
+            "light_armor"
         );
     }
 

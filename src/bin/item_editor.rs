@@ -456,6 +456,8 @@ impl ItemEditor {
         println!("    [2] Medium (chain mail, scale)");
         println!("    [3] Heavy (plate mail, full plate)");
         println!("    [4] Shield (all shield types)");
+        println!("    [5] Helmet (headgear)");
+        println!("    [6] Boots (footwear)");
 
         let choice = self.read_input("  Classification: ");
         match choice.trim() {
@@ -463,6 +465,8 @@ impl ItemEditor {
             "2" => ArmorClassification::Medium,
             "3" => ArmorClassification::Heavy,
             "4" => ArmorClassification::Shield,
+            "5" => ArmorClassification::Helmet,
+            "6" => ArmorClassification::Boots,
             _ => ArmorClassification::Light,
         }
     }

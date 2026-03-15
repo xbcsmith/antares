@@ -32,13 +32,14 @@
 
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
-use crate::domain::character::{Inventory, PARTY_MAX_SIZE};
+use crate::domain::character::{EquipmentSlot, Inventory, PARTY_MAX_SIZE};
 use crate::domain::combat::item_usage::{validate_item_use_slot, ItemUseError};
 use crate::domain::items::consumable_usage::{
     apply_consumable_effect_exploration, ConsumableApplyResult,
 };
+use crate::domain::items::equipment_validation::EquipError;
 use crate::domain::items::types::{ConsumableEffect, ItemType};
-use crate::domain::transactions::drop_item;
+use crate::domain::transactions::{drop_item, equip_item, unequip_item, TransactionError};
 use crate::game::resources::GlobalState;
 use crate::game::systems::item_world_events::ItemDroppedEvent;
 use crate::game::systems::ui::GameLog;
@@ -53,6 +54,9 @@ use bevy_egui::{egui, EguiContexts};
 const PANEL_HEADER_H: f32 = 36.0;
 /// Height of the action button strip below the grid when a slot is selected.
 const PANEL_ACTION_H: f32 = 48.0;
+/// Height of the equipment display strip shown between the header and slot grid.
+/// Two rows of cells (weapon/armor/shield, then helmet/boots/ring/ring).
+const EQUIP_STRIP_H: f32 = 76.0;
 /// Number of slot columns in the grid inside each character panel.
 /// With MAX_ITEMS=64 and SLOT_COLS=8 the grid is 8×8.
 const SLOT_COLS: usize = 8;
@@ -83,6 +87,8 @@ impl Plugin for InventoryPlugin {
         app.add_message::<DropItemAction>()
             .add_message::<TransferItemAction>()
             .add_message::<UseItemExplorationAction>()
+            .add_message::<EquipItemAction>()
+            .add_message::<UnequipItemAction>()
             .init_resource::<InventoryNavigationState>()
             .add_systems(
                 Update,
@@ -201,6 +207,55 @@ pub struct UseItemExplorationAction {
     pub slot_index: usize,
 }
 
+// ===== Equip / Unequip Message Types =====
+
+/// Emitted when the player requests equipping an inventory item into an equipment slot.
+///
+/// Dispatched by pressing **E** while an equipable slot is highlighted in
+/// `SlotNavigation` phase, or by clicking the **Equip** button in the action
+/// strip.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::inventory_ui::EquipItemAction;
+///
+/// let action = EquipItemAction { party_index: 0, slot_index: 2 };
+/// assert_eq!(action.party_index, 0);
+/// assert_eq!(action.slot_index, 2);
+/// ```
+#[derive(Message)]
+pub struct EquipItemAction {
+    /// Party member index (0-based) whose inventory contains the item.
+    pub party_index: usize,
+    /// Slot index in that character's inventory to equip.
+    pub slot_index: usize,
+}
+
+/// Emitted when the player requests unequipping an item from an equipment slot
+/// back into inventory.
+///
+/// Dispatched by pressing **Enter** on a focused equipment strip cell, or by
+/// clicking the **Unequip** button shown below the strip.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::inventory_ui::UnequipItemAction;
+/// use antares::domain::character::EquipmentSlot;
+///
+/// let action = UnequipItemAction { party_index: 1, slot: EquipmentSlot::Weapon };
+/// assert_eq!(action.party_index, 1);
+/// assert!(matches!(action.slot, EquipmentSlot::Weapon));
+/// ```
+#[derive(Message)]
+pub struct UnequipItemAction {
+    /// Party member index (0-based) wearing the item.
+    pub party_index: usize,
+    /// Which equipment slot to clear.
+    pub slot: EquipmentSlot,
+}
+
 // ===== Panel Action =====
 
 /// Represents an action that the player has requested via the inventory UI.
@@ -271,6 +326,20 @@ pub enum PanelAction {
         /// Party index of the character receiving the item.
         to_party_index: usize,
     },
+    /// Equip the item at `slot_index` from `party_index`'s inventory.
+    Equip {
+        /// Party member index of the owner.
+        party_index: usize,
+        /// Inventory slot index to equip.
+        slot_index: usize,
+    },
+    /// Unequip the item in `slot` from `party_index`'s equipment back to inventory.
+    Unequip {
+        /// Party member index of the owner.
+        party_index: usize,
+        /// The equipment slot to clear.
+        slot: EquipmentSlot,
+    },
 }
 
 // ===== Navigation Phase =====
@@ -328,6 +397,12 @@ pub struct InventoryNavigationState {
     pub focused_action_index: usize,
     /// Current navigation phase — slot grid or action button row.
     pub phase: NavigationPhase,
+    /// Which equipment strip cell is focused (`None` = strip not focused).
+    ///
+    /// Set when the player navigates Up from slot row 0, or clicks an equipment
+    /// cell.  Cleared when navigating Down back to the inventory grid or when
+    /// an Unequip action is dispatched.
+    pub selected_equip_slot: Option<EquipmentSlot>,
 }
 
 impl InventoryNavigationState {
@@ -342,15 +417,23 @@ impl InventoryNavigationState {
 /// Build the ordered list of action button descriptors for a focused panel.
 ///
 /// Returns a `Vec<PanelAction>` in the same order the UI renders them:
-/// `Use` first (only for consumable items), then `Drop`, then one `Transfer`
-/// per other open panel member.
+/// `Equip` first (only for equipable items), then `Use` (only for consumables),
+/// then `Drop`, then one `Transfer` per other open panel member.
+///
+/// Button order:
+/// | Index | Label  | Condition               |
+/// |-------|--------|-------------------------|
+/// | 0     | Equip  | Item is equipable        |
+/// | 0/1   | Use    | Item is `Consumable`     |
+/// | 1/2   | Drop   | Always present           |
+/// | 2+    | → Name | One per other open panel |
 ///
 /// `panel_names` contains `(party_index, name)` for every visible panel.
 /// `focused_party_index` is the panel whose actions are being computed.
 /// `selected_slot_index` is the inventory slot currently highlighted.
 /// `character` is the focused party member, used to inspect the item type.
-/// `game_content` is used to look up the item definition; if `None`, no `Use`
-/// action is generated.
+/// `game_content` is used to look up the item definition; if `None`, no `Equip`
+/// or `Use` action is generated.
 fn build_action_list(
     focused_party_index: usize,
     selected_slot_index: usize,
@@ -360,12 +443,28 @@ fn build_action_list(
 ) -> Vec<PanelAction> {
     let mut actions = Vec::new();
 
-    // Prepend Use action if the focused slot contains a consumable item
-    let is_consumable = character
+    // Look up the item definition once for both equipable and consumable checks.
+    let item_opt = character
         .inventory
         .items
         .get(selected_slot_index)
-        .and_then(|slot| game_content.and_then(|gc| gc.db().items.get_item(slot.item_id)))
+        .and_then(|slot| game_content.and_then(|gc| gc.db().items.get_item(slot.item_id)));
+
+    // Prepend Equip action if the item can be placed in an equipment slot.
+    // `EquipmentSlot::for_item` returns `Some(_)` for weapons, armour, and accessories.
+    let is_equipable = item_opt
+        .and_then(|item| EquipmentSlot::for_item(item, &character.equipment))
+        .is_some();
+
+    if is_equipable {
+        actions.push(PanelAction::Equip {
+            party_index: focused_party_index,
+            slot_index: 0, // placeholder — filled at execution time
+        });
+    }
+
+    // Prepend Use action if the focused slot contains a consumable item
+    let is_consumable = item_opt
         .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
         .unwrap_or(false);
 
@@ -410,10 +509,17 @@ fn build_action_list(
 /// | Either            | `Tab`            | Advance character panel focus (clears slot)         |
 /// | Either            | `Shift+Tab`      | Retreat character panel focus (clears slot)         |
 /// | SlotNavigation    | `←→↑↓`          | Navigate the slot grid                              |
+/// | SlotNavigation    | `↑` (row 0)      | Move focus to the equipment strip                   |
 /// | SlotNavigation    | `Enter`          | Enter ActionNavigation for the highlighted slot     |
+/// | SlotNavigation    | `E`              | Equip the highlighted equipable item directly       |
+/// | SlotNavigation    | `U`              | Use the highlighted consumable directly             |
+/// | EquipStrip        | `←→`            | Cycle equipment strip cells                         |
+/// | EquipStrip        | `↓`             | Return focus to inventory grid row 0                |
+/// | EquipStrip        | `Enter`          | Dispatch UnequipItemAction for the focused cell     |
 /// | ActionNavigation  | `←→`            | Cycle action buttons                                |
 /// | ActionNavigation  | `Enter`          | Execute focused action; return to slot 0            |
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 fn inventory_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut global_state: ResMut<GlobalState>,
@@ -422,6 +528,8 @@ fn inventory_input_system(
     mut transfer_writer: MessageWriter<TransferItemAction>,
     game_content: Option<Res<GameContent>>,
     mut use_writer: MessageWriter<UseItemExplorationAction>,
+    mut equip_writer: MessageWriter<EquipItemAction>,
+    mut unequip_writer: MessageWriter<UnequipItemAction>,
 ) {
     // Bail if not in inventory mode; reset nav state for next entry.
     let party_size = match &global_state.0.mode {
@@ -531,6 +639,18 @@ fn inventory_input_system(
                         to_party_index: *to_party_index,
                     });
                 }
+                PanelAction::Equip { party_index, .. } => {
+                    equip_writer.write(EquipItemAction {
+                        party_index: *party_index,
+                        slot_index: slot_idx,
+                    });
+                }
+                PanelAction::Unequip { party_index, slot } => {
+                    unequip_writer.write(UnequipItemAction {
+                        party_index: *party_index,
+                        slot: *slot,
+                    });
+                }
             }
             // Return to slot 0 in slot-navigation phase
             if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
@@ -607,6 +727,104 @@ fn inventory_input_system(
         }
         nav_state.selected_slot_index = None;
         nav_state.focused_action_index = 0;
+        nav_state.selected_equip_slot = None;
+        return;
+    }
+
+    // ── Equipment strip navigation ─────────────────────────────────────────
+    //
+    // When `selected_equip_slot` is `Some`, the equipment strip has focus.
+    // Left/Right cycle through the 7 slots; Down returns to grid row 0;
+    // Enter dispatches UnequipItemAction for the focused cell.
+    const EQUIP_SLOTS: [EquipmentSlot; 7] = [
+        EquipmentSlot::Weapon,
+        EquipmentSlot::Armor,
+        EquipmentSlot::Shield,
+        EquipmentSlot::Helmet,
+        EquipmentSlot::Boots,
+        EquipmentSlot::Accessory1,
+        EquipmentSlot::Accessory2,
+    ];
+
+    if let Some(equip_slot) = nav_state.selected_equip_slot {
+        // Esc — exit equipment strip, back to slot navigation
+        if keyboard.just_pressed(KeyCode::Escape) {
+            nav_state.selected_equip_slot = None;
+            return;
+        }
+
+        // ArrowDown — return to inventory grid row 0
+        if keyboard.just_pressed(KeyCode::ArrowDown) {
+            nav_state.selected_equip_slot = None;
+            if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                inv_state.selected_slot = Some(0);
+            }
+            nav_state.selected_slot_index = Some(0);
+            return;
+        }
+
+        // ArrowLeft / ArrowRight — cycle through equipment strip cells
+        if keyboard.just_pressed(KeyCode::ArrowLeft) || keyboard.just_pressed(KeyCode::ArrowRight) {
+            if let Some(idx) = EQUIP_SLOTS.iter().position(|&s| s == equip_slot) {
+                let next = if keyboard.just_pressed(KeyCode::ArrowLeft) {
+                    if idx == 0 {
+                        EQUIP_SLOTS.len() - 1
+                    } else {
+                        idx - 1
+                    }
+                } else {
+                    (idx + 1) % EQUIP_SLOTS.len()
+                };
+                nav_state.selected_equip_slot = Some(EQUIP_SLOTS[next]);
+            }
+            return;
+        }
+
+        // Enter — dispatch UnequipItemAction for the focused equipment slot
+        if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
+            unequip_writer.write(UnequipItemAction {
+                party_index: focused_party_index,
+                slot: equip_slot,
+            });
+            nav_state.selected_equip_slot = None;
+            return;
+        }
+
+        // Any other key while strip is focused is ignored
+        return;
+    }
+
+    // E key — equip the highlighted item directly (bypasses ActionNavigation)
+    if keyboard.just_pressed(KeyCode::KeyE) {
+        if let Some(slot_idx) = nav_state.selected_slot_index {
+            let is_equipable = global_state
+                .0
+                .party
+                .members
+                .get(focused_party_index)
+                .and_then(|ch| {
+                    ch.inventory.items.get(slot_idx).and_then(|slot| {
+                        game_content
+                            .as_deref()
+                            .and_then(|gc| gc.db().items.get_item(slot.item_id))
+                            .and_then(|item| EquipmentSlot::for_item(item, &ch.equipment))
+                    })
+                })
+                .is_some();
+
+            if is_equipable {
+                equip_writer.write(EquipItemAction {
+                    party_index: focused_party_index,
+                    slot_index: slot_idx,
+                });
+                if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                    inv_state.selected_slot = None;
+                }
+                nav_state.selected_slot_index = None;
+                nav_state.focused_action_index = 0;
+                nav_state.phase = NavigationPhase::SlotNavigation;
+            }
+        }
         return;
     }
 
@@ -682,6 +900,23 @@ fn inventory_input_system(
         || keyboard.just_pressed(KeyCode::ArrowUp);
 
     if any_arrow {
+        // ArrowUp from slot row 0 → move focus to the equipment strip
+        if keyboard.just_pressed(KeyCode::ArrowUp) {
+            let current = match &global_state.0.mode {
+                GameMode::Inventory(s) => s.selected_slot.unwrap_or(0),
+                _ => 0,
+            };
+            if current < SLOT_COLS {
+                // Entering the equipment strip — clear grid selection
+                if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                    inv_state.selected_slot = None;
+                }
+                nav_state.selected_slot_index = None;
+                nav_state.selected_equip_slot = Some(EquipmentSlot::Weapon);
+                return;
+            }
+        }
+
         if let GameMode::Inventory(inv_state) = &mut global_state.0.mode {
             let current = inv_state.selected_slot.unwrap_or(0);
             let next = if keyboard.just_pressed(KeyCode::ArrowRight) {
@@ -695,14 +930,8 @@ fn inventory_input_system(
             } else if keyboard.just_pressed(KeyCode::ArrowDown) {
                 (current + SLOT_COLS) % max_slots
             } else {
-                // ArrowUp — move one row up, wrapping from top to bottom same column
-                if current < SLOT_COLS {
-                    let last_row_start = (max_slots / SLOT_COLS).saturating_sub(1) * SLOT_COLS;
-                    let col = current % SLOT_COLS;
-                    (last_row_start + col).min(max_slots - 1)
-                } else {
-                    current - SLOT_COLS
-                }
+                // ArrowUp — move one row up (row > 0 case handled above)
+                current.saturating_sub(SLOT_COLS)
             };
             inv_state.selected_slot = Some(next);
             nav_state.selected_slot_index = Some(next);
@@ -720,6 +949,7 @@ fn inventory_input_system(
 /// a painter-drawn slot grid showing item-type silhouettes — matching the
 /// target mockup style.
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 fn inventory_ui_system(
     mut contexts: EguiContexts,
     global_state: Res<GlobalState>,
@@ -728,6 +958,8 @@ fn inventory_ui_system(
     mut drop_writer: MessageWriter<DropItemAction>,
     mut transfer_writer: MessageWriter<TransferItemAction>,
     mut use_writer: MessageWriter<UseItemExplorationAction>,
+    mut equip_writer: MessageWriter<EquipItemAction>,
+    mut unequip_writer: MessageWriter<UnequipItemAction>,
 ) {
     let inv_state = match &global_state.0.mode {
         GameMode::Inventory(s) => s.clone(),
@@ -800,11 +1032,17 @@ fn inventory_ui_system(
         }
 
         // ── Hint line changes based on navigation phase ──────────────────
-        let hint = match nav_state.phase {
-            NavigationPhase::SlotNavigation => {
-                "Tab: cycle character   ←→↑↓: navigate slots   Enter: select item   U: use consumable   Esc/I: close"
+        let hint = if nav_state.selected_equip_slot.is_some() {
+            "←→: cycle equipment slots   ↓: back to inventory   Enter: unequip   Esc: cancel"
+        } else {
+            match nav_state.phase {
+                NavigationPhase::SlotNavigation => {
+                    "Tab: cycle character   ←→↑↓: navigate slots   Enter: select item   E: equip   U: use   Esc/I: close"
+                }
+                NavigationPhase::ActionNavigation => {
+                    "←→: cycle actions   Enter: execute   Esc: cancel"
+                }
             }
-            NavigationPhase::ActionNavigation => "←→: cycle actions   Enter: execute   Esc: cancel",
         };
         ui.label(egui::RichText::new(hint).small().weak());
         ui.separator();
@@ -845,6 +1083,13 @@ fn inventory_ui_system(
                             None
                         };
 
+                    // Only pass selected_equip_slot to the focused panel
+                    let panel_equip_slot = if is_focused {
+                        nav_state.selected_equip_slot
+                    } else {
+                        None
+                    };
+
                     // push_id mandatory per sdk/AGENTS.md
                     ui.push_id(format!("inv_panel_{}", party_index), |ui| {
                         let action = render_character_panel(
@@ -857,6 +1102,7 @@ fn inventory_ui_system(
                             &global_state,
                             game_content.as_deref(),
                             &panel_names,
+                            panel_equip_slot,
                         );
                         if action.is_some() {
                             pending_action = action;
@@ -901,6 +1147,18 @@ fn inventory_ui_system(
                     to_party_index,
                 });
             }
+            PanelAction::Equip {
+                party_index,
+                slot_index,
+            } => {
+                equip_writer.write(EquipItemAction {
+                    party_index,
+                    slot_index,
+                });
+            }
+            PanelAction::Unequip { party_index, slot } => {
+                unequip_writer.write(UnequipItemAction { party_index, slot });
+            }
         }
     }
 }
@@ -909,12 +1167,22 @@ fn inventory_ui_system(
 ///
 /// Layout (top to bottom):
 /// - Dark header bar (`PANEL_HEADER_H` px) — character name only.
+/// - Equipment strip (`EQUIP_STRIP_H` px) — seven equipment cells in two rows.
 /// - Body — painter-drawn slot grid filling the remaining height.
-/// - Action strip (`PANEL_ACTION_H` px) — Drop / Give buttons, only when a
-///   filled slot is selected.
+/// - Action strip (`PANEL_ACTION_H` px) — Drop / Give / Equip / Unequip buttons.
 ///
 /// The slot grid is drawn entirely via `egui::Painter` so it looks like the
 /// mockup: dark background, faint grid lines, white item-type silhouettes.
+///
+/// ## Equipment strip
+///
+/// The strip shows all seven equipment slots in two rows:
+/// - Row 1: Weapon · Armor · Shield
+/// - Row 2: Helmet · Boots · Ring · Ring
+///
+/// Each cell shows the slot label and equipped item name (or "—" when empty).
+/// When `selected_equip_slot` is `Some(slot)`, that cell is highlighted and
+/// an **Unequip** button appears below the strip.
 ///
 /// ## Action strip keyboard highlight
 ///
@@ -924,8 +1192,8 @@ fn inventory_ui_system(
 ///
 /// # Returns
 ///
-/// `Some(PanelAction)` when the player clicked a Drop or Give button;
-/// `None` otherwise.
+/// `Some(PanelAction)` when the player clicked an action button (Drop, Give,
+/// Equip, or Unequip); `None` otherwise.
 #[allow(clippy::too_many_arguments)]
 fn render_character_panel(
     ui: &mut egui::Ui,
@@ -937,6 +1205,7 @@ fn render_character_panel(
     global_state: &GlobalState,
     game_content: Option<&GameContent>,
     panel_names: &[(usize, String)],
+    selected_equip_slot: Option<EquipmentSlot>,
 ) -> Option<PanelAction> {
     if party_index >= global_state.0.party.members.len() {
         return None;
@@ -946,10 +1215,17 @@ fn render_character_panel(
     let items = &character.inventory.items;
     let mut panel_action: Option<PanelAction> = None;
 
-    // How much vertical space does the action strip need?
+    // How much vertical space do the action strips need?
+    let has_equip_action = selected_equip_slot.is_some();
+    let equip_action_reserve = if has_equip_action {
+        PANEL_ACTION_H
+    } else {
+        0.0
+    };
     let has_action = selected_slot.map(|s| s < items.len()).unwrap_or(false);
     let action_reserve = if has_action { PANEL_ACTION_H } else { 0.0 };
-    let body_h = (size.y - PANEL_HEADER_H - action_reserve).max(20.0);
+    let body_h =
+        (size.y - PANEL_HEADER_H - EQUIP_STRIP_H - equip_action_reserve - action_reserve).max(20.0);
 
     // ── Outer border ─────────────────────────────────────────────────────
     let border_color = if is_focused {
@@ -958,7 +1234,7 @@ fn render_character_panel(
         UNFOCUSED_BORDER_COLOR
     };
     let (panel_rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    let painter = ui.painter();
+    let painter = ui.painter().clone();
     painter.rect_stroke(
         panel_rect,
         2.0,
@@ -977,9 +1253,142 @@ fn render_character_panel(
         egui::Color32::WHITE,
     );
 
+    // ── Equipment strip ───────────────────────────────────────────────────
+    // Two rows of cells: Row 1 = Weapon / Armor / Shield (3 cells)
+    //                    Row 2 = Helmet / Boots / Ring  / Ring  (4 cells)
+    let equip_strip_rect = egui::Rect::from_min_size(
+        panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H),
+        egui::vec2(size.x, EQUIP_STRIP_H),
+    );
+    painter.rect_filled(equip_strip_rect, 0.0, PANEL_BG_COLOR);
+
+    let equip_cell_w = (size.x / 4.0).floor().max(20.0);
+    let equip_cell_h = (EQUIP_STRIP_H / 2.0).floor();
+
+    // All seven slots grouped into rows for rendering
+    let equip_rows: [&[(EquipmentSlot, &str)]; 2] = [
+        &[
+            (EquipmentSlot::Weapon, "Weapon"),
+            (EquipmentSlot::Armor, "Armor"),
+            (EquipmentSlot::Shield, "Shield"),
+        ],
+        &[
+            (EquipmentSlot::Helmet, "Helmet"),
+            (EquipmentSlot::Boots, "Boots"),
+            (EquipmentSlot::Accessory1, "Ring"),
+            (EquipmentSlot::Accessory2, "Ring"),
+        ],
+    ];
+
+    for (row_idx, row_slots) in equip_rows.iter().enumerate() {
+        for (col_idx, (slot, slot_label)) in row_slots.iter().enumerate() {
+            let cell_min = equip_strip_rect.min
+                + egui::vec2(col_idx as f32 * equip_cell_w, row_idx as f32 * equip_cell_h);
+            let cell_rect =
+                egui::Rect::from_min_size(cell_min, egui::vec2(equip_cell_w, equip_cell_h));
+
+            // Cell border
+            painter.rect_stroke(
+                cell_rect.shrink(1.0),
+                1.0,
+                egui::Stroke::new(1.0, GRID_LINE_COLOR),
+                egui::StrokeKind::Outside,
+            );
+
+            // Keyboard-focus selection highlight (green tint)
+            if selected_equip_slot == Some(*slot) {
+                painter.rect_filled(
+                    cell_rect.shrink(1.0),
+                    0.0,
+                    egui::Color32::from_rgba_premultiplied(0, 120, 60, 60),
+                );
+                painter.rect_stroke(
+                    cell_rect.shrink(1.0),
+                    1.0,
+                    egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 220, 100)),
+                    egui::StrokeKind::Outside,
+                );
+            }
+
+            // Slot label in small dimmed text
+            painter.text(
+                cell_rect.min + egui::vec2(3.0, 2.0),
+                egui::Align2::LEFT_TOP,
+                slot_label,
+                egui::FontId::proportional(9.0),
+                egui::Color32::from_rgba_premultiplied(130, 130, 130, 255),
+            );
+
+            // Equipped item name or "—"
+            let (item_display, item_color): (std::borrow::Cow<str>, egui::Color32) =
+                match slot.get(&character.equipment) {
+                    Some(item_id) => {
+                        let name = game_content
+                            .and_then(|gc| gc.db().items.get_item(item_id))
+                            .map(|it| std::borrow::Cow::Owned(it.name.clone()))
+                            .unwrap_or_else(|| std::borrow::Cow::Owned(format!("#{item_id}")));
+                        (name, egui::Color32::WHITE)
+                    }
+                    None => (
+                        std::borrow::Cow::Borrowed("—"),
+                        egui::Color32::from_rgba_premultiplied(90, 90, 90, 255),
+                    ),
+                };
+
+            painter.text(
+                cell_rect.left_center() + egui::vec2(3.0, 5.0),
+                egui::Align2::LEFT_CENTER,
+                item_display.as_ref(),
+                egui::FontId::proportional(10.0),
+                item_color,
+            );
+
+            // Mouse-click on a filled slot → dispatch Unequip immediately
+            let cell_sense = ui.allocate_rect(cell_rect, egui::Sense::click());
+            if cell_sense.clicked() && slot.get(&character.equipment).is_some() {
+                panel_action = Some(PanelAction::Unequip {
+                    party_index,
+                    slot: *slot,
+                });
+            }
+        }
+    }
+
+    // ── Unequip button strip (below equipment strip, keyboard-nav only) ───
+    if has_equip_action {
+        let unequip_rect = egui::Rect::from_min_size(
+            egui::pos2(equip_strip_rect.min.x, equip_strip_rect.max.y),
+            egui::vec2(size.x, equip_action_reserve),
+        );
+        painter.rect_filled(unequip_rect, 0.0, HEADER_BG_COLOR);
+
+        let mut unequip_child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(unequip_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        unequip_child.add_space(6.0);
+        unequip_child.push_id("equip_strip_actions", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let unequip_label = egui::RichText::new("Unequip")
+                    .color(egui::Color32::from_rgb(100, 200, 100))
+                    .small();
+                if ui
+                    .add(egui::Button::new(unequip_label))
+                    .on_hover_text("Return this item to inventory")
+                    .clicked()
+                {
+                    if let Some(slot) = selected_equip_slot {
+                        panel_action = Some(PanelAction::Unequip { party_index, slot });
+                    }
+                }
+            });
+        });
+    }
+
     // ── Body: slot grid ───────────────────────────────────────────────────
     let body_rect = egui::Rect::from_min_size(
-        panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H),
+        panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H + EQUIP_STRIP_H + equip_action_reserve),
         egui::vec2(size.x, body_h),
     );
     painter.rect_filled(body_rect, 0.0, PANEL_BG_COLOR);
@@ -1040,7 +1449,7 @@ fn render_character_panel(
                 .and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id))
                 .map(|it| &it.item_type);
             paint_item_silhouette(
-                painter,
+                &painter,
                 cell_rect,
                 cell_size,
                 item_type,
@@ -1053,7 +1462,11 @@ fn render_character_panel(
     if has_action {
         if let Some(slot_idx) = selected_slot {
             let action_rect = egui::Rect::from_min_size(
-                panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H + body_h),
+                panel_rect.min
+                    + egui::vec2(
+                        0.0,
+                        PANEL_HEADER_H + EQUIP_STRIP_H + equip_action_reserve + body_h,
+                    ),
                 egui::vec2(size.x, action_reserve),
             );
             painter.rect_filled(action_rect, 0.0, HEADER_BG_COLOR);
@@ -1069,15 +1482,49 @@ fn render_character_panel(
             // push_id for the action row — mandatory per sdk/AGENTS.md
             child.push_id("actions", |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    // ── Action: Use (consumable only, appears before Drop) ─
-                    let is_consumable = game_content
-                        .and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id))
+                    // Look up item once for both Equip and Use checks.
+                    let item_opt = items
+                        .get(slot_idx)
+                        .and_then(|s| game_content?.db().items.get_item(s.item_id));
+
+                    let is_equipable = item_opt
+                        .and_then(|item| EquipmentSlot::for_item(item, &character.equipment))
+                        .is_some();
+
+                    let is_consumable = item_opt
                         .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
                         .unwrap_or(false);
 
+                    // Running index used to match focused_action_index
+                    let mut btn_idx: usize = 0;
+
+                    // ── Action: Equip (equipable items, appears first) ─────
+                    if is_equipable {
+                        let equip_focused = focused_action_index == Some(btn_idx);
+                        let equip_label = egui::RichText::new("Equip")
+                            .color(if equip_focused {
+                                ACTION_FOCUSED_COLOR
+                            } else {
+                                egui::Color32::from_rgb(100, 200, 100)
+                            })
+                            .small();
+                        let mut equip_btn = egui::Button::new(equip_label);
+                        if equip_focused {
+                            equip_btn =
+                                equip_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                        }
+                        if ui.add(equip_btn).on_hover_text("Equip this item").clicked() {
+                            panel_action = Some(PanelAction::Equip {
+                                party_index,
+                                slot_index: slot_idx,
+                            });
+                        }
+                        btn_idx += 1;
+                    }
+
+                    // ── Action: Use (consumable only, appears after Equip) ─
                     if is_consumable {
-                        // action index 0 = Use (when present)
-                        let use_focused = focused_action_index == Some(0);
+                        let use_focused = focused_action_index == Some(btn_idx);
                         let use_label = egui::RichText::new("Use")
                             .color(if use_focused {
                                 ACTION_FOCUSED_COLOR
@@ -1099,12 +1546,11 @@ fn render_character_panel(
                                 slot_index: slot_idx,
                             });
                         }
+                        btn_idx += 1;
                     }
 
                     // ── Action: Drop ──────────────────────────────────────
-                    // When Use is present, Drop is index 1; otherwise index 0.
-                    let drop_focused_idx = if is_consumable { 1 } else { 0 };
-                    let drop_focused = focused_action_index == Some(drop_focused_idx);
+                    let drop_focused = focused_action_index == Some(btn_idx);
                     let drop_label = egui::RichText::new("Drop")
                         .color(if drop_focused {
                             ACTION_FOCUSED_COLOR
@@ -1126,11 +1572,9 @@ fn render_character_panel(
                             slot_index: slot_idx,
                         });
                     }
+                    btn_idx += 1;
 
                     // ── Actions: Transfer to other party members ──────────
-                    // When Use is present, Transfer buttons start at index 2;
-                    // otherwise they start at index 1.
-                    let mut action_btn_idx: usize = if is_consumable { 2 } else { 1 };
                     for &(other_index, ref other_name) in panel_names {
                         if other_index == party_index {
                             continue;
@@ -1138,7 +1582,7 @@ fn render_character_panel(
                         let target_full = global_state.0.party.members[other_index]
                             .inventory
                             .is_full();
-                        let transfer_focused = focused_action_index == Some(action_btn_idx);
+                        let transfer_focused = focused_action_index == Some(btn_idx);
                         let label_text = format!("→ {}", other_name);
                         let transfer_label = egui::RichText::new(&label_text)
                             .color(if transfer_focused {
@@ -1167,8 +1611,10 @@ fn render_character_panel(
                                 to_party_index: other_index,
                             });
                         }
-                        action_btn_idx += 1;
+                        btn_idx += 1;
                     }
+                    // Suppress unused variable warning when no transfers
+                    let _ = btn_idx;
                 });
             });
         }
@@ -1387,12 +1833,17 @@ fn paint_item_silhouette(
 ///
 /// All operations are bounds-checked; out-of-range indices produce a warning
 /// log and no mutation.
+#[allow(clippy::too_many_arguments)]
 fn inventory_action_system(
     mut drop_reader: MessageReader<DropItemAction>,
     mut transfer_reader: MessageReader<TransferItemAction>,
+    mut equip_reader: MessageReader<EquipItemAction>,
+    mut unequip_reader: MessageReader<UnequipItemAction>,
     mut global_state: ResMut<GlobalState>,
     mut nav_state: ResMut<InventoryNavigationState>,
     mut item_dropped_writer: Option<MessageWriter<ItemDroppedEvent>>,
+    game_content: Option<Res<GameContent>>,
+    mut game_log: Option<ResMut<GameLog>>,
 ) {
     // Collect messages upfront so we do not hold a borrow while mutating state.
     let drop_events: Vec<(usize, usize)> = drop_reader
@@ -1403,6 +1854,16 @@ fn inventory_action_system(
     let transfer_events: Vec<(usize, usize, usize)> = transfer_reader
         .read()
         .map(|e| (e.from_party_index, e.from_slot_index, e.to_party_index))
+        .collect();
+
+    let equip_events: Vec<(usize, usize)> = equip_reader
+        .read()
+        .map(|e| (e.party_index, e.slot_index))
+        .collect();
+
+    let unequip_events: Vec<(usize, EquipmentSlot)> = unequip_reader
+        .read()
+        .map(|e| (e.party_index, e.slot))
         .collect();
 
     // ── Drop events ─────────────────────────────────────────────────────────
@@ -1584,6 +2045,134 @@ fn inventory_action_system(
                         from_party_index, slot.item_id, rollback_err
                     );
                 }
+            }
+        }
+    }
+
+    // ── Equip events ─────────────────────────────────────────────────────────
+    for (party_index, slot_index) in equip_events {
+        // Bounds-check party index
+        if party_index >= global_state.0.party.members.len() {
+            warn!(
+                "EquipItemAction: party_index {} out of bounds (party size {})",
+                party_index,
+                global_state.0.party.members.len()
+            );
+            continue;
+        }
+
+        // Bounds-check slot index
+        let inv_len = global_state.0.party.members[party_index]
+            .inventory
+            .items
+            .len();
+        if slot_index >= inv_len {
+            warn!(
+                "EquipItemAction: slot_index {} out of bounds (inventory size {}) for party[{}]",
+                slot_index, inv_len, party_index
+            );
+            continue;
+        }
+
+        // Resolve game content — required for equip validation
+        let content = match game_content.as_deref() {
+            Some(gc) => gc,
+            None => {
+                if let Some(ref mut log) = game_log {
+                    log.add("Cannot equip: game content not available.".to_string());
+                }
+                continue;
+            }
+        };
+        let content_db = content.db();
+
+        match equip_item(
+            &mut global_state.0.party.members[party_index],
+            slot_index,
+            &content_db.items,
+            &content_db.classes,
+            &content_db.races,
+        ) {
+            Ok(()) => {
+                info!(
+                    "Equipped item from party[{}] slot {}",
+                    party_index, slot_index
+                );
+                if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                    inv_state.selected_slot = None;
+                }
+                nav_state.selected_slot_index = None;
+                nav_state.focused_action_index = 0;
+                nav_state.phase = NavigationPhase::SlotNavigation;
+            }
+            Err(e) => {
+                let msg = match &e {
+                    EquipError::ItemNotFound(_) => "Cannot equip: item not found.".to_string(),
+                    EquipError::ClassRestriction => "Cannot equip: class restriction.".to_string(),
+                    EquipError::RaceRestriction => "Cannot equip: race restriction.".to_string(),
+                    EquipError::NoSlotAvailable => "Cannot equip: no slot available.".to_string(),
+                    EquipError::AlignmentRestriction => {
+                        "Cannot equip: alignment restriction.".to_string()
+                    }
+                    EquipError::InvalidRace(s) => format!("Cannot equip: invalid race ({s})."),
+                    EquipError::InvalidClass(s) => format!("Cannot equip: invalid class ({s})."),
+                };
+                warn!(
+                    "EquipItemAction failed for party[{}] slot {}: {}",
+                    party_index, slot_index, msg
+                );
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
+            }
+        }
+    }
+
+    // ── Unequip events ────────────────────────────────────────────────────────
+    for (party_index, slot) in unequip_events {
+        // Bounds-check party index
+        if party_index >= global_state.0.party.members.len() {
+            warn!(
+                "UnequipItemAction: party_index {} out of bounds (party size {})",
+                party_index,
+                global_state.0.party.members.len()
+            );
+            continue;
+        }
+
+        // Resolve game content — required for AC recalculation
+        let content = match game_content.as_deref() {
+            Some(gc) => gc,
+            None => {
+                if let Some(ref mut log) = game_log {
+                    log.add("Cannot unequip: game content not available.".to_string());
+                }
+                continue;
+            }
+        };
+        let content_db = content.db();
+
+        match unequip_item(
+            &mut global_state.0.party.members[party_index],
+            slot,
+            &content_db.items,
+        ) {
+            Ok(()) => {
+                info!("Unequipped slot {:?} from party[{}]", slot, party_index);
+                nav_state.selected_equip_slot = None;
+            }
+            Err(TransactionError::InventoryFull { .. }) => {
+                let msg = "Cannot unequip: inventory is full.".to_string();
+                warn!("UnequipItemAction: {}", msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "UnequipItemAction: unexpected error for party[{}] slot {:?}: {}",
+                    party_index, slot, e
+                );
             }
         }
     }
@@ -1983,6 +2572,7 @@ mod tests {
                     &global_state,
                     None, // no GameContent needed
                     &[],  // no open panels for transfer buttons
+                    None, // no equipment strip selection
                 );
             });
         });
@@ -2039,6 +2629,7 @@ mod tests {
                     &global_state,
                     None, // no GameContent
                     &[],  // no open panels for transfer buttons
+                    None, // no equipment strip selection
                 );
             });
         });
@@ -2069,6 +2660,7 @@ mod tests {
                     &global_state,
                     None,
                     &[],
+                    None, // no equipment strip selection
                 );
             });
         });
@@ -2087,6 +2679,7 @@ mod tests {
             focus_on_panel: 1,
             focused_action_index: 2,
             phase: NavigationPhase::ActionNavigation,
+            selected_equip_slot: None,
         };
         let debug_str = format!("{:?}", state);
         assert!(debug_str.contains("3"));
@@ -2111,6 +2704,8 @@ mod tests {
         // Register messages
         app.add_message::<DropItemAction>();
         app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
 
         // Build game state with one party member that has two items
         let mut game_state = GameState::new();
@@ -2187,6 +2782,8 @@ mod tests {
 
         app.add_message::<DropItemAction>();
         app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
 
         let mut game_state = GameState::new();
 
@@ -2255,6 +2852,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<DropItemAction>();
         app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
 
         let mut game_state = GameState::new();
         let mut character = Character::new(
@@ -2320,6 +2919,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<DropItemAction>();
         app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
 
         let mut game_state = GameState::new();
         let mut character = Character::new(
@@ -2366,6 +2967,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<DropItemAction>();
         app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
 
         let mut game_state = GameState::new();
         // Empty party
@@ -2397,6 +3000,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<DropItemAction>();
         app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
 
         let mut game_state = GameState::new();
 
@@ -2472,6 +3077,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<DropItemAction>();
         app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
 
         let mut game_state = GameState::new();
 
@@ -2547,6 +3154,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<DropItemAction>();
         app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
 
         let mut game_state = GameState::new();
 
@@ -2605,6 +3214,8 @@ mod tests {
             }
             PanelAction::Transfer { .. } => panic!("expected Drop variant"),
             PanelAction::Use { .. } => panic!("expected Drop variant"),
+            PanelAction::Equip { .. } => panic!("expected Drop variant"),
+            PanelAction::Unequip { .. } => panic!("expected Drop variant"),
         }
     }
 
@@ -2632,6 +3243,8 @@ mod tests {
             }
             PanelAction::Drop { .. } => panic!("expected Transfer variant"),
             PanelAction::Use { .. } => panic!("expected Transfer variant"),
+            PanelAction::Equip { .. } => panic!("expected Transfer variant"),
+            PanelAction::Unequip { .. } => panic!("expected Transfer variant"),
         }
     }
 
@@ -2688,6 +3301,7 @@ mod tests {
                     &global_state,
                     None,
                     &panel_names,
+                    None, // no equipment strip selection
                 );
                 assert!(action.is_none(), "no button clicked, should return None");
             });
@@ -2743,6 +3357,7 @@ mod tests {
                     &global_state,
                     None,
                     &panel_names,
+                    None, // no equipment strip selection
                 );
                 assert!(action.is_none());
             });
@@ -2798,6 +3413,7 @@ mod tests {
                     &global_state,
                     None,
                     &panel_names,
+                    None, // no equipment strip selection
                 );
                 assert!(action.is_none());
             });
@@ -2968,6 +3584,7 @@ mod tests {
             focus_on_panel: 2,
             focused_action_index: 1,
             phase: NavigationPhase::ActionNavigation,
+            selected_equip_slot: None,
         };
         state.reset();
         assert_eq!(state.selected_slot_index, None);
@@ -2991,6 +3608,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<DropItemAction>();
         app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
 
         let mut game_state = GameState::new();
         let mut character = Character::new(
@@ -3049,6 +3668,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<DropItemAction>();
         app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
 
         let mut game_state = GameState::new();
 
@@ -4037,9 +4658,15 @@ mod tests {
                 .all(|a| !matches!(a, PanelAction::Use { .. })),
             "no Use action should appear for a non-consumable slot"
         );
+        // Weapons are equipable, so Equip is the first action
         assert!(
-            matches!(actions[0], PanelAction::Drop { party_index: 0, .. }),
-            "first action should be Drop for a non-consumable slot"
+            matches!(actions[0], PanelAction::Equip { party_index: 0, .. }),
+            "first action should be Equip for an equipable non-consumable slot"
+        );
+        // Drop is the second action
+        assert!(
+            matches!(actions[1], PanelAction::Drop { party_index: 0, .. }),
+            "second action should be Drop for a non-consumable slot"
         );
     }
 
@@ -4146,5 +4773,616 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    // ====================================================================
+    // Phase 4: Equip / Unequip tests
+    // ====================================================================
+
+    // ------------------------------------------------------------------
+    // 4.5.1  E key dispatches EquipItemAction
+    // ------------------------------------------------------------------
+
+    /// Pressing **E** while an equipable item is selected in `SlotNavigation`
+    /// phase dispatches `EquipItemAction { party_index: 0, slot_index: 0 }`.
+    #[test]
+    fn test_equip_action_dispatched_on_e_key() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::items::types::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::DiceRoll;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut content_db = ContentDatabase::new();
+        let weapon = Item {
+            id: 1,
+            name: "Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        content_db.items.add_item(weapon).unwrap();
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 0,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        // Register ButtonInput<KeyCode> manually (without InputPlugin) so that
+        // just_pressed is NOT cleared by InputPlugin's clear system before
+        // inventory_input_system runs.
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+        app.add_message::<UseItemExplorationAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
+        app.insert_resource(GameContent::new(content_db));
+        app.insert_resource(GlobalState(game_state));
+        let nav = InventoryNavigationState {
+            selected_slot_index: Some(0),
+            ..Default::default()
+        };
+        app.insert_resource(nav);
+        app.add_systems(Update, inventory_input_system);
+
+        // Press E before update so just_pressed(KeyE) is true during the frame.
+        // Without InputPlugin there is no clear-system to wipe just_pressed
+        // before inventory_input_system runs.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyE);
+        app.update();
+
+        // When E dispatches EquipItemAction, the input system also clears
+        // selected_slot_index to None.  That side-effect proves the message
+        // was dispatched (it only happens inside the `if is_equipable` branch).
+        let nav = app.world().resource::<InventoryNavigationState>();
+        assert_eq!(
+            nav.selected_slot_index, None,
+            "selected_slot_index must be cleared after E dispatches EquipItemAction"
+        );
+        assert!(
+            matches!(nav.phase, NavigationPhase::SlotNavigation),
+            "phase must remain SlotNavigation after E-key equip dispatch"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // 4.5.2  Equip button absent for consumable
+    // ------------------------------------------------------------------
+
+    /// `build_action_list` for a slot containing a **consumable** must NOT
+    /// include an `Equip` action.
+    #[test]
+    fn test_equip_button_absent_for_consumable() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut content_db = ContentDatabase::new();
+        let potion = Item {
+            id: 1,
+            name: "Healing Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(20),
+                is_combat_usable: true,
+                duration_minutes: None,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        content_db.items.add_item(potion).unwrap();
+        let game_content = GameContent::new(content_db);
+
+        let mut character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 1,
+        });
+
+        let panel_names: Vec<(usize, String)> = vec![(0, "Hero".to_string())];
+        let actions = build_action_list(0, 0, &panel_names, &character, Some(&game_content));
+
+        let has_equip = actions
+            .iter()
+            .any(|a| matches!(a, PanelAction::Equip { .. }));
+        assert!(!has_equip, "Equip should not appear for a consumable");
+    }
+
+    // ------------------------------------------------------------------
+    // 4.5.3  Equip button present for weapon and is first
+    // ------------------------------------------------------------------
+
+    /// `build_action_list` for a slot containing a **weapon** returns `Equip`
+    /// as the first action.
+    #[test]
+    fn test_equip_button_present_for_weapon() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::items::types::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::DiceRoll;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut content_db = ContentDatabase::new();
+        let weapon = Item {
+            id: 2,
+            name: "Longsword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        content_db.items.add_item(weapon).unwrap();
+        let game_content = GameContent::new(content_db);
+
+        let mut character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.inventory.items.push(InventorySlot {
+            item_id: 2,
+            charges: 0,
+        });
+
+        let panel_names: Vec<(usize, String)> = vec![(0, "Hero".to_string())];
+        let actions = build_action_list(0, 0, &panel_names, &character, Some(&game_content));
+
+        assert!(
+            matches!(actions[0], PanelAction::Equip { party_index: 0, .. }),
+            "Equip should be the first action for a weapon"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // 4.5.4  EquipItemAction moves item from inventory into equipment slot
+    // ------------------------------------------------------------------
+
+    /// Sending `EquipItemAction` moves the weapon from `inventory.items` into
+    /// `equipment.weapon` and clears `selected_slot_index`.
+    #[test]
+    fn test_equip_action_system_moves_item_to_slot() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::items::types::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::races::RaceDefinition;
+        use crate::domain::types::DiceRoll;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut content_db = ContentDatabase::new();
+
+        // Add a weapon to the item database
+        let weapon = Item {
+            id: 1,
+            name: "Iron Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        content_db.items.add_item(weapon).unwrap();
+
+        // Add a knight class with martial_melee proficiency
+        content_db
+            .classes
+            .add_class(ClassDefinition {
+                id: "knight".to_string(),
+                name: "Knight".to_string(),
+                description: String::new(),
+                hp_die: DiceRoll::new(1, 10, 0),
+                spell_school: None,
+                is_pure_caster: false,
+                spell_stat: None,
+                special_abilities: vec![],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: vec![],
+                proficiencies: vec!["martial_melee".to_string()],
+            })
+            .unwrap();
+
+        // Add a human race (no restrictions)
+        content_db
+            .races
+            .add_race(RaceDefinition::new(
+                "human".to_string(),
+                "Human".to_string(),
+                "A versatile race".to_string(),
+            ))
+            .unwrap();
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Knight".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 0,
+        });
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(content_db));
+        app.init_resource::<InventoryNavigationState>();
+        app.init_resource::<GameLog>();
+        app.add_systems(Update, inventory_action_system);
+
+        app.world_mut().write_message(EquipItemAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.party.members[0].equipment.weapon,
+            Some(1),
+            "weapon slot should hold item_id=1"
+        );
+        assert_eq!(
+            gs.0.party.members[0].inventory.items.len(),
+            0,
+            "inventory should be empty after equipping"
+        );
+
+        let nav = app.world().resource::<InventoryNavigationState>();
+        assert_eq!(
+            nav.selected_slot_index, None,
+            "selected_slot_index should be cleared"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // 4.5.5  UnequipItemAction returns item to inventory
+    // ------------------------------------------------------------------
+
+    /// Sending `UnequipItemAction` clears `equipment.weapon` and adds the
+    /// item back to `inventory.items`.
+    #[test]
+    fn test_unequip_action_system_returns_item_to_inventory() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, EquipmentSlot, Sex};
+        use crate::domain::items::types::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::DiceRoll;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut content_db = ContentDatabase::new();
+        let weapon = Item {
+            id: 1,
+            name: "Shortsword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 6, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 30,
+            sell_cost: 15,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        content_db.items.add_item(weapon).unwrap();
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Place weapon directly in equipment slot
+        ch.equipment.weapon = Some(1);
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(content_db));
+        app.init_resource::<InventoryNavigationState>();
+        app.init_resource::<GameLog>();
+        app.add_systems(Update, inventory_action_system);
+
+        app.world_mut().write_message(UnequipItemAction {
+            party_index: 0,
+            slot: EquipmentSlot::Weapon,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.party.members[0].equipment.weapon, None,
+            "weapon slot should be cleared"
+        );
+        assert_eq!(
+            gs.0.party.members[0].inventory.items.len(),
+            1,
+            "item should return to inventory"
+        );
+        assert_eq!(
+            gs.0.party.members[0].inventory.items[0].item_id, 1,
+            "returned item should be item_id=1"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // 4.5.6  UnequipItemAction with full inventory logs "inventory is full"
+    // ------------------------------------------------------------------
+
+    /// When the character's inventory is full, `UnequipItemAction` must write
+    /// "inventory is full" to `GameLog` and leave the equipment slot unchanged.
+    #[test]
+    fn test_unequip_action_system_inventory_full_logs_error() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, EquipmentSlot, InventorySlot, Sex};
+        use crate::domain::items::types::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::{DiceRoll, ItemId};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut content_db = ContentDatabase::new();
+        let weapon = Item {
+            id: 1,
+            name: "Great Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(2, 6, 0),
+                bonus: 0,
+                hands_required: 2,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 100,
+            sell_cost: 50,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        content_db.items.add_item(weapon).unwrap();
+
+        let mut game_state = GameState::new();
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Fill inventory completely
+        for i in 0..Inventory::MAX_ITEMS {
+            ch.inventory.items.push(InventorySlot {
+                item_id: (i + 10) as ItemId,
+                charges: 0,
+            });
+        }
+        ch.equipment.weapon = Some(1);
+        game_state.party.add_member(ch).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DropItemAction>();
+        app.add_message::<TransferItemAction>();
+        app.add_message::<EquipItemAction>();
+        app.add_message::<UnequipItemAction>();
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(content_db));
+        app.init_resource::<InventoryNavigationState>();
+        app.init_resource::<GameLog>();
+        app.add_systems(Update, inventory_action_system);
+
+        app.world_mut().write_message(UnequipItemAction {
+            party_index: 0,
+            slot: EquipmentSlot::Weapon,
+        });
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.party.members[0].equipment.weapon,
+            Some(1),
+            "equipment slot must be unchanged when inventory is full"
+        );
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages.iter().any(|m| m.contains("inventory is full")),
+            "GameLog should contain 'inventory is full'"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // 4.5.7  Equipment strip renders equipped item name without panic
+    // ------------------------------------------------------------------
+
+    /// `render_character_panel` with a weapon equipped must complete without
+    /// panicking, and the weapon's `item_id` must be accessible via the
+    /// character's equipment struct (proving the strip would display it).
+    #[test]
+    fn test_equipment_strip_shows_equipped_item_name() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, EquipmentSlot, Sex};
+        use crate::domain::items::types::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::DiceRoll;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut content_db = ContentDatabase::new();
+        let sword = Item {
+            id: 42,
+            name: "Flame Blade".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 6, 0),
+                bonus: 1,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 100,
+            sell_cost: 50,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        content_db.items.add_item(sword).unwrap();
+        let game_content = GameContent::new(content_db);
+
+        let mut global_state = GlobalState(GameState::new());
+        let mut hero = Character::new(
+            "Warrior".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Directly set the weapon slot to item_id=42
+        hero.equipment.weapon = Some(42);
+        global_state.0.party.add_member(hero).unwrap();
+
+        // Verify the weapon is accessible via EquipmentSlot::Weapon
+        assert_eq!(
+            EquipmentSlot::Weapon.get(&global_state.0.party.members[0].equipment),
+            Some(42),
+            "weapon slot should hold item_id=42"
+        );
+        let equipped_name = game_content
+            .db()
+            .items
+            .get_item(42)
+            .map(|i| i.name.as_str())
+            .unwrap_or("");
+        assert_eq!(
+            equipped_name, "Flame Blade",
+            "item name should be Flame Blade"
+        );
+
+        // Render the panel with the equipment strip cell focused — must not panic
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_character_panel(
+                    ui,
+                    0,
+                    true,
+                    None,
+                    None,
+                    egui::vec2(400.0, 500.0),
+                    &global_state,
+                    Some(&game_content),
+                    &[],
+                    Some(EquipmentSlot::Weapon), // equipment strip cell focused
+                );
+            });
+        });
+        // No panic = the equipped item name was rendered in the strip
     }
 }

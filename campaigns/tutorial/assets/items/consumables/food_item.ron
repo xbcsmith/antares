@@ -1,0 +1,67 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+//
+// Food Item mesh definition — CreatureDefinition format.
+//
+// Visual intent: a squat, earthy-brown flask or wrapped parcel sitting on
+// the ground — clearly distinct from magical red/blue/green potion flasks.
+//
+// Geometry: same six-vertex hexagonal disc used by the potion meshes so the
+// silhouette reads as "small container / bundle" when viewed from first-person
+// perspective.  The earthy-brown colour (0.55, 0.35, 0.10) matches the colour
+// the procedural fallback (ItemMeshDescriptor::from_consumable) assigns to
+// ConsumableEffect::IsFood items, ensuring visual consistency between the
+// data-driven path and the fallback.
+//
+// No emissive glow — food is mundane, not magical.
+// Scale 0.8 — slightly smaller than potions (scale 0.9) to read as a plain
+// consumable without the "important item" presence of a magic flask.
+(
+    id: 9205,
+    name: "ItemMeshFoodItem",
+    meshes: [
+        (
+            name: Some("food"),
+            vertices: [
+                ( 0.1000, 0.0000,  0.0000),
+                ( 0.0500, 0.0000,  0.0866),
+                (-0.0500, 0.0000,  0.0866),
+                (-0.1000, 0.0000,  0.0000),
+                (-0.0500, 0.0000, -0.0866),
+                ( 0.0500, 0.0000, -0.0866),
+                ( 0.0000, 0.0000,  0.0000),
+            ],
+            indices: [6, 0, 1, 6, 1, 2, 6, 2, 3, 6, 3, 4, 6, 4, 5, 6, 5, 0],
+            normals: Some([
+                (0.0000, 1.0000, 0.0000),
+                (0.0000, 1.0000, 0.0000),
+                (0.0000, 1.0000, 0.0000),
+                (0.0000, 1.0000, 0.0000),
+                (0.0000, 1.0000, 0.0000),
+                (0.0000, 1.0000, 0.0000),
+                (0.0000, 1.0000, 0.0000),
+            ]),
+            uvs: None,
+            color: (0.55, 0.35, 0.10, 1.00),
+            lod_levels: None,
+            lod_distances: None,
+            material: Some((
+                base_color: (0.55, 0.35, 0.10, 1.00),
+                metallic: 0.00,
+                roughness: 0.85,
+                emissive: None,
+                alpha_mode: Opaque,
+            )),
+            texture_path: None,
+        ),
+    ],
+    mesh_transforms: [
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+    ],
+    scale: 0.8,
+    color_tint: None,
+)

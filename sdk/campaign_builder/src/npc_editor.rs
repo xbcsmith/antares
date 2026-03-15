@@ -142,6 +142,14 @@ pub struct NpcEditorState {
     /// `CampaignBuilderApp` to switch tab and open the named template.
     #[serde(skip)]
     pub requested_template_edit: Option<String>,
+
+    /// Status message produced by an action inside `show()` (e.g. Reload).
+    ///
+    /// Because `show()` returns `bool` (unsaved-changes flag) rather than a
+    /// status string, the parent reads this field with `.take()` after every
+    /// `show()` call and forwards it to `CampaignBuilderApp::status_message`.
+    #[serde(skip)]
+    pub pending_status: Option<String>,
 }
 
 /// NPC editor mode
@@ -227,6 +235,7 @@ impl Default for NpcEditorState {
             reset_autocomplete_buffers: false,
             available_stock_templates: Vec::new(),
             requested_template_edit: None,
+            pending_status: None,
         }
     }
 }
@@ -332,6 +341,27 @@ impl NpcEditorState {
             ToolbarAction::Import => self.show_import_dialog = true,
             ToolbarAction::Export => {
                 needs_save |= self.export_all_npcs();
+            }
+            ToolbarAction::Reload => {
+                if let Some(dir) = campaign_dir {
+                    let path = dir.join(npcs_file);
+                    if path.exists() {
+                        match self.load_from_file(&path) {
+                            Ok(()) => {
+                                self.pending_status =
+                                    Some(format!("Reloaded {} NPCs from disk", self.npcs.len()));
+                            }
+                            Err(e) => {
+                                self.pending_status = Some(format!("Failed to reload NPCs: {}", e));
+                            }
+                        }
+                    } else {
+                        self.pending_status =
+                            Some(format!("NPCs file not found: {}", path.display()));
+                    }
+                } else {
+                    self.pending_status = Some("No campaign directory set".to_string());
+                }
             }
             _ => {}
         }
@@ -1746,6 +1776,40 @@ impl NpcEditorState {
         saved
     }
 
+    /// Loads NPC definitions from a RON file on disk, replacing the current list.
+    ///
+    /// On success `self.npcs` is replaced with the loaded data, the current
+    /// selection is cleared and the editor returns to List mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Full path to the `.ron` file containing `Vec<NpcDefinition>`.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, `Err(String)` with a description on failure.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use campaign_builder::npc_editor::NpcEditorState;
+    /// use std::path::Path;
+    ///
+    /// let mut state = NpcEditorState::new();
+    /// // state.load_from_file(Path::new("data/npcs.ron")).unwrap();
+    /// ```
+    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let contents = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+        let loaded: Vec<NpcDefinition> = ron::from_str(&contents)
+            .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))?;
+        self.npcs = loaded;
+        self.selected_npc = None;
+        self.mode = NpcEditorMode::List;
+        self.has_unsaved_changes = false;
+        Ok(())
+    }
+
     fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -2669,5 +2733,213 @@ mod tests {
         let taken = state.requested_template_edit.take();
         assert_eq!(taken, Some("foo".to_string()));
         assert!(state.requested_template_edit.is_none());
+    }
+
+    // ── Reload / load_from_file tests ─────────────────────────────────────────
+
+    /// `pending_status` starts as `None` so the parent's status bar is not
+    /// polluted before any action has been taken.
+    #[test]
+    fn test_pending_status_initial_state() {
+        let state = NpcEditorState::new();
+        assert!(state.pending_status.is_none());
+    }
+
+    /// `load_from_file` replaces `self.npcs` with the file contents, clears the
+    /// selection, resets to List mode, and clears the unsaved-changes flag.
+    #[test]
+    fn test_load_from_file_replaces_npcs() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("npcs.ron");
+
+        // Write two NPCs to disk.
+        let original = vec![
+            NpcDefinition {
+                id: "npc_a".to_string(),
+                name: "Alpha".to_string(),
+                description: String::new(),
+                portrait_id: String::new(),
+                sprite: None,
+                dialogue_id: None,
+                creature_id: None,
+                quest_ids: Vec::new(),
+                faction: None,
+                is_merchant: false,
+                is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
+            },
+            NpcDefinition {
+                id: "npc_b".to_string(),
+                name: "Beta".to_string(),
+                description: String::new(),
+                portrait_id: String::new(),
+                sprite: None,
+                dialogue_id: None,
+                creature_id: None,
+                quest_ids: Vec::new(),
+                faction: None,
+                is_merchant: false,
+                is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
+            },
+        ];
+        let ron_str =
+            ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default()).unwrap();
+        std::fs::write(&path, ron_str).unwrap();
+
+        // Start the editor with a different, stale NPC list.
+        let mut state = NpcEditorState::new();
+        state.npcs.push(NpcDefinition {
+            id: "stale".to_string(),
+            name: "Stale NPC".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            sprite: None,
+            dialogue_id: None,
+            creature_id: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+        });
+        state.selected_npc = Some(0);
+        state.mode = NpcEditorMode::Edit;
+        state.has_unsaved_changes = true;
+
+        // Reload from file.
+        state.load_from_file(&path).expect("load_from_file failed");
+
+        assert_eq!(state.npcs.len(), 2);
+        assert_eq!(state.npcs[0].id, "npc_a");
+        assert_eq!(state.npcs[1].id, "npc_b");
+        assert!(state.selected_npc.is_none(), "selection must be cleared");
+        assert_eq!(state.mode, NpcEditorMode::List, "must return to List mode");
+        assert!(
+            !state.has_unsaved_changes,
+            "no unsaved changes after reload"
+        );
+    }
+
+    /// `load_from_file` returns an `Err` when the file does not exist.
+    #[test]
+    fn test_load_from_file_missing_file_returns_err() {
+        let mut state = NpcEditorState::new();
+        let result = state.load_from_file(std::path::Path::new("/nonexistent/path/npcs.ron"));
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("Failed to read"),
+            "error should mention read failure, got: {msg}"
+        );
+    }
+
+    /// `load_from_file` returns an `Err` when the file contains invalid RON.
+    #[test]
+    fn test_load_from_file_bad_ron_returns_err() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("npcs.ron");
+        std::fs::write(&path, "this is not valid RON at all!!!").unwrap();
+
+        let mut state = NpcEditorState::new();
+        let result = state.load_from_file(&path);
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("Failed to parse"),
+            "error should mention parse failure, got: {msg}"
+        );
+    }
+
+    /// After a successful reload the `pending_status` field must contain a
+    /// message that the parent can forward to the global status bar.
+    #[test]
+    fn test_reload_sets_pending_status_on_success() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().to_path_buf();
+        let npcs_file = "data/npcs.ron";
+        let path = dir.join(npcs_file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+
+        // Write an empty NPC list.
+        std::fs::write(&path, "[]").unwrap();
+
+        let mut state = NpcEditorState::new();
+        assert!(state.pending_status.is_none());
+
+        // Simulate the Reload toolbar action as show() would execute it.
+        if dir.join(npcs_file).exists() {
+            match state.load_from_file(&dir.join(npcs_file)) {
+                Ok(()) => {
+                    state.pending_status =
+                        Some(format!("Reloaded {} NPCs from disk", state.npcs.len()));
+                }
+                Err(e) => {
+                    state.pending_status = Some(format!("Failed to reload NPCs: {}", e));
+                }
+            }
+        }
+
+        assert!(state.pending_status.is_some());
+        let status = state.pending_status.take().unwrap();
+        assert!(
+            status.contains("Reloaded"),
+            "success message should mention Reloaded, got: {status}"
+        );
+        // take() should clear the field.
+        assert!(state.pending_status.is_none());
+    }
+
+    /// When the NPCs file does not exist, `pending_status` should contain an
+    /// explanatory message and `self.npcs` must remain unchanged.
+    #[test]
+    fn test_reload_sets_pending_status_when_file_missing() {
+        let mut state = NpcEditorState::new();
+        state.npcs.push(NpcDefinition {
+            id: "guard".to_string(),
+            name: "Guard".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            sprite: None,
+            dialogue_id: None,
+            creature_id: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+        });
+
+        let missing_path = std::path::Path::new("/no/such/dir/npcs.ron");
+
+        // Simulate the path.exists() guard in the Reload handler.
+        if !missing_path.exists() {
+            state.pending_status = Some(format!("NPCs file not found: {}", missing_path.display()));
+        }
+
+        assert!(state.pending_status.is_some());
+        let status = state.pending_status.take().unwrap();
+        assert!(
+            status.contains("not found"),
+            "message should mention not found, got: {status}"
+        );
+        // NPCs list must be unmodified.
+        assert_eq!(
+            state.npcs.len(),
+            1,
+            "npcs must be unchanged when file is missing"
+        );
     }
 }

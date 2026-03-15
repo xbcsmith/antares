@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{
-    autocomplete_tag_list_selector, extract_item_tag_candidates, show_standard_list_item,
-    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
-    TwoColumnLayout,
+    autocomplete_tag_list_selector, extract_item_tag_candidates, handle_reload,
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
@@ -244,24 +244,7 @@ impl ItemsEditorState {
                 }
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(items_file);
-                    if path.exists() {
-                        match std::fs::read_to_string(&path) {
-                            Ok(contents) => match ron::from_str::<Vec<Item>>(&contents) {
-                                Ok(loaded_items) => {
-                                    *items = loaded_items;
-                                    *status_message =
-                                        format!("Loaded items from: {}", path.display());
-                                }
-                                Err(e) => *status_message = format!("Failed to parse items: {}", e),
-                            },
-                            Err(e) => *status_message = format!("Failed to read items: {}", e),
-                        }
-                    } else {
-                        *status_message = "Items file does not exist".to_string();
-                    }
-                }
+                handle_reload(items, campaign_dir, items_file, status_message);
             }
             ToolbarAction::None => {}
         }

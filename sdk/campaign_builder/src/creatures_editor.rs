@@ -40,6 +40,23 @@ use std::path::PathBuf;
 /// ```
 pub const OPEN_CREATURE_TEMPLATES_SENTINEL: &str = "__campaign_builder::open_creature_templates__";
 
+/// Sentinel returned by [`CreaturesEditorState::show`] when the user triggers a Reload.
+///
+/// The parent [`CampaignBuilderApp`] detects this value and calls its own
+/// `load_creatures()` which performs the two-step registry → individual asset-file
+/// load sequence.  The creatures editor itself cannot perform that load because it
+/// does not own the required campaign-level I/O logic.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::creatures_editor::RELOAD_CREATURES_SENTINEL;
+///
+/// assert!(!RELOAD_CREATURES_SENTINEL.is_empty());
+/// assert!(RELOAD_CREATURES_SENTINEL.starts_with("__campaign_builder"));
+/// ```
+pub const RELOAD_CREATURES_SENTINEL: &str = "__campaign_builder::reload_creatures__";
+
 /// Minimum allowed value for the creature-level scale slider.
 ///
 /// Allows very small creatures (e.g. insects, tiny familiars) down to 0.001 units.
@@ -380,9 +397,13 @@ impl CreaturesEditorState {
             ToolbarAction::Save
             | ToolbarAction::Load
             | ToolbarAction::Import
-            | ToolbarAction::Export
-            | ToolbarAction::Reload => {
-                // Handled by parent
+            | ToolbarAction::Export => {
+                // Handled by parent (via do_save_campaign / do_open_campaign)
+            }
+            ToolbarAction::Reload => {
+                // Signal the parent to call load_creatures(), which performs the
+                // two-step registry → per-asset-file reload sequence.
+                return Some(RELOAD_CREATURES_SENTINEL.to_string());
             }
             ToolbarAction::None => {}
         }
@@ -3186,6 +3207,24 @@ impl CreaturesEditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Reload sentinel tests ─────────────────────────────────────────────────
+
+    /// RELOAD_CREATURES_SENTINEL must be a non-empty string that starts with the
+    /// internal namespace prefix so the parent can distinguish it from a user-
+    /// visible status message.
+    #[test]
+    fn test_reload_sentinel_is_nonempty_and_namespaced() {
+        assert!(!RELOAD_CREATURES_SENTINEL.is_empty());
+        assert!(RELOAD_CREATURES_SENTINEL.starts_with("__campaign_builder"));
+    }
+
+    /// The two sentinel constants must be distinct so the parent can route each
+    /// to the correct handler.
+    #[test]
+    fn test_reload_sentinel_differs_from_template_sentinel() {
+        assert_ne!(RELOAD_CREATURES_SENTINEL, OPEN_CREATURE_TEMPLATES_SENTINEL);
+    }
 
     #[test]
     fn test_creatures_editor_state_initialization() {

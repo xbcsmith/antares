@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{
-    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout, DEFAULT_PANEL_MIN_HEIGHT,
+    handle_reload, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout, DEFAULT_PANEL_MIN_HEIGHT,
 };
 use antares::domain::character::{ATTRIBUTE_MODIFIER_MAX, ATTRIBUTE_MODIFIER_MIN};
 use antares::domain::conditions::{
@@ -358,34 +358,7 @@ impl ConditionsEditorState {
                 }
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(conditions_file);
-                    if path.exists() {
-                        match fs::read_to_string(&path) {
-                            Ok(contents) => {
-                                match ron::from_str::<Vec<ConditionDefinition>>(&contents) {
-                                    Ok(loaded) => {
-                                        *conditions = loaded;
-                                        *status_message =
-                                            format!("Loaded conditions from: {}", path.display());
-                                    }
-                                    Err(e) => {
-                                        *status_message =
-                                            format!("Failed to parse conditions: {}", e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to read conditions: {}", e);
-                            }
-                        }
-                    } else {
-                        *status_message =
-                            format!("Conditions file does not exist: {}", path.display());
-                    }
-                } else {
-                    *status_message = "No campaign directory set".to_string();
-                }
+                handle_reload(conditions, campaign_dir, conditions_file, status_message);
             }
             ToolbarAction::None => {}
         }
