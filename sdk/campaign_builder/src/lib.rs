@@ -4775,6 +4775,11 @@ impl eframe::App for CampaignBuilderApp {
                 ) {
                     if msg == creatures_editor::OPEN_CREATURE_TEMPLATES_SENTINEL {
                         self.show_creature_template_browser = true;
+                    } else if msg == creatures_editor::RELOAD_CREATURES_SENTINEL {
+                        // User pressed Reload in the Creatures toolbar.  The editor
+                        // cannot perform the two-step registry → per-file load itself,
+                        // so it returns a sentinel and we call load_creatures() here.
+                        self.load_creatures();
                     } else {
                         self.status_message = msg;
                     }
@@ -4914,6 +4919,13 @@ impl eframe::App for CampaignBuilderApp {
                     npc_creature_manager.as_ref(),
                 ) {
                     self.unsaved_changes = true;
+                }
+
+                // Forward any status message produced inside show() (e.g. Reload result)
+                // to the app's global status bar.  The NPC editor returns bool rather than
+                // a status string, so it uses pending_status as a side-channel.
+                if let Some(status) = self.npc_editor_state.pending_status.take() {
+                    self.status_message = status;
                 }
 
                 // If the NPC editor requested cross-tab navigation to edit a stock template,

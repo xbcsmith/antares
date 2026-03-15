@@ -1,5 +1,139 @@
 # Implementations
 
+## SDK: Reload Sweep — Centralized and Fixed Across All Editors (Complete)
+
+### Problem
+
+The Campaign Builder's **Reload** toolbar action (F5) was broken in two editors
+and inconsistently implemented across all others:
+
+1. **Creatures Editor** — `ToolbarAction::Reload` was silently discarded with a
+   `// Handled by parent` comment, but the parent (`CampaignBuilderApp`) never
+   handled it. Clicking Reload in the Creatures tab did nothing.
+
+2. **NPC Editor** — `ToolbarAction::Reload` fell through a `_ => {}` wildcard
+   arm and was silently ignored. Clicking Reload in the NPCs tab did nothing.
+
+3. **Six simple editors** (Items, Monsters, Spells, Conditions, Proficiencies,
+   Quests) — Each contained its own copy of identical `std::fs::read_to_string`
+   - `ron::from_str` logic instead of using the centralised `handle_reload`
+     helper that already existed in `ui_helpers.rs` but was never called.
+
+### Root Cause — Creatures Editor
+
+The creatures editor uses a two-step load sequence (registry file →
+per-creature asset files) that lives in `CampaignBuilderApp::load_creatures()`.
+The editor's `show()` returns `Option<String>` (a status message) rather than a
+`ToolbarAction`, so the parent has no typed channel to receive an action request.
+The `// Handled by parent` comment was aspirational but never wired up.
+
+### Root Cause — NPC Editor
+
+The NPC editor's `match toolbar_action` block had only three explicit arms
+(`New`, `Import`, `Export`) and a catch-all `_ => {}`. `Reload` fell into the
+catch-all without any effect. Additionally, because `show()` returns `bool`
+(unsaved-changes flag) rather than a status string, there was no mechanism to
+report the reload outcome to the global status bar.
+
+### Fix
+
+**`sdk/campaign_builder/src/creatures_editor.rs`**
+
+- Added `pub const RELOAD_CREATURES_SENTINEL` — a namespaced sentinel string
+  modelled on the existing `OPEN_CREATURE_TEMPLATES_SENTINEL`.
+- Changed the `ToolbarAction::Reload` arm from `// Handled by parent` to
+  `return Some(RELOAD_CREATURES_SENTINEL.to_string())`, so the editor signals
+  its intent without duplicating load logic.
+
+**`sdk/campaign_builder/src/lib.rs` (creatures)**
+
+- In the `EditorTab::Creatures` handler, added an `else if` branch for
+  `RELOAD_CREATURES_SENTINEL` that calls `self.load_creatures()`, the same
+  full two-step reload that runs on campaign open.
+
+**`sdk/campaign_builder/src/npc_editor.rs`**
+
+- Added `pub pending_status: Option<String>` (`#[serde(skip)]`) to
+  `NpcEditorState` — a side-channel the parent polls with `.take()` after
+  every `show()` call to pick up status messages.
+- Added `pub fn load_from_file(&mut self, path: &Path) -> Result<(), String>`
+  which deserialises `Vec<NpcDefinition>` from disk, replaces `self.npcs`,
+  clears the selection, resets to List mode, and clears the unsaved-changes
+  flag.
+- Added an explicit `ToolbarAction::Reload` arm in `show()` that calls
+  `load_from_file` and stores the result in `pending_status`.
+
+**`sdk/campaign_builder/src/lib.rs` (NPCs)**
+
+- After the `npc_editor_state.show()` call, added:
+  `if let Some(status) = self.npc_editor_state.pending_status.take() { ... }`
+  to forward reload (and any future) status messages to the global status bar.
+
+**Six simple editors — migrated to `handle_reload`**
+
+Replaced the duplicated inline reload blocks in each of the following files
+with a single call to `handle_reload(data, campaign_dir, filename, status)`:
+
+| File                                               | Data type                    |
+| -------------------------------------------------- | ---------------------------- |
+| `sdk/campaign_builder/src/items_editor.rs`         | `Vec<Item>`                  |
+| `sdk/campaign_builder/src/monsters_editor.rs`      | `Vec<MonsterDefinition>`     |
+| `sdk/campaign_builder/src/spells_editor.rs`        | `Vec<Spell>`                 |
+| `sdk/campaign_builder/src/conditions_editor.rs`    | `Vec<ConditionDefinition>`   |
+| `sdk/campaign_builder/src/proficiencies_editor.rs` | `Vec<ProficiencyDefinition>` |
+| `sdk/campaign_builder/src/quest_editor.rs`         | `Vec<Quest>`                 |
+
+Each file also gained `handle_reload` in its `use crate::ui_helpers::` import.
+
+### Editors Left Unchanged
+
+The following editors already had correct, custom reload logic and were not
+touched:
+
+- `characters_editor.rs` — calls `self.load_from_file(&path)` (handles extra state)
+- `classes_editor.rs` — calls `self.load_from_file(&path)`
+- `races_editor.rs` — calls `self.load_from_file(&path)`
+- `dialogue_editor.rs` — calls `self.load_from_file(&path)` + syncs `*dialogues`
+- `config_editor.rs` — calls `self.load_config(campaign_dir)`
+- `map_editor.rs` — calls `self.load_maps(...)` (multi-file directory load)
+- `stock_templates_editor.rs` — auto-loads on first display; Reload not in toolbar
+
+### New Tests (8 new)
+
+**`creatures_editor::tests`**
+
+- `test_reload_sentinel_is_nonempty_and_namespaced` — sentinel is non-empty and
+  starts with `__campaign_builder`.
+- `test_reload_sentinel_differs_from_template_sentinel` — the two sentinels are
+  distinct so the parent can route them to different handlers.
+
+**`npc_editor::tests`**
+
+- `test_pending_status_initial_state` — `pending_status` starts as `None`.
+- `test_load_from_file_replaces_npcs` — round-trip: writes two NPCs to a temp
+  file, loads into an editor that had a stale NPC, asserts list replaced and
+  editor state reset.
+- `test_load_from_file_missing_file_returns_err` — error message mentions
+  "Failed to read" when the path does not exist.
+- `test_load_from_file_bad_ron_returns_err` — error message mentions "Failed to
+  parse" when the file contains invalid RON.
+- `test_reload_sets_pending_status_on_success` — `pending_status` contains a
+  "Reloaded" message after a successful reload; `.take()` clears the field.
+- `test_reload_sets_pending_status_when_file_missing` — `pending_status`
+  contains "not found" and `self.npcs` is left unchanged.
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run (workspace)          → 3560 passed, 8 skipped
+cargo nextest run -p campaign_builder  → 2059 passed, 2 skipped
+```
+
+---
+
 ## SDK: Stock-Template Wipe-Prevention Fix (Complete)
 
 ### Problem
