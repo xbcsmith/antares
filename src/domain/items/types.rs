@@ -87,6 +87,12 @@ pub enum WeaponClassification {
 ///
 /// let classification = ArmorClassification::Heavy;
 /// assert_ne!(classification, ArmorClassification::Light);
+///
+/// let helmet = ArmorClassification::Helmet;
+/// assert_ne!(helmet, ArmorClassification::Light);
+///
+/// let boots = ArmorClassification::Boots;
+/// assert_ne!(boots, ArmorClassification::Light);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ArmorClassification {
@@ -99,6 +105,10 @@ pub enum ArmorClassification {
     Heavy,
     /// All shield types
     Shield,
+    /// Helmet / headgear — maps to equipment.helmet
+    Helmet,
+    /// Boots / footwear — maps to equipment.boots
+    Boots,
 }
 
 /// Magic item classification for arcane vs divine items

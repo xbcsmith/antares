@@ -1,5 +1,81 @@
 # Implementations
 
+## Phase 1: ArmorClassification Expansion (Complete)
+
+### Summary
+
+Expanded `ArmorClassification` with two new variants (`Helmet` and `Boots`),
+extended the proficiency mapping, made the equipment-slot routing match
+exhaustive, migrated all three RON item data files, and added SDK validation
+that enforces slot-type integrity at campaign-pack time.
+
+### Files Changed
+
+| File                                       | Change                                                                                                                                                                                                      |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/items/types.rs`                | Added `Helmet` and `Boots` variants to `ArmorClassification`; updated doc example                                                                                                                           |
+| `src/domain/proficiency.rs`                | Extended `proficiency_for_armor` match with `Helmet => "light_armor"` and `Boots => "light_armor"`; updated doctest and added two dedicated test functions                                                  |
+| `src/domain/items/equipment_validation.rs` | Replaced blanket `ItemType::Armor(_) => true` arm with exhaustive `ArmorClassification` match; added 6 new unit tests                                                                                       |
+| `src/domain/visual/item_mesh.rs`           | Added `Helmet` and `Boots` arms to `from_armor`; added both variants to the all-classifications test array                                                                                                  |
+| `src/bin/item_editor.rs`                   | Added options `[5] Helmet` and `[6] Boots` to `select_armor_classification`                                                                                                                                 |
+| `src/sdk/validation.rs`                    | Added `HelmetSlotTypeMismatch` and `BootsSlotTypeMismatch` `ValidationError` variants (both `Error` severity); added validation logic in `validate_character_references`; added 3 new SDK integration tests |
+| `src/sdk/error_formatter.rs`               | Added `get_suggestions` arms for `HelmetSlotTypeMismatch` and `BootsSlotTypeMismatch`                                                                                                                       |
+| `tests/proficiency_integration_test.rs`    | Extended `get_armor_proficiency` helper with `Helmet` and `Boots` arms                                                                                                                                      |
+| `data/items.ron`                           | Added Iron Helmet (id 25, `classification: Helmet`) and Leather Boots (id 26, `classification: Boots`)                                                                                                      |
+| `data/test_campaign/data/items.ron`        | Same two items added — required by Phase 2 tests                                                                                                                                                            |
+| `campaigns/tutorial/data/items.ron`        | Same two items added — live campaign kept in sync                                                                                                                                                           |
+
+### Design Decisions
+
+- **Proficiency mapping**: Both `Helmet` and `Boots` map to `"light_armor"`.
+  Headgear and footwear are universally lightweight and do not warrant their
+  own proficiency tracks; any class or race that can wear light armour can wear
+  them. This matches the Might and Magic 1 design where helmets and boots are
+  accessible to all adventurers.
+
+- **IDs 25 and 26**: The plan suggested IDs 50/51, but those were already
+  occupied by potions in every data file. IDs 25 and 26 are the next free
+  slots in the armor ID block (20–29) and are available across all three item
+  data files.
+
+- **Exhaustive match in `has_slot_for_item`**: All six `ArmorClassification`
+  arms return `true` because the function checks whether a slot _type_ exists,
+  not whether it is vacant. The exhaustive form guarantees any future
+  classification variant causes a compile-time error rather than silently
+  defaulting to an incorrect value.
+
+- **SDK validation severity**: `HelmetSlotTypeMismatch` and
+  `BootsSlotTypeMismatch` are `Error`-severity (not `Warning`) because placing
+  the wrong item type in a dedicated slot is always a data-authoring bug, not
+  an intentional design choice.
+
+### New Tests (11 total)
+
+| Test                                                    | Location               |
+| ------------------------------------------------------- | ---------------------- |
+| `test_armor_classification_helmet_variant_exists`       | `equipment_validation` |
+| `test_armor_classification_boots_variant_exists`        | `equipment_validation` |
+| `test_has_slot_for_helmet_item`                         | `equipment_validation` |
+| `test_has_slot_for_boots_item`                          | `equipment_validation` |
+| `test_can_equip_helmet_succeeds`                        | `equipment_validation` |
+| `test_can_equip_boots_succeeds`                         | `equipment_validation` |
+| `test_proficiency_for_armor_helmet_maps_to_light_armor` | `proficiency`          |
+| `test_proficiency_for_armor_boots_maps_to_light_armor`  | `proficiency`          |
+| `test_sdk_validation_helmet_in_wrong_slot_fails`        | `sdk::validation`      |
+| `test_sdk_validation_boots_in_wrong_slot_fails`         | `sdk::validation`      |
+| `test_sdk_validation_correct_helmet_passes`             | `sdk::validation`      |
+
+### Quality Gates
+
+```text
+cargo fmt         → No output (all files formatted)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 3529 tests run: 3529 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Item Mesh Editor — Registry Loading Fix (Complete)
 
 ### Problem

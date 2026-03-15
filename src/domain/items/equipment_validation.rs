@@ -176,17 +176,25 @@ fn has_slot_for_item(
     _item_id: ItemId,
     item: &crate::domain::items::types::Item,
 ) -> bool {
-    use crate::domain::items::types::{AccessorySlot, ItemType};
+    use crate::domain::items::types::{AccessorySlot, ArmorClassification, ItemType};
 
     match &item.item_type {
         ItemType::Weapon(_) => {
             // Weapon slot always exists
             true
         }
-        ItemType::Armor(_) => {
-            // Armor slot always exists
-            true
-        }
+        ItemType::Armor(data) => match data.classification {
+            // Body-armor slot
+            ArmorClassification::Light
+            | ArmorClassification::Medium
+            | ArmorClassification::Heavy => true,
+            // Shield slot
+            ArmorClassification::Shield => true,
+            // Helmet slot
+            ArmorClassification::Helmet => true,
+            // Boots slot
+            ArmorClassification::Boots => true,
+        },
         ItemType::Accessory(data) => {
             // Check if appropriate accessory slot exists
             match data.slot {
@@ -760,5 +768,181 @@ mod tests {
         // Assert
         assert!(result.is_err());
         assert!(matches!(result, Err(EquipError::InvalidClass(_))));
+    }
+
+    // ===== Phase 1: ArmorClassification Expansion Tests =====
+
+    #[test]
+    fn test_armor_classification_helmet_variant_exists() {
+        let helmet = ArmorClassification::Helmet;
+        assert_ne!(helmet, ArmorClassification::Light);
+    }
+
+    #[test]
+    fn test_armor_classification_boots_variant_exists() {
+        let boots = ArmorClassification::Boots;
+        assert_ne!(boots, ArmorClassification::Light);
+    }
+
+    #[test]
+    fn test_has_slot_for_helmet_item() {
+        // Arrange
+        let helmet_item = Item {
+            id: 25,
+            name: "Iron Helmet".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 5,
+                classification: ArmorClassification::Helmet,
+            }),
+            base_cost: 40,
+            sell_cost: 20,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+
+        // Act & Assert — has_slot_for_item must return true for Helmet-classified armor
+        let equipment = crate::domain::character::Equipment::new();
+        assert!(has_slot_for_item(&equipment, 25, &helmet_item));
+    }
+
+    #[test]
+    fn test_has_slot_for_boots_item() {
+        // Arrange
+        let boots_item = Item {
+            id: 26,
+            name: "Leather Boots".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 2,
+                classification: ArmorClassification::Boots,
+            }),
+            base_cost: 20,
+            sell_cost: 10,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+
+        // Act & Assert — has_slot_for_item must return true for Boots-classified armor
+        let equipment = crate::domain::character::Equipment::new();
+        assert!(has_slot_for_item(&equipment, 26, &boots_item));
+    }
+
+    #[test]
+    fn test_can_equip_helmet_succeeds() {
+        // Arrange — sorcerer has "light_armor" proficiency which covers Helmet
+        let character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut items = ItemDatabase::new();
+        let helmet = Item {
+            id: 25,
+            name: "Iron Helmet".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 5,
+                classification: ArmorClassification::Helmet,
+            }),
+            base_cost: 40,
+            sell_cost: 20,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        items.add_item(helmet).unwrap();
+
+        let mut classes = ClassDatabase::new();
+        let sorcerer = create_test_sorcerer_class(); // has "light_armor" proficiency
+        classes.add_class(sorcerer).unwrap();
+
+        let mut races = RaceDatabase::new();
+        let human = create_test_human_race();
+        races.add_race(human).unwrap();
+
+        // Act
+        let result = can_equip_item(&character, 25, &items, &classes, &races);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_can_equip_boots_succeeds() {
+        // Arrange — sorcerer has "light_armor" proficiency which covers Boots
+        let character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut items = ItemDatabase::new();
+        let boots = Item {
+            id: 26,
+            name: "Leather Boots".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 2,
+                classification: ArmorClassification::Boots,
+            }),
+            base_cost: 20,
+            sell_cost: 10,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        items.add_item(boots).unwrap();
+
+        let mut classes = ClassDatabase::new();
+        let sorcerer = create_test_sorcerer_class(); // has "light_armor" proficiency
+        classes.add_class(sorcerer).unwrap();
+
+        let mut races = RaceDatabase::new();
+        let human = create_test_human_race();
+        races.add_race(human).unwrap();
+
+        // Act
+        let result = can_equip_item(&character, 26, &items, &classes, &races);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert!(result.unwrap());
     }
 }
