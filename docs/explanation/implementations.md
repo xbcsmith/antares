@@ -1,5 +1,247 @@
 # Implementations
 
+## ItemMesh Full Coverage — All Items Data-Driven (Complete)
+
+### Problem
+
+`ItemMeshCategory` and `ItemMeshDescriptor::from_item` form a hard-coded
+procedural fallback in the game engine. The fallback derives mesh shapes
+entirely from Rust code — `WeaponClassification::Simple + sides ≤ 4 →
+Dagger shape`, `ArmorClassification::Medium → iron chain-mail pile`, etc.
+Because 33 of the 43 tutorial items had `mesh_id: None` in `items.ron`, the
+data-driven path was bypassed for the vast majority of items. Several items
+received actively wrong shapes: `Staff` rendered as a blunt club (its
+`Simple` classification + `sides = 6` mapped to Blunt), `Healing Scroll` and
+`Resurection Scroll` rendered as red potion flasks (their `HealHp`/
+`CureCondition` effect mapped to Potion), and `Mage Robe` rendered as a
+leather-armor pile.
+
+Food items (`Food Ration`, `Trail Ration`) had no entry in the registry at
+all — the fallback generated an earthy-brown flask, but any `mesh_id` pointer
+would have resulted in the wrong colour since no food-coloured mesh existed.
+
+### Root Cause
+
+`spawn_dropped_item_system` only takes the data-driven path when
+`item.mesh_id = Some(id)` AND the id resolves in `GameDataResource`. For
+`mesh_id: None` the fallback is always triggered regardless of what RON mesh
+files exist in the campaign. The 27-entry registry had full coverage; the
+item definitions simply had not been wired up to it.
+
+### Fix
+
+#### 1. `campaigns/tutorial/assets/items/consumables/food_item.ron` (new file)
+
+A new `CreatureDefinition` asset — id `9205` — using the same six-vertex
+hexagonal disc geometry as the potion meshes, coloured earthy brown
+`(0.55, 0.35, 0.10)` with high roughness `(0.85)` and no emissive glow.
+The colour exactly matches what the procedural fallback generated for
+`ConsumableEffect::IsFood` items, ensuring visual consistency between the
+data-driven path and any future fallback use. Scale is `0.8` (slightly
+smaller than the `0.9` potion scale) to read as a plain, mundane consumable.
+
+#### 2. `campaigns/tutorial/data/item_mesh_registry.ron`
+
+Added entry `/*[27]*/` for id `9205 ItemMeshFoodItem` pointing to the new
+`assets/items/consumables/food_item.ron`. The registry now has 28 entries
+covering all weapon, armor, accessory, consumable, ammo, and quest categories.
+
+#### 3. `campaigns/tutorial/data/items.ron`
+
+Assigned `mesh_id` to all 33 items that previously had `mesh_id: None`.
+The game engine's `from_item` procedural fallback is now unreachable for
+every item in the tutorial campaign. Full mapping:
+
+| Item                  | id      | mesh_id | Rationale                                                  |
+| --------------------- | ------- | ------- | ---------------------------------------------------------- |
+| Mace                  | 5       | 9006    | Club — only blunt-weapon mesh available                    |
+| Battle Axe            | 6       | 9001    | Sword — closest martial 1H shape; no axe mesh yet          |
+| Leather Armor         | 20      | 9101    | Exact match                                                |
+| Chain Mail            | 21      | 9102    | Exact match                                                |
+| Plate Mail            | 22      | 9103    | Exact match                                                |
+| Wooden Shield         | 23      | 9104    | Exact match                                                |
+| Iron Helmet           | 25      | 9105    | Exact match                                                |
+| Leather Boots         | 26      | 9106    | Exact match                                                |
+| Chain Mail +1         | 30      | 9102    | Same shape, enchanted variant                              |
+| Dragon Scale Mail     | 31      | 9103    | Plate shape — high-AC, full-coverage armour                |
+| Ring of Protection    | 40      | 9301    | Exact match                                                |
+| Amulet of Might       | 41      | 9302    | Exact match                                                |
+| Belt of Speed         | 42      | 9303    | Exact match                                                |
+| Arcane Wand           | 43      | 9007    | Staff — rod/wand silhouette                                |
+| Holy Symbol           | 44      | 9302    | Amulet — worn as pendant                                   |
+| Healing Potion        | 50      | 9201    | Exact match                                                |
+| Magic Potion          | 51      | 9202    | Mana Potion — same flask shape                             |
+| Cure Poison Potion    | 52      | 9203    | Cure Potion — exact match                                  |
+| Arrows                | 60      | 9401    | Exact match                                                |
+| Crossbow Bolts        | 61      | 9402    | Exact match                                                |
+| Ruby Whistle          | 100     | 9502    | Key Item — quest object                                    |
+| Mace of Undead        | 101     | 9006    | Club — blunt weapon shape                                  |
+| Foo / Foo Stand / Bar | 102–104 | 9502    | Key Item — test placeholders                               |
+| Long Bow +1           | 105     | 9008    | Bow — exact match                                          |
+| Staff                 | 106     | 9007    | **Critical fix** — fallback gave it a club shape           |
+| Mage Robe             | 107     | 9304    | Cloak — fabric garment, far better than leather-armor pile |
+| Healing Scroll        | 108     | 9501    | **Critical fix** — fallback gave it a red potion flask     |
+| Cure Disease Potion   | 109     | 9203    | Cure Potion                                                |
+| Resurection Scroll    | 110     | 9501    | **Critical fix** — fallback gave it a red potion flask     |
+| Food Ration           | 111     | 9205    | New food mesh — earthy brown flask                         |
+| Trail Ration          | 112     | 9205    | New food mesh — earthy brown flask                         |
+
+### Files Changed
+
+| File                                                        | Change                                                     |
+| ----------------------------------------------------------- | ---------------------------------------------------------- |
+| `campaigns/tutorial/assets/items/consumables/food_item.ron` | New — earthy-brown hexagonal flask, id 9205                |
+| `campaigns/tutorial/data/item_mesh_registry.ron`            | Added entry 27: id 9205 `ItemMeshFoodItem`                 |
+| `campaigns/tutorial/data/items.ron`                         | `mesh_id` assigned for all 43 items; zero `None` remaining |
+
+### Quality Gates
+
+```text
+cargo fmt --all          → clean
+cargo check --all-targets --all-features → 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → 0 warnings
+cargo nextest run --all-features → 3560 passed, 0 failed
+```
+
+---
+
+## ItemMesh Format Mismatch — Dropped Items and SDK Preview Fix (Complete)
+
+### Problem
+
+Dropped items in the game world always displayed the same procedural mesh
+regardless of which `mesh_id` was assigned to the item. Importing a new OBJ
+(as RON) in the Item Mesh Editor and moving it to `assets/items/weapons/` also
+had no visible effect — the SDK preview always showed the same generic sword
+shape.
+
+### Root Cause 1 — `short_sword.ron` in Wrong Format (Critical)
+
+`campaigns/tutorial/assets/items/weapons/short_sword.ron` was serialised in
+`ItemMeshDescriptor` format:
+
+```campaigns/tutorial/assets/items/weapons/short_sword.ron#L1-9
+(
+    category: Dagger,
+    blade_length: 0.5,
+    primary_color: (0.75, 0.75, 0.78, 1.0),
+    ...
+    scale: 1.5,
+)
+```
+
+Every other asset file under `assets/items/` was already in `CreatureDefinition`
+format (with `id:`, `name:`, `meshes:`, etc.). When
+`CreatureDatabase::load_from_registry` tried to deserialise `short_sword.ron`
+as a `CreatureDefinition` it returned a `ParseError`. That error propagated
+through `ItemMeshDatabase::load_from_registry` → `load_item_meshes` →
+`load_game_data` → `load_campaign_data`, which caught the top-level error,
+logged it, and inserted an **empty** `GameDataResource`.
+
+Consequence: every `spawn_dropped_item_system` call found `item_meshes` empty,
+hit the `mesh_id not found` warning branch, and fell back to the procedural
+`ItemMeshDescriptor::from_item` path — making all items look identical.
+
+### Root Cause 2 — SDK `perform_save_as_with_path` Serialised Wrong Type
+
+`perform_save_as_with_path` was serialising the raw `ItemMeshDescriptor` struct
+to disk:
+
+```sdk/campaign_builder/src/item_mesh_editor.rs#L870-L875
+let ron_text = ron::ser::to_string_pretty(&descriptor, ...)
+```
+
+Any file written from the SDK editor was therefore in `ItemMeshDescriptor`
+format, which the runtime `CreatureDatabase` loader cannot parse. New meshes
+created inside the SDK would silently fail to load in-game.
+
+### Root Cause 3 — `execute_register_asset` Rejected `CreatureDefinition` Files
+
+`execute_register_asset_validation` tried to parse the file only as
+`ItemMeshDescriptor` and rejected it with an error if that failed — meaning any
+correctly-formatted `CreatureDefinition` RON (e.g. an OBJ imported outside the
+SDK) could not be registered at all.
+
+### Root Cause 4 — SDK Preview Lost Custom Geometry
+
+When `load_from_campaign` encountered a file in `CreatureDefinition` format
+(Attempt 2 code path), it discarded the vertex data and stored only a
+simplified `ItemMeshDescriptor` inferred from the first mesh's colour.
+`sync_preview_renderer_from_descriptor` always called
+`descriptor.to_creature_definition()`, so the preview showed a procedurally
+regenerated shape instead of the imported OBJ geometry.
+
+### Fix
+
+#### 1. `campaigns/tutorial/assets/items/weapons/short_sword.ron`
+
+Converted from `ItemMeshDescriptor` format to `CreatureDefinition` format,
+consistent with all other asset files. Blade vertices computed from the
+original descriptor parameters (category `Dagger`, `blade_length: 0.5`,
+`scale: 1.5`):
+
+- `half_len = (0.3 + 0.5 × 0.7) × 0.5 = 0.3250`
+- `half_width = half_len × 0.12 = 0.0390`
+- `pommel_z = −half_len × 0.30 = −0.0975`
+
+Cross-guard proportioned between `dagger.ron` (±0.0700) and `sword.ron`
+(±0.1100): ±0.0850 wide, ±0.0150 deep. Both meshes receive steel colours and
+metallic materials matching the original descriptor.
+
+This single fix unblocks the entire item mesh registry: `load_game_data` now
+succeeds, `GameDataResource` is populated, and all items with a `mesh_id`
+resolve to their correct `CreatureDefinition`.
+
+#### 2. `sdk/campaign_builder/src/item_mesh_editor.rs` — `perform_save_as_with_path`
+
+Now serialises a `CreatureDefinition` (the canonical game-engine format) instead
+of an `ItemMeshDescriptor`. If the entry being saved originated from an
+imported `CreatureDefinition` (see fix 4 below), that native definition is
+reused with `scale` updated from the descriptor; otherwise
+`descriptor.to_creature_definition()` generates the mesh. Files written by the
+SDK can now be loaded by `CreatureDatabase::load_from_registry` without error.
+
+#### 3. `execute_register_asset_validation` / `execute_register_asset`
+
+Both methods now accept either format. Validation checks
+`ron::de::from_str::<ItemMeshDescriptor>` **and** `ron::de::from_str::<CreatureDefinition>`
+and rejects the file only when neither succeeds. The registration path
+constructs an `ItemMeshEntry` with `native_creature_def: Some(def)` when the
+file is a `CreatureDefinition`, preserving the custom geometry for use in the
+preview and in subsequent saves.
+
+#### 4. `ItemMeshEntry` — `native_creature_def` Field
+
+Added `pub native_creature_def: Option<CreatureDefinition>` to `ItemMeshEntry`.
+
+- `load_from_campaign` Attempt 1 (ItemMeshDescriptor path): `native_creature_def: None`.
+- `load_from_campaign` Attempt 2 (CreatureDefinition path): `native_creature_def: Some(def)`.
+- `execute_register_asset` (CreatureDefinition file): `native_creature_def: Some(def)`.
+- SDK-authored saves: `native_creature_def: None` (descriptor is source of truth).
+
+`sync_preview_renderer_from_descriptor` now checks the selected entry for a
+`native_creature_def` and passes it directly to the preview renderer when
+present, so imported OBJ geometry is faithfully shown instead of a procedural
+approximation.
+
+### Files Changed
+
+| File                                                      | Change                                                                                        |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `campaigns/tutorial/assets/items/weapons/short_sword.ron` | Converted from `ItemMeshDescriptor` to `CreatureDefinition` format                            |
+| `sdk/campaign_builder/src/item_mesh_editor.rs`            | `ItemMeshEntry` new field; save path fix; register-asset dual-format; preview uses native def |
+
+### Quality Gates
+
+```text
+cargo fmt --all          → clean
+cargo check --all-targets --all-features → 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → 0 warnings
+cargo nextest run --all-features → 3560 passed, 0 failed
+```
+
+---
+
 ## SDK: Reload Sweep — Centralized and Fixed Across All Editors (Complete)
 
 ### Problem

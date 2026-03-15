@@ -127,7 +127,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9006),
     ),
     (
         id: 6,
@@ -153,7 +153,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9001),
     ),
     (
         id: 7,
@@ -347,7 +347,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9101),
     ),
     (
         id: 21,
@@ -368,7 +368,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9102),
     ),
     (
         id: 22,
@@ -391,7 +391,7 @@
             "heavy_armor",
         ],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9103),
     ),
     (
         id: 23,
@@ -412,7 +412,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9104),
     ),
 
     // ===== Helmets and Boots =====
@@ -436,7 +436,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9105),
     ),
     (
         id: 26,
@@ -457,7 +457,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9106),
     ),
     (
         id: 30,
@@ -481,7 +481,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9102),
     ),
     (
         id: 31,
@@ -505,7 +505,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9103),
     ),
     (
         id: 40,
@@ -528,7 +528,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9301),
     ),
     (
         id: 41,
@@ -551,7 +551,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9302),
     ),
     (
         id: 42,
@@ -574,7 +574,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9303),
     ),
     (
         id: 43,
@@ -597,7 +597,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9007),
     ),
     (
         id: 44,
@@ -620,7 +620,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9302),
     ),
     (
         id: 50,
@@ -641,7 +641,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9201),
     ),
     (
         id: 51,
@@ -662,7 +662,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9202),
     ),
     (
         id: 52,
@@ -683,7 +683,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9203),
     ),
     (
         id: 60,
@@ -703,7 +703,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9401),
     ),
     (
         id: 61,
@@ -723,7 +723,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9402),
     ),
     (
         id: 100,
@@ -746,7 +746,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9502),
     ),
     (
         id: 101,
@@ -772,7 +772,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9006),
     ),
     (
         id: 102,
@@ -792,7 +792,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9502),
     ),
     (
         id: 103,
@@ -812,7 +812,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9502),
     ),
     (
         id: 104,
@@ -832,7 +832,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9502),
     ),
     (
         id: 105,
@@ -861,7 +861,7 @@
             "two_handed",
         ],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9008),
     ),
     (
         id: 106,
@@ -887,7 +887,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9007),
     ),
     (
         id: 107,
@@ -908,7 +908,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9304),
     ),
     (
         id: 108,
@@ -929,7 +929,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9501),
     ),
     (
         id: 109,
@@ -950,7 +950,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9203),
     ),
     (
         id: 110,
@@ -971,7 +971,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9501),
     ),
     (
         id: 111,
@@ -992,7 +992,7 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9205),
     ),
     (
         id: 112,
@@ -1013,6 +1013,6 @@
         icon_path: None,
         tags: [],
         mesh_descriptor_override: None,
-        mesh_id: None,
+        mesh_id: Some(9205),
     ),
 ]

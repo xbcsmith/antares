@@ -77,6 +77,7 @@ pub enum ItemMeshRegistrySortBy {
 ///         emissive_color: [0.0, 0.0, 0.0],
 ///         scale: 1.0,
 ///     },
+///     native_creature_def: None,
 /// };
 /// assert_eq!(entry.name, "Iron Sword");
 /// ```
@@ -90,6 +91,17 @@ pub struct ItemMeshEntry {
     pub file_path: String,
     /// The descriptor loaded from (or about to be saved to) `file_path`.
     pub descriptor: ItemMeshDescriptor,
+    /// The original [`CreatureDefinition`] loaded from disk when the asset file
+    /// was in `CreatureDefinition` format (e.g. an OBJ imported as RON or a
+    /// hand-crafted mesh authored outside the SDK editor).
+    ///
+    /// When `Some`, [`sync_preview_renderer_from_descriptor`] uses this
+    /// definition directly so custom vertex geometry is faithfully shown in the
+    /// preview instead of the procedurally-generated approximation.
+    ///
+    /// `None` for entries whose disk file is in `ItemMeshDescriptor` format or
+    /// for entries that were created (not imported) inside the SDK editor.
+    pub native_creature_def: Option<CreatureDefinition>,
 }
 
 /// Signal emitted by [`ItemMeshEditorState::show`] to request cross-tab
@@ -338,11 +350,16 @@ impl ItemMeshEditorState {
                     category: descriptor.category,
                     file_path: rel_path,
                     descriptor,
+                    native_creature_def: None,
                 });
                 continue;
             }
 
-            // ── Attempt 2: CreatureDefinition (game/legacy format) ────────
+            // ── Attempt 2: CreatureDefinition (game-engine / imported-OBJ format) ──
+            // This is the canonical on-disk format used by the game engine.
+            // We derive a simplified ItemMeshDescriptor for the editor controls
+            // while storing the full CreatureDefinition so the preview can show
+            // the real custom geometry instead of a procedural approximation.
             if let Ok(def) = ron::de::from_str::<CreatureDefinition>(&content) {
                 let category = Self::infer_category_from_path(&full_path);
                 let primary_color = def
@@ -375,6 +392,7 @@ impl ItemMeshEditorState {
                     category,
                     file_path: rel_path,
                     descriptor,
+                    native_creature_def: Some(def),
                 });
             }
         }
@@ -498,6 +516,7 @@ impl ItemMeshEditorState {
     ///         emissive_color: [0.0, 0.0, 0.0],
     ///         scale: 1.0,
     ///     },
+    ///     native_creature_def: None,
     /// });
     /// state.open_for_editing(0);
     /// assert!(state.edit_buffer.is_some());
@@ -538,6 +557,7 @@ impl ItemMeshEditorState {
     ///         emissive_color: [0.0, 0.0, 0.0],
     ///         scale: 1.0,
     ///     },
+    ///     native_creature_def: None,
     /// });
     /// state.open_for_editing(0);
     /// state.back_to_registry();
@@ -870,7 +890,26 @@ impl ItemMeshEditorState {
             .clone();
 
         // Serialize to RON.
-        let ron_text = ron::ser::to_string_pretty(&descriptor, ron::ser::PrettyConfig::default())
+        //
+        // Always write CreatureDefinition format so the game engine's
+        // CreatureDatabase::load_from_registry can load the file directly.
+        //
+        // If the entry being edited originated from a hand-crafted
+        // CreatureDefinition (e.g. an imported OBJ), we reuse its geometry but
+        // propagate the current descriptor's scale so any SDK scale edits are
+        // preserved.  For procedural-only entries we generate the mesh from the
+        // descriptor.
+        let mut creature_def = if let Some(idx) = self.selected_entry {
+            self.registry
+                .get(idx)
+                .and_then(|e| e.native_creature_def.clone())
+                .unwrap_or_else(|| descriptor.to_creature_definition())
+        } else {
+            descriptor.to_creature_definition()
+        };
+        // Propagate scale edits from the descriptor so SDK changes are visible.
+        creature_def.scale = descriptor.scale;
+        let ron_text = ron::ser::to_string_pretty(&creature_def, ron::ser::PrettyConfig::default())
             .map_err(|e| format!("RON serialization failed: {}", e))?;
 
         // Write to disk.
@@ -901,11 +940,14 @@ impl ItemMeshEditorState {
             .join(" ");
 
         // Append new entry to registry.
+        // native_creature_def is None for newly saved entries: the descriptor
+        // is the source of truth and the file was just written from it.
         self.registry.push(ItemMeshEntry {
             name: cap_name,
             category: descriptor.category,
             file_path: path.to_string(),
             descriptor,
+            native_creature_def: None,
         });
 
         // Update workflow file reference and mark clean.
@@ -975,10 +1017,16 @@ impl ItemMeshEditorState {
             }
         };
 
-        // Try to deserialize as ItemMeshDescriptor.
-        if let Err(e) = ron::de::from_str::<ItemMeshDescriptor>(&content) {
-            self.register_asset_error =
-                Some(format!("Invalid ItemMeshDescriptor in '{}': {}", path, e));
+        // Accept either ItemMeshDescriptor format (legacy/editor-authored) or
+        // CreatureDefinition format (game-engine canonical / imported-OBJ).
+        // Reject the file only if neither can be parsed.
+        let is_descriptor = ron::de::from_str::<ItemMeshDescriptor>(&content).is_ok();
+        let is_creature_def = ron::de::from_str::<CreatureDefinition>(&content).is_ok();
+        if !is_descriptor && !is_creature_def {
+            self.register_asset_error = Some(format!(
+                "'{}' is not a valid ItemMeshDescriptor or CreatureDefinition",
+                path
+            ));
             return false;
         }
 
@@ -1016,8 +1064,45 @@ impl ItemMeshEditorState {
         let content = std::fs::read_to_string(&full_path)
             .map_err(|e| format!("Cannot read '{}': {}", full_path.display(), e))?;
 
-        let descriptor: ItemMeshDescriptor =
-            ron::de::from_str(&content).map_err(|e| format!("Invalid descriptor: {}", e))?;
+        // Try ItemMeshDescriptor first (editor-authored format), then fall back
+        // to CreatureDefinition (game-engine / imported-OBJ format).
+        let (descriptor, native_creature_def) =
+            if let Ok(desc) = ron::de::from_str::<ItemMeshDescriptor>(&content) {
+                (desc, None)
+            } else if let Ok(def) = ron::de::from_str::<CreatureDefinition>(&content) {
+                let category = Self::infer_category_from_path(&full_path);
+                let primary_color = def
+                    .meshes
+                    .first()
+                    .map(|m| m.color)
+                    .unwrap_or([0.7, 0.7, 0.7, 1.0]);
+                let accent_color = def
+                    .meshes
+                    .get(1)
+                    .map(|m| m.color)
+                    .unwrap_or([0.5, 0.3, 0.1, 1.0]);
+                let emissive = def
+                    .meshes
+                    .first()
+                    .and_then(|m| m.material.as_ref())
+                    .and_then(|mat| mat.emissive)
+                    .is_some();
+                let desc = ItemMeshDescriptor {
+                    category,
+                    blade_length: 0.5,
+                    primary_color,
+                    accent_color,
+                    emissive,
+                    emissive_color: [0.0, 0.0, 0.0],
+                    scale: def.scale,
+                };
+                (desc, Some(def))
+            } else {
+                return Err(format!(
+                    "'{}' is not a valid ItemMeshDescriptor or CreatureDefinition",
+                    path
+                ));
+            };
 
         let stem = full_path
             .file_stem()
@@ -1041,6 +1126,7 @@ impl ItemMeshEditorState {
             category: descriptor.category,
             file_path: path,
             descriptor,
+            native_creature_def,
         });
 
         Ok(())
@@ -1116,8 +1202,26 @@ impl ItemMeshEditorState {
     /// Creates the renderer on first call if it doesn't exist.  Clears
     /// `preview_dirty` after synchronization.
     fn sync_preview_renderer_from_descriptor(&mut self) {
-        if let Some(desc) = &self.edit_buffer {
-            let creature_def = desc.to_creature_definition();
+        // If the selected entry has a native CreatureDefinition (imported OBJ
+        // or hand-crafted mesh), use that for the preview so the user sees the
+        // real custom geometry instead of a procedural approximation.
+        // Otherwise, generate the mesh from the descriptor in the edit buffer.
+        let creature_def = if let Some(idx) = self.selected_entry {
+            self.registry
+                .get(idx)
+                .and_then(|e| e.native_creature_def.clone())
+                .or_else(|| {
+                    self.edit_buffer
+                        .as_ref()
+                        .map(|d| d.to_creature_definition())
+                })
+        } else {
+            self.edit_buffer
+                .as_ref()
+                .map(|d| d.to_creature_definition())
+        };
+
+        if let Some(creature_def) = creature_def {
             if let Some(renderer) = &mut self.preview_renderer {
                 renderer.update_creature(Some(creature_def));
             } else {
@@ -2412,6 +2516,7 @@ mod tests {
             category: ItemMeshCategory::Sword,
             file_path: format!("assets/items/{}.ron", name.to_lowercase().replace(' ', "_")),
             descriptor: make_descriptor(1.0),
+            native_creature_def: None,
         }
     }
 

@@ -134,4 +134,9 @@
         name: "ItemMeshKeyItem",
         filepath: "assets/items/quest/key_item.ron",
     ),
+    /*[27]*/ (
+        id: 9205,
+        name: "ItemMeshFoodItem",
+        filepath: "assets/items/consumables/food_item.ron",
+    ),
 ]
