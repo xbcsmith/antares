@@ -187,6 +187,18 @@ Write a plan with a phased approach to implementing doors as furniture in the ga
 
 ✅ PLAN WRITTEN - [Doors as Furniture Implementation Plan](./doors_as_furniture_implementation_plan.md)
 
+### Furniture as RON
+
+We need to create a furniture.ron that defines reusable furniture templates (like "Iron-Bound Dungeon Door" with preset material, scale, tint, flags). Right now the FurnitureType::default_presets() method serves this role in code, but using a data-driven approach would let campaign authors define custom furniture. It would also let us create custom chests, tables, beds, etc.
+
+We should be able to import OBJ files in the Campaign Builder and have them be converted to furniture templates.
+
+We should have all the functionality we have around Items.
+
+Write a plan with a phased approach to implementing furniture as RON in the game engine and the SDK. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Furniture as RON Implementation Plan](./furniture_as_ron_implementation_plan.md)
+
 ### Notes
 
 Month Year Date in Game Engine View looks horrible.
@@ -194,8 +206,6 @@ Month Year Date in Game Engine View looks horrible.
 Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? The trees on Map 1 look no different than before.
 You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same.
 Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
-
-Door are really bad. Fat half tile blocks. No wood textures either.
 
 Combat. Characters with 0 HP are unconcious and should not be allowed to attack monsters.
 

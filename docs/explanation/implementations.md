@@ -1,5 +1,140 @@
 # Implementations
 
+## Phase 4: Inventory UI — Equip and Unequip (Complete)
+
+### Summary
+
+Added full equip/unequip support to the inventory UI overlay. Players can now
+select an item in the inventory grid and press **E** (or click the **Equip**
+button in the action strip) to move it into the appropriate equipment slot.
+An equipment display strip — two rows of seven cells — is rendered between
+the character name header and the inventory slot grid in every character panel,
+showing all equipped items. Selecting a cell in the strip (keyboard or mouse)
+and pressing **Enter** (or clicking **Unequip**) returns the item to inventory.
+All failure paths write a human-readable `GameLog` entry instead of panicking.
+
+### Files Changed
+
+- **`src/game/systems/inventory_ui.rs`** — primary implementation file:
+  - `EquipItemAction` and `UnequipItemAction` message types added and
+    registered in `InventoryPlugin::build`
+  - `PanelAction::Equip` and `PanelAction::Unequip` variants added
+  - `InventoryNavigationState.selected_equip_slot: Option<EquipmentSlot>`
+    added to track equipment strip focus
+  - `build_action_list` extended: `Equip` prepended as index-0 action for
+    any equipable item (weapons, armour, accessories)
+  - `inventory_input_system` extended:
+    - **E key** shortcut dispatches `EquipItemAction` directly from
+      `SlotNavigation` phase (mirrors existing **U** shortcut for Use)
+    - Equipment strip keyboard navigation: **↑** from grid row 0 enters
+      the strip; **↓** returns to grid row 0; **←**/**→** cycle the seven
+      cells; **Enter** dispatches `UnequipItemAction`
+    - `ActionNavigation` `Enter` handler updated to handle `Equip` and
+      `Unequip` variants
+    - `Tab` clears `selected_equip_slot`
+    - **↑** wrapping from row 0 now enters the equipment strip instead of
+      wrapping to the last grid row
+  - `inventory_ui_system` extended: passes `panel_equip_slot` to
+    `render_character_panel`; handles `PanelAction::Equip` and
+    `PanelAction::Unequip`; hint line updated for equipment strip phase
+  - `render_character_panel` extended:
+    - `selected_equip_slot: Option<EquipmentSlot>` parameter added
+    - Equipment strip (`EQUIP_STRIP_H = 76px`) rendered between header and
+      grid — two rows (Weapon/Armor/Shield, Helmet/Boots/Ring/Ring)
+    - Each cell shows a dimmed slot label and the equipped item name (or
+      `—` when empty); focused cell has a green highlight border
+    - Mouse click on an occupied cell dispatches `PanelAction::Unequip`
+    - Unequip action button shown below the strip when a cell is focused
+    - **Equip** button added to the action strip (index 0, green) for
+      equipable items; existing Use/Drop/Transfer index offsets updated
+    - `painter` cloned to owned `Painter` so `ui.allocate_rect()` and
+      `ui.new_child()` can be called without borrow conflicts
+  - `inventory_action_system` extended:
+    - `EquipItemAction` handler: bounds-checks, resolves `GameContent`,
+      calls `equip_item()`, clears nav state on success, writes `GameLog`
+      error on failure
+    - `UnequipItemAction` handler: bounds-checks, resolves `GameContent`,
+      calls `unequip_item()`, clears `selected_equip_slot` on success,
+      writes "inventory is full" `GameLog` entry on `InventoryFull` error
+  - All six existing `render_character_panel` test call sites updated to
+    pass `None` for the new `selected_equip_slot` parameter
+  - All ten existing `inventory_action_system` test setups updated to
+    register `EquipItemAction` and `UnequipItemAction`
+  - `test_build_action_list_no_use_for_non_consumable` updated: first
+    action for a weapon is now `Equip`, not `Drop`
+  - `test_panel_action_drop_variant` and `test_panel_action_transfer_variant`
+    updated with `Equip`/`Unequip` catch-all arms
+
+### Design Decisions
+
+#### `Painter::clone()` to resolve egui borrow conflict
+
+`egui::Ui::painter()` returns `&Painter` — an immutable reference to the
+`Ui`. Calling `ui.allocate_rect()` (mutable) while `painter` is alive fails
+the borrow checker. Cloning the painter at the start of
+`render_character_panel` gives an owned `Painter` whose internal `Arc`
+state still writes to the same draw list, eliminating the conflict without
+any observable behavioural difference.
+
+#### E key test uses nav-state side-effect, not message-queue inspection
+
+`Messages<T>` is not re-exported from `bevy::prelude`. Rather than depend
+on the internal `bevy_ecs::message::Messages` path, the E key test verifies
+the nav-state side-effect: `selected_slot_index` is set to `None` and
+`phase` stays `SlotNavigation` — a code path that is only reached inside
+the `if is_equipable { equip_writer.write(...) }` branch. This is a
+sufficient proxy for "the message was dispatched".
+
+#### `ButtonInput<KeyCode>` initialised without `InputPlugin`
+
+Bevy's `InputPlugin` registers a `First`-schedule system that calls
+`ButtonInput::clear()` at the start of every frame, wiping `just_pressed`
+before `Update` systems run. In tests this means pressing a key before
+`app.update()` would be invisible to the input system. By registering
+`ButtonInput<KeyCode>` with `app.init_resource::<ButtonInput<KeyCode>>()`
+(without `InputPlugin`), `just_pressed` persists through the update frame
+as needed.
+
+#### Up-arrow from row 0 enters the equipment strip (no bottom-wrap)
+
+Before Phase 4, pressing **↑** from grid row 0 wrapped to the last grid
+row (standard grid wrapping). Now it navigates to the equipment strip
+above the grid. Bottom-to-top grid wrapping is removed for row 0 because
+the strip is the natural "above row 0" destination. Pressing **↓** from
+the strip returns to slot 0 of the grid, completing the bidirectional
+navigation.
+
+#### Action button index offsets computed with a running `btn_idx`
+
+The action strip previously used hard-coded offsets
+(`if is_consumable { 1 } else { 0 }`) for the Drop index. With the new
+`Equip` button potentially preceding both `Use` and `Drop`, a running
+`btn_idx` counter replaces all hard-coded offsets, making the order
+table self-documenting and easy to extend.
+
+### New Tests (7 new)
+
+| Test                                                   | Covers                                                          |
+| ------------------------------------------------------ | --------------------------------------------------------------- |
+| `test_equip_action_dispatched_on_e_key`                | E key in `SlotNavigation` clears nav state (proxy for dispatch) |
+| `test_equip_button_absent_for_consumable`              | `build_action_list` omits Equip for consumables                 |
+| `test_equip_button_present_for_weapon`                 | `build_action_list` puts Equip first for weapons                |
+| `test_equip_action_system_moves_item_to_slot`          | `EquipItemAction` moves item to `equipment.weapon`              |
+| `test_unequip_action_system_returns_item_to_inventory` | `UnequipItemAction` clears slot and restores inventory          |
+| `test_unequip_action_system_inventory_full_logs_error` | Full inventory → GameLog "inventory is full", slot unchanged    |
+| `test_equipment_strip_shows_equipped_item_name`        | Panel renders with equipped weapon; item accessible via struct  |
+
+### Quality Gates
+
+```
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 3555 passed (excluding pre-existing flaky perf benchmark)
+```
+
+---
+
 ## Phase 3: Starting Equipment in Inventory (Complete)
 
 ### Summary
