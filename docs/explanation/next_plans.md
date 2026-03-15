@@ -199,6 +199,14 @@ Write a plan with a phased approach to implementing furniture as RON in the game
 
 ✅ PLAN WRITTEN - [Furniture as RON Implementation Plan](./furniture_as_ron_implementation_plan.md)
 
+### Unconcious Characters and Dead Characters
+
+Characters with 0 HP are unconcious and should not be allowed to attack monsters. They should also not be allowed to be attacked by monsters. They should be able to be healed by other characters. Unconcious IS a condition. It is a special condition because of combat implecations. We should add it to the Conditions in a Campaign. CHaracters remain unconcious until they are healed with a Spell, Scroll, or by resting. We should also add Dead to the Conditions in a Campaign. I haven't yet because it requires a lot of wiring because you need to resurrect dead characters either with a Spell, Scroll, or a Priest/Priestess. Dead should be able to be permanent if the Campaign creator wants it to be. We can also add Uncoincious and Dead as conditions from a Spell or Scroll or Consumable.The default should be "until ressurected". The default template for conditions in the SDK should include Unconcious and Dead so that Creators do not forget to add them to their campaigns.
+
+Write a plan with a phased approach to implementing unconcious characters in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+[Unconcious Characters Implementation Plan](./unconcious_characters_implementation_plan.md)
+
 ### Notes
 
 Month Year Date in Game Engine View looks horrible.
@@ -207,6 +215,5 @@ Trees are still horrible. Grass sucks as well. Is tree bark textures being appli
 You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same.
 Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
 
-Combat. Characters with 0 HP are unconcious and should not be allowed to attack monsters.
 
 Time does not advance when the party moves. The clock only ever increments the hour when resting. Time should advance every time the party moves a tile (the minutes should advance). Time should advance when the party travels between maps.

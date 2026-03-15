@@ -4178,4 +4178,130 @@ mod tests {
             serialized
         );
     }
+
+    // ===== Phase 5: instantiate — Helmet and Boots in starting_equipment =====
+
+    #[test]
+    fn test_instantiate_starting_helmet_in_equipment_slot() {
+        // A character definition with starting_equipment.helmet should result in the
+        // helmet being placed in the helmet equipment slot, NOT left in inventory.
+        // Item 25 = "Iron Helmet" (Armor, classification: Helmet, ac_bonus: 1).
+        // Knight has light_armor proficiency, which covers the Helmet classification.
+        let races = RaceDatabase::load_from_file("data/test_campaign/data/races.ron")
+            .expect("Failed to load races");
+        let classes = ClassDatabase::load_from_file("data/test_campaign/data/classes.ron")
+            .expect("Failed to load classes");
+        let items = ItemDatabase::load_from_file("data/test_campaign/data/items.ron")
+            .expect("Failed to load items");
+
+        let definition = CharacterDefinition {
+            id: "test_phase5_helmet".to_string(),
+            name: "Phase5 Helmet".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Good,
+            base_stats: Stats::new(14, 10, 10, 12, 10, 12, 10),
+            hp_override: None,
+            portrait_id: "1".to_string(),
+            starting_gold: 0,
+            starting_gems: 0,
+            starting_food: 0,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment {
+                helmet: Some(25), // Iron Helmet (Helmet classification, ac_bonus: 1)
+                ..Default::default()
+            },
+            description: "Phase 5 helmet test".to_string(),
+            is_premade: false,
+            starts_in_party: false,
+            creature_id: None,
+        };
+
+        let character = definition
+            .instantiate(&races, &classes, &items)
+            .expect("Failed to instantiate character with starting helmet");
+
+        // Helmet must be placed in the helmet equipment slot.
+        assert_eq!(
+            character.equipment.helmet,
+            Some(25),
+            "Iron Helmet (id 25) must be in the helmet equipment slot"
+        );
+
+        // Helmet must NOT appear in inventory.
+        let helmet_in_inv = character.inventory.items.iter().any(|s| s.item_id == 25);
+        assert!(
+            !helmet_in_inv,
+            "starting helmet must be in the equipment slot, not in inventory"
+        );
+
+        // AC must reflect the helmet's ac_bonus (1): AC_DEFAULT(10) + 1 = 11.
+        assert_eq!(
+            character.ac.current, 11,
+            "AC should be AC_DEFAULT(10) + Iron Helmet ac_bonus(1) = 11"
+        );
+    }
+
+    #[test]
+    fn test_instantiate_starting_boots_in_equipment_slot() {
+        // A character definition with starting_equipment.boots should result in the
+        // boots being placed in the boots equipment slot, NOT left in inventory.
+        // Item 26 = "Leather Boots" (Armor, classification: Boots, ac_bonus: 1).
+        // Knight has light_armor proficiency, which covers the Boots classification.
+        let races = RaceDatabase::load_from_file("data/test_campaign/data/races.ron")
+            .expect("Failed to load races");
+        let classes = ClassDatabase::load_from_file("data/test_campaign/data/classes.ron")
+            .expect("Failed to load classes");
+        let items = ItemDatabase::load_from_file("data/test_campaign/data/items.ron")
+            .expect("Failed to load items");
+
+        let definition = CharacterDefinition {
+            id: "test_phase5_boots".to_string(),
+            name: "Phase5 Boots".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Good,
+            base_stats: Stats::new(14, 10, 10, 12, 10, 12, 10),
+            hp_override: None,
+            portrait_id: "1".to_string(),
+            starting_gold: 0,
+            starting_gems: 0,
+            starting_food: 0,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment {
+                boots: Some(26), // Leather Boots (Boots classification, ac_bonus: 1)
+                ..Default::default()
+            },
+            description: "Phase 5 boots test".to_string(),
+            is_premade: false,
+            starts_in_party: false,
+            creature_id: None,
+        };
+
+        let character = definition
+            .instantiate(&races, &classes, &items)
+            .expect("Failed to instantiate character with starting boots");
+
+        // Boots must be placed in the boots equipment slot.
+        assert_eq!(
+            character.equipment.boots,
+            Some(26),
+            "Leather Boots (id 26) must be in the boots equipment slot"
+        );
+
+        // Boots must NOT appear in inventory.
+        let boots_in_inv = character.inventory.items.iter().any(|s| s.item_id == 26);
+        assert!(
+            !boots_in_inv,
+            "starting boots must be in the equipment slot, not in inventory"
+        );
+
+        // AC must reflect the boots' ac_bonus (1): AC_DEFAULT(10) + 1 = 11.
+        assert_eq!(
+            character.ac.current, 11,
+            "AC should be AC_DEFAULT(10) + Leather Boots ac_bonus(1) = 11"
+        );
+    }
 }

@@ -1,5 +1,123 @@
 # Implementations
 
+## Phase 5: Character Equipment — Documentation and Final Validation (Complete)
+
+### Summary
+
+Phase 5 closes out the five-phase Character Equipment feature by auditing test
+coverage for all new variants and functions introduced in Phases 1–4, adding
+the missing unit tests found during the audit, and running the full four-gate
+quality pipeline to confirm zero errors and zero warnings.
+
+### Coverage Audit Results
+
+The four priority targets from the plan were inspected:
+
+| Target file                                                   | Gap found                                                                    | Action taken     |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------- |
+| `src/domain/items/types.rs` — `required_proficiency`          | No tests for `Helmet` and `Boots` classifications                            | Added 2 tests    |
+| `src/domain/items/equipment_validation.rs` — `can_equip_item` | `Helmet` and `Boots` fully covered by Phase 1 tests                          | No action needed |
+| `src/domain/proficiency.rs` — `proficiency_for_armor`         | `Helmet` and `Boots` fully covered by Phase 1 tests                          | No action needed |
+| `src/domain/character_definition.rs` — `instantiate`          | Weapon and body-armor tested in Phase 3; no tests for `helmet`/`boots` slots | Added 2 tests    |
+
+### New Tests (4 new)
+
+| Test                                                 | File                                 | Covers                                                                                                            |
+| ---------------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `test_armor_required_proficiency_helmet`             | `src/domain/items/types.rs`          | `Item::required_proficiency()` returns `Some("light_armor")` for a `Helmet`-classified armor item                 |
+| `test_armor_required_proficiency_boots`              | `src/domain/items/types.rs`          | `Item::required_proficiency()` returns `Some("light_armor")` for a `Boots`-classified armor item                  |
+| `test_instantiate_starting_helmet_in_equipment_slot` | `src/domain/character_definition.rs` | `instantiate` places a helmet (item 25, Iron Helmet) into `equipment.helmet`; item absent from inventory; AC = 11 |
+| `test_instantiate_starting_boots_in_equipment_slot`  | `src/domain/character_definition.rs` | `instantiate` places boots (item 26, Leather Boots) into `equipment.boots`; item absent from inventory; AC = 11   |
+
+### Cross-Phase Feature Summary
+
+The complete Character Equipment feature (Phases 1–5) delivered:
+
+#### Phase 1 — `ArmorClassification` Expansion
+
+- Added `Helmet` and `Boots` variants to `ArmorClassification` enum
+  (`src/domain/items/types.rs`)
+- Extended `ProficiencyDatabase::proficiency_for_armor` to map both new
+  variants to `"light_armor"` (`src/domain/proficiency.rs`)
+- Made `has_slot_for_item` exhaustive over all six `ArmorClassification`
+  variants — no `_` wildcard (`src/domain/items/equipment_validation.rs`)
+- Made `EquipmentSlot::for_item` exhaustive over the same variants
+  (`src/domain/items/equipment_validation.rs`)
+- Migrated `data/test_campaign/data/items.ron` and `data/items.ron` to use
+  `classification: Helmet` / `classification: Boots` in RON data
+- Extended SDK validation to accept the two new classifications
+  (`src/sdk/validation.rs`)
+
+#### Phase 2 — Domain Transaction Functions and AC Calculation
+
+- Added `EquipmentSlot` enum with seven variants and `get`/`set`/`for_item`
+  methods (`src/domain/character.rs`)
+- Added `calculate_armor_class` pure function — reads `equipment` and
+  `item_db`, returns a clamped `[AC_MIN, AC_MAX]` value
+  (`src/domain/items/equipment_validation.rs`)
+- Added `equip_item` domain transaction: validates class/race proficiency
+  and alignment, adds item to inventory, then moves it to the correct slot,
+  then recalculates AC (`src/domain/transactions.rs`)
+- Added `unequip_item` domain transaction: clears the slot, returns item to
+  inventory, recalculates AC (`src/domain/transactions.rs`)
+- Fixed `Character::new()` to initialise `ac.current = AC_DEFAULT` (was 0)
+  (`src/domain/character.rs`)
+- Fixed `equipped_count()` to iterate all seven slots including `helmet` and
+  `boots` (`src/domain/character.rs`)
+
+#### Phase 3 — Starting Equipment in Inventory
+
+- Changed `CharacterDefinition::instantiate` to a two-pass flow: first add
+  all `starting_items` to inventory, then call `equip_item` for each slot in
+  `starting_equipment` (`src/domain/character_definition.rs`)
+- Removed `create_starting_equipment` helper (logic merged into `instantiate`)
+- Added `CharacterDefinitionError::InvalidStartingEquipment` — returned when
+  a starting equipment item fails proficiency or alignment validation
+- Audited `data/test_campaign/data/characters.ron` and
+  `campaigns/tutorial/data/characters.ron` to verify all `starting_equipment`
+  item IDs are present in the corresponding items databases
+
+#### Phase 4 — Inventory UI — Equip and Unequip
+
+- Added `EquipItemAction` and `UnequipItemAction` message types, registered in
+  `InventoryPlugin::build` (`src/game/systems/inventory_ui.rs`)
+- Added `PanelAction::Equip` and `PanelAction::Unequip` variants to the action
+  strip; `build_action_list` prepends `Equip` (index 0) for equipable items
+- Added equipment display strip: two rows of seven cells rendered above the
+  inventory grid in every character panel
+- Added **E** keyboard shortcut to dispatch `EquipItemAction` from the
+  `SlotNavigation` phase; **Enter** on a focused strip cell dispatches
+  `UnequipItemAction`
+- Extended `inventory_action_system` to handle both new message types, writing
+  `GameLog` errors on all failure paths
+
+### Architecture Compliance
+
+- [x] `ArmorClassification` match arms exhaustive — no `_` wildcard
+- [x] `EquipmentSlot::for_item` match exhaustive over all six `ArmorClassification` variants
+- [x] Proficiency IDs are string values from `ProficiencyDatabase`, never hard-coded in callers
+- [x] RON data files use `classification: Helmet` / `Boots`
+- [x] No tests reference `campaigns/tutorial` — all use `data/test_campaign`
+- [x] Helmet and Boots fixture items exist in `data/test_campaign/data/items.ron` (ids 25 and 26)
+- [x] `equip_item` and `unequip_item` are pure-domain functions in `transactions.rs` — no Bevy dependencies
+- [x] `calculate_armor_class` only reads `equipment` and `item_db` — no mutable state
+- [x] AC recalculation is triggered inside `equip_item` and `unequip_item`, never in callers
+- [x] Starting equipment items added to inventory then equip-validated via `equip_item`
+- [x] `EquipItemAction` / `UnequipItemAction` follow existing message pattern
+- [x] All new public functions have `///` doc comments
+- [x] SPDX `FileCopyrightText` and `License-Identifier` headers present in all modified `.rs` files
+
+### Quality Gates
+
+```
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 3560 passed (8 skipped); was 3556 before Phase 5
+```
+
+---
+
 ## Phase 4: Inventory UI — Equip and Unequip (Complete)
 
 ### Summary

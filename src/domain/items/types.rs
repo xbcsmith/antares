@@ -1257,6 +1257,78 @@ mod tests {
         assert_eq!(shield.required_proficiency(), Some("shield".to_string()));
     }
 
+    // ===== Phase 5: Item::required_proficiency — Helmet and Boots =====
+
+    #[test]
+    fn test_armor_required_proficiency_helmet() {
+        // Helmet classification must map to the same proficiency as Light armor ("light_armor").
+        // This validates that ArmorClassification::Helmet is handled by required_proficiency()
+        // and that callers do not need a special-case branch for headgear.
+        let iron_helmet = Item {
+            id: 25,
+            name: "Iron Helmet".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 5,
+                classification: ArmorClassification::Helmet,
+            }),
+            base_cost: 40,
+            sell_cost: 20,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+
+        assert_eq!(
+            iron_helmet.required_proficiency(),
+            Some("light_armor".to_string()),
+            "Helmet classification must require light_armor proficiency"
+        );
+    }
+
+    #[test]
+    fn test_armor_required_proficiency_boots() {
+        // Boots classification must map to the same proficiency as Light armor ("light_armor").
+        // This validates that ArmorClassification::Boots is handled by required_proficiency()
+        // and that callers do not need a special-case branch for footwear.
+        let leather_boots = Item {
+            id: 26,
+            name: "Leather Boots".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 2,
+                classification: ArmorClassification::Boots,
+            }),
+            base_cost: 20,
+            sell_cost: 10,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+
+        assert_eq!(
+            leather_boots.required_proficiency(),
+            Some("light_armor".to_string()),
+            "Boots classification must require light_armor proficiency"
+        );
+    }
+
     #[test]
     fn test_accessory_required_proficiency_arcane() {
         let wand = Item {
