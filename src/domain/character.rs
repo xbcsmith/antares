@@ -651,7 +651,7 @@ pub struct Equipment {
 
 impl Equipment {
     /// Maximum number of equipped items
-    pub const MAX_EQUIPPED: usize = 6;
+    pub const MAX_EQUIPPED: usize = 7;
 
     /// Creates a new Equipment with all slots empty
     pub fn new() -> Self {
@@ -667,6 +667,27 @@ impl Equipment {
     }
 
     /// Count currently equipped items
+    ///
+    /// Counts all seven slots: weapon, armor, shield, helmet, boots,
+    /// accessory1, and accessory2.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::Equipment;
+    ///
+    /// let mut equipment = Equipment::new();
+    /// assert_eq!(equipment.equipped_count(), 0);
+    ///
+    /// equipment.weapon    = Some(1);
+    /// equipment.armor     = Some(2);
+    /// equipment.shield    = Some(3);
+    /// equipment.helmet    = Some(4);
+    /// equipment.boots     = Some(5);
+    /// equipment.accessory1 = Some(6);
+    /// equipment.accessory2 = Some(7);
+    /// assert_eq!(equipment.equipped_count(), 7);
+    /// ```
     pub fn equipped_count(&self) -> usize {
         [
             &self.weapon,
@@ -675,6 +696,7 @@ impl Equipment {
             &self.helmet,
             &self.boots,
             &self.accessory1,
+            &self.accessory2,
         ]
         .iter()
         .filter(|slot| slot.is_some())
@@ -715,6 +737,106 @@ impl Equipment {
 impl Default for Equipment {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ===== EquipmentSlot =====
+
+/// Identifies a specific slot in a character's [`Equipment`] set.
+///
+/// Used by the domain transaction functions (`equip_item`, `unequip_item`) to
+/// address a particular slot without pattern-matching on raw field names.
+///
+/// The correct target slot for an item is derived via
+/// [`EquipmentSlot::for_item`], which is implemented in
+/// `src/domain/items/equipment_validation.rs` (same crate, separate module) to
+/// avoid a circular dependency between the `character` and `items` modules.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Equipment, EquipmentSlot};
+///
+/// let mut equipment = Equipment::new();
+/// equipment.weapon = Some(42);
+///
+/// assert_eq!(EquipmentSlot::Weapon.get(&equipment), Some(42));
+///
+/// EquipmentSlot::Weapon.set(&mut equipment, None);
+/// assert_eq!(EquipmentSlot::Weapon.get(&equipment), None);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EquipmentSlot {
+    /// One-handed or two-handed weapon
+    Weapon,
+    /// Body armour (Light / Medium / Heavy classification)
+    Armor,
+    /// Shield
+    Shield,
+    /// Helmet / headgear
+    Helmet,
+    /// Boots / footwear
+    Boots,
+    /// First accessory slot (ring, amulet, belt, cloak)
+    Accessory1,
+    /// Second accessory slot
+    Accessory2,
+}
+
+impl EquipmentSlot {
+    /// Read the current `ItemId` from this slot in the given equipment set.
+    ///
+    /// Returns `None` when the slot is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Equipment, EquipmentSlot};
+    ///
+    /// let mut equipment = Equipment::new();
+    /// equipment.armor = Some(20);
+    ///
+    /// assert_eq!(EquipmentSlot::Armor.get(&equipment), Some(20));
+    /// assert_eq!(EquipmentSlot::Weapon.get(&equipment), None);
+    /// ```
+    pub fn get(&self, equipment: &Equipment) -> Option<ItemId> {
+        match self {
+            EquipmentSlot::Weapon => equipment.weapon,
+            EquipmentSlot::Armor => equipment.armor,
+            EquipmentSlot::Shield => equipment.shield,
+            EquipmentSlot::Helmet => equipment.helmet,
+            EquipmentSlot::Boots => equipment.boots,
+            EquipmentSlot::Accessory1 => equipment.accessory1,
+            EquipmentSlot::Accessory2 => equipment.accessory2,
+        }
+    }
+
+    /// Write an `ItemId` into this slot in the given equipment set.
+    ///
+    /// Pass `None` to clear the slot.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Equipment, EquipmentSlot};
+    ///
+    /// let mut equipment = Equipment::new();
+    /// EquipmentSlot::Weapon.set(&mut equipment, Some(1));
+    /// assert_eq!(equipment.weapon, Some(1));
+    ///
+    /// EquipmentSlot::Weapon.set(&mut equipment, None);
+    /// assert_eq!(equipment.weapon, None);
+    /// ```
+    pub fn set(&self, equipment: &mut Equipment, value: Option<ItemId>) {
+        match self {
+            EquipmentSlot::Weapon => equipment.weapon = value,
+            EquipmentSlot::Armor => equipment.armor = value,
+            EquipmentSlot::Shield => equipment.shield = value,
+            EquipmentSlot::Helmet => equipment.helmet = value,
+            EquipmentSlot::Boots => equipment.boots = value,
+            EquipmentSlot::Accessory1 => equipment.accessory1 = value,
+            EquipmentSlot::Accessory2 => equipment.accessory2 = value,
+        }
     }
 }
 
@@ -1101,7 +1223,7 @@ impl Character {
             stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
             hp: AttributePair16::new(10),
             sp: AttributePair16::new(0),
-            ac: AttributePair::new(0),
+            ac: AttributePair::new(AC_DEFAULT),
             spell_level: AttributePair::new(0),
             inventory: Inventory::new(),
             equipment: Equipment::new(),
@@ -1957,6 +2079,15 @@ mod tests {
 
         equipment.armor = Some(2);
         assert_eq!(equipment.equipped_count(), 2);
+
+        // Fill all seven slots and verify MAX_EQUIPPED matches
+        equipment.shield = Some(3);
+        equipment.helmet = Some(4);
+        equipment.boots = Some(5);
+        equipment.accessory1 = Some(6);
+        equipment.accessory2 = Some(7);
+        assert_eq!(equipment.equipped_count(), 7);
+        assert_eq!(Equipment::MAX_EQUIPPED, 7);
     }
 
     #[test]

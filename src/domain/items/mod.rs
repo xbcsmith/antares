@@ -43,7 +43,7 @@ pub use consumable_usage::{
     apply_consumable_effect, apply_consumable_effect_exploration, ConsumableApplyResult,
 };
 pub use database::{ItemDatabase, ItemDatabaseError, ItemMeshDatabase};
-pub use equipment_validation::{can_equip_item, EquipError};
+pub use equipment_validation::{calculate_armor_class, can_equip_item, EquipError};
 pub use types::{
     normalize_duration, AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType,
     ArmorClassification, ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData,

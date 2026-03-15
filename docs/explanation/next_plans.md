@@ -24,7 +24,7 @@ The @scripts/generate_icons.sh script generates icons for the web and macOS plat
 
 Write a plan with a phased approach for adding a Mac OS tray icon. THINK HARD and follow the rules in @PLAN.md
 
-[MacOS Tray Icon](./macos_tray_icon.md)
+✅ COMPLETED - [MacOS Tray Icon](./macos_tray_icon.md)
 
 ## OBJ to RON Conversion
 
@@ -34,7 +34,7 @@ UI, assign colors via a color picker and preset palette, and export the result
 as a `CreatureDefinition` RON file (used for both creatures and items). The
 default export paths are `assets/creatures/` and `assets/items/` respectively.
 
-✅ COMPLETE - [obj to ron conversion](./obj_to_ron_implementation_plan.md)
+✅ COMPLETED - [obj to ron conversion](./obj_to_ron_implementation_plan.md)
 
 ## Game Engine
 
@@ -170,6 +170,43 @@ Write a plan with a phased approach to implementing an automap and mini map in t
 
 ✅ PLAN WRITTEN - [Automap and Mini Map Implementation Plan](./automap_and_mini_map_implementation_plan.md)
 
+### Doors as Furniture
+
+Doors should be classified as furniture and should be placed on the map as furniture. They should not be classified as walls and should not be placed on the map as walls. They should be placed on the map as furniture and should be placed on the map as furniture.
+
+
+Doors are environmental objects with state — they can be open/closed/locked, just like chests can be locked/unlocked. The existing FurnitureFlags already has locked: bool and blocking: bool, which are exactly what doors need.
+
+Doors need procedural mesh — Adding FurnitureType::Door (or DoorSingle / DoorDouble) gives doors the same procedural mesh pipeline that already builds detailed 3D geometry for thrones, bookshelves, etc. You'd create a DoorConfig and a spawn_door function alongside the existing ones.
+
+Material support for free — FurnitureMaterial::Wood already has appropriate PBR properties for a wooden door. You could also have Metal gates, Stone doors, etc.
+
+DoorFrameConfig and StructureType::DoorFrame you already have in the architecture are the perfect companion — the frame is a structure, the door panel itself becomes furniture. They compose together on the same tile.
+
+Write a plan with a phased approach to implementing doors as furniture in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Doors as Furniture Implementation Plan](./doors_as_furniture_implementation_plan.md)
+
+### Furniture as RON
+
+We need to create a furniture.ron that defines reusable furniture templates (like "Iron-Bound Dungeon Door" with preset material, scale, tint, flags). Right now the FurnitureType::default_presets() method serves this role in code, but using a data-driven approach would let campaign authors define custom furniture. It would also let us create custom chests, tables, beds, etc.
+
+We should be able to import OBJ files in the Campaign Builder and have them be converted to furniture templates.
+
+We should have all the functionality we have around Items.
+
+Write a plan with a phased approach to implementing furniture as RON in the game engine and the SDK. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Furniture as RON Implementation Plan](./furniture_as_ron_implementation_plan.md)
+
+### Unconcious Characters and Dead Characters
+
+Characters with 0 HP are unconcious and should not be allowed to attack monsters. They should also not be allowed to be attacked by monsters. They should be able to be healed by other characters. Unconcious IS a condition. It is a special condition because of combat implecations. We should add it to the Conditions in a Campaign. CHaracters remain unconcious until they are healed with a Spell, Scroll, or by resting. We should also add Dead to the Conditions in a Campaign. I haven't yet because it requires a lot of wiring because you need to resurrect dead characters either with a Spell, Scroll, or a Priest/Priestess. Dead should be able to be permanent if the Campaign creator wants it to be. We can also add Uncoincious and Dead as conditions from a Spell or Scroll or Consumable.The default should be "until ressurected". The default template for conditions in the SDK should include Unconcious and Dead so that Creators do not forget to add them to their campaigns.
+
+Write a plan with a phased approach to implementing unconcious characters in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+[Unconcious Characters Implementation Plan](./unconcious_characters_implementation_plan.md)
+
 ### Notes
 
 Month Year Date in Game Engine View looks horrible.
@@ -178,8 +215,5 @@ Trees are still horrible. Grass sucks as well. Is tree bark textures being appli
 You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same.
 Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
 
-Door are really bad. Fat half tile blocks. No wood textures either.
-
-Combat. Characters with 0 HP are unconcious and should not be allowed to attack monsters.
 
 Time does not advance when the party moves. The clock only ever increments the hour when resting. Time should advance every time the party moves a tile (the minutes should advance). Time should advance when the party travels between maps.

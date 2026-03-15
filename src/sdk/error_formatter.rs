@@ -428,6 +428,58 @@ impl ErrorFormatter {
                     "Run 'cargo nextest run --all-features' to see the full validation output".to_string(),
                 ]
             }
+
+            ValidationError::HelmetSlotTypeMismatch {
+                character_id,
+                item_id,
+                actual_classification,
+            } => {
+                vec![
+                    format!(
+                        "Character '{}' has a '{}'-classified item (ID {}) in the helmet slot",
+                        character_id, actual_classification, item_id
+                    ),
+                    format!(
+                        "Item ID {} must have classification: Helmet in its ArmorData",
+                        item_id
+                    ),
+                    format!(
+                        "Edit 'data/items.ron' and set `classification: Helmet` for item {}",
+                        item_id
+                    ),
+                    format!(
+                        "Or update character '{}' starting_equipment.helmet to reference a Helmet-classified item",
+                        character_id
+                    ),
+                    "Run 'cargo nextest run --all-features' to verify the fix".to_string(),
+                ]
+            }
+
+            ValidationError::BootsSlotTypeMismatch {
+                character_id,
+                item_id,
+                actual_classification,
+            } => {
+                vec![
+                    format!(
+                        "Character '{}' has a '{}'-classified item (ID {}) in the boots slot",
+                        character_id, actual_classification, item_id
+                    ),
+                    format!(
+                        "Item ID {} must have classification: Boots in its ArmorData",
+                        item_id
+                    ),
+                    format!(
+                        "Edit 'data/items.ron' and set `classification: Boots` for item {}",
+                        item_id
+                    ),
+                    format!(
+                        "Or update character '{}' starting_equipment.boots to reference a Boots-classified item",
+                        character_id
+                    ),
+                    "Run 'cargo nextest run --all-features' to verify the fix".to_string(),
+                ]
+            }
         }
     }
 

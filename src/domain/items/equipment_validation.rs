@@ -12,7 +12,7 @@
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
 //! See `docs/explanation/engine_sdk_support_plan.md` Phase 6 for implementation details.
 
-use crate::domain::character::{Character, Equipment};
+use crate::domain::character::{Character, Equipment, EquipmentSlot, AC_DEFAULT, AC_MAX, AC_MIN};
 use crate::domain::classes::ClassDatabase;
 use crate::domain::items::ItemDatabase;
 use crate::domain::proficiency::has_proficiency_union;
@@ -176,17 +176,25 @@ fn has_slot_for_item(
     _item_id: ItemId,
     item: &crate::domain::items::types::Item,
 ) -> bool {
-    use crate::domain::items::types::{AccessorySlot, ItemType};
+    use crate::domain::items::types::{AccessorySlot, ArmorClassification, ItemType};
 
     match &item.item_type {
         ItemType::Weapon(_) => {
             // Weapon slot always exists
             true
         }
-        ItemType::Armor(_) => {
-            // Armor slot always exists
-            true
-        }
+        ItemType::Armor(data) => match data.classification {
+            // Body-armor slot
+            ArmorClassification::Light
+            | ArmorClassification::Medium
+            | ArmorClassification::Heavy => true,
+            // Shield slot
+            ArmorClassification::Shield => true,
+            // Helmet slot
+            ArmorClassification::Helmet => true,
+            // Boots slot
+            ArmorClassification::Boots => true,
+        },
         ItemType::Accessory(data) => {
             // Check if appropriate accessory slot exists
             match data.slot {
@@ -205,6 +213,133 @@ fn has_slot_for_item(
             false
         }
     }
+}
+
+// ===== EquipmentSlot::for_item =====
+
+impl EquipmentSlot {
+    /// Derive the correct target equipment slot for an item.
+    ///
+    /// Inspects the item's [`ItemType`] (and [`ArmorClassification`] for armour)
+    /// together with the current state of `equipment` (to choose between
+    /// `Accessory1` and `Accessory2`).
+    ///
+    /// | `ItemType`          | Classification / notes        | Target slot   |
+    /// |---------------------|-------------------------------|---------------|
+    /// | `Weapon(_)`         | any                           | `Weapon`      |
+    /// | `Armor(data)`       | `Light / Medium / Heavy`      | `Armor`       |
+    /// | `Armor(data)`       | `Shield`                      | `Shield`      |
+    /// | `Armor(data)`       | `Helmet`                      | `Helmet`      |
+    /// | `Armor(data)`       | `Boots`                       | `Boots`       |
+    /// | `Accessory(_)`      | `accessory1` empty            | `Accessory1`  |
+    /// | `Accessory(_)`      | `accessory1` occupied         | `Accessory2`  |
+    /// | `Consumable / Ammo / Quest` | —                   | `None`        |
+    ///
+    /// # Arguments
+    ///
+    /// * `item`      - The item being equipped.
+    /// * `equipment` - The character's current equipment (consulted for
+    ///   accessory slot selection only).
+    ///
+    /// # Returns
+    ///
+    /// `Some(EquipmentSlot)` if the item is equippable, `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::domain::character::{Equipment, EquipmentSlot};
+    /// use antares::domain::items::{ArmorClassification, ArmorData, Item, ItemType};
+    ///
+    /// let equipment = Equipment::new();
+    /// // A Helmet-classified armour item targets the Helmet slot
+    /// // (see full Item construction in integration tests)
+    /// ```
+    pub fn for_item(
+        item: &crate::domain::items::types::Item,
+        equipment: &crate::domain::character::Equipment,
+    ) -> Option<EquipmentSlot> {
+        use crate::domain::items::types::{ArmorClassification, ItemType};
+
+        match &item.item_type {
+            ItemType::Weapon(_) => Some(EquipmentSlot::Weapon),
+            ItemType::Armor(data) => match data.classification {
+                ArmorClassification::Light
+                | ArmorClassification::Medium
+                | ArmorClassification::Heavy => Some(EquipmentSlot::Armor),
+                ArmorClassification::Shield => Some(EquipmentSlot::Shield),
+                ArmorClassification::Helmet => Some(EquipmentSlot::Helmet),
+                ArmorClassification::Boots => Some(EquipmentSlot::Boots),
+            },
+            ItemType::Accessory(_) => {
+                if equipment.accessory1.is_none() {
+                    Some(EquipmentSlot::Accessory1)
+                } else {
+                    Some(EquipmentSlot::Accessory2)
+                }
+            }
+            ItemType::Consumable(_) | ItemType::Ammo(_) | ItemType::Quest(_) => None,
+        }
+    }
+}
+
+// ===== calculate_armor_class =====
+
+/// Calculate the total armor class for a character based on equipped armor items.
+///
+/// Sums the `ac_bonus` from all `ItemType::Armor` items equipped in the
+/// `armor`, `shield`, `helmet`, and `boots` slots, then adds [`AC_DEFAULT`]
+/// (10) as the base.  The final value is clamped to `[AC_MIN, AC_MAX]` (0–30).
+///
+/// Weapon and accessory slots are excluded from this calculation.
+/// `BonusAttribute::ArmorClass` bonuses on accessories are out of scope.
+///
+/// If an `item_id` stored in an equipment slot does not exist in `item_db`,
+/// that slot contributes 0 to the total; no panic occurs.
+///
+/// # Arguments
+///
+/// * `equipment` - The character's current equipment set.
+/// * `item_db`   - Item database used to look up `ac_bonus` values.
+///
+/// # Returns
+///
+/// Total armor class as a `u8`, clamped to `[AC_MIN, AC_MAX]`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::Equipment;
+/// use antares::domain::items::{calculate_armor_class, ItemDatabase};
+///
+/// let equipment = Equipment::new();
+/// let item_db   = ItemDatabase::new();
+///
+/// // Unarmoured character has AC_DEFAULT (10)
+/// assert_eq!(calculate_armor_class(&equipment, &item_db), 10);
+/// ```
+pub fn calculate_armor_class(equipment: &Equipment, item_db: &ItemDatabase) -> u8 {
+    use crate::domain::items::types::ItemType;
+
+    let mut total: u32 = AC_DEFAULT as u32;
+
+    for item_id in [
+        equipment.armor,
+        equipment.shield,
+        equipment.helmet,
+        equipment.boots,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(item) = item_db.get_item(item_id) {
+            if let ItemType::Armor(data) = &item.item_type {
+                total = total.saturating_add(data.ac_bonus as u32);
+            }
+        }
+    }
+
+    total.clamp(AC_MIN as u32, AC_MAX as u32) as u8
 }
 
 #[cfg(test)]
@@ -760,5 +895,301 @@ mod tests {
         // Assert
         assert!(result.is_err());
         assert!(matches!(result, Err(EquipError::InvalidClass(_))));
+    }
+
+    // ===== Phase 1: ArmorClassification Expansion Tests =====
+
+    #[test]
+    fn test_armor_classification_helmet_variant_exists() {
+        let helmet = ArmorClassification::Helmet;
+        assert_ne!(helmet, ArmorClassification::Light);
+    }
+
+    #[test]
+    fn test_armor_classification_boots_variant_exists() {
+        let boots = ArmorClassification::Boots;
+        assert_ne!(boots, ArmorClassification::Light);
+    }
+
+    #[test]
+    fn test_has_slot_for_helmet_item() {
+        // Arrange
+        let helmet_item = Item {
+            id: 25,
+            name: "Iron Helmet".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 5,
+                classification: ArmorClassification::Helmet,
+            }),
+            base_cost: 40,
+            sell_cost: 20,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+
+        // Act & Assert — has_slot_for_item must return true for Helmet-classified armor
+        let equipment = crate::domain::character::Equipment::new();
+        assert!(has_slot_for_item(&equipment, 25, &helmet_item));
+    }
+
+    #[test]
+    fn test_has_slot_for_boots_item() {
+        // Arrange
+        let boots_item = Item {
+            id: 26,
+            name: "Leather Boots".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 2,
+                classification: ArmorClassification::Boots,
+            }),
+            base_cost: 20,
+            sell_cost: 10,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+
+        // Act & Assert — has_slot_for_item must return true for Boots-classified armor
+        let equipment = crate::domain::character::Equipment::new();
+        assert!(has_slot_for_item(&equipment, 26, &boots_item));
+    }
+
+    #[test]
+    fn test_can_equip_helmet_succeeds() {
+        // Arrange — sorcerer has "light_armor" proficiency which covers Helmet
+        let character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut items = ItemDatabase::new();
+        let helmet = Item {
+            id: 25,
+            name: "Iron Helmet".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 5,
+                classification: ArmorClassification::Helmet,
+            }),
+            base_cost: 40,
+            sell_cost: 20,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        items.add_item(helmet).unwrap();
+
+        let mut classes = ClassDatabase::new();
+        let sorcerer = create_test_sorcerer_class(); // has "light_armor" proficiency
+        classes.add_class(sorcerer).unwrap();
+
+        let mut races = RaceDatabase::new();
+        let human = create_test_human_race();
+        races.add_race(human).unwrap();
+
+        // Act
+        let result = can_equip_item(&character, 25, &items, &classes, &races);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_can_equip_boots_succeeds() {
+        // Arrange — sorcerer has "light_armor" proficiency which covers Boots
+        let character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut items = ItemDatabase::new();
+        let boots = Item {
+            id: 26,
+            name: "Leather Boots".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 2,
+                classification: ArmorClassification::Boots,
+            }),
+            base_cost: 20,
+            sell_cost: 10,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        items.add_item(boots).unwrap();
+
+        let mut classes = ClassDatabase::new();
+        let sorcerer = create_test_sorcerer_class(); // has "light_armor" proficiency
+        classes.add_class(sorcerer).unwrap();
+
+        let mut races = RaceDatabase::new();
+        let human = create_test_human_race();
+        races.add_race(human).unwrap();
+
+        // Act
+        let result = can_equip_item(&character, 26, &items, &classes, &races);
+
+        // Assert
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        assert!(result.unwrap());
+    }
+
+    // ===== Phase 2: calculate_armor_class Tests =====
+
+    fn make_armor_item(id: ItemId, ac_bonus: u8, classification: ArmorClassification) -> Item {
+        Item {
+            id,
+            name: format!("Armor {id}"),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus,
+                weight: 10,
+                classification,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        }
+    }
+
+    #[test]
+    fn test_calculate_ac_no_armor() {
+        // Empty equipment → AC_DEFAULT (10)
+        let equipment = crate::domain::character::Equipment::new();
+        let item_db = ItemDatabase::new();
+        assert_eq!(calculate_armor_class(&equipment, &item_db), 10);
+    }
+
+    #[test]
+    fn test_calculate_ac_body_armor_only() {
+        // Leather armor with +4 AC bonus → 10 + 4 = 14
+        let mut item_db = ItemDatabase::new();
+        item_db
+            .add_item(make_armor_item(20, 4, ArmorClassification::Light))
+            .unwrap();
+
+        let mut equipment = crate::domain::character::Equipment::new();
+        equipment.armor = Some(20);
+
+        assert_eq!(calculate_armor_class(&equipment, &item_db), 14);
+    }
+
+    #[test]
+    fn test_calculate_ac_all_slots() {
+        // body +4, shield +2, helmet +1, boots +1 → 10 + 4 + 2 + 1 + 1 = 18
+        let mut item_db = ItemDatabase::new();
+        item_db
+            .add_item(make_armor_item(20, 4, ArmorClassification::Light))
+            .unwrap();
+        item_db
+            .add_item(make_armor_item(23, 2, ArmorClassification::Shield))
+            .unwrap();
+        item_db
+            .add_item(make_armor_item(25, 1, ArmorClassification::Helmet))
+            .unwrap();
+        item_db
+            .add_item(make_armor_item(26, 1, ArmorClassification::Boots))
+            .unwrap();
+
+        let mut equipment = crate::domain::character::Equipment::new();
+        equipment.armor = Some(20);
+        equipment.shield = Some(23);
+        equipment.helmet = Some(25);
+        equipment.boots = Some(26);
+
+        assert_eq!(calculate_armor_class(&equipment, &item_db), 18);
+    }
+
+    #[test]
+    fn test_calculate_ac_clamps_to_max() {
+        // Items with huge bonuses must not exceed AC_MAX (30)
+        let mut item_db = ItemDatabase::new();
+        // Each slot contributes 10 → 10 (base) + 10 + 10 + 10 + 10 = 50 → clamped to 30
+        item_db
+            .add_item(make_armor_item(20, 10, ArmorClassification::Heavy))
+            .unwrap();
+        item_db
+            .add_item(make_armor_item(23, 10, ArmorClassification::Shield))
+            .unwrap();
+        item_db
+            .add_item(make_armor_item(25, 10, ArmorClassification::Helmet))
+            .unwrap();
+        item_db
+            .add_item(make_armor_item(26, 10, ArmorClassification::Boots))
+            .unwrap();
+
+        let mut equipment = crate::domain::character::Equipment::new();
+        equipment.armor = Some(20);
+        equipment.shield = Some(23);
+        equipment.helmet = Some(25);
+        equipment.boots = Some(26);
+
+        let ac = calculate_armor_class(&equipment, &item_db);
+        assert!(ac <= 30, "AC must be clamped to AC_MAX (30), but got {ac}");
+        assert_eq!(ac, 30);
+    }
+
+    #[test]
+    fn test_calculate_ac_missing_item_id_skips_slot() {
+        // equipment.helmet references item 999 which does not exist → no panic,
+        // contribution is 0; body armor still counts
+        let mut item_db = ItemDatabase::new();
+        item_db
+            .add_item(make_armor_item(20, 4, ArmorClassification::Light))
+            .unwrap();
+
+        let mut equipment = crate::domain::character::Equipment::new();
+        equipment.armor = Some(20);
+        equipment.helmet = Some(200); // non-existent item ID (within u8 range)
+
+        // 10 (base) + 4 (body) + 0 (missing helmet) = 14
+        assert_eq!(calculate_armor_class(&equipment, &item_db), 14);
     }
 }

@@ -298,7 +298,6 @@
         starting_gems: 1,
         starting_food: 5,
         starting_items: [
-            2,
             50,
             50,
             51,

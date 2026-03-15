@@ -957,6 +957,81 @@ this rule had existed.
 
 ---
 
+### Rule 15: Every Left-Panel List Must Use `show_standard_list_item`
+
+Any list rendered in the left panel of a Campaign Builder editor **must** use
+the shared `show_standard_list_item` helper from `ui_helpers.rs`, driven by a
+`StandardListItemConfig` and `MetadataBadge` values. The following patterns
+are **not permitted** and will be treated as bugs:
+
+- `ui.selectable_label(is_selected, &format!("[{:?}] {}", category, name))` —
+  embedding metadata into the label string.
+- A hand-rolled `response.context_menu(|ui| { … })` block inline in the list
+  loop — duplicates the context menu already provided by `show_standard_list_item`.
+- A `ui.horizontal(|ui| { … })` sub-row for badges placed outside of
+  `StandardListItemConfig` — inconsistent spacing and styling.
+
+**Permitted exception**: navigation-only lists (e.g., the Campaign editor's
+section nav) may pass `.with_context_menu(false)` and omit badges. They still
+**must** use `StandardListItemConfig` / `show_standard_list_item`.
+
+**WRONG — ad-hoc label formatting and inline context menu:**
+
+```antares/sdk/examples/wrong_left_panel_list.rs#L1-13
+// ❌ Category baked into label string; hand-rolled context menu.
+let resp = ui.selectable_label(
+    row.is_selected,
+    &format!("[{:?}] {}", row.category, row.name),
+);
+resp.context_menu(|ui| {
+    if ui.button("✏️ Edit").clicked() {
+        left_open_edit = Some(real_idx);
+        ui.close();
+    }
+    // …
+});
+```
+
+**RIGHT — `StandardListItemConfig` with a `MetadataBadge`:**
+
+```antares/sdk/examples/right_left_panel_list.rs#L1-13
+// ✅ Category shown as a colored badge; context menu delegated to show_standard_list_item.
+let badge = MetadataBadge::new(format!("{:?}", row.category))
+    .with_color(egui::Color32::LIGHT_BLUE)
+    .with_tooltip("Item category");
+let config = StandardListItemConfig::new(&row.name)
+    .with_badges(vec![badge])
+    .selected(row.is_selected);
+let (clicked, action) = show_standard_list_item(ui, config);
+if clicked {
+    pending_select = Some(real_idx);
+    ui.ctx().request_repaint();
+}
+// map action → pending_open_edit / pending_duplicate / pending_delete / pending_export
+```
+
+**Snapshot pre-requisite**: Because both left and right `TwoColumnLayout`
+closures cannot simultaneously borrow `self`, the `RowData` struct (or
+equivalent pre-snapshot) used to feed the list **must** carry raw fields
+(`name`, `category`, etc.), **not** a pre-formatted `label: String`. Badges
+are constructed inside the closure from the raw fields.
+
+**Audit question to ask before every PR:**
+
+> "Does every list in the left panel of this editor delegate to
+> `show_standard_list_item`?"
+> If NO → migrate it.
+
+**Why this rule exists:**
+
+`item_mesh_editor.rs` used `format!("[{:?}] {}", entry.category, entry.name)`
+as the list label and a hand-rolled `resp.context_menu` block, while every
+other Campaign Builder editor had already migrated to `StandardListItemConfig`.
+The divergence was invisible to the compiler and all tests, and was only caught
+during a manual review.
+
+---
+
 ## Future Editor Standardization Pattern
 
 Use this section as the default implementation recipe when adding a new
@@ -1018,7 +1093,12 @@ ui.push_id(stable_id, |ui| {
 
 ### Acceptance Checklist For Any New Editor
 
-- [ ] List rows use `StandardListItemConfig` (no ad-hoc metadata row)
+- [ ] List rows use `show_standard_list_item` with `StandardListItemConfig` and
+      `MetadataBadge` — no bare `selectable_label` with embedded metadata string,
+      no inline `context_menu` block (Rule 15)
+- [ ] `RowData` (or equivalent pre-snapshot) carries raw data fields, not a
+      pre-formatted `label: String`, so badges can be constructed inside the
+      closure
 - [ ] Row loops use `push_id` with stable keys
 - [ ] Context menu behavior is correct for the editor type
 - [ ] Navigation-only lists explicitly disable context menu
@@ -1124,6 +1204,12 @@ under `sdk/campaign_builder/src/`:
       - Every Grid / Plot / CollapsingHeader in a loop has a unique ID
       - No two Windows share a title string in the same frame
       - List/detail or list/preview splits use TwoColumnLayout, not raw SidePanel
+      - Every left-panel list row uses show_standard_list_item with
+        StandardListItemConfig + MetadataBadge; no bare selectable_label with
+        an embedded metadata string; no inline context_menu block (Rule 15)
+      - RowData (or equivalent pre-snapshot) carries raw fields (name, category,
+        etc.), not pre-formatted label strings, so badges can be built inside
+        the closure
       - Any multi-closure call (show_split, etc.) pre-computes shared state into
         owned locals before the call; mutations are deferred and applied after
       - Toolbar rows with more than two buttons use horizontal_wrapped, not horizontal
@@ -1185,6 +1271,11 @@ campaign builder UI code:
 
 - [ ] List/detail and list/preview layouts use `TwoColumnLayout`, not raw
       `SidePanel::right().show_inside()`
+- [ ] Every left-panel list renders rows through `show_standard_list_item` with
+      `StandardListItemConfig` + `MetadataBadge` — no bare `selectable_label`
+      with embedded metadata strings; no inline `context_menu` block (Rule 15)
+- [ ] `RowData` (or equivalent pre-snapshot struct) carries raw data fields, not
+      pre-formatted label strings, so badges can be constructed inside the closure
 - [ ] Any function that accepts two or more closures simultaneously has all
       shared `self` reads extracted to owned `let` bindings before the call
 - [ ] All state mutations inside closures use the deferred `pending_*` pattern
@@ -1244,3 +1335,4 @@ Last updated: 2025
 | 2025 | `creatures_editor.rs`                    | All toolbar controls in one `ui.horizontal` — "Register Asset" and "Browse Templates" clipped invisible at standard window widths; button not present in preview panel or edit-mode row                                                                                                                                                                                                                                                                                                                                           | Rule 12          |
 | 2025 | `stock_templates_editor.rs` / `lib.rs`   | Stock Templates tab appeared empty after opening a campaign (recurring). Three compounding causes: (1) `load_stock_templates` had no `path.exists()` guard and clobbered `status_message` with an error on missing files; (2) `do_new_campaign` never reset `stock_templates_editor_state`, leaking previous campaign data; (3) `show()` had no `needs_initial_load` auto-load fallback when the explicit load silently failed. Fixed by Rule 13 load pattern.                                                                    | Rule 13          |
 | 2025 | `characters_editor.rs` / `npc_editor.rs` | Phase 4 Unified Creature Asset Binding initially used `egui::TextEdit::singleline` for `creature_id` in both editors. Value was lost between frames, user received no candidate suggestions, field was not cleared by `reset_autocomplete_buffers`, and no hover tooltip showed whether the typed ID existed. Fixed by adding `autocomplete_creature_selector` to `ui_helpers.rs`, an `available_creatures` cache on both state structs, buffer-clear wiring in `reset_autocomplete_buffers`, and modal-picker autocomplete sync. | Rule 14          |
+| 2025 | `item_mesh_editor.rs`                    | Registry left-panel used `format!("[{:?}] {}", entry.category, entry.name)` as the list label and a hand-rolled `resp.context_menu` block instead of `StandardListItemConfig` / `MetadataBadge` / `show_standard_list_item`. Every other Campaign Builder editor had already migrated; the divergence was invisible to the compiler and all tests. Fixed by carrying `name` + `category` in `RowData`, adding `item_mesh_category_badge`, and delegating to `show_standard_list_item`.                                            | Rule 15          |

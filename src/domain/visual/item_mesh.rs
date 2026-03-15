@@ -692,6 +692,24 @@ impl ItemMeshDescriptor {
                 emissive_color: [0.0; 3],
                 scale: BASE_SCALE,
             },
+            ArmorClassification::Helmet => Self {
+                category: ItemMeshCategory::Helmet,
+                blade_length: 0.4,
+                primary_color: COLOR_IRON,
+                accent_color: COLOR_LEATHER,
+                emissive: false,
+                emissive_color: [0.0; 3],
+                scale: BASE_SCALE * 0.9,
+            },
+            ArmorClassification::Boots => Self {
+                category: ItemMeshCategory::Boots,
+                blade_length: 0.4,
+                primary_color: COLOR_LEATHER,
+                accent_color: COLOR_LEATHER,
+                emissive: false,
+                emissive_color: [0.0; 3],
+                scale: BASE_SCALE * 0.8,
+            },
         }
     }
 
@@ -2430,6 +2448,8 @@ mod tests {
             ArmorClassification::Medium,
             ArmorClassification::Heavy,
             ArmorClassification::Shield,
+            ArmorClassification::Helmet,
+            ArmorClassification::Boots,
         ];
         for classification in &classes {
             let item = Item {
