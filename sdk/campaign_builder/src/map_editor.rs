@@ -1945,6 +1945,14 @@ pub struct EventEditorState {
     // Color tint fields for furniture customization
     pub furniture_use_color_tint: bool,
     pub furniture_color_tint: [f32; 3],
+    /// Optional reference to a `FurnitureDefinition` ID in `furniture.ron`.
+    /// When `Some`, the template dropdown has a selection and the event will
+    /// carry `furniture_id: Some(...)` in the serialised RON.
+    pub furniture_id: Option<u32>,
+    /// Key item ID required to unlock this door (only used when furniture_type == Door)
+    pub furniture_key_item_id: String,
+    /// Search / filter text used in the furniture template dropdown.
+    pub furniture_template_query: String,
 
     // Autocomplete input buffers
     /// Combat event type selected for this encounter. Controls ambush, ranged,
@@ -2017,6 +2025,9 @@ impl Default for EventEditorState {
             furniture_blocking: false,
             furniture_use_color_tint: false,
             furniture_color_tint: [1.0, 1.0, 1.0],
+            furniture_id: None,
+            furniture_key_item_id: String::new(),
+            furniture_template_query: String::new(),
             trap_effect_input_buffer: String::new(),
             teleport_map_input_buffer: String::new(),
             npc_id_input_buffer: String::new(),
@@ -2293,8 +2304,14 @@ impl EventEditorState {
                 } else {
                     None
                 };
+                let key_item_id = if self.furniture_type == FurnitureType::Door {
+                    self.furniture_key_item_id.trim().parse::<u32>().ok()
+                } else {
+                    None
+                };
                 Ok(MapEvent::Furniture {
                     name: self.name.clone(),
+                    furniture_id: self.furniture_id,
                     furniture_type: self.furniture_type,
                     rotation_y,
                     scale: self.furniture_scale,
@@ -2305,6 +2322,7 @@ impl EventEditorState {
                         blocking: self.furniture_blocking,
                     },
                     color_tint,
+                    key_item_id,
                 })
             }
             EventType::Container => {
@@ -2485,15 +2503,18 @@ impl EventEditorState {
             }
             MapEvent::Furniture {
                 name,
+                furniture_id,
                 furniture_type,
                 rotation_y,
                 scale,
                 material,
                 flags,
                 color_tint,
+                key_item_id,
             } => {
                 s.event_type = EventType::Furniture;
                 s.name = name.clone();
+                s.furniture_id = *furniture_id;
                 s.furniture_type = *furniture_type;
                 s.furniture_rotation_y = rotation_y.map(|r| r.to_string()).unwrap_or_default();
                 s.furniture_scale = *scale;
@@ -2504,6 +2525,9 @@ impl EventEditorState {
                 if let Some(tint) = color_tint {
                     s.furniture_use_color_tint = true;
                     s.furniture_color_tint = *tint;
+                }
+                if let Some(kid) = key_item_id {
+                    s.furniture_key_item_id = kid.to_string();
                 }
             }
             MapEvent::Container {
@@ -3175,6 +3199,7 @@ impl MapsEditorState {
         items: &[Item],
         conditions: &[antares::domain::conditions::ConditionDefinition],
         npcs: &[NpcDefinition],
+        furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -3303,6 +3328,7 @@ impl MapsEditorState {
                     items,
                     conditions,
                     npcs,
+                    furniture_definitions,
                     campaign_dir,
                     maps_dir,
                     display_config,
@@ -3531,6 +3557,7 @@ impl MapsEditorState {
         items: &[Item],
         conditions: &[antares::domain::conditions::ConditionDefinition],
         npcs: &[NpcDefinition],
+        furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -3790,7 +3817,14 @@ impl MapsEditorState {
                                 .id_salt("map_editor_inspector_scroll")
                                 .show(right_ui, |ui| {
                                     if let Some(npc_id) = Self::show_inspector_panel(
-                                        ui, editor_ref, maps, monsters, items, conditions, npcs,
+                                        ui,
+                                        editor_ref,
+                                        maps,
+                                        monsters,
+                                        items,
+                                        conditions,
+                                        npcs,
+                                        furniture_definitions,
                                     ) {
                                         self.requested_open_npc = Some(npc_id);
                                     }
@@ -4004,6 +4038,7 @@ impl MapsEditorState {
         items: &[Item],
         conditions: &[antares::domain::conditions::ConditionDefinition],
         npcs: &[NpcDefinition],
+        furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
     ) -> Option<String> {
         let mut requested_open_npc: Option<String> = None;
 
@@ -4194,6 +4229,7 @@ impl MapsEditorState {
                             ui.label(format!("Inn Entry: {} ({})", innkeeper_id, name));
                         }
                         MapEvent::Furniture {
+                            furniture_id,
                             furniture_type,
                             rotation_y,
                             scale,
@@ -4211,6 +4247,9 @@ impl MapsEditorState {
                                 scale,
                                 material.name()
                             ));
+                            if let Some(fid) = furniture_id {
+                                ui.label(format!("  📦 Template ID: {}", fid));
+                            }
                             if flags.lit {
                                 ui.label("  🔥 Lit");
                             }
@@ -4363,7 +4402,15 @@ impl MapsEditorState {
         if matches!(editor.current_tool, EditorTool::PlaceEvent) {
             ui.group(|ui| {
                 ui.heading("Event Editor");
-                Self::show_event_editor(ui, editor, maps, monsters, items, conditions);
+                Self::show_event_editor(
+                    ui,
+                    editor,
+                    maps,
+                    monsters,
+                    items,
+                    conditions,
+                    furniture_definitions,
+                );
             });
         }
 
@@ -4662,6 +4709,7 @@ impl MapsEditorState {
         monsters: &[MonsterDefinition],
         items: &[Item],
         conditions: &[antares::domain::conditions::ConditionDefinition],
+        furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
     ) {
         if let Some(ref mut event_editor) = editor.event_editor {
             egui::ComboBox::from_id_salt("map_event_type_combo")
@@ -5128,6 +5176,116 @@ impl MapsEditorState {
                     });
                 }
                 EventType::Furniture => {
+                    // ── Template dropdown ─────────────────────────────────────────────
+                    if !furniture_definitions.is_empty() {
+                        ui.separator();
+                        ui.label("Template:");
+                        ui.horizontal(|ui| {
+                            // Determine current selection label
+                            let selected_label = event_editor
+                                .furniture_id
+                                .and_then(|id| {
+                                    furniture_definitions
+                                        .iter()
+                                        .find(|d| d.id == id)
+                                        .map(|d| format!("{} {}", d.display_icon(), d.name))
+                                })
+                                .unwrap_or_else(|| "— None —".to_string());
+
+                            egui::ComboBox::from_id_salt("furniture_template_combo")
+                                .selected_text(selected_label)
+                                .show_ui(ui, |ui| {
+                                    // "None" option
+                                    if ui
+                                        .selectable_label(
+                                            event_editor.furniture_id.is_none(),
+                                            "— None —",
+                                        )
+                                        .clicked()
+                                    {
+                                        event_editor.furniture_id = None;
+                                        editor.has_changes = true;
+                                    }
+
+                                    // Filter by search query
+                                    let query =
+                                        event_editor.furniture_template_query.to_lowercase();
+                                    for def in furniture_definitions.iter() {
+                                        if !query.is_empty()
+                                            && !def.name.to_lowercase().contains(&query)
+                                        {
+                                            continue;
+                                        }
+                                        let label = format!("{} {}", def.display_icon(), def.name);
+                                        if ui
+                                            .selectable_label(
+                                                event_editor.furniture_id == Some(def.id),
+                                                label,
+                                            )
+                                            .clicked()
+                                        {
+                                            // Apply template: populate all inline fields from
+                                            // definition and set furniture_id.
+                                            event_editor.furniture_id = Some(def.id);
+                                            event_editor.furniture_type = def.base_type;
+                                            event_editor.furniture_material = def.material;
+                                            event_editor.furniture_scale = def.scale;
+                                            event_editor.furniture_lit = def.flags.lit;
+                                            event_editor.furniture_locked = def.flags.locked;
+                                            event_editor.furniture_blocking = def.flags.blocking;
+                                            if let Some(tint) = def.color_tint {
+                                                event_editor.furniture_use_color_tint = true;
+                                                event_editor.furniture_color_tint = tint;
+                                            } else {
+                                                event_editor.furniture_use_color_tint = false;
+                                            }
+                                            editor.has_changes = true;
+                                        }
+                                    }
+                                });
+
+                            // Search field for filtering templates
+                            ui.add(
+                                egui::TextEdit::singleline(
+                                    &mut event_editor.furniture_template_query,
+                                )
+                                .hint_text("🔍 filter…")
+                                .desired_width(100.0),
+                            );
+
+                            // Clear template button
+                            if event_editor.furniture_id.is_some()
+                                && ui.button("✖").on_hover_text("Clear template").clicked()
+                            {
+                                event_editor.furniture_id = None;
+                                editor.has_changes = true;
+                            }
+                        });
+
+                        // Show resolved template info when one is selected
+                        if let Some(id) = event_editor.furniture_id {
+                            if let Some(def) = furniture_definitions.iter().find(|d| d.id == id) {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "  ID {} · {} · {} · scale={:.1}",
+                                        def.id,
+                                        def.category.name(),
+                                        def.material.name(),
+                                        def.scale
+                                    ))
+                                    .small()
+                                    .color(egui::Color32::GRAY),
+                                );
+                            } else {
+                                ui.colored_label(
+                                    egui::Color32::YELLOW,
+                                    format!("  ⚠ Template ID {} not found in database", id),
+                                );
+                            }
+                        }
+                        ui.separator();
+                    }
+
                     // Furniture type selection
                     egui::ComboBox::from_id_salt("furniture_type_combo")
                         .selected_text(event_editor.furniture_type.name())
@@ -5297,13 +5455,80 @@ impl MapsEditorState {
                         }
                     }
 
-                    if event_editor.furniture_type == FurnitureType::Chest {
+                    if event_editor.furniture_type == FurnitureType::Chest
+                        || event_editor.furniture_type == FurnitureType::Door
+                    {
                         if ui
-                            .checkbox(&mut event_editor.furniture_locked, "Locked")
+                            .checkbox(&mut event_editor.furniture_locked, "🔒 Starts Locked")
                             .changed()
                         {
                             editor.has_changes = true;
                         }
+                    }
+
+                    // Door-specific: key item ID
+                    if event_editor.furniture_type == FurnitureType::Door
+                        && event_editor.furniture_locked
+                    {
+                        ui.separator();
+                        ui.label("🗝 Key Item:");
+                        ui.horizontal(|ui| {
+                            egui::ComboBox::from_id_salt("door_key_item_combo")
+                                .selected_text(if event_editor.furniture_key_item_id.is_empty() {
+                                    "— No key required —".to_string()
+                                } else {
+                                    let id_str = &event_editor.furniture_key_item_id;
+                                    items
+                                        .iter()
+                                        .find(|it| it.id.to_string() == *id_str)
+                                        .map(|it| format!("{} - {}", it.id, it.name))
+                                        .unwrap_or_else(|| format!("ID: {}", id_str))
+                                })
+                                .show_ui(ui, |ui| {
+                                    // None option
+                                    if ui
+                                        .selectable_label(
+                                            event_editor.furniture_key_item_id.is_empty(),
+                                            "— No key required —",
+                                        )
+                                        .clicked()
+                                    {
+                                        event_editor.furniture_key_item_id.clear();
+                                        editor.has_changes = true;
+                                    }
+                                    for item in items.iter() {
+                                        ui.push_id(item.id, |ui| {
+                                            let label = format!("{} - {}", item.id, item.name);
+                                            if ui
+                                                .selectable_label(
+                                                    event_editor.furniture_key_item_id
+                                                        == item.id.to_string(),
+                                                    &label,
+                                                )
+                                                .clicked()
+                                            {
+                                                event_editor.furniture_key_item_id =
+                                                    item.id.to_string();
+                                                editor.has_changes = true;
+                                            }
+                                        });
+                                    }
+                                });
+                            if !event_editor.furniture_key_item_id.is_empty()
+                                && ui
+                                    .small_button("✖ Clear")
+                                    .on_hover_text("Remove key requirement")
+                                    .clicked()
+                            {
+                                event_editor.furniture_key_item_id.clear();
+                                editor.has_changes = true;
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new("Only this item unlocks the door")
+                                .small()
+                                .color(egui::Color32::GRAY),
+                        );
                     }
 
                     // Blocking flag applies to all furniture
@@ -7551,7 +7776,7 @@ mod tests {
 
         egui::CentralPanel::default().show(&ctx, |ui| {
             // Should render the inspector without panicking (and include name/description)
-            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[], &[], &[]);
+            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[], &[], &[], &[]);
         });
 
         // Verify selection was preserved and the inspector invocation completed
@@ -9539,6 +9764,95 @@ mod tests {
                 "description() must not be empty for {:?}",
                 variant
             );
+        }
+    }
+
+    /// Test that FurnitureType::Door shows locked checkbox
+    #[test]
+    fn test_furniture_door_locked_flag_round_trip() {
+        use antares::domain::world::{FurnitureFlags, FurnitureMaterial, FurnitureType, MapEvent};
+        let event = MapEvent::Furniture {
+            name: "Castle Door".to_string(),
+            furniture_id: None,
+            furniture_type: FurnitureType::Door,
+            rotation_y: None,
+            scale: 1.0,
+            material: FurnitureMaterial::Wood,
+            flags: FurnitureFlags {
+                lit: false,
+                locked: true,
+                blocking: true,
+            },
+            color_tint: None,
+            key_item_id: None,
+        };
+        let editor = EventEditorState::from_map_event(Position::new(3, 4), &event);
+        assert_eq!(editor.furniture_type, FurnitureType::Door);
+        assert!(editor.furniture_locked, "locked flag should be loaded");
+        assert!(editor.furniture_key_item_id.is_empty());
+    }
+
+    /// Test that FurnitureType::Door with key_item_id round-trips
+    #[test]
+    fn test_furniture_door_key_item_round_trip() {
+        use antares::domain::world::{FurnitureFlags, FurnitureMaterial, FurnitureType, MapEvent};
+        let event = MapEvent::Furniture {
+            name: "Locked Vault".to_string(),
+            furniture_id: None,
+            furniture_type: FurnitureType::Door,
+            rotation_y: None,
+            scale: 1.0,
+            material: FurnitureMaterial::Metal,
+            flags: FurnitureFlags {
+                lit: false,
+                locked: true,
+                blocking: true,
+            },
+            color_tint: None,
+            key_item_id: Some(42),
+        };
+        let pos = Position::new(5, 7);
+        let editor = EventEditorState::from_map_event(pos, &event);
+        assert_eq!(editor.furniture_type, FurnitureType::Door);
+        assert!(editor.furniture_locked);
+        assert_eq!(editor.furniture_key_item_id, "42");
+
+        // Round-trip: editor -> map event
+        let result = editor.to_map_event().unwrap();
+        match result {
+            MapEvent::Furniture {
+                key_item_id, flags, ..
+            } => {
+                assert_eq!(key_item_id, Some(42));
+                assert!(flags.locked);
+            }
+            _ => panic!("Expected MapEvent::Furniture"),
+        }
+    }
+
+    /// Test FurnitureType::Door with no key_item_id
+    #[test]
+    fn test_furniture_door_no_key_item() {
+        let editor = EventEditorState {
+            event_type: EventType::Furniture,
+            furniture_type: FurnitureType::Door,
+            furniture_locked: false,
+            furniture_blocking: true,
+            furniture_key_item_id: String::new(),
+            name: "Simple Door".to_string(),
+            ..Default::default()
+        };
+        let result = editor.to_map_event().unwrap();
+        match result {
+            MapEvent::Furniture {
+                furniture_type,
+                key_item_id,
+                ..
+            } => {
+                assert_eq!(furniture_type, FurnitureType::Door);
+                assert_eq!(key_item_id, None);
+            }
+            _ => panic!("Expected MapEvent::Furniture"),
         }
     }
 }
