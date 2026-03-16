@@ -31,6 +31,7 @@ CampaignMetadata(
     npcs_file: "data/npcs.ron",
     proficiencies_file: "data/proficiencies.ron",
     creatures_file: "data/creatures.ron",
+    furniture_file: "data/furniture.ron",
     stock_templates_file: "data/npc_stock_templates.ron",
     starting_time: GameTime(
         year: 1,

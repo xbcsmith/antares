@@ -1,0 +1,194 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+// furniture.ron — tutorial campaign furniture definitions
+//
+// Seeded from FurnitureType::default_presets().  One entry per existing
+// preset plus an Iron Chest variant.  These definitions are used by the
+// campaign loader integration tests (§1.5).
+
+[
+    // ── Throne presets ────────────────────────────────────────────────
+    (
+        id: 1,
+        name: "Wooden Throne",
+        category: Seating,
+        base_type: Throne,
+        material: Wood,
+        scale: 1.2,
+        color_tint: None,
+        flags: (lit: false, locked: false, blocking: true),
+        icon: None,
+        tags: ["throne", "seating"],
+        mesh_id: None,
+        description: Some("A sturdy wooden throne fit for a local lord."),
+    ),
+    (
+        id: 2,
+        name: "Stone Throne",
+        category: Seating,
+        base_type: Throne,
+        material: Stone,
+        scale: 1.3,
+        color_tint: None,
+        flags: (lit: false, locked: false, blocking: true),
+        icon: None,
+        tags: ["throne", "seating", "stone"],
+        mesh_id: None,
+        description: Some("A heavy stone throne carved from a single block."),
+    ),
+    (
+        id: 3,
+        name: "Golden Throne",
+        category: Seating,
+        base_type: Throne,
+        material: Gold,
+        scale: 1.5,
+        color_tint: None,
+        flags: (lit: false, locked: false, blocking: true),
+        icon: None,
+        tags: ["throne", "seating", "gold", "royal"],
+        mesh_id: None,
+        description: Some("An opulent golden throne worthy of a king."),
+    ),
+
+    // ── Bench preset ─────────────────────────────────────────────────
+    (
+        id: 4,
+        name: "Wooden Bench",
+        category: Seating,
+        base_type: Bench,
+        material: Wood,
+        scale: 1.0,
+        color_tint: None,
+        flags: (lit: false, locked: false, blocking: false),
+        icon: None,
+        tags: ["bench", "seating"],
+        mesh_id: None,
+        description: Some("A simple wooden bench."),
+    ),
+
+    // ── Table preset ─────────────────────────────────────────────────
+    (
+        id: 5,
+        name: "Wooden Table",
+        category: Utility,
+        base_type: Table,
+        material: Wood,
+        scale: 1.0,
+        color_tint: None,
+        flags: (lit: false, locked: false, blocking: true),
+        icon: None,
+        tags: ["table", "utility"],
+        mesh_id: None,
+        description: Some("A plain wooden table."),
+    ),
+
+    // ── Chair preset ─────────────────────────────────────────────────
+    (
+        id: 6,
+        name: "Wooden Chair",
+        category: Seating,
+        base_type: Chair,
+        material: Wood,
+        scale: 1.0,
+        color_tint: None,
+        flags: (lit: false, locked: false, blocking: false),
+        icon: None,
+        tags: ["chair", "seating"],
+        mesh_id: None,
+        description: Some("A basic wooden chair."),
+    ),
+
+    // ── Torch presets ─────────────────────────────────────────────────
+    (
+        id: 7,
+        name: "Wooden Torch",
+        category: Lighting,
+        base_type: Torch,
+        material: Wood,
+        scale: 1.0,
+        color_tint: Some((1.0, 0.6, 0.2)),
+        flags: (lit: true, locked: false, blocking: false),
+        icon: None,
+        tags: ["torch", "lighting", "fire"],
+        mesh_id: None,
+        description: Some("A wall-mounted wooden torch with an orange flame."),
+    ),
+    (
+        id: 8,
+        name: "Metal Sconce",
+        category: Lighting,
+        base_type: Torch,
+        material: Metal,
+        scale: 0.8,
+        color_tint: Some((0.6, 0.8, 1.0)),
+        flags: (lit: true, locked: false, blocking: false),
+        icon: None,
+        tags: ["torch", "lighting", "metal", "sconce"],
+        mesh_id: None,
+        description: Some("An iron wall sconce burning with a cold blue flame."),
+    ),
+
+    // ── Bookshelf preset ──────────────────────────────────────────────
+    (
+        id: 9,
+        name: "Wooden Bookshelf",
+        category: Storage,
+        base_type: Bookshelf,
+        material: Wood,
+        scale: 1.0,
+        color_tint: None,
+        flags: (lit: false, locked: false, blocking: true),
+        icon: None,
+        tags: ["bookshelf", "storage"],
+        mesh_id: None,
+        description: Some("A tall wooden bookshelf filled with dusty tomes."),
+    ),
+
+    // ── Barrel preset ─────────────────────────────────────────────────
+    (
+        id: 10,
+        name: "Wooden Barrel",
+        category: Storage,
+        base_type: Barrel,
+        material: Wood,
+        scale: 1.0,
+        color_tint: None,
+        flags: (lit: false, locked: false, blocking: false),
+        icon: None,
+        tags: ["barrel", "storage"],
+        mesh_id: None,
+        description: Some("A wooden barrel used to store provisions."),
+    ),
+
+    // ── Chest presets ─────────────────────────────────────────────────
+    (
+        id: 11,
+        name: "Wooden Chest",
+        category: Storage,
+        base_type: Chest,
+        material: Wood,
+        scale: 1.0,
+        color_tint: None,
+        flags: (lit: false, locked: false, blocking: true),
+        icon: None,
+        tags: ["chest", "storage"],
+        mesh_id: None,
+        description: Some("A plain wooden chest for storing valuables."),
+    ),
+    (
+        id: 12,
+        name: "Iron Chest",
+        category: Storage,
+        base_type: Chest,
+        material: Metal,
+        scale: 1.0,
+        color_tint: None,
+        flags: (lit: false, locked: true, blocking: true),
+        icon: None,
+        tags: ["chest", "storage", "locked", "iron"],
+        mesh_id: None,
+        description: Some("A heavy iron-bound chest secured with a sturdy lock."),
+    ),
+]

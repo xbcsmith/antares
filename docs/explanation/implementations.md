@@ -1,5 +1,129 @@
 # Implementations
 
+## Phase 1: Furniture Domain Types and `furniture.ron` Data File (Complete)
+
+### Overview
+
+Implements the first phase of the data-driven furniture system described in
+`docs/explanation/furniture_as_ron_implementation_plan.md`. The closed
+`FurnitureType` enum remains unchanged (backward compatible); this phase
+introduces a parallel data layer: named, reusable `FurnitureDefinition`
+templates stored in `furniture.ron` campaign data files and indexed at runtime
+by `FurnitureDatabase`.
+
+### Deliverables
+
+#### `src/domain/types.rs`
+
+- Added `pub type FurnitureId = u32;` — unique identifier for a
+  `FurnitureDefinition` within a campaign.
+- Added `pub type FurnitureMeshId = u32;` — references entries in
+  `furniture_mesh_registry.ron` (used by Phase 4).
+
+#### `src/domain/world/furniture.rs` (new module)
+
+- **`FurnitureDatabaseError`** — `thiserror`-based error enum with
+  `ReadError`, `ParseError`, `NotFound`, `DuplicateId` variants.
+- **`FurnitureDefinition`** — fully serializable struct with fields:
+  `id`, `name`, `category`, `base_type`, `material`, `scale`,
+  `color_tint`, `flags`, `icon`, `tags`, `mesh_id`, `description`.
+  All optional fields use `#[serde(default)]` for forward compatibility.
+  Helper methods: `display_icon()`, `has_custom_mesh()`.
+- **`FurnitureDatabase`** — `HashMap<FurnitureId, FurnitureDefinition>`
+  index with:
+  - `new()` / `Default`
+  - `load_from_file()` / `load_from_string()` (RON `Vec<FurnitureDefinition>`)
+  - `add()` — duplicate-ID guard
+  - `get_by_id()`, `get_by_name()`, `get_by_category()`, `get_by_base_type()`
+  - `all_definitions()`, `len()`, `is_empty()`, `has_definition()`
+- **31 unit tests** covering all public methods, RON round-trips, error cases,
+  and the `data/test_campaign/data/furniture.ron` fixture.
+
+#### `src/domain/world/types.rs`
+
+- Added `Passage` variant to `FurnitureCategory` (Seating, Storage,
+  Decoration, Lighting, Utility, **Passage**).
+- Updated `name()` and `all()` methods accordingly.
+
+#### `src/domain/world/mod.rs`
+
+- Added `pub mod furniture;`
+- Re-exported `FurnitureDatabase`, `FurnitureDatabaseError`, `FurnitureDefinition`.
+
+#### `src/domain/mod.rs`
+
+- Re-exported `FurnitureId`, `FurnitureMeshId` from `types`.
+- Re-exported `FurnitureDatabase`, `FurnitureDatabaseError`,
+  `FurnitureDefinition` from `world::furniture`.
+
+#### `src/domain/campaign_loader.rs`
+
+- Added `pub furniture: FurnitureDatabase` field to `GameData`.
+- `GameData::new()` / `Default` initialise the field to an empty database.
+- `CampaignLoader::load_game_data()` now calls `load_furniture()`.
+- `load_furniture()` loads `data/furniture.ron` from the campaign path;
+  a missing file is **not** an error (returns empty database), matching
+  the pattern established by `load_item_meshes()`.
+- Added two new tests: `test_campaign_loader_loads_furniture` and
+  `test_furniture_missing_is_ok`.
+
+#### `src/sdk/campaign_loader.rs`
+
+- Added `pub furniture: String` field to `CampaignData`
+  (`#[serde(default = "default_furniture_path")]` → `"data/furniture.ron"`).
+- Added `pub furniture_file: String` field to `CampaignMetadata`
+  (same default).
+- `TryFrom<CampaignMetadata> for Campaign` maps `furniture_file` →
+  `data.furniture`.
+- Updated the `test_campaign_data_defaults` unit test.
+
+#### RON Data Files
+
+- `data/test_campaign/data/furniture.ron` — 12 definitions seeded from
+  `FurnitureType::default_presets()` (Wooden Throne, Stone Throne, Golden
+  Throne, Wooden Bench, Wooden Table, Wooden Chair, Wooden Torch, Metal
+  Sconce, Wooden Bookshelf, Wooden Barrel, Wooden Chest, Iron Chest).
+- `campaigns/tutorial/data/furniture.ron` — identical content for the live
+  tutorial campaign.
+- Both `campaign.ron` files updated to include `furniture_file:
+"data/furniture.ron"`.
+
+#### Other Files Updated
+
+`CampaignData` struct initializations updated in:
+`src/application/save_game.rs`, `src/application/mod.rs` (×2),
+`src/sdk/campaign_packager.rs` (×2), `src/bin/antares.rs`,
+`tests/campaign_integration_test.rs`.
+
+#### Existing Tests Updated
+
+- `sdk/campaign_builder/tests/furniture_properties_tests.rs` —
+  `test_furniture_category_enum_variants` updated from `5` → `6` variants;
+  `test_furniture_category_names` updated to include `Passage`.
+
+### Architecture Compliance
+
+- `FurnitureType` enum is **unchanged** — all existing map RON files and
+  procedural rendering continue to work without modification.
+- `FurnitureId` and `FurnitureMeshId` use the `u32` base type consistent
+  with `CreatureId` / `MeshId` in `src/domain/types.rs`.
+- RON files use `(r, g, b)` tuple syntax for `[f32; 3]` color tints, matching
+  the convention established by existing map RON files.
+- Test data uses `data/test_campaign` — no references to
+  `campaigns/tutorial` in tests (Implementation Rule 5 compliant).
+- SPDX headers present on all new Rust and RON files.
+
+### Quality Gate Results
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings)
+✅ cargo nextest run → 3593 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Item Mesh Editor — Left Panel Standardization (Complete)
 
 ### Problem

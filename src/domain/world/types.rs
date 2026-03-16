@@ -1384,6 +1384,8 @@ pub enum FurnitureCategory {
     Lighting,
     /// Utility furniture (Table, Crate)
     Utility,
+    /// Passage furniture (Doors, Arches, Gates)
+    Passage,
 }
 
 impl FurnitureCategory {
@@ -1395,6 +1397,7 @@ impl FurnitureCategory {
             FurnitureCategory::Decoration => "Decoration",
             FurnitureCategory::Lighting => "Lighting",
             FurnitureCategory::Utility => "Utility",
+            FurnitureCategory::Passage => "Passage",
         }
     }
 
@@ -1406,6 +1409,7 @@ impl FurnitureCategory {
             FurnitureCategory::Decoration,
             FurnitureCategory::Lighting,
             FurnitureCategory::Utility,
+            FurnitureCategory::Passage,
         ]
     }
 }
