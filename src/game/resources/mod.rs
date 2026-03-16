@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Game resources module
@@ -6,7 +6,7 @@
 //! Contains global game resources and asset management systems.
 
 use crate::application::GameState;
-use crate::domain::types::{ItemId, MapId};
+use crate::domain::types::{ItemId, MapId, Position};
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -131,6 +131,43 @@ impl DroppedItemRegistry {
     }
 }
 
+/// Signals that the player has interacted with a locked object and must
+/// choose whether to pick the lock or bash it open.
+///
+/// This resource is populated by `handle_input` when the player presses `E`
+/// in front of a locked door that cannot be opened with a key from the party
+/// inventory. Phase 3's lock UI reads this resource to display the pick-lock
+/// or bash choice prompt.
+///
+/// Clear `lock_id` to `None` when the choice has been resolved or cancelled.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::resources::LockInteractionPending;
+///
+/// let pending = LockInteractionPending::default();
+/// assert!(pending.lock_id.is_none());
+/// assert!(pending.position.is_none());
+/// assert!(!pending.can_lockpick);
+/// ```
+#[derive(Resource, Default, Debug, Clone)]
+pub struct LockInteractionPending {
+    /// The `lock_id` string of the locked object awaiting an action choice.
+    ///
+    /// `None` when no lock interaction is pending.
+    pub lock_id: Option<String>,
+    /// The tile position of the locked object on the current map.
+    ///
+    /// `None` when no lock interaction is pending.
+    pub position: Option<Position>,
+    /// Whether at least one party member has the `pick_lock` special ability.
+    ///
+    /// Phase 3 uses this flag to enable or disable the "Pick Lock" option in
+    /// the choice UI.
+    pub can_lockpick: bool,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -191,6 +228,48 @@ mod tests {
         assert_eq!(registry.entries.len(), 2);
         assert_eq!(registry.get(1, 0, 0, 1), Some(e1));
         assert_eq!(registry.get(1, 0, 1, 1), Some(e2));
+    }
+
+    // ── LockInteractionPending ───────────────────────────────────────────────
+
+    #[test]
+    fn test_lock_interaction_pending_default() {
+        let pending = LockInteractionPending::default();
+        assert!(pending.lock_id.is_none());
+        assert!(pending.position.is_none());
+        assert!(!pending.can_lockpick);
+    }
+
+    #[test]
+    fn test_lock_interaction_pending_set_fields() {
+        use crate::domain::types::Position;
+
+        let pending = LockInteractionPending {
+            lock_id: Some("gate_01".to_string()),
+            position: Some(Position::new(3, 5)),
+            can_lockpick: true,
+        };
+
+        assert_eq!(pending.lock_id, Some("gate_01".to_string()));
+        assert_eq!(pending.position, Some(Position::new(3, 5)));
+        assert!(pending.can_lockpick);
+    }
+
+    #[test]
+    fn test_lock_interaction_pending_clear() {
+        let mut pending = LockInteractionPending {
+            lock_id: Some("some_lock".to_string()),
+            position: Some(crate::domain::types::Position::new(1, 1)),
+            can_lockpick: true,
+        };
+        // Clearing simulates the UI consuming the pending request.
+        pending.lock_id = None;
+        pending.position = None;
+        pending.can_lockpick = false;
+
+        assert!(pending.lock_id.is_none());
+        assert!(pending.position.is_none());
+        assert!(!pending.can_lockpick);
     }
 
     /// A later insert with the same key overwrites the previous entity.

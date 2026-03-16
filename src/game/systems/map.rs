@@ -119,6 +119,10 @@ impl Plugin for MapManagerPlugin {
         app.add_message::<MapChangeEvent>()
             // Phase 3: register SetFacing message and proximity/facing systems
             .add_plugins(crate::game::systems::facing::FacingPlugin)
+            // Phase 2 (locks): seed lock_states for every map present at startup.
+            // This runs once before the first frame so that player interaction
+            // (handle_input E-key path) can find lock entries immediately.
+            .add_systems(Startup, init_map_lock_states_system)
             // Process explicit map change requests first, then let the marker
             // spawner observe the changed world state and spawn/despawn accordingly.
             .add_systems(
@@ -349,6 +353,30 @@ fn resolve_encounter_creature_id(
 
 /// System that handles explicit MapChangeEvent messages by updating the world
 /// current map and party position. Invalid map ids are ignored (no panic).
+/// Startup system that initialises `lock_states` for every map loaded into the
+/// world at game start.
+///
+/// Calling [`Map::init_lock_states`] is idempotent — it skips any lock whose
+/// `lock_id` is already present in `lock_states` — so it is safe to call
+/// multiple times.  However, it must run before any player interaction so that
+/// `handle_input`'s E-key path can look up lock entries immediately.
+///
+/// # Examples
+///
+/// The system is registered as a [`Startup`] system in [`MapManagerPlugin`].
+/// For map *transitions* the same initialisation call is made inside
+/// [`map_change_handler`].
+fn init_map_lock_states_system(mut global_state: ResMut<GlobalState>) {
+    let map_count = global_state.0.world.maps.len();
+    for map in global_state.0.world.maps.values_mut() {
+        map.init_lock_states();
+    }
+    info!(
+        "Lock states initialised for {} map(s) at startup",
+        map_count
+    );
+}
+
 fn map_change_handler(
     mut ev_reader: MessageReader<MapChangeEvent>,
     mut global_state: ResMut<GlobalState>,
@@ -357,6 +385,14 @@ fn map_change_handler(
         if global_state.0.world.get_map(ev.target_map).is_some() {
             global_state.0.world.set_current_map(ev.target_map);
             global_state.0.world.set_party_position(ev.target_pos);
+            // Phase 2 (locks): seed lock_states for the newly active map so that
+            // any LockedDoor / LockedContainer events on it are registered before
+            // the player can interact with them.  init_lock_states is idempotent —
+            // it skips entries that already exist — so previously-unlocked doors
+            // keep their state after a map transition.
+            if let Some(map) = global_state.0.world.get_current_map_mut() {
+                map.init_lock_states();
+            }
             // Each map transition (teleport, dungeon entrance, town portal, etc.)
             // costs time. Advance after confirming the map actually exists so that
             // invalid/no-op events do not tick the clock.

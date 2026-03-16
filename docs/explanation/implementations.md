@@ -13980,3 +13980,232 @@ The 2 new tray tests:
 - `campaign_builder tray::tests::test_tray_command_channel_send_recv` ✅
 
 ---
+
+## Phase 2: Interaction Wiring — Locked Door E-Key Path
+
+**Date:** 2026
+**Plan reference:** `docs/explanation/locked_objects_and_keys_implementation_plan.md` §§ 2.1–2.7
+
+### Overview
+
+Phase 2 wires the Phase 1 domain layer (`LockState`, `try_unlock`, `Map::init_lock_states`) into
+the Bevy game systems so that pressing `E` in front of a locked door either opens it (with the
+right key) or populates a pending-action resource for Phase 3's pick-lock / bash UI.
+
+---
+
+### 2.1 — `LockInteractionPending` Resource
+
+**File:** `src/game/resources/mod.rs`
+
+Added the `LockInteractionPending` Bevy `Resource` that signals Phase 3's lock-choice UI when
+the player interacts with a locked object and no key is present.
+
+```src/game/resources/mod.rs#L133-168
+/// Signals that the player has interacted with a locked object and must
+/// choose whether to pick the lock or bash it open.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct LockInteractionPending {
+    pub lock_id: Option<String>,
+    pub position: Option<Position>,
+    pub can_lockpick: bool,
+}
+```
+
+- `lock_id`: the `lock_id` string from the `MapEvent::LockedDoor` awaiting resolution; `None`
+  when no interaction is pending.
+- `position`: tile coordinate of the locked object on the current map.
+- `can_lockpick`: `true` when at least one party member has the `pick_lock` special ability
+  (Robber class). Phase 3 uses this flag to enable/disable the "Pick Lock" button.
+
+Registered in `InputPlugin::build` via `app.init_resource::<LockInteractionPending>()`.
+
+Three tests added to `game::resources::tests`:
+
+| Test                                       | Verifies                                      |
+| ------------------------------------------ | --------------------------------------------- |
+| `test_lock_interaction_pending_default`    | Default is all-`None`, `can_lockpick = false` |
+| `test_lock_interaction_pending_set_fields` | Fields store correct values                   |
+| `test_lock_interaction_pending_clear`      | Fields can be reset to `None`                 |
+
+---
+
+### 2.2 — `map.init_lock_states()` Called on Map Load
+
+**File:** `src/game/systems/map.rs`
+
+#### 2.2.1 Startup system
+
+Added `init_map_lock_states_system` registered as a `Startup` system in `MapManagerPlugin`. It
+iterates every map in `world.maps` and calls `Map::init_lock_states()`, which is idempotent (skips
+any `lock_id` already present).
+
+#### 2.2.2 Map-change handler
+
+`map_change_handler` now calls `map.init_lock_states()` on the newly-active map after each
+teleport / map transition, ensuring locked doors on destination maps are registered before the
+party can interact with them.
+
+---
+
+### 2.3 — Extended Door Interaction in `handle_input`
+
+**File:** `src/game/systems/input.rs`
+
+Two new interaction paths added inside the `Interact` (`E`-key) block, after the existing
+furniture-door entity check and before the NPC / sign / container adjacency loop:
+
+#### Path A — Tile-based `LockedDoor` event (Phase 2 core)
+
+1. **Extract** `MapEvent::LockedDoor { lock_id, key_item_id, .. }` at `world.position_ahead()`
+   (immutable borrow of `world`).
+2. **Check** `map.lock_states.get(&lock_id).map(|ls| ls.is_locked)`.
+3. **If already unlocked** (player re-interacts): set `tile.wall_type = WallType::None`,
+   `tile.blocked = false`, return.
+4. **If locked, key found in party**: consume key from `party.members[i].inventory.items`,
+   unlock `lock_state`, clear tile, remove event, log `"You unlock the door with the <name>."`.
+5. **If locked, key required but absent**: log `"The door is locked. You need a key."`, populate
+   `LockInteractionPending`, return.
+6. **If locked, no key required**: log `"The door is locked."`, populate
+   `LockInteractionPending`, return.
+
+`game_state.world` and `game_state.party` are disjoint struct fields — the Rust borrow checker's
+field-splitting rules allow both to be mutably borrowed simultaneously within the same function
+body. The `can_lockpick` flag is derived by checking each party member's class against
+`ClassDatabase::get_class(&member.class_id)?.has_ability("pick_lock")`.
+
+#### Path B — Tile-based `WallType::Door` fallback
+
+If the tile at `position_ahead()` has `WallType::Door` but **no** `LockedDoor` event (i.e. a
+plain, non-locked tile door), pressing `E` sets `tile.wall_type = WallType::None` and
+`tile.blocked = false` immediately. This is the "existing behaviour" fallback referenced in the
+Phase 2 spec.
+
+#### System parameter change
+
+Added `mut lock_pending: Option<ResMut<LockInteractionPending>>` to `handle_input`. Wrapped in
+`Option<>` (same pattern as `game_log`) so test apps that call `app.add_systems(Update,
+handle_input)` without registering `InputPlugin` still compile and run correctly. The real game
+always has the resource because `InputPlugin::build` registers it unconditionally.
+
+---
+
+### 2.4 — Extended `MapEvent::LockedDoor` Handling in `handle_events`
+
+**File:** `src/game/systems/events.rs`
+
+#### `check_for_events` skip list
+
+`MapEvent::LockedDoor { .. }` and `MapEvent::LockedContainer { .. }` added to the
+"not auto-triggering" skip list. Locked-door tiles are `blocked = true` so the party cannot
+physically stand on them; interaction is exclusively driven by the `E`-key path.
+
+#### `handle_events` locked-door arm
+
+The previous stub (which only logged a message) was replaced with the full key-check + unlock
+logic, mirroring the `handle_input` path. This covers programmatic `MapEventTriggered` triggers
+used in integration tests. The `handle_events` signature was updated to include:
+
+```src/game/systems/events.rs#L270-274
+mut lock_pending: Option<ResMut<LockInteractionPending>>,
+```
+
+The previously unused `_marker_query` parameter was removed to keep `handle_events` within
+Bevy's 16-system-parameter limit.
+
+`MapEvent::LockedContainer` received the same full key-check treatment (previously only logged).
+
+---
+
+### Game Log Messages
+
+| Outcome                     | Message                                                           |
+| --------------------------- | ----------------------------------------------------------------- |
+| Key required, not in party  | `"The door is locked. You need a key."`                           |
+| No key required (pick/bash) | `"The door is locked."`                                           |
+| `OpenedWithKey`             | `"You unlock the door with the <key_name>."`                      |
+| Already unlocked (re-open)  | `"You open the door."` / `"Previously unlocked door at … opened"` |
+
+Key names are looked up from `game_content.db().items.get_item(kid).name`; falls back to
+`"key <id>"` when no `GameContent` resource is registered (test environments).
+
+---
+
+### Tests Added
+
+#### `src/game/resources/mod.rs` — 3 new tests
+
+| Test                                       | Verifies                                    |
+| ------------------------------------------ | ------------------------------------------- |
+| `test_lock_interaction_pending_default`    | All fields default to `None` / `false`      |
+| `test_lock_interaction_pending_set_fields` | Struct literal construction with all fields |
+| `test_lock_interaction_pending_clear`      | Fields can be individually reset            |
+
+#### `src/game/systems/input.rs` — 4 new integration tests (`locked_door_map_event_tests`)
+
+| Test                                                  | Verifies                                                                |
+| ----------------------------------------------------- | ----------------------------------------------------------------------- |
+| `test_e_key_on_regular_door_opens_it`                 | Plain `WallType::Door` (no `LockedDoor` event) opens immediately on `E` |
+| `test_e_key_on_locked_door_with_correct_key_opens_it` | Correct key → tile opens, key consumed, log message present             |
+| `test_e_key_on_locked_door_without_key_sets_pending`  | No key → `LockInteractionPending` set, log says "need a key"            |
+| `test_e_key_on_locked_door_wrong_key_stays_locked`    | Wrong key → door stays locked, pending set, wrong key preserved         |
+
+#### `src/game/systems/events.rs` — 3 new integration tests (`locked_door_event_tests`)
+
+| Test                                                       | Verifies                                                                               |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `test_locked_door_event_sets_pending_resource`             | `MapEventTriggered(LockedDoor)` with no key → `LockInteractionPending` populated       |
+| `test_locked_door_event_with_key_unlocks_and_consumes_key` | `MapEventTriggered(LockedDoor)` with correct key → unlocked, key consumed, log message |
+| `test_locked_door_event_no_key_required_sets_pending`      | `LockedDoor` with `key_item_id: None` → pending set, log says "The door is locked."    |
+
+---
+
+### Files Modified
+
+| File                         | Change                                                                                                                                                                                                |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/resources/mod.rs`  | Added `LockInteractionPending` resource + 3 tests                                                                                                                                                     |
+| `src/game/systems/input.rs`  | Added `LockInteractionPending` param, tile-based locked-door path, `WallType::Door` fallback, 4 tests                                                                                                 |
+| `src/game/systems/events.rs` | Removed unused `_marker_query` param, added `lock_pending` param, replaced `LockedDoor`/`LockedContainer` stubs with full key-check logic, added `LockedDoor`/`LockedContainer` to skip list, 3 tests |
+| `src/game/systems/map.rs`    | Added `init_map_lock_states_system` (Startup), called `init_lock_states()` in `map_change_handler`                                                                                                    |
+
+### Architecture Compliance
+
+- [x] `LockInteractionPending` placed in `game/resources/mod.rs` — no circular imports between
+      `input.rs` and `events.rs`
+- [x] `ItemId` type alias used throughout — no raw `u32`/`usize` for item IDs
+- [x] `try_unlock` domain semantics implemented faithfully (key check → consumed on success,
+      `Locked` outcome → Phase 3 pending)
+- [x] `Map::init_lock_states()` called at Startup and on every map transition
+- [x] No test references `campaigns/tutorial`
+- [x] No new data files created (Phase 4 adds RON content)
+- [x] All test data uses the in-memory map builder, not `data/test_campaign`
+
+### Quality Gate Results
+
+```text
+cargo fmt --all                                → No output (all files formatted)
+cargo check --all-targets --all-features       → Finished with 0 errors, 0 warnings
+cargo clippy --all-targets --all-features
+  -- -D warnings                               → Finished with 0 warnings
+cargo nextest run --all-features --no-fail-fast → 3671/3672 passed
+```
+
+The one failure (`test_creature_database_load_performance`) is a pre-existing timing-sensitive
+performance test unrelated to Phase 2 changes (it checks load time < 500 ms; flaps under
+machine load).
+
+New Phase 2 tests — all green:
+
+- `game::resources::tests::test_lock_interaction_pending_default` ✅
+- `game::resources::tests::test_lock_interaction_pending_set_fields` ✅
+- `game::resources::tests::test_lock_interaction_pending_clear` ✅
+- `game::systems::input::locked_door_map_event_tests::test_e_key_on_regular_door_opens_it` ✅
+- `game::systems::input::locked_door_map_event_tests::test_e_key_on_locked_door_with_correct_key_opens_it` ✅
+- `game::systems::input::locked_door_map_event_tests::test_e_key_on_locked_door_without_key_sets_pending` ✅
+- `game::systems::input::locked_door_map_event_tests::test_e_key_on_locked_door_wrong_key_stays_locked` ✅
+- `game::systems::events::locked_door_event_tests::test_locked_door_event_sets_pending_resource` ✅
+- `game::systems::events::locked_door_event_tests::test_locked_door_event_with_key_unlocks_and_consumes_key` ✅
+- `game::systems::events::locked_door_event_tests::test_locked_door_event_no_key_required_sets_pending` ✅
+
+---
