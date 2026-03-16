@@ -50,13 +50,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::types::{FurnitureId, FurnitureMeshId};
+use crate::domain::visual::creature_database::{CreatureDatabase, CreatureDatabaseError};
 use crate::domain::world::types::{
     FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType,
 };
 
 // ===== Error Types =====
 
-/// Errors that can occur when working with the furniture database
+/// Errors that can occur when working with furniture definitions and mesh registries.
 #[derive(Error, Debug)]
 pub enum FurnitureDatabaseError {
     /// File could not be read from disk
@@ -74,6 +75,10 @@ pub enum FurnitureDatabaseError {
     /// An entry with the same ID already exists
     #[error("Duplicate furniture ID {0} detected")]
     DuplicateId(FurnitureId),
+
+    /// Furniture mesh registry or one of its asset files failed to load
+    #[error("Failed to load furniture mesh registry: {0}")]
+    MeshRegistryError(#[from] CreatureDatabaseError),
 }
 
 // ===== FurnitureDefinition =====
@@ -264,6 +269,161 @@ impl FurnitureDefinition {
 pub struct FurnitureDatabase {
     /// Definitions indexed by `FurnitureId` for O(1) lookup
     items: HashMap<FurnitureId, FurnitureDefinition>,
+}
+
+/// Database of custom furniture meshes loaded from `furniture_mesh_registry.ron`
+///
+/// Furniture mesh assets reuse the same underlying [`crate::domain::visual::CreatureDefinition`]
+/// format as creature and item mesh assets. This wrapper keeps furniture mesh
+/// concerns separate from creature visuals while reusing the validated registry loader.
+///
+/// # Examples
+///
+/// ```no_run
+/// use antares::domain::world::furniture::FurnitureMeshDatabase;
+/// use std::path::Path;
+///
+/// let db = FurnitureMeshDatabase::load_from_registry(
+///     Path::new("data/test_campaign/data/furniture_mesh_registry.ron"),
+///     Path::new("data/test_campaign"),
+/// );
+///
+/// // Missing fixture data in some environments is fine; this is just a usage example.
+/// let _ = db;
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct FurnitureMeshDatabase {
+    /// Wrapped creature-style registry database for furniture mesh assets
+    inner: CreatureDatabase,
+}
+
+impl FurnitureMeshDatabase {
+    /// Creates a new, empty furniture mesh database.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::furniture::FurnitureMeshDatabase;
+    ///
+    /// let db = FurnitureMeshDatabase::new();
+    /// assert!(db.is_empty());
+    /// assert_eq!(db.count(), 0);
+    /// ```
+    pub fn new() -> Self {
+        Self {
+            inner: CreatureDatabase::new(),
+        }
+    }
+
+    /// Loads a furniture mesh database from a registry RON file.
+    ///
+    /// The registry uses the same `CreatureReference` format as creature and
+    /// item mesh registries. Each entry points at a `CreatureDefinition` RON
+    /// file under the campaign root.
+    ///
+    /// # Arguments
+    ///
+    /// * `registry_path` - Path to `furniture_mesh_registry.ron`
+    /// * `campaign_root` - Root campaign directory used to resolve relative asset paths
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the registry file or any referenced mesh asset file
+    /// cannot be read, parsed, or validated.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::domain::world::furniture::FurnitureMeshDatabase;
+    /// use std::path::Path;
+    ///
+    /// let db = FurnitureMeshDatabase::load_from_registry(
+    ///     Path::new("data/test_campaign/data/furniture_mesh_registry.ron"),
+    ///     Path::new("data/test_campaign"),
+    /// ).unwrap();
+    /// assert!(!db.is_empty());
+    /// ```
+    pub fn load_from_registry(
+        registry_path: &Path,
+        campaign_root: &Path,
+    ) -> Result<Self, CreatureDatabaseError> {
+        let inner = CreatureDatabase::load_from_registry(registry_path, campaign_root)?;
+        Ok(Self { inner })
+    }
+
+    /// Returns the underlying creature-style mesh database.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::furniture::FurnitureMeshDatabase;
+    ///
+    /// let db = FurnitureMeshDatabase::new();
+    /// assert!(db.as_creature_database().is_empty());
+    /// ```
+    pub fn as_creature_database(&self) -> &CreatureDatabase {
+        &self.inner
+    }
+
+    /// Returns `true` when no furniture mesh entries are loaded.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::furniture::FurnitureMeshDatabase;
+    ///
+    /// let db = FurnitureMeshDatabase::new();
+    /// assert!(db.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Returns the number of registered furniture mesh entries.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::furniture::FurnitureMeshDatabase;
+    ///
+    /// let db = FurnitureMeshDatabase::new();
+    /// assert_eq!(db.count(), 0);
+    /// ```
+    pub fn count(&self) -> usize {
+        self.inner.count()
+    }
+
+    /// Returns `true` if a mesh with the given furniture mesh ID exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::furniture::FurnitureMeshDatabase;
+    ///
+    /// let db = FurnitureMeshDatabase::new();
+    /// assert!(!db.has_mesh(10001));
+    /// ```
+    pub fn has_mesh(&self, id: FurnitureMeshId) -> bool {
+        self.inner.has_creature(id)
+    }
+
+    /// Validates all registered furniture mesh assets.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error if any referenced mesh asset is malformed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::furniture::FurnitureMeshDatabase;
+    ///
+    /// let db = FurnitureMeshDatabase::new();
+    /// assert!(db.validate().is_ok());
+    /// ```
+    pub fn validate(&self) -> Result<(), CreatureDatabaseError> {
+        self.inner.validate()
+    }
 }
 
 impl FurnitureDatabase {

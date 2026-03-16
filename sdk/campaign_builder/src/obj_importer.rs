@@ -28,7 +28,7 @@ use crate::mesh_obj_io::{
     ImportedObjMesh, ImportedObjMeshColorSource, ImportedObjMtlSourceKind, ImportedObjScene,
     ObjError, ObjImportOptions,
 };
-use antares::domain::types::CreatureId;
+use antares::domain::types::{CreatureId, FurnitureMeshId};
 use antares::domain::visual::{AlphaMode, MeshDefinition};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -53,6 +53,8 @@ pub enum ExportType {
     Creature,
     /// Export as an item asset.
     Item,
+    /// Export as a furniture mesh asset.
+    Furniture,
 }
 
 /// Records how the importer's current mesh color was chosen.
@@ -131,8 +133,12 @@ pub struct ObjImporterState {
     pub export_type: ExportType,
     /// Suggested next creature ID for export.
     pub creature_id: CreatureId,
+    /// Suggested next furniture mesh ID for export.
+    pub furniture_id: FurnitureMeshId,
     /// Name entered by the user for the export.
     pub creature_name: String,
+    /// Optional category subfolder used when exporting item or furniture meshes.
+    pub category: String,
     /// Uniform OBJ import scale.
     pub scale: f32,
     /// Status text shown in the importer UI.
@@ -275,7 +281,9 @@ impl Default for ObjImporterState {
             meshes: Vec::new(),
             export_type: ExportType::Creature,
             creature_id: 4000,
+            furniture_id: 10001,
             creature_name: String::new(),
+            category: String::new(),
             scale: 0.01,
             status_message: String::new(),
             custom_palette: CustomPalette::default(),
@@ -297,7 +305,9 @@ impl ObjImporterState {
         let scale = self.scale;
         let custom_palette = self.custom_palette.clone();
         let creature_id = self.creature_id;
+        let furniture_id = self.furniture_id;
         let export_type = self.export_type;
+        let category = self.category.clone();
         let new_custom_color = self.new_custom_color;
         let manual_mtl_path = self.manual_mtl_path.clone();
 
@@ -305,7 +315,9 @@ impl ObjImporterState {
             scale,
             custom_palette,
             creature_id,
+            furniture_id,
             export_type,
+            category,
             new_custom_color,
             manual_mtl_path,
             ..Self::default()
@@ -422,6 +434,11 @@ impl ObjImporterState {
     /// Updates the suggested creature ID shown by the importer.
     pub fn set_next_creature_id(&mut self, creature_id: CreatureId) {
         self.creature_id = creature_id;
+    }
+
+    /// Updates the suggested furniture mesh ID shown by the importer.
+    pub fn set_next_furniture_id(&mut self, furniture_id: FurnitureMeshId) {
+        self.furniture_id = furniture_id;
     }
 
     /// Sets the mesh currently targeted by the color editor.
@@ -789,6 +806,9 @@ mod tests {
         let mut state = ObjImporterState::new();
         state.scale = 0.05;
         state.creature_id = 4012;
+        state.furniture_id = 10042;
+        state.export_type = ExportType::Furniture;
+        state.category = "tables".to_string();
         state.manual_mtl_path = Some(PathBuf::from("materials/hero_override.mtl"));
         state.new_custom_color = [0.2, 0.4, 0.6, 1.0];
         state.add_custom_color("favorite_teal", [0.1, 0.7, 0.7, 1.0]);
@@ -797,16 +817,18 @@ mod tests {
         state.clear();
 
         assert_eq!(state.mode, ImporterMode::Idle);
+        assert!(state.meshes.is_empty());
         assert_eq!(state.scale, 0.05);
         assert_eq!(state.creature_id, 4012);
+        assert_eq!(state.furniture_id, 10042);
+        assert_eq!(state.export_type, ExportType::Furniture);
+        assert_eq!(state.category, "tables");
         assert_eq!(
             state.manual_mtl_path,
             Some(PathBuf::from("materials/hero_override.mtl"))
         );
         assert_eq!(state.new_custom_color, [0.2, 0.4, 0.6, 1.0]);
         assert_eq!(state.custom_palette.colors.len(), 1);
-        assert!(state.meshes.is_empty());
-        assert!(state.imported_material_palette.is_empty());
     }
 
     #[test]

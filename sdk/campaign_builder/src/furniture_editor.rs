@@ -113,6 +113,16 @@ impl FurnitureCategoryFilter {
 // Editor State
 // =============================================================================
 
+/// Signal emitted by the furniture editor when it wants the host app to switch
+/// to another tab or tool.
+///
+/// This mirrors the cross-tab navigation pattern already used by other editors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FurnitureEditorSignal {
+    /// Ask the host app to open the OBJ importer and prepare it for furniture mesh work.
+    OpenInObjImporter,
+}
+
 /// All mutable UI state owned by the furniture definitions editor.
 ///
 /// Holds the current mode, search / filter inputs, the in-flight edit buffer,
@@ -134,6 +144,8 @@ pub struct FurnitureEditorState {
     pub filter_category: Option<FurnitureCategoryFilter>,
     /// Optional base-type filter; `None` = show all types
     pub filter_base_type: Option<FurnitureType>,
+    /// When `Some`, requests host-app navigation to the OBJ importer.
+    pub requested_signal: Option<FurnitureEditorSignal>,
 }
 
 impl Default for FurnitureEditorState {
@@ -147,6 +159,7 @@ impl Default for FurnitureEditorState {
             import_export_buffer: String::new(),
             filter_category: None,
             filter_base_type: None,
+            requested_signal: None,
         }
     }
 }
@@ -227,6 +240,7 @@ impl FurnitureEditorState {
         unsaved_changes: &mut bool,
         status_message: &mut String,
         file_load_merge_mode: &mut bool,
+        available_mesh_ids: &[u32],
     ) {
         ui.heading("🪑 Furniture Editor");
         ui.add_space(5.0);
@@ -964,7 +978,8 @@ impl FurnitureEditorState {
                         .changed()
                     {
                         if enable_mesh {
-                            self.edit_buffer.mesh_id = Some(10001);
+                            self.edit_buffer.mesh_id =
+                                available_mesh_ids.first().copied().or(Some(10001));
                         } else {
                             self.edit_buffer.mesh_id = None;
                         }
@@ -974,9 +989,37 @@ impl FurnitureEditorState {
                     if let Some(ref mut mesh_id) = self.edit_buffer.mesh_id {
                         ui.horizontal(|ui| {
                             ui.label("Mesh ID:");
-                            ui.add(egui::DragValue::new(mesh_id).speed(1.0));
+
+                            egui::ComboBox::from_id_salt("furniture_mesh_id_selector")
+                                .selected_text(mesh_id.to_string())
+                                .show_ui(ui, |ui| {
+                                    for id in available_mesh_ids {
+                                        ui.selectable_value(mesh_id, *id, id.to_string());
+                                    }
+                                });
                         });
+
                         ui.small("Mesh IDs come from furniture_mesh_registry.ron");
+
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("Open in OBJ Importer").clicked() {
+                                self.requested_signal =
+                                    Some(FurnitureEditorSignal::OpenInObjImporter);
+                                *status_message =
+                                    "Opening OBJ Importer for furniture mesh work".to_string();
+                                ui.ctx().request_repaint();
+                            }
+                        });
+                    } else {
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("Open in OBJ Importer").clicked() {
+                                self.requested_signal =
+                                    Some(FurnitureEditorSignal::OpenInObjImporter);
+                                *status_message =
+                                    "Opening OBJ Importer for furniture mesh work".to_string();
+                                ui.ctx().request_repaint();
+                            }
+                        });
                     }
                 });
 

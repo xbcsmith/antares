@@ -34,7 +34,9 @@ pub use blueprint::MapBlueprint;
 pub use creature_binding::CreatureBound;
 pub use dropped_items::DroppedItem;
 pub use events::{random_encounter, trigger_event, EventError, EventResult};
-pub use furniture::{FurnitureDatabase, FurnitureDatabaseError, FurnitureDefinition};
+pub use furniture::{
+    FurnitureDatabase, FurnitureDatabaseError, FurnitureDefinition, FurnitureMeshDatabase,
+};
 pub use movement::{check_tile_blocked, move_party, MovementError};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};
 pub use npc_runtime::{

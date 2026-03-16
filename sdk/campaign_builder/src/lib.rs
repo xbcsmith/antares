@@ -4910,6 +4910,16 @@ impl eframe::App for CampaignBuilderApp {
                     &mut self.status_message,
                     &mut self.file_load_merge_mode,
                 );
+                if let Some(mesh_id) = self
+                    .furniture_editor_state
+                    .requested_open_obj_importer
+                    .take()
+                {
+                    self.active_tab = EditorTab::Importer;
+                    self.status_message =
+                        format!("Opening OBJ Importer for furniture mesh #{}", mesh_id);
+                    ui.ctx().request_repaint();
+                }
             }
             EditorTab::Importer => {
                 if let Some(signal) = obj_importer_ui::show_obj_importer_tab(
@@ -4927,6 +4937,11 @@ impl eframe::App for CampaignBuilderApp {
                             ui.ctx().request_repaint();
                         }
                         obj_importer_ui::ObjImporterUiSignal::ItemExported => {
+                            ui.ctx().request_repaint();
+                        }
+                        obj_importer_ui::ObjImporterUiSignal::FurnitureExported => {
+                            self.status_message = self.obj_importer_state.status_message.clone();
+                            self.active_tab = EditorTab::Furniture;
                             ui.ctx().request_repaint();
                         }
                     }

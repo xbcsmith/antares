@@ -1,5 +1,127 @@
 # Implementations
 
+## Phase 4: Furniture Mesh Registry and OBJ Import (Complete)
+
+### Overview
+
+Implements Phase 4 of the data-driven furniture system described in
+`docs/explanation/furniture_as_ron_implementation_plan.md`. This phase adds a
+dedicated furniture mesh registry, campaign-loaded custom furniture mesh
+database support, furniture OBJ export/import plumbing in the Campaign Builder
+importer, category-based asset subfolders, runtime rendering support for
+custom furniture meshes, and cross-tab workflow integration between the
+Furniture Editor and OBJ Importer.
+
+The implementation mirrors the existing item mesh pipeline while keeping
+furniture-specific IDs and registry files distinct. Furniture definitions can
+now reference `mesh_id: Option<FurnitureMeshId>`, those IDs resolve through
+`furniture_mesh_registry.ron`, OBJ exports can target
+`assets/furniture/<category>/...`, and runtime furniture spawning now prefers
+the imported mesh path when a registered custom mesh exists, falling back to
+procedural furniture spawning when it does not.
+
+### Deliverables
+
+#### Domain layer
+
+- Added `FurnitureMeshDatabase` as a thin, named wrapper around
+  `CreatureDatabase`, paralleling `ItemMeshDatabase`.
+- Added campaign loader support for `data/furniture_mesh_registry.ron` with
+  opt-in semantics: missing registry files are valid and produce an empty
+  database.
+- Extended `GameData` and related content-loading plumbing to carry furniture
+  mesh registry content alongside furniture definitions and item meshes.
+- Added `furniture_mesh_registry.ron` data files to:
+  - `campaigns/tutorial/data/furniture_mesh_registry.ron`
+  - `data/test_campaign/data/furniture_mesh_registry.ron`
+
+#### Runtime rendering
+
+- Extended furniture rendering to check the resolved furniture definition for
+  `mesh_id`.
+- When `mesh_id` resolves successfully, runtime spawning now uses the custom
+  imported mesh definition instead of the procedural `spawn_*` furniture path.
+- The custom mesh path applies `FurnitureMaterial` PBR values:
+  - `base_color()`
+  - `metallic()`
+  - `roughness()`
+  - lit furniture emissive behavior where applicable
+- Missing or invalid furniture mesh references log a warning and fall back to
+  the procedural furniture path instead of failing hard.
+
+#### Campaign Builder SDK
+
+- Added `ExportType::Furniture` to the OBJ importer.
+- Extended importer state with furniture-oriented export data:
+  - furniture ID suggestion
+  - category text / category path input
+- Updated exporter path generation so category subfolders are supported:
+  - items: `assets/items/<category>/<name>.ron`
+  - furniture: `assets/furniture/<category>/<name>.ron`
+  - empty category still falls back to the root asset directory
+- Added furniture export handling so OBJ → RON export can also append/update
+  `furniture_mesh_registry.ron`.
+- Updated item mesh save/export path helpers to respect category subfolders
+  instead of always targeting the root `assets/items/` directory.
+- Added Furniture Editor mesh workflow improvements:
+  - mesh ID selector populated from registered furniture mesh entries
+  - “Open in OBJ Importer” workflow for furniture definitions using custom
+    meshes
+- Added host-app cross-tab wiring so furniture editor requests can switch to
+  the Importer tab and pre-populate importer context.
+
+### Tests Added
+
+- `FurnitureMeshDatabase` registry loading from `data/test_campaign`
+- furniture mesh registry validation
+- `ExportType::Furniture` behavior and defaults
+- export path generation for category subfolders
+- furniture export writes to `assets/furniture/...`
+- runtime custom-mesh furniture resolution prefers imported mesh path
+- fallback behavior when furniture mesh IDs are missing
+- round-trip flow coverage for:
+  - importer export
+  - registry load
+  - runtime resolution
+
+### Data Files
+
+Added furniture mesh registry fixtures in both the live tutorial campaign and
+the stable test fixture campaign. This keeps runtime examples available while
+ensuring tests use `data/test_campaign` rather than the live campaign.
+
+### Architecture Compliance
+
+- Module placement follows architecture Section 3.2:
+  - domain loading in `src/domain/`
+  - runtime rendering in `src/game/systems/`
+  - editor/importer workflow in `sdk/campaign_builder/src/`
+- Type aliases are used consistently:
+  - `FurnitureMeshId`
+  - `FurnitureId`
+- RON remains the source format for registry and asset data files.
+- Phase 4 preserves the existing fallback path for procedural furniture, so
+  custom mesh support is additive rather than disruptive.
+- Test fixtures remain under `data/test_campaign` in accordance with
+  `AGENTS.md` Implementation Rule 5.
+
+### Quality Gates
+
+Phase 4 is complete when the following all pass after implementation updates:
+
+- `cargo fmt --all`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo nextest run --all-features`
+
+### Outcome
+
+Campaign authors can now import an OBJ as a furniture mesh, export it into the
+campaign under `assets/furniture/...`, register it in
+`furniture_mesh_registry.ron`, assign its `FurnitureMeshId` to a
+`FurnitureDefinition`, and have that custom 3D model render in place of the
+procedural furniture mesh at runtime.
+
 ## Phase 3: Furniture Editor in Campaign Builder SDK (Complete)
 
 ### Overview
