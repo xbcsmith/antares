@@ -35,14 +35,14 @@
 
 use crate::application::dialogue::RecruitmentContext;
 use crate::domain::types::Position;
-use crate::domain::world::{MapEvent, WallType};
+use crate::domain::world::MapEvent;
 use crate::game::components::dialogue::NpcDialogue;
 use crate::game::components::furniture::DoorState;
 use crate::game::components::FurnitureEntity;
 use crate::game::resources::GlobalState;
 use crate::game::systems::dialogue::{PendingRecruitmentContext, StartDialogue};
 use crate::game::systems::events::MapEventTriggered;
-use crate::game::systems::map::{DoorOpenedEvent, NpcMarker, TileCoord};
+use crate::game::systems::map::{NpcMarker, TileCoord};
 #[cfg(test)]
 use crate::game::systems::rest::InitiateRestEvent;
 use crate::sdk::game_config::ControlsConfig;
@@ -435,7 +435,6 @@ fn handle_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     input_config: Res<InputConfigResource>,
     mut global_state: ResMut<GlobalState>,
-    mut door_messages: MessageWriter<DoorOpenedEvent>,
     mut map_event_messages: MessageWriter<MapEventTriggered>,
     mut dialogue_writer: MessageWriter<StartDialogue>,
     mut recruitment_context: ResMut<PendingRecruitmentContext>,
@@ -625,8 +624,7 @@ fn handle_input(
         let target = world.position_ahead();
 
         // ── Phase 3: Furniture door interaction ───────────────────────────
-        // Check for a furniture-based door entity at the tile ahead BEFORE the
-        // legacy WallType::Door path so migrated doors are handled first.
+        // Check for a furniture-based door entity at the tile ahead.
         // Using a local flag to avoid holding query borrows across the `return`.
         {
             let mut furniture_door_handled = false;
@@ -705,21 +703,6 @@ fn handle_input(
 
             if furniture_door_handled {
                 return; // Door handled; don't fall through to other checks
-            }
-        }
-
-        // ── Legacy: WallType::Door tile interaction ────────────────────────
-        // Kept as a fallback for un-migrated maps. Phase 4 removes this path.
-        if let Some(map) = world.get_current_map_mut() {
-            if let Some(tile) = map.get_tile_mut(target) {
-                if tile.wall_type == WallType::Door {
-                    // Open the door by changing it to None
-                    tile.wall_type = WallType::None;
-                    info!("Opened door at {:?}", target);
-                    // Send event to trigger map visual refresh
-                    door_messages.write(DoorOpenedEvent { position: target });
-                    return; // Door handled; don't fall through to other checks
-                }
             }
         }
 
@@ -1013,7 +996,6 @@ mod dialogue_inventory_tests {
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
         app.insert_resource(GameContent::new(db));
-        app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
@@ -1418,7 +1400,6 @@ mod integration_tests {
         app.insert_resource(GlobalState(crate::application::GameState::new()));
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
-        app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
@@ -1449,7 +1430,6 @@ mod integration_tests {
 
         // Register message channels the input system depends on so MessageWriter<T>
         // parameters are initialized when running the system in tests.
-        app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
@@ -1499,7 +1479,6 @@ mod integration_tests {
         app.insert_resource(PendingRecruitmentContext::default());
 
         // Register messages used by input system
-        app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
@@ -1544,7 +1523,6 @@ mod integration_tests {
         app.insert_resource(PendingRecruitmentContext::default());
 
         // Register messages used by input system
-        app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
@@ -1953,33 +1931,6 @@ mod interaction_tests {
         assert!(matches!(event, Some(MapEvent::Teleport { .. })));
     }
 
-    /// Test that door interaction state changes correctly.
-    /// Validates the door opening mechanism by checking wall type transitions.
-    #[test]
-    fn test_door_interaction_wall_state() {
-        // Arrange
-        let mut map =
-            crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
-
-        let door_pos = Position::new(5, 4);
-        if let Some(tile) = map.get_tile_mut(door_pos) {
-            tile.wall_type = WallType::Door;
-        }
-
-        // Act - verify initial state
-        let tile_before = map.get_tile(door_pos).expect("tile missing");
-        assert_eq!(tile_before.wall_type, WallType::Door);
-
-        // Act - open door by changing wall type
-        if let Some(tile) = map.get_tile_mut(door_pos) {
-            tile.wall_type = WallType::None;
-        }
-
-        // Assert - verify final state
-        let tile_after = map.get_tile(door_pos).expect("tile missing");
-        assert_eq!(tile_after.wall_type, WallType::None);
-    }
-
     /// Test that NPC placements are properly stored and retrievable.
     /// Validates the NPC data structure and storage mechanisms.
     #[test]
@@ -2107,7 +2058,6 @@ mod inventory_guard_tests {
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
 
-        app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
@@ -2153,7 +2103,6 @@ mod inventory_guard_tests {
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
 
-        app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
@@ -2213,7 +2162,6 @@ mod combat_guard_tests {
         app.insert_resource(PendingRecruitmentContext::default());
 
         // Register message channels that handle_input depends on.
-        app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
@@ -2261,7 +2209,6 @@ mod combat_guard_tests {
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
 
-        app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
@@ -2335,7 +2282,6 @@ mod door_interaction_tests {
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
 
-        app.add_message::<DoorOpenedEvent>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();

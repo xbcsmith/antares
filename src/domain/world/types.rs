@@ -2205,6 +2205,15 @@ pub enum MapEvent {
         /// Optional color tint for customization (RGB, 0.0-1.0 range)
         #[serde(default)]
         color_tint: Option<[f32; 3]>,
+        /// Optional item ID required to unlock this door; `None` means no key required.
+        ///
+        /// Only meaningful for `FurnitureType::Door` events.  When `Some(id)`,
+        /// the interaction system checks the party inventory for the matching item
+        /// before allowing the door to be opened.  Defaults to `None` so existing
+        /// RON map files without this field remain valid (backward compatible via
+        /// `#[serde(default)]`).
+        #[serde(default)]
+        key_item_id: Option<ItemId>,
     },
     /// An interactive container (chest, barrel, hole-in-the-wall, crate, etc.)
     /// whose contents can be taken or stashed into by the party.
@@ -5460,5 +5469,62 @@ mod tests {
         assert_eq!(round_tripped.dropped_items[0].item_id, 7);
         assert_eq!(round_tripped.dropped_items[0].charges, 2);
         assert_eq!(round_tripped.dropped_items[0].position, Position::new(2, 2));
+    }
+
+    #[test]
+    fn test_furniture_event_key_item_id_roundtrip() {
+        // Verify that key_item_id serializes/deserializes correctly in RON format.
+        // Also verify backward compatibility: old RON without key_item_id defaults to None.
+
+        // Round-trip with Some value
+        let event = MapEvent::Furniture {
+            name: "Locked Door".to_string(),
+            furniture_id: None,
+            furniture_type: crate::domain::world::FurnitureType::Door,
+            rotation_y: None,
+            scale: 1.0,
+            material: crate::domain::world::FurnitureMaterial::Wood,
+            flags: crate::domain::world::FurnitureFlags {
+                lit: false,
+                locked: true,
+                blocking: true,
+            },
+            color_tint: None,
+            key_item_id: Some(42),
+        };
+
+        let serialised = ron::ser::to_string_pretty(&event, Default::default())
+            .expect("serialize MapEvent::Furniture to RON");
+        let parsed: MapEvent =
+            ron::de::from_str(&serialised).expect("deserialize MapEvent::Furniture from RON");
+
+        match parsed {
+            MapEvent::Furniture { key_item_id, .. } => {
+                assert_eq!(
+                    key_item_id,
+                    Some(42),
+                    "key_item_id must round-trip through RON"
+                );
+            }
+            other => panic!("expected Furniture event, got {:?}", other),
+        }
+
+        // Backward compatibility: old RON without key_item_id must default to None
+        let old_ron = r#"Furniture(
+            name: "Old Door",
+            furniture_type: Door,
+            scale: 1.0,
+        )"#;
+        let parsed_old: MapEvent =
+            ron::de::from_str(old_ron).expect("deserialize old Furniture RON without key_item_id");
+        match parsed_old {
+            MapEvent::Furniture { key_item_id, .. } => {
+                assert_eq!(
+                    key_item_id, None,
+                    "key_item_id must default to None for backward compatibility"
+                );
+            }
+            other => panic!("expected Furniture event, got {:?}", other),
+        }
     }
 }

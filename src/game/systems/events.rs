@@ -591,6 +591,7 @@ fn handle_events(
                 material,
                 flags,
                 color_tint,
+                key_item_id,
             } => {
                 let msg = format!("Furniture placed: {}", name);
                 println!("{}", msg);
@@ -635,6 +636,7 @@ fn handle_events(
                         resolved_material,
                         resolved_flags,
                         resolved_tint,
+                        *key_item_id,
                         &mut furniture_cache,
                     );
                 }
@@ -1827,6 +1829,7 @@ mod tests {
                 blocking: false,
             },
             color_tint: Some([0.6, 0.8, 1.0]),
+            key_item_id: None,
         };
 
         let serialised = ron::to_string(&event).expect("serialise to RON");

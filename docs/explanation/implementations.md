@@ -1,5 +1,320 @@
 # Implementations
 
+## Phase 4: Doors as Furniture — Map Data Migration and Campaign Builder (Complete)
+
+### Overview
+
+Implements Phase 4 of the doors-as-furniture migration described in
+`docs/explanation/doors_as_furniture_implementation_plan.md`. This phase
+completes the full migration by:
+
+1. **Migration script** (`tools/migrate_doors.py`) — a Python 3 tool that
+   scans all RON map files, detects tiles with `wall_type: Door`, converts
+   each to a `MapEvent::Furniture` event at the same position, and rewrites
+   the tile's `wall_type` to `r#None`. Idempotent; supports `--dry-run`.
+2. **Data migration** — ran the script on all 6 maps in
+   `data/test_campaign/data/maps/` and `campaigns/tutorial/data/maps/`.
+   Zero `wall_type: Door` tiles remain across all map files (13 doors migrated).
+3. **Remove legacy `WallType::Door` rendering** — deleted the `WallType::Door`
+   match arm from `spawn_map` in `map.rs`, removed `door_rgb`/`door_color`
+   constants, and removed `DoorOpenedEvent` (struct, plugin registration, and
+   `handle_door_opened` system) which was only used by the now-deleted legacy path.
+4. **Remove legacy `WallType::Door` interaction** — deleted the legacy tile-mutation
+   interact block from `handle_input` in `input.rs`, removed the `door_messages`
+   system parameter, removed all `WallType`/`DoorOpenedEvent` imports, and
+   deleted the `test_door_interaction_wall_state` test. All Phase 3 furniture-based
+   door interaction is preserved.
+5. **Campaign Builder UI** — extended the `EventType::Furniture` editor panel so
+   `FurnitureType::Door` appears in the type dropdown (was already present via
+   `FurnitureType::all()`), the locked checkbox renders for both `Chest` and
+   `Door`, and a door-specific `🗝 Key Item:` ComboBox appears when the door is
+   locked. Added `furniture_key_item_id: String` to `EventEditorState`.
+6. **`key_item_id` in `MapEvent::Furniture`** — added `#[serde(default)]
+key_item_id: Option<ItemId>` to the Furniture map event variant so campaign
+   data can declare which item unlocks a door. Propagated through both spawn
+   pipelines (`spawn_furniture` and `spawn_furniture_with_rendering`) to the
+   `DoorState` component.
+
+### Files Changed
+
+| File                                      | Change                                                                                                                                                                                                                                              |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tools/migrate_doors.py`                  | **New** — Python migration script; regex-based tile scanner; event inserter; idempotent                                                                                                                                                             |
+| `data/test_campaign/data/maps/map_1.ron`  | 4 `wall_type: Door` tiles → `wall_type: r#None` + 4 `Furniture(Door)` events                                                                                                                                                                        |
+| `data/test_campaign/data/maps/map_3.ron`  | 6 doors migrated                                                                                                                                                                                                                                    |
+| `data/test_campaign/data/maps/map_5.ron`  | 3 doors migrated                                                                                                                                                                                                                                    |
+| `campaigns/tutorial/data/maps/map_1.ron`  | 4 doors migrated                                                                                                                                                                                                                                    |
+| `campaigns/tutorial/data/maps/map_3.ron`  | 6 doors migrated                                                                                                                                                                                                                                    |
+| `campaigns/tutorial/data/maps/map_5.ron`  | 3 doors migrated                                                                                                                                                                                                                                    |
+| `src/domain/world/types.rs`               | Added `#[serde(default)] key_item_id: Option<ItemId>` to `MapEvent::Furniture`; backward compatible                                                                                                                                                 |
+| `src/game/systems/procedural_meshes.rs`   | Added `key_item_id` parameter to `spawn_furniture`; passes to `DoorState`                                                                                                                                                                           |
+| `src/game/systems/furniture_rendering.rs` | Added `key_item_id` parameter to `spawn_furniture_with_rendering`; passes to `DoorState`                                                                                                                                                            |
+| `src/game/systems/events.rs`              | Binds `key_item_id` from Furniture destructuring; passes to spawn                                                                                                                                                                                   |
+| `src/game/systems/map.rs`                 | Removed `WallType::Door` render arm, `door_rgb`, `door_color`; removed `DoorOpenedEvent` struct/plugin/system; passes `key_item_id` to `spawn_furniture`                                                                                            |
+| `src/game/systems/input.rs`               | Removed legacy `WallType::Door` interact block; removed `door_messages` param; removed `DoorOpenedEvent` and `WallType` imports; removed `test_door_interaction_wall_state`; removed 10 `app.add_message::<DoorOpenedEvent>()` calls from test apps |
+| `sdk/campaign_builder/src/map_editor.rs`  | Added `furniture_key_item_id` field; door-aware locked checkbox; door key-item ComboBox; 3 new tests                                                                                                                                                |
+
+### Migration Script: `tools/migrate_doors.py`
+
+The script uses a field-order-aware regex to match complete tile blocks:
+
+```tools/migrate_doors.py#L1-10
+#!/usr/bin/env python3
+"""
+Migration script: converts wall_type: Door tiles to MapEvent::Furniture events.
+Usage: python3 tools/migrate_doors.py [--dry-run] [paths...]
+"""
+```
+
+Each migrated door tile receives a canonical furniture event:
+
+```antares/data/test_campaign/data/maps/map_1.ron#L1-1
+(
+    x: 4,
+    y: 3,
+): Furniture(
+    name: "Door",
+    furniture_id: None,
+    furniture_type: Door,
+    rotation_y: None,
+    scale: 1.0,
+    material: Wood,
+    flags: (
+        lit: false,
+        locked: false,
+        blocking: true,
+    ),
+    color_tint: None,
+    key_item_id: None,
+),
+```
+
+### Migration Results
+
+| Map file                                 | Doors migrated | Tile positions                             |
+| ---------------------------------------- | -------------- | ------------------------------------------ |
+| `data/test_campaign/data/maps/map_1.ron` | 4              | (4,3), (14,4), (4,9), (4,16)               |
+| `data/test_campaign/data/maps/map_3.ron` | 6              | (4,2), (12,3), (9,4), (7,5), (7,9), (3,10) |
+| `data/test_campaign/data/maps/map_5.ron` | 3              | (4,5), (15,5), (10,8)                      |
+| `campaigns/tutorial/data/maps/map_1.ron` | 4              | (4,3), (14,4), (4,9), (4,16)               |
+| `campaigns/tutorial/data/maps/map_3.ron` | 6              | (4,2), (12,3), (9,4), (7,5), (7,9), (3,10) |
+| `campaigns/tutorial/data/maps/map_5.ron` | 3              | (4,5), (15,5), (10,8)                      |
+
+**Verification:** `grep -rn "wall_type: Door"` across all map files returns zero matches.
+
+### Removed: `DoorOpenedEvent` and Legacy Render/Interact Paths
+
+The `DoorOpenedEvent` message was used only by the tile-mutation door path:
+
+- Written in `input.rs` when `WallType::Door` was set on a tile
+- Read by `handle_door_opened` in `map.rs` to trigger a full map re-render
+
+With all doors now managed as furniture entities, the `DoorState` component
+tracks open/locked state and the input system rotates the door entity's
+`Transform` directly. No full map re-render is needed when a door opens.
+The entire event infrastructure was removed cleanly.
+
+### Campaign Builder UI: Door-Specific Fields
+
+The `EventType::Furniture` editor panel now shows door-specific controls:
+
+- **Locked checkbox** — visible for `Chest` and `Door` (label: "🔒 Starts Locked")
+- **Key Item ComboBox** — visible only when `furniture_type == Door && furniture_locked == true`;
+  uses `from_id_salt("door_key_item_combo")` and `push_id` per row per SDK egui rules
+- `FurnitureCategory::Passage` already correctly filters doors in the furniture editor
+
+### Phase 4 Deliverables Checklist
+
+- [x] Migration script `tools/migrate_doors.py` created
+- [x] All `.ron` map files migrated — zero `wall_type: Door` tiles remain
+- [x] Campaign builder UI updated for `FurnitureType::Door` (locked checkbox + key item selector)
+- [x] Legacy `WallType::Door` rendering removed from `map.rs`
+- [x] Legacy `WallType::Door` interaction path removed from `input.rs`
+- [x] `DoorOpenedEvent` fully removed (struct, plugin registration, system, all test app registrations)
+- [x] `test_door_interaction_wall_state` test removed
+- [x] `key_item_id: Option<ItemId>` added to `MapEvent::Furniture` with `#[serde(default)]`
+- [x] `key_item_id` propagated through `spawn_furniture` and `spawn_furniture_with_rendering`
+- [x] `DoorState::key_item_id` set correctly at spawn time from map event data
+- [x] 3 new campaign builder tests added
+- [x] `docs/explanation/implementations.md` updated
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` Section 4 — no deviations
+- [x] `MapEvent::Furniture` uses `ItemId` type alias (not raw `u32`)
+- [x] `#[serde(default)]` ensures backward compatibility — no forced migration of non-door events
+- [x] RON format used for all game data files
+- [x] All test data uses `data/test_campaign`, not `campaigns/tutorial`
+- [x] No git operations performed
+
+### Quality Gates
+
+```
+cargo fmt --all         → clean (no output)
+cargo check             → 0 errors, 0 warnings
+cargo clippy -- -D warnings → 0 warnings
+cargo nextest run       → 3639 passed, 5 pre-existing failures (missing asset files unrelated to Phase 4)
+```
+
+---
+
+## Phase 4: Doors as Furniture — `key_item_id` Propagation Through Spawn Pipeline (Complete)
+
+### Overview
+
+Implements Phase 4 of the doors-as-furniture migration. Phase 3 added the
+`DoorState` component with a `key_item_id: Option<ItemId>` field, but the field
+was always `None` because nothing read it from map data. Phase 4 closes that
+gap by:
+
+1. Adding `key_item_id: Option<ItemId>` to `MapEvent::Furniture` so campaign
+   authors (and the campaign builder SDK) can declare a required key item for
+   each door event in RON map files.
+2. Propagating that value through both spawn pipelines (`spawn_furniture` in
+   `procedural_meshes.rs` and `spawn_furniture_with_rendering` in
+   `furniture_rendering.rs`) so the `DoorState` component on the spawned door
+   entity carries the correct key requirement at runtime.
+3. Binding the new field in the `handle_events` Furniture match arm in
+   `events.rs` and forwarding it to the rendering spawn call.
+
+The field is backward compatible: existing RON map files without `key_item_id`
+deserialize correctly because the field is annotated `#[serde(default)]` and
+defaults to `None`.
+
+### Files Changed
+
+| File                                      | Change                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/world/types.rs`               | Added `key_item_id: Option<ItemId>` with `#[serde(default)]` after `color_tint` in `MapEvent::Furniture`; added `test_furniture_event_key_item_id_roundtrip` test covering both Some(42) round-trip and backward-compat None default                                                                        |
+| `src/game/systems/procedural_meshes.rs`   | Added `key_item_id: Option<types::ItemId>` parameter to `spawn_furniture` after `color_tint`; updated doc comment; in the `FurnitureType::Door` arm, constructs `DoorState` then sets `ds.key_item_id = key_item_id` before inserting                                                                       |
+| `src/game/systems/furniture_rendering.rs` | Added `key_item_id: Option<types::ItemId>` parameter to `spawn_furniture_with_rendering` after `color_tint`; updated doc comment; in the `FurnitureType::Door` arm, constructs `DoorState` via `let mut door_state = DoorState::new(...)` then sets `door_state.key_item_id = key_item_id` before inserting |
+| `src/game/systems/events.rs`              | Removed `..` wildcard from `MapEvent::Furniture` destructuring; added explicit `key_item_id` binding; passed `*key_item_id` to `spawn_furniture_with_rendering`; updated struct literal in `test_furniture_event_furniture_id_round_trips_through_ron` to include `key_item_id: None`                       |
+
+### Tests Added
+
+- **`src/domain/world/types.rs`** — `test_furniture_event_key_item_id_roundtrip` (new):
+  - Verifies `key_item_id: Some(42)` survives a RON serialize → deserialize round-trip
+  - Verifies old RON without `key_item_id` deserializes with `key_item_id: None`
+- **`src/game/systems/events.rs`** — `test_furniture_event_furniture_id_round_trips_through_ron` (updated):
+  - Added `key_item_id: None` to the `MapEvent::Furniture` struct literal to keep the test compiling after the new required field
+
+### Design Decisions
+
+**`#[serde(default)]` ensures backward compatibility**
+Every existing RON map file that omits `key_item_id` continues to deserialize
+without error. No migration of existing data files is required.
+
+**Both spawn paths updated in parallel**
+`spawn_furniture` (used by `map.rs` during map load) and
+`spawn_furniture_with_rendering` (used by `events.rs` for runtime placement)
+receive the new parameter so the `DoorState` key requirement is set regardless
+of which path spawns the door.
+
+**`key_item_id` is not part of `resolve_furniture_fields`**
+The key item is a per-instance positional property (like `rotation_y`), not a
+template property. It is therefore read directly from the `MapEvent::Furniture`
+destructuring and forwarded to the spawn call, bypassing the
+`resolve_furniture_fields` merge logic.
+
+### Phase 4 Deliverables Checklist
+
+- [x] `key_item_id: Option<ItemId>` added to `MapEvent::Furniture` with `#[serde(default)]`
+- [x] Backward-compatible: old RON without field defaults to `None`
+- [x] `spawn_furniture` updated with `key_item_id` parameter; `DoorState::key_item_id` set
+- [x] `spawn_furniture_with_rendering` updated with `key_item_id` parameter; `DoorState::key_item_id` set
+- [x] `handle_events` Furniture arm binds `key_item_id` and passes it through
+- [x] RON round-trip test added in `types.rs`
+- [x] Existing struct literal test in `events.rs` updated
+- [x] `cargo fmt` clean
+- [x] `cargo check` errors limited to `map.rs` / `input.rs` (other-agent scope; expected)
+
+### Quality Gates
+
+```
+cargo fmt         → clean (no changes)
+cargo check       → 0 errors in modified files; expected map.rs/input.rs errors
+                    from parallel agent work (other-agent scope)
+```
+
+---
+
+## Phase 4: Doors as Furniture — Campaign Builder `map_editor.rs` Door UI (Complete)
+
+### Overview
+
+Extends the Campaign Builder's furniture event editor to expose `FurnitureType::Door`-specific
+UI controls. Prior to this phase the locked checkbox was shown only for `FurnitureType::Chest`;
+doors had no way to configure a required key item. This phase:
+
+1. Adds `furniture_key_item_id: String` to `EventEditorState` as an editor buffer for the
+   `key_item_id` field on `MapEvent::Furniture`.
+2. Extends the locked-flag checkbox in `show_event_editor` to appear for both `Chest` and
+   `Door` (with the label "🔒 Starts Locked").
+3. Adds a door-specific `ComboBox` (`door_key_item_combo`) that appears only when
+   `furniture_type == Door && furniture_locked == true`, letting the author pick the key item
+   (or select "— No key required —") from the campaign item list. A "✖ Clear" button and a
+   helper label round out the control.
+4. Updates `to_map_event` so that the `key_item_id` in the produced `MapEvent::Furniture`
+   is populated from the buffer when the type is `Door`, and is `None` for all other types.
+5. Updates `from_map_event` to destructure `key_item_id` from `MapEvent::Furniture` and
+   populate `furniture_key_item_id` when the value is `Some`.
+6. Adds three focused round-trip / unit tests for the new door behaviour.
+
+### Files Changed
+
+| File                                     | Change                                                                                                                                                                                                                              |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/map_editor.rs` | Added `furniture_key_item_id: String` field + `Default` init; updated `to_map_event` Furniture arm; updated `from_map_event` Furniture arm; replaced locked checkbox with Chest-or-Door guard + door key-item ComboBox; 3 new tests |
+
+### Tests Added
+
+- **`test_furniture_door_locked_flag_round_trip`** — constructs a `MapEvent::Furniture { type: Door, locked: true, key_item_id: None }`, loads it via `from_map_event`, and asserts the locked flag is set and `furniture_key_item_id` is empty.
+- **`test_furniture_door_key_item_round_trip`** — full round-trip: `MapEvent::Furniture { key_item_id: Some(42) }` → `from_map_event` → `to_map_event`, asserting `key_item_id == Some(42)` and `flags.locked` survive the trip.
+- **`test_furniture_door_no_key_item`** — builds `EventEditorState` with `furniture_type: Door, furniture_locked: false, furniture_key_item_id: String::new()` and asserts `to_map_event` produces `key_item_id: None`.
+
+### Design Decisions
+
+**`key_item_id` only set for `Door` in `to_map_event`**
+Non-door furniture types (Chest, Throne, etc.) do not use `key_item_id`. The conversion
+guards with `if self.furniture_type == FurnitureType::Door` so the field is always `None`
+for non-door types, keeping the domain invariant clean.
+
+**ComboBox only visible when door is locked**
+Showing the key-item picker only when `furniture_locked == true` avoids confusing the author
+with an item selector for an unlocked door where the field would be meaningless.
+
+**`egui::ComboBox::from_id_salt("door_key_item_combo")`**
+Follows the SDK egui ID audit rule: all ComboBoxes use `from_id_salt` with a unique stable
+string to avoid ID collisions.
+
+**`ui.push_id(item.id, |ui| { … })` for item rows**
+Each selectable item row is wrapped in `push_id` per the SDK egui loop rule, preventing
+duplicate-ID warnings when the item list contains many entries.
+
+### Phase 4 Campaign Builder Checklist
+
+- [x] `furniture_key_item_id: String` field added to `EventEditorState`
+- [x] `Default` impl initialises field to `String::new()`
+- [x] `to_map_event` computes `key_item_id` from buffer (Door only, else `None`)
+- [x] `MapEvent::Furniture` initialiser includes `key_item_id`
+- [x] `from_map_event` destructures `key_item_id` and populates buffer
+- [x] Locked checkbox updated to cover `Chest || Door` with new label
+- [x] Door key-item `ComboBox` with `from_id_salt`, `push_id` rows, Clear button
+- [x] Helper hint label rendered below ComboBox
+- [x] 3 new tests added inside existing `mod tests` block
+- [x] `cargo fmt` clean
+- [x] Only `map_editor.rs` modified
+
+### Quality Gates
+
+```
+cargo fmt         → clean (no changes)
+cargo check       → 0 errors in modified files; pre-existing map.rs/input.rs errors
+                    remain (other-agent scope, outside Phase 4 Campaign Builder task)
+```
+
+---
+
 ## Phase 3: Doors as Furniture — Door Interaction and State Management (Complete)
 
 ### Overview

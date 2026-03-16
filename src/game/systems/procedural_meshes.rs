@@ -4152,6 +4152,9 @@ mod tests {
 }
 
 /// Spawns a furniture item based on type with custom properties
+///
+/// The `key_item_id` parameter sets the required key item on [`DoorState`] for
+/// `FurnitureType::Door` entities; `None` means the door has no key requirement.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_furniture(
     commands: &mut Commands,
@@ -4165,6 +4168,7 @@ pub fn spawn_furniture(
     material_type: world::FurnitureMaterial,
     flags: &world::FurnitureFlags,
     color_tint: Option<[f32; 3]>,
+    key_item_id: Option<types::ItemId>,
     cache: &mut ProceduralMeshCache,
 ) -> Entity {
     use crate::domain::world::FurnitureType;
@@ -4289,9 +4293,14 @@ pub fn spawn_furniture(
             // Attach interaction components so map-loaded doors can be queried
             // and interacted with through handle_input (Phase 3).
             let rotation_radians = rotation_y.unwrap_or(0.0_f32).to_radians();
+            let door_state = {
+                let mut ds = DoorState::new(flags.locked, rotation_radians);
+                ds.key_item_id = key_item_id;
+                ds
+            };
             commands.entity(door_entity).insert((
                 FurnitureEntity::new(world::FurnitureType::Door, flags.blocking),
-                DoorState::new(flags.locked, rotation_radians),
+                door_state,
                 Interactable::with_distance(InteractionType::OpenDoor, 1.5),
             ));
             door_entity

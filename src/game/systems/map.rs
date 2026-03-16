@@ -109,12 +109,6 @@ pub struct MapChangeEvent {
     pub target_pos: types::Position,
 }
 
-/// Message sent when a door is opened - triggers map visual refresh
-#[derive(Message, Clone)]
-pub struct DoorOpenedEvent {
-    pub position: types::Position,
-}
-
 /// Plugin responsible for dynamic map management (spawning/despawning marker
 /// entities and event triggers when the current map changes).
 pub struct MapManagerPlugin;
@@ -123,7 +117,6 @@ impl Plugin for MapManagerPlugin {
     fn build(&self, app: &mut App) {
         // Register the map change message and the handler + spawn systems
         app.add_message::<MapChangeEvent>()
-            .add_message::<DoorOpenedEvent>()
             // Phase 3: register SetFacing message and proximity/facing systems
             .add_plugins(crate::game::systems::facing::FacingPlugin)
             // Process explicit map change requests first, then let the marker
@@ -132,7 +125,6 @@ impl Plugin for MapManagerPlugin {
                 Update,
                 (
                     map_change_handler,
-                    handle_door_opened,
                     spawn_map_markers,
                     cleanup_recruitable_visuals,
                     cleanup_encounter_visuals,
@@ -301,55 +293,6 @@ fn register_sprite_sheets_system(mut sprite_assets: ResMut<SpriteAssets>) {
             info!("Registered fallback placeholder sprite sheet: placeholders");
         }
     }
-}
-
-/// System that handles door opened messages by refreshing map visuals
-#[allow(unused_mut)] // spawn_map requires mut even though clippy doesn't detect it
-#[allow(clippy::too_many_arguments)]
-fn handle_door_opened(
-    mut door_messages: MessageReader<DoorOpenedEvent>,
-    mut commands: Commands,
-    query_existing: Query<Entity, With<MapEntity>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut sprite_assets: ResMut<SpriteAssets>,
-    asset_server: Res<AssetServer>,
-    global_state: Res<GlobalState>,
-    content: Res<crate::application::resources::GameContent>,
-    quality_settings: Res<crate::game::resources::GrassQualitySettings>,
-    terrain_cache: Option<Res<TerrainMaterialCache>>,
-) {
-    // Only refresh if a door was actually opened
-    if door_messages.read().count() == 0 {
-        return;
-    }
-
-    info!("Door opened - refreshing map visuals");
-
-    // Despawn all existing map entities
-    for entity in query_existing.iter() {
-        commands.entity(entity).despawn();
-    }
-
-    // Use the cached resource when available; fall back to an empty default so
-    // tests that don't insert TerrainMaterialCache still work correctly.
-    let default_cache = TerrainMaterialCache::default();
-    let cache_ref: &TerrainMaterialCache = terrain_cache.as_deref().unwrap_or(&default_cache);
-
-    // Respawn the map with updated door states
-    let mut procedural_cache = super::procedural_meshes::ProceduralMeshCache::default();
-    spawn_map(
-        commands,
-        meshes,
-        materials,
-        sprite_assets,
-        asset_server,
-        global_state,
-        content,
-        quality_settings,
-        cache_ref,
-        &mut procedural_cache,
-    );
 }
 
 /// Converts a domain MapEvent into a lightweight MapEventType (if supported)
@@ -628,7 +571,6 @@ fn spawn_map(
         // RGB tuples are kept to allow per-tile tinting of walls based on terrain
         let floor_rgb = (0.3_f32, 0.3_f32, 0.3_f32);
         let wall_base_rgb = (0.6_f32, 0.6_f32, 0.6_f32);
-        let door_rgb = (0.4_f32, 0.2_f32, 0.1_f32); // Brown
         let water_rgb = (0.2_f32, 0.4_f32, 0.8_f32); // Blue
         let mountain_rgb = (0.5_f32, 0.5_f32, 0.5_f32); // Gray rock
         let forest_rgb = (0.2_f32, 0.6_f32, 0.2_f32); // Green
@@ -638,7 +580,6 @@ fn spawn_map(
 
         let floor_color = Color::srgb(floor_rgb.0, floor_rgb.1, floor_rgb.2);
         let wall_base_color = Color::srgb(wall_base_rgb.0, wall_base_rgb.1, wall_base_rgb.2);
-        let door_color = Color::srgb(door_rgb.0, door_rgb.1, door_rgb.2);
         let water_color = Color::srgb(water_rgb.0, water_rgb.1, water_rgb.2);
         let mountain_color = Color::srgb(mountain_rgb.0, mountain_rgb.1, mountain_rgb.2);
         let _forest_color = Color::srgb(forest_rgb.0, forest_rgb.1, forest_rgb.2);
@@ -968,49 +909,7 @@ fn spawn_map(
                                 TileCoord(pos),
                             ));
                         }
-                        world::WallType::Door => {
-                            // Use per-tile visual metadata for dimensions
-                            let (width_x, height, width_z) =
-                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
-                            let mesh = get_or_create_mesh(
-                                &mut meshes,
-                                &mut mesh_cache,
-                                width_x,
-                                height,
-                                width_z,
-                            );
-                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
 
-                            // Apply color tint if specified
-                            let mut base_color = door_color;
-                            if let Some((r, g, b)) = tile.visual.color_tint {
-                                base_color =
-                                    Color::srgb(door_rgb.0 * r, door_rgb.1 * g, door_rgb.2 * b);
-                            }
-
-                            let material = materials.add(StandardMaterial {
-                                base_color,
-                                perceptual_roughness: 0.5,
-                                ..default()
-                            });
-
-                            // Apply rotation if specified
-                            let rotation = bevy::prelude::Quat::from_rotation_y(
-                                tile.visual.rotation_y_radians(),
-                            );
-                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
-                                .with_rotation(rotation);
-
-                            commands.spawn((
-                                Mesh3d(mesh),
-                                MeshMaterial3d(material),
-                                transform,
-                                GlobalTransform::default(),
-                                Visibility::default(),
-                                MapEntity(map.id),
-                                TileCoord(pos),
-                            ));
-                        }
                         world::WallType::Torch => {
                             // Use per-tile visual metadata for dimensions
                             let (width_x, height, width_z) =
@@ -1295,6 +1194,7 @@ fn spawn_map(
                     material,
                     flags,
                     color_tint,
+                    key_item_id,
                     ..
                 } => {
                     // Resolve final furniture properties: database template defaults
@@ -1327,6 +1227,7 @@ fn spawn_map(
                         resolved_material,
                         &resolved_flags,
                         resolved_tint,
+                        *key_item_id,
                         procedural_cache,
                     );
                 }
@@ -4044,6 +3945,7 @@ mod tests {
                 blocking: true,
             },
             color_tint: None,
+            key_item_id: None,
         };
 
         let serialised = ron::to_string(&event).expect("serialize to RON");

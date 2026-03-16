@@ -265,6 +265,7 @@ pub fn spawn_custom_furniture_mesh_with_rendering(
 /// * `material` - Material type (Wood, Stone, Metal, Gold)
 /// * `flags` - Furniture flags (lit, locked, blocking)
 /// * `color_tint` - Optional RGB color tint [0.0..1.0]
+/// * `key_item_id` - Optional item ID required to unlock this door; `None` means no key required
 /// * `cache` - Mutable reference to procedural mesh cache
 ///
 /// # Returns
@@ -283,6 +284,7 @@ pub fn spawn_furniture_with_rendering(
     material: FurnitureMaterial,
     flags: FurnitureFlags,
     color_tint: Option<[f32; 3]>,
+    key_item_id: Option<types::ItemId>,
     cache: &mut ProceduralMeshCache,
 ) -> Entity {
     // Get base material properties
@@ -437,9 +439,9 @@ pub fn spawn_furniture_with_rendering(
             // base_rotation_y is the initial Y rotation of the door entity (in radians),
             // used to restore the closed visual when the door is shut again.
             let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
-            commands
-                .entity(door_entity)
-                .insert(DoorState::new(flags.locked, rotation_radians));
+            let mut door_state = DoorState::new(flags.locked, rotation_radians);
+            door_state.key_item_id = key_item_id;
+            commands.entity(door_entity).insert(door_state);
             door_entity
         }
     };
