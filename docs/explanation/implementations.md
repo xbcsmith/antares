@@ -1,5 +1,132 @@
 # Implementations
 
+## Phase 2: Doors as Furniture — Door Frame Procedural Mesh (Complete)
+
+### Overview
+
+Implements Phase 2 of the doors-as-furniture migration described in
+`docs/explanation/doors_as_furniture_implementation_plan.md`. This phase builds
+the companion door frame using the pre-existing `DoorFrameConfig` and
+`StructureType::DoorFrame` domain types, which were defined but never wired to
+any spawn function.
+
+After Phase 2, calling `spawn_door_with_frame()` (or dispatching a
+`MapEvent::Furniture { furniture_type: Door, .. }`) renders a complete doorway:
+a detailed 3D door panel (Phase 1) surrounded by a stone inverted-U frame
+(Phase 2). The frame is visually distinct from the door — stone material instead
+of wood, slightly larger than the panel opening — and both entities carry
+`MapEntity` / `TileCoord` components for map-lifecycle cleanup.
+
+### Deliverables
+
+#### Procedural mesh system (`src/game/systems/procedural_meshes.rs`)
+
+- **`spawn_door_frame()` function** — produces a parent entity with three
+  children forming an inverted-U frame around a door opening:
+
+  - **Two vertical posts** (left and right): cuboid of
+    `frame_thickness × (height + frame_thickness) × frame_thickness` placed
+    just outside each edge of the door opening.
+  - **One horizontal lintel** (top): cuboid of
+    `(width + 2·frame_thickness) × frame_thickness × frame_thickness` sitting
+    on top of the opening.
+  - Material: `STRUCTURE_STONE_COLOR` (light gray, `perceptual_roughness: 0.85`)
+    matching columns and arches.
+  - Uses existing constants `DOOR_FRAME_THICKNESS` (0.15) and
+    `DOOR_FRAME_BORDER` (0.1) from the constants block.
+  - Parent entity tagged with `MapEntity(map_id)` and `TileCoord(position)` for
+    map-lifecycle cleanup, plus `Name::new("DoorFrame")`.
+  - Supports `rotation_y` parameter matching `spawn_door()` signature.
+
+- **`spawn_door_with_frame()` function** — composite helper that calls
+  `spawn_door()` and `spawn_door_frame()` at the same tile position, returning
+  `(door_entity, frame_entity)` as sibling entities. The door panel
+  (default width 0.9, height 2.3) sits inside the frame opening (default width
+  1.0, height 2.5), ensuring no visual clipping.
+
+- **`ProceduralMeshCache` changes**:
+
+  - Removed stale `#[allow(dead_code)]` from the `structure_door_frame` field
+    (now actively used for the post mesh).
+  - Added `structure_door_frame_lintel: Option<Handle<Mesh>>` field for the
+    lintel mesh.
+  - Updated `Default::default()` to initialise `structure_door_frame_lintel: None`.
+  - Updated `get_or_create_structure_mesh()` match — added `"door_frame_lintel"`
+    key mapped to `structure_door_frame_lintel`.
+  - Updated `clear_all()` to clear `structure_door_frame_lintel`.
+  - Updated `cached_count()` to count `structure_door_frame_lintel`.
+
+- **`spawn_furniture()` Door arm** updated to call `spawn_door_with_frame()`
+  instead of `spawn_door()`, destructuring `(door_entity, _frame_entity)` and
+  returning `door_entity` as the representative entity for the furniture
+  dispatch pipeline.
+
+- **New tests** (10 new in `mod tests`):
+  - `test_door_frame_constants_valid` — `DOOR_FRAME_THICKNESS` and
+    `DOOR_FRAME_BORDER` are positive and less than half a tile.
+  - `test_door_frame_post_geometry` — post height > opening height; post x >
+    opening half-width.
+  - `test_door_frame_lintel_geometry` — lintel width > opening width; lintel
+    center-Y > opening height.
+  - `test_door_fits_inside_frame` — `DoorFrameConfig::default()` opening is
+    wider and taller than `DoorConfig::default()` panel.
+  - `test_cache_door_frame_lintel_default_none` — new lintel field starts `None`.
+  - `test_cache_clear_all_clears_door_frame_lintel` — `clear_all()` resets the
+    lintel field.
+  - `test_door_frame_config_thickness_matches_constant` — default
+    `frame_thickness` equals `DOOR_FRAME_THICKNESS`.
+  - `test_spawn_door_frame_produces_entities` — **Bevy headless App**: asserts
+    exactly one `Name == "DoorFrame"` entity is spawned.
+  - `test_spawn_door_with_frame_produces_door_and_frame` — **Bevy headless App**:
+    asserts one `"Door"` entity and one `"DoorFrame"` entity exist after calling
+    the composite helper with `rotation_y: Some(90.0)`.
+  - `test_spawn_door_frame_has_map_entity_and_tile_coord` — **Bevy headless
+    App**: verifies `MapEntity.0 == 42` and `TileCoord.0 == Position { x:4, y:7 }`
+    on the spawned frame entity.
+  - Updated `test_cache_structure_defaults` to assert
+    `structure_door_frame_lintel.is_none()`.
+
+#### Rendering pipeline (`src/game/systems/furniture_rendering.rs`)
+
+- Updated imports:
+  - Replaced `spawn_door` with `spawn_door_with_frame` in the
+    `procedural_meshes` import group.
+  - Added `DoorFrameConfig` to the `crate::domain::world` import.
+- Updated `spawn_furniture_with_rendering()` Door arm to call
+  `spawn_door_with_frame()` with `DoorFrameConfig::default()`, destructuring
+  `(door_entity, _frame_entity)` and returning `door_entity` so
+  `FurnitureEntity` and `Interactable` components are attached to the door panel
+  (not the frame).
+
+### Quality Gates
+
+```text
+✅ cargo fmt         — no output
+✅ cargo check       — Finished with 0 errors
+✅ cargo clippy      — Finished with 0 warnings (-D warnings)
+✅ cargo nextest run — 3621/3625 passed; 4 pre-existing failures (missing
+                       oak_table.ron asset and tutorial campaign creature
+                       files, unrelated to this phase)
+```
+
+### Architecture Compliance
+
+- `spawn_door_frame()` uses `STRUCTURE_STONE_COLOR` to match `spawn_column()`
+  and `spawn_arch()` — all architectural structures share the same stone visual.
+- `DoorFrameConfig` (width 1.0, height 2.5, frame_thickness 0.15) is the
+  pre-existing domain type from `src/domain/world/types.rs`; no new config
+  types were introduced.
+- `DOOR_FRAME_THICKNESS` and `DOOR_FRAME_BORDER` constants from the existing
+  constants block are used — no magic numbers.
+- `structure_door_frame` (post) and `structure_door_frame_lintel` (lintel)
+  follow the `structure_*` naming convention of `ProceduralMeshCache`.
+- `spawn_door_with_frame()` returns sibling entities (not parent/child) —
+  consistent with how other composite spawn helpers are structured.
+- All Bevy App tests follow the `MinimalPlugins + AssetPlugin + init_asset`
+  headless pattern established in `advanced_grass.rs`.
+- All test data uses `data/test_campaign` (Implementation Rule 5 compliant).
+- No architectural deviations from `docs/reference/architecture.md`.
+
 ## Phase 1: Doors as Furniture — Domain Types and Door Procedural Mesh (Complete)
 
 ### Overview

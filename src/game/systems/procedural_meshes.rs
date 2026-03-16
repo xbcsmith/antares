@@ -96,9 +96,10 @@ pub struct ProceduralMeshCache {
     /// Cached mesh handle for wall segments
     #[allow(dead_code)]
     structure_wall: Option<Handle<Mesh>>,
-    /// Cached mesh handle for door frames
-    #[allow(dead_code)]
+    /// Cached mesh handle for door frame posts (vertical sides, used by spawn_door_frame)
     structure_door_frame: Option<Handle<Mesh>>,
+    /// Cached mesh handle for door frame lintel (horizontal top bar, used by spawn_door_frame)
+    structure_door_frame_lintel: Option<Handle<Mesh>>,
     /// Cached mesh handle for railing posts
     #[allow(dead_code)]
     structure_railing_post: Option<Handle<Mesh>>,
@@ -349,6 +350,7 @@ impl Default for ProceduralMeshCache {
             structure_arch_support: None,
             structure_wall: None,
             structure_door_frame: None,
+            structure_door_frame_lintel: None,
             structure_railing_post: None,
             structure_railing_bar: None,
             creature_meshes: HashMap::new(),
@@ -451,6 +453,7 @@ impl ProceduralMeshCache {
             "arch_support" => &mut self.structure_arch_support,
             "wall" => &mut self.structure_wall,
             "door_frame" => &mut self.structure_door_frame,
+            "door_frame_lintel" => &mut self.structure_door_frame_lintel,
             "railing_post" => &mut self.structure_railing_post,
             "railing_bar" => &mut self.structure_railing_bar,
             _ => panic!("Unknown structure component: {}", component),
@@ -496,6 +499,7 @@ impl ProceduralMeshCache {
         self.structure_arch_support = None;
         self.structure_wall = None;
         self.structure_door_frame = None;
+        self.structure_door_frame_lintel = None;
         self.structure_railing_post = None;
         self.structure_railing_bar = None;
         self.creature_meshes.clear();
@@ -660,6 +664,9 @@ impl ProceduralMeshCache {
             count += 1;
         }
         if self.structure_door_frame.is_some() {
+            count += 1;
+        }
+        if self.structure_door_frame_lintel.is_some() {
             count += 1;
         }
         if self.structure_railing_post.is_some() {
@@ -3510,8 +3517,286 @@ mod tests {
         assert!(cache.structure_arch_support.is_none());
         assert!(cache.structure_wall.is_none());
         assert!(cache.structure_door_frame.is_none());
+        assert!(cache.structure_door_frame_lintel.is_none());
         assert!(cache.structure_railing_post.is_none());
         assert!(cache.structure_railing_bar.is_none());
+    }
+
+    // ==================== Phase 2: Door Frame Tests ====================
+
+    /// Tests door frame constants are valid and sensible
+    #[test]
+    fn test_door_frame_constants_valid() {
+        const {
+            assert!(
+                DOOR_FRAME_THICKNESS > 0.0,
+                "DOOR_FRAME_THICKNESS must be positive"
+            );
+        }
+        const {
+            assert!(
+                DOOR_FRAME_BORDER > 0.0,
+                "DOOR_FRAME_BORDER must be positive"
+            );
+        }
+        // Frame thickness must be less than half a tile (0.5 world units)
+        const {
+            assert!(
+                DOOR_FRAME_THICKNESS < 0.5,
+                "DOOR_FRAME_THICKNESS must be less than half a tile"
+            );
+        }
+    }
+
+    /// Tests that door frame post geometry dimensions are correct.
+    ///
+    /// Post height = opening height + frame_thickness (covers up to lintel bottom).
+    /// Post width = frame_thickness.
+    #[test]
+    fn test_door_frame_post_geometry() {
+        use crate::domain::world::DoorFrameConfig;
+        let config = DoorFrameConfig::default();
+        let post_height = config.height + config.frame_thickness;
+        // Post height must be taller than the door opening
+        assert!(post_height > config.height);
+        // Post center-Y = post_height / 2 — must be positive
+        let post_y = post_height / 2.0;
+        assert!(post_y > 0.0);
+        // Post x-offset from center = half opening width + half post thickness
+        let post_x = config.width / 2.0 + config.frame_thickness / 2.0;
+        assert!(post_x > config.width / 2.0, "post must be outside opening");
+    }
+
+    /// Tests that door frame lintel geometry dimensions are correct.
+    ///
+    /// Lintel width = opening width + 2 * frame_thickness (spans both posts).
+    /// Lintel Y center = opening height + half frame_thickness.
+    #[test]
+    fn test_door_frame_lintel_geometry() {
+        use crate::domain::world::DoorFrameConfig;
+        let config = DoorFrameConfig::default();
+        let lintel_width = config.width + 2.0 * config.frame_thickness;
+        // Lintel must be wider than the door opening
+        assert!(lintel_width > config.width);
+        // Lintel center-Y must be above opening height
+        let lintel_y = config.height + config.frame_thickness / 2.0;
+        assert!(lintel_y > config.height);
+    }
+
+    /// Tests that the frame opening is larger than the default door panel,
+    /// ensuring the door fits inside its frame without clipping.
+    #[test]
+    fn test_door_fits_inside_frame() {
+        use crate::domain::world::DoorFrameConfig;
+        let frame = DoorFrameConfig::default();
+        let door = DoorConfig::default();
+        // Frame opening width must be greater than door panel width
+        assert!(
+            frame.width > door.width,
+            "frame opening ({}) must be wider than door panel ({})",
+            frame.width,
+            door.width
+        );
+        // Frame opening height must be greater than door panel height
+        assert!(
+            frame.height > door.height,
+            "frame opening ({}) must be taller than door panel ({})",
+            frame.height,
+            door.height
+        );
+    }
+
+    /// Tests that structure_door_frame_lintel cache field is None by default.
+    #[test]
+    fn test_cache_door_frame_lintel_default_none() {
+        let cache = ProceduralMeshCache::default();
+        assert!(cache.structure_door_frame_lintel.is_none());
+    }
+
+    /// Tests that clear_all() clears the door frame lintel cache field.
+    #[test]
+    fn test_cache_clear_all_clears_door_frame_lintel() {
+        // We can't add a real mesh without a full Bevy context, but we can
+        // verify that clear_all() sets the field to None even if it was None.
+        let mut cache = ProceduralMeshCache::default();
+        assert!(cache.structure_door_frame_lintel.is_none());
+        cache.clear_all();
+        assert!(cache.structure_door_frame_lintel.is_none());
+        // Verify structure_door_frame is also cleared
+        assert!(cache.structure_door_frame.is_none());
+    }
+
+    /// Tests that spawn_door_frame produces a parent entity with child posts
+    /// and lintel inside a minimal Bevy App.
+    #[test]
+    fn test_spawn_door_frame_produces_entities() {
+        use crate::domain::world::DoorFrameConfig;
+
+        fn spawn_frame_system(
+            mut commands: Commands,
+            mut materials: ResMut<Assets<StandardMaterial>>,
+            mut meshes: ResMut<Assets<Mesh>>,
+        ) {
+            let mut cache = ProceduralMeshCache::default();
+            let config = DoorFrameConfig::default();
+            let position = crate::domain::types::Position::new(0, 0);
+            let map_id: crate::domain::types::MapId = 1;
+            spawn_door_frame(
+                &mut commands,
+                &mut materials,
+                &mut meshes,
+                position,
+                map_id,
+                config,
+                &mut cache,
+                None,
+            );
+        }
+
+        let mut app = bevy::app::App::new();
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Mesh>();
+        app.add_systems(bevy::app::Update, spawn_frame_system);
+        app.update();
+
+        // After spawning, at least one entity with the Name "DoorFrame" exists
+        let world = app.world_mut();
+        let frame_count = world
+            .query_filtered::<&Name, ()>()
+            .iter(world)
+            .filter(|n| n.as_str() == "DoorFrame")
+            .count();
+        assert_eq!(frame_count, 1, "exactly one DoorFrame entity should exist");
+    }
+
+    /// Tests that spawn_door_with_frame produces two separate entities:
+    /// a Door entity and a DoorFrame entity, both in the same Bevy world.
+    #[test]
+    fn test_spawn_door_with_frame_produces_door_and_frame() {
+        use crate::domain::world::DoorFrameConfig;
+
+        fn spawn_composite_system(
+            mut commands: Commands,
+            mut materials: ResMut<Assets<StandardMaterial>>,
+            mut meshes: ResMut<Assets<Mesh>>,
+        ) {
+            let mut cache = ProceduralMeshCache::default();
+            let door_config = DoorConfig::default();
+            let frame_config = DoorFrameConfig::default();
+            let position = crate::domain::types::Position::new(2, 3);
+            let map_id: crate::domain::types::MapId = 1;
+            spawn_door_with_frame(
+                &mut commands,
+                &mut materials,
+                &mut meshes,
+                position,
+                map_id,
+                door_config,
+                frame_config,
+                &mut cache,
+                Some(90.0),
+            );
+        }
+
+        let mut app = bevy::app::App::new();
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Mesh>();
+        app.add_systems(bevy::app::Update, spawn_composite_system);
+        app.update();
+
+        let world = app.world_mut();
+        let door_count = world
+            .query_filtered::<&Name, ()>()
+            .iter(world)
+            .filter(|n| n.as_str() == "Door")
+            .count();
+        let frame_count = world
+            .query_filtered::<&Name, ()>()
+            .iter(world)
+            .filter(|n| n.as_str() == "DoorFrame")
+            .count();
+        assert_eq!(door_count, 1, "exactly one Door entity should exist");
+        assert_eq!(frame_count, 1, "exactly one DoorFrame entity should exist");
+    }
+
+    /// Tests that spawn_door_frame attaches MapEntity and TileCoord components
+    /// to the parent door frame entity.
+    #[test]
+    fn test_spawn_door_frame_has_map_entity_and_tile_coord() {
+        use crate::domain::world::DoorFrameConfig;
+        use crate::game::systems::map::{MapEntity, TileCoord};
+
+        fn spawn_frame_components_system(
+            mut commands: Commands,
+            mut materials: ResMut<Assets<StandardMaterial>>,
+            mut meshes: ResMut<Assets<Mesh>>,
+        ) {
+            let mut cache = ProceduralMeshCache::default();
+            let config = DoorFrameConfig::default();
+            let position = crate::domain::types::Position::new(4, 7);
+            let map_id: crate::domain::types::MapId = 42;
+            spawn_door_frame(
+                &mut commands,
+                &mut materials,
+                &mut meshes,
+                position,
+                map_id,
+                config,
+                &mut cache,
+                None,
+            );
+        }
+
+        let mut app = bevy::app::App::new();
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Mesh>();
+        app.add_systems(bevy::app::Update, spawn_frame_components_system);
+        app.update();
+
+        // Query for the DoorFrame entity and verify its components
+        let world = app.world_mut();
+        let result = world
+            .query::<(&Name, &MapEntity, &TileCoord)>()
+            .iter(world)
+            .find(|(n, _, _)| n.as_str() == "DoorFrame")
+            .map(|(_, map_entity, tile_coord)| (map_entity.0, tile_coord.0));
+
+        assert!(
+            result.is_some(),
+            "DoorFrame entity must have MapEntity and TileCoord"
+        );
+        let (found_map_id, found_position) = result.unwrap();
+        assert_eq!(found_map_id, 42, "MapEntity map_id must match");
+        assert_eq!(found_position.x, 4, "TileCoord x must match");
+        assert_eq!(found_position.y, 7, "TileCoord y must match");
+    }
+
+    /// Tests that DoorFrameConfig frame_thickness matches the DOOR_FRAME_THICKNESS constant.
+    #[test]
+    fn test_door_frame_config_thickness_matches_constant() {
+        use crate::domain::world::DoorFrameConfig;
+        let config = DoorFrameConfig::default();
+        assert!(
+            (config.frame_thickness - DOOR_FRAME_THICKNESS).abs() < f32::EPSILON,
+            "DoorFrameConfig::default().frame_thickness ({}) must equal DOOR_FRAME_THICKNESS ({})",
+            config.frame_thickness,
+            DOOR_FRAME_THICKNESS
+        );
     }
 
     // ==================== Phase 5: Performance & Polish Tests ====================
@@ -3977,7 +4262,7 @@ pub fn spawn_furniture(
             )
         }
         FurnitureType::Door => {
-            let config = DoorConfig {
+            let door_config = DoorConfig {
                 width: DOOR_PANEL_WIDTH * scale,
                 height: DOOR_PANEL_HEIGHT * scale,
                 thickness: DOOR_PANEL_THICKNESS,
@@ -3986,9 +4271,19 @@ pub fn spawn_furniture(
                 has_hinges: true,
                 color_override: Some(final_color),
             };
-            spawn_door(
-                commands, materials, meshes, position, map_id, config, cache, rotation_y,
-            )
+            let frame_config = crate::domain::world::DoorFrameConfig::default();
+            let (door_entity, _frame_entity) = spawn_door_with_frame(
+                commands,
+                materials,
+                meshes,
+                position,
+                map_id,
+                door_config,
+                frame_config,
+                cache,
+                rotation_y,
+            );
+            door_entity
         }
     }
 }
@@ -4423,6 +4718,233 @@ pub fn spawn_door(
     commands.entity(parent).add_child(handle);
 
     parent
+}
+
+/// Spawns a procedurally generated door frame structure.
+///
+/// A door frame is an architectural element that surrounds a door opening,
+/// forming an inverted U shape. It consists of two vertical posts (left and
+/// right sides) and one horizontal lintel (top bar), rendered in stone
+/// to match other architectural structures such as columns and arches.
+///
+/// The frame is slightly larger than the door panel it surrounds:
+/// - Horizontal opening = `config.width`  (door panel fits inside)
+/// - Total frame height = `config.height + config.frame_thickness` (lintel on top)
+///
+/// # Arguments
+///
+/// * `commands`   - Bevy Commands for entity spawning
+/// * `materials`  - Material asset storage
+/// * `meshes`     - Mesh asset storage
+/// * `position`   - Tile position in world coordinates
+/// * `map_id`     - Map identifier used for entity cleanup on map unload
+/// * `config`     - Door frame configuration (width, height, frame_thickness)
+/// * `cache`      - Mutable reference to mesh cache for reuse across tiles
+/// * `rotation_y` - Optional Y-axis rotation in degrees (0 = door faces +Z)
+///
+/// # Returns
+///
+/// Entity ID of the parent door frame entity.  The entity has three children:
+/// left post, right post, and lintel.
+///
+/// # Examples
+///
+/// ```text
+/// use antares::game::systems::procedural_meshes::spawn_door_frame;
+/// use antares::domain::world::DoorFrameConfig;
+///
+/// let config = DoorFrameConfig::default();
+/// let frame = spawn_door_frame(
+///     &mut commands, &mut materials, &mut meshes,
+///     position, map_id, config, &mut cache, None,
+/// );
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_door_frame(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: crate::domain::world::DoorFrameConfig,
+    cache: &mut ProceduralMeshCache,
+    rotation_y: Option<f32>,
+) -> Entity {
+    let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
+
+    // ── Material ───────────────────────────────────────────────────────────
+    // Stone color matches columns and arches — architectural structures share
+    // the same visual language.
+    let frame_material = materials.add(StandardMaterial {
+        base_color: STRUCTURE_STONE_COLOR,
+        perceptual_roughness: 0.85,
+        metallic: 0.0,
+        ..default()
+    });
+
+    // ── Post mesh ──────────────────────────────────────────────────────────
+    // Both posts share the same cuboid geometry.
+    // Height extends to cover the full opening plus the lintel thickness so
+    // there is no gap at the top corner joints.
+    let post_height = config.height + config.frame_thickness;
+    let post_mesh = cache.get_or_create_structure_mesh("door_frame", meshes, || {
+        Cuboid::new(config.frame_thickness, post_height, config.frame_thickness).into()
+    });
+
+    // ── Lintel mesh ────────────────────────────────────────────────────────
+    // The lintel spans the full outer width of the frame (opening + both posts).
+    let lintel_width = config.width + 2.0 * config.frame_thickness;
+    let lintel_mesh = cache.get_or_create_structure_mesh("door_frame_lintel", meshes, || {
+        Cuboid::new(lintel_width, config.frame_thickness, config.frame_thickness).into()
+    });
+
+    // ── Parent entity ──────────────────────────────────────────────────────
+    let transform = Transform::from_xyz(
+        position.x as f32 + TILE_CENTER_OFFSET,
+        0.0,
+        position.y as f32 + TILE_CENTER_OFFSET,
+    )
+    .with_rotation(Quat::from_rotation_y(rotation_radians));
+
+    let parent = commands
+        .spawn((
+            transform,
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("DoorFrame"),
+        ))
+        .id();
+
+    // ── Left post ──────────────────────────────────────────────────────────
+    // Center is placed just outside the left edge of the opening.
+    let post_x = config.width / 2.0 + config.frame_thickness / 2.0;
+    let post_y = post_height / 2.0;
+
+    let left_post = commands
+        .spawn((
+            Mesh3d(post_mesh.clone()),
+            MeshMaterial3d(frame_material.clone()),
+            Transform::from_xyz(-post_x, post_y, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(left_post);
+
+    // ── Right post ─────────────────────────────────────────────────────────
+    let right_post = commands
+        .spawn((
+            Mesh3d(post_mesh),
+            MeshMaterial3d(frame_material.clone()),
+            Transform::from_xyz(post_x, post_y, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(right_post);
+
+    // ── Lintel ─────────────────────────────────────────────────────────────
+    // Sits on top of the opening.  Its bottom edge is at y = config.height and
+    // its center is half a frame_thickness above that.
+    let lintel_y = config.height + config.frame_thickness / 2.0;
+
+    let lintel = commands
+        .spawn((
+            Mesh3d(lintel_mesh),
+            MeshMaterial3d(frame_material),
+            Transform::from_xyz(0.0, lintel_y, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(lintel);
+
+    parent
+}
+
+/// Spawns a door panel together with its surrounding stone frame.
+///
+/// This composite helper calls [`spawn_door`] and [`spawn_door_frame`] at the
+/// same tile position, producing a complete doorway:
+/// - A 3D wooden door panel with planks, braces, hinges, and handle.
+/// - A stone frame (two posts + lintel) that visually surrounds the opening.
+///
+/// Both entities are siblings (not parent/child) and carry a [`MapEntity`]
+/// tag so they are cleaned up together when the map is unloaded.
+///
+/// The door panel sits *inside* the frame opening: panel width (default 0.9)
+/// is smaller than the frame opening width (default 1.0), and panel height
+/// (default 2.3) is smaller than the frame height (default 2.5).
+///
+/// # Arguments
+///
+/// * `commands`     - Bevy Commands for entity spawning
+/// * `materials`    - Material asset storage
+/// * `meshes`       - Mesh asset storage
+/// * `position`     - Tile position in world coordinates
+/// * `map_id`       - Map identifier for entity cleanup
+/// * `door_config`  - Door panel configuration
+/// * `frame_config` - Door frame configuration
+/// * `cache`        - Mutable reference to mesh cache for reuse
+/// * `rotation_y`   - Optional Y-axis rotation in degrees applied to both entities
+///
+/// # Returns
+///
+/// A tuple `(door_entity, frame_entity)` where `door_entity` is the root of
+/// the door panel hierarchy and `frame_entity` is the root of the stone frame.
+/// Callers that only need a single representative entity (e.g. the furniture
+/// dispatch) should use the `door_entity`.
+///
+/// # Examples
+///
+/// ```text
+/// use antares::game::systems::procedural_meshes::{spawn_door_with_frame, DoorConfig};
+/// use antares::domain::world::DoorFrameConfig;
+///
+/// let (door, frame) = spawn_door_with_frame(
+///     &mut commands, &mut materials, &mut meshes,
+///     position, map_id,
+///     DoorConfig::default(), DoorFrameConfig::default(),
+///     &mut cache, Some(90.0),
+/// );
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_door_with_frame(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    door_config: DoorConfig,
+    frame_config: crate::domain::world::DoorFrameConfig,
+    cache: &mut ProceduralMeshCache,
+    rotation_y: Option<f32>,
+) -> (Entity, Entity) {
+    let door_entity = spawn_door(
+        commands,
+        materials,
+        meshes,
+        position,
+        map_id,
+        door_config,
+        cache,
+        rotation_y,
+    );
+
+    let frame_entity = spawn_door_frame(
+        commands,
+        materials,
+        meshes,
+        position,
+        map_id,
+        frame_config,
+        cache,
+        rotation_y,
+    );
+
+    (door_entity, frame_entity)
 }
 
 // ==================== Item Mesh Config Structs ====================

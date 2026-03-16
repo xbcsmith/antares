@@ -15,12 +15,12 @@ use bevy::prelude::*;
 use crate::domain::types::{self, FurnitureId};
 use crate::domain::visual::CreatureDefinition;
 use crate::domain::world::furniture::FurnitureDatabase;
-use crate::domain::world::{FurnitureFlags, FurnitureMaterial, FurnitureType};
+use crate::domain::world::{DoorFrameConfig, FurnitureFlags, FurnitureMaterial, FurnitureType};
 use crate::game::components::{FurnitureEntity, Interactable, InteractionType};
 use crate::game::systems::procedural_meshes::{
-    spawn_bench, spawn_chair, spawn_chest, spawn_door, spawn_table, spawn_throne, spawn_torch,
-    BenchConfig, ChairConfig, ChestConfig, DoorConfig, ProceduralMeshCache, TableConfig,
-    ThroneConfig, TorchConfig,
+    spawn_bench, spawn_chair, spawn_chest, spawn_door_with_frame, spawn_table, spawn_throne,
+    spawn_torch, BenchConfig, ChairConfig, ChestConfig, DoorConfig, ProceduralMeshCache,
+    TableConfig, ThroneConfig, TorchConfig,
 };
 
 /// Resolves effective furniture properties by merging a [`FurnitureDatabase`]
@@ -414,23 +414,27 @@ pub fn spawn_furniture_with_rendering(
             cache,
             rotation_y,
         ),
-        FurnitureType::Door => spawn_door(
-            commands,
-            materials,
-            meshes,
-            position,
-            map_id,
-            DoorConfig {
-                width: 0.9 * scale,
-                height: 2.3 * scale,
-                has_hinges: true,
-                has_studs: true,
-                color_override: Some(final_color),
-                ..Default::default()
-            },
-            cache,
-            rotation_y,
-        ),
+        FurnitureType::Door => {
+            let (door_entity, _frame_entity) = spawn_door_with_frame(
+                commands,
+                materials,
+                meshes,
+                position,
+                map_id,
+                DoorConfig {
+                    width: 0.9 * scale,
+                    height: 2.3 * scale,
+                    has_hinges: true,
+                    has_studs: true,
+                    color_override: Some(final_color),
+                    ..Default::default()
+                },
+                DoorFrameConfig::default(),
+                cache,
+                rotation_y,
+            );
+            door_entity
+        }
     };
 
     // Add FurnitureEntity marker component
