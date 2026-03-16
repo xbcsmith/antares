@@ -1,5 +1,210 @@
 # Implementations
 
+## Phase 3: Furniture Editor in Campaign Builder SDK (Complete)
+
+### Overview
+
+Implements Phase 3 of the data-driven furniture system described in
+`docs/explanation/furniture_as_ron_implementation_plan.md`. This phase builds
+the dedicated `FurnitureEditor` tab in the Campaign Builder SDK, mirroring the
+`ItemsEditor` pattern: List / Add / Edit modes, two-column layout with search
+and category/type filters, full CRUD with toolbar actions (New, Save, Load,
+Import, Export, Reload, Duplicate, Delete), and complete RON import/export.
+
+It also wires `furniture_file` into `CampaignMetadata` and
+`CampaignMetadataEditBuffer` so campaigns can declare a custom path for their
+furniture RON file (defaulting to `"data/furniture.ron"`), and adds
+`save_furniture()` to `do_save_campaign()` so furniture definitions are
+persisted whenever the campaign is saved.
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/furniture_editor.rs` (new file)
+
+New editor module with:
+
+- **`FurnitureEditorMode`** — `List` / `Add` / `Edit` enum, `PartialEq + Copy`.
+- **`FurnitureCategoryFilter`** — six-variant filter enum matching
+  `FurnitureCategory`. Each variant implements `matches()`, `as_str()`, and
+  the type provides `all()`. This avoids a direct dependency on `None`-wrapped
+  `FurnitureCategory` in combo-box code while keeping match arms exhaustive.
+- **`FurnitureEditorState`** — owns `mode`, `search_query`,
+  `selected_furniture`, `edit_buffer: FurnitureDefinition`,
+  `show_import_dialog`, `import_export_buffer`, `filter_category`, and
+  `filter_base_type`. Implements `Default` and `new()`.
+- **`FurnitureEditorState::default_furniture()`** — canonical factory that
+  produces a blank `FurnitureDefinition` with `id: 0`, `scale: 1.0`, all
+  flags false, no tint, no mesh, no tags.
+- **`show()`** — top-level render method called once per frame. Renders
+  heading, `EditorToolbar`, filter row (horizontal_wrapped per SDK Rule 12),
+  and delegates to `show_list` / `show_form` / import dialog.
+- **`show_list()`** — pre-computes a filtered + sorted snapshot (SDK Rule 10),
+  renders a `TwoColumnLayout` (SDK Rule 9). Left panel iterates with
+  `push_id` per item (SDK Rule 1) and calls `show_standard_list_item` (SDK
+  Rule 15) with category-colour `MetadataBadge`s and a "Custom Mesh" badge
+  when `mesh_id` is set. Right panel shows a read-only preview via
+  `show_preview_static`. Context-menu actions (Edit / Delete / Duplicate /
+  Export) are resolved after the closures to avoid borrow conflicts.
+- **`show_preview_static()`** — static method; renders basic info, flags,
+  colour tint swatch, tags, description, and mesh ID in a `ScrollArea` with
+  distinct `id_salt` (SDK Rule 2).
+- **`show_import_dialog()`** — `egui::Window` with unique title (SDK Rule 8),
+  multiline code editor, Import / Copy / Close buttons in
+  `horizontal_wrapped` (SDK Rule 12).
+- **`show_form()`** — add/edit form in a `ScrollArea` (SDK Rule 2) covering:
+  ID (read-only), name, icon override, category combo (SDK Rule 3), base-type
+  combo (SDK Rule 3), material combo (SDK Rule 3), scale slider, colour-tint
+  enable/disable with per-channel RGB sliders + preview swatch, flags
+  checkboxes, custom mesh ID enable/disable with `DragValue`, tags CSV
+  input, description enable/disable with multiline text edit, and
+  Save/Cancel buttons in `horizontal_wrapped` (SDK Rule 12). All state
+  changes that affect layout call `request_repaint()` (SDK Rule 7).
+- **`save_furniture()`** — private method: creates parent directories, RON-
+  serialises the slice, writes the file, sets `unsaved_changes = true`.
+- **`next_available_id()`** — free function: `max_id.saturating_add(1)`,
+  returns `1` for empty lists.
+- **48 unit tests** covering mode variants, category filter matching, default
+  factory, `next_available_id`, add/edit/delete/duplicate logic, RON
+  round-trips (single + list, color_tint, mesh_id, tags, description),
+  filter-by-category/base-type/name, save_furniture to a `TempDir`
+  (creates file, creates missing parent dirs, no-op without campaign dir),
+  edit-buffer isolation, tags CSV parsing, `has_custom_mesh`, and
+  `display_icon` fallback/override.
+
+#### `sdk/campaign_builder/src/lib.rs`
+
+- Added `pub mod furniture_editor` declaration.
+- Added `Furniture` variant to `EditorTab` enum and `"Furniture"` to its
+  `name()` match arm.
+- Added `furniture_file: String` field to `CampaignMetadata` with
+  `#[serde(default = "default_furniture_file")]` for backward-compatible
+  deserialization of existing `campaign.ron` files.
+- Added `fn default_furniture_file() -> String` returning
+  `"data/furniture.ron"`.
+- Updated `Default for CampaignMetadata` to include
+  `furniture_file: "data/furniture.ron".to_string()`.
+- Added `furniture_editor_state: furniture_editor::FurnitureEditorState` to
+  `CampaignBuilderApp` struct.
+- Initialised `furniture_editor_state: furniture_editor::FurnitureEditorState::new()`
+  in `Default for CampaignBuilderApp`.
+- Added `EditorTab::Furniture` to the sidebar tabs array in `update()`.
+- Added `EditorTab::Furniture` match arm in the central panel, delegating to
+  `self.furniture_editor_state.show(...)` with `furniture_definitions`,
+  `campaign_dir`, `campaign.furniture_file`, `unsaved_changes`,
+  `status_message`, and `file_load_merge_mode`.
+- Updated `load_furniture()`: now joins against `self.campaign.furniture_file`
+  instead of the hardcoded `"data/furniture.ron"` path; resets
+  `furniture_editor_state` on success or when no file is found.
+- Added `save_furniture() -> Result<(), String>`: creates parent dirs,
+  serialises `furniture_definitions` to RON, writes the file, logs to the
+  logger. Returns `Err` so `do_save_campaign` can aggregate warnings.
+- Wired `save_furniture()` into `do_save_campaign()` after the maps loop.
+- Cleared `furniture_editor_state` in `do_new_campaign()` alongside
+  `furniture_definitions.clear()`.
+- Fixed existing `test_ron_serialization` test literal to include the new
+  `furniture_file` field.
+
+#### `sdk/campaign_builder/src/campaign_editor.rs`
+
+- Added `pub furniture_file: String` field to `CampaignMetadataEditBuffer`.
+- Updated `from_metadata()` to copy `m.furniture_file.clone()` into the
+  buffer.
+- Updated `apply_to()` to write `self.furniture_file.clone()` back to the
+  destination metadata.
+- Added a "Furniture File" row (label + text-edit + browse button) to the
+  Files section of `render_ui`, matching the pattern of the surrounding file
+  path rows.
+- `Default for CampaignMetadataEditBuffer` is unchanged — it already
+  delegates to `from_metadata(&CampaignMetadata::default())`, which now
+  includes `furniture_file`.
+
+### Tests Added (48 new in `furniture_editor.rs`)
+
+| Test                                                     | What it contracts                             |
+| -------------------------------------------------------- | --------------------------------------------- |
+| `test_editor_mode_variants_are_distinct`                 | All three modes are inequal                   |
+| `test_category_filter_all_returns_six_variants`          | Array length = 6                              |
+| `test_category_filter_as_str_non_empty`                  | No empty label strings                        |
+| `test_category_filter_matches_*` (6)                     | Each filter variant matches only its category |
+| `test_state_new_returns_list_mode`                       | Initial mode is `List`                        |
+| `test_state_default_selected_is_none`                    | No selection on creation                      |
+| `test_state_default_filters_are_none`                    | Both filters start `None`                     |
+| `test_state_default_import_dialog_closed`                | Dialog hidden, buffer empty                   |
+| `test_default_furniture_name`                            | `"New Furniture"`                             |
+| `test_default_furniture_id_is_zero`                      | id = 0                                        |
+| `test_default_furniture_scale_is_one`                    | scale = 1.0                                   |
+| `test_default_furniture_no_color_tint`                   | `color_tint` is `None`                        |
+| `test_default_furniture_no_mesh_id`                      | `mesh_id` is `None`                           |
+| `test_default_furniture_empty_tags`                      | `tags` is empty                               |
+| `test_default_furniture_flags_all_false`                 | All flags false                               |
+| `test_next_available_id_empty_list_returns_one`          | Empty → 1                                     |
+| `test_next_available_id_increments_max`                  | Non-contiguous → max + 1                      |
+| `test_next_available_id_with_gaps`                       | Gaps ignored, uses max                        |
+| `test_add_definition_to_list`                            | Push then read-back                           |
+| `test_edit_definition_in_list`                           | Mutate name in place                          |
+| `test_delete_definition_from_list`                       | Correct items survive                         |
+| `test_duplicate_definition_assigns_new_id`               | Dupe gets max+1 id and ` (Copy)` suffix       |
+| `test_single_definition_ron_roundtrip`                   | Serialize → parse → equal                     |
+| `test_definition_list_ron_roundtrip`                     | Three entries survive round-trip              |
+| `test_definition_with_color_tint_roundtrip`              | `color_tint` and `lit` flag preserved         |
+| `test_definition_with_mesh_id_roundtrip`                 | `mesh_id` and `has_custom_mesh()` preserved   |
+| `test_definition_with_tags_roundtrip`                    | `tags` vec preserved                          |
+| `test_definition_with_description_roundtrip`             | `description` preserved                       |
+| `test_filter_by_category_seating`                        | Correct count from mixed list                 |
+| `test_filter_by_base_type_torch`                         | Correct count from mixed list                 |
+| `test_filter_by_name_search`                             | Case-insensitive partial match                |
+| `test_save_furniture_creates_file`                       | File written, content round-trips             |
+| `test_save_furniture_no_campaign_dir_is_noop`            | No crash or mutation                          |
+| `test_save_furniture_creates_missing_parent_directories` | `data/` created on demand                     |
+| `test_mode_starts_as_list`                               | New state → `List`                            |
+| `test_mode_add_is_not_edit`                              | `Add != Edit`                                 |
+| `test_edit_buffer_mutation_does_not_affect_list`         | Buffer is an owned clone                      |
+| `test_tags_csv_round_trip_logic`                         | CSV → `Vec<String>` parsing                   |
+| `test_tags_csv_empty_string_produces_empty_vec`          | Empty input → empty vec                       |
+| `test_has_custom_mesh_true_when_mesh_id_set`             | `mesh_id: Some` → `has_custom_mesh()` true    |
+| `test_has_custom_mesh_false_when_no_mesh_id`             | `mesh_id: None` → false                       |
+| `test_display_icon_uses_override_when_set`               | Explicit icon returned                        |
+| `test_display_icon_falls_back_to_base_type`              | `FurnitureType::icon()` used when no override |
+
+### egui ID Audit (sdk/AGENTS.md compliance)
+
+| Rule                                         | Status                                                     |
+| -------------------------------------------- | ---------------------------------------------------------- |
+| Rule 1 — push_id in loop bodies              | ✅ `left_ui.push_id(*idx, …)` in list loop                 |
+| Rule 2 — ScrollArea id_salt                  | ✅ `"furniture_preview_scroll"`, `"furniture_form_scroll"` |
+| Rule 3 — ComboBox from_id_salt               | ✅ All four combo boxes use unique salts                   |
+| Rule 7 — request_repaint on state change     | ✅ Called on mode transitions and checkbox changes         |
+| Rule 8 — unique Window title                 | ✅ `"Import/Export Furniture Definition"`                  |
+| Rule 9 — TwoColumnLayout                     | ✅ `TwoColumnLayout::new("furniture").show_split(…)`       |
+| Rule 10 — pre-compute before closures        | ✅ `filtered` and `sorted` built before `show_split`       |
+| Rule 12 — horizontal_wrapped for button rows | ✅ Filter row, import dialog buttons, form action buttons  |
+| Rule 15 — show_standard_list_item            | ✅ Every left-panel list item uses it                      |
+
+### Architecture Compliance
+
+- `FurnitureDefinition` and `FurnitureId` from `antares::domain` — used exactly
+  as defined. No ad-hoc structs introduced.
+- Module placement follows Section 3.2: editor UI code in
+  `sdk/campaign_builder/src/`.
+- RON format used for all data files (`.ron` extension, `ron::ser::to_string_pretty`).
+- `furniture_file` added to `CampaignMetadata` with `#[serde(default)]` to
+  preserve backward compatibility with existing `campaign.ron` files that
+  pre-date this field.
+- No architectural deviations from `architecture.md`.
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → No output (all files formatted)
+cargo check --all-targets --all-features → Finished with 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished with 0 warnings
+cargo nextest run --all-features → 3604 passed, 8 skipped (antares workspace)
+cargo nextest run -p campaign_builder --all-features → 2107 passed, 2 skipped
+  (includes 48 new furniture_editor tests)
+```
+
+---
+
 ## Phase 2: `MapEvent::Furniture` References `FurnitureId` (Complete)
 
 ### Overview

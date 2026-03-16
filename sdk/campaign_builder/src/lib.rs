@@ -40,6 +40,7 @@ pub mod creatures_editor;
 pub mod creatures_manager;
 pub mod creatures_workflow;
 pub mod dialogue_editor;
+pub mod furniture_editor;
 pub mod icon;
 pub mod item_mesh_editor;
 pub mod item_mesh_undo_redo;
@@ -402,6 +403,13 @@ pub struct CampaignMetadata {
     #[serde(default = "default_stock_templates_file")]
     pub stock_templates_file: String,
 
+    /// Relative path to the furniture definitions RON file
+    ///
+    /// Furniture support is opt-in per campaign. Existing `campaign.ron`
+    /// files that omit this field will default to `"data/furniture.ron"`.
+    #[serde(default = "default_furniture_file")]
+    pub furniture_file: String,
+
     /// Starting game time for a new campaign (day, hour, minute).
     ///
     /// Defaults to Day 1, 08:00 (morning) if not specified in the RON file.
@@ -456,6 +464,10 @@ fn default_stock_templates_file() -> String {
     "data/npc_stock_templates.ron".to_string()
 }
 
+fn default_furniture_file() -> String {
+    "data/furniture.ron".to_string()
+}
+
 /// Default starting time: Day 1, 08:00 — campaign begins in the morning.
 fn default_starting_time() -> GameTime {
     GameTime::new(1, 8, 0)
@@ -499,6 +511,7 @@ impl Default for CampaignMetadata {
             proficiencies_file: "data/proficiencies.ron".to_string(),
             creatures_file: "data/creatures.ron".to_string(),
             stock_templates_file: "data/npc_stock_templates.ron".to_string(),
+            furniture_file: "data/furniture.ron".to_string(),
             starting_time: default_starting_time(),
         }
     }
@@ -515,6 +528,7 @@ enum EditorTab {
     Conditions,
     Monsters,
     Creatures,
+    Furniture,
     Importer,
     Maps,
     Quests,
@@ -548,6 +562,7 @@ impl EditorTab {
             EditorTab::Conditions => "Conditions",
             EditorTab::Monsters => "Monsters",
             EditorTab::Creatures => "Creatures",
+            EditorTab::Furniture => "Furniture",
             EditorTab::Importer => "Importer",
             EditorTab::Maps => "Maps",
             EditorTab::Quests => "Quests",
@@ -702,6 +717,9 @@ struct CampaignBuilderApp {
     /// Passed to the map editor so the furniture template dropdown is populated.
     furniture_definitions: Vec<antares::domain::FurnitureDefinition>,
 
+    /// Furniture definitions editor state
+    furniture_editor_state: furniture_editor::FurnitureEditorState,
+
     // Map editor state
     maps: Vec<Map>,
     maps_editor_state: MapsEditorState,
@@ -851,6 +869,7 @@ impl Default for CampaignBuilderApp {
             conditions_editor_state: ConditionsEditorState::new(),
 
             furniture_definitions: Vec::new(),
+            furniture_editor_state: furniture_editor::FurnitureEditorState::new(),
 
             maps: Vec::new(),
             maps_editor_state: MapsEditorState::new(),
@@ -2431,12 +2450,13 @@ impl CampaignBuilderApp {
         }
     }
 
-    /// Load furniture definitions from `data/furniture.ron`
+    /// Load furniture definitions from the campaign furniture RON file.
     ///
     /// Missing file is not an error — furniture support is opt-in per campaign.
+    /// Syncs the loaded definitions into `furniture_editor_state` too.
     fn load_furniture(&mut self) {
         if let Some(ref dir) = self.campaign_dir {
-            let furniture_path = dir.join("data/furniture.ron");
+            let furniture_path = dir.join(&self.campaign.furniture_file);
             if furniture_path.exists() {
                 match fs::read_to_string(&furniture_path) {
                     Ok(contents) => {
@@ -2445,6 +2465,8 @@ impl CampaignBuilderApp {
                             Ok(defs) => {
                                 let count = defs.len();
                                 self.furniture_definitions = defs;
+                                self.furniture_editor_state =
+                                    furniture_editor::FurnitureEditorState::new();
                                 self.logger.info(
                                     category::FILE_IO,
                                     &format!("Loaded {} furniture definitions", count),
@@ -2472,11 +2494,39 @@ impl CampaignBuilderApp {
                     }
                 }
             } else {
-                // Missing furniture.ron is not an error
                 self.furniture_definitions.clear();
+                self.furniture_editor_state = furniture_editor::FurnitureEditorState::new();
                 self.logger
                     .debug(category::FILE_IO, "No furniture.ron found (opt-in)");
             }
+        }
+    }
+
+    /// Save furniture definitions to the campaign furniture RON file.
+    ///
+    /// Returns an Err string on failure so the caller can aggregate warnings.
+    fn save_furniture(&mut self) -> Result<(), String> {
+        if let Some(ref dir) = self.campaign_dir {
+            let furniture_path = dir.join(&self.campaign.furniture_file);
+            if let Some(parent) = furniture_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create furniture dir: {}", e))?;
+            }
+            let contents =
+                ron::ser::to_string_pretty(&self.furniture_definitions, Default::default())
+                    .map_err(|e| format!("Failed to serialize furniture: {}", e))?;
+            fs::write(&furniture_path, contents)
+                .map_err(|e| format!("Failed to write furniture file: {}", e))?;
+            self.logger.info(
+                category::FILE_IO,
+                &format!(
+                    "Saved {} furniture definitions",
+                    self.furniture_definitions.len()
+                ),
+            );
+            Ok(())
+        } else {
+            Err("No campaign directory set".to_string())
         }
     }
 
@@ -3206,6 +3256,7 @@ impl CampaignBuilderApp {
         self.conditions_editor_state = ConditionsEditorState::new();
 
         self.furniture_definitions.clear();
+        self.furniture_editor_state = furniture_editor::FurnitureEditorState::new();
 
         self.maps.clear();
         self.maps_editor_state = MapsEditorState::new();
@@ -3298,6 +3349,10 @@ impl CampaignBuilderApp {
             if let Err(e) = self.save_map(map) {
                 save_warnings.push(format!("Map {}: {}", idx, e));
             }
+        }
+
+        if let Err(e) = self.save_furniture() {
+            save_warnings.push(format!("Furniture: {}", e));
         }
 
         if let Err(e) = self.save_quests() {
@@ -4645,6 +4700,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Conditions,
                     EditorTab::Monsters,
                     EditorTab::Creatures,
+                    EditorTab::Furniture,
                     EditorTab::Importer,
                     EditorTab::Maps,
                     EditorTab::Quests,
@@ -4843,6 +4899,17 @@ impl eframe::App for CampaignBuilderApp {
                         self.status_message = msg;
                     }
                 }
+            }
+            EditorTab::Furniture => {
+                self.furniture_editor_state.show(
+                    ui,
+                    &mut self.furniture_definitions,
+                    self.campaign_dir.as_ref(),
+                    &self.campaign.furniture_file,
+                    &mut self.unsaved_changes,
+                    &mut self.status_message,
+                    &mut self.file_load_merge_mode,
+                );
             }
             EditorTab::Importer => {
                 if let Some(signal) = obj_importer_ui::show_obj_importer_tab(
@@ -7495,6 +7562,7 @@ mod tests {
             npcs_file: "data/npcs.ron".to_string(),
             proficiencies_file: "data/proficiencies.ron".to_string(),
             stock_templates_file: "data/npc_stock_templates.ron".to_string(),
+            furniture_file: "data/furniture.ron".to_string(),
             starting_time: default_starting_time(),
         };
 
