@@ -142,6 +142,7 @@ pub fn resolve_furniture_fields(
 /// * `meshes` - Mesh asset storage
 /// * `position` - Tile position for furniture
 /// * `map_id` - Map identifier for cleanup
+/// * `furniture_type` - Resolved furniture type for interaction and blocking metadata
 /// * `creature_def` - Imported mesh definition loaded from the furniture mesh registry
 /// * `rotation_y` - Optional Y-axis rotation in degrees
 /// * `scale` - Size multiplier for the furniture
@@ -161,6 +162,7 @@ pub fn spawn_custom_furniture_mesh_with_rendering(
     meshes: &mut ResMut<Assets<Mesh>>,
     position: types::Position,
     map_id: types::MapId,
+    furniture_type: FurnitureType,
     creature_def: &CreatureDefinition,
     rotation_y: Option<f32>,
     scale: f32,
@@ -231,12 +233,13 @@ pub fn spawn_custom_furniture_mesh_with_rendering(
 
     commands
         .entity(furniture_entity)
-        .insert(FurnitureEntity::new(FurnitureType::Table, flags.blocking));
+        .insert(FurnitureEntity::new(furniture_type, flags.blocking));
 
-    if let Some(interaction_type) = get_interaction_type(FurnitureType::Table) {
+    if let Some(interaction_type) = get_interaction_type(furniture_type) {
+        let distance = get_interaction_distance(furniture_type);
         commands
             .entity(furniture_entity)
-            .insert(Interactable::with_distance(interaction_type, 2.0));
+            .insert(Interactable::with_distance(interaction_type, distance));
     }
 
     Some(furniture_entity)

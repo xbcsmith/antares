@@ -24,12 +24,19 @@ completes the full migration by:
    system parameter, removed all `WallType`/`DoorOpenedEvent` imports, and
    deleted the `test_door_interaction_wall_state` test. All Phase 3 furniture-based
    door interaction is preserved.
-5. **Campaign Builder UI** — extended the `EventType::Furniture` editor panel so
+5. **Intentional `DoorOpenedEvent` design deviation** — the original Phase 3 plan
+   proposed changing `DoorOpenedEvent` from a position-based event to an
+   entity-targeted event. The final implementation deliberately took a simpler
+   route: the input system now mutates the interacted door entity directly,
+   rotating its `Transform`, updating `FurnitureEntity.blocking`, and syncing
+   `tile.blocked` in place. Because the interacting system already has the door
+   entity in hand, an intermediate event no longer adds value.
+6. **Campaign Builder UI** — extended the `EventType::Furniture` editor panel so
    `FurnitureType::Door` appears in the type dropdown (was already present via
    `FurnitureType::all()`), the locked checkbox renders for both `Chest` and
    `Door`, and a door-specific `🗝 Key Item:` ComboBox appears when the door is
    locked. Added `furniture_key_item_id: String` to `EventEditorState`.
-6. **`key_item_id` in `MapEvent::Furniture`** — added `#[serde(default)]
+7. **`key_item_id` in `MapEvent::Furniture`** — added `#[serde(default)]
 key_item_id: Option<ItemId>` to the Furniture map event variant so campaign
    data can declare which item unlocks a door. Propagated through both spawn
    pipelines (`spawn_furniture` and `spawn_furniture_with_rendering`) to the
@@ -109,10 +116,15 @@ The `DoorOpenedEvent` message was used only by the tile-mutation door path:
 - Written in `input.rs` when `WallType::Door` was set on a tile
 - Read by `handle_door_opened` in `map.rs` to trigger a full map re-render
 
-With all doors now managed as furniture entities, the `DoorState` component
-tracks open/locked state and the input system rotates the door entity's
-`Transform` directly. No full map re-render is needed when a door opens.
-The entire event infrastructure was removed cleanly.
+The original implementation plan proposed evolving this into an entity-targeted
+event so furniture doors could update visuals without a full respawn. The final
+implementation intentionally simplified that design instead: when the player
+interacts with a furniture door, `input.rs` directly mutates that door entity's
+`Transform`, toggles `FurnitureEntity.blocking`, and synchronizes the map tile's
+`blocked` flag. No full map re-render is needed when a door opens, and no
+follow-up event hop is required because the interacting system already has the
+target entity available. The entire event infrastructure was therefore removed
+cleanly rather than converted to a new payload shape.
 
 ### Campaign Builder UI: Door-Specific Fields
 
@@ -131,6 +143,7 @@ The `EventType::Furniture` editor panel now shows door-specific controls:
 - [x] Legacy `WallType::Door` rendering removed from `map.rs`
 - [x] Legacy `WallType::Door` interaction path removed from `input.rs`
 - [x] `DoorOpenedEvent` fully removed (struct, plugin registration, system, all test app registrations)
+- [x] Documented that the Phase 3 event-based door update design was intentionally replaced by direct entity `Transform` mutation in `input.rs`
 - [x] `test_door_interaction_wall_state` test removed
 - [x] `key_item_id: Option<ItemId>` added to `MapEvent::Furniture` with `#[serde(default)]`
 - [x] `key_item_id` propagated through `spawn_furniture` and `spawn_furniture_with_rendering`
