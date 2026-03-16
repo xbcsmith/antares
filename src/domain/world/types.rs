@@ -1250,10 +1250,22 @@ pub enum FurnitureType {
     Barrel,
     /// Lockable chest for treasure
     Chest,
+    /// Openable door panel (passage furniture)
+    Door,
 }
 
 impl FurnitureType {
     /// Returns all furniture type variants
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::FurnitureType;
+    ///
+    /// let all = FurnitureType::all();
+    /// assert!(all.contains(&FurnitureType::Door));
+    /// assert_eq!(all.len(), 9);
+    /// ```
     pub fn all() -> &'static [FurnitureType] {
         &[
             FurnitureType::Throne,
@@ -1264,10 +1276,19 @@ impl FurnitureType {
             FurnitureType::Bookshelf,
             FurnitureType::Barrel,
             FurnitureType::Chest,
+            FurnitureType::Door,
         ]
     }
 
     /// Returns human-readable name for the furniture type
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::FurnitureType;
+    ///
+    /// assert_eq!(FurnitureType::Door.name(), "Door");
+    /// ```
     pub fn name(self) -> &'static str {
         match self {
             FurnitureType::Throne => "Throne",
@@ -1278,10 +1299,19 @@ impl FurnitureType {
             FurnitureType::Bookshelf => "Bookshelf",
             FurnitureType::Barrel => "Barrel",
             FurnitureType::Chest => "Chest",
+            FurnitureType::Door => "Door",
         }
     }
 
     /// Returns an emoji icon representing the furniture type
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::FurnitureType;
+    ///
+    /// assert_eq!(FurnitureType::Door.icon(), "🚪");
+    /// ```
     pub fn icon(self) -> &'static str {
         match self {
             FurnitureType::Throne => "👑",
@@ -1292,10 +1322,19 @@ impl FurnitureType {
             FurnitureType::Bookshelf => "📚",
             FurnitureType::Barrel => "🛢️",
             FurnitureType::Chest => "📦",
+            FurnitureType::Door => "🚪",
         }
     }
 
     /// Returns the category for this furniture type
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{FurnitureType, FurnitureCategory};
+    ///
+    /// assert_eq!(FurnitureType::Door.category(), FurnitureCategory::Passage);
+    /// ```
     pub fn category(self) -> FurnitureCategory {
         match self {
             FurnitureType::Throne | FurnitureType::Bench | FurnitureType::Chair => {
@@ -1306,6 +1345,7 @@ impl FurnitureType {
             }
             FurnitureType::Torch => FurnitureCategory::Lighting,
             FurnitureType::Table => FurnitureCategory::Utility,
+            FurnitureType::Door => FurnitureCategory::Passage,
         }
     }
 
@@ -1359,6 +1399,26 @@ impl FurnitureType {
                     material: FurnitureMaterial::Metal,
                     scale: 0.8,
                     color_tint: Some([0.6, 0.8, 1.0]), // Blue flame
+                },
+            ],
+            FurnitureType::Door => vec![
+                FurnitureAppearancePreset {
+                    name: "Wooden Door",
+                    material: FurnitureMaterial::Wood,
+                    scale: 1.0,
+                    color_tint: None,
+                },
+                FurnitureAppearancePreset {
+                    name: "Reinforced Door",
+                    material: FurnitureMaterial::Metal,
+                    scale: 1.0,
+                    color_tint: Some([0.5, 0.35, 0.2]), // Dark wood with metal bands
+                },
+                FurnitureAppearancePreset {
+                    name: "Stone Door",
+                    material: FurnitureMaterial::Stone,
+                    scale: 1.0,
+                    color_tint: None,
                 },
             ],
             _ => vec![FurnitureAppearancePreset {

@@ -1,5 +1,123 @@
 # Implementations
 
+## Phase 1: Doors as Furniture — Domain Types and Door Procedural Mesh (Complete)
+
+### Overview
+
+Implements Phase 1 of the doors-as-furniture migration described in
+`docs/explanation/doors_as_furniture_implementation_plan.md`. This phase
+introduces `FurnitureType::Door` into the furniture type system, adds a
+procedural 3D door mesh (`spawn_door()`), and wires the new type through the
+full furniture pipeline — dispatch, rendering, interaction, and test data.
+
+Doors previously rendered as plain brown cuboids via `WallType::Door` with no
+geometry detail, no textures, and no interaction system support. After Phase 1,
+spawning a `MapEvent::Furniture { furniture_type: Door, .. }` produces a proper
+3D door with wood planks, cross-braces, hinges, and a handle, fully respecting
+`FurnitureMaterial` PBR properties. Phase 2–4 (door frame, interaction state,
+map migration) build on this foundation.
+
+### Deliverables
+
+#### Domain layer (`src/domain/world/types.rs`)
+
+- Added `FurnitureType::Door` variant to the `FurnitureType` enum.
+- Updated `FurnitureType::all()` — now returns 9 variants.
+- Updated `FurnitureType::name()` — `Door` → `"Door"`.
+- Updated `FurnitureType::icon()` — `Door` → `"🚪"`.
+- Updated `FurnitureType::category()` — `Door` → `FurnitureCategory::Passage`.
+- Updated `FurnitureType::default_presets()` — 3 door presets: Wooden Door,
+  Reinforced Door (metal bands), Stone Door.
+- `FurnitureCategory::Passage` and its `name()`/`all()` implementations were
+  already present; no additional domain changes needed.
+
+#### Furniture component (`src/game/components/furniture.rs`)
+
+- Added `InteractionType::OpenDoor` variant to the `InteractionType` enum.
+- Updated `InteractionType::name()` — `OpenDoor` → `"Open Door"`.
+- Added tests: `test_interaction_type_names` updated; new
+  `test_open_door_interaction_is_distinct` test added.
+
+#### Procedural mesh system (`src/game/systems/procedural_meshes.rs`)
+
+- Added door geometry constants:
+  `DOOR_PANEL_WIDTH` (0.9), `DOOR_PANEL_HEIGHT` (2.3),
+  `DOOR_PANEL_THICKNESS` (0.08), `DOOR_BRACE_HEIGHT`, `DOOR_BRACE_PROUD`,
+  `DOOR_HINGE_HEIGHT`, `DOOR_HINGE_WIDTH`, `DOOR_HANDLE_RADIUS`,
+  `DOOR_HANDLE_LENGTH`, `DOOR_DEFAULT_PLANK_COUNT` (5),
+  `DOOR_PANEL_COLOR` (warm wood brown).
+- Added `DoorConfig` struct with `Clone + Debug + Default` — fields: `width`,
+  `height`, `thickness`, `plank_count`, `has_studs`, `has_hinges`,
+  `color_override`.
+- Added `spawn_door()` procedural mesh function producing a composite entity:
+  - **Panel**: main door face cuboid.
+  - **Plank dividers**: thin raised strips at plank boundaries for wood texture
+    appearance.
+  - **Cross-braces**: 2 heavy horizontal strips at 1/3 and 2/3 height.
+  - **Hinges** (optional): 2 metal cuboids on the left edge.
+  - **Handle**: metal cylinder on the right side at ~45 % height, rotated to
+    protrude from the door face.
+  - Separate wood panel material and metallic accent material applied to their
+    respective sub-entities.
+- Added 4 door mesh cache fields to `ProceduralMeshCache`:
+  `furniture_door_panel`, `furniture_door_brace`, `furniture_door_hinge`,
+  `furniture_door_handle`.
+- Updated `get_or_create_furniture_mesh()` match to handle all 4 door
+  component keys.
+- Updated `clear_all()` and `cached_count()` to include the new cache fields.
+- Updated `Default` impl for `ProceduralMeshCache`.
+- Updated `spawn_furniture()` dispatch — added `FurnitureType::Door` arm that
+  scales `DoorConfig` by the `scale` parameter and calls `spawn_door()`.
+- Updated existing tests: `test_furniture_type_all` (len 8 → 9),
+  `test_furniture_type_names` (added Door assertion),
+  `test_cache_furniture_defaults` (added 4 door cache field assertions).
+- Added new tests: `test_furniture_type_door_properties`,
+  `test_door_config_defaults`, `test_door_constants_valid`,
+  `test_door_color_constant_valid`, `test_door_config_clone`,
+  `test_door_config_with_color_override`, `test_furniture_category_passage_in_all`,
+  `test_furniture_category_all_have_names`.
+
+#### Rendering pipeline (`src/game/systems/furniture_rendering.rs`)
+
+- Updated imports to include `spawn_door` and `DoorConfig`.
+- Updated `spawn_furniture_with_rendering()` — added `FurnitureType::Door` arm
+  that builds a `DoorConfig` with `scale`-adjusted width/height and calls
+  `spawn_door()`.
+- Updated `get_interaction_type()` — `Door` → `Some(InteractionType::OpenDoor)`.
+- Updated `get_interaction_distance()` — `Door` → `1.5` world units.
+- Added tests: `test_get_interaction_type_door`,
+  `test_get_interaction_distance_door`.
+
+#### Test campaign data (`data/test_campaign/data/furniture.ron`)
+
+- Added 3 `Door` furniture definitions (IDs 13–15): Wooden Door, Reinforced
+  Door, Stone Door — all with `category: Passage`, `base_type: Door`,
+  `blocking: true`.
+- Satisfies `test_load_from_file_test_campaign` which asserts every
+  `FurnitureType` variant has at least one definition in the fixture database.
+
+### Quality Gates
+
+```text
+✅ cargo fmt         — no output
+✅ cargo check       — Finished with 0 errors
+✅ cargo clippy      — Finished with 0 warnings
+✅ cargo nextest run — 3610/3615 passed; 5 pre-existing failures (missing
+                       asset files unrelated to this phase)
+```
+
+### Architecture Compliance
+
+- `FurnitureType::Door` uses `FurnitureCategory::Passage` as specified in
+  architecture Section 4 and the implementation plan Section 1.1.
+- `InteractionType::OpenDoor` follows the existing `InteractionType` pattern in
+  `src/game/components/furniture.rs`.
+- `DoorConfig` follows the established `*Config` / `Default` pattern used by
+  `BenchConfig`, `ChestConfig`, `TorchConfig`, etc.
+- Cache fields follow the `furniture_*` naming convention of `ProceduralMeshCache`.
+- All test data uses `data/test_campaign` (Implementation Rule 5 compliant).
+- No architectural deviations from `docs/reference/architecture.md`.
+
 ## Phase 4: Furniture Mesh Registry and OBJ Import (Complete)
 
 ### Overview

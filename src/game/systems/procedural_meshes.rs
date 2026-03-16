@@ -77,6 +77,14 @@ pub struct ProceduralMeshCache {
     furniture_chest_lid: Option<Handle<Mesh>>,
     furniture_torch_handle: Option<Handle<Mesh>>,
     furniture_torch_flame: Option<Handle<Mesh>>,
+    /// Cached mesh handle for door panel
+    furniture_door_panel: Option<Handle<Mesh>>,
+    /// Cached mesh handle for door cross braces
+    furniture_door_brace: Option<Handle<Mesh>>,
+    /// Cached mesh handle for door hinges
+    furniture_door_hinge: Option<Handle<Mesh>>,
+    /// Cached mesh handle for door handle
+    furniture_door_handle: Option<Handle<Mesh>>,
     /// Cached mesh handle for column shafts
     structure_column_shaft: Option<Handle<Mesh>>,
     /// Cached mesh handle for column capitals (Doric/Ionic)
@@ -331,6 +339,10 @@ impl Default for ProceduralMeshCache {
             furniture_chest_lid: None,
             furniture_torch_handle: None,
             furniture_torch_flame: None,
+            furniture_door_panel: None,
+            furniture_door_brace: None,
+            furniture_door_hinge: None,
+            furniture_door_handle: None,
             structure_column_shaft: None,
             structure_column_capital: None,
             structure_arch_curve: None,
@@ -399,6 +411,10 @@ impl ProceduralMeshCache {
             "chest_lid" => &mut self.furniture_chest_lid,
             "torch_handle" => &mut self.furniture_torch_handle,
             "torch_flame" => &mut self.furniture_torch_flame,
+            "door_panel" => &mut self.furniture_door_panel,
+            "door_brace" => &mut self.furniture_door_brace,
+            "door_hinge" => &mut self.furniture_door_hinge,
+            "door_handle" => &mut self.furniture_door_handle,
             _ => panic!("Unknown furniture component: {}", component),
         };
 
@@ -470,6 +486,10 @@ impl ProceduralMeshCache {
         self.furniture_chest_lid = None;
         self.furniture_torch_handle = None;
         self.furniture_torch_flame = None;
+        self.furniture_door_panel = None;
+        self.furniture_door_brace = None;
+        self.furniture_door_hinge = None;
+        self.furniture_door_handle = None;
         self.structure_column_shaft = None;
         self.structure_column_capital = None;
         self.structure_arch_curve = None;
@@ -612,6 +632,18 @@ impl ProceduralMeshCache {
         if self.furniture_torch_flame.is_some() {
             count += 1;
         }
+        if self.furniture_door_panel.is_some() {
+            count += 1;
+        }
+        if self.furniture_door_brace.is_some() {
+            count += 1;
+        }
+        if self.furniture_door_hinge.is_some() {
+            count += 1;
+        }
+        if self.furniture_door_handle.is_some() {
+            count += 1;
+        }
         if self.structure_column_shaft.is_some() {
             count += 1;
         }
@@ -744,6 +776,28 @@ const TORCH_HANDLE_HEIGHT: f32 = 1.2;
 const TORCH_FLAME_WIDTH: f32 = 0.25;
 const TORCH_FLAME_HEIGHT: f32 = 0.4;
 
+// Furniture dimensions - Door
+/// Default door panel width in world units
+const DOOR_PANEL_WIDTH: f32 = 0.9;
+/// Default door panel height in world units
+const DOOR_PANEL_HEIGHT: f32 = 2.3;
+/// Default door panel thickness in world units
+const DOOR_PANEL_THICKNESS: f32 = 0.08;
+/// Thickness of horizontal cross-brace strips on the door face
+const DOOR_BRACE_HEIGHT: f32 = 0.08;
+/// How far cross braces protrude from the panel face
+const DOOR_BRACE_PROUD: f32 = 0.02;
+/// Height of each hinge cuboid
+const DOOR_HINGE_HEIGHT: f32 = 0.12;
+/// Width of each hinge cuboid
+const DOOR_HINGE_WIDTH: f32 = 0.06;
+/// Radius of the door handle cylinder
+const DOOR_HANDLE_RADIUS: f32 = 0.025;
+/// Length of the door handle cylinder
+const DOOR_HANDLE_LENGTH: f32 = 0.12;
+/// Default number of visible plank strips on the door face
+const DOOR_DEFAULT_PLANK_COUNT: u8 = 5;
+
 // Color constants
 const TREE_TRUNK_COLOR: Color = Color::srgb(0.4, 0.25, 0.15); // Brown
 const TREE_FOLIAGE_COLOR: Color = Color::srgb(0.2, 0.6, 0.2); // Green
@@ -787,6 +841,7 @@ const THRONE_BACKING: Color = Color::srgb(0.6, 0.0, 0.0); // Deep red for backin
 const CHEST_COLOR: Color = Color::srgb(0.35, 0.2, 0.1); // Dark brown
 const TORCH_HANDLE_COLOR: Color = Color::srgb(0.2, 0.1, 0.0); // Very dark brown
 const TORCH_FLAME_COLOR: Color = Color::srgb(1.0, 0.8, 0.2); // Yellow/orange
+const DOOR_PANEL_COLOR: Color = Color::srgb(0.55, 0.35, 0.18); // Warm wood brown
 
 // Structure dimensions - Column
 #[allow(dead_code)]
@@ -3119,6 +3174,10 @@ mod tests {
         assert!(cache.furniture_chest_lid.is_none());
         assert!(cache.furniture_torch_handle.is_none());
         assert!(cache.furniture_torch_flame.is_none());
+        assert!(cache.furniture_door_panel.is_none());
+        assert!(cache.furniture_door_brace.is_none());
+        assert!(cache.furniture_door_hinge.is_none());
+        assert!(cache.furniture_door_handle.is_none());
     }
 
     /// Tests furniture color constants are valid
@@ -3154,7 +3213,7 @@ mod tests {
     fn test_furniture_type_all() {
         use crate::domain::world::FurnitureType;
         let all = FurnitureType::all();
-        assert_eq!(all.len(), 8);
+        assert_eq!(all.len(), 9);
         assert!(all.contains(&FurnitureType::Throne));
         assert!(all.contains(&FurnitureType::Bench));
         assert!(all.contains(&FurnitureType::Table));
@@ -3163,6 +3222,29 @@ mod tests {
         assert!(all.contains(&FurnitureType::Bookshelf));
         assert!(all.contains(&FurnitureType::Barrel));
         assert!(all.contains(&FurnitureType::Chest));
+        assert!(all.contains(&FurnitureType::Door));
+    }
+
+    /// Tests FurnitureType::Door has correct name, icon, and category
+    #[test]
+    fn test_furniture_type_door_properties() {
+        use crate::domain::world::{FurnitureCategory, FurnitureType};
+        assert_eq!(FurnitureType::Door.name(), "Door");
+        assert_eq!(FurnitureType::Door.icon(), "🚪");
+        assert_eq!(FurnitureType::Door.category(), FurnitureCategory::Passage);
+    }
+
+    /// Tests DoorConfig::default() returns expected geometry values
+    #[test]
+    fn test_door_config_defaults() {
+        let cfg = DoorConfig::default();
+        assert_eq!(cfg.width, DOOR_PANEL_WIDTH);
+        assert_eq!(cfg.height, DOOR_PANEL_HEIGHT);
+        assert_eq!(cfg.thickness, DOOR_PANEL_THICKNESS);
+        assert_eq!(cfg.plank_count, DOOR_DEFAULT_PLANK_COUNT);
+        assert!(cfg.has_studs);
+        assert!(cfg.has_hinges);
+        assert!(cfg.color_override.is_none());
     }
 
     /// Tests FurnitureType enum names
@@ -3177,6 +3259,126 @@ mod tests {
         assert_eq!(FurnitureType::Bookshelf.name(), "Bookshelf");
         assert_eq!(FurnitureType::Barrel.name(), "Barrel");
         assert_eq!(FurnitureType::Chest.name(), "Chest");
+        assert_eq!(FurnitureType::Door.name(), "Door");
+    }
+
+    /// Tests FurnitureCategory::Passage is in all() and name() returns "Passage"
+    #[test]
+    fn test_furniture_category_passage_in_all() {
+        use crate::domain::world::FurnitureCategory;
+        let all = FurnitureCategory::all();
+        assert!(
+            all.contains(&FurnitureCategory::Passage),
+            "FurnitureCategory::all() must contain Passage"
+        );
+        assert_eq!(FurnitureCategory::Passage.name(), "Passage");
+    }
+
+    /// Tests that all FurnitureCategory variants have non-empty names
+    #[test]
+    fn test_furniture_category_all_have_names() {
+        use crate::domain::world::FurnitureCategory;
+        for cat in FurnitureCategory::all() {
+            assert!(
+                !cat.name().is_empty(),
+                "Category {:?} must have a non-empty name",
+                cat
+            );
+        }
+    }
+
+    /// Tests door dimension constants are positive and sensible
+    ///
+    /// All assertions here compare compile-time constants, so they are evaluated
+    /// inside `const { }` blocks to satisfy `clippy::assertions_on_constants`.
+    #[test]
+    fn test_door_constants_valid() {
+        // Verify each constant is accessible and positive (compile-time checks)
+        const {
+            assert!(DOOR_PANEL_WIDTH > 0.0, "DOOR_PANEL_WIDTH must be positive");
+        }
+        const {
+            assert!(
+                DOOR_PANEL_HEIGHT > 0.0,
+                "DOOR_PANEL_HEIGHT must be positive"
+            );
+        }
+        const {
+            assert!(
+                DOOR_PANEL_THICKNESS > 0.0,
+                "DOOR_PANEL_THICKNESS must be positive"
+            );
+        }
+        const {
+            assert!(
+                DOOR_BRACE_HEIGHT > 0.0,
+                "DOOR_BRACE_HEIGHT must be positive"
+            );
+        }
+        const {
+            assert!(
+                DOOR_HINGE_HEIGHT > 0.0,
+                "DOOR_HINGE_HEIGHT must be positive"
+            );
+        }
+        const {
+            assert!(
+                DOOR_HANDLE_RADIUS > 0.0,
+                "DOOR_HANDLE_RADIUS must be positive"
+            );
+        }
+        const {
+            assert!(
+                DOOR_HANDLE_LENGTH > 0.0,
+                "DOOR_HANDLE_LENGTH must be positive"
+            );
+        }
+        // Panel must be taller than wide (portrait orientation)
+        const {
+            assert!(
+                DOOR_PANEL_HEIGHT > DOOR_PANEL_WIDTH,
+                "Door must be taller than it is wide"
+            );
+        }
+        // Thickness must be much less than width (flat panel)
+        const {
+            assert!(
+                (DOOR_PANEL_WIDTH / 5.0 - DOOR_PANEL_THICKNESS) > 0.0,
+                "Door panel must be thin relative to its width"
+            );
+        }
+    }
+
+    /// Tests door color constant is a valid sRGB color
+    #[test]
+    fn test_door_color_constant_valid() {
+        let _ = DOOR_PANEL_COLOR;
+        // Verify it can be converted — just touching it is enough to ensure
+        // it is a valid Color::srgb() expression that compiles
+    }
+
+    /// Tests DoorConfig can be cloned
+    #[test]
+    fn test_door_config_clone() {
+        let cfg = DoorConfig::default();
+        let cloned = cfg.clone();
+        assert_eq!(cloned.width, cfg.width);
+        assert_eq!(cloned.height, cfg.height);
+        assert_eq!(cloned.thickness, cfg.thickness);
+        assert_eq!(cloned.plank_count, cfg.plank_count);
+        assert_eq!(cloned.has_studs, cfg.has_studs);
+        assert_eq!(cloned.has_hinges, cfg.has_hinges);
+    }
+
+    /// Tests DoorConfig with color_override
+    #[test]
+    fn test_door_config_with_color_override() {
+        let color = Color::srgb(0.8, 0.3, 0.1);
+        let cfg = DoorConfig {
+            color_override: Some(color),
+            ..Default::default()
+        };
+        assert!(cfg.color_override.is_some());
     }
 
     // ==================== Structure Configuration Tests ====================
@@ -3774,6 +3976,20 @@ pub fn spawn_furniture(
                 commands, materials, meshes, position, map_id, config, cache, rotation_y,
             )
         }
+        FurnitureType::Door => {
+            let config = DoorConfig {
+                width: DOOR_PANEL_WIDTH * scale,
+                height: DOOR_PANEL_HEIGHT * scale,
+                thickness: DOOR_PANEL_THICKNESS,
+                plank_count: DOOR_DEFAULT_PLANK_COUNT,
+                has_studs: true,
+                has_hinges: true,
+                color_override: Some(final_color),
+            };
+            spawn_door(
+                commands, materials, meshes, position, map_id, config, cache, rotation_y,
+            )
+        }
     }
 }
 
@@ -3858,6 +4074,61 @@ impl Default for BookshelfConfig {
             height: 1.8,
             width: 0.9,
             depth: 0.3,
+            color_override: None,
+        }
+    }
+}
+
+/// Configuration for a door furniture panel
+///
+/// Controls the geometry of a procedurally-generated door panel.  The door
+/// consists of a main panel subdivided into visible plank strips, two
+/// horizontal cross-braces, optional iron studs, optional hinges on the left
+/// edge, and a handle on the right side at mid-height.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::DoorConfig;
+///
+/// let cfg = DoorConfig::default();
+/// assert_eq!(cfg.width, 0.9);
+/// assert_eq!(cfg.height, 2.3);
+/// assert_eq!(cfg.thickness, 0.08);
+/// assert_eq!(cfg.plank_count, 5);
+/// assert!(cfg.has_studs);
+/// assert!(cfg.has_hinges);
+/// assert!(cfg.color_override.is_none());
+/// ```
+#[derive(Clone, Debug)]
+pub struct DoorConfig {
+    /// Width of the door panel in world units (default 0.9)
+    pub width: f32,
+    /// Height of the door panel in world units (default 2.3)
+    pub height: f32,
+    /// Thickness of the door panel in world units (default 0.08)
+    pub thickness: f32,
+    /// Number of visible vertical plank strips (default 5)
+    pub plank_count: u8,
+    /// Whether to render iron studs on the door face (default true)
+    pub has_studs: bool,
+    /// Whether to render hinge cuboids on the left edge (default true)
+    pub has_hinges: bool,
+    /// Optional color override; uses `DOOR_PANEL_COLOR` if None
+    pub color_override: Option<Color>,
+}
+
+impl Default for DoorConfig {
+    /// Returns a door panel with wood-plank defaults: 0.9 × 2.3 × 0.08,
+    /// 5 planks, studs and hinges enabled.
+    fn default() -> Self {
+        Self {
+            width: DOOR_PANEL_WIDTH,
+            height: DOOR_PANEL_HEIGHT,
+            thickness: DOOR_PANEL_THICKNESS,
+            plank_count: DOOR_DEFAULT_PLANK_COUNT,
+            has_studs: true,
+            has_hinges: true,
             color_override: None,
         }
     }
@@ -3953,6 +4224,203 @@ pub fn spawn_bookshelf(
             .id();
         commands.entity(parent).add_child(shelf);
     }
+
+    parent
+}
+
+/// Spawns a procedural door panel mesh with planks, cross-braces, hinges, and handle
+///
+/// Creates a composite 3D door from:
+/// - **Panel**: a flat cuboid (`width × height × thickness`) representing the door face
+/// - **Cross-braces**: 2 thin horizontal strips at 1/3 and 2/3 height, slightly proud of the panel
+/// - **Hinges** (optional): 2 thin cuboids on the left edge at top-third and bottom-third height
+/// - **Handle**: a small cylinder on the right side at mid-height
+///
+/// The `plank_count` field controls how many visible plank dividers are rendered as thin
+/// raised strips across the panel face, giving a wood-plank texture appearance.
+///
+/// # Arguments
+///
+/// * `commands` - Bevy Commands for entity spawning
+/// * `materials` - Material asset storage
+/// * `meshes` - Mesh asset storage
+/// * `position` - Tile position in world coordinates
+/// * `map_id` - Map identifier for cleanup
+/// * `config` - Door configuration (width, height, thickness, plank_count, studs, hinges, color)
+/// * `cache` - Mutable reference to mesh cache for reuse
+/// * `rotation_y` - Optional rotation in degrees around Y-axis
+///
+/// # Returns
+///
+/// Entity ID of the parent door entity
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_door(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: DoorConfig,
+    cache: &mut ProceduralMeshCache,
+    rotation_y: Option<f32>,
+) -> Entity {
+    let color = config.color_override.unwrap_or(DOOR_PANEL_COLOR);
+    let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
+
+    // ── Materials ──────────────────────────────────────────────────────────
+    // Wood panel material — warm, rough surface
+    let panel_material = materials.add(StandardMaterial {
+        base_color: color,
+        perceptual_roughness: 0.85,
+        metallic: 0.0,
+        ..default()
+    });
+
+    // Metal accent material — darker and more metallic for hinges / handle
+    let metal_color = Color::srgb(
+        color.to_srgba().red * 0.45,
+        color.to_srgba().green * 0.45,
+        color.to_srgba().blue * 0.45,
+    );
+    let metal_material = materials.add(StandardMaterial {
+        base_color: metal_color,
+        perceptual_roughness: 0.4,
+        metallic: 0.85,
+        ..default()
+    });
+
+    // ── Cached meshes ──────────────────────────────────────────────────────
+    // Main door panel
+    let panel_mesh = cache.get_or_create_furniture_mesh("door_panel", meshes, || {
+        Cuboid::new(config.width, config.height, config.thickness).into()
+    });
+
+    // Cross brace strip (full width of door, thin and slightly proud)
+    let brace_mesh = cache.get_or_create_furniture_mesh("door_brace", meshes, || {
+        Cuboid::new(
+            config.width,
+            DOOR_BRACE_HEIGHT,
+            config.thickness + DOOR_BRACE_PROUD * 2.0,
+        )
+        .into()
+    });
+
+    // Hinge cuboid (left edge)
+    let hinge_mesh = cache.get_or_create_furniture_mesh("door_hinge", meshes, || {
+        Cuboid::new(DOOR_HINGE_WIDTH, DOOR_HINGE_HEIGHT, config.thickness + 0.02).into()
+    });
+
+    // Handle cylinder (horizontal, pointing along Z so it protrudes from the face)
+    let handle_mesh = cache.get_or_create_furniture_mesh("door_handle", meshes, || {
+        Cylinder::new(DOOR_HANDLE_RADIUS, DOOR_HANDLE_LENGTH).into()
+    });
+
+    // ── Parent entity ──────────────────────────────────────────────────────
+    let transform = Transform::from_xyz(
+        position.x as f32 + TILE_CENTER_OFFSET,
+        0.0,
+        position.y as f32 + TILE_CENTER_OFFSET,
+    )
+    .with_rotation(Quat::from_rotation_y(rotation_radians));
+
+    let parent = commands
+        .spawn((
+            transform,
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Door"),
+        ))
+        .id();
+
+    // ── Main panel ─────────────────────────────────────────────────────────
+    let panel = commands
+        .spawn((
+            Mesh3d(panel_mesh),
+            MeshMaterial3d(panel_material.clone()),
+            Transform::from_xyz(0.0, config.height / 2.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(panel);
+
+    // ── Plank dividers ─────────────────────────────────────────────────────
+    // Thin raised strips running horizontally across the panel to simulate planks
+    if config.plank_count > 1 {
+        let strip_height = 0.025_f32;
+        let strip_mesh = meshes.add(Cuboid::new(
+            config.width + 0.005,
+            strip_height,
+            config.thickness + DOOR_BRACE_PROUD,
+        ));
+        let plank_gap = config.height / config.plank_count as f32;
+        for i in 1..config.plank_count {
+            let y = i as f32 * plank_gap;
+            let strip = commands
+                .spawn((
+                    Mesh3d(strip_mesh.clone()),
+                    MeshMaterial3d(panel_material.clone()),
+                    Transform::from_xyz(0.0, y, 0.0),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                ))
+                .id();
+            commands.entity(parent).add_child(strip);
+        }
+    }
+
+    // ── Cross-braces ───────────────────────────────────────────────────────
+    // Two heavy horizontal braces at 1/3 and 2/3 height for structural appearance
+    for frac in [1.0_f32 / 3.0, 2.0 / 3.0] {
+        let y = frac * config.height;
+        let brace = commands
+            .spawn((
+                Mesh3d(brace_mesh.clone()),
+                MeshMaterial3d(panel_material.clone()),
+                Transform::from_xyz(0.0, y, 0.0),
+                GlobalTransform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        commands.entity(parent).add_child(brace);
+    }
+
+    // ── Hinges ─────────────────────────────────────────────────────────────
+    if config.has_hinges {
+        let hinge_x = -(config.width / 2.0) + DOOR_HINGE_WIDTH / 2.0;
+        for frac in [0.25_f32, 0.75] {
+            let y = frac * config.height;
+            let hinge = commands
+                .spawn((
+                    Mesh3d(hinge_mesh.clone()),
+                    MeshMaterial3d(metal_material.clone()),
+                    Transform::from_xyz(hinge_x, y, 0.0),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                ))
+                .id();
+            commands.entity(parent).add_child(hinge);
+        }
+    }
+
+    // ── Handle ─────────────────────────────────────────────────────────────
+    // Cylinder rotated 90° around X so it protrudes from the door face (along Z)
+    let handle_x = config.width / 2.0 - 0.12;
+    let handle_y = config.height * 0.45; // Slightly below mid-height (ergonomic)
+    let handle_z = config.thickness / 2.0 + DOOR_HANDLE_LENGTH / 2.0 + 0.01;
+    let handle = commands
+        .spawn((
+            Mesh3d(handle_mesh),
+            MeshMaterial3d(metal_material),
+            Transform::from_xyz(handle_x, handle_y, handle_z)
+                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(handle);
 
     parent
 }

@@ -143,16 +143,28 @@ pub enum InteractionType {
     LightTorch,
     /// Read from a bookshelf (display book list)
     ReadBookshelf,
+    /// Open or close a door panel
+    OpenDoor,
 }
 
 impl InteractionType {
     /// Get a human-readable name for the interaction
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::InteractionType;
+    ///
+    /// assert_eq!(InteractionType::OpenDoor.name(), "Open Door");
+    /// assert_eq!(InteractionType::OpenChest.name(), "Open Chest");
+    /// ```
     pub fn name(self) -> &'static str {
         match self {
             Self::OpenChest => "Open Chest",
             Self::SitOnChair => "Sit on Chair",
             Self::LightTorch => "Light Torch",
             Self::ReadBookshelf => "Read Bookshelf",
+            Self::OpenDoor => "Open Door",
         }
     }
 }
@@ -198,5 +210,15 @@ mod tests {
         assert_eq!(InteractionType::SitOnChair.name(), "Sit on Chair");
         assert_eq!(InteractionType::LightTorch.name(), "Light Torch");
         assert_eq!(InteractionType::ReadBookshelf.name(), "Read Bookshelf");
+        assert_eq!(InteractionType::OpenDoor.name(), "Open Door");
+    }
+
+    #[test]
+    fn test_open_door_interaction_is_distinct() {
+        // Verify OpenDoor is a unique variant, not equal to other interactions
+        assert_ne!(InteractionType::OpenDoor, InteractionType::OpenChest);
+        assert_ne!(InteractionType::OpenDoor, InteractionType::SitOnChair);
+        assert_ne!(InteractionType::OpenDoor, InteractionType::LightTorch);
+        assert_ne!(InteractionType::OpenDoor, InteractionType::ReadBookshelf);
     }
 }

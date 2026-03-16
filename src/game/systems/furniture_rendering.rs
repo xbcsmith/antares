@@ -18,8 +18,9 @@ use crate::domain::world::furniture::FurnitureDatabase;
 use crate::domain::world::{FurnitureFlags, FurnitureMaterial, FurnitureType};
 use crate::game::components::{FurnitureEntity, Interactable, InteractionType};
 use crate::game::systems::procedural_meshes::{
-    spawn_bench, spawn_chair, spawn_chest, spawn_table, spawn_throne, spawn_torch, BenchConfig,
-    ChairConfig, ChestConfig, ProceduralMeshCache, TableConfig, ThroneConfig, TorchConfig,
+    spawn_bench, spawn_chair, spawn_chest, spawn_door, spawn_table, spawn_throne, spawn_torch,
+    BenchConfig, ChairConfig, ChestConfig, DoorConfig, ProceduralMeshCache, TableConfig,
+    ThroneConfig, TorchConfig,
 };
 
 /// Resolves effective furniture properties by merging a [`FurnitureDatabase`]
@@ -413,6 +414,23 @@ pub fn spawn_furniture_with_rendering(
             cache,
             rotation_y,
         ),
+        FurnitureType::Door => spawn_door(
+            commands,
+            materials,
+            meshes,
+            position,
+            map_id,
+            DoorConfig {
+                width: 0.9 * scale,
+                height: 2.3 * scale,
+                has_hinges: true,
+                has_studs: true,
+                color_override: Some(final_color),
+                ..Default::default()
+            },
+            cache,
+            rotation_y,
+        ),
     };
 
     // Add FurnitureEntity marker component
@@ -442,6 +460,7 @@ fn get_interaction_type(furniture_type: FurnitureType) -> Option<InteractionType
         FurnitureType::Chair | FurnitureType::Throne => Some(InteractionType::SitOnChair),
         FurnitureType::Torch => Some(InteractionType::LightTorch),
         FurnitureType::Bookshelf => Some(InteractionType::ReadBookshelf),
+        FurnitureType::Door => Some(InteractionType::OpenDoor),
         FurnitureType::Table | FurnitureType::Bench => None,
     }
 }
@@ -452,6 +471,7 @@ fn get_interaction_distance(furniture_type: FurnitureType) -> f32 {
         FurnitureType::Chest | FurnitureType::Barrel => 1.5,
         FurnitureType::Chair | FurnitureType::Throne => 1.5,
         FurnitureType::Torch | FurnitureType::Bookshelf => 2.0,
+        FurnitureType::Door => 1.5,
         FurnitureType::Table | FurnitureType::Bench => Interactable::DEFAULT_DISTANCE,
     }
 }
@@ -521,6 +541,19 @@ mod tests {
     #[test]
     fn test_get_interaction_distance_bookshelf() {
         assert_eq!(get_interaction_distance(FurnitureType::Bookshelf), 2.0);
+    }
+
+    #[test]
+    fn test_get_interaction_type_door() {
+        assert_eq!(
+            get_interaction_type(FurnitureType::Door),
+            Some(InteractionType::OpenDoor)
+        );
+    }
+
+    #[test]
+    fn test_get_interaction_distance_door() {
+        assert_eq!(get_interaction_distance(FurnitureType::Door), 1.5);
     }
 
     #[test]
