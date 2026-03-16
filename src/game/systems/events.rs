@@ -677,6 +677,27 @@ fn handle_events(
                     log.add(msg);
                 }
             }
+
+            MapEvent::LockedDoor { name, lock_id, .. } => {
+                // Lock interactions are handled by the lock domain functions
+                // (`try_unlock`, `try_lockpick`, `try_bash`). Stepping on the
+                // tile triggers a log message; the actual interaction is driven
+                // by the player choosing an action in the lock UI (future phase).
+                let msg = format!("Locked door: {} (lock_id={})", name, lock_id);
+                info!("{}", msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
+            }
+
+            MapEvent::LockedContainer { name, lock_id, .. } => {
+                // Same as LockedDoor — lock UI handles the actual interaction.
+                let msg = format!("Locked container: {} (lock_id={})", name, lock_id);
+                info!("{}", msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
+            }
         }
     }
 }

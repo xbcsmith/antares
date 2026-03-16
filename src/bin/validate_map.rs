@@ -278,6 +278,14 @@ fn print_map_summary(map: &Map) {
                 // Count dropped item events (static map-authored drops)
                 signs += 1
             }
+            MapEvent::LockedDoor { .. } => {
+                // Count locked door events
+                signs += 1
+            }
+            MapEvent::LockedContainer { .. } => {
+                // Count locked container events
+                signs += 1
+            }
         }
     }
 

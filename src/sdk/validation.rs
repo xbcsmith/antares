@@ -1216,6 +1216,62 @@ impl<'a> Validator<'a> {
                         });
                     }
                 }
+                crate::domain::world::MapEvent::LockedDoor {
+                    lock_id,
+                    key_item_id,
+                    ..
+                } => {
+                    // Validate that the lock_id is non-empty
+                    if lock_id.trim().is_empty() {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Error,
+                            message: format!(
+                                "Map {} has LockedDoor event with empty lock_id at ({}, {})",
+                                map.id, pos.x, pos.y
+                            ),
+                        });
+                    }
+                    // Validate key item exists if one is specified
+                    if let Some(kid) = key_item_id {
+                        if !self.db.items.has_item(kid) {
+                            errors.push(ValidationError::MissingItem {
+                                context: format!(
+                                    "Map {} LockedDoor '{}' key_item_id at ({}, {})",
+                                    map.id, lock_id, pos.x, pos.y
+                                ),
+                                item_id: *kid,
+                            });
+                        }
+                    }
+                }
+                crate::domain::world::MapEvent::LockedContainer {
+                    lock_id,
+                    key_item_id,
+                    ..
+                } => {
+                    // Validate that the lock_id is non-empty
+                    if lock_id.trim().is_empty() {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Error,
+                            message: format!(
+                                "Map {} has LockedContainer event with empty lock_id at ({}, {})",
+                                map.id, pos.x, pos.y
+                            ),
+                        });
+                    }
+                    // Validate key item exists if one is specified
+                    if let Some(kid) = key_item_id {
+                        if !self.db.items.has_item(kid) {
+                            errors.push(ValidationError::MissingItem {
+                                context: format!(
+                                    "Map {} LockedContainer '{}' key_item_id at ({}, {})",
+                                    map.id, lock_id, pos.x, pos.y
+                                ),
+                                item_id: *kid,
+                            });
+                        }
+                    }
+                }
             }
         }
 

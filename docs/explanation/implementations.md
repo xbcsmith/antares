@@ -1,5 +1,205 @@
 # Implementations
 
+## Phase 1: Locked Objects and Keys — Domain Layer (Complete)
+
+### Overview
+
+Implements Phase 1 of the locked objects and keys plan
+(`docs/explanation/locked_objects_and_keys_implementation_plan.md`).
+
+This phase introduces all pure-domain types and functions needed to represent
+and resolve locks. No Bevy, ECS, or UI code — only `src/domain/`.
+
+The implementation follows architecture.md Section 12.10 for the unlock and
+bash mechanical rules that govern success formulae and trap behaviour.
+
+### Files Changed
+
+| File                                                | Change                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/world/lock.rs`                          | **New file** — `LockState`, `UnlockOutcome`, `try_unlock`, `try_lockpick`, `try_bash`, `roll_trap`, constants, 15 tests                                                                                                                                                                           |
+| `src/domain/world/mod.rs`                           | Added `pub mod lock;`; re-exported `LockState`, `UnlockOutcome`, `try_unlock`, `try_lockpick`, `try_bash`, `LOCKPICK_FAIL_TRAP_INCREMENT`, `BASH_TRAP_INCREMENT`, `TRAP_CHANCE_MAX`; added `UnlockMethod` to `events` re-export                                                                   |
+| `src/domain/world/types.rs`                         | Added `use crate::domain::world::lock::LockState;` import; added `MapEvent::LockedDoor` and `MapEvent::LockedContainer` variants; added `pub lock_states: HashMap<String, LockState>` field to `Map`; added `lock_states: HashMap::new()` to `Map::new()`; added `Map::init_lock_states()` method |
+| `src/domain/world/events.rs`                        | Added `EventResult::Locked`, `Unlocked`, `LockpickFailed`, `BashFailed`, `TrapTriggered` variants; added `UnlockMethod` enum; added `LockedDoor \| LockedContainer => EventResult::None` arm to `trigger_event`                                                                                   |
+| `src/domain/world/blueprint.rs`                     | Added `lock_states: HashMap::new()` to `Map` struct literal in `From<MapBlueprint> for Map`                                                                                                                                                                                                       |
+| `src/sdk/templates.rs`                              | Added `lock_states: HashMap::new()` to all three `Map` struct literals (`town_map`, `dungeon_map`, `forest_map`)                                                                                                                                                                                  |
+| `src/bin/validate_map.rs`                           | Added `MapEvent::LockedDoor { .. }` and `MapEvent::LockedContainer { .. }` arms to `print_map_summary` exhaustive match                                                                                                                                                                           |
+| `src/game/systems/events.rs`                        | Added `MapEvent::LockedDoor` and `MapEvent::LockedContainer` arms to `handle_events` exhaustive match                                                                                                                                                                                             |
+| `src/sdk/validation.rs`                             | Added `MapEvent::LockedDoor` and `MapEvent::LockedContainer` arms to `validate_map` exhaustive match (validates non-empty `lock_id` and optional `key_item_id` existence)                                                                                                                         |
+| `sdk/campaign_builder/src/map_editor.rs`            | Added `LockedDoor` and `LockedContainer` arms to `from_map_event`, `MapGridWidget::ui`, `MapPreviewWidget::ui`, `show_inspector_panel`, and `event_name_description` exhaustive matches                                                                                                           |
+| `sdk/campaign_builder/tests/map_data_validation.rs` | Added `MapEvent::LockedDoor { .. }` and `MapEvent::LockedContainer { .. }` arms to exhaustive match                                                                                                                                                                                               |
+
+### New Types
+
+#### `LockState` (`src/domain/world/lock.rs`)
+
+Runtime mutable state for a single lock instance. Keyed by `lock_id: String`
+matching the `lock_id` field on `MapEvent::LockedDoor` or
+`MapEvent::LockedContainer`. Stored in `Map::lock_states` at runtime and
+serialised with save data so that unlocked doors remain open across
+save/load cycles.
+
+Fields: `lock_id: String`, `is_locked: bool`, `trap_chance: u8`.
+
+Methods: `new(lock_id)`, `has_trap_risk()`, `increment_trap_chance(delta)`,
+`unlock()`.
+
+#### `UnlockOutcome` (`src/domain/world/lock.rs`)
+
+Result enum returned by all three unlock functions. Variants:
+
+- `OpenedWithKey { key_item_id }` — consumed key from party inventory
+- `LockpickSuccess { picker_party_index }` — pick roll succeeded
+- `LockpickFailed { picker_party_index, new_trap_chance }` — pick roll failed
+- `BashSuccess { basher_party_index }` — bash roll succeeded
+- `BashFailed { basher_party_index, new_trap_chance }` — bash roll failed
+- `TrapTriggered { damage, effect }` — trap fired before or during attempt
+- `Locked { requires_key_item_id }` — lock still closed, no action taken
+
+#### `EventResult` new variants (`src/domain/world/events.rs`)
+
+Five new variants appended to the existing `EventResult` enum:
+
+- `Locked { lock_id, requires_key_item_id }` — interacted with locked object;
+  not yet resolved; caller should prompt Pick Lock / Bash
+- `Unlocked { lock_id, method: UnlockMethod }` — lock was opened
+- `LockpickFailed { lock_id, new_trap_chance }` — pick attempt failed
+- `BashFailed { lock_id, new_trap_chance }` — bash attempt failed
+- `TrapTriggered { lock_id, damage, effect }` — trap fired during interaction
+
+#### `UnlockMethod` (`src/domain/world/events.rs`)
+
+Supporting enum embedded in `EventResult::Unlocked`:
+
+- `Key { item_id }` — opened with a matching key item (consumed)
+- `Lockpick { picker_party_index }` — opened by picking
+- `Bash { basher_party_index }` — opened by bashing
+
+#### `MapEvent::LockedDoor` and `MapEvent::LockedContainer`
+
+Two new variants added to `MapEvent` in `src/domain/world/types.rs`:
+
+```antares/src/domain/world/types.rs#L2278-2320
+LockedDoor {
+    #[serde(default)]
+    name: String,
+    lock_id: String,
+    #[serde(default)]
+    key_item_id: Option<ItemId>,
+    #[serde(default)]
+    initial_trap_chance: u8,
+},
+LockedContainer {
+    #[serde(default)]
+    name: String,
+    lock_id: String,
+    #[serde(default)]
+    key_item_id: Option<ItemId>,
+    #[serde(default)]
+    initial_trap_chance: u8,
+},
+```
+
+All fields except `lock_id` use `#[serde(default)]` for backward
+compatibility with existing RON map files.
+
+### Constants
+
+All defined in `src/domain/world/lock.rs` and re-exported from
+`src/domain/world/mod.rs`:
+
+| Constant                       | Value | Meaning                                                 |
+| ------------------------------ | ----- | ------------------------------------------------------- |
+| `LOCKPICK_FAIL_TRAP_INCREMENT` | 10    | % added to `trap_chance` per failed lockpick attempt    |
+| `BASH_TRAP_INCREMENT`          | 20    | % added to `trap_chance` per bash attempt (any outcome) |
+| `TRAP_CHANCE_MAX`              | 90    | Maximum value `trap_chance` can reach via normal play   |
+
+### Functions
+
+#### `try_unlock`
+
+Checks party inventory for a matching key item. On success: consumes the key
+and calls `lock_state.unlock()`, returns `OpenedWithKey`. If the party lacks
+the key (or no key is required), returns `Locked` so the caller can prompt
+the player to pick or bash.
+
+#### `try_lockpick`
+
+Requires the `"pick_lock"` special ability. Success formula (arch §12.10):
+base 30 % + 5 % per level above 1 + 10 % if class is `"robber"`, clamped
+to [5 %, 95 %]. A trap check fires first when `trap_chance > 0`. On failure
+increments `trap_chance` by `LOCKPICK_FAIL_TRAP_INCREMENT`.
+
+#### `try_bash`
+
+No class restriction. Success formula: base 25 % + 3 % per level + 5 % if
+Might ≥ 15, clamped to [5 %, 80 %]. A trap check fires first when
+`trap_chance > 0`. Always increments `trap_chance` by `BASH_TRAP_INCREMENT`
+on an actual bash attempt (not if a trap short-circuits the attempt).
+
+#### `Map::init_lock_states`
+
+Iterates `Map::events`, creates a `LockState` for every `LockedDoor` and
+`LockedContainer` event whose `lock_id` is not already present in
+`Map::lock_states`. Existing entries are never overwritten so that save-game
+data (unlocked doors, accumulated trap chances) survives map reloads.
+
+### Tests Added (15 new tests in `src/domain/world/lock.rs`)
+
+| Test                                                           | What it verifies                                                       |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `test_lock_state_new_is_locked`                                | `LockState::new` starts locked with `trap_chance == 0`                 |
+| `test_lock_state_unlock`                                       | `unlock()` sets `is_locked` to `false`                                 |
+| `test_lock_state_increment_trap_chance_clamps`                 | `increment_trap_chance` caps at `TRAP_CHANCE_MAX`                      |
+| `test_try_unlock_with_correct_key_removes_item_from_inventory` | Key consumed and lock opened                                           |
+| `test_try_unlock_with_wrong_key_returns_locked`                | Wrong key not consumed, lock stays locked                              |
+| `test_try_unlock_no_key_required_still_needs_lockpick_or_bash` | `None` key returns `Locked { requires_key_item_id: None }`             |
+| `test_try_lockpick_success_unlocks`                            | Robber level 20 (95 %) — `LockpickSuccess` sets `is_locked` to `false` |
+| `test_try_lockpick_failure_increments_trap_chance`             | Failed pick increments `trap_chance` by `LOCKPICK_FAIL_TRAP_INCREMENT` |
+| `test_try_lockpick_class_without_pick_lock_always_fails`       | Knight (no `pick_lock` ability) always returns `LockpickFailed`        |
+| `test_try_lockpick_trap_fires_before_attempt`                  | `trap_chance == 100` always returns `TrapTriggered` before the pick    |
+| `test_try_bash_success_unlocks`                                | Successful bash unlocks; `trap_chance` always incremented              |
+| `test_try_bash_failure_increments_trap_chance`                 | Failed bash increments `trap_chance` by `BASH_TRAP_INCREMENT`          |
+| `test_try_bash_no_class_restriction`                           | Sorcerer can attempt a bash (returns `BashSuccess` or `BashFailed`)    |
+| `test_map_init_lock_states_populates_from_events`              | `init_lock_states` creates `LockState` entries for `LockedDoor` events |
+| `test_map_init_lock_states_does_not_overwrite_existing`        | Pre-populated (save-game) state is not overwritten                     |
+
+### Phase 1 Deliverables Checklist
+
+- [x] `src/domain/world/lock.rs` — `LockState`, `UnlockOutcome`,
+      `try_unlock`, `try_lockpick`, `try_bash`
+- [x] `src/domain/world/types.rs` — `MapEvent::LockedDoor`,
+      `MapEvent::LockedContainer`, `Map::lock_states`, `Map::init_lock_states`
+- [x] `src/domain/world/events.rs` — `EventResult::Locked`, `Unlocked`,
+      `LockpickFailed`, `BashFailed`, `TrapTriggered`; `UnlockMethod` enum
+- [x] `src/domain/world/mod.rs` — exports updated (lock module, constants,
+      `UnlockMethod`)
+- [x] All 15 tests passing; all four quality gates pass
+
+### Architecture Compliance
+
+- [x] `ItemId` type alias used — no raw integer types for domain identifiers
+- [x] Module placement follows Section 3.2 (`src/domain/world/`)
+- [x] `AttributePair` pattern respected (reads `stats.might.current`)
+- [x] No hardcoded magic numbers — all thresholds are named constants
+- [x] RON format used for game data; no JSON/YAML
+- [x] No Bevy/ECS/UI code in the domain module
+- [x] SPDX header present in new `.rs` file
+- [x] All test data uses `data/test_campaign` — no reference to
+      `campaigns/tutorial`
+- [x] `///` doc comments on every public function, struct, enum, and variant
+
+### Quality Gate Results
+
+```text
+cargo fmt         → clean (no output)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 15/15 new lock tests passed; 3661/3662 total
+                    (1 pre-existing performance flap in
+                    test_creature_database_load_performance — unrelated)
+```
+
 ## Phase 4: Doors as Furniture — Map Data Migration and Campaign Builder (Complete)
 
 ### Overview

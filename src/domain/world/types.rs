@@ -13,6 +13,7 @@
 use crate::domain::combat::types::CombatEventType;
 use crate::domain::types::{Direction, GameTime, ItemId, MapId, Position, TimeOfDay};
 use crate::domain::world::dropped_items::DroppedItem;
+use crate::domain::world::lock::LockState;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -2264,6 +2265,53 @@ pub enum MapEvent {
         #[serde(default)]
         charges: u16,
     },
+    /// A locked door that requires a key, lockpicking, or bashing to open.
+    ///
+    /// Runtime state is stored in [`Map::lock_states`] keyed by `lock_id`.
+    /// Call [`Map::init_lock_states`] after deserialising a map to populate
+    /// the runtime map; existing entries (from save data) are never overwritten.
+    ///
+    /// # Backward Compatibility
+    ///
+    /// All fields except `lock_id` use `#[serde(default)]` so existing RON
+    /// map files that pre-date this variant are unaffected.
+    LockedDoor {
+        /// Display name for editor and log messages.
+        #[serde(default)]
+        name: String,
+        /// Unique identifier used as the key in [`Map::lock_states`].
+        lock_id: String,
+        /// Optional item ID required to unlock with a key.
+        ///
+        /// `None` means the door has no key — it must be picked or bashed.
+        #[serde(default)]
+        key_item_id: Option<ItemId>,
+        /// Starting trap chance percentage (0–100).
+        ///
+        /// Written into the [`LockState`] by [`Map::init_lock_states`] only
+        /// when no prior state exists for this `lock_id`.
+        #[serde(default)]
+        initial_trap_chance: u8,
+    },
+    /// A locked container (chest, crate, etc.) that requires a key,
+    /// lockpicking, or bashing to open.
+    ///
+    /// Behaves identically to [`MapEvent::LockedDoor`] from the lock-system
+    /// perspective; the distinction is purely cosmetic (different UI prompt /
+    /// log message).
+    LockedContainer {
+        /// Display name for editor and log messages.
+        #[serde(default)]
+        name: String,
+        /// Unique identifier used as the key in [`Map::lock_states`].
+        lock_id: String,
+        /// Optional item ID required to unlock with a key.
+        #[serde(default)]
+        key_item_id: Option<ItemId>,
+        /// Starting trap chance percentage (0–100).
+        #[serde(default)]
+        initial_trap_chance: u8,
+    },
 }
 
 /// Default scale for furniture events (1.0x)
@@ -2524,6 +2572,17 @@ pub struct Map {
     /// existing map files are unaffected by this addition.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dropped_items: Vec<DroppedItem>,
+
+    /// Runtime lock states keyed by `lock_id`.
+    ///
+    /// Populated by [`Map::init_lock_states`] on map load (or restored from
+    /// save data). Persisted with save data so unlocked doors remain open
+    /// across save/load cycles.
+    ///
+    /// The field is omitted from serialised RON output when empty so that
+    /// existing map files are unaffected by this addition.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub lock_states: HashMap<String, LockState>,
 }
 
 fn default_map_name() -> String {
@@ -2578,6 +2637,7 @@ impl Map {
             allow_random_encounters: default_allow_random_encounters(),
             npc_placements: Vec::new(),
             dropped_items: Vec::new(),
+            lock_states: HashMap::new(),
         }
     }
 
@@ -2878,6 +2938,48 @@ impl Map {
                 }
             })
             .collect()
+    }
+
+    /// Initialises [`LockState`] entries for every `LockedDoor` and
+    /// `LockedContainer` event found in [`Map::events`].
+    ///
+    /// Existing entries in `lock_states` are **not** overwritten so that
+    /// save-game data (unlocked doors, accumulated trap chances) is preserved
+    /// when a map is reloaded.
+    ///
+    /// Call this once after constructing or deserialising a `Map`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::Map;
+    ///
+    /// let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+    /// map.init_lock_states();
+    /// assert!(map.lock_states.is_empty()); // no LockedDoor events
+    /// ```
+    pub fn init_lock_states(&mut self) {
+        for event in self.events.values() {
+            match event {
+                MapEvent::LockedDoor {
+                    lock_id,
+                    initial_trap_chance,
+                    ..
+                }
+                | MapEvent::LockedContainer {
+                    lock_id,
+                    initial_trap_chance,
+                    ..
+                } => {
+                    if !self.lock_states.contains_key(lock_id) {
+                        let mut state = LockState::new(lock_id.clone());
+                        state.trap_chance = *initial_trap_chance;
+                        self.lock_states.insert(lock_id.clone(), state);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 }
 
