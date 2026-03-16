@@ -2222,7 +2222,7 @@
         ),
         (
             terrain: Grass,
-            wall_type: Door,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4531,6 +4531,24 @@
                 14,
                 24,
             ],
+        ),
+        (
+            x: 0,
+            y: 10,
+        ): Furniture(
+            name: "Door",
+            furniture_id: None,
+            furniture_type: Door,
+            rotation_y: None,
+            scale: 1.0,
+            material: Wood,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: true,
+            ),
+            color_tint: None,
+            key_item_id: None,
         ),
     },
     npcs: [

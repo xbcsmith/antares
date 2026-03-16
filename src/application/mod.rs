@@ -2440,6 +2440,7 @@ mod tests {
                 dialogues: "dialogues.ron".to_string(),
                 characters: "characters.ron".to_string(),
                 creatures: "creatures.ron".to_string(),
+                furniture: "data/furniture.ron".to_string(),
             },
             assets: crate::sdk::campaign_loader::CampaignAssets {
                 tilesets: "tilesets".to_string(),
@@ -2604,6 +2605,7 @@ mod tests {
                 dialogues: "dialogues.ron".to_string(),
                 characters: "characters.ron".to_string(),
                 creatures: "creatures.ron".to_string(),
+                furniture: "data/furniture.ron".to_string(),
             },
             assets: crate::sdk::campaign_loader::CampaignAssets {
                 tilesets: "tilesets".to_string(),

@@ -272,6 +272,10 @@ pub struct CampaignData {
     /// Creatures data file (visual definitions)
     #[serde(default = "default_creatures_path")]
     pub creatures: String,
+
+    /// Furniture definitions data file
+    #[serde(default = "default_furniture_path")]
+    pub furniture: String,
 }
 
 fn default_items_path() -> String {
@@ -312,6 +316,10 @@ fn default_characters_path() -> String {
 
 fn default_creatures_path() -> String {
     "data/creatures.ron".to_string()
+}
+
+fn default_furniture_path() -> String {
+    "data/furniture.ron".to_string()
 }
 
 /// Asset paths within campaign
@@ -476,6 +484,12 @@ pub struct CampaignMetadata {
     pub characters_file: String,
     #[serde(default = "default_creatures_path")]
     pub creatures_file: String,
+    /// Furniture definitions data file
+    ///
+    /// Defaults to `"data/furniture.ron"` so existing `campaign.ron` files
+    /// that lack this field continue to deserialize correctly.
+    #[serde(default = "default_furniture_path")]
+    pub furniture_file: String,
     /// Starting game time for a new campaign (day, hour, minute).
     ///
     /// Defaults to Day 1, 08:00 (morning) if not specified in the RON file.
@@ -545,6 +559,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 dialogues: metadata.dialogue_file,
                 characters: metadata.characters_file,
                 creatures: metadata.creatures_file,
+                furniture: metadata.furniture_file,
             },
             assets: CampaignAssets {
                 tilesets: "assets/tilesets".to_string(),
@@ -902,6 +917,7 @@ mod tests {
             dialogues: default_dialogues_path(),
             characters: default_characters_path(),
             creatures: default_creatures_path(),
+            furniture: default_furniture_path(),
         };
 
         assert_eq!(data.items, "data/items.ron");

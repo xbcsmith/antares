@@ -51,7 +51,9 @@ pub enum MovementError {
 ///
 /// # Errors
 ///
-/// Returns `MovementError::Blocked` if the target tile is blocked
+/// Returns `MovementError::DoorLocked` if the target tile is a closed locked door
+/// Returns `MovementError::Blocked` if the target tile is blocked by a wall, terrain,
+/// or a closed unlocked door
 /// Returns `MovementError::OutOfBounds` if the target is outside map boundaries
 /// Returns `MovementError::MapNotFound` if the current map doesn't exist
 ///
@@ -87,6 +89,14 @@ pub fn move_party(world: &mut World, direction: Direction) -> Result<Position, M
         return Err(MovementError::OutOfBounds(new_pos.x, new_pos.y));
     }
 
+    // Closed locked doors are represented as blocking tiles with no wall_type after
+    // the doors-as-furniture migration. We reserve `is_special` on blocked, wall-less
+    // tiles to mean "locked door" so movement can surface a domain-level
+    // `MovementError::DoorLocked` instead of the generic `Blocked`.
+    if is_locked_door_tile(map, new_pos)? {
+        return Err(MovementError::DoorLocked(new_pos.x, new_pos.y));
+    }
+
     // Check if tile is blocked
     if check_tile_blocked(map, new_pos)? {
         return Err(MovementError::Blocked(new_pos.x, new_pos.y));
@@ -104,6 +114,38 @@ pub fn move_party(world: &mut World, direction: Direction) -> Result<Position, M
     }
 
     Ok(new_pos)
+}
+
+/// Returns `true` when the tile at `position` represents a closed locked door.
+///
+/// After the doors-as-furniture migration, doors no longer use `WallType::Door`.
+/// Instead, the map loader/input pipeline keeps the tile blocked state in sync with
+/// the door entity. For world-layer movement, a blocked tile with `wall_type == None`
+/// and `is_special == true` is treated as a locked furniture door sentinel so callers
+/// can distinguish it from generic blocked terrain.
+///
+/// # Arguments
+///
+/// * `map` - The map to inspect
+/// * `position` - The position to check
+///
+/// # Returns
+///
+/// Returns `Ok(true)` if the tile should be treated as a locked door
+///
+/// # Errors
+///
+/// Returns `MovementError::OutOfBounds` if position is outside map boundaries
+pub fn is_locked_door_tile(map: &Map, position: Position) -> Result<bool, MovementError> {
+    if !map.is_valid_position(position) {
+        return Err(MovementError::OutOfBounds(position.x, position.y));
+    }
+
+    let tile = map
+        .get_tile(position)
+        .ok_or(MovementError::OutOfBounds(position.x, position.y))?;
+
+    Ok(tile.blocked && matches!(tile.wall_type, super::types::WallType::None) && tile.is_special)
 }
 
 /// Checks if a tile at the given position is blocked
@@ -287,11 +329,11 @@ mod tests {
         let mut world = World::new();
         let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
 
-        // Place a door (not blocked by default in our implementation)
+        // Place a door to the north
         let door_pos = Position::new(10, 9);
         if let Some(tile) = map.get_tile_mut(door_pos) {
             tile.wall_type = WallType::Door;
-            tile.blocked = false; // Doors can be walked through when open
+            tile.blocked = false; // Open door should not block
         }
 
         world.add_map(map);
@@ -302,6 +344,67 @@ mod tests {
         let result = move_party(&mut world, Direction::North);
         assert!(result.is_ok());
         assert_eq!(world.party_position, Position::new(10, 9));
+    }
+
+    #[test]
+    fn test_is_locked_door_tile_detects_special_blocked_wallless_tile() {
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(4, 4);
+
+        if let Some(tile) = map.get_tile_mut(pos) {
+            tile.wall_type = WallType::None;
+            tile.blocked = true;
+            tile.is_special = true;
+        }
+
+        let result = is_locked_door_tile(&map, pos).expect("position must be valid");
+        assert!(
+            result,
+            "special blocked wall-less tiles should be treated as locked doors"
+        );
+    }
+
+    #[test]
+    fn test_is_locked_door_tile_false_for_generic_blocked_tile() {
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(4, 4);
+
+        if let Some(tile) = map.get_tile_mut(pos) {
+            tile.wall_type = WallType::Normal;
+            tile.blocked = true;
+            tile.is_special = false;
+        }
+
+        let result = is_locked_door_tile(&map, pos).expect("position must be valid");
+        assert!(
+            !result,
+            "ordinary blocked tiles must not be reclassified as locked doors"
+        );
+    }
+
+    #[test]
+    fn test_move_party_returns_door_locked_for_locked_furniture_door_sentinel_tile() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
+        let door_pos = Position::new(10, 9);
+
+        if let Some(tile) = map.get_tile_mut(door_pos) {
+            tile.wall_type = WallType::None;
+            tile.blocked = true;
+            tile.is_special = true;
+        }
+
+        world.add_map(map);
+        world.set_current_map(1);
+        world.set_party_position(Position::new(10, 10));
+
+        let result = move_party(&mut world, Direction::North);
+        assert!(matches!(result, Err(MovementError::DoorLocked(10, 9))));
+        assert_eq!(
+            world.party_position,
+            Position::new(10, 10),
+            "party position must remain unchanged when a locked door blocks movement"
+        );
     }
 
     #[test]

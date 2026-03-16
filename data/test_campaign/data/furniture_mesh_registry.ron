@@ -1,0 +1,12 @@
+[
+    (
+        id: 10001,
+        name: "CustomOakTable",
+        filepath: "assets/furniture/tables/oak_table.ron",
+    ),
+    (
+        id: 10002,
+        name: "StoneBench",
+        filepath: "assets/furniture/seating/stone_bench.ron",
+    ),
+]

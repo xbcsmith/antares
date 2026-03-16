@@ -75,8 +75,10 @@ pub enum EventResult {
     },
     /// Furniture or props event triggered
     Furniture {
-        /// Type of furniture
+        /// Type of furniture (from inline field or resolved from definition)
         furniture_type: crate::domain::world::FurnitureType,
+        /// Optional furniture definition ID for template-based spawning
+        furniture_id: Option<crate::domain::types::FurnitureId>,
     },
     /// Open an interactive container (chest, barrel, crate, etc.)
     EnterContainer {
@@ -338,9 +340,16 @@ pub fn trigger_event(
             }
         }
 
-        MapEvent::Furniture { furniture_type, .. } => {
+        MapEvent::Furniture {
+            furniture_type,
+            furniture_id,
+            ..
+        } => {
             // Furniture events are repeatable - don't remove
-            EventResult::Furniture { furniture_type }
+            EventResult::Furniture {
+                furniture_type,
+                furniture_id,
+            }
         }
 
         MapEvent::Container {

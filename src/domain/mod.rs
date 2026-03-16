@@ -52,8 +52,8 @@ pub use inventory::{
 pub use quest::QuestId;
 pub use transactions::{ServiceOutcome, TransactionError};
 pub use types::{
-    CharacterId, CreatureId, EventId, InnkeeperId, ItemId, MapId, MeshId, MonsterId, RaceId,
-    SpellId,
+    CharacterId, CreatureId, EventId, FurnitureId, FurnitureMeshId, InnkeeperId, ItemId, MapId,
+    MeshId, MonsterId, RaceId, SpellId,
 };
 pub use types::{DiceRoll, Direction, GameTime, Position};
 
@@ -73,3 +73,6 @@ pub use visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 // Re-export campaign types
 pub use campaign::{Campaign, CampaignConfig};
 pub use campaign_loader::{CampaignError, CampaignLoader, GameData};
+
+// Re-export furniture types
+pub use world::furniture::{FurnitureDatabase, FurnitureDatabaseError, FurnitureDefinition};

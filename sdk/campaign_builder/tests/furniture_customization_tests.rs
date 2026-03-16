@@ -122,6 +122,7 @@ fn test_color_tint_none_serialization() {
         material: FurnitureMaterial::Wood,
         flags: FurnitureFlags::default(),
         color_tint: None,
+        furniture_id: None,
     };
 
     // Serialize to RON
@@ -148,6 +149,7 @@ fn test_color_tint_some_serialization() {
         material: FurnitureMaterial::Wood,
         flags: FurnitureFlags::default(),
         color_tint: Some(expected_tint),
+        furniture_id: None,
     };
 
     let serialized = ron::to_string(&event).expect("Failed to serialize");
@@ -172,6 +174,7 @@ fn test_color_tint_roundtrip_zero_values() {
         material: FurnitureMaterial::Stone,
         flags: FurnitureFlags::default(),
         color_tint: Some(tint),
+        furniture_id: None,
     };
 
     let serialized = ron::to_string(&event).expect("Failed to serialize");
@@ -196,6 +199,7 @@ fn test_color_tint_roundtrip_max_values() {
         material: FurnitureMaterial::Gold,
         flags: FurnitureFlags::default(),
         color_tint: Some(tint),
+        furniture_id: None,
     };
 
     let serialized = ron::to_string(&event).expect("Failed to serialize");
@@ -229,6 +233,7 @@ fn test_color_tint_range_validation() {
             material: FurnitureMaterial::Wood,
             flags: FurnitureFlags::default(),
             color_tint: Some(tint),
+            furniture_id: None,
         };
 
         let serialized = ron::to_string(&event).expect("Failed to serialize");
@@ -432,6 +437,7 @@ fn test_furniture_properties_roundtrip_basic() {
             blocking: true,
         },
         color_tint: None,
+        furniture_id: None,
     };
 
     let serialized = ron::to_string(&original).expect("Failed to serialize");
@@ -446,6 +452,7 @@ fn test_furniture_properties_roundtrip_basic() {
             material,
             flags,
             color_tint,
+            furniture_id: _,
         } => {
             assert_eq!(name, "Test Furniture");
             assert_eq!(furniture_type, FurnitureType::Throne);
@@ -475,6 +482,7 @@ fn test_furniture_properties_roundtrip_with_color_tint() {
             blocking: false,
         },
         color_tint: Some([0.8, 0.4, 0.1]),
+        furniture_id: None,
     };
 
     let serialized = ron::to_string(&original).expect("Failed to serialize");
@@ -489,6 +497,7 @@ fn test_furniture_properties_roundtrip_with_color_tint() {
             material,
             flags,
             color_tint,
+            furniture_id: _,
         } => {
             assert_eq!(name, "Colored Torch");
             assert_eq!(furniture_type, FurnitureType::Torch);
@@ -518,6 +527,7 @@ fn test_furniture_properties_roundtrip_all_flags() {
             blocking: true,
         },
         color_tint: Some([0.5, 0.5, 0.5]),
+        furniture_id: None,
     };
 
     let serialized = ron::to_string(&original).expect("Failed to serialize");
@@ -642,6 +652,7 @@ fn test_furniture_event_with_all_phase9_features() {
             blocking: true,
         },
         color_tint: Some([1.0, 0.9, 0.5]), // Warm golden glow
+        furniture_id: None,
     };
 
     // Verify all properties
@@ -654,6 +665,7 @@ fn test_furniture_event_with_all_phase9_features() {
             material,
             flags,
             color_tint,
+            furniture_id: _,
         } => {
             assert_eq!(name, "Golden Throne with Custom Glow");
             assert_eq!(furniture_type, FurnitureType::Throne);
@@ -686,6 +698,7 @@ fn test_preset_application_creates_valid_event() {
         material: preset.material,
         flags: FurnitureFlags::default(),
         color_tint: preset.color_tint,
+        furniture_id: None,
     };
 
     let serialized = ron::to_string(&event).expect("Failed to serialize");

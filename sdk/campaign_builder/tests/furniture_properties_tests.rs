@@ -124,7 +124,7 @@ mod furniture_properties_tests {
     fn test_furniture_category_enum_variants() {
         let categories = FurnitureCategory::all();
 
-        assert_eq!(categories.len(), 5, "Should have 5 category variants");
+        assert_eq!(categories.len(), 6, "Should have 6 category variants");
 
         let category_names: Vec<&str> = categories.iter().map(|c| c.name()).collect();
         assert!(category_names.contains(&"Seating"));
@@ -132,6 +132,7 @@ mod furniture_properties_tests {
         assert!(category_names.contains(&"Decoration"));
         assert!(category_names.contains(&"Lighting"));
         assert!(category_names.contains(&"Utility"));
+        assert!(category_names.contains(&"Passage"));
     }
 
     /// Test category names
@@ -143,6 +144,7 @@ mod furniture_properties_tests {
             (FurnitureCategory::Decoration, "Decoration"),
             (FurnitureCategory::Lighting, "Lighting"),
             (FurnitureCategory::Utility, "Utility"),
+            (FurnitureCategory::Passage, "Passage"),
         ];
 
         for (category, expected_name) in test_cases {
@@ -327,6 +329,7 @@ mod furniture_properties_tests {
                 blocking: false,
             },
             color_tint: None,
+            furniture_id: None,
         };
 
         // Verify serialization through editor state
@@ -381,6 +384,7 @@ mod furniture_properties_tests {
                 blocking: false,
             },
             color_tint: None,
+            furniture_id: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(5, 5), &event);
@@ -438,6 +442,7 @@ mod furniture_properties_tests {
                 blocking: true,
             },
             color_tint: None,
+            furniture_id: None,
         };
 
         // Convert to editor state

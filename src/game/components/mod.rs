@@ -34,7 +34,7 @@ pub use dialogue::{
     DIALOGUE_TYPEWRITER_SPEED,
 };
 pub use dropped_item::DroppedItem;
-pub use furniture::{FurnitureEntity, Interactable, InteractionType};
+pub use furniture::{DoorState, FurnitureEntity, Interactable, InteractionType};
 pub use inventory::{CharacterEntity, PartyEntities};
 pub use menu::*;
 pub use performance::{

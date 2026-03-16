@@ -12,6 +12,7 @@ use crate::game::resources::GlobalState;
 use crate::game::resources::TerrainMaterialCache;
 use crate::game::systems::actor::spawn_actor_sprite;
 use crate::game::systems::creature_spawning::spawn_creature;
+use crate::game::systems::furniture_rendering::resolve_furniture_fields;
 use crate::game::systems::procedural_meshes;
 use rand::Rng;
 
@@ -108,12 +109,6 @@ pub struct MapChangeEvent {
     pub target_pos: types::Position,
 }
 
-/// Message sent when a door is opened - triggers map visual refresh
-#[derive(Message, Clone)]
-pub struct DoorOpenedEvent {
-    pub position: types::Position,
-}
-
 /// Plugin responsible for dynamic map management (spawning/despawning marker
 /// entities and event triggers when the current map changes).
 pub struct MapManagerPlugin;
@@ -122,7 +117,6 @@ impl Plugin for MapManagerPlugin {
     fn build(&self, app: &mut App) {
         // Register the map change message and the handler + spawn systems
         app.add_message::<MapChangeEvent>()
-            .add_message::<DoorOpenedEvent>()
             // Phase 3: register SetFacing message and proximity/facing systems
             .add_plugins(crate::game::systems::facing::FacingPlugin)
             // Process explicit map change requests first, then let the marker
@@ -131,7 +125,6 @@ impl Plugin for MapManagerPlugin {
                 Update,
                 (
                     map_change_handler,
-                    handle_door_opened,
                     spawn_map_markers,
                     cleanup_recruitable_visuals,
                     cleanup_encounter_visuals,
@@ -300,55 +293,6 @@ fn register_sprite_sheets_system(mut sprite_assets: ResMut<SpriteAssets>) {
             info!("Registered fallback placeholder sprite sheet: placeholders");
         }
     }
-}
-
-/// System that handles door opened messages by refreshing map visuals
-#[allow(unused_mut)] // spawn_map requires mut even though clippy doesn't detect it
-#[allow(clippy::too_many_arguments)]
-fn handle_door_opened(
-    mut door_messages: MessageReader<DoorOpenedEvent>,
-    mut commands: Commands,
-    query_existing: Query<Entity, With<MapEntity>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut sprite_assets: ResMut<SpriteAssets>,
-    asset_server: Res<AssetServer>,
-    global_state: Res<GlobalState>,
-    content: Res<crate::application::resources::GameContent>,
-    quality_settings: Res<crate::game::resources::GrassQualitySettings>,
-    terrain_cache: Option<Res<TerrainMaterialCache>>,
-) {
-    // Only refresh if a door was actually opened
-    if door_messages.read().count() == 0 {
-        return;
-    }
-
-    info!("Door opened - refreshing map visuals");
-
-    // Despawn all existing map entities
-    for entity in query_existing.iter() {
-        commands.entity(entity).despawn();
-    }
-
-    // Use the cached resource when available; fall back to an empty default so
-    // tests that don't insert TerrainMaterialCache still work correctly.
-    let default_cache = TerrainMaterialCache::default();
-    let cache_ref: &TerrainMaterialCache = terrain_cache.as_deref().unwrap_or(&default_cache);
-
-    // Respawn the map with updated door states
-    let mut procedural_cache = super::procedural_meshes::ProceduralMeshCache::default();
-    spawn_map(
-        commands,
-        meshes,
-        materials,
-        sprite_assets,
-        asset_server,
-        global_state,
-        content,
-        quality_settings,
-        cache_ref,
-        &mut procedural_cache,
-    );
 }
 
 /// Converts a domain MapEvent into a lightweight MapEventType (if supported)
@@ -627,7 +571,6 @@ fn spawn_map(
         // RGB tuples are kept to allow per-tile tinting of walls based on terrain
         let floor_rgb = (0.3_f32, 0.3_f32, 0.3_f32);
         let wall_base_rgb = (0.6_f32, 0.6_f32, 0.6_f32);
-        let door_rgb = (0.4_f32, 0.2_f32, 0.1_f32); // Brown
         let water_rgb = (0.2_f32, 0.4_f32, 0.8_f32); // Blue
         let mountain_rgb = (0.5_f32, 0.5_f32, 0.5_f32); // Gray rock
         let forest_rgb = (0.2_f32, 0.6_f32, 0.2_f32); // Green
@@ -637,7 +580,6 @@ fn spawn_map(
 
         let floor_color = Color::srgb(floor_rgb.0, floor_rgb.1, floor_rgb.2);
         let wall_base_color = Color::srgb(wall_base_rgb.0, wall_base_rgb.1, wall_base_rgb.2);
-        let door_color = Color::srgb(door_rgb.0, door_rgb.1, door_rgb.2);
         let water_color = Color::srgb(water_rgb.0, water_rgb.1, water_rgb.2);
         let mountain_color = Color::srgb(mountain_rgb.0, mountain_rgb.1, mountain_rgb.2);
         let _forest_color = Color::srgb(forest_rgb.0, forest_rgb.1, forest_rgb.2);
@@ -967,49 +909,7 @@ fn spawn_map(
                                 TileCoord(pos),
                             ));
                         }
-                        world::WallType::Door => {
-                            // Use per-tile visual metadata for dimensions
-                            let (width_x, height, width_z) =
-                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
-                            let mesh = get_or_create_mesh(
-                                &mut meshes,
-                                &mut mesh_cache,
-                                width_x,
-                                height,
-                                width_z,
-                            );
-                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
 
-                            // Apply color tint if specified
-                            let mut base_color = door_color;
-                            if let Some((r, g, b)) = tile.visual.color_tint {
-                                base_color =
-                                    Color::srgb(door_rgb.0 * r, door_rgb.1 * g, door_rgb.2 * b);
-                            }
-
-                            let material = materials.add(StandardMaterial {
-                                base_color,
-                                perceptual_roughness: 0.5,
-                                ..default()
-                            });
-
-                            // Apply rotation if specified
-                            let rotation = bevy::prelude::Quat::from_rotation_y(
-                                tile.visual.rotation_y_radians(),
-                            );
-                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
-                                .with_rotation(rotation);
-
-                            commands.spawn((
-                                Mesh3d(mesh),
-                                MeshMaterial3d(material),
-                                transform,
-                                GlobalTransform::default(),
-                                Visibility::default(),
-                                MapEntity(map.id),
-                                TileCoord(pos),
-                            ));
-                        }
                         world::WallType::Torch => {
                             // Use per-tile visual metadata for dimensions
                             let (width_x, height, width_z) =
@@ -1287,26 +1187,47 @@ fn spawn_map(
                     );
                 }
                 world::MapEvent::Furniture {
+                    furniture_id,
                     furniture_type,
                     rotation_y,
                     scale,
                     material,
                     flags,
                     color_tint,
+                    key_item_id,
                     ..
                 } => {
+                    // Resolve final furniture properties: database template defaults
+                    // merged with per-instance inline overrides from the map event.
+                    let (
+                        resolved_type,
+                        resolved_material,
+                        resolved_scale,
+                        resolved_flags,
+                        resolved_tint,
+                    ) = resolve_furniture_fields(
+                        *furniture_id,
+                        *furniture_type,
+                        *material,
+                        *scale,
+                        flags,
+                        *color_tint,
+                        &content.0.furniture,
+                    );
+
                     procedural_meshes::spawn_furniture(
                         &mut commands,
                         &mut materials,
                         &mut meshes,
                         *position,
                         map.id,
-                        *furniture_type,
+                        resolved_type,
                         *rotation_y,
-                        *scale,
-                        *material,
-                        flags,
-                        *color_tint,
+                        resolved_scale,
+                        resolved_material,
+                        &resolved_flags,
+                        resolved_tint,
+                        *key_item_id,
                         procedural_cache,
                     );
                 }
@@ -3980,5 +3901,103 @@ mod tests {
             state.0.time.day, time_before.day,
             "invalid map transition must not advance days"
         );
+    }
+
+    #[test]
+    fn test_map_event_furniture_ron_backward_compat_no_furniture_id() {
+        // Existing Furniture RON without furniture_id must parse with furniture_id: None.
+        use crate::domain::world::MapEvent;
+
+        let ron_str = r#"Furniture(
+            name: "Old Throne",
+            furniture_type: Throne,
+            rotation_y: Some(90.0),
+            scale: 1.2,
+        )"#;
+
+        let parsed: MapEvent = ron::from_str(ron_str).expect("parse from RON");
+        match parsed {
+            MapEvent::Furniture { furniture_id, .. } => {
+                assert_eq!(
+                    furniture_id, None,
+                    "Missing furniture_id must default to None for backward compat"
+                );
+            }
+            other => panic!("expected Furniture, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_event_furniture_ron_round_trip_with_furniture_id() {
+        // A Furniture event with furniture_id: Some(3) round-trips through RON correctly.
+        use crate::domain::world::{FurnitureMaterial, FurnitureType, MapEvent};
+
+        let event = MapEvent::Furniture {
+            name: "Royal Throne".to_string(),
+            furniture_id: Some(3),
+            furniture_type: FurnitureType::Throne,
+            rotation_y: Some(180.0),
+            scale: 1.5,
+            material: FurnitureMaterial::Gold,
+            flags: crate::domain::world::FurnitureFlags {
+                lit: false,
+                locked: false,
+                blocking: true,
+            },
+            color_tint: None,
+            key_item_id: None,
+        };
+
+        let serialised = ron::to_string(&event).expect("serialize to RON");
+        let parsed: MapEvent = ron::from_str(&serialised).expect("parse from RON");
+
+        match parsed {
+            MapEvent::Furniture {
+                furniture_id,
+                furniture_type,
+                name,
+                ..
+            } => {
+                assert_eq!(furniture_id, Some(3), "furniture_id must round-trip");
+                assert_eq!(
+                    furniture_type,
+                    FurnitureType::Throne,
+                    "furniture_type must round-trip"
+                );
+                assert_eq!(name, "Royal Throne", "name must round-trip");
+            }
+            other => panic!("expected Furniture, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_event_furniture_inline_fields_without_furniture_id() {
+        // When furniture_id is None, inline fields are used as-is (pure backward compat).
+        use crate::domain::world::{FurnitureMaterial, FurnitureType, MapEvent};
+
+        let ron_str = r#"Furniture(
+            name: "Stone Bench",
+            furniture_type: Bench,
+            material: Stone,
+            scale: 0.8,
+            flags: (lit: false, locked: false, blocking: false),
+        )"#;
+
+        let parsed: MapEvent = ron::from_str(ron_str).expect("parse from RON");
+        match parsed {
+            MapEvent::Furniture {
+                furniture_id,
+                furniture_type,
+                material,
+                scale,
+                ..
+            } => {
+                assert_eq!(furniture_id, None, "No furniture_id → None");
+                assert_eq!(furniture_type, FurnitureType::Bench);
+                assert_eq!(material, FurnitureMaterial::Stone);
+                assert!((scale - 0.8).abs() < f32::EPSILON);
+            }
+            other => panic!("expected Furniture, got {:?}", other),
+        }
     }
 }

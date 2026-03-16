@@ -49,6 +49,18 @@ pub type CreatureId = u32;
 /// Mesh identifier (for individual meshes within a creature)
 pub type MeshId = u32;
 
+/// Furniture definition identifier
+///
+/// Used to reference `FurnitureDefinition` entries in `FurnitureDatabase`.
+/// IDs are assigned per-campaign starting at 1.
+pub type FurnitureId = u32;
+
+/// Furniture mesh identifier (for custom OBJ-imported meshes)
+///
+/// References entries in `furniture_mesh_registry.ron`.
+/// Conventionally in the 10000+ range to avoid collisions with creature IDs.
+pub type FurnitureMeshId = u32;
+
 // ===== Position =====
 
 /// 2D position on a map

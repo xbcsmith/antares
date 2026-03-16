@@ -47,6 +47,8 @@ pub(crate) enum ObjImporterUiSignal {
     CreatureExported,
     /// An item asset was exported.
     ItemExported,
+    /// A furniture mesh asset was exported.
+    FurnitureExported,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,7 +98,7 @@ pub(crate) fn show_obj_importer_tab(
     logger: &mut Logger,
 ) -> Option<ObjImporterUiSignal> {
     ui.heading("OBJ Importer");
-    ui.label("Load a Wavefront OBJ, adjust mesh colors, then export a creature or item RON asset.");
+    ui.label("Load a Wavefront OBJ, adjust mesh colors, then export a creature, item, or furniture RON asset.");
 
     if !state.status_message.is_empty() {
         ui.add_space(4.0);
@@ -171,7 +173,19 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
                 {
                     ui.ctx().request_repaint();
                 }
+                if ui
+                    .radio_value(&mut state.export_type, ExportType::Furniture, "Furniture")
+                    .changed()
+                {
+                    ui.ctx().request_repaint();
+                }
             });
+            ui.end_row();
+
+            ui.label("Category:");
+            if ui.text_edit_singleline(&mut state.category).changed() {
+                ui.ctx().request_repaint();
+            }
             ui.end_row();
 
             ui.label("Scale:");
@@ -271,14 +285,38 @@ fn render_loaded_mode(
                 {
                     ui.ctx().request_repaint();
                 }
+                if ui
+                    .radio_value(&mut state.export_type, ExportType::Furniture, "Furniture")
+                    .changed()
+                {
+                    ui.ctx().request_repaint();
+                }
             });
             ui.end_row();
 
             ui.label("ID:");
-            if ui
-                .add(egui::DragValue::new(&mut state.creature_id).range(0..=u32::MAX))
-                .changed()
-            {
+            match state.export_type {
+                ExportType::Furniture => {
+                    if ui
+                        .add(egui::DragValue::new(&mut state.furniture_id).range(0..=u32::MAX))
+                        .changed()
+                    {
+                        ui.ctx().request_repaint();
+                    }
+                }
+                ExportType::Creature | ExportType::Item => {
+                    if ui
+                        .add(egui::DragValue::new(&mut state.creature_id).range(0..=u32::MAX))
+                        .changed()
+                    {
+                        ui.ctx().request_repaint();
+                    }
+                }
+            }
+            ui.end_row();
+
+            ui.label("Category:");
+            if ui.text_edit_singleline(&mut state.category).changed() {
                 ui.ctx().request_repaint();
             }
             ui.end_row();
@@ -307,7 +345,11 @@ fn render_loaded_mode(
             ui.monospace(preview_export_relative_path(
                 state.export_type,
                 &state.creature_name,
-                state.creature_id,
+                match state.export_type {
+                    ExportType::Furniture => state.furniture_id,
+                    ExportType::Creature | ExportType::Item => state.creature_id,
+                },
+                &state.category,
             ));
             ui.end_row();
         });
@@ -366,6 +408,7 @@ fn render_loaded_mode(
                     let signal = match outcome.export_type {
                         ExportType::Creature => ObjImporterUiSignal::CreatureExported,
                         ExportType::Item => ObjImporterUiSignal::ItemExported,
+                        ExportType::Furniture => ObjImporterUiSignal::FurnitureExported,
                     };
                     logger.info(category::FILE_IO, &outcome.status_message);
                     state.clear();
@@ -1093,9 +1136,16 @@ fn export_state_to_campaign(
     campaign_dir: Option<&Path>,
 ) -> Result<ExportOutcome, ObjImporterExportError> {
     let campaign_dir = campaign_dir.ok_or(ObjImporterExportError::MissingCampaignDir)?;
-    let creature = build_creature_definition(state)?;
-    let relative_path =
-        preview_export_relative_path(state.export_type, &creature.name, creature.id);
+    let mut creature = build_creature_definition(state)?;
+    if matches!(state.export_type, ExportType::Furniture) {
+        creature.id = state.furniture_id;
+    }
+    let relative_path = preview_export_relative_path(
+        state.export_type,
+        &creature.name,
+        creature.id,
+        &state.category,
+    );
     let absolute_path = campaign_dir.join(&relative_path);
 
     match state.export_type {
@@ -1104,6 +1154,13 @@ fn export_state_to_campaign(
             manager.save_creature_at_path(&relative_path, &creature)?;
         }
         ExportType::Item => {
+            if let Some(parent) = absolute_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let contents = ron::ser::to_string_pretty(&creature, ron::ser::PrettyConfig::new())?;
+            fs::write(&absolute_path, contents)?;
+        }
+        ExportType::Furniture => {
             if let Some(parent) = absolute_path.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -1124,11 +1181,31 @@ fn export_state_to_campaign(
     })
 }
 
-fn preview_export_relative_path(export_type: ExportType, name: &str, id: u32) -> String {
+fn preview_export_relative_path(
+    export_type: ExportType,
+    name: &str,
+    id: u32,
+    category: &str,
+) -> String {
     let file_stem = sanitized_export_stem(name, id, export_type);
+    let category_path = sanitize_category_path(category);
+
     match export_type {
         ExportType::Creature => format!("assets/creatures/{}.ron", file_stem),
-        ExportType::Item => format!("assets/items/{}.ron", file_stem),
+        ExportType::Item => {
+            if category_path.is_empty() {
+                format!("assets/items/{}.ron", file_stem)
+            } else {
+                format!("assets/items/{}/{}.ron", category_path, file_stem)
+            }
+        }
+        ExportType::Furniture => {
+            if category_path.is_empty() {
+                format!("assets/furniture/{}.ron", file_stem)
+            } else {
+                format!("assets/furniture/{}/{}.ron", category_path, file_stem)
+            }
+        }
     }
 }
 
@@ -1149,16 +1226,40 @@ fn sanitized_export_stem(name: &str, id: u32, export_type: ExportType) -> String
         match export_type {
             ExportType::Creature => format!("creature_{}", id),
             ExportType::Item => format!("item_{}", id),
+            ExportType::Furniture => format!("furniture_{}", id),
         }
     } else {
         sanitized
     }
 }
 
+fn sanitize_category_path(category: &str) -> String {
+    category
+        .split('/')
+        .map(|segment| {
+            let mut sanitized = segment
+                .trim()
+                .to_ascii_lowercase()
+                .chars()
+                .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+                .collect::<String>();
+
+            while sanitized.contains("__") {
+                sanitized = sanitized.replace("__", "_");
+            }
+
+            sanitized.trim_matches('_').to_string()
+        })
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn export_type_label(export_type: ExportType) -> &'static str {
     match export_type {
         ExportType::Creature => "creature",
         ExportType::Item => "item",
+        ExportType::Furniture => "furniture",
     }
 }
 
@@ -1293,12 +1394,20 @@ mod tests {
     #[test]
     fn test_preview_export_relative_path_uses_expected_directories() {
         assert_eq!(
-            preview_export_relative_path(ExportType::Creature, "Stone Golem", 44),
+            preview_export_relative_path(ExportType::Creature, "Stone Golem", 44, ""),
             "assets/creatures/stone_golem.ron"
         );
         assert_eq!(
-            preview_export_relative_path(ExportType::Item, "", 9),
+            preview_export_relative_path(ExportType::Item, "", 9, ""),
             "assets/items/item_9.ron"
+        );
+        assert_eq!(
+            preview_export_relative_path(ExportType::Item, "Sword", 9, "Weapons"),
+            "assets/items/weapons/sword.ron"
+        );
+        assert_eq!(
+            preview_export_relative_path(ExportType::Furniture, "Oak Table", 10001, "Tables"),
+            "assets/furniture/tables/oak_table.ron"
         );
     }
 

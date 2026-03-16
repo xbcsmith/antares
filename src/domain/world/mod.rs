@@ -17,11 +17,13 @@
 //! - `events`: Map event handling system
 //! - `sprite_selection`: Procedural sprite selection (Phase 6)
 //! - `dropped_items`: Domain record for items lying on the ground ([`DroppedItem`])
+//! - `furniture`: Data-driven furniture definitions ([`FurnitureDefinition`], [`FurnitureDatabase`])
 
 pub mod blueprint;
 pub mod creature_binding;
 pub mod dropped_items;
 mod events;
+pub mod furniture;
 mod movement;
 pub mod npc;
 pub mod npc_runtime;
@@ -32,6 +34,9 @@ pub use blueprint::MapBlueprint;
 pub use creature_binding::CreatureBound;
 pub use dropped_items::DroppedItem;
 pub use events::{random_encounter, trigger_event, EventError, EventResult};
+pub use furniture::{
+    FurnitureDatabase, FurnitureDatabaseError, FurnitureDefinition, FurnitureMeshDatabase,
+};
 pub use movement::{check_tile_blocked, move_party, MovementError};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};
 pub use npc_runtime::{

@@ -882,7 +882,7 @@
         [
             (
                 terrain: Stone,
-                wall_type: Door,
+                wall_type: r#None,
                 blocked: false,
                 is_special: false,
                 is_dark: false,
@@ -1583,7 +1583,7 @@
             ),
             (
                 terrain: Stone,
-                wall_type: Door,
+                wall_type: r#None,
                 blocked: false,
                 is_special: false,
                 is_dark: false,

@@ -40,6 +40,7 @@ use crate::domain::magic::types::Spell;
 use crate::domain::quest::{Quest, QuestId};
 use crate::domain::races::{RaceDatabase, RaceError};
 use crate::domain::types::{MapId, MonsterId, SpellId};
+use crate::domain::world::furniture::FurnitureDatabase;
 use crate::domain::world::{Map, MapBlueprint};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -86,6 +87,9 @@ pub enum DatabaseError {
 
     #[error("Failed to load NPC stock templates: {0}")]
     NpcStockTemplateLoadError(String),
+
+    #[error("Failed to load furniture: {0}")]
+    FurnitureLoadError(String),
 
     #[error("Failed to load map {map_id}: {error}")]
     MapLoadError { map_id: String, error: String },
@@ -1034,6 +1038,12 @@ pub struct ContentDatabase {
     /// Loaded from `npc_stock_templates.ron` in the data or campaign directory.
     /// Used to initialize the runtime stock for merchant NPCs when a session begins.
     pub npc_stock_templates: crate::domain::world::npc_runtime::MerchantStockTemplateDatabase,
+
+    /// Furniture definition database — named, reusable furniture templates
+    ///
+    /// Loaded from `data/furniture.ron` in the campaign directory.
+    /// Missing file is not an error — furniture support is opt-in per campaign.
+    pub furniture: FurnitureDatabase,
 }
 
 impl ContentDatabase {
@@ -1063,6 +1073,7 @@ impl ContentDatabase {
             creatures: crate::domain::visual::creature_database::CreatureDatabase::new(),
             npc_stock_templates:
                 crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new(),
+            furniture: FurnitureDatabase::new(),
         }
     }
 
@@ -1221,6 +1232,14 @@ impl ContentDatabase {
             crate::domain::visual::creature_database::CreatureDatabase::new()
         };
 
+        // Load furniture definitions (opt-in per campaign; missing file is not an error)
+        let furniture = if data_dir.join("furniture.ron").exists() {
+            FurnitureDatabase::load_from_file(data_dir.join("furniture.ron"))
+                .map_err(|e| DatabaseError::FurnitureLoadError(e.to_string()))?
+        } else {
+            FurnitureDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -1235,6 +1254,7 @@ impl ContentDatabase {
             npcs,
             npc_stock_templates,
             creatures,
+            furniture,
         })
     }
 
@@ -1363,6 +1383,14 @@ impl ContentDatabase {
             crate::domain::visual::creature_database::CreatureDatabase::new()
         };
 
+        // Load furniture definitions (opt-in per campaign; missing file is not an error)
+        let furniture = if data_path.join("furniture.ron").exists() {
+            FurnitureDatabase::load_from_file(data_path.join("furniture.ron"))
+                .map_err(|e| DatabaseError::FurnitureLoadError(e.to_string()))?
+        } else {
+            FurnitureDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -1377,6 +1405,7 @@ impl ContentDatabase {
             npcs,
             npc_stock_templates,
             creatures,
+            furniture,
         })
     }
 

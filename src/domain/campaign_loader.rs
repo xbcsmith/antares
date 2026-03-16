@@ -29,6 +29,7 @@ use thiserror::Error;
 
 use crate::domain::items::database::ItemMeshDatabase;
 use crate::domain::visual::creature_database::CreatureDatabase;
+use crate::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
 
 /// Campaign validation errors
 #[derive(Debug, Error)]
@@ -77,14 +78,19 @@ pub enum CampaignError {
 /// use antares::domain::campaign_loader::GameData;
 /// use antares::domain::visual::creature_database::CreatureDatabase;
 /// use antares::domain::items::database::ItemMeshDatabase;
+/// use antares::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
 ///
 /// let game_data = GameData {
 ///     creatures: CreatureDatabase::new(),
 ///     item_meshes: ItemMeshDatabase::new(),
+///     furniture: FurnitureDatabase::new(),
+///     furniture_meshes: FurnitureMeshDatabase::new(),
 /// };
 ///
 /// assert!(game_data.creatures.is_empty());
 /// assert!(game_data.item_meshes.is_empty());
+/// assert!(game_data.furniture.is_empty());
+/// assert!(game_data.furniture_meshes.is_empty());
 /// ```
 #[derive(Debug, Clone)]
 pub struct GameData {
@@ -92,6 +98,10 @@ pub struct GameData {
     pub creatures: CreatureDatabase,
     /// Item mesh database — visual definitions for dropped items
     pub item_meshes: ItemMeshDatabase,
+    /// Furniture definition database — named, reusable furniture templates
+    pub furniture: FurnitureDatabase,
+    /// Furniture mesh database — custom OBJ-imported mesh definitions
+    pub furniture_meshes: FurnitureMeshDatabase,
 }
 
 impl GameData {
@@ -110,6 +120,8 @@ impl GameData {
         Self {
             creatures: CreatureDatabase::new(),
             item_meshes: ItemMeshDatabase::new(),
+            furniture: FurnitureDatabase::new(),
+            furniture_meshes: FurnitureMeshDatabase::new(),
         }
     }
 
@@ -128,6 +140,14 @@ impl GameData {
         self.item_meshes
             .validate()
             .map_err(|e| CampaignError::ValidationFailed(format!("Item mesh validation: {}", e)))?;
+
+        // Furniture database has no external references to validate in Phase 1;
+        // an empty database is always valid.
+
+        // Validate furniture mesh database
+        self.furniture_meshes.validate().map_err(|e| {
+            CampaignError::ValidationFailed(format!("Furniture mesh validation: {}", e))
+        })?;
 
         Ok(())
     }
@@ -216,6 +236,12 @@ impl CampaignLoader {
         // Load item mesh registry (opt-in per campaign; missing file is OK)
         game_data.item_meshes = self.load_item_meshes()?;
 
+        // Load furniture definitions (opt-in per campaign; missing file is OK)
+        game_data.furniture = self.load_furniture()?;
+
+        // Load furniture mesh registry (opt-in per campaign; missing file is OK)
+        game_data.furniture_meshes = self.load_furniture_meshes()?;
+
         // Validate all loaded data
         game_data.validate()?;
 
@@ -277,6 +303,34 @@ impl CampaignLoader {
         }
     }
 
+    /// Loads furniture definitions from the campaign.
+    ///
+    /// Looks for `data/furniture.ron` inside the campaign directory.
+    /// If the file does not exist the function returns an empty
+    /// [`FurnitureDatabase`] without error — furniture definition support is
+    /// opt-in per campaign.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CampaignError::ReadError` if the file exists but cannot be
+    /// read, or `CampaignError::ParseError` if it cannot be parsed.
+    fn load_furniture(&self) -> Result<FurnitureDatabase, CampaignError> {
+        let furniture_path = self.campaign_path.join("data/furniture.ron");
+
+        if !furniture_path.exists() {
+            // Missing furniture.ron is not an error — campaign simply has no furniture definitions
+            return Ok(FurnitureDatabase::new());
+        }
+
+        FurnitureDatabase::load_from_file(&furniture_path).map_err(|e| {
+            CampaignError::ReadError(format!(
+                "furniture.ron '{}': {}",
+                furniture_path.display(),
+                e
+            ))
+        })
+    }
+
     /// Loads item mesh database from campaign.
     ///
     /// Looks for `data/item_mesh_registry.ron` inside the campaign directory.
@@ -303,6 +357,36 @@ impl CampaignLoader {
                 e
             ))
         })
+    }
+
+    /// Loads furniture mesh database from campaign.
+    ///
+    /// Looks for `data/furniture_mesh_registry.ron` inside the campaign
+    /// directory. If the file does not exist the function returns an empty
+    /// [`FurnitureMeshDatabase`] without error — furniture mesh support is
+    /// opt-in per campaign.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CampaignError::ReadError` if the registry file exists but
+    /// cannot be read, or `CampaignError::ParseError` if it cannot be parsed.
+    fn load_furniture_meshes(&self) -> Result<FurnitureMeshDatabase, CampaignError> {
+        let registry_path = self.campaign_path.join("data/furniture_mesh_registry.ron");
+
+        if !registry_path.exists() {
+            // Missing registry is not an error — campaign simply has no furniture meshes
+            return Ok(FurnitureMeshDatabase::new());
+        }
+
+        FurnitureMeshDatabase::load_from_registry(&registry_path, &self.campaign_path).map_err(
+            |e| {
+                CampaignError::ReadError(format!(
+                    "Furniture mesh registry '{}': {}",
+                    registry_path.display(),
+                    e
+                ))
+            },
+        )
     }
 
     /// Loads a data file with override support
@@ -354,6 +438,7 @@ mod tests {
         let data = GameData::new();
         assert!(data.creatures.is_empty());
         assert!(data.item_meshes.is_empty());
+        assert!(data.furniture.is_empty());
     }
 
     #[test]
@@ -361,6 +446,7 @@ mod tests {
         let data = GameData::default();
         assert!(data.creatures.is_empty());
         assert!(data.item_meshes.is_empty());
+        assert!(data.furniture.is_empty());
     }
 
     #[test]
@@ -429,6 +515,41 @@ mod tests {
         assert!(
             result.is_ok(),
             "Expected empty ItemMeshDatabase when registry is absent"
+        );
+        assert!(result.unwrap().is_empty());
+    }
+
+    /// §1.5 — loads `data/test_campaign` and asserts furniture database has ≥ 11 entries.
+    #[test]
+    fn test_campaign_loader_loads_furniture() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let base = std::path::PathBuf::from(manifest_dir).join("data");
+        let campaign = base.join("test_campaign");
+
+        let mut loader = CampaignLoader::new(base, campaign);
+        let result = loader.load_game_data();
+        assert!(result.is_ok(), "load_game_data failed: {:?}", result.err());
+
+        let game_data = result.unwrap();
+        assert!(
+            game_data.furniture.len() >= 11,
+            "Expected ≥ 11 furniture definitions, got {}",
+            game_data.furniture.len()
+        );
+    }
+
+    /// §1.5 — a campaign without `furniture.ron` loads without error and returns empty database.
+    #[test]
+    fn test_furniture_missing_is_ok() {
+        let loader = CampaignLoader::new(
+            PathBuf::from("nonexistent_data"),
+            PathBuf::from("nonexistent_campaign"),
+        );
+
+        let result = loader.load_furniture();
+        assert!(
+            result.is_ok(),
+            "Expected empty FurnitureDatabase when furniture.ron is absent"
         );
         assert!(result.unwrap().is_empty());
     }
