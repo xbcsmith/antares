@@ -1,5 +1,95 @@
 # Implementations
 
+## Phase 3: Doors as Furniture — Door Interaction and State Management (Complete)
+
+### Overview
+
+Implements Phase 3 of the doors-as-furniture migration described in
+`docs/explanation/doors_as_furniture_implementation_plan.md`. This phase
+replaces the old tile-mutation door model with a proper ECS-based door state
+component, wires open/close interaction through the existing `handle_input`
+system, syncs tile blocking, and surfaces `MovementError::DoorLocked` semantics
+at the input layer.
+
+After Phase 3, furniture doors placed via `MapEvent::Furniture { furniture_type:
+Door, .. }` are fully interactive:
+
+- Pressing the interact key while facing a furniture door toggles it open/closed
+  and rotates the door panel 90° around its Y axis.
+- Closed doors set `tile.blocked = true`; open doors set it to `false`.
+- Locked doors (initialized from `FurnitureFlags.locked`) display "The door is
+  locked." and refuse to open — unless the party carries the `key_item_id` item,
+  in which case the door is unlocked and opened in one action.
+- Moving forward into a locked, closed furniture door is blocked at the input
+  layer with a "The door is locked." message.
+- The legacy `WallType::Door` tile-mutation path is preserved unchanged as a
+  fallback for un-migrated maps (Phase 4 removes it).
+
+### Files Changed
+
+| File                                      | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/components/furniture.rs`        | Added `DoorState` component (`is_open`, `is_locked`, `key_item_id`, `base_rotation_y`), `Default` impl, constructor `DoorState::new(is_locked, base_rotation_y)`, and 8 unit tests                                                                                                                                                                                                                                                                                |
+| `src/game/components/mod.rs`              | Re-exported `DoorState` from the `furniture` sub-module                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `src/game/systems/furniture_rendering.rs` | Imported `DoorState`; in the `FurnitureType::Door` arm of `spawn_furniture_with_rendering()`, inserted `DoorState::new(flags.locked, rotation_radians)` onto the door entity so runtime-spawned doors carry state                                                                                                                                                                                                                                                 |
+| `src/game/systems/procedural_meshes.rs`   | Imported `FurnitureEntity`, `DoorState`, `Interactable`, `InteractionType` from `game::components::furniture`; in the `FurnitureType::Door` arm of `spawn_furniture()`, inserted a bundle of `(FurnitureEntity, DoorState, Interactable)` so map-loaded doors are interactable without calling `spawn_furniture_with_rendering`                                                                                                                                   |
+| `src/game/systems/input.rs`               | Added `door_entity_query: Query<(&mut FurnitureEntity, &mut DoorState, &mut Transform, &TileCoord)>` and `game_log: Option<ResMut<GameLog>>` parameters to `handle_input`; added Phase 3 furniture door interaction block (open/close toggle, unlock-with-key, tile blocking sync, Transform rotation) before the legacy `WallType::Door` path; added locked-door guard before MoveForward movement; added `mod door_interaction_tests` with 10 integration tests |
+
+### Design Decisions
+
+**`DoorState` component (not tile mutation)**
+Door open/closed state now lives on the ECS entity as a `DoorState` component
+rather than being encoded in `tile.wall_type`. This preserves re-close
+semantics (the door can be closed again), enables locked-door logic, and
+decouples visual state from map data.
+
+**`base_rotation_y` field**
+Doors are placed at arbitrary Y rotations. Storing the base rotation in
+`DoorState` lets the system restore the closed angle on close without needing
+to track the prior quaternion.
+
+**Furniture door interaction takes priority over legacy path**
+The Phase 3 furniture door check runs _before_ the `WallType::Door` tile check.
+Once Phase 4 migrates all map data, the legacy path can be deleted without
+changing the Phase 3 interaction logic.
+
+**`spawn_furniture` vs `spawn_furniture_with_rendering`**
+Both spawning paths now attach `DoorState` (and `FurnitureEntity` / `Interactable`
+for `spawn_furniture`) so doors are interactable regardless of whether they were
+created during map load or via a runtime `MapEvent`.
+
+**No `DoorOpenedEvent` for furniture doors**
+Furniture doors update their own `Transform` and `tile.blocked` in-place. There
+is no need to fire `DoorOpenedEvent` (which triggers a full map despawn/respawn).
+The event is still fired by the legacy `WallType::Door` path.
+
+### Phase 3 Deliverables Checklist
+
+- [x] `DoorState` component with `is_open`, `is_locked`, `key_item_id`, `base_rotation_y`
+- [x] `DoorState` attached in `spawn_furniture_with_rendering()` Door arm
+- [x] `DoorState` + `FurnitureEntity` + `Interactable` attached in `spawn_furniture()` Door arm
+- [x] Input system furniture-door interaction path (toggle open/close, Transform rotation, tile blocking)
+- [x] Locked door key check against party inventory
+- [x] `MovementError::DoorLocked` surfaced at input layer (locked door blocks MoveForward)
+- [x] "The door is locked." `GameLog` message on failed interaction or movement
+- [x] Legacy `WallType::Door` path preserved unchanged
+- [x] 10 integration tests + 8 unit tests — all passing
+
+### Quality Gates
+
+```
+cargo fmt         → clean (no changes)
+cargo check       → Finished — 0 errors
+cargo clippy      → Finished — 0 warnings (-D warnings)
+cargo nextest run → 3639 / 3644 passed (5 pre-existing failures unrelated to Phase 3)
+```
+
+The 5 pre-existing failures are missing furniture mesh asset files
+(`assets/furniture/tables/oak_table.ron`) and a tutorial creature fixture — all
+present before this phase and documented in the Phase 2 entry below.
+
+---
+
 ## Phase 2: Doors as Furniture — Door Frame Procedural Mesh (Complete)
 
 ### Overview

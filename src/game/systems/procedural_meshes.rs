@@ -13,6 +13,9 @@ use super::map::{MapEntity, TileCoord};
 use crate::domain::types::{self, CreatureId};
 use crate::domain::world;
 use crate::domain::world::TileVisualMetadata;
+use crate::game::components::furniture::{
+    DoorState, FurnitureEntity, Interactable, InteractionType,
+};
 use bevy::color::LinearRgba;
 use bevy::prelude::*;
 use rand::Rng;
@@ -4283,6 +4286,14 @@ pub fn spawn_furniture(
                 cache,
                 rotation_y,
             );
+            // Attach interaction components so map-loaded doors can be queried
+            // and interacted with through handle_input (Phase 3).
+            let rotation_radians = rotation_y.unwrap_or(0.0_f32).to_radians();
+            commands.entity(door_entity).insert((
+                FurnitureEntity::new(world::FurnitureType::Door, flags.blocking),
+                DoorState::new(flags.locked, rotation_radians),
+                Interactable::with_distance(InteractionType::OpenDoor, 1.5),
+            ));
             door_entity
         }
     }

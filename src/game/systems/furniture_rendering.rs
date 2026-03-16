@@ -16,7 +16,7 @@ use crate::domain::types::{self, FurnitureId};
 use crate::domain::visual::CreatureDefinition;
 use crate::domain::world::furniture::FurnitureDatabase;
 use crate::domain::world::{DoorFrameConfig, FurnitureFlags, FurnitureMaterial, FurnitureType};
-use crate::game::components::{FurnitureEntity, Interactable, InteractionType};
+use crate::game::components::{DoorState, FurnitureEntity, Interactable, InteractionType};
 use crate::game::systems::procedural_meshes::{
     spawn_bench, spawn_chair, spawn_chest, spawn_door_with_frame, spawn_table, spawn_throne,
     spawn_torch, BenchConfig, ChairConfig, ChestConfig, DoorConfig, ProceduralMeshCache,
@@ -433,6 +433,13 @@ pub fn spawn_furniture_with_rendering(
                 cache,
                 rotation_y,
             );
+            // Attach DoorState so the interaction system can track open/locked state.
+            // base_rotation_y is the initial Y rotation of the door entity (in radians),
+            // used to restore the closed visual when the door is shut again.
+            let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
+            commands
+                .entity(door_entity)
+                .insert(DoorState::new(flags.locked, rotation_radians));
             door_entity
         }
     };

@@ -37,6 +37,8 @@ use crate::application::dialogue::RecruitmentContext;
 use crate::domain::types::Position;
 use crate::domain::world::{MapEvent, WallType};
 use crate::game::components::dialogue::NpcDialogue;
+use crate::game::components::furniture::DoorState;
+use crate::game::components::FurnitureEntity;
 use crate::game::resources::GlobalState;
 use crate::game::systems::dialogue::{PendingRecruitmentContext, StartDialogue};
 use crate::game::systems::events::MapEventTriggered;
@@ -444,6 +446,16 @@ fn handle_input(
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
     dialogue_query: Query<&NpcDialogue>,
     game_content: Option<Res<crate::application::resources::GameContent>>,
+    // Query for furniture door entities — provides open/locked state and
+    // allows toggling the door transform without a full map respawn.
+    mut door_entity_query: Query<(
+        &mut FurnitureEntity,
+        &mut DoorState,
+        &mut Transform,
+        &TileCoord,
+    )>,
+    // Optional game log for player-visible feedback messages (e.g. "Door is locked.")
+    mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
 ) {
     let current_time = time.elapsed_secs();
     let cooldown = input_config.controls.movement_cooldown;
@@ -611,6 +623,93 @@ fn handle_input(
 
         // Door interaction - check if there's a door in front of the party
         let target = world.position_ahead();
+
+        // ── Phase 3: Furniture door interaction ───────────────────────────
+        // Check for a furniture-based door entity at the tile ahead BEFORE the
+        // legacy WallType::Door path so migrated doors are handled first.
+        // Using a local flag to avoid holding query borrows across the `return`.
+        {
+            let mut furniture_door_handled = false;
+            for (mut furniture_entity, mut door_state, mut door_transform, tile_coord) in
+                door_entity_query.iter_mut()
+            {
+                if tile_coord.0 != target {
+                    continue;
+                }
+                furniture_door_handled = true;
+
+                if door_state.is_locked {
+                    // Check if any party member carries the required key.
+                    let can_unlock = door_state.key_item_id.is_some_and(|key_id| {
+                        game_state.party.members.iter().any(|member| {
+                            member
+                                .inventory
+                                .items
+                                .iter()
+                                .any(|slot| slot.item_id == key_id)
+                        })
+                    });
+
+                    if can_unlock {
+                        // Unlock and open in one action.
+                        door_state.is_locked = false;
+                        door_state.is_open = true;
+                        furniture_entity.blocking = false;
+                        door_transform.rotation = Quat::from_rotation_y(
+                            door_state.base_rotation_y + std::f32::consts::FRAC_PI_2,
+                        );
+                        if let Some(map) = world.get_current_map_mut() {
+                            if let Some(tile) = map.get_tile_mut(tile_coord.0) {
+                                tile.blocked = false;
+                            }
+                        }
+                        info!("Unlocked and opened furniture door at {:?}", target);
+                    } else {
+                        let msg = "The door is locked.".to_string();
+                        info!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                    }
+                } else {
+                    // Toggle open ↔ closed.
+                    door_state.is_open = !door_state.is_open;
+                    furniture_entity.blocking = !door_state.is_open;
+
+                    let angle = if door_state.is_open {
+                        door_state.base_rotation_y + std::f32::consts::FRAC_PI_2
+                    } else {
+                        door_state.base_rotation_y
+                    };
+                    door_transform.rotation = Quat::from_rotation_y(angle);
+
+                    // Sync tile blocked state so movement checks are accurate.
+                    if let Some(map) = world.get_current_map_mut() {
+                        if let Some(tile) = map.get_tile_mut(tile_coord.0) {
+                            tile.blocked = !door_state.is_open;
+                        }
+                    }
+
+                    info!(
+                        "{} furniture door at {:?}",
+                        if door_state.is_open {
+                            "Opened"
+                        } else {
+                            "Closed"
+                        },
+                        target
+                    );
+                }
+                break;
+            }
+
+            if furniture_door_handled {
+                return; // Door handled; don't fall through to other checks
+            }
+        }
+
+        // ── Legacy: WallType::Door tile interaction ────────────────────────
+        // Kept as a fallback for un-migrated maps. Phase 4 removes this path.
         if let Some(map) = world.get_current_map_mut() {
             if let Some(tile) = map.get_tile_mut(target) {
                 if tile.wall_type == WallType::Door {
@@ -758,7 +857,20 @@ fn handle_input(
         .is_action_pressed(GameAction::MoveForward, &keyboard_input)
     {
         let target = world.position_ahead();
-        if let Some(map) = world.get_current_map() {
+
+        // Phase 3: deny movement into a locked furniture door, surfacing
+        // MovementError::DoorLocked semantics at the input layer.
+        let locked_door_ahead = door_entity_query
+            .iter()
+            .any(|(_, ds, _, tc)| tc.0 == target && ds.is_locked && !ds.is_open);
+
+        if locked_door_ahead {
+            let msg = "The door is locked.".to_string();
+            info!("{}", msg);
+            if let Some(ref mut log) = game_log {
+                log.add(msg);
+            }
+        } else if let Some(map) = world.get_current_map() {
             if !map.is_blocked(target) {
                 world.set_party_position(target);
                 moved = true;
@@ -2180,6 +2292,421 @@ mod combat_guard_tests {
             overlay_query.iter(app.world()).count(),
             0,
             "Victory overlay must be dismissed after movement"
+        );
+    }
+}
+
+#[cfg(test)]
+mod door_interaction_tests {
+    use super::*;
+    use crate::domain::world::Map;
+    use crate::game::components::furniture::{DoorState, FurnitureEntity};
+    use crate::game::systems::map::TileCoord;
+    use bevy::prelude::{App, ButtonInput, Entity, KeyCode, Transform, Update};
+
+    /// Helper: build a minimal app wired for furniture-door interaction tests.
+    ///
+    /// World: 10×10 map, party at (5, 5).  Party facing defaults to North,
+    /// so `world.position_ahead()` → (5, 4).
+    fn build_door_test_app() -> App {
+        let mut app = App::new();
+
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        // Zero cooldown so input fires on the first update.
+        let cfg = ControlsConfig {
+            movement_cooldown: 0.0,
+            ..ControlsConfig::default()
+        };
+        let key_map = KeyMap::from_controls_config(&cfg);
+        app.insert_resource(InputConfigResource {
+            controls: cfg,
+            key_map,
+        });
+
+        let mut gs = crate::application::GameState::new();
+        let map = Map::new(1, "DoorTestMap".to_string(), "Test".to_string(), 10, 10);
+        gs.world.add_map(map);
+        gs.world.set_current_map(1);
+        gs.world.set_party_position(Position::new(5, 5));
+        // Default party_facing is North → position_ahead() == (5, 4).
+
+        app.insert_resource(GlobalState(gs));
+        app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
+        app.insert_resource(PendingRecruitmentContext::default());
+
+        app.add_message::<DoorOpenedEvent>();
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<StartDialogue>();
+        app.add_message::<InitiateRestEvent>();
+
+        app.add_systems(Update, handle_input);
+        app
+    }
+
+    /// Spawn a furniture door entity at `position` with the given locked state.
+    /// Returns the spawned entity ID.
+    fn spawn_door_entity(app: &mut App, position: Position, is_locked: bool) -> Entity {
+        app.world_mut()
+            .spawn((
+                FurnitureEntity::new(crate::domain::world::FurnitureType::Door, !is_locked),
+                DoorState::new(is_locked, 0.0),
+                Transform::default(),
+                TileCoord(position),
+            ))
+            .id()
+    }
+
+    /// Resolve the interact `KeyCode` from the default `ControlsConfig`.
+    fn interact_key() -> KeyCode {
+        let cfg = ControlsConfig::default();
+        parse_key_code(&cfg.interact[0]).expect("default interact key must be parseable")
+    }
+
+    /// Resolve the move-forward `KeyCode` from the default `ControlsConfig`.
+    fn move_forward_key() -> KeyCode {
+        let cfg = ControlsConfig::default();
+        parse_key_code(&cfg.move_forward[0]).expect("default move_forward key must be parseable")
+    }
+
+    // ── Phase 3 Unit-style tests (pure DoorState logic) ───────────────────
+
+    /// `DoorState::new(false, 0.0)` produces a closed, unlocked door with no key.
+    #[test]
+    fn test_door_state_component_default_values() {
+        let door = DoorState::default();
+        assert!(!door.is_open);
+        assert!(!door.is_locked);
+        assert!(door.key_item_id.is_none());
+        assert_eq!(door.base_rotation_y, 0.0);
+    }
+
+    /// Open angle is base + π/2; closed angle restores base.
+    #[test]
+    fn test_door_state_rotation_angles() {
+        let base = std::f32::consts::PI;
+        let door = DoorState::new(false, base);
+
+        let open_angle = door.base_rotation_y + std::f32::consts::FRAC_PI_2;
+        let closed_angle = door.base_rotation_y;
+        assert!((open_angle - (base + std::f32::consts::FRAC_PI_2)).abs() < 1e-6);
+        assert!((closed_angle - base).abs() < 1e-6);
+    }
+
+    // ── Phase 3 Integration tests (Bevy headless App) ─────────────────────
+
+    /// Pressing interact on an unlocked furniture door opens it.
+    #[test]
+    fn test_furniture_door_opens_on_interact() {
+        let mut app = build_door_test_app();
+
+        // Door directly north of the party (= position_ahead when facing North).
+        let door_pos = Position::new(5, 4);
+        let door_entity = spawn_door_entity(&mut app, door_pos, false);
+
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(interact_key());
+        }
+        app.update();
+
+        let door_state = app
+            .world()
+            .entity(door_entity)
+            .get::<DoorState>()
+            .expect("DoorState must be on the door entity");
+        assert!(
+            door_state.is_open,
+            "Furniture door must be open after interact"
+        );
+        assert!(!door_state.is_locked, "Unlocked door must remain unlocked");
+    }
+
+    /// Pressing interact a second time on an open furniture door closes it.
+    #[test]
+    fn test_furniture_door_closes_on_second_interact() {
+        let mut app = build_door_test_app();
+        let door_pos = Position::new(5, 4);
+        let door_entity = spawn_door_entity(&mut app, door_pos, false);
+        let key = interact_key();
+
+        // First interact → open.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(key);
+        }
+        app.update();
+        {
+            let ds = app.world().entity(door_entity).get::<DoorState>().unwrap();
+            assert!(ds.is_open, "Door should be open after first interact");
+        }
+
+        // Second interact → close.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(key);
+        }
+        app.update();
+
+        let ds = app.world().entity(door_entity).get::<DoorState>().unwrap();
+        assert!(!ds.is_open, "Door must be closed after second interact");
+    }
+
+    /// Interacting with a locked door (no key) leaves it closed and locked.
+    #[test]
+    fn test_locked_furniture_door_stays_closed_without_key() {
+        let mut app = build_door_test_app();
+        let door_pos = Position::new(5, 4);
+        let door_entity = spawn_door_entity(&mut app, door_pos, true); // locked
+
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(interact_key());
+        }
+        app.update();
+
+        let ds = app.world().entity(door_entity).get::<DoorState>().unwrap();
+        assert!(
+            !ds.is_open,
+            "Locked door must stay closed when party has no key"
+        );
+        assert!(ds.is_locked, "Door must remain locked");
+    }
+
+    /// Locked door opens when a party member holds the matching key item.
+    #[test]
+    fn test_locked_door_opens_with_correct_key_in_inventory() {
+        const KEY_ITEM: crate::domain::types::ItemId = 77;
+        let mut app = build_door_test_app();
+
+        // Give the party a hero carrying key item 77.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            let mut hero = crate::domain::character::Character::new(
+                "Keyholder".to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                crate::domain::character::Sex::Male,
+                crate::domain::character::Alignment::Good,
+            );
+            hero.inventory.add_item(KEY_ITEM, 1).unwrap();
+            gs.0.party.add_member(hero).unwrap();
+        }
+
+        // Locked door that requires KEY_ITEM.
+        let door_pos = Position::new(5, 4);
+        let mut door_state = DoorState::new(true, 0.0);
+        door_state.key_item_id = Some(KEY_ITEM);
+        let door_entity = app
+            .world_mut()
+            .spawn((
+                FurnitureEntity::new(crate::domain::world::FurnitureType::Door, true),
+                door_state,
+                Transform::default(),
+                TileCoord(door_pos),
+            ))
+            .id();
+
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(interact_key());
+        }
+        app.update();
+
+        let ds = app.world().entity(door_entity).get::<DoorState>().unwrap();
+        assert!(
+            ds.is_open,
+            "Locked door must open when party carries the key"
+        );
+        assert!(!ds.is_locked, "Door must be unlocked after key is used");
+    }
+
+    /// Opening a furniture door unblocks the tile in the world data.
+    #[test]
+    fn test_furniture_door_open_unblocks_tile() {
+        let mut app = build_door_test_app();
+        let door_pos = Position::new(5, 4);
+
+        // Pre-block the tile to simulate an initially-closed door.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            if let Some(map) = gs.0.world.get_current_map_mut() {
+                if let Some(tile) = map.get_tile_mut(door_pos) {
+                    tile.blocked = true;
+                }
+            }
+        }
+
+        spawn_door_entity(&mut app, door_pos, false);
+
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(interact_key());
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        let tile =
+            gs.0.world
+                .get_current_map()
+                .unwrap()
+                .get_tile(door_pos)
+                .unwrap();
+        assert!(
+            !tile.blocked,
+            "Opening a furniture door must unblock the tile"
+        );
+    }
+
+    /// Closing an open furniture door re-blocks the tile in the world data.
+    #[test]
+    fn test_furniture_door_close_reblocks_tile() {
+        let mut app = build_door_test_app();
+        let door_pos = Position::new(5, 4);
+
+        // Spawn a door that starts open.
+        let mut open_state = DoorState::new(false, 0.0);
+        open_state.is_open = true;
+        let door_entity = app
+            .world_mut()
+            .spawn((
+                FurnitureEntity::new(crate::domain::world::FurnitureType::Door, false),
+                open_state,
+                Transform::default(),
+                TileCoord(door_pos),
+            ))
+            .id();
+
+        // Ensure tile is unblocked (matching the open state).
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            if let Some(map) = gs.0.world.get_current_map_mut() {
+                if let Some(tile) = map.get_tile_mut(door_pos) {
+                    tile.blocked = false;
+                }
+            }
+        }
+
+        // Interact → close the door.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(interact_key());
+        }
+        app.update();
+
+        {
+            let ds = app.world().entity(door_entity).get::<DoorState>().unwrap();
+            assert!(
+                !ds.is_open,
+                "Door must be closed after interacting with open door"
+            );
+        }
+
+        let gs = app.world().resource::<GlobalState>();
+        let tile =
+            gs.0.world
+                .get_current_map()
+                .unwrap()
+                .get_tile(door_pos)
+                .unwrap();
+        assert!(
+            tile.blocked,
+            "Closing a furniture door must re-block the tile"
+        );
+    }
+
+    /// A furniture door that is NOT in front of the party is unaffected by interact.
+    #[test]
+    fn test_door_not_opened_when_not_directly_ahead() {
+        let mut app = build_door_test_app();
+
+        // Door to the east — party faces North so this is off to the side.
+        let door_pos = Position::new(6, 5);
+        let door_entity = spawn_door_entity(&mut app, door_pos, false);
+
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(interact_key());
+        }
+        app.update();
+
+        let ds = app.world().entity(door_entity).get::<DoorState>().unwrap();
+        assert!(
+            !ds.is_open,
+            "Door to the side must not be opened by a forward-facing interact"
+        );
+    }
+
+    /// Moving forward into a locked (closed) furniture door is blocked at the
+    /// input layer, surfacing `MovementError::DoorLocked` semantics.
+    #[test]
+    fn test_locked_furniture_door_blocks_forward_movement() {
+        let mut app = build_door_test_app();
+
+        let door_pos = Position::new(5, 4);
+        // Spawn a locked, closed door with no key — permanently blocks movement.
+        app.world_mut().spawn((
+            FurnitureEntity::new(crate::domain::world::FurnitureType::Door, true),
+            DoorState::new(true, 0.0),
+            Transform::default(),
+            TileCoord(door_pos),
+        ));
+
+        let original_position = {
+            let gs = app.world().resource::<GlobalState>();
+            gs.0.world.party_position
+        };
+
+        // Press move-forward.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(move_forward_key());
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.world.party_position, original_position,
+            "Party must not move through a locked furniture door"
+        );
+    }
+
+    /// An open (unlocked) furniture door does NOT block forward movement.
+    #[test]
+    fn test_open_furniture_door_allows_forward_movement() {
+        let mut app = build_door_test_app();
+
+        let door_pos = Position::new(5, 4);
+        let mut open_state = DoorState::new(false, 0.0);
+        open_state.is_open = true;
+        app.world_mut().spawn((
+            FurnitureEntity::new(crate::domain::world::FurnitureType::Door, false),
+            open_state,
+            Transform::default(),
+            TileCoord(door_pos),
+        ));
+
+        // Ensure tile is unblocked (open door).
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            if let Some(map) = gs.0.world.get_current_map_mut() {
+                if let Some(tile) = map.get_tile_mut(door_pos) {
+                    tile.blocked = false;
+                }
+            }
+        }
+
+        // Press move-forward — should succeed.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(move_forward_key());
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.world.party_position, door_pos,
+            "Party must be able to move through an open furniture door"
         );
     }
 }
