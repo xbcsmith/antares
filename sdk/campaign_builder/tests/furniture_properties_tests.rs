@@ -329,6 +329,7 @@ mod furniture_properties_tests {
                 blocking: false,
             },
             color_tint: None,
+            furniture_id: None,
         };
 
         // Verify serialization through editor state
@@ -383,6 +384,7 @@ mod furniture_properties_tests {
                 blocking: false,
             },
             color_tint: None,
+            furniture_id: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(5, 5), &event);
@@ -440,6 +442,7 @@ mod furniture_properties_tests {
                 blocking: true,
             },
             color_tint: None,
+            furniture_id: None,
         };
 
         // Convert to editor state

@@ -12,13 +12,119 @@
 
 use bevy::prelude::*;
 
-use crate::domain::types;
+use crate::domain::types::{self, FurnitureId};
+use crate::domain::world::furniture::FurnitureDatabase;
 use crate::domain::world::{FurnitureFlags, FurnitureMaterial, FurnitureType};
 use crate::game::components::{FurnitureEntity, Interactable, InteractionType};
 use crate::game::systems::procedural_meshes::{
     spawn_bench, spawn_chair, spawn_chest, spawn_table, spawn_throne, spawn_torch, BenchConfig,
     ChairConfig, ChestConfig, ProceduralMeshCache, TableConfig, ThroneConfig, TorchConfig,
 };
+
+/// Resolves effective furniture properties by merging a [`FurnitureDatabase`]
+/// definition with per-instance inline overrides from a `MapEvent::Furniture`.
+///
+/// ## Resolution rules
+///
+/// | `furniture_id` | DB lookup | Result |
+/// |---|---|---|
+/// | `None` | n/a | All inline values used as-is (backward compatible) |
+/// | `Some(id)` | found | `base_type`, `material`, `scale`, `flags` from DB definition; `color_tint` from inline if `Some`, else from DB |
+/// | `Some(id)` | not found | Warning logged; falls back to all inline values |
+///
+/// `rotation_y` is always taken from the inline field (it is positional, not a
+/// template property) and is therefore **not** a parameter of this function.
+///
+/// # Arguments
+///
+/// * `furniture_id` — optional definition ID from `MapEvent::Furniture`
+/// * `inline_type` — inline `furniture_type` field
+/// * `inline_material` — inline `material` field
+/// * `inline_scale` — inline `scale` field
+/// * `inline_flags` — inline `flags` field
+/// * `inline_color_tint` — inline `color_tint` field
+/// * `db` — the campaign's loaded [`FurnitureDatabase`]
+///
+/// # Returns
+///
+/// A tuple `(FurnitureType, FurnitureMaterial, f32, FurnitureFlags, Option<[f32; 3]>)`
+/// representing the resolved type, material, scale, flags, and color tint.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::furniture_rendering::resolve_furniture_fields;
+/// use antares::domain::world::furniture::FurnitureDatabase;
+/// use antares::domain::world::{FurnitureType, FurnitureMaterial, FurnitureFlags};
+///
+/// let db = FurnitureDatabase::new();
+///
+/// // No furniture_id → inline values returned unchanged
+/// let (ft, mat, scale, flags, tint) = resolve_furniture_fields(
+///     None,
+///     FurnitureType::Bench,
+///     FurnitureMaterial::Stone,
+///     1.5,
+///     &FurnitureFlags { lit: false, locked: false, blocking: true },
+///     Some([0.8, 0.8, 0.8]),
+///     &db,
+/// );
+/// assert_eq!(ft, FurnitureType::Bench);
+/// assert_eq!(mat, FurnitureMaterial::Stone);
+/// assert_eq!(tint, Some([0.8, 0.8, 0.8]));
+/// ```
+pub fn resolve_furniture_fields(
+    furniture_id: Option<FurnitureId>,
+    inline_type: FurnitureType,
+    inline_material: FurnitureMaterial,
+    inline_scale: f32,
+    inline_flags: &FurnitureFlags,
+    inline_color_tint: Option<[f32; 3]>,
+    db: &FurnitureDatabase,
+) -> (
+    FurnitureType,
+    FurnitureMaterial,
+    f32,
+    FurnitureFlags,
+    Option<[f32; 3]>,
+) {
+    let Some(id) = furniture_id else {
+        // No id — pure inline fields, full backward compatibility
+        return (
+            inline_type,
+            inline_material,
+            inline_scale,
+            inline_flags.clone(),
+            inline_color_tint,
+        );
+    };
+
+    let Some(def) = db.get_by_id(id) else {
+        warn!(
+            "furniture_id {} not found in FurnitureDatabase; falling back to inline fields",
+            id
+        );
+        return (
+            inline_type,
+            inline_material,
+            inline_scale,
+            inline_flags.clone(),
+            inline_color_tint,
+        );
+    };
+
+    // Definition found: use its base values.
+    // Inline `color_tint` acts as a per-instance override when it is `Some`.
+    let resolved_color = inline_color_tint.or(def.color_tint);
+
+    (
+        def.base_type,
+        def.material,
+        def.scale,
+        def.flags.clone(),
+        resolved_color,
+    )
+}
 
 /// Enhanced furniture spawning with material and interaction support
 ///
@@ -330,5 +436,161 @@ mod tests {
         let gold = FurnitureMaterial::Gold;
         assert!(gold.metallic() > 0.5);
         assert!(gold.roughness() < 0.5);
+    }
+
+    // ===== resolve_furniture_fields tests =====
+
+    use crate::domain::world::furniture::{FurnitureDatabase, FurnitureDefinition};
+    use crate::domain::world::FurnitureCategory;
+
+    fn make_test_def(id: u32) -> FurnitureDefinition {
+        FurnitureDefinition {
+            id,
+            name: format!("Test Def {}", id),
+            category: FurnitureCategory::Seating,
+            base_type: FurnitureType::Throne,
+            material: FurnitureMaterial::Gold,
+            scale: 2.0,
+            color_tint: Some([0.9, 0.8, 0.7]),
+            flags: FurnitureFlags {
+                lit: true,
+                locked: false,
+                blocking: true,
+            },
+            icon: None,
+            tags: vec![],
+            mesh_id: None,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn test_resolve_furniture_fields_no_id_returns_inline() {
+        let db = FurnitureDatabase::new();
+        let inline_flags = FurnitureFlags {
+            lit: false,
+            locked: true,
+            blocking: false,
+        };
+        let (ft, mat, scale, flags, tint) = resolve_furniture_fields(
+            None,
+            FurnitureType::Bench,
+            FurnitureMaterial::Stone,
+            1.5,
+            &inline_flags,
+            Some([0.1, 0.2, 0.3]),
+            &db,
+        );
+        assert_eq!(ft, FurnitureType::Bench);
+        assert_eq!(mat, FurnitureMaterial::Stone);
+        assert!((scale - 1.5).abs() < f32::EPSILON);
+        assert!(flags.locked);
+        assert_eq!(tint, Some([0.1, 0.2, 0.3]));
+    }
+
+    #[test]
+    fn test_resolve_furniture_fields_with_id_uses_def_values() {
+        let mut db = FurnitureDatabase::new();
+        db.add(make_test_def(1)).unwrap();
+
+        let inline_flags = FurnitureFlags::default();
+        let (ft, mat, scale, flags, tint) = resolve_furniture_fields(
+            Some(1),
+            FurnitureType::Bench,    // overridden by def (Throne)
+            FurnitureMaterial::Wood, // overridden by def (Gold)
+            1.0,                     // overridden by def (2.0)
+            &inline_flags,
+            None, // no inline override → use def color_tint
+            &db,
+        );
+        assert_eq!(ft, FurnitureType::Throne, "base_type from definition");
+        assert_eq!(mat, FurnitureMaterial::Gold, "material from definition");
+        assert!((scale - 2.0).abs() < f32::EPSILON, "scale from definition");
+        assert!(flags.lit, "flags.lit from definition");
+        assert_eq!(
+            tint,
+            Some([0.9, 0.8, 0.7]),
+            "color_tint from definition when inline is None"
+        );
+    }
+
+    #[test]
+    fn test_resolve_furniture_fields_inline_color_tint_overrides_def() {
+        let mut db = FurnitureDatabase::new();
+        db.add(make_test_def(2)).unwrap();
+
+        let inline_flags = FurnitureFlags::default();
+        let inline_tint = Some([0.1, 0.2, 0.3]);
+        let (_, _, _, _, tint) = resolve_furniture_fields(
+            Some(2),
+            FurnitureType::Chair,
+            FurnitureMaterial::Wood,
+            1.0,
+            &inline_flags,
+            inline_tint, // explicit inline override
+            &db,
+        );
+        assert_eq!(
+            tint,
+            Some([0.1, 0.2, 0.3]),
+            "inline color_tint wins over definition color_tint"
+        );
+    }
+
+    #[test]
+    fn test_resolve_furniture_fields_missing_id_falls_back_to_inline() {
+        let db = FurnitureDatabase::new(); // empty — id 99 not present
+        let inline_flags = FurnitureFlags {
+            lit: false,
+            locked: false,
+            blocking: true,
+        };
+        let (ft, mat, scale, flags, tint) = resolve_furniture_fields(
+            Some(99),
+            FurnitureType::Chest,
+            FurnitureMaterial::Metal,
+            0.8,
+            &inline_flags,
+            Some([0.5, 0.5, 0.5]),
+            &db,
+        );
+        // Falls back to inline because id 99 is not in the db
+        assert_eq!(ft, FurnitureType::Chest, "fallback: inline type");
+        assert_eq!(mat, FurnitureMaterial::Metal, "fallback: inline material");
+        assert!((scale - 0.8).abs() < f32::EPSILON, "fallback: inline scale");
+        assert!(flags.blocking, "fallback: inline flags");
+        assert_eq!(tint, Some([0.5, 0.5, 0.5]), "fallback: inline color_tint");
+    }
+
+    #[test]
+    fn test_resolve_furniture_fields_def_color_none_and_inline_none() {
+        // When both def.color_tint and inline_color_tint are None, result is None
+        let mut db = FurnitureDatabase::new();
+        let def = FurnitureDefinition {
+            id: 5,
+            name: "No Tint".to_string(),
+            category: FurnitureCategory::Utility,
+            base_type: FurnitureType::Table,
+            material: FurnitureMaterial::Wood,
+            scale: 1.0,
+            color_tint: None,
+            flags: FurnitureFlags::default(),
+            icon: None,
+            tags: vec![],
+            mesh_id: None,
+            description: None,
+        };
+        db.add(def).unwrap();
+
+        let (_, _, _, _, tint) = resolve_furniture_fields(
+            Some(5),
+            FurnitureType::Bench,
+            FurnitureMaterial::Stone,
+            1.0,
+            &FurnitureFlags::default(),
+            None,
+            &db,
+        );
+        assert_eq!(tint, None, "both None → resolved tint is None");
     }
 }

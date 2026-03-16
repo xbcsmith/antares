@@ -1,5 +1,180 @@
 # Implementations
 
+## Phase 2: `MapEvent::Furniture` References `FurnitureId` (Complete)
+
+### Overview
+
+Implements Phase 2 of the data-driven furniture system described in
+`docs/explanation/furniture_as_ron_implementation_plan.md`. This phase wires
+the `FurnitureDefinition` database (introduced in Phase 1) into the live game
+event pipeline and the SDK so that map events can reference named furniture
+templates by ID rather than inlining all properties. Existing RON map files
+with inline-only furniture continue to work identically (zero migration needed).
+
+### Deliverables
+
+#### `src/domain/world/types.rs`
+
+- Added `furniture_id: Option<crate::domain::types::FurnitureId>` to
+  `MapEvent::Furniture`, placed between `name` and `furniture_type`.
+- Decorated with `#[serde(default)]` for full backward compatibility; existing
+  RON files that omit the field deserialise with `furniture_id: None`.
+- Doc comment explains the resolution semantics: when `Some(id)`, the rendering
+  system looks up the template in `FurnitureDatabase` and uses its `base_type`,
+  `material`, `scale`, `flags`, and optionally `color_tint` as defaults;
+  inline `color_tint: Some(…)` always wins as a per-instance override.
+
+#### `src/domain/world/events.rs`
+
+- Added `furniture_id: Option<crate::domain::types::FurnitureId>` to
+  `EventResult::Furniture`.
+- Updated `trigger_event()` match arm for `MapEvent::Furniture` to destructure
+  and forward `furniture_id` by value (`FurnitureId = u32` is `Copy`).
+
+#### `src/sdk/database.rs`
+
+- Added `use crate::domain::world::furniture::FurnitureDatabase;` import.
+- Added `FurnitureLoadError(String)` variant to `DatabaseError`.
+- Added `pub furniture: FurnitureDatabase` field to `ContentDatabase`.
+- Updated `ContentDatabase::new()`, `load_campaign()`, and `load_core()` to
+  load `furniture.ron` (opt-in — missing file returns empty database, not an
+  error).
+- `furniture.ron` loading uses `FurnitureDatabase::load_from_file()` and maps
+  errors via `DatabaseError::FurnitureLoadError`.
+
+#### `src/game/systems/furniture_rendering.rs`
+
+Added the **`resolve_furniture_fields()`** public function — the central
+resolution logic for Phase 2:
+
+```
+pub fn resolve_furniture_fields(
+    furniture_id: Option<FurnitureId>,
+    inline_type: FurnitureType,
+    inline_material: FurnitureMaterial,
+    inline_scale: f32,
+    inline_flags: &FurnitureFlags,
+    inline_color_tint: Option<[f32; 3]>,
+    db: &FurnitureDatabase,
+) -> (FurnitureType, FurnitureMaterial, f32, FurnitureFlags, Option<[f32; 3]>)
+```
+
+Resolution rules:
+
+| `furniture_id` | DB lookup | Result                                                                                              |
+| -------------- | --------- | --------------------------------------------------------------------------------------------------- |
+| `None`         | n/a       | All inline values (backward compatible)                                                             |
+| `Some(id)`     | found     | `base_type`, `material`, `scale`, `flags` from DB; `color_tint` from inline if `Some`, else from DB |
+| `Some(id)`     | not found | `warn!` logged; falls back to all inline values                                                     |
+
+`rotation_y` is always taken from the inline field (positional attribute, not
+a template property) and is **not** a parameter of this function.
+
+#### `src/game/systems/events.rs`
+
+- Replaced the large 8-arm `match furniture_type { … }` spawn block in
+  `handle_events` with a call to `resolve_furniture_fields()` followed by a
+  single `spawn_furniture_with_rendering()` call.
+- Now correctly honours `furniture_id` at event-trigger time:
+  definition defaults are merged with inline overrides before spawning.
+- Removed the now-unnecessary individual `spawn_bench`, `spawn_chair`, etc.
+  imports; only `ProceduralMeshCache` and the two `furniture_rendering`
+  symbols are imported.
+
+#### `src/game/systems/map.rs`
+
+- Updated `spawn_map`'s `MapEvent::Furniture` match arm to destructure
+  `furniture_id` and call `resolve_furniture_fields()` using
+  `content.0.furniture` before passing the resolved values to
+  `procedural_meshes::spawn_furniture()`.
+- Added import for `resolve_furniture_fields` from `furniture_rendering`.
+
+#### `sdk/campaign_builder/src/map_editor.rs`
+
+- Added `furniture_id: Option<u32>` and `furniture_template_query: String`
+  fields to `EventEditorState` (both initialise to `None` / empty in
+  `Default`).
+- Updated `to_map_event()` for `EventType::Furniture` to emit the new
+  `furniture_id` field.
+- Updated `from_map_event()` for `MapEvent::Furniture` to read and store
+  `furniture_id`.
+- Updated the inspector panel `MapEvent::Furniture` arm to destructure
+  `furniture_id` and display `📦 Template ID: N` when set.
+- Added `furniture_definitions: &[FurnitureDefinition]` parameter to
+  `MapsEditorState::show()`, `show_editor()`, `show_inspector_panel()`, and
+  `show_event_editor()`, threading the slice through the full call chain.
+- Added **Template dropdown** in the `EventType::Furniture` editor panel:
+  - Searchable combo box listing all `FurnitureDefinition` entries by icon +
+    name.
+  - Selecting a template sets `furniture_id`, populates all inline fields
+    (type, material, scale, flags, color tint) from the definition as
+    starting values, and marks the editor dirty.
+  - "✖ Clear template" button resets `furniture_id` to `None`.
+  - Shows a compact info line (`ID · category · material · scale`) for the
+    selected template, or a yellow warning if the ID is missing from the DB.
+
+#### `sdk/campaign_builder/src/lib.rs`
+
+- Added `furniture_definitions: Vec<FurnitureDefinition>` field to
+  `CampaignBuilderApp`; initialised to `Vec::new()` in `Default` and cleared
+  in `do_new_campaign()`.
+- Added `load_furniture()` method: reads `data/furniture.ron` from the open
+  campaign directory; missing file is not an error.
+- Called `load_furniture()` in both `do_open_campaign()` and the auto-load
+  sequence in `run()` (same ordering as `load_conditions()`).
+- Updated the `EditorTab::Maps` render arm to pass `&self.furniture_definitions`
+  to `maps_editor_state.show()`.
+
+### Tests Added (6 new tests, total: 3604)
+
+#### `src/game/systems/furniture_rendering.rs` — 5 new tests
+
+- `test_resolve_furniture_fields_no_id_returns_inline` — `None` id → all inline
+- `test_resolve_furniture_fields_with_id_uses_def_values` — definition wins for
+  base_type, material, scale, flags; `color_tint` from def when inline is None
+- `test_resolve_furniture_fields_inline_color_tint_overrides_def` — inline
+  `color_tint: Some(…)` beats definition's tint
+- `test_resolve_furniture_fields_missing_id_falls_back_to_inline` — unknown ID
+  → warn + inline fallback
+- `test_resolve_furniture_fields_def_color_none_and_inline_none` — both None
+  → resolved tint is None
+
+#### `src/game/systems/map.rs` — 3 new tests
+
+- `test_map_event_furniture_ron_backward_compat_no_furniture_id`
+- `test_map_event_furniture_ron_round_trip_with_furniture_id`
+- `test_map_event_furniture_inline_fields_without_furniture_id`
+
+#### `src/game/systems/events.rs` — 3 new tests
+
+- `test_furniture_event_furniture_id_defaults_to_none_in_ron`
+- `test_furniture_event_furniture_id_round_trips_through_ron`
+- `test_furniture_event_resolution_inline_only_preserves_all_fields`
+
+### Architecture Compliance
+
+- `MapEvent::Furniture.furniture_id` is `#[serde(default)]` — zero impact on
+  existing RON map files (backward compatible).
+- `FurnitureId = u32` is `Copy`; no allocations introduced in the event hot
+  path.
+- `ContentDatabase` now loads `furniture.ron` opt-in (missing = empty DB, not
+  error) — consistent with how `npc_stock_templates.ron` and
+  `creature_mesh_registry.ron` are loaded.
+- All test data points at `data/test_campaign` — no references to
+  `campaigns/tutorial` in any new test code (Implementation Rule 5 compliant).
+- SPDX copyright/license headers present on all modified source files.
+
+### Quality Gate Results
+
+```
+✅ cargo fmt         → no output
+✅ cargo check       → Finished 0 errors
+✅ cargo clippy      → Finished 0 warnings
+✅ cargo nextest run → 3604 passed, 8 skipped, 0 failed
+```
+
+---
+
 ## Phase 1: Furniture Domain Types and `furniture.ron` Data File (Complete)
 
 ### Overview

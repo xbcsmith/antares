@@ -231,6 +231,7 @@ pub fn run() -> Result<(), eframe::Error> {
                                 app.load_characters_from_campaign();
                                 app.load_maps();
                                 app.load_conditions();
+                                app.load_furniture();
 
                                 if let Err(e) = app.load_quests() {
                                     app.logger.warn(
@@ -697,6 +698,10 @@ struct CampaignBuilderApp {
     conditions: Vec<ConditionDefinition>,
     conditions_editor_state: ConditionsEditorState,
 
+    /// Furniture definitions loaded from `data/furniture.ron` in the open campaign.
+    /// Passed to the map editor so the furniture template dropdown is populated.
+    furniture_definitions: Vec<antares::domain::FurnitureDefinition>,
+
     // Map editor state
     maps: Vec<Map>,
     maps_editor_state: MapsEditorState,
@@ -844,6 +849,8 @@ impl Default for CampaignBuilderApp {
 
             conditions: Vec::new(),
             conditions_editor_state: ConditionsEditorState::new(),
+
+            furniture_definitions: Vec::new(),
 
             maps: Vec::new(),
             maps_editor_state: MapsEditorState::new(),
@@ -2424,6 +2431,55 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load furniture definitions from `data/furniture.ron`
+    ///
+    /// Missing file is not an error — furniture support is opt-in per campaign.
+    fn load_furniture(&mut self) {
+        if let Some(ref dir) = self.campaign_dir {
+            let furniture_path = dir.join("data/furniture.ron");
+            if furniture_path.exists() {
+                match fs::read_to_string(&furniture_path) {
+                    Ok(contents) => {
+                        match ron::from_str::<Vec<antares::domain::FurnitureDefinition>>(&contents)
+                        {
+                            Ok(defs) => {
+                                let count = defs.len();
+                                self.furniture_definitions = defs;
+                                self.logger.info(
+                                    category::FILE_IO,
+                                    &format!("Loaded {} furniture definitions", count),
+                                );
+                                self.status_message =
+                                    format!("Loaded {} furniture definitions", count);
+                            }
+                            Err(e) => {
+                                self.furniture_definitions.clear();
+                                self.logger.warn(
+                                    category::FILE_IO,
+                                    &format!("Failed to parse furniture.ron: {}", e),
+                                );
+                                self.status_message =
+                                    format!("Failed to parse furniture.ron: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.furniture_definitions.clear();
+                        self.logger.warn(
+                            category::FILE_IO,
+                            &format!("Failed to read furniture.ron: {}", e),
+                        );
+                    }
+                }
+            } else {
+                // Missing furniture.ron is not an error
+                self.furniture_definitions.clear();
+                self.logger
+                    .debug(category::FILE_IO, "No furniture.ron found (opt-in)");
+            }
+        }
+    }
+
     /// Load creatures from RON file
     fn load_creatures(&mut self) {
         let creatures_file = self.campaign.creatures_file.clone();
@@ -3149,6 +3205,8 @@ impl CampaignBuilderApp {
         self.conditions.clear();
         self.conditions_editor_state = ConditionsEditorState::new();
 
+        self.furniture_definitions.clear();
+
         self.maps.clear();
         self.maps_editor_state = MapsEditorState::new();
 
@@ -3389,6 +3447,7 @@ impl CampaignBuilderApp {
                     self.load_characters_from_campaign();
                     self.load_maps();
                     self.load_conditions();
+                    self.load_furniture();
 
                     // Load quests and dialogues
                     if let Err(e) = self.load_quests() {
@@ -4816,6 +4875,7 @@ impl eframe::App for CampaignBuilderApp {
                     &self.items,
                     &self.conditions,
                     &self.npc_editor_state.npcs,
+                    &self.furniture_definitions,
                     self.campaign_dir.as_ref(),
                     &self.campaign.maps_dir,
                     &self.tool_config.display,

@@ -2115,6 +2115,19 @@ pub enum MapEvent {
         /// Event name for editor display
         #[serde(default)]
         name: String,
+        /// Optional reference to a `FurnitureDefinition` in the campaign's
+        /// `furniture.ron` database.
+        ///
+        /// When `Some(id)`, the rendering system looks up the named template and
+        /// uses its `base_type`, `material`, `scale`, `flags`, and `color_tint` as
+        /// defaults.  Inline fields (`material`, `scale`, `flags`, `color_tint`) on
+        /// this event act as per-instance overrides when the `furniture_id` is `None`
+        /// or not found in the database.
+        ///
+        /// Defaults to `None` so existing RON map files without this field remain
+        /// valid (backward compatible via `#[serde(default)]`).
+        #[serde(default)]
+        furniture_id: Option<crate::domain::types::FurnitureId>,
         /// Type of furniture to spawn
         furniture_type: FurnitureType,
         /// Optional Y-axis rotation in degrees (0-360)

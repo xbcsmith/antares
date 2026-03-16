@@ -12,6 +12,7 @@ use crate::game::resources::GlobalState;
 use crate::game::resources::TerrainMaterialCache;
 use crate::game::systems::actor::spawn_actor_sprite;
 use crate::game::systems::creature_spawning::spawn_creature;
+use crate::game::systems::furniture_rendering::resolve_furniture_fields;
 use crate::game::systems::procedural_meshes;
 use rand::Rng;
 
@@ -1287,6 +1288,7 @@ fn spawn_map(
                     );
                 }
                 world::MapEvent::Furniture {
+                    furniture_id,
                     furniture_type,
                     rotation_y,
                     scale,
@@ -1295,18 +1297,36 @@ fn spawn_map(
                     color_tint,
                     ..
                 } => {
+                    // Resolve final furniture properties: database template defaults
+                    // merged with per-instance inline overrides from the map event.
+                    let (
+                        resolved_type,
+                        resolved_material,
+                        resolved_scale,
+                        resolved_flags,
+                        resolved_tint,
+                    ) = resolve_furniture_fields(
+                        *furniture_id,
+                        *furniture_type,
+                        *material,
+                        *scale,
+                        flags,
+                        *color_tint,
+                        &content.0.furniture,
+                    );
+
                     procedural_meshes::spawn_furniture(
                         &mut commands,
                         &mut materials,
                         &mut meshes,
                         *position,
                         map.id,
-                        *furniture_type,
+                        resolved_type,
                         *rotation_y,
-                        *scale,
-                        *material,
-                        flags,
-                        *color_tint,
+                        resolved_scale,
+                        resolved_material,
+                        &resolved_flags,
+                        resolved_tint,
                         procedural_cache,
                     );
                 }
@@ -3980,5 +4000,102 @@ mod tests {
             state.0.time.day, time_before.day,
             "invalid map transition must not advance days"
         );
+    }
+
+    #[test]
+    fn test_map_event_furniture_ron_backward_compat_no_furniture_id() {
+        // Existing Furniture RON without furniture_id must parse with furniture_id: None.
+        use crate::domain::world::MapEvent;
+
+        let ron_str = r#"Furniture(
+            name: "Old Throne",
+            furniture_type: Throne,
+            rotation_y: Some(90.0),
+            scale: 1.2,
+        )"#;
+
+        let parsed: MapEvent = ron::from_str(ron_str).expect("parse from RON");
+        match parsed {
+            MapEvent::Furniture { furniture_id, .. } => {
+                assert_eq!(
+                    furniture_id, None,
+                    "Missing furniture_id must default to None for backward compat"
+                );
+            }
+            other => panic!("expected Furniture, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_event_furniture_ron_round_trip_with_furniture_id() {
+        // A Furniture event with furniture_id: Some(3) round-trips through RON correctly.
+        use crate::domain::world::{FurnitureMaterial, FurnitureType, MapEvent};
+
+        let event = MapEvent::Furniture {
+            name: "Royal Throne".to_string(),
+            furniture_id: Some(3),
+            furniture_type: FurnitureType::Throne,
+            rotation_y: Some(180.0),
+            scale: 1.5,
+            material: FurnitureMaterial::Gold,
+            flags: crate::domain::world::FurnitureFlags {
+                lit: false,
+                locked: false,
+                blocking: true,
+            },
+            color_tint: None,
+        };
+
+        let serialised = ron::to_string(&event).expect("serialize to RON");
+        let parsed: MapEvent = ron::from_str(&serialised).expect("parse from RON");
+
+        match parsed {
+            MapEvent::Furniture {
+                furniture_id,
+                furniture_type,
+                name,
+                ..
+            } => {
+                assert_eq!(furniture_id, Some(3), "furniture_id must round-trip");
+                assert_eq!(
+                    furniture_type,
+                    FurnitureType::Throne,
+                    "furniture_type must round-trip"
+                );
+                assert_eq!(name, "Royal Throne", "name must round-trip");
+            }
+            other => panic!("expected Furniture, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_event_furniture_inline_fields_without_furniture_id() {
+        // When furniture_id is None, inline fields are used as-is (pure backward compat).
+        use crate::domain::world::{FurnitureMaterial, FurnitureType, MapEvent};
+
+        let ron_str = r#"Furniture(
+            name: "Stone Bench",
+            furniture_type: Bench,
+            material: Stone,
+            scale: 0.8,
+            flags: (lit: false, locked: false, blocking: false),
+        )"#;
+
+        let parsed: MapEvent = ron::from_str(ron_str).expect("parse from RON");
+        match parsed {
+            MapEvent::Furniture {
+                furniture_id,
+                furniture_type,
+                material,
+                scale,
+                ..
+            } => {
+                assert_eq!(furniture_id, None, "No furniture_id → None");
+                assert_eq!(furniture_type, FurnitureType::Bench);
+                assert_eq!(material, FurnitureMaterial::Stone);
+                assert!((scale - 0.8).abs() < f32::EPSILON);
+            }
+            other => panic!("expected Furniture, got {:?}", other),
+        }
     }
 }

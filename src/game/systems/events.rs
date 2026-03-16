@@ -5,15 +5,15 @@ use crate::application::resources::GameContent;
 use crate::domain::transactions::pickup_item;
 use crate::domain::types::{ItemId, MapId, Position};
 use crate::domain::world::EventResult;
-use crate::domain::world::{FurnitureType, MapEvent};
+use crate::domain::world::MapEvent;
 use crate::game::resources::GlobalState;
 use crate::game::systems::dialogue::{SimpleDialogue, StartDialogue};
+use crate::game::systems::furniture_rendering::{
+    resolve_furniture_fields, spawn_furniture_with_rendering,
+};
 use crate::game::systems::item_world_events::ItemPickedUpEvent;
 use crate::game::systems::map::{EventTrigger, MapChangeEvent, NpcMarker, TileCoord};
-use crate::game::systems::procedural_meshes::{
-    spawn_bench, spawn_chair, spawn_chest, spawn_table, spawn_throne, spawn_torch, BenchConfig,
-    ChairConfig, ChestConfig, ProceduralMeshCache, TableConfig, ThroneConfig, TorchConfig,
-};
+use crate::game::systems::procedural_meshes::ProceduralMeshCache;
 use crate::game::systems::ui::GameLog;
 use bevy::prelude::*;
 
@@ -584,12 +584,13 @@ fn handle_events(
             }
             MapEvent::Furniture {
                 name,
+                furniture_id,
                 furniture_type,
                 rotation_y,
-                scale: _,
-                material: _,
-                flags: _,
-                color_tint: _,
+                scale,
+                material,
+                flags,
+                color_tint,
             } => {
                 let msg = format!("Furniture placed: {}", name);
                 println!("{}", msg);
@@ -601,118 +602,41 @@ fn handle_events(
                 if can_spawn_furniture {
                     let map_id = global_state.0.world.current_map;
                     let commands = commands.as_mut().unwrap();
-                    let materials = materials.as_mut().unwrap();
-                    let meshes = meshes.as_mut().unwrap();
+                    let materials_res = materials.as_mut().unwrap();
+                    let meshes_res = meshes.as_mut().unwrap();
 
-                    match furniture_type {
-                        FurnitureType::Throne => {
-                            spawn_throne(
-                                commands,
-                                materials,
-                                meshes,
-                                trigger.position,
-                                map_id,
-                                ThroneConfig::default(),
-                                &mut furniture_cache,
-                                *rotation_y,
-                            );
-                        }
-                        FurnitureType::Bench => {
-                            spawn_bench(
-                                commands,
-                                materials,
-                                meshes,
-                                trigger.position,
-                                map_id,
-                                BenchConfig::default(),
-                                &mut furniture_cache,
-                                *rotation_y,
-                            );
-                        }
-                        FurnitureType::Table => {
-                            spawn_table(
-                                commands,
-                                materials,
-                                meshes,
-                                trigger.position,
-                                map_id,
-                                TableConfig::default(),
-                                &mut furniture_cache,
-                                *rotation_y,
-                            );
-                        }
-                        FurnitureType::Chair => {
-                            spawn_chair(
-                                commands,
-                                materials,
-                                meshes,
-                                trigger.position,
-                                map_id,
-                                ChairConfig::default(),
-                                &mut furniture_cache,
-                                *rotation_y,
-                            );
-                        }
-                        FurnitureType::Torch => {
-                            spawn_torch(
-                                commands,
-                                materials,
-                                meshes,
-                                trigger.position,
-                                map_id,
-                                TorchConfig::default(),
-                                &mut furniture_cache,
-                                *rotation_y,
-                            );
-                        }
-                        FurnitureType::Chest => {
-                            spawn_chest(
-                                commands,
-                                materials,
-                                meshes,
-                                trigger.position,
-                                map_id,
-                                ChestConfig::default(),
-                                &mut furniture_cache,
-                                *rotation_y,
-                            );
-                        }
-                        FurnitureType::Bookshelf => {
-                            // Bookshelf uses similar dimensions to a tall table
-                            spawn_table(
-                                commands,
-                                materials,
-                                meshes,
-                                trigger.position,
-                                map_id,
-                                TableConfig {
-                                    width: 0.8,
-                                    depth: 0.3,
-                                    height: 1.8,
-                                    color_override: Some(Color::srgb(0.35, 0.2, 0.1)),
-                                },
-                                &mut furniture_cache,
-                                *rotation_y,
-                            );
-                        }
-                        FurnitureType::Barrel => {
-                            // Barrel uses chest dimensions with slightly different proportions
-                            spawn_chest(
-                                commands,
-                                materials,
-                                meshes,
-                                trigger.position,
-                                map_id,
-                                ChestConfig {
-                                    locked: false,
-                                    size_multiplier: 0.9,
-                                    color_override: Some(Color::srgb(0.4, 0.25, 0.15)),
-                                },
-                                &mut furniture_cache,
-                                *rotation_y,
-                            );
-                        }
-                    }
+                    // Resolve final furniture properties: definition defaults merged
+                    // with per-instance inline overrides.
+                    let (
+                        resolved_type,
+                        resolved_material,
+                        resolved_scale,
+                        resolved_flags,
+                        resolved_tint,
+                    ) = resolve_furniture_fields(
+                        *furniture_id,
+                        *furniture_type,
+                        *material,
+                        *scale,
+                        flags,
+                        *color_tint,
+                        &content.db().furniture,
+                    );
+
+                    spawn_furniture_with_rendering(
+                        commands,
+                        materials_res,
+                        meshes_res,
+                        trigger.position,
+                        map_id,
+                        resolved_type,
+                        *rotation_y,
+                        resolved_scale,
+                        resolved_material,
+                        resolved_flags,
+                        resolved_tint,
+                        &mut furniture_cache,
+                    );
                 }
             }
             MapEvent::Container {
@@ -1859,5 +1783,100 @@ mod tests {
                 other
             ),
         }
+    }
+
+    #[test]
+    fn test_furniture_event_furniture_id_defaults_to_none_in_ron() {
+        // Verify that existing Furniture RON without furniture_id deserialises correctly.
+        use crate::domain::world::MapEvent;
+
+        let ron_str = r#"Furniture(
+            name: "Old Bench",
+            furniture_type: Bench,
+            scale: 1.0,
+        )"#;
+
+        let parsed: MapEvent = ron::from_str(ron_str).expect("deserialize old Furniture RON");
+        match parsed {
+            MapEvent::Furniture { furniture_id, .. } => {
+                assert_eq!(
+                    furniture_id, None,
+                    "furniture_id must default to None for backward compatibility"
+                );
+            }
+            other => panic!("expected Furniture event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_furniture_event_furniture_id_round_trips_through_ron() {
+        // A Furniture event with furniture_id: Some(7) must serialise and
+        // deserialise without loss.
+        use crate::domain::world::{FurnitureMaterial, FurnitureType, MapEvent};
+
+        let event = MapEvent::Furniture {
+            name: "Metal Sconce".to_string(),
+            furniture_id: Some(7),
+            furniture_type: FurnitureType::Torch,
+            rotation_y: None,
+            scale: 0.8,
+            material: FurnitureMaterial::Metal,
+            flags: crate::domain::world::FurnitureFlags {
+                lit: true,
+                locked: false,
+                blocking: false,
+            },
+            color_tint: Some([0.6, 0.8, 1.0]),
+        };
+
+        let serialised = ron::to_string(&event).expect("serialise to RON");
+        let parsed: MapEvent = ron::from_str(&serialised).expect("parse from RON");
+
+        match parsed {
+            MapEvent::Furniture {
+                furniture_id,
+                furniture_type,
+                ..
+            } => {
+                assert_eq!(furniture_id, Some(7), "furniture_id must round-trip");
+                assert_eq!(
+                    furniture_type,
+                    FurnitureType::Torch,
+                    "furniture_type must round-trip"
+                );
+            }
+            other => panic!("expected Furniture event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_furniture_event_resolution_inline_only_preserves_all_fields() {
+        // When furniture_id is None, inline values are returned unchanged.
+        use crate::domain::world::furniture::FurnitureDatabase;
+        use crate::domain::world::{FurnitureFlags, FurnitureMaterial, FurnitureType};
+        use crate::game::systems::furniture_rendering::resolve_furniture_fields;
+
+        let db = FurnitureDatabase::new();
+        let flags = FurnitureFlags {
+            lit: false,
+            locked: true,
+            blocking: false,
+        };
+
+        let (ft, mat, scale, resolved_flags, tint) = resolve_furniture_fields(
+            None,
+            FurnitureType::Chest,
+            FurnitureMaterial::Metal,
+            1.3,
+            &flags,
+            Some([0.7, 0.7, 0.7]),
+            &db,
+        );
+
+        assert_eq!(ft, FurnitureType::Chest);
+        assert_eq!(mat, FurnitureMaterial::Metal);
+        assert!((scale - 1.3).abs() < f32::EPSILON);
+        assert!(resolved_flags.locked);
+        assert_eq!(tint, Some([0.7, 0.7, 0.7]));
     }
 }
