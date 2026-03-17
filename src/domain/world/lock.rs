@@ -297,6 +297,7 @@ pub fn try_unlock(
 /// - Base chance: 30 %
 /// - +5 % per character level above 1
 /// - +10 % bonus if class is `"robber"`
+/// - +(speed.current − 10) / 2 Speed bonus (nimble-finger bonus for Speed > 10)
 /// - Result clamped to \[5 %, 95 %\]
 ///
 /// **Trap behaviour:**  A trap roll is performed **before** the pick attempt
@@ -355,7 +356,8 @@ pub fn try_lockpick<R: Rng>(
     } else {
         0
     };
-    let success_chance = (30 + level_bonus + class_bonus).clamp(5, 95) as u32;
+    let speed_bonus = (character.stats.speed.current.saturating_sub(10) / 2) as i32;
+    let success_chance = (30 + level_bonus + class_bonus + speed_bonus).clamp(5, 95) as u32;
 
     let roll: u32 = rng.random_range(0..100);
     if roll < success_chance {
@@ -440,6 +442,99 @@ pub fn try_bash<R: Rng>(
     }
 }
 
+// ===== trap_effect_for_chance (crate-visible) =====
+
+/// Maps a `trap_chance` value to the optional status-effect name it produces.
+///
+/// | `trap_chance` range | Effect |
+/// |---------------------|--------|
+/// | 0–29                | `None` (damage only) |
+/// | 30–59               | `Some("poison")` — poisons the lead character |
+/// | 60–89               | `Some("paralysis")` — paralyses all party members |
+/// | 90+                 | `Some("teleport")` — teleports party to map start |
+///
+/// This function is `pub(crate)` so that `lock_action_system` can apply the
+/// correct condition and unit tests can verify the mapping directly without
+/// running random trials.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::lock::trap_effect_for_chance;
+///
+/// assert_eq!(trap_effect_for_chance(0),  None);
+/// assert_eq!(trap_effect_for_chance(29), None);
+/// assert_eq!(trap_effect_for_chance(30), Some("poison".to_string()));
+/// assert_eq!(trap_effect_for_chance(59), Some("poison".to_string()));
+/// assert_eq!(trap_effect_for_chance(60), Some("paralysis".to_string()));
+/// assert_eq!(trap_effect_for_chance(89), Some("paralysis".to_string()));
+/// assert_eq!(trap_effect_for_chance(90), Some("teleport".to_string()));
+/// ```
+pub fn trap_effect_for_chance(trap_chance: u8) -> Option<String> {
+    match trap_chance {
+        0..=29 => None,
+        30..=59 => Some("poison".to_string()),
+        60..=89 => Some("paralysis".to_string()),
+        _ => Some("teleport".to_string()),
+    }
+}
+
+// ===== compute_lockpick_chance (crate-visible) =====
+
+/// Computes the lockpick success-chance percentage for a given character.
+///
+/// Returns `None` when the character's class lacks the `"pick_lock"` ability
+/// (the attempt auto-fails without a roll). Returns `Some(chance)` otherwise,
+/// where `chance` is clamped to `[5, 95]`.
+///
+/// This pure function exposes the formula used inside [`try_lockpick`] so
+/// that tests can verify the contribution of each stat without running random
+/// trials.
+///
+/// # Formula
+///
+/// ```text
+/// chance = 30
+///        + (level − 1) × 5
+///        + if class == "robber" { 10 } else { 0 }
+///        + (speed.current.saturating_sub(10) / 2)
+/// ```
+///
+/// Clamped to `[5, 95]`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::lock::compute_lockpick_chance;
+/// use antares::domain::character::{Alignment, Character, Sex};
+/// use antares::domain::classes::ClassDatabase;
+///
+/// // A non-robber without pick_lock returns None.
+/// let knight = Character::new(
+///     "Knight".to_string(), "human".to_string(), "knight".to_string(),
+///     Sex::Male, Alignment::Good,
+/// );
+/// let empty_db = ClassDatabase::new();
+/// assert_eq!(compute_lockpick_chance(&knight, &empty_db), None);
+/// ```
+pub fn compute_lockpick_chance(character: &Character, class_db: &ClassDatabase) -> Option<u32> {
+    let has_ability = class_db
+        .get_class(&character.class_id)
+        .map(|c| c.has_ability("pick_lock"))
+        .unwrap_or(false);
+    if !has_ability {
+        return None;
+    }
+    let level_bonus = character.level.saturating_sub(1) as i32 * 5;
+    let class_bonus: i32 = if character.class_id == "robber" {
+        10
+    } else {
+        0
+    };
+    let speed_bonus = (character.stats.speed.current.saturating_sub(10) / 2) as i32;
+    Some((30 + level_bonus + class_bonus + speed_bonus).clamp(5, 95) as u32)
+}
+
 // ===== roll_trap (private) =====
 
 /// Roll to see if a trap fires given the current `trap_chance`.
@@ -458,7 +553,7 @@ fn roll_trap<R: Rng>(trap_chance: u8, rng: &mut R) -> Option<UnlockOutcome> {
         let damage = (d6 * multiplier).max(1) as u16;
         Some(UnlockOutcome::TrapTriggered {
             damage,
-            effect: None,
+            effect: trap_effect_for_chance(trap_chance),
         })
     } else {
         None
@@ -901,6 +996,73 @@ mod tests {
         assert!(
             !state.is_locked,
             "init_lock_states must not re-lock a previously unlocked door"
+        );
+    }
+
+    // ─── trap_effect_for_chance tests ────────────────────────────────────────
+
+    /// `trap_effect_for_chance(45)` returns `Some("poison")` — in the 30–59
+    /// range.
+    #[test]
+    fn test_roll_trap_poison_range() {
+        let effect = super::trap_effect_for_chance(45);
+        assert_eq!(
+            effect,
+            Some("poison".to_string()),
+            "trap_chance=45 must produce the 'poison' effect"
+        );
+    }
+
+    /// `trap_effect_for_chance(70)` returns `Some("paralysis")` — in the
+    /// 60–89 range.
+    #[test]
+    fn test_roll_trap_paralysis_range() {
+        let effect = super::trap_effect_for_chance(70);
+        assert_eq!(
+            effect,
+            Some("paralysis".to_string()),
+            "trap_chance=70 must produce the 'paralysis' effect"
+        );
+    }
+
+    // ─── Speed bonus tests ───────────────────────────────────────────────────
+
+    /// A robber with `speed.current == 16` must have a strictly higher
+    /// lockpick success chance than an otherwise identical robber with
+    /// `speed.current == 10`.
+    ///
+    /// Formula: base(30) + level_bonus(0) + class_bonus(10) + speed_bonus
+    ///   speed 10 → speed_bonus = 0  → total = 40
+    ///   speed 16 → speed_bonus = 3  → total = 43
+    #[test]
+    fn test_try_lockpick_speed_bonus_applied() {
+        let class_db = load_class_db();
+
+        let mut slow_robber = make_character("robber", 1);
+        slow_robber.stats.speed.current = 10; // speed_bonus = 0
+
+        let mut fast_robber = make_character("robber", 1);
+        fast_robber.stats.speed.current = 16; // speed_bonus = (16-10)/2 = 3
+
+        let chance_slow = super::compute_lockpick_chance(&slow_robber, &class_db)
+            .expect("robber must have pick_lock ability in data/classes.ron");
+        let chance_fast = super::compute_lockpick_chance(&fast_robber, &class_db)
+            .expect("robber must have pick_lock ability in data/classes.ron");
+
+        assert!(
+            chance_fast > chance_slow,
+            "Speed 16 robber ({} %) must beat Speed 10 robber ({} %) lockpick chance",
+            chance_fast,
+            chance_slow
+        );
+        // Concrete values as a regression guard.
+        assert_eq!(
+            chance_slow, 40,
+            "level-1 robber speed-10 base chance must be 40 %"
+        );
+        assert_eq!(
+            chance_fast, 43,
+            "level-1 robber speed-16 chance must be 43 %"
         );
     }
 }

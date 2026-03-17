@@ -442,8 +442,9 @@ fn lock_action_system(
                 for member in global_state.0.party.members.iter_mut() {
                     member.hp.modify(-(*damage as i32));
                 }
-                if let Some(effect_name) = effect {
-                    let effect_msg = format!("Effect: {}", effect_name);
+                // Apply status-condition / teleport effects (Phase 5).
+                let effect_messages = apply_trap_effects(effect.as_deref(), &mut global_state.0);
+                for effect_msg in effect_messages {
                     info!("{}", effect_msg);
                     if let Some(ref mut log) = game_log {
                         log.add(effect_msg);
@@ -572,6 +573,71 @@ pub(crate) fn apply_success(
             game_state.enter_container_inventory(id, name.clone(), vec![]);
 
             messages.push(format!("The {} is unlocked.", name));
+        }
+    }
+    messages
+}
+
+/// Applies the status-condition or teleport side-effect produced by a fired trap.
+///
+/// | `effect`      | Action |
+/// |---------------|--------|
+/// | `"poison"`    | Applies `Condition::POISONED` to the lead party member (index 0) |
+/// | `"paralysis"` | Applies `Condition::PARALYZED` to every party member |
+/// | `"teleport"`  | Teleports the party to `Position::new(1, 1)` (safe map-start fallback) |
+/// | `None` / other | No-op (damage-only trap or unrecognised effect) |
+///
+/// Returns a `Vec<String>` of game-log messages so that callers can emit
+/// them through the normal logging path.
+///
+/// Extracted from [`lock_action_system`] as a `pub(crate)` function so that
+/// unit tests can exercise condition application without a running Bevy `App`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::lock_ui::apply_trap_effects;
+/// use antares::application::GameState;
+/// use antares::domain::character::Condition;
+///
+/// let mut gs = GameState::new();
+/// let msgs = apply_trap_effects(Some("poison"), &mut gs);
+/// // Party is empty → no condition applied, but no panic either.
+/// assert!(msgs.is_empty());
+/// ```
+pub(crate) fn apply_trap_effects(
+    effect: Option<&str>,
+    game_state: &mut crate::application::GameState,
+) -> Vec<String> {
+    use crate::domain::character::Condition;
+
+    let mut messages: Vec<String> = Vec::new();
+    let Some(effect_name) = effect else {
+        return messages;
+    };
+
+    match effect_name {
+        "poison" => {
+            if let Some(lead) = game_state.party.members.first_mut() {
+                lead.conditions.add(Condition::POISONED);
+                messages.push(format!("{} has been poisoned by the trap!", lead.name));
+            }
+        }
+        "paralysis" => {
+            for member in game_state.party.members.iter_mut() {
+                member.conditions.add(Condition::PARALYZED);
+            }
+            messages.push("The paralytic gas freezes your entire party!".to_string());
+        }
+        "teleport" => {
+            // `Map` has no `starting_position` field; use (1, 1) as the safe
+            // fallback per the architecture specification.
+            let start = crate::domain::types::Position::new(1, 1);
+            game_state.world.set_party_position(start);
+            messages.push("The trap teleports your party to the start of the map!".to_string());
+        }
+        other => {
+            messages.push(format!("Effect: {}", other));
         }
     }
     messages
@@ -1090,6 +1156,121 @@ mod tests {
         assert!(
             matches!(outcome, UnlockOutcome::LockpickFailed { .. }),
             "empty class DB must cause LockpickFailed for any class"
+        );
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Phase 5 — Trap condition-effect tests
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// A `"poison"` trap effect applies `Condition::POISONED` to the lead
+    /// party member only.
+    #[test]
+    fn test_trap_poison_effect_applies_condition_to_lead_character() {
+        use crate::domain::character::Condition;
+
+        let lock_id = "poison_trap_lock";
+        let position = Position::new(2, 2);
+        let event = MapEvent::LockedDoor {
+            name: "Poison Door".to_string(),
+            lock_id: lock_id.to_string(),
+            key_item_id: None,
+            initial_trap_chance: 0,
+        };
+        let mut gs = make_game_state_with_event(position, event, lock_id, 0);
+
+        // Add a second party member so we can verify only the lead is poisoned.
+        let second = make_character("knight", 3);
+        gs.party.add_member(second).unwrap();
+
+        let msgs = apply_trap_effects(Some("poison"), &mut gs);
+
+        assert!(
+            gs.party.members[0].conditions.has(Condition::POISONED),
+            "lead character must be poisoned after 'poison' trap effect"
+        );
+        assert!(
+            !gs.party.members[1].conditions.has(Condition::POISONED),
+            "second party member must NOT be poisoned — only the lead is affected"
+        );
+        assert!(
+            msgs.iter().any(|m| m.contains("poisoned")),
+            "apply_trap_effects must return a poison message; got: {:?}",
+            msgs
+        );
+    }
+
+    /// A `"paralysis"` trap effect applies `Condition::PARALYZED` to every
+    /// party member.
+    #[test]
+    fn test_trap_paralysis_effect_applies_to_all_party_members() {
+        use crate::domain::character::Condition;
+
+        let lock_id = "paralysis_trap_lock";
+        let position = Position::new(3, 3);
+        let event = MapEvent::LockedDoor {
+            name: "Paralysis Door".to_string(),
+            lock_id: lock_id.to_string(),
+            key_item_id: None,
+            initial_trap_chance: 0,
+        };
+        let mut gs = make_game_state_with_event(position, event, lock_id, 0);
+
+        // Add a second party member.
+        let second = make_character("sorcerer", 2);
+        gs.party.add_member(second).unwrap();
+
+        let msgs = apply_trap_effects(Some("paralysis"), &mut gs);
+
+        for (idx, member) in gs.party.members.iter().enumerate() {
+            assert!(
+                member.conditions.has(Condition::PARALYZED),
+                "party member {} ({}) must be paralyzed after 'paralysis' trap",
+                idx,
+                member.name
+            );
+        }
+        assert!(
+            msgs.iter()
+                .any(|m| m.contains("paralytic") || m.contains("paralyz")),
+            "apply_trap_effects must return a paralysis message; got: {:?}",
+            msgs
+        );
+    }
+
+    /// A `"teleport"` trap effect moves the party position to `(1, 1)`.
+    #[test]
+    fn test_trap_teleport_effect_moves_party_to_start() {
+        let lock_id = "teleport_trap_lock";
+        let position = Position::new(4, 4);
+        let event = MapEvent::LockedDoor {
+            name: "Teleport Door".to_string(),
+            lock_id: lock_id.to_string(),
+            key_item_id: None,
+            initial_trap_chance: 0,
+        };
+        let mut gs = make_game_state_with_event(position, event, lock_id, 0);
+
+        // Place party far from (1, 1) to verify the teleport effect.
+        gs.world.set_party_position(Position::new(8, 8));
+        assert_eq!(
+            gs.world.party_position,
+            Position::new(8, 8),
+            "pre-condition: party must start at (8, 8)"
+        );
+
+        let msgs = apply_trap_effects(Some("teleport"), &mut gs);
+
+        assert_eq!(
+            gs.world.party_position,
+            Position::new(1, 1),
+            "party must be teleported to (1, 1) by a teleport trap"
+        );
+        assert!(
+            msgs.iter()
+                .any(|m| m.contains("teleport") || m.contains("start")),
+            "apply_trap_effects must return a teleport message; got: {:?}",
+            msgs
         );
     }
 }

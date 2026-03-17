@@ -1,5 +1,192 @@
 # Implementations
 
+## Phase 5: locked_objects_and_keys — Save/Load Persistence, Trap Effects, and Documentation (Complete)
+
+### Overview
+
+Phase 5 closes the remaining gaps in the locked objects and keys feature:
+
+1. **Save/Load Persistence** — Verified that `Map::lock_states` round-trips
+   correctly through the RON save/load pipeline. Unlocked doors remain open and
+   non-zero `trap_chance` values are preserved.
+2. **Trap Status Condition Effects** — `roll_trap` now produces real status
+   effects based on the `trap_chance` range. A new `apply_trap_effects` pure
+   helper in `lock_ui.rs` applies those conditions to the party without
+   requiring a running Bevy `App`.
+3. **Lockpick Skill Progression** — `try_lockpick` now incorporates the
+   character's `speed.current` stat as a nimble-finger bonus. A new pure helper
+   `compute_lockpick_chance` exposes the formula for deterministic unit tests.
+4. **Documentation** — This entry.
+
+### Files Changed
+
+| File                                  | Change                                                                                                                      |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/world/lock.rs`            | `roll_trap` extended; `trap_effect_for_chance` and `compute_lockpick_chance` added; `try_lockpick` Speed bonus; 3 new tests |
+| `src/game/systems/lock_ui.rs`         | `apply_trap_effects` helper added; `lock_action_system` wired to apply conditions/teleport; 3 new tests                     |
+| `src/application/save_game.rs`        | 2 new persistence round-trip tests                                                                                          |
+| `docs/explanation/implementations.md` | This summary                                                                                                                |
+
+### 5.1 — Save/Load Persistence (`src/application/save_game.rs`)
+
+`Map::lock_states` is serialised via `#[serde(default, skip_serializing_if =
+"HashMap::is_empty")]`, so it already participates in the standard RON
+save/load pipeline. Two new tests confirm correctness:
+
+- **`test_save_load_preserves_unlocked_door_state`** — Seeds a `LockState`
+  from a `LockedDoor` event, calls `init_lock_states()`, unlocks the door,
+  clears the door tile (simulating `apply_success`), saves and reloads.
+  Asserts `is_locked == false` and `wall_type == WallType::None` after load.
+- **`test_save_load_preserves_trap_chance`** — Inserts a `LockState` with
+  `trap_chance = 30`, saves and reloads. Asserts `trap_chance == 30` on the
+  loaded state.
+
+### 5.2 — Trap Status Condition Effects
+
+#### `trap_effect_for_chance` (`src/domain/world/lock.rs`)
+
+New `pub` pure function mapping `trap_chance` → `Option<String>`:
+
+| `trap_chance` range | Effect               |
+| ------------------- | -------------------- |
+| 0–29                | `None` (damage only) |
+| 30–59               | `Some("poison")`     |
+| 60–89               | `Some("paralysis")`  |
+| 90+                 | `Some("teleport")`   |
+
+`roll_trap` now calls `trap_effect_for_chance(trap_chance)` instead of
+hard-coding `effect: None`.
+
+#### `apply_trap_effects` (`src/game/systems/lock_ui.rs`)
+
+New `pub(crate)` helper extracted from `lock_action_system`:
+
+```rust
+pub(crate) fn apply_trap_effects(
+    effect: Option<&str>,
+    game_state: &mut GameState,
+) -> Vec<String>
+```
+
+| `effect`       | Action                                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `"poison"`     | Applies `Condition::POISONED` to the lead party member (index 0)                                                       |
+| `"paralysis"`  | Applies `Condition::PARALYZED` to every party member                                                                   |
+| `"teleport"`   | Sets `world.party_position` to `Position::new(1, 1)` (safe map-start fallback; `Map` has no `starting_position` field) |
+| `None` / other | No-op (damage-only trap or unrecognised effect string)                                                                 |
+
+`lock_action_system` now calls `apply_trap_effects` inside the
+`TrapTriggered` match arm after dealing damage.
+
+### 5.3 — Lockpick Skill Progression (`src/domain/world/lock.rs`)
+
+`try_lockpick` now incorporates the character's `speed.current` stat as a
+nimble-finger bonus in the success formula:
+
+```text
+success_chance = 30
+               + (level − 1) × 5
+               + if class == "robber" { 10 } else { 0 }
+               + (speed.current.saturating_sub(10) / 2)
+```
+
+Clamped to `[5, 95]`. The bonus is zero for the default `speed.current = 10`,
+so all existing tests remain valid without modification.
+
+#### `compute_lockpick_chance` (`src/domain/world/lock.rs`)
+
+New `pub` pure function that exposes the formula for deterministic unit tests:
+
+```rust
+pub fn compute_lockpick_chance(
+    character: &Character,
+    class_db: &ClassDatabase,
+) -> Option<u32>
+```
+
+Returns `None` when the character's class lacks the `"pick_lock"` ability
+(auto-fail path), or `Some(chance)` otherwise. Used directly in
+`test_try_lockpick_speed_bonus_applied` to verify Speed 16 yields a strictly
+higher chance than Speed 10 without running stochastic trials.
+
+### Tests Added (8 new)
+
+#### `src/domain/world/lock.rs` — 3 new tests
+
+- `test_roll_trap_poison_range` — `trap_effect_for_chance(45)` returns `Some("poison")`
+- `test_roll_trap_paralysis_range` — `trap_effect_for_chance(70)` returns `Some("paralysis")`
+- `test_try_lockpick_speed_bonus_applied` — Speed-16 robber has `chance=43%` vs Speed-10 robber `chance=40%`
+
+#### `src/game/systems/lock_ui.rs` — 3 new tests
+
+- `test_trap_poison_effect_applies_condition_to_lead_character` — Only party member [0] gets `POISONED`
+- `test_trap_paralysis_effect_applies_to_all_party_members` — All members get `PARALYZED`
+- `test_trap_teleport_effect_moves_party_to_start` — Party position becomes `(1, 1)`
+
+#### `src/application/save_game.rs` — 2 new tests
+
+- `test_save_load_preserves_unlocked_door_state`
+- `test_save_load_preserves_trap_chance`
+
+### Known Limitations
+
+- **No per-character lockpick XP gain** — The plan deferred XP progression;
+  `try_lockpick` does not award experience on success.
+- **No master key item** — There is no "skeleton key" that opens any lock;
+  each lock requires a specific `key_item_id` or pick/bash.
+- **No magic unlock spell integration** — Spells that could unlock doors are
+  not yet wired into the lock system.
+- **Teleport always uses `(1, 1)` fallback** — `Map` has no `starting_position`
+  field; a future phase could add one and use it here.
+- **`trap_chance` not reset after successful unlock** — This is intentional;
+  the map tile state replaces the event once unlocked.
+
+### Data-Authoring Guide: How to Add a Locked Door in RON
+
+Add a `LockedDoor` entry in the map's `events` block:
+
+```ron
+// In data/your_campaign/data/maps/map_1.ron
+events: {
+    (x: 5, y: 3): LockedDoor(
+        name: "Old Iron Door",
+        lock_id: "iron_door_east_wing",   // unique per map
+        key_item_id: Some(200),           // None if pick/bash only
+        initial_trap_chance: 0,           // 0–90; 0 = no trap risk initially
+    ),
+},
+```
+
+Rules:
+
+- `lock_id` must be **unique within the map** (validated by the SDK's
+  `DuplicateLockId` rule).
+- When `key_item_id` is `Some(n)`, item `n` must exist in `items.ron` and
+  have `is_key_item: true` inside its `Quest` type data (validated by the SDK's
+  `LockedObjectKeyNotKeyItem` rule).
+- `initial_trap_chance` is the starting trap risk percentage (0–90). Higher
+  values mean the party risks triggering a trap the first time they try to
+  pick or bash.
+
+### Phase 5 Deliverables Checklist
+
+- [x] `src/application/save_game.rs` — persistence tests added
+- [x] `src/domain/world/lock.rs` — `roll_trap` produces condition effects; `try_lockpick` incorporates Speed bonus; helpers exposed
+- [x] `src/game/systems/lock_ui.rs` — `lock_action_system` applies trap conditions and teleport via `apply_trap_effects`
+- [x] `docs/explanation/implementations.md` — updated with summary section
+- [x] All four quality gates pass (0 errors, 0 warnings, 8/8 new tests pass)
+
+### Quality Gate Results
+
+```
+cargo fmt         → clean (no changes)
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3700 tests: 8 new tests added, all passing
+```
+
+---
+
 ## Phase 4: locked_objects_and_keys — SDK Validation Rules (Complete)
 
 ### Overview
