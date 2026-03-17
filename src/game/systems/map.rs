@@ -72,6 +72,26 @@ pub struct EncounterVisualMarker {
     pub position: types::Position,
 }
 
+/// Component tagging a spawned entity as the visual padlock marker for a locked door.
+///
+/// Despawned by `cleanup_locked_door_markers` when the corresponding door is
+/// successfully unlocked (bash, pick, or key) by `lock_action_system`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::map::LockedDoorMarker;
+///
+/// let marker = LockedDoorMarker { lock_id: "gate_01".to_string() };
+/// assert_eq!(marker.lock_id, "gate_01");
+/// ```
+#[derive(bevy::prelude::Component, Debug, Clone, PartialEq, Eq)]
+pub struct LockedDoorMarker {
+    /// Matches `MapEvent::LockedDoor::lock_id` so it can be despawned
+    /// after the door is unlocked.
+    pub lock_id: String,
+}
+
 /// Event trigger component - attached to entities that represent in-world event triggers
 #[derive(bevy::prelude::Component, Debug, Clone)]
 pub struct EventTrigger {
@@ -132,6 +152,7 @@ impl Plugin for MapManagerPlugin {
                     spawn_map_markers,
                     cleanup_recruitable_visuals,
                     cleanup_encounter_visuals,
+                    cleanup_locked_door_markers,
                 ),
             );
     }
@@ -185,6 +206,43 @@ fn cleanup_recruitable_visuals(
             current_map.get_event(tile_coord.0),
             Some(world::MapEvent::RecruitableCharacter { character_id, .. }) if character_id == &marker.character_id
         );
+
+        if !should_keep {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+/// Despawns locked-door marker entities when their corresponding door has been
+/// unlocked (i.e. the `LockedDoor` event is gone from the map or the lock state
+/// shows the door is no longer locked).
+///
+/// This mirrors the pattern used by `cleanup_recruitable_visuals`.
+fn cleanup_locked_door_markers(
+    mut commands: Commands,
+    global_state: Res<GlobalState>,
+    query: Query<(Entity, &LockedDoorMarker, &TileCoord, &MapEntity)>,
+) {
+    let game_state = &global_state.0;
+    let Some(current_map) = game_state.world.get_current_map() else {
+        return;
+    };
+
+    for (entity, marker, tile_coord, map_entity) in query.iter() {
+        if map_entity.0 != current_map.id {
+            continue;
+        }
+
+        // Despawn if the LockedDoor event has been removed or the door is now unlocked.
+        let should_keep = matches!(
+            current_map.get_event(tile_coord.0),
+            Some(crate::domain::world::MapEvent::LockedDoor { lock_id, .. })
+                if lock_id == &marker.lock_id
+        ) && current_map
+            .lock_states
+            .get(marker.lock_id.as_str())
+            .map(|ls| ls.is_locked)
+            .unwrap_or(false);
 
         if !should_keep {
             commands.entity(entity).despawn();
@@ -1421,6 +1479,50 @@ fn spawn_map(
                         Visibility::default(),
                     ));
                 }
+                world::MapEvent::LockedDoor { lock_id, .. } => {
+                    // Spawn a small amber padlock marker when the door is still locked.
+                    let is_locked = map
+                        .lock_states
+                        .get(lock_id.as_str())
+                        .map(|ls| ls.is_locked)
+                        .unwrap_or(true);
+
+                    if is_locked {
+                        let x = position.x as f32;
+                        let y = position.y as f32;
+                        /// Deep amber tint to distinguish locked doors at a glance.
+                        const LOCKED_DOOR_MARKER_COLOR: [f32; 3] = [0.8, 0.5, 0.1];
+                        let amber = Color::srgb(
+                            LOCKED_DOOR_MARKER_COLOR[0],
+                            LOCKED_DOOR_MARKER_COLOR[1],
+                            LOCKED_DOOR_MARKER_COLOR[2],
+                        );
+                        let marker_mesh = meshes.add(Cuboid::new(0.2, 0.2, 0.2));
+                        let marker_mat = materials.add(StandardMaterial {
+                            base_color: amber,
+                            perceptual_roughness: 0.6,
+                            ..default()
+                        });
+                        commands.spawn((
+                            Mesh3d(marker_mesh),
+                            MeshMaterial3d(marker_mat),
+                            Transform::from_xyz(
+                                x + TILE_CENTER_OFFSET,
+                                1.5,
+                                y + TILE_CENTER_OFFSET,
+                            ),
+                            GlobalTransform::default(),
+                            Visibility::default(),
+                            MapEntity(map.id),
+                            TileCoord(*position),
+                            LockedDoorMarker {
+                                lock_id: lock_id.clone(),
+                            },
+                        ));
+                    }
+                }
+                // LockedContainer events have no visual marker — opened exclusively via UI.
+                world::MapEvent::LockedContainer { .. } => {}
                 // Other events (Trap, Treasure, NpcDialogue, InnEntry) have no visual markers
                 _ => {}
             }
@@ -4035,5 +4137,142 @@ mod tests {
             }
             other => panic!("expected Furniture, got {:?}", other),
         }
+    }
+
+    /// T4-LD1: Verify a `LockedDoorMarker` entity is spawned when `spawn_map` processes
+    /// a map that contains a locked `LockedDoor` event.
+    #[test]
+    fn test_locked_door_marker_spawned_on_map_load() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        let db = crate::sdk::database::ContentDatabase::new();
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        let map_id: crate::domain::types::MapId = 1;
+        let door_pos = Position::new(3, 3);
+
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            door_pos,
+            MapEvent::LockedDoor {
+                name: "Castle Gate".to_string(),
+                lock_id: "castle_gate".to_string(),
+                key_item_id: None,
+                initial_trap_chance: 0,
+            },
+        );
+        // Seed lock states so the spawn check sees is_locked = true.
+        map.init_lock_states();
+
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(map_id);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        // First frame: spawn_map_system runs in Startup and should produce a marker.
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&LockedDoorMarker, &TileCoord)>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(
+            results.len(),
+            1,
+            "Expected exactly one LockedDoorMarker entity"
+        );
+        assert_eq!(results[0].0.lock_id, "castle_gate");
+        assert_eq!(results[0].1 .0, door_pos);
+    }
+
+    /// T4-LD2: Verify `cleanup_locked_door_markers` despawns the marker once the
+    /// `LockedDoor` event is removed from the map (simulating a successful unlock).
+    #[test]
+    fn test_locked_door_marker_despawned_after_unlock() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        // Use MapManagerPlugin so cleanup_locked_door_markers is scheduled.
+        app.add_plugins(MapManagerPlugin);
+
+        let map_id: crate::domain::types::MapId = 1;
+        let door_pos = Position::new(2, 5);
+        let lock_id = "dungeon_gate".to_string();
+
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            door_pos,
+            MapEvent::LockedDoor {
+                name: "Dungeon Gate".to_string(),
+                lock_id: lock_id.clone(),
+                key_item_id: None,
+                initial_trap_chance: 0,
+            },
+        );
+        // Seed lock states so is_locked = true before the first frame.
+        map.init_lock_states();
+
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(map_id);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+
+        // Resources required by spawn_map_markers (also registered by MapManagerPlugin).
+        app.insert_resource(crate::application::resources::GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(crate::game::resources::GrassQualitySettings::default());
+
+        // Spawn a LockedDoorMarker entity manually to simulate what spawn_map does.
+        let marker_entity = app
+            .world_mut()
+            .spawn((
+                LockedDoorMarker {
+                    lock_id: lock_id.clone(),
+                },
+                TileCoord(door_pos),
+                MapEntity(map_id),
+            ))
+            .id();
+
+        // First frame: event is present and lock is locked — entity must survive.
+        app.update();
+        assert!(
+            app.world().get_entity(marker_entity).is_ok(),
+            "Entity should survive while the LockedDoor event is present and locked"
+        );
+
+        // Remove the locked door event (simulates a successful unlock action).
+        {
+            let mut gs = app
+                .world_mut()
+                .resource_mut::<crate::game::resources::GlobalState>();
+            let map = gs.0.world.get_map_mut(map_id).expect("map must exist");
+            map.remove_event(door_pos);
+        }
+
+        // Next frame: cleanup_locked_door_markers must despawn the marker.
+        app.update();
+        assert!(
+            app.world().get_entity(marker_entity).is_err(),
+            "Entity must be despawned after the LockedDoor event is removed"
+        );
     }
 }

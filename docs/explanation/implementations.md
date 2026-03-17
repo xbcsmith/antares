@@ -1,5 +1,382 @@
 # Implementations
 
+## Phase 4: locked_objects_and_keys — SDK Validation Rules (Complete)
+
+### Overview
+
+Implements Phase 4 of the `locked_objects_and_keys` feature
+(`docs/explanation/locked_objects_and_keys_implementation_plan.md`).
+
+This phase adds two new SDK validation rules to `src/sdk/validation.rs` that
+catch data-authoring mistakes at campaign-build time rather than at runtime:
+
+1. **`LockedObjectKeyNotKeyItem`** — every `MapEvent::LockedDoor` and
+   `MapEvent::LockedContainer` whose `key_item_id` is `Some(id)` must
+   reference an item that exists **and** has
+   `ItemType::Quest(QuestData { is_key_item: true })`. An item that exists
+   but has `is_key_item: false` is rejected.
+
+2. **`DuplicateLockId`** — every `lock_id` across all `LockedDoor` and
+   `LockedContainer` events on a single map must be unique, because
+   `Map::lock_states` uses `lock_id` as the `HashMap` key. Two events
+   sharing the same `lock_id` would silently overwrite each other's runtime
+   state.
+
+### Files Changed
+
+| File                         | Change                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/sdk/validation.rs`      | Added `LockedObjectKeyNotKeyItem` and `DuplicateLockId` variants to `ValidationError`; updated `severity()` to classify both as `Severity::Error`; added is-key-item check in both `LockedDoor` and `LockedContainer` match arms of `validate_map`; added duplicate-lock-id scan after the events loop; added 4 new tests |
+| `src/sdk/error_formatter.rs` | Added `LockedObjectKeyNotKeyItem` and `DuplicateLockId` arms to the `get_suggestions` match so the formatter remains exhaustive                                                                                                                                                                                           |
+
+### New `ValidationError` Variants
+
+#### `LockedObjectKeyNotKeyItem`
+
+```antares/src/sdk/validation.rs#L267-279
+#[error(
+    "Map {map_id} locked object '{lock_id}' key_item_id {item_id} \
+     is not a key item (is_key_item must be true)"
+)]
+LockedObjectKeyNotKeyItem {
+    map_id: crate::domain::types::MapId,
+    lock_id: String,
+    item_id: crate::domain::types::ItemId,
+},
+```
+
+Emitted when the item referenced by `key_item_id` exists in the
+`ItemDatabase` but is **not** `ItemType::Quest(QuestData { is_key_item: true })`.
+The pre-existing `MissingItem` error continues to fire when the item ID is
+absent entirely; `LockedObjectKeyNotKeyItem` fires only when the item is
+present but misconfigured.
+
+#### `DuplicateLockId`
+
+```antares/src/sdk/validation.rs#L281-290
+#[error("Map {map_id} has duplicate lock_id '{lock_id}'")]
+DuplicateLockId {
+    map_id: crate::domain::types::MapId,
+    lock_id: String,
+},
+```
+
+Emitted once per duplicated `lock_id` value. The duplicate scan uses a
+two-pass `HashSet` approach: first pass collects all `lock_id` strings and
+detects collisions; second pass pushes one `DuplicateLockId` error per
+colliding value.
+
+### Validation Logic Added to `validate_map`
+
+**is-key-item check** (added inside both `LockedDoor` and `LockedContainer`
+match arms, after the existing `MissingItem` check):
+
+```antares/src/sdk/validation.rs#L1274-1290
+if let Some(kid) = key_item_id {
+    if let Some(item) = self.db.items.get_item(*kid) {
+        let is_key = matches!(
+            &item.item_type,
+            crate::domain::items::ItemType::Quest(q) if q.is_key_item
+        );
+        if !is_key {
+            errors.push(ValidationError::LockedObjectKeyNotKeyItem {
+                map_id: map.id,
+                lock_id: lock_id.clone(),
+                item_id: *kid,
+            });
+        }
+    }
+    // Note: MissingItem is already emitted above when item not found
+}
+```
+
+**duplicate-lock-id scan** (added after the events loop, before NPC
+placement validation):
+
+```antares/src/sdk/validation.rs#L1340-1373
+{
+    let mut seen_lock_ids: std::collections::HashSet<&str> =
+        std::collections::HashSet::new();
+    let mut duplicate_ids: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for event in map.events.values() {
+        let lock_id = match event {
+            crate::domain::world::MapEvent::LockedDoor { lock_id, .. } => {
+                Some(lock_id.as_str())
+            }
+            crate::domain::world::MapEvent::LockedContainer { lock_id, .. } => {
+                Some(lock_id.as_str())
+            }
+            _ => None,
+        };
+        if let Some(id) = lock_id {
+            if !seen_lock_ids.insert(id) {
+                duplicate_ids.insert(id.to_string());
+            }
+        }
+    }
+    for dup_id in duplicate_ids {
+        errors.push(ValidationError::DuplicateLockId {
+            map_id: map.id,
+            lock_id: dup_id,
+        });
+    }
+}
+```
+
+### Tests Added (4 new tests in `src/sdk/validation.rs`)
+
+| Test                                                         | What it verifies                                                                                                                                                        |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_locked_door_with_valid_key_item_passes_validation`     | A `LockedDoor` referencing an item with `is_key_item: true` emits no `LockedObjectKeyNotKeyItem` or `DuplicateLockId` errors                                            |
+| `test_locked_door_with_invalid_key_item_id_fails_validation` | A `LockedDoor` with a `key_item_id` pointing to a non-existent item emits `MissingItem` and does **not** emit `LockedObjectKeyNotKeyItem`                               |
+| `test_locked_door_with_non_key_item_fails_validation`        | A `LockedDoor` referencing an item with `is_key_item: false` emits `LockedObjectKeyNotKeyItem` with the correct `map_id`, `lock_id`, and `item_id`; severity is `Error` |
+| `test_locked_door_with_duplicate_lock_id_fails_validation`   | Two `LockedDoor` events on the same map sharing a `lock_id` emit `DuplicateLockId` with the correct fields; severity is `Error`                                         |
+
+### Phase 4 Deliverables Checklist
+
+- [x] `ValidationError::LockedObjectKeyNotKeyItem` added with `Severity::Error`
+- [x] `ValidationError::DuplicateLockId` added with `Severity::Error`
+- [x] `validate_map` — is-key-item check in `LockedDoor` arm
+- [x] `validate_map` — is-key-item check in `LockedContainer` arm
+- [x] `validate_map` — duplicate-lock-id scan after events loop
+- [x] `error_formatter.rs` `get_suggestions` match kept exhaustive
+- [x] 4 new tests covering all paths
+- [x] `cargo fmt --all` → clean
+- [x] `cargo check --all-targets --all-features` → 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` → 0 warnings
+- [x] `cargo nextest run --all-features` → all new tests pass; only pre-existing performance test failure unrelated to this change
+
+---
+
+## Phase 4: locked_objects_and_keys — Key Items and Campaign Content Data (Complete)
+
+### Overview
+
+Implements the data-content deliverables for Phase 4 of the
+`locked_objects_and_keys` feature. Adds three key item definitions to the
+item databases and populates both the `test_campaign` fixture and the live
+`tutorial` campaign with locked doors and containers that exercise the unlock
+mechanic end-to-end.
+
+### Files Changed
+
+| File                                     | Change                                                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `data/items.ron`                         | Added key items 200 (Dungeon Gate Key), 201 (Old Chest Key), 202 (Iron Lock Key) with `is_key_item: true`  |
+| `data/test_campaign/data/items.ron`      | Mirrored items 200–202                                                                                     |
+| `data/test_campaign/data/maps/map_1.ron` | Tile (16,4) → Stone/Door/blocked; tile (16,12) → Stone/Door/blocked; three new events added                |
+| `data/test_campaign/data/characters.ron` | Added item 200 to `tutorial_human_knight` starting inventory so key-unlock integration tests need no setup |
+| `campaigns/tutorial/data/items.ron`      | Added items 200–202 (with `mesh_descriptor_override: None, mesh_id: None` matching campaign format)        |
+| `campaigns/tutorial/data/maps/map_1.ron` | Tile (17,12) → Stone/Door/blocked; three new events added (Treasure key, LockedContainer, LockedDoor)      |
+
+### Key Item Definitions (IDs 200–202)
+
+All three items are `ItemType::Quest` with `is_key_item: true`:
+
+| ID  | Name             | `quest_id`      | Purpose                                    |
+| --- | ---------------- | --------------- | ------------------------------------------ |
+| 200 | Dungeon Gate Key | `dungeon_key`   | Opens `test_dungeon_gate` / tutorial chest |
+| 201 | Old Chest Key    | `chest_key`     | Opens `test_chest` container               |
+| 202 | Iron Lock Key    | `iron_lock_key` | Reserved for iron-door encounters          |
+
+Both `base_cost` and `sell_cost` are `0` — these are non-purchasable quest
+rewards. `max_charges: 1`, `is_cursed: false`.
+
+### Test Campaign Map Fixtures (`data/test_campaign/data/maps/map_1.ron`)
+
+Three events were appended to the `events` map and two tiles were modified:
+
+| Position | Event type        | `lock_id`           | `key_item_id` | `initial_trap_chance` |
+| -------- | ----------------- | ------------------- | ------------- | --------------------- |
+| (16, 4)  | `LockedDoor`      | `test_dungeon_gate` | `Some(200)`   | 0                     |
+| (16, 12) | `LockedDoor`      | `test_iron_door`    | `None`        | 10                    |
+| (17, 4)  | `LockedContainer` | `test_chest`        | `Some(201)`   | 0                     |
+
+Tiles (16, 4) and (16, 12) were changed from
+`terrain: Ground, wall_type: None, blocked: false` to
+`terrain: Stone, wall_type: Door, blocked: true` so a physical door wall
+exists for `apply_success` to clear on unlock.
+
+Item 200 (Dungeon Gate Key) was added to `tutorial_human_knight`'s
+`starting_items` list so integration tests for the key-unlock path work
+without extra inventory setup.
+
+### Tutorial Campaign Map Content (`campaigns/tutorial/data/maps/map_1.ron`)
+
+Three events teach the mechanic to new players. The key for the locked chest
+is discoverable as a `Treasure` event earlier in the same map:
+
+| Position | Event type        | `lock_id`                 | `key_item_id` | Notes                                 |
+| -------- | ----------------- | ------------------------- | ------------- | ------------------------------------- |
+| (16, 8)  | `Treasure`        | n/a                       | n/a           | `loot: [200]` — key drop              |
+| (17, 8)  | `LockedContainer` | `tutorial_locked_chest`   | `Some(200)`   | Rewarded chest                        |
+| (17, 12) | `LockedDoor`      | `tutorial_barred_passage` | `None`        | Lockpick/bash only; `trap_chance: 15` |
+
+Tile (17, 12) was changed from Ground/None/unblocked to
+Stone/Door/blocked.
+
+> **Rule:** The tutorial campaign changes are live game content only. All
+> integration tests reference `data/test_campaign`, never `campaigns/tutorial`.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 **EXACTLY** (ItemType::Quest, QuestData.is_key_item, MapEvent::LockedDoor, MapEvent::LockedContainer)
+- [x] RON format used for all data files — no JSON or YAML
+- [x] Item IDs 200–202 do not conflict with existing IDs (highest prior ID was 112 in test_campaign; 101 in base)
+- [x] Test data lives in `data/test_campaign` — zero references to `campaigns/tutorial` in tests
+- [x] `campaigns/tutorial` changes are live-game content only
+
+### Phase 4 Data Deliverables Checklist
+
+- [x] `data/items.ron` — items 200, 201, 202 added with `is_key_item: true`
+- [x] `data/test_campaign/data/items.ron` — items 200–202 mirrored
+- [x] `data/test_campaign/data/maps/map_1.ron` — tiles (16,4) and (16,12) converted to Door; three events added
+- [x] `data/test_campaign/data/characters.ron` — item 200 in `tutorial_human_knight` starting inventory
+- [x] `campaigns/tutorial/data/items.ron` — items 200–202 added (campaign item format with `mesh_id`)
+- [x] `campaigns/tutorial/data/maps/map_1.ron` — Treasure (key drop), LockedContainer, LockedDoor added; tile (17,12) converted to Door
+- [x] `cargo fmt --all` → clean
+- [x] `cargo check --all-targets --all-features` → 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` → 0 warnings
+- [x] `cargo nextest run --all-features` → 3692/3692 passed
+
+---
+
+## Phase 4: locked_objects_and_keys — `LockedDoorMarker` Spawn and Cleanup (`map.rs`) (Complete)
+
+### Overview
+
+Implements the visual marker subsystem for `MapEvent::LockedDoor` as part of
+Phase 4 of the `locked_objects_and_keys` feature.
+
+Three concerns are addressed in `src/game/systems/map.rs`:
+
+1. **`LockedDoorMarker` component** — a new ECS component that tags any entity
+   spawned as the amber padlock visual for a locked door. Stores the
+   `lock_id` string so the cleanup system can match it against the current
+   map's `lock_states`.
+
+2. **`cleanup_locked_door_markers` system** — mirrors the existing
+   `cleanup_recruitable_visuals` pattern. Runs every `Update` frame and
+   despawns any `LockedDoorMarker` entity whose `lock_id` is either no longer
+   present as a `LockedDoor` event on the current map, or whose
+   `Map::lock_states` entry shows `is_locked: false`.
+
+3. **`LockedDoor` spawn arm in `spawn_map`** — inside the per-event loop that
+   already handles `Sign`, `Teleport`, `Furniture`, `Encounter`, and
+   `RecruitableCharacter`, a new `LockedDoor` arm spawns an amber
+   `Cuboid(0.2, 0.2, 0.2)` mesh at `(x + 0.5, 1.5, y + 0.5)` when
+   `lock_states` shows the door is still locked (defaults to locked when no
+   state is seeded yet). A `LockedContainer { .. } => {}` no-op arm is also
+   added; containers have no visual marker — they are opened exclusively
+   through the UI.
+
+### Files Changed
+
+| File                      | Change                                                                                                                                                                                                                                                                            |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/map.rs` | Added `LockedDoorMarker` struct (Component); added `cleanup_locked_door_markers` system function; registered `cleanup_locked_door_markers` in `MapManagerPlugin::build`; added `LockedDoor` and `LockedContainer` match arms in the events loop of `spawn_map`; added 2 new tests |
+
+### New Component: `LockedDoorMarker`
+
+```antares/src/game/systems/map.rs#L74-91
+/// Component tagging a spawned entity as the visual padlock marker for a locked door.
+///
+/// Despawned by `cleanup_locked_door_markers` when the corresponding door is
+/// successfully unlocked (bash, pick, or key) by `lock_action_system`.
+#[derive(bevy::prelude::Component, Debug, Clone, PartialEq, Eq)]
+pub struct LockedDoorMarker {
+    /// Matches `MapEvent::LockedDoor::lock_id` so it can be despawned
+    /// after the door is unlocked.
+    pub lock_id: String,
+}
+```
+
+### New System: `cleanup_locked_door_markers`
+
+The system queries all `(Entity, &LockedDoorMarker, &TileCoord, &MapEntity)`
+tuples, skips entities not on the current map, and despawns any where:
+
+- the tile no longer has a `LockedDoor` event with a matching `lock_id`, **or**
+- `Map::lock_states[lock_id].is_locked` is `false`.
+
+```antares/src/game/systems/map.rs#L216-255
+fn cleanup_locked_door_markers(
+    mut commands: Commands,
+    global_state: Res<GlobalState>,
+    query: Query<(Entity, &LockedDoorMarker, &TileCoord, &MapEntity)>,
+) { ... }
+```
+
+`should_keep` uses the same `matches!` guard pattern as
+`cleanup_recruitable_visuals`, chaining it with the lock-state look-up:
+
+```antares/src/game/systems/map.rs#L238-249
+let should_keep = matches!(
+    current_map.get_event(tile_coord.0),
+    Some(crate::domain::world::MapEvent::LockedDoor { lock_id, .. })
+        if lock_id == &marker.lock_id
+) && current_map
+    .lock_states
+    .get(marker.lock_id.as_str())
+    .map(|ls| ls.is_locked)
+    .unwrap_or(false);
+```
+
+### Spawn Logic in `spawn_map`
+
+The `LockedDoor` arm checks `map.lock_states` first and only spawns the
+marker when the door is still locked (defaulting to locked when no
+`LockState` entry exists yet):
+
+```antares/src/game/systems/map.rs#L1482-1528
+world::MapEvent::LockedDoor { lock_id, .. } => {
+    let is_locked = map
+        .lock_states
+        .get(lock_id.as_str())
+        .map(|ls| ls.is_locked)
+        .unwrap_or(true);
+
+    if is_locked {
+        // spawn amber Cuboid(0.2, 0.2, 0.2) at tile center, y = 1.5
+        // with MapEntity, TileCoord, LockedDoorMarker components
+    }
+}
+world::MapEvent::LockedContainer { .. } => {}
+```
+
+The amber colour is defined as a local constant immediately before the
+`Color::srgb` call:
+
+```antares/src/game/systems/map.rs#L1494-1495
+/// Deep amber tint to distinguish locked doors at a glance.
+const LOCKED_DOOR_MARKER_COLOR: [f32; 3] = [0.8, 0.5, 0.1];
+```
+
+### Tests Added (2 new tests in `src/game/systems/map.rs`)
+
+| Test                                             | What it verifies                                                                                                                                                                                                                                                     |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_locked_door_marker_spawned_on_map_load`    | Uses `MapRenderingPlugin`; inserts a map with a `LockedDoor` event and seeded lock states; runs one frame; asserts exactly one `LockedDoorMarker` entity with `lock_id == "castle_gate"` at the expected tile coordinate                                             |
+| `test_locked_door_marker_despawned_after_unlock` | Uses `MapManagerPlugin`; manually spawns a `LockedDoorMarker`/`TileCoord`/`MapEntity` tuple; first frame — entity survives because the event is present and locked; removes the `LockedDoor` event; second frame — `cleanup_locked_door_markers` despawns the entity |
+
+### Phase 4 `map.rs` Deliverables Checklist
+
+- [x] `LockedDoorMarker` component added with `pub lock_id: String` field
+- [x] `///` doc comment with doctest on `LockedDoorMarker`
+- [x] `cleanup_locked_door_markers` system added after `cleanup_recruitable_visuals`
+- [x] `cleanup_locked_door_markers` registered in `MapManagerPlugin::build`
+- [x] `LockedDoor` match arm in `spawn_map` events loop — spawns amber marker when locked
+- [x] `LockedContainer { .. } => {}` no-op arm added before fallthrough `_ => {}`
+- [x] `LOCKED_DOOR_MARKER_COLOR` defined as a `const` with doc comment
+- [x] 2 new tests: spawn and despawn coverage
+- [x] `cargo fmt --all` → clean
+- [x] `cargo check --all-targets --all-features` → 0 errors
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` → 0 warnings
+- [x] `cargo nextest run --all-features` → 3692 tests, both new tests pass; only pre-existing performance flake fails under full parallel load
+
+---
+
 ## Phase 3: Lockpick / Bash UI Prompt and Locked Container Interaction (Complete)
 
 ### Overview

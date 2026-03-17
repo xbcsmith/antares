@@ -255,6 +255,35 @@ pub enum ValidationError {
         /// String representation of the item's actual ArmorClassification
         actual_classification: String,
     },
+
+    /// A locked object's `key_item_id` references an item that is not a key item
+    /// (i.e. `ItemType::Quest(QuestData { is_key_item: true })`).
+    ///
+    /// Emitted when the item exists but `is_key_item` is `false`.
+    #[error(
+        "Map {map_id} locked object '{lock_id}' key_item_id {item_id} \
+         is not a key item (is_key_item must be true)"
+    )]
+    LockedObjectKeyNotKeyItem {
+        /// Map where the locked event is located
+        map_id: crate::domain::types::MapId,
+        /// Lock identifier from the event
+        lock_id: String,
+        /// The item ID that was found but is not a key item
+        item_id: crate::domain::types::ItemId,
+    },
+
+    /// Two or more locked objects on the same map share the same `lock_id`.
+    ///
+    /// Each locked door / container on a map must have a unique `lock_id` because
+    /// `Map::lock_states` uses `lock_id` as the HashMap key.
+    #[error("Map {map_id} has duplicate lock_id '{lock_id}'")]
+    DuplicateLockId {
+        /// Map where the duplicate was found
+        map_id: crate::domain::types::MapId,
+        /// The duplicated lock identifier
+        lock_id: String,
+    },
 }
 
 impl ValidationError {
@@ -290,7 +319,9 @@ impl ValidationError {
             | ValidationError::MissingStockTemplateItem { .. }
             | ValidationError::ItemMeshDescriptorInvalid { .. }
             | ValidationError::HelmetSlotTypeMismatch { .. }
-            | ValidationError::BootsSlotTypeMismatch { .. } => Severity::Error,
+            | ValidationError::BootsSlotTypeMismatch { .. }
+            | ValidationError::LockedObjectKeyNotKeyItem { .. }
+            | ValidationError::DuplicateLockId { .. } => Severity::Error,
 
             ValidationError::DisconnectedMap { .. } | ValidationError::InvalidServiceId { .. } => {
                 Severity::Warning
@@ -1243,6 +1274,23 @@ impl<'a> Validator<'a> {
                             });
                         }
                     }
+                    // Check the item exists AND is a key item
+                    if let Some(kid) = key_item_id {
+                        if let Some(item) = self.db.items.get_item(*kid) {
+                            let is_key = matches!(
+                                &item.item_type,
+                                crate::domain::items::ItemType::Quest(q) if q.is_key_item
+                            );
+                            if !is_key {
+                                errors.push(ValidationError::LockedObjectKeyNotKeyItem {
+                                    map_id: map.id,
+                                    lock_id: lock_id.clone(),
+                                    item_id: *kid,
+                                });
+                            }
+                        }
+                        // Note: MissingItem is already emitted above when item not found
+                    }
                 }
                 crate::domain::world::MapEvent::LockedContainer {
                     lock_id,
@@ -1271,7 +1319,54 @@ impl<'a> Validator<'a> {
                             });
                         }
                     }
+                    // Check the item exists AND is a key item
+                    if let Some(kid) = key_item_id {
+                        if let Some(item) = self.db.items.get_item(*kid) {
+                            let is_key = matches!(
+                                &item.item_type,
+                                crate::domain::items::ItemType::Quest(q) if q.is_key_item
+                            );
+                            if !is_key {
+                                errors.push(ValidationError::LockedObjectKeyNotKeyItem {
+                                    map_id: map.id,
+                                    lock_id: lock_id.clone(),
+                                    item_id: *kid,
+                                });
+                            }
+                        }
+                        // Note: MissingItem is already emitted above when item not found
+                    }
                 }
+            }
+        }
+
+        // Check for duplicate lock_ids across all LockedDoor and LockedContainer events
+        {
+            let mut seen_lock_ids: std::collections::HashSet<&str> =
+                std::collections::HashSet::new();
+            let mut duplicate_ids: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for event in map.events.values() {
+                let lock_id = match event {
+                    crate::domain::world::MapEvent::LockedDoor { lock_id, .. } => {
+                        Some(lock_id.as_str())
+                    }
+                    crate::domain::world::MapEvent::LockedContainer { lock_id, .. } => {
+                        Some(lock_id.as_str())
+                    }
+                    _ => None,
+                };
+                if let Some(id) = lock_id {
+                    if !seen_lock_ids.insert(id) {
+                        duplicate_ids.insert(id.to_string());
+                    }
+                }
+            }
+            for dup_id in duplicate_ids {
+                errors.push(ValidationError::DuplicateLockId {
+                    map_id: map.id,
+                    lock_id: dup_id,
+                });
             }
         }
 
@@ -2838,6 +2933,247 @@ mod tests {
             mismatch_errors.is_empty(),
             "Expected no HelmetSlotTypeMismatch errors but got: {:?}",
             mismatch_errors
+        );
+    }
+
+    #[test]
+    fn test_locked_door_with_valid_key_item_passes_validation() {
+        use crate::domain::items::{Item, ItemType, QuestData};
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut db = ContentDatabase::new();
+
+        // Add a key item with is_key_item: true
+        let key_item = Item {
+            id: 200,
+            name: "Dungeon Gate Key".to_string(),
+            item_type: ItemType::Quest(QuestData {
+                quest_id: "dungeon_key".to_string(),
+                is_key_item: true,
+            }),
+            base_cost: 0,
+            sell_cost: 0,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 1,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(key_item).unwrap();
+
+        // Add a map with LockedDoor referencing this key item
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = crate::domain::types::Position::new(5, 5);
+        map.add_event(
+            pos,
+            MapEvent::LockedDoor {
+                name: "Gate".to_string(),
+                lock_id: "gate_01".to_string(),
+                key_item_id: Some(200),
+                initial_trap_chance: 0,
+            },
+        );
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_map(&map).unwrap();
+
+        // Should have no LockedObjectKeyNotKeyItem or DuplicateLockId errors
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::LockedObjectKeyNotKeyItem { .. })),
+            "Expected no LockedObjectKeyNotKeyItem error but got: {:?}",
+            errors
+        );
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::DuplicateLockId { .. })),
+            "Expected no DuplicateLockId error but got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_locked_door_with_invalid_key_item_id_fails_validation() {
+        // key_item_id references a non-existent item — should emit MissingItem
+        use crate::domain::world::{Map, MapEvent};
+
+        let db = ContentDatabase::new(); // empty — item 999 does not exist
+
+        let mut map = Map::new(2, "Test2".to_string(), "Desc".to_string(), 10, 10);
+        let pos = crate::domain::types::Position::new(3, 3);
+        map.add_event(
+            pos,
+            MapEvent::LockedDoor {
+                name: "Vault Door".to_string(),
+                lock_id: "vault_01".to_string(),
+                key_item_id: Some(254),
+                initial_trap_chance: 0,
+            },
+        );
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_map(&map).unwrap();
+
+        // Should emit MissingItem for the non-existent item
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::MissingItem { item_id: 254, .. })),
+            "Expected MissingItem error for item_id 254 but got: {:?}",
+            errors
+        );
+        // Should NOT emit LockedObjectKeyNotKeyItem (item was not found at all)
+        assert!(
+            !errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::LockedObjectKeyNotKeyItem { .. })),
+            "Should not emit LockedObjectKeyNotKeyItem when item is missing entirely, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_locked_door_with_non_key_item_fails_validation() {
+        // key_item_id references an item that exists but has is_key_item: false
+        use crate::domain::items::{Item, ItemType, QuestData};
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut db = ContentDatabase::new();
+
+        // Add a quest item that is NOT a key item
+        let non_key_item = Item {
+            id: 201,
+            name: "Old Letter".to_string(),
+            item_type: ItemType::Quest(QuestData {
+                quest_id: "side_quest".to_string(),
+                is_key_item: false, // NOT a key item
+            }),
+            base_cost: 0,
+            sell_cost: 0,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(non_key_item).unwrap();
+
+        let mut map = Map::new(3, "Test3".to_string(), "Desc".to_string(), 10, 10);
+        let pos = crate::domain::types::Position::new(4, 4);
+        map.add_event(
+            pos,
+            MapEvent::LockedDoor {
+                name: "Secret Door".to_string(),
+                lock_id: "secret_01".to_string(),
+                key_item_id: Some(201),
+                initial_trap_chance: 0,
+            },
+        );
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_map(&map).unwrap();
+
+        // Should emit LockedObjectKeyNotKeyItem
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::LockedObjectKeyNotKeyItem { .. })),
+            "Expected LockedObjectKeyNotKeyItem error but got: {:?}",
+            errors
+        );
+        // Verify the error carries the correct details
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                ValidationError::LockedObjectKeyNotKeyItem { map_id, lock_id, item_id }
+                if *map_id == 3 && lock_id == "secret_01" && *item_id == 201
+            )),
+            "Expected LockedObjectKeyNotKeyItem with map_id=3, lock_id='secret_01', item_id=201, got: {:?}",
+            errors
+        );
+        // Verify severity
+        let key_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::LockedObjectKeyNotKeyItem { .. }))
+            .collect();
+        assert_eq!(
+            key_errors[0].severity(),
+            Severity::Error,
+            "LockedObjectKeyNotKeyItem should be Error severity"
+        );
+    }
+
+    #[test]
+    fn test_locked_door_with_duplicate_lock_id_fails_validation() {
+        // Two LockedDoor events on the same map share the same lock_id
+        use crate::domain::world::{Map, MapEvent};
+
+        let db = ContentDatabase::new();
+
+        let mut map = Map::new(4, "Test4".to_string(), "Desc".to_string(), 10, 10);
+
+        // Add two LockedDoor events with the same lock_id at different positions
+        map.add_event(
+            crate::domain::types::Position::new(1, 1),
+            MapEvent::LockedDoor {
+                name: "Door A".to_string(),
+                lock_id: "shared_lock".to_string(),
+                key_item_id: None,
+                initial_trap_chance: 0,
+            },
+        );
+        map.add_event(
+            crate::domain::types::Position::new(2, 2),
+            MapEvent::LockedDoor {
+                name: "Door B".to_string(),
+                lock_id: "shared_lock".to_string(), // duplicate!
+                key_item_id: None,
+                initial_trap_chance: 0,
+            },
+        );
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_map(&map).unwrap();
+
+        // Should emit a DuplicateLockId error
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::DuplicateLockId { .. })),
+            "Expected DuplicateLockId error but got: {:?}",
+            errors
+        );
+        // Verify the error carries the correct details
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                ValidationError::DuplicateLockId { map_id, lock_id }
+                if *map_id == 4 && lock_id == "shared_lock"
+            )),
+            "Expected DuplicateLockId with map_id=4, lock_id='shared_lock', got: {:?}",
+            errors
+        );
+        // Verify severity
+        let dup_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::DuplicateLockId { .. }))
+            .collect();
+        assert_eq!(
+            dup_errors[0].severity(),
+            Severity::Error,
+            "DuplicateLockId should be Error severity"
         );
     }
 }
