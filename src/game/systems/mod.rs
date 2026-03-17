@@ -28,6 +28,7 @@ pub mod inn_ui;
 pub mod input;
 pub mod inventory_ui;
 pub mod item_world_events;
+pub mod lock_ui;
 pub mod lod;
 pub mod map;
 pub mod menu;

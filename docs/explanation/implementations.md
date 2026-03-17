@@ -1,6 +1,197 @@
 # Implementations
 
-## Phase 1: Locked Objects and Keys — Domain Layer (Complete)
+## Phase 3: Lockpick / Bash UI Prompt and Locked Container Interaction (Complete)
+
+### Overview
+
+Implements Phase 3 of the locked objects and keys plan
+(`docs/explanation/locked_objects_and_keys_implementation_plan.md`).
+
+This phase adds the egui lock-choice prompt, the action handler that calls the
+Phase 1 domain functions, and the locked-container `E`-key path in `handle_input`.
+
+### Files Changed
+
+| File                          | Change                                                                                                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/lock_ui.rs` | **New file** — `LockUiPlugin`, `LockActionChosen`, `LockAction`, `LockNavState`, `lock_prompt_ui_system`, `lock_action_system`, `handle_lock_action`, `apply_success`, 11 tests |
+| `src/game/systems/mod.rs`     | Added `pub mod lock_ui;`                                                                                                                                                        |
+| `src/game/systems/input.rs`   | Phase 3 `LockedContainer` E-key block added after Phase 2 locked-door block; 2 new integration tests                                                                            |
+| `src/bin/antares.rs`          | Registered `LockUiPlugin`                                                                                                                                                       |
+
+### New Types
+
+#### `LockActionChosen` (`src/game/systems/lock_ui.rs`)
+
+`#[derive(Message)]` struct emitted when the player selects an action from the
+lock prompt UI. Fields: `lock_id: String`, `position: Position`,
+`action: LockAction`, `party_index: usize`.
+
+#### `LockAction` (`src/game/systems/lock_ui.rs`)
+
+`#[derive(Debug, Clone, Copy, PartialEq, Eq)]` enum with two variants:
+`Lockpick` and `Bash`.
+
+#### `LockNavState` (`src/game/systems/lock_ui.rs`)
+
+`#[derive(Resource, Default, Debug)]` resource tracking `selected_character:
+Option<usize>` — which party member is focused in the lock prompt UI.
+Registered by `LockUiPlugin`.
+
+### Systems
+
+#### `lock_prompt_ui_system`
+
+Runs every frame. Returns immediately when `LockInteractionPending.lock_id` is
+`None`. Otherwise renders a centred `egui::Window` with:
+
+- Character selector (keys `1`–`6` or mouse click on character name labels).
+- **Pick Lock** button — disabled via `add_enabled_ui(can_lockpick, …)` when no
+  party member has the `pick_lock` special ability.
+- **Bash** button — always available.
+- **Cancel** button / `Esc` key — clears `LockInteractionPending` with no side
+  effect.
+
+Emits `LockActionChosen` and clears `LockInteractionPending` when the player
+confirms a choice.
+
+#### `lock_action_system`
+
+Reads `LockActionChosen` messages. For each message:
+
+1. Builds a `ClassDatabase` reference (falls back to empty when `GameContent`
+   is absent).
+2. Clones the acting `Character` and the `LockState` snapshot before any
+   mutation.
+3. Determines `EventKind::Door` or `EventKind::Container(name)` from the map
+   event at `position`.
+4. Calls `handle_lock_action` (pure helper) with `rand::rng()`.
+5. Writes the updated `LockState` back to `map.lock_states`.
+6. Handles every `UnlockOutcome` variant:
+   - `LockpickSuccess` / `BashSuccess` → calls `apply_success`, logs message.
+   - `LockpickFailed` → logs `"Only a skilled Robber…"` (no ability) or
+     `"You fail to pick the lock. Trap chance: N%."` (ability but roll failed).
+   - `BashFailed` → logs `"You fail to break open the door. Trap chance: N%."`.
+   - `TrapTriggered` → applies `damage` to every party member via
+     `member.hp.modify(-(damage as i32))` and logs the trap message.
+7. Always clears `LockInteractionPending`.
+
+### Pure Helpers
+
+#### `handle_lock_action<R: Rng>` (pub(crate))
+
+Dispatches `LockAction::Lockpick` → `try_lockpick` and `LockAction::Bash` →
+`try_bash`. Extracted from the Bevy system so tests can inject seeded RNGs.
+
+#### `apply_success` (pub(crate))
+
+Applies a successful unlock to `GameState`:
+
+- **Door** — sets `tile.wall_type = WallType::None`, `tile.blocked = false`,
+  removes the `LockedDoor` event.
+- **Container** — replaces the `LockedContainer` event with an open
+  `MapEvent::Container` (empty items), calls
+  `game_state.enter_container_inventory(…)`, returns
+  `"The {name} is unlocked."` as a log message.
+
+Returns `Vec<String>` of game-log messages to add (avoids Bevy type
+parameters so the function is testable with plain `GameState`).
+
+### Locked Container `E`-Key Path (`src/game/systems/input.rs`)
+
+New block inserted between the Phase 2 locked-door block and the tile-door
+fallback. Follows the same evaluation order as the locked-door path:
+
+1. If `LockedContainer` is already unlocked → replace event with `Container`,
+   fire `MapEventTriggered { Container }`, return.
+2. If locked, key found in party → consume key, unlock lock_state, add
+   `Container` event, fire `MapEventTriggered { Container }`, log success,
+   return.
+3. If locked, key required but absent → log `"The container is locked. You
+need a key."`, populate `LockInteractionPending`, return.
+4. If locked, no key required → log `"The container is locked."`, populate
+   `LockInteractionPending`, return.
+
+Using `map_event_messages.write(MapEventTriggered { Container })` to open the
+container avoids a borrow-checker conflict with `world = &mut game_state.world`
+that would arise from calling `game_state.enter_container_inventory()` directly.
+The `handle_events` system processes the `Container` event in the same frame.
+
+### Failure Messages
+
+| Outcome                        | Game Log Message                                      |
+| ------------------------------ | ----------------------------------------------------- |
+| `LockpickFailed` (no ability)  | `"Only a skilled Robber can pick this lock."`         |
+| `LockpickFailed` (roll failed) | `"You fail to pick the lock. Trap chance: N%."`       |
+| `BashFailed`                   | `"You fail to break open the door. Trap chance: N%."` |
+| `LockpickSuccess`              | `"{name} picks the lock!"`                            |
+| `BashSuccess` (door)           | `"{name} smashes the door open!"`                     |
+| `BashSuccess` (container)      | `"{name} smashes open the {container}!"`              |
+| Container unlocked             | `"The {name} is unlocked."`                           |
+| `TrapTriggered`                | `"A trap fires! The party takes N damage!"`           |
+
+### Tests Added (13 new tests in `src/game/systems/lock_ui.rs`)
+
+| Test                                                              | What it verifies                                                |
+| ----------------------------------------------------------------- | --------------------------------------------------------------- |
+| `test_lock_action_chosen_fields`                                  | `LockActionChosen` stores all fields correctly                  |
+| `test_lock_action_variants_distinct`                              | `LockAction` equality                                           |
+| `test_lock_action_system_bash_success_opens_door`                 | Bash success → `WallType::None`, `blocked=false`, event removed |
+| `test_lock_action_system_bash_failure_logs_message`               | Bash failure → `new_trap_chance == BASH_TRAP_INCREMENT`         |
+| `test_lock_action_system_lockpick_no_ability_logs_rejection`      | Knight + empty class DB → `LockpickFailed`, rejection message   |
+| `test_lock_action_system_trap_triggered_damages_party`            | `trap_chance==100` → `TrapTriggered`, HP reduced                |
+| `test_lock_action_system_container_success_enters_container_mode` | `apply_success` on container → `GameMode::ContainerInventory`   |
+| `test_lock_nav_state_default`                                     | `LockNavState::default()` has no selected character             |
+| `test_apply_success_door_removes_event`                           | `LockedDoor` event removed after door success                   |
+| `test_apply_success_container_replaces_event`                     | `LockedContainer` replaced with `Container`                     |
+| `test_handle_lock_action_bash_no_trap_when_zero_chance`           | No trap fires when `trap_chance == 0`                           |
+| `test_handle_lock_action_lockpick_no_class_db_always_fails`       | Empty class DB → `LockpickFailed` for any class                 |
+
+**2 new integration tests in `src/game/systems/input.rs`
+(`locked_container_map_event_tests`):**
+
+| Test                                                                    | What it verifies                                         |
+| ----------------------------------------------------------------------- | -------------------------------------------------------- |
+| `test_e_key_on_locked_container_without_key_sets_pending`               | No-key container → `LockInteractionPending` set          |
+| `test_e_key_on_locked_container_with_correct_key_fires_container_event` | Correct key → key consumed, lock unlocked, pending clear |
+
+### Phase 3 Deliverables Checklist
+
+- [x] `src/game/systems/lock_ui.rs` — `LockUiPlugin`, `lock_prompt_ui_system`,
+      `lock_action_system`, `LockActionChosen`, `LockAction`, `LockNavState`
+- [x] `src/game/systems/input.rs` — locked container path added alongside
+      locked door path
+- [x] `src/bin/antares.rs` — `LockUiPlugin` registered
+- [x] All four quality gates pass
+
+### Architecture Compliance
+
+- [x] `handle_lock_action` is `pub(crate)` — domain functions invoked from
+      the game layer, not duplicated
+- [x] `apply_success` takes plain `&mut GameState` — no Bevy types,
+      independently testable
+- [x] `rand::rng()` used in the Bevy system; seeded `StdRng` used in tests
+- [x] `LockInteractionPending` always cleared after every action or cancel
+- [x] Trap damage uses `member.hp.modify(-(damage as i32))` — consistent with
+      combat engine pattern
+- [x] Container success fires `MapEventTriggered` rather than calling
+      `enter_container_inventory` directly — avoids borrow conflict with
+      `world = &mut game_state.world`
+- [x] No test references `campaigns/tutorial` (Implementation Rule 5)
+- [x] SPDX header present on `lock_ui.rs`
+
+### Quality Gate Results
+
+```text
+cargo fmt --all         → clean (no output)
+cargo check             → Finished dev profile, 0 errors
+cargo clippy -D warnings → Finished dev profile, 0 warnings
+cargo nextest run       → 3686/3686 passed, 8 skipped, 0 failed
+```
+
+---
+
+## Phase 2: Interaction Wiring — Locked Door `E`-Key Path (Complete)
 
 ### Overview
 

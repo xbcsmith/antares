@@ -885,6 +885,207 @@ fn handle_input(
         }
         // ── End Phase 2 locked-door block ─────────────────────────────────────
 
+        // ── Phase 3: Tile-based LockedContainer (MapEvent) interaction ─────────
+        //
+        // When the tile directly ahead carries a `MapEvent::LockedContainer`,
+        // follow the same key-check logic as the LockedDoor path above.
+        //
+        // On success (key found or already unlocked), fire a
+        // `MapEventTriggered` for the replacement `Container` event so that
+        // `handle_events` enters `ContainerInventory` mode — this avoids any
+        // borrow-checker conflict with `world = &mut game_state.world`.
+        {
+            // Step A: read locked-container event info (immutable).
+            let locked_container_info: Option<(
+                String,
+                String,
+                Option<crate::domain::types::ItemId>,
+            )> = world
+                .get_current_map()
+                .and_then(|m| m.get_event(target))
+                .and_then(|e| {
+                    if let MapEvent::LockedContainer {
+                        lock_id,
+                        name,
+                        key_item_id,
+                        ..
+                    } = e
+                    {
+                        Some((lock_id.clone(), name.clone(), *key_item_id))
+                    } else {
+                        None
+                    }
+                });
+
+            if let Some((lock_id, container_name, key_item_id)) = locked_container_info {
+                // Step B: check lock status (immutable).
+                let is_locked: bool = world
+                    .get_current_map()
+                    .and_then(|m| m.lock_states.get(&lock_id))
+                    .map(|ls| ls.is_locked)
+                    .unwrap_or_else(|| {
+                        warn!(
+                            "LockedContainer lock_id '{}' has no lock_state entry; \
+                             was init_lock_states() called on map load?",
+                            lock_id
+                        );
+                        true
+                    });
+
+                if !is_locked {
+                    // Already unlocked — replace with Container event and fire
+                    // MapEventTriggered so handle_events enters container mode.
+                    let id = lock_id.clone();
+                    let name = container_name.clone();
+                    if let Some(map) = world.get_current_map_mut() {
+                        map.add_event(
+                            target,
+                            MapEvent::Container {
+                                id: id.clone(),
+                                name: name.clone(),
+                                description: String::new(),
+                                items: vec![],
+                            },
+                        );
+                    }
+                    map_event_messages.write(MapEventTriggered {
+                        event: MapEvent::Container {
+                            id,
+                            name,
+                            description: String::new(),
+                            items: vec![],
+                        },
+                        position: target,
+                    });
+                    info!("Opening previously unlocked container at {:?}", target);
+                    return;
+                }
+
+                // Step C: search party inventory for the required key (immutable).
+                let key_found: Option<(usize, usize)> = key_item_id.and_then(|kid| {
+                    game_state
+                        .party
+                        .members
+                        .iter()
+                        .enumerate()
+                        .find_map(|(char_idx, ch)| {
+                            ch.inventory
+                                .items
+                                .iter()
+                                .position(|slot| slot.item_id == kid)
+                                .map(|slot_idx| (char_idx, slot_idx))
+                        })
+                });
+
+                match (key_item_id, key_found) {
+                    (Some(kid), Some((char_idx, slot_idx))) => {
+                        // ── Key found: consume it, unlock, open the container ──
+                        game_state.party.members[char_idx]
+                            .inventory
+                            .items
+                            .remove(slot_idx);
+
+                        let id = lock_id.clone();
+                        let name = container_name.clone();
+
+                        // Mutate world — last use of `world` in this branch.
+                        if let Some(map) = world.get_current_map_mut() {
+                            if let Some(ls) = map.lock_states.get_mut(&lock_id) {
+                                ls.unlock();
+                            }
+                            // Replace LockedContainer with open Container event.
+                            map.add_event(
+                                target,
+                                MapEvent::Container {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    description: String::new(),
+                                    items: vec![],
+                                },
+                            );
+                        }
+
+                        // Fire MapEventTriggered so handle_events enters container mode.
+                        map_event_messages.write(MapEventTriggered {
+                            event: MapEvent::Container {
+                                id,
+                                name: name.clone(),
+                                description: String::new(),
+                                items: vec![],
+                            },
+                            position: target,
+                        });
+
+                        let key_name = game_content
+                            .as_deref()
+                            .and_then(|gc| gc.db().items.get_item(kid))
+                            .map(|item| item.name.clone())
+                            .unwrap_or_else(|| format!("key {}", kid));
+                        let msg =
+                            format!("You unlock the {} with the {}.", container_name, key_name);
+                        info!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                        return;
+                    }
+                    (Some(_), None) => {
+                        // ── Key required but not in party ─────────────────────
+                        let msg = "The container is locked. You need a key.".to_string();
+                        info!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                        let can_lockpick = game_content
+                            .as_deref()
+                            .map(|gc| {
+                                game_state.party.members.iter().any(|member| {
+                                    gc.db()
+                                        .classes
+                                        .get_class(&member.class_id)
+                                        .map(|cls| cls.has_ability("pick_lock"))
+                                        .unwrap_or(false)
+                                })
+                            })
+                            .unwrap_or(false);
+                        if let Some(ref mut pending) = lock_pending {
+                            pending.lock_id = Some(lock_id);
+                            pending.position = Some(target);
+                            pending.can_lockpick = can_lockpick;
+                        }
+                        return;
+                    }
+                    (None, _) => {
+                        // ── No key required: must pick lock or bash ───────────
+                        let msg = "The container is locked.".to_string();
+                        info!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                        let can_lockpick = game_content
+                            .as_deref()
+                            .map(|gc| {
+                                game_state.party.members.iter().any(|member| {
+                                    gc.db()
+                                        .classes
+                                        .get_class(&member.class_id)
+                                        .map(|cls| cls.has_ability("pick_lock"))
+                                        .unwrap_or(false)
+                                })
+                            })
+                            .unwrap_or(false);
+                        if let Some(ref mut pending) = lock_pending {
+                            pending.lock_id = Some(lock_id);
+                            pending.position = Some(target);
+                            pending.can_lockpick = can_lockpick;
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+        // ── End Phase 3 locked-container block ────────────────────────────────
+
         // ── Tile-based WallType::Door fallback ────────────────────────────────
         //
         // If the tile directly ahead is a plain WallType::Door tile with no
@@ -2872,6 +3073,182 @@ mod door_interaction_tests {
 /// - Locked door + correct key in party → door opens, key consumed.
 /// - Locked door + no key in party → `LockInteractionPending` set.
 /// - Locked door + wrong key in party → door stays locked, pending set.
+#[cfg(test)]
+mod locked_container_map_event_tests {
+    use super::*;
+    use crate::domain::character::{Alignment, Character, Sex};
+    use crate::domain::world::{LockState, Map, MapEvent};
+    use bevy::prelude::{App, ButtonInput, KeyCode, Update};
+
+    const CONTAINER_KEY_ID: crate::domain::types::ItemId = 55;
+    const CONTAINER_LOCK_ID: &str = "test_container_lock";
+
+    fn container_pos() -> Position {
+        Position::new(5, 4)
+    }
+
+    fn build_locked_container_app() -> App {
+        let mut app = App::new();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        let cfg = ControlsConfig {
+            movement_cooldown: 0.0,
+            ..ControlsConfig::default()
+        };
+        let key_map = KeyMap::from_controls_config(&cfg);
+        app.insert_resource(InputConfigResource {
+            controls: cfg,
+            key_map,
+        });
+
+        let mut gs = crate::application::GameState::new();
+        let map = Map::new(
+            1,
+            "ContainerTestMap".to_string(),
+            "Test".to_string(),
+            10,
+            10,
+        );
+        gs.world.add_map(map);
+        gs.world.set_current_map(1);
+        gs.world.set_party_position(Position::new(5, 5));
+
+        let hero = Character::new(
+            "Test Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+
+        app.insert_resource(GlobalState(gs));
+        app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
+        app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<crate::game::systems::ui::GameLog>();
+
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
+        app.add_message::<InitiateRestEvent>();
+
+        app.add_systems(Update, handle_input);
+        app
+    }
+
+    fn add_locked_container_event(
+        app: &mut App,
+        key_item_id: Option<crate::domain::types::ItemId>,
+    ) {
+        let pos = container_pos();
+        let mut gs = app.world_mut().resource_mut::<GlobalState>();
+        if let Some(map) = gs.0.world.get_current_map_mut() {
+            map.add_event(
+                pos,
+                MapEvent::LockedContainer {
+                    name: "Iron Chest".to_string(),
+                    lock_id: CONTAINER_LOCK_ID.to_string(),
+                    key_item_id,
+                    initial_trap_chance: 0,
+                },
+            );
+            map.lock_states.insert(
+                CONTAINER_LOCK_ID.to_string(),
+                LockState::new(CONTAINER_LOCK_ID),
+            );
+        }
+    }
+
+    fn give_key_to_party(app: &mut App, key_id: crate::domain::types::ItemId) {
+        let mut gs = app.world_mut().resource_mut::<GlobalState>();
+        gs.0.party.members[0]
+            .inventory
+            .add_item(key_id, 1)
+            .expect("inventory must not be full for test key");
+    }
+
+    fn interact_key() -> KeyCode {
+        KeyCode::KeyE
+    }
+
+    fn press_key(app: &mut App, key: KeyCode) {
+        let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        input.press(key);
+    }
+
+    /// Pressing E on a `LockedContainer` with no key required sets
+    /// `LockInteractionPending` with the container's lock_id.
+    #[test]
+    fn test_e_key_on_locked_container_without_key_sets_pending() {
+        let mut app = build_locked_container_app();
+        add_locked_container_event(&mut app, None);
+        press_key(&mut app, interact_key());
+        app.update();
+
+        let pending = app.world().resource::<LockInteractionPending>();
+        assert_eq!(
+            pending.lock_id,
+            Some(CONTAINER_LOCK_ID.to_string()),
+            "LockInteractionPending.lock_id must be set when container has no key"
+        );
+        assert_eq!(
+            pending.position,
+            Some(container_pos()),
+            "LockInteractionPending.position must point to the container tile"
+        );
+
+        let log = app.world().resource::<crate::game::systems::ui::GameLog>();
+        assert!(
+            log.messages.iter().any(|m| m.contains("locked")),
+            "game log must contain a 'locked' message; got: {:?}",
+            log.messages
+        );
+    }
+
+    /// Pressing E on a `LockedContainer` with the correct key fires a
+    /// `MapEventTriggered` Container event so handle_events can enter container
+    /// inventory mode.
+    #[test]
+    fn test_e_key_on_locked_container_with_correct_key_fires_container_event() {
+        let mut app = build_locked_container_app();
+        add_locked_container_event(&mut app, Some(CONTAINER_KEY_ID));
+        give_key_to_party(&mut app, CONTAINER_KEY_ID);
+        press_key(&mut app, interact_key());
+        app.update();
+
+        // Key must be consumed.
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            !gs.0.party.members[0]
+                .inventory
+                .items
+                .iter()
+                .any(|s| s.item_id == CONTAINER_KEY_ID),
+            "Key must be consumed after unlocking the container"
+        );
+
+        // Lock state must be unlocked.
+        let lock_state =
+            gs.0.world
+                .get_current_map()
+                .unwrap()
+                .lock_states
+                .get(CONTAINER_LOCK_ID)
+                .unwrap();
+        assert!(
+            !lock_state.is_locked,
+            "LockState must be unlocked after key success"
+        );
+
+        // LockInteractionPending must NOT be set.
+        let pending = app.world().resource::<LockInteractionPending>();
+        assert!(
+            pending.lock_id.is_none(),
+            "LockInteractionPending must be empty after key success"
+        );
+    }
+}
+
 #[cfg(test)]
 mod locked_door_map_event_tests {
     use super::*;

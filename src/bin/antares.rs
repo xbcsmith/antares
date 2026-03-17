@@ -274,6 +274,9 @@ impl Plugin for AntaresPlugin {
 
         // Phase 2 (item meshes): Item world spawn / despawn systems
         app.add_plugins(antares::game::systems::item_world_events::ItemWorldPlugin);
+
+        // Phase 3 (locks): Lock prompt UI and lock action handler
+        app.add_plugins(antares::game::systems::lock_ui::LockUiPlugin);
     }
 }
 
