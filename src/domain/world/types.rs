@@ -2308,6 +2308,15 @@ pub enum MapEvent {
         /// Optional item ID required to unlock with a key.
         #[serde(default)]
         key_item_id: Option<ItemId>,
+        /// Items stored inside the container, accessible after unlocking.
+        ///
+        /// When the container is successfully unlocked, these items are
+        /// transferred into the `ContainerInventory` mode so the player can
+        /// take them. Uses `#[serde(default)]` so existing RON map files that
+        /// pre-date this field are unaffected (they simply get an empty
+        /// container).
+        #[serde(default)]
+        items: Vec<crate::domain::character::InventorySlot>,
         /// Starting trap chance percentage (0–100).
         #[serde(default)]
         initial_trap_chance: u8,

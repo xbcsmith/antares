@@ -125,8 +125,14 @@ pub(crate) enum EventKind {
     /// A locked door — opened by clearing the tile's wall type.
     Door,
     /// A locked container — opened by entering `ContainerInventory` mode.
-    /// Carries the display name of the container.
-    Container(String),
+    /// Carries the display name and pre-loaded items of the container.
+    Container {
+        /// Display name shown in the inventory panel header.
+        name: String,
+        /// Items pre-loaded in the container (from
+        /// `MapEvent::LockedContainer::items`).
+        items: Vec<crate::domain::character::InventorySlot>,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -341,7 +347,10 @@ fn lock_action_system(
             .get_current_map()
             .and_then(|m| m.get_event(*position))
             .map(|e| match e {
-                MapEvent::LockedContainer { name, .. } => EventKind::Container(name.clone()),
+                MapEvent::LockedContainer { name, items, .. } => EventKind::Container {
+                    name: name.clone(),
+                    items: items.clone(),
+                },
                 _ => EventKind::Door,
             })
             .unwrap_or(EventKind::Door);
@@ -387,7 +396,7 @@ fn lock_action_system(
             }
             UnlockOutcome::BashSuccess { .. } => {
                 let msg = match &event_kind {
-                    EventKind::Container(name) => {
+                    EventKind::Container { name, .. } => {
                         format!("{} smashes open the {}!", char_name, name)
                     }
                     EventKind::Door => format!("{} smashes the door open!", char_name),
@@ -548,29 +557,34 @@ pub(crate) fn apply_success(
                 map.remove_event(position);
             }
         }
-        EventKind::Container(container_name) => {
+        EventKind::Container {
+            name: container_name,
+            items: container_items,
+        } => {
             let name = container_name.clone();
             let id = lock_id.to_string();
+            let items = container_items.clone();
 
             // Step 1 — world mutations (explicit block so borrow ends before step 2).
             {
                 if let Some(map) = game_state.world.get_current_map_mut() {
-                    // Replace LockedContainer with an open Container so the
-                    // player can re-access it without re-triggering the prompt.
+                    // Replace LockedContainer with an open Container seeded
+                    // with the items that were locked inside, so the player
+                    // can re-access it without re-triggering the prompt.
                     map.add_event(
                         position,
                         MapEvent::Container {
                             id: id.clone(),
                             name: name.clone(),
                             description: String::new(),
-                            items: vec![],
+                            items: items.clone(),
                         },
                     );
                 }
             } // borrow of game_state.world ends here
 
-            // Step 2 — enter ContainerInventory mode.
-            game_state.enter_container_inventory(id, name.clone(), vec![]);
+            // Step 2 — enter ContainerInventory mode with the locked items.
+            game_state.enter_container_inventory(id, name.clone(), items);
 
             messages.push(format!("The {} is unlocked.", name));
         }
@@ -998,6 +1012,7 @@ mod tests {
             name: container_name.to_string(),
             lock_id: lock_id.to_string(),
             key_item_id: None,
+            items: vec![],
             initial_trap_chance: 0,
         };
         let mut gs = make_game_state_with_event(position, event, lock_id, 0);
@@ -1005,7 +1020,10 @@ mod tests {
         let messages = apply_success(
             lock_id,
             position,
-            &EventKind::Container(container_name.to_string()),
+            &EventKind::Container {
+                name: container_name.to_string(),
+                items: vec![],
+            },
             &mut gs,
         );
 
@@ -1085,6 +1103,7 @@ mod tests {
             name: "Old Chest".to_string(),
             lock_id: lock_id.to_string(),
             key_item_id: None,
+            items: vec![],
             initial_trap_chance: 0,
         };
         let mut gs = make_game_state_with_event(position, event, lock_id, 0);
@@ -1092,7 +1111,10 @@ mod tests {
         apply_success(
             lock_id,
             position,
-            &EventKind::Container("Old Chest".to_string()),
+            &EventKind::Container {
+                name: "Old Chest".to_string(),
+                items: vec![],
+            },
             &mut gs,
         );
 
@@ -1104,6 +1126,91 @@ mod tests {
             }
             other => panic!(
                 "expected MapEvent::Container after container success, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// Items stored inside a `LockedContainer` are passed through to
+    /// `ContainerInventory` mode (and into the replacement `Container` event)
+    /// after a successful unlock via `apply_success`.
+    ///
+    /// This is the regression test for the Phase 1 gap where `items` was
+    /// missing from `MapEvent::LockedContainer` and `apply_success` always
+    /// passed `vec![]`.
+    #[test]
+    fn test_apply_success_container_items_passed_through() {
+        use crate::application::GameMode;
+        use crate::domain::character::InventorySlot;
+
+        let lock_id = "items_lock";
+        let position = Position::new(6, 6);
+
+        // Two items pre-loaded in the container.
+        let chest_items = vec![
+            InventorySlot {
+                item_id: 50,
+                charges: 0,
+            },
+            InventorySlot {
+                item_id: 51,
+                charges: 0,
+            },
+        ];
+
+        let event = MapEvent::LockedContainer {
+            name: "Treasure Chest".to_string(),
+            lock_id: lock_id.to_string(),
+            key_item_id: None,
+            items: chest_items.clone(),
+            initial_trap_chance: 0,
+        };
+        let mut gs = make_game_state_with_event(position, event, lock_id, 0);
+
+        apply_success(
+            lock_id,
+            position,
+            &EventKind::Container {
+                name: "Treasure Chest".to_string(),
+                items: chest_items.clone(),
+            },
+            &mut gs,
+        );
+
+        // 1. Game mode must be ContainerInventory.
+        assert!(
+            matches!(gs.mode, GameMode::ContainerInventory(_)),
+            "game mode must be ContainerInventory after container unlock; got {:?}",
+            gs.mode
+        );
+
+        // 2. ContainerInventory state must contain both items.
+        if let GameMode::ContainerInventory(ref state) = gs.mode {
+            assert_eq!(
+                state.items.len(),
+                2,
+                "ContainerInventory must hold both locked items; got {} items",
+                state.items.len()
+            );
+            assert_eq!(state.items[0].item_id, 50);
+            assert_eq!(state.items[1].item_id, 51);
+        }
+
+        // 3. The replacement Container event on the map must also carry both items.
+        let replacement = gs.world.get_current_map().unwrap().get_event(position);
+        match replacement {
+            Some(MapEvent::Container { items, .. }) => {
+                assert_eq!(
+                    items.len(),
+                    2,
+                    "replacement Container event must carry both items; got {}",
+                    items.len()
+                );
+                assert_eq!(items[0].item_id, 50);
+                assert_eq!(items[1].item_id, 51);
+            }
+            other => panic!(
+                "expected MapEvent::Container with items after container success, got {:?}",
                 other
             ),
         }

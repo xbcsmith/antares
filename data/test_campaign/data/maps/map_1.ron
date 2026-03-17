@@ -8486,6 +8486,10 @@
             name: "Treasure Chest",
             lock_id: "test_chest",
             key_item_id: Some(201),
+            items: [
+                (item_id: 50, charges: 0),
+                (item_id: 51, charges: 0),
+            ],
             initial_trap_chance: 0,
         ),
     },

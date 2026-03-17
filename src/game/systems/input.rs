@@ -3149,6 +3149,7 @@ mod locked_container_map_event_tests {
                     name: "Iron Chest".to_string(),
                     lock_id: CONTAINER_LOCK_ID.to_string(),
                     key_item_id,
+                    items: vec![],
                     initial_trap_chance: 0,
                 },
             );

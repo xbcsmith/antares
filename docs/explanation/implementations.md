@@ -182,7 +182,97 @@ Rules:
 cargo fmt         → clean (no changes)
 cargo check       → Finished (0 errors)
 cargo clippy      → Finished (0 warnings)
-cargo nextest run → 3700 tests: 8 new tests added, all passing
+cargo nextest run → 3701 tests: 9 new tests added (8 Phase 5 + 1 gap-fix), all passing
+```
+
+---
+
+## Gap Fix: locked_objects_and_keys — `MapEvent::LockedContainer` Missing `items` Field (Complete)
+
+### Overview
+
+Audit of the full implementation plan revealed that `MapEvent::LockedContainer`
+was defined in Phase 1 without the `items: Vec<InventorySlot>` field that the
+plan explicitly specifies. As a result:
+
+- `apply_success` always passed `vec![]` to `enter_container_inventory`, so
+  locked containers were always empty when opened.
+- The test campaign fixture's `LockedContainer` had no items listed (two items
+  were required by Phase 4.3).
+
+### Files Changed
+
+| File                                     | Change                                                                                                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/domain/world/types.rs`              | Added `items: Vec<InventorySlot>` field (with `#[serde(default)]`) to `MapEvent::LockedContainer`                                                                              |
+| `src/game/systems/lock_ui.rs`            | `EventKind::Container` now carries `items`; `apply_success` passes items to `enter_container_inventory` and the replacement `MapEvent::Container`; 3 test constructors updated |
+| `src/game/systems/input.rs`              | `MapEvent::LockedContainer` test helper updated with `items: vec![]`                                                                                                           |
+| `data/test_campaign/data/maps/map_1.ron` | `LockedContainer` at (17,4) now contains two items (`item_id: 50` and `item_id: 51`)                                                                                           |
+
+### Type Change
+
+```rust
+// Before (missing items field):
+LockedContainer {
+    name: String,
+    lock_id: String,
+    key_item_id: Option<ItemId>,
+    initial_trap_chance: u8,
+}
+
+// After (plan-compliant):
+LockedContainer {
+    name: String,
+    lock_id: String,
+    key_item_id: Option<ItemId>,
+    /// Items stored inside the container, accessible after unlocking.
+    /// #[serde(default)] — existing RON files unaffected (empty container).
+    items: Vec<crate::domain::character::InventorySlot>,
+    initial_trap_chance: u8,
+}
+```
+
+### `EventKind` Change
+
+`EventKind::Container` was upgraded from a tuple variant carrying only the
+name to a struct variant carrying both name and items:
+
+```rust
+// Before:
+Container(String),
+
+// After:
+Container {
+    name: String,
+    items: Vec<crate::domain::character::InventorySlot>,
+},
+```
+
+`lock_action_system` now destructures `LockedContainer { name, items, .. }`
+and passes both into `EventKind::Container { name, items }`.
+
+`apply_success` now uses:
+
+```rust
+game_state.enter_container_inventory(id, name.clone(), items);
+```
+
+instead of `vec![]`.
+
+### New Test
+
+- **`test_apply_success_container_items_passed_through`** — verifies that two
+  items pre-loaded in `EventKind::Container { items }` reach both the
+  `ContainerInventory` game mode state and the replacement `MapEvent::Container`
+  event.
+
+### Quality Gate Results
+
+```
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run → 3701 tests: 3700 passed, 1 failed (pre-existing perf flake)
 ```
 
 ---
