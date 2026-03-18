@@ -263,6 +263,12 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                     MapEvent::DroppedItem { .. } => {
                         // DroppedItem events have no required validation here
                     }
+                    MapEvent::LockedDoor { .. } => {
+                        // LockedDoor events have no required validation here
+                    }
+                    MapEvent::LockedContainer { .. } => {
+                        // LockedContainer events have no required validation here
+                    }
                 }
             }
 

@@ -6,7 +6,7 @@ use crate::domain::transactions::pickup_item;
 use crate::domain::types::{ItemId, MapId, Position};
 use crate::domain::world::EventResult;
 use crate::domain::world::MapEvent;
-use crate::game::resources::GlobalState;
+use crate::game::resources::{GlobalState, LockInteractionPending};
 use crate::game::systems::dialogue::{SimpleDialogue, StartDialogue};
 use crate::game::systems::furniture_rendering::{
     resolve_furniture_fields, spawn_furniture_with_rendering,
@@ -118,6 +118,18 @@ fn check_for_events(
                     MapEvent::Container { .. } => {
                         info!(
                             "Party at {:?} is on a Container event; not auto-triggering (requires interact)",
+                            current_pos
+                        );
+                    }
+                    // Phase 2 (locks): LockedDoor and LockedContainer tiles are
+                    // blocked so the party cannot physically stand on them. Skip
+                    // auto-triggering here; interaction is driven by the E-key
+                    // path in `handle_input` (or explicit MapEventTriggered in
+                    // tests).
+                    MapEvent::LockedDoor { .. } | MapEvent::LockedContainer { .. } => {
+                        info!(
+                            "Party at {:?} is on a LockedDoor/LockedContainer event; \
+                             not auto-triggering (requires interact)",
                             current_pos
                         );
                     }
@@ -240,9 +252,6 @@ fn handle_events(
     mut materials: Option<ResMut<Assets<StandardMaterial>>>,
     mut meshes: Option<ResMut<Assets<Mesh>>>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
-    // Fallback query to find a visual event/tile marker at the same TileCoord when an NPC marker is absent.
-    // We exclude NpcMarker here to avoid duplicating NPC matches.
-    _marker_query: Query<(Entity, &TileCoord, &Transform), Without<NpcMarker>>,
     // Diagnostic query to list entities at the tile when speaker resolution fails.
     // Keep the query compact to avoid clippy type-complexity complaints while still
     // returning the transform and event trigger presence which are useful for diagnostics.
@@ -258,6 +267,10 @@ fn handle_events(
     mut pending_recruitment: Option<
         ResMut<crate::game::systems::dialogue::PendingRecruitmentContext>,
     >,
+    // Phase 2 (locks): signal resource consumed by Phase 3's lock-choice UI.
+    // Using Option<ResMut<...>> so handle_events can run in test apps that do
+    // not register InputPlugin (and therefore may not have the resource).
+    mut lock_pending: Option<ResMut<LockInteractionPending>>,
 ) {
     let mut furniture_cache = ProceduralMeshCache::default();
     for trigger in event_reader.read() {
@@ -675,6 +688,250 @@ fn handle_events(
                 info!("{}", msg);
                 if let Some(ref mut log) = game_log {
                     log.add(msg);
+                }
+            }
+
+            // Phase 2 (locks): handle a LockedDoor event triggered via
+            // MapEventTriggered (e.g. from programmatic tests or a future
+            // game-world trigger system). The primary player path goes through
+            // `handle_input`, but this arm handles the same logic for the
+            // message-triggered path so both paths are consistent.
+            MapEvent::LockedDoor {
+                name,
+                lock_id,
+                key_item_id,
+                ..
+            } => {
+                info!("LockedDoor event for '{}' (lock_id={})", name, lock_id);
+
+                let is_locked: bool = global_state
+                    .0
+                    .world
+                    .get_current_map()
+                    .and_then(|m| m.lock_states.get(lock_id.as_str()))
+                    .map(|ls| ls.is_locked)
+                    .unwrap_or_else(|| {
+                        warn!(
+                            "LockedDoor '{}' has no lock_state entry; \
+                             was init_lock_states called on map load?",
+                            lock_id
+                        );
+                        true
+                    });
+
+                if !is_locked {
+                    // Already unlocked — open the tile so the party can pass.
+                    if let Some(map) = global_state.0.world.get_current_map_mut() {
+                        if let Some(tile) = map.get_tile_mut(trigger.position) {
+                            tile.wall_type = crate::domain::world::WallType::None;
+                            tile.blocked = false;
+                        }
+                    }
+                    if let Some(ref mut log) = game_log {
+                        log.add("You open the door.".to_string());
+                    }
+                    return;
+                }
+
+                // Search party inventory for the required key.
+                let key_item_id_val: Option<crate::domain::types::ItemId> = *key_item_id;
+                let key_found: Option<(usize, usize)> = key_item_id_val.and_then(|kid| {
+                    global_state
+                        .0
+                        .party
+                        .members
+                        .iter()
+                        .enumerate()
+                        .find_map(|(ci, ch)| {
+                            ch.inventory
+                                .items
+                                .iter()
+                                .position(|slot| slot.item_id == kid)
+                                .map(|si| (ci, si))
+                        })
+                });
+
+                match (key_item_id_val, key_found) {
+                    (Some(kid), Some((char_idx, slot_idx))) => {
+                        // Key found: consume it, unlock the door, open the tile.
+                        global_state.0.party.members[char_idx]
+                            .inventory
+                            .items
+                            .remove(slot_idx);
+                        let lock_id_owned = lock_id.clone();
+                        let event_pos = trigger.position;
+                        if let Some(map) = global_state.0.world.get_current_map_mut() {
+                            if let Some(ls) = map.lock_states.get_mut(&lock_id_owned) {
+                                ls.unlock();
+                            }
+                            if let Some(tile) = map.get_tile_mut(event_pos) {
+                                tile.wall_type = crate::domain::world::WallType::None;
+                                tile.blocked = false;
+                            }
+                            map.remove_event(event_pos);
+                        }
+                        let key_name = content
+                            .db()
+                            .items
+                            .get_item(kid)
+                            .map(|item| item.name.clone())
+                            .unwrap_or_else(|| format!("key {}", kid));
+                        let msg = format!("You unlock the door with the {}.", key_name);
+                        info!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                    }
+                    (Some(_), None) => {
+                        // Key required but not in party.
+                        let msg = "The door is locked. You need a key.".to_string();
+                        info!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                        let can_lockpick = global_state.0.party.members.iter().any(|member| {
+                            content
+                                .db()
+                                .classes
+                                .get_class(&member.class_id)
+                                .map(|cls| cls.has_ability("pick_lock"))
+                                .unwrap_or(false)
+                        });
+                        if let Some(ref mut pending) = lock_pending {
+                            pending.lock_id = Some(lock_id.clone());
+                            pending.position = Some(trigger.position);
+                            pending.can_lockpick = can_lockpick;
+                        }
+                    }
+                    (None, _) => {
+                        // No key needed; party must pick lock or bash.
+                        let msg = "The door is locked.".to_string();
+                        info!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                        let can_lockpick = global_state.0.party.members.iter().any(|member| {
+                            content
+                                .db()
+                                .classes
+                                .get_class(&member.class_id)
+                                .map(|cls| cls.has_ability("pick_lock"))
+                                .unwrap_or(false)
+                        });
+                        if let Some(ref mut pending) = lock_pending {
+                            pending.lock_id = Some(lock_id.clone());
+                            pending.position = Some(trigger.position);
+                            pending.can_lockpick = can_lockpick;
+                        }
+                    }
+                }
+            }
+
+            // Phase 2 (locks): same key-check logic as LockedDoor.
+            MapEvent::LockedContainer {
+                name,
+                lock_id,
+                key_item_id,
+                ..
+            } => {
+                info!("LockedContainer event for '{}' (lock_id={})", name, lock_id);
+
+                let is_locked: bool = global_state
+                    .0
+                    .world
+                    .get_current_map()
+                    .and_then(|m| m.lock_states.get(lock_id.as_str()))
+                    .map(|ls| ls.is_locked)
+                    .unwrap_or(true);
+
+                if !is_locked {
+                    if let Some(ref mut log) = game_log {
+                        log.add("The container is open.".to_string());
+                    }
+                    return;
+                }
+
+                let key_item_id_val: Option<crate::domain::types::ItemId> = *key_item_id;
+                let key_found: Option<(usize, usize)> = key_item_id_val.and_then(|kid| {
+                    global_state
+                        .0
+                        .party
+                        .members
+                        .iter()
+                        .enumerate()
+                        .find_map(|(ci, ch)| {
+                            ch.inventory
+                                .items
+                                .iter()
+                                .position(|slot| slot.item_id == kid)
+                                .map(|si| (ci, si))
+                        })
+                });
+
+                match (key_item_id_val, key_found) {
+                    (Some(kid), Some((char_idx, slot_idx))) => {
+                        global_state.0.party.members[char_idx]
+                            .inventory
+                            .items
+                            .remove(slot_idx);
+                        let lock_id_owned = lock_id.clone();
+                        if let Some(map) = global_state.0.world.get_current_map_mut() {
+                            if let Some(ls) = map.lock_states.get_mut(&lock_id_owned) {
+                                ls.unlock();
+                            }
+                        }
+                        let key_name = content
+                            .db()
+                            .items
+                            .get_item(kid)
+                            .map(|item| item.name.clone())
+                            .unwrap_or_else(|| format!("key {}", kid));
+                        let msg = format!("You unlock the container with the {}.", key_name);
+                        info!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                    }
+                    (Some(_), None) => {
+                        let msg = "The container is locked. You need a key.".to_string();
+                        info!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                        let can_lockpick = global_state.0.party.members.iter().any(|member| {
+                            content
+                                .db()
+                                .classes
+                                .get_class(&member.class_id)
+                                .map(|cls| cls.has_ability("pick_lock"))
+                                .unwrap_or(false)
+                        });
+                        if let Some(ref mut pending) = lock_pending {
+                            pending.lock_id = Some(lock_id.clone());
+                            pending.position = Some(trigger.position);
+                            pending.can_lockpick = can_lockpick;
+                        }
+                    }
+                    (None, _) => {
+                        let msg = "The container is locked.".to_string();
+                        info!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                        let can_lockpick = global_state.0.party.members.iter().any(|member| {
+                            content
+                                .db()
+                                .classes
+                                .get_class(&member.class_id)
+                                .map(|cls| cls.has_ability("pick_lock"))
+                                .unwrap_or(false)
+                        });
+                        if let Some(ref mut pending) = lock_pending {
+                            pending.lock_id = Some(lock_id.clone());
+                            pending.position = Some(trigger.position);
+                            pending.can_lockpick = can_lockpick;
+                        }
+                    }
                 }
             }
         }
@@ -1881,5 +2138,273 @@ mod tests {
         assert!((scale - 1.3).abs() < f32::EPSILON);
         assert!(resolved_flags.locked);
         assert_eq!(tint, Some([0.7, 0.7, 0.7]));
+    }
+}
+
+/// Integration tests for Phase 2: `MapEvent::LockedDoor` arriving via the
+/// `MapEventTriggered` message sets `LockInteractionPending`.
+///
+/// These tests exercise the `handle_events` match arm for `LockedDoor` that
+/// was added in Phase 2. The primary player path goes through `handle_input`,
+/// but `handle_events` must handle the same logic for programmatic tests and
+/// future game-world trigger systems.
+#[cfg(test)]
+mod locked_door_event_tests {
+    use super::*;
+    use crate::application::resources::GameContent;
+    use crate::domain::character::{Alignment, Character, Sex};
+    use crate::domain::world::{LockState, Map, MapEvent};
+    use crate::game::resources::{GlobalState, LockInteractionPending};
+    use crate::game::systems::dialogue::{SimpleDialogue, StartDialogue};
+    use crate::game::systems::events::{MapEventTriggered, PickupDroppedItemRequest};
+    use crate::game::systems::map::MapChangeEvent;
+    use crate::game::systems::ui::GameLog;
+    use bevy::prelude::{App, MinimalPlugins, Update};
+
+    /// Item ID used as the required key in lock tests.
+    const KEY_ID: crate::domain::types::ItemId = 77;
+    /// Lock identifier string used in test events.
+    const LOCK_ID: &str = "evt_test_lock";
+
+    /// Position of the locked door in the test map.
+    fn lock_pos() -> crate::domain::types::Position {
+        crate::domain::types::Position::new(3, 3)
+    }
+
+    /// Build a minimal Bevy app for `handle_events` locked-door tests.
+    ///
+    /// Registers:
+    /// - All messages required by `EventPlugin`
+    /// - `GlobalState` with a 10×10 map + one party member
+    /// - `GameContent` (empty database — sufficient for class lookups that
+    ///   return `None`, yielding `can_lockpick = false`)
+    /// - `LockInteractionPending` (Phase 2 resource under test)
+    /// - `GameLog` (for log message assertions)
+    fn build_event_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        // Register all message channels that `EventPlugin` depends on.
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<PickupDroppedItemRequest>();
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_message::<SimpleDialogue>();
+
+        // Build a world with a 10×10 map.
+        let mut gs = crate::application::GameState::new();
+        let mut map = Map::new(1, "EventTestMap".to_string(), "Test".to_string(), 10, 10);
+
+        // Insert a locked door event and matching lock state.
+        map.add_event(
+            lock_pos(),
+            MapEvent::LockedDoor {
+                name: "Event Test Door".to_string(),
+                lock_id: LOCK_ID.to_string(),
+                key_item_id: Some(KEY_ID),
+                initial_trap_chance: 0,
+            },
+        );
+        map.lock_states
+            .insert(LOCK_ID.to_string(), LockState::new(LOCK_ID));
+
+        gs.world.add_map(map);
+        gs.world.set_current_map(1);
+        gs.world
+            .set_party_position(crate::domain::types::Position::new(3, 4));
+
+        // Add a party member so inventory / class lookups don't panic.
+        let hero = Character::new(
+            "Event Test Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+
+        app.insert_resource(GlobalState(gs));
+        app.insert_resource(GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<GameLog>();
+
+        // Register handle_events (the system under test).
+        app.add_systems(Update, handle_events);
+        app
+    }
+
+    /// Helper: write a `MapEventTriggered` message for the locked door.
+    fn fire_locked_door_event(app: &mut App) {
+        let mut writer = app
+            .world_mut()
+            .get_resource_mut::<Messages<MapEventTriggered>>()
+            .unwrap();
+        writer.write(MapEventTriggered {
+            event: MapEvent::LockedDoor {
+                name: "Event Test Door".to_string(),
+                lock_id: LOCK_ID.to_string(),
+                key_item_id: Some(KEY_ID),
+                initial_trap_chance: 0,
+            },
+            position: lock_pos(),
+        });
+    }
+
+    // ── Test: LockedDoor event via MapEventTriggered sets LockInteractionPending
+
+    /// When `MapEvent::LockedDoor` arrives through `MapEventTriggered` and the
+    /// party has no matching key, `handle_events` must populate
+    /// `LockInteractionPending` with the lock's ID and position.
+    ///
+    /// This covers the programmatic-trigger path (e.g. tests, scripted events)
+    /// described in Phase 2 Section 2.3.
+    #[test]
+    fn test_locked_door_event_sets_pending_resource() {
+        let mut app = build_event_test_app();
+
+        // Fire the LockedDoor event (party has no key).
+        fire_locked_door_event(&mut app);
+
+        // Run handle_events.
+        app.update();
+
+        // LockInteractionPending must have the lock_id set.
+        let pending = app.world().resource::<LockInteractionPending>();
+        assert_eq!(
+            pending.lock_id,
+            Some(LOCK_ID.to_string()),
+            "LockInteractionPending.lock_id must be set when party has no key; got: {:?}",
+            pending.lock_id
+        );
+        assert_eq!(
+            pending.position,
+            Some(lock_pos()),
+            "LockInteractionPending.position must point to the door tile"
+        );
+        // `can_lockpick` is false because ContentDatabase is empty (no classes loaded).
+        assert!(
+            !pending.can_lockpick,
+            "can_lockpick must be false when no class database is loaded"
+        );
+    }
+
+    /// When `MapEvent::LockedDoor` arrives and the party carries the correct
+    /// key, `handle_events` must consume the key and mark the lock as unlocked.
+    #[test]
+    fn test_locked_door_event_with_key_unlocks_and_consumes_key() {
+        let mut app = build_event_test_app();
+
+        // Give the party member the required key.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.party.members[0]
+                .inventory
+                .add_item(KEY_ID, 1)
+                .expect("inventory must not be full");
+        }
+
+        fire_locked_door_event(&mut app);
+        app.update();
+
+        // Lock state must be unlocked.
+        let gs = app.world().resource::<GlobalState>();
+        let lock_state =
+            gs.0.world
+                .get_current_map()
+                .unwrap()
+                .lock_states
+                .get(LOCK_ID)
+                .unwrap();
+        assert!(
+            !lock_state.is_locked,
+            "lock_state must be unlocked after handle_events processes the key"
+        );
+
+        // Key must have been consumed.
+        assert!(
+            !gs.0.party.members[0]
+                .inventory
+                .items
+                .iter()
+                .any(|s| s.item_id == KEY_ID),
+            "Key must be removed from inventory after unlock"
+        );
+
+        // `LockInteractionPending` must NOT be set (door was opened).
+        let pending = app.world().resource::<LockInteractionPending>();
+        assert!(
+            pending.lock_id.is_none(),
+            "LockInteractionPending must be empty after successful key unlock"
+        );
+
+        // Game log must contain a success message.
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages
+                .iter()
+                .any(|m| m.starts_with("You unlock the door with the")),
+            "Game log must contain unlock success message; got: {:?}",
+            log.messages
+        );
+    }
+
+    /// When `MapEvent::LockedDoor` has no `key_item_id` (pick-or-bash lock),
+    /// `handle_events` must set `LockInteractionPending` with the lock ID.
+    #[test]
+    fn test_locked_door_event_no_key_required_sets_pending() {
+        let mut app = build_event_test_app();
+
+        // Override the map event to have no key_item_id.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            if let Some(map) = gs.0.world.get_current_map_mut() {
+                map.add_event(
+                    lock_pos(),
+                    MapEvent::LockedDoor {
+                        name: "Pick-or-bash Door".to_string(),
+                        lock_id: LOCK_ID.to_string(),
+                        key_item_id: None,
+                        initial_trap_chance: 0,
+                    },
+                );
+            }
+        }
+
+        // Write the no-key event directly.
+        {
+            let mut writer = app
+                .world_mut()
+                .get_resource_mut::<Messages<MapEventTriggered>>()
+                .unwrap();
+            writer.write(MapEventTriggered {
+                event: MapEvent::LockedDoor {
+                    name: "Pick-or-bash Door".to_string(),
+                    lock_id: LOCK_ID.to_string(),
+                    key_item_id: None,
+                    initial_trap_chance: 0,
+                },
+                position: lock_pos(),
+            });
+        }
+
+        app.update();
+
+        // LockInteractionPending must be set.
+        let pending = app.world().resource::<LockInteractionPending>();
+        assert_eq!(
+            pending.lock_id,
+            Some(LOCK_ID.to_string()),
+            "Pending must be set for a lock that requires pick or bash"
+        );
+
+        // Game log must say "The door is locked."
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages.iter().any(|m| m == "The door is locked."),
+            "Game log must contain 'The door is locked.' for no-key lock; got: {:?}",
+            log.messages
+        );
     }
 }

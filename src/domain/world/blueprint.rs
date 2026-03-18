@@ -241,6 +241,7 @@ impl From<MapBlueprint> for Map {
             allow_random_encounters: true,
             npc_placements,
             dropped_items: Vec::new(),
+            lock_states: std::collections::HashMap::new(),
         }
     }
 }

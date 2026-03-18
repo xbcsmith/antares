@@ -775,4 +775,66 @@
         icon_path: None,
         tags: [],
     ),
+
+    // ===== Key Items (IDs 200-202) =====
+
+    // Dungeon Gate Key — opens dungeon entrance doors
+    (
+        id: 200,
+        name: "Dungeon Gate Key",
+        item_type: Quest((
+            quest_id: "dungeon_key",
+            is_key_item: true,
+        )),
+        base_cost: 0,
+        sell_cost: 0,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 1,
+        is_cursed: false,
+        icon_path: None,
+        tags: [],
+    ),
+
+    // Old Chest Key — generic chest key
+    (
+        id: 201,
+        name: "Old Chest Key",
+        item_type: Quest((
+            quest_id: "chest_key",
+            is_key_item: true,
+        )),
+        base_cost: 0,
+        sell_cost: 0,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 1,
+        is_cursed: false,
+        icon_path: None,
+        tags: [],
+    ),
+
+    // Iron Lock Key — used for locked iron doors in tutorial
+    (
+        id: 202,
+        name: "Iron Lock Key",
+        item_type: Quest((
+            quest_id: "iron_lock_key",
+            is_key_item: true,
+        )),
+        base_cost: 0,
+        sell_cost: 0,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 1,
+        is_cursed: false,
+        icon_path: None,
+        tags: [],
+    ),
 ]

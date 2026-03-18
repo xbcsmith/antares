@@ -47,6 +47,7 @@
         starting_items: [
             50,
             50,
+            200,
         ],
         starting_equipment: (
             weapon: Some(3),
