@@ -5300,9 +5300,9 @@
             ),
         ),
         (
-            terrain: Ground,
-            wall_type: r#None,
-            blocked: false,
+            terrain: Stone,
+            wall_type: Door,
+            blocked: true,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -8536,6 +8536,34 @@
             ),
             color_tint: None,
             key_item_id: None,
+        ),
+        (
+            x: 16,
+            y: 8,
+        ): Treasure(
+            name: "Hidden Chest",
+            description: "A chest containing a key to a nearby locked room.",
+            loot: [
+                200,
+            ],
+        ),
+        (
+            x: 17,
+            y: 8,
+        ): LockedContainer(
+            name: "Locked Chest",
+            lock_id: "tutorial_locked_chest",
+            key_item_id: Some(200),
+            initial_trap_chance: 0,
+        ),
+        (
+            x: 17,
+            y: 12,
+        ): LockedDoor(
+            name: "Barred Passage",
+            lock_id: "tutorial_barred_passage",
+            key_item_id: None,
+            initial_trap_chance: 15,
         ),
     },
     allow_random_encounters: true,

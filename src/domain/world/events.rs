@@ -103,6 +103,78 @@ pub enum EventResult {
         /// Tile coordinate where the item is lying.
         position: Position,
     },
+    /// A locked object was interacted with but the lock was not resolved.
+    ///
+    /// Returned when the party steps onto a `LockedDoor` or `LockedContainer`
+    /// tile and either lacks the key or has not yet chosen Pick Lock / Bash.
+    /// The caller should prompt the player with the appropriate UI.
+    Locked {
+        /// The `lock_id` of the object that could not be opened.
+        lock_id: String,
+        /// The [`ItemId`] of the required key, or `None` if no key is defined.
+        requires_key_item_id: Option<crate::domain::types::ItemId>,
+    },
+    /// A lock was successfully opened.
+    Unlocked {
+        /// The `lock_id` of the object that was opened.
+        lock_id: String,
+        /// How the lock was opened.
+        method: UnlockMethod,
+    },
+    /// A lockpick attempt failed; trap chance increased.
+    LockpickFailed {
+        /// The `lock_id` of the lock that resisted the pick.
+        lock_id: String,
+        /// Updated trap chance percentage after the failure.
+        new_trap_chance: u8,
+    },
+    /// A bash attempt failed; trap chance increased.
+    BashFailed {
+        /// The `lock_id` of the lock that held against the bash.
+        lock_id: String,
+        /// Updated trap chance percentage after the bash.
+        new_trap_chance: u8,
+    },
+    /// A trap was triggered during a lock interaction.
+    TrapTriggered {
+        /// The `lock_id` of the object whose trap fired.
+        lock_id: String,
+        /// Hit point damage dealt to the party.
+        damage: u16,
+        /// Optional status effect name (future phases will populate this).
+        effect: Option<String>,
+    },
+}
+
+/// How a lock was opened.
+///
+/// Embedded in [`EventResult::Unlocked`] to allow callers to show the
+/// appropriate game log message and trigger side-effects.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::events::UnlockMethod;
+///
+/// let method = UnlockMethod::Key { item_id: 42 };
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnlockMethod {
+    /// Opened with a matching key item (which was consumed).
+    Key {
+        /// The [`ItemId`] of the key that was used.
+        item_id: crate::domain::types::ItemId,
+    },
+    /// Opened by a character picking the lock.
+    Lockpick {
+        /// Index of the picking character in the active party.
+        picker_party_index: usize,
+    },
+    /// Opened by a character bashing through.
+    Bash {
+        /// Index of the bashing character in the active party.
+        basher_party_index: usize,
+    },
 }
 
 /// Errors that can occur during event processing
@@ -368,6 +440,14 @@ pub fn trigger_event(
             // at map load time.  Triggering the event at runtime (e.g. party
             // steps on the tile) is a no-op here — pickup is handled via a
             // dedicated action in a later phase.
+            EventResult::None
+        }
+
+        MapEvent::LockedDoor { .. } | MapEvent::LockedContainer { .. } => {
+            // Lock interactions are handled by the lock domain functions
+            // (`try_unlock`, `try_lockpick`, `try_bash`). Stepping on the
+            // tile is a no-op here — the interaction is driven by the player
+            // choosing an action in the lock UI.
             EventResult::None
         }
     };

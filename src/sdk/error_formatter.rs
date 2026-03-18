@@ -480,6 +480,47 @@ impl ErrorFormatter {
                     "Run 'cargo nextest run --all-features' to verify the fix".to_string(),
                 ]
             }
+
+            ValidationError::LockedObjectKeyNotKeyItem {
+                map_id,
+                lock_id,
+                item_id,
+            } => {
+                vec![
+                    format!(
+                        "Map {} locked object '{}' references item ID {} which exists but is not a key item",
+                        map_id, lock_id, item_id
+                    ),
+                    format!(
+                        "Edit 'data/items.ron' and set `is_key_item: true` on item ID {}",
+                        item_id
+                    ),
+                    format!(
+                        "Or update map {} event '{}' to reference an item with `is_key_item: true`",
+                        map_id, lock_id
+                    ),
+                    "Key items use ItemType::Quest(QuestData { is_key_item: true, .. })".to_string(),
+                    "Run 'cargo nextest run --all-features' to verify the fix".to_string(),
+                ]
+            }
+
+            ValidationError::DuplicateLockId { map_id, lock_id } => {
+                vec![
+                    format!(
+                        "Map {} has multiple LockedDoor/LockedContainer events sharing lock_id '{}'",
+                        map_id, lock_id
+                    ),
+                    format!(
+                        "Each locked object on a map must have a unique lock_id (used as key in Map::lock_states)"
+                    ),
+                    format!(
+                        "Edit the map data and assign distinct lock_id values to each locked event on map {}",
+                        map_id
+                    ),
+                    "Suggested naming: '<area>_<object>_<number>', e.g. 'dungeon_door_01', 'dungeon_chest_01'".to_string(),
+                    "Run 'cargo nextest run --all-features' to verify the fix".to_string(),
+                ]
+            }
         }
     }
 

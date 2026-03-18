@@ -2548,6 +2548,14 @@ impl EventEditorState {
                 s.event_type = EventType::Treasure;
                 s.name = name.clone();
             }
+            MapEvent::LockedDoor { name, .. } => {
+                s.event_type = EventType::Treasure;
+                s.name = name.clone();
+            }
+            MapEvent::LockedContainer { name, .. } => {
+                s.event_type = EventType::Treasure;
+                s.name = name.clone();
+            }
         }
         s
     }
@@ -2750,6 +2758,8 @@ impl<'a> Widget for MapGridWidget<'a> {
                             MapEvent::Furniture { .. } => EventType::Furniture,
                             MapEvent::Container { .. } => EventType::Container,
                             MapEvent::DroppedItem { .. } => EventType::Treasure,
+                            MapEvent::LockedDoor { .. } => EventType::Treasure,
+                            MapEvent::LockedContainer { .. } => EventType::Treasure,
                         })
                     } else {
                         None
@@ -2967,6 +2977,8 @@ impl<'a> Widget for MapPreviewWidget<'a> {
                         MapEvent::Furniture { .. } => EventType::Furniture,
                         MapEvent::Container { .. } => EventType::Container,
                         MapEvent::DroppedItem { .. } => EventType::Treasure,
+                        MapEvent::LockedDoor { .. } => EventType::Treasure,
+                        MapEvent::LockedContainer { .. } => EventType::Treasure,
                     });
                     let has_npc_placement =
                         self.map.npc_placements.iter().any(|p| p.position == pos);
@@ -4276,6 +4288,31 @@ impl MapsEditorState {
                                 ui.label(format!("  Charges: {}", charges));
                             }
                         }
+                        MapEvent::LockedDoor {
+                            name,
+                            lock_id,
+                            key_item_id,
+                            ..
+                        } => {
+                            ui.label(format!("🔒 Locked Door: {} (lock_id: {})", name, lock_id));
+                            if let Some(kid) = key_item_id {
+                                ui.label(format!("  Key Item ID: {}", kid));
+                            }
+                        }
+                        MapEvent::LockedContainer {
+                            name,
+                            lock_id,
+                            key_item_id,
+                            ..
+                        } => {
+                            ui.label(format!(
+                                "🔒 Locked Container: {} (lock_id: {})",
+                                name, lock_id
+                            ));
+                            if let Some(kid) = key_item_id {
+                                ui.label(format!("  Key Item ID: {}", kid));
+                            }
+                        }
                     }
 
                     ui.horizontal(|ui| {
@@ -4480,6 +4517,8 @@ impl MapsEditorState {
                 name, description, ..
             } => (name.clone(), description.clone()),
             MapEvent::DroppedItem { name, .. } => (name.clone(), String::new()),
+            MapEvent::LockedDoor { name, .. } => (name.clone(), String::new()),
+            MapEvent::LockedContainer { name, .. } => (name.clone(), String::new()),
         }
     }
 

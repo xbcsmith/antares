@@ -1591,4 +1591,164 @@ mod tests {
             "tutorial_merchant_stock"
         );
     }
+
+    // ===== Phase 5: Lock State Persistence Tests =====
+
+    /// Verifies that unlocking a door in one session and saving/loading
+    /// leaves the door open in the restored session.
+    ///
+    /// Steps:
+    /// 1. Build a `Map` with a `LockedDoor` event.
+    /// 2. Call `init_lock_states()` to seed the runtime lock state.
+    /// 3. Unlock the door and clear the door tile (simulating `apply_success`).
+    /// 4. Save → Load.
+    /// 5. Assert `lock_states["test_door"].is_locked == false`.
+    /// 6. Assert the door tile has `wall_type == WallType::None`.
+    #[test]
+    fn test_save_load_preserves_unlocked_door_state() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, WallType};
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let lock_id = "test_door";
+        let door_pos = Position::new(3, 3);
+
+        let mut state = GameState::new();
+
+        // Build a 10×10 map with a LockedDoor event at (3, 3).
+        let mut map = Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            door_pos,
+            MapEvent::LockedDoor {
+                name: "Test Door".to_string(),
+                lock_id: lock_id.to_string(),
+                key_item_id: None,
+                initial_trap_chance: 0,
+            },
+        );
+
+        // Place a door tile so apply_success has a tile to clear.
+        if let Some(tile) = map.get_tile_mut(door_pos) {
+            tile.wall_type = WallType::Door;
+            tile.blocked = true;
+        }
+
+        // Seed the runtime lock state from the map events.
+        map.init_lock_states();
+
+        // Simulate apply_success: unlock the lock state and clear the tile.
+        if let Some(ls) = map.lock_states.get_mut(lock_id) {
+            ls.unlock();
+        }
+        if let Some(tile) = map.get_tile_mut(door_pos) {
+            tile.wall_type = WallType::None;
+            tile.blocked = false;
+        }
+
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        // Save → Load.
+        manager
+            .save("lock_state_roundtrip", &state)
+            .expect("save must succeed");
+        let loaded = manager
+            .load("lock_state_roundtrip")
+            .expect("load must succeed");
+
+        let loaded_map = loaded
+            .world
+            .get_current_map()
+            .expect("current map must be present after load");
+
+        // 1. Lock state must still be unlocked.
+        let loaded_lock = loaded_map
+            .lock_states
+            .get(lock_id)
+            .expect("lock_states entry must survive save/load");
+        assert!(
+            !loaded_lock.is_locked,
+            "unlock state must survive save/load; expected is_locked=false"
+        );
+
+        // 2. Door tile must still be open.
+        let tile = loaded_map
+            .get_tile(door_pos)
+            .expect("door tile must exist after load");
+        assert_eq!(
+            tile.wall_type,
+            WallType::None,
+            "door tile wall_type must be WallType::None after save/load"
+        );
+        assert!(
+            !tile.blocked,
+            "door tile must not be blocked after save/load"
+        );
+    }
+
+    /// Verifies that a non-zero `trap_chance` on a `LockState` survives a
+    /// full save/load round-trip without being reset to zero.
+    #[test]
+    fn test_save_load_preserves_trap_chance() {
+        use crate::domain::types::Position;
+        use crate::domain::world::lock::LockState;
+        use crate::domain::world::{Map, MapEvent};
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let lock_id = "trap_chance_door";
+        let door_pos = Position::new(5, 5);
+
+        let mut state = GameState::new();
+
+        let mut map = Map::new(1, "Trap Map".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            door_pos,
+            MapEvent::LockedDoor {
+                name: "Trap Door".to_string(),
+                lock_id: lock_id.to_string(),
+                key_item_id: None,
+                initial_trap_chance: 0,
+            },
+        );
+
+        // Manually insert a LockState with a non-zero trap_chance (simulating
+        // one failed lockpick attempt).
+        let mut ls = LockState::new(lock_id);
+        ls.trap_chance = 30;
+        map.lock_states.insert(lock_id.to_string(), ls);
+
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        // Save → Load.
+        manager
+            .save("trap_chance_roundtrip", &state)
+            .expect("save must succeed");
+        let loaded = manager
+            .load("trap_chance_roundtrip")
+            .expect("load must succeed");
+
+        let loaded_map = loaded
+            .world
+            .get_current_map()
+            .expect("current map must be present after load");
+
+        let loaded_lock = loaded_map
+            .lock_states
+            .get(lock_id)
+            .expect("lock_states entry must survive save/load");
+
+        assert_eq!(
+            loaded_lock.trap_chance, 30,
+            "trap_chance must survive save/load without being reset"
+        );
+        assert!(
+            loaded_lock.is_locked,
+            "door must still be locked (trap_chance test does not unlock)"
+        );
+    }
 }
