@@ -238,6 +238,8 @@ pub fn apply_consumable_effect(
             if healed > 0 {
                 result.healing = healed;
             }
+            // Revive from unconscious if HP is now above 0.
+            crate::domain::resources::revive_from_unconscious(character);
         }
 
         ConsumableEffect::RestoreSp(amount) => {
@@ -482,6 +484,61 @@ mod tests {
         let result = apply_consumable_effect(&mut ch, &data);
         assert_eq!(ch.hp.current, 80, "current should increase by 30");
         assert_eq!(result.healing, 30);
+    }
+
+    /// A `HealHp` consumable applied to an unconscious (0 HP) character must
+    /// clear the UNCONSCIOUS condition once HP is raised above 0.
+    #[test]
+    fn test_heal_hp_clears_unconscious() {
+        use crate::domain::character::Condition;
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut ch = make_character(20, 0, 0, 0);
+        ch.conditions.add(Condition::UNCONSCIOUS);
+        ch.add_condition(ActiveCondition::new(
+            "unconscious".to_string(),
+            ConditionDuration::Permanent,
+        ));
+
+        let data = make_consumable_data(ConsumableEffect::HealHp(10), None);
+        let result = apply_consumable_effect(&mut ch, &data);
+
+        assert_eq!(ch.hp.current, 10, "HP should be 10 after healing");
+        assert!(result.healing > 0, "result.healing must be positive");
+        assert!(
+            !ch.conditions.has(Condition::UNCONSCIOUS),
+            "UNCONSCIOUS bitflag must be cleared after HealHp raises HP above 0"
+        );
+        assert!(
+            ch.active_conditions
+                .iter()
+                .all(|c| c.condition_id != "unconscious"),
+            "active_conditions must not contain 'unconscious' after revival"
+        );
+    }
+
+    /// A `HealHp(0)` that does not raise HP above 0 must leave UNCONSCIOUS set.
+    #[test]
+    fn test_heal_hp_does_not_clear_when_still_zero() {
+        use crate::domain::character::Condition;
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut ch = make_character(20, 0, 0, 0);
+        ch.conditions.add(Condition::UNCONSCIOUS);
+        ch.add_condition(ActiveCondition::new(
+            "unconscious".to_string(),
+            ConditionDuration::Permanent,
+        ));
+
+        // HealHp(0) — does not raise HP
+        let data = make_consumable_data(ConsumableEffect::HealHp(0), None);
+        apply_consumable_effect(&mut ch, &data);
+
+        assert_eq!(ch.hp.current, 0, "HP must remain 0 after HealHp(0)");
+        assert!(
+            ch.conditions.has(Condition::UNCONSCIOUS),
+            "UNCONSCIOUS must remain set when HP does not rise above 0"
+        );
     }
 
     // -----------------------------------------------------------------------

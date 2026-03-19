@@ -302,6 +302,8 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
 
                             // Apply as damage to character's HP
                             pc.hp.modify(-dmg);
+                            // Revive from unconscious if HP is now above 0.
+                            crate::domain::resources::revive_from_unconscious(pc.as_mut());
 
                             // Use the provided target index directly
                             affected.push(idx);
@@ -325,6 +327,8 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                         let dmg = (base + bonus).max(0);
 
                         pc.hp.modify(-dmg);
+                        // Revive from unconscious if HP is now above 0.
+                        crate::domain::resources::revive_from_unconscious(pc.as_mut());
                         affected.push(i);
                         total_damage += dmg;
 
@@ -345,6 +349,8 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                     combat_state.get_combatant_mut(&caster)
                 {
                     pc.hp.modify(-dmg);
+                    // Revive from unconscious if HP is now above 0.
+                    crate::domain::resources::revive_from_unconscious(pc.as_mut());
                     if let CombatantId::Player(idx) = caster {
                         affected.push(idx);
                     }

@@ -165,4 +165,14 @@
         default_duration: Rounds(3),
         icon_id: Some("icon_sleep"),
     ),
+    (
+        id: "unconscious",
+        name: "Unconscious",
+        description: "Character is at 0 HP and cannot act. Revived by healing above 0 HP or by resting.",
+        effects: [
+            StatusEffect("unconscious"),
+        ],
+        default_duration: Permanent,
+        icon_id: Some("icon_unconscious"),
+    ),
 ]

@@ -531,6 +531,53 @@ pub fn food_needed_to_rest(party: &Party) -> u32 {
     party.members.len() as u32 * FOOD_PER_REST
 }
 
+/// Revives a character from unconscious if their HP is above 0.
+///
+/// Clears the `UNCONSCIOUS` bitflag AND removes any `ActiveCondition`
+/// with `condition_id == "unconscious"` from `active_conditions`.
+/// Both must be cleared together to prevent `reconcile_character_conditions`
+/// from re-setting the bitflag on the next turn tick.
+///
+/// This function is a no-op if the character is not unconscious or if
+/// `hp.current == 0`.
+///
+/// # Arguments
+///
+/// * `character` - The character to potentially revive
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Character, Sex, Alignment, Condition};
+/// use antares::domain::conditions::{ActiveCondition, ConditionDuration};
+/// use antares::domain::resources::revive_from_unconscious;
+///
+/// let mut c = Character::new(
+///     "Hero".to_string(),
+///     "human".to_string(),
+///     "knight".to_string(),
+///     Sex::Male,
+///     Alignment::Good,
+/// );
+/// c.hp.current = 5;
+/// c.conditions.add(Condition::UNCONSCIOUS);
+/// c.add_condition(ActiveCondition::new(
+///     "unconscious".to_string(),
+///     ConditionDuration::Permanent,
+/// ));
+///
+/// revive_from_unconscious(&mut c);
+///
+/// assert!(!c.conditions.has(Condition::UNCONSCIOUS));
+/// ```
+pub fn revive_from_unconscious(character: &mut crate::domain::character::Character) {
+    use crate::domain::character::Condition;
+    if character.conditions.has(Condition::UNCONSCIOUS) && character.hp.current > 0 {
+        character.conditions.remove(Condition::UNCONSCIOUS);
+        character.remove_condition("unconscious");
+    }
+}
+
 /// Restores one hour of HP and SP for every living party member.
 ///
 /// This is the **pure healing tick** used by the rest-orchestration loop.
@@ -652,10 +699,9 @@ pub fn rest_party_hour(
 
     // Restore one hour of HP and SP for each living party member.
     for character in &mut party.members {
-        // Only skip characters with an explicit fatal or unconscious condition.
-        // Characters at 0 HP with no condition set (the normal post-combat state
-        // before a Dead condition is introduced) are healed normally.
-        if character.conditions.is_fatal() || character.conditions.is_unconscious() {
+        // Skip characters with a fatal condition; unconscious characters are
+        // healed and revived below once their HP rises above 0.
+        if character.conditions.is_fatal() {
             continue;
         }
 
@@ -678,6 +724,9 @@ pub fn rest_party_hour(
             .round() as u16)
             .min(character.sp.base);
         character.sp.current = character.sp.current.max(sp_target);
+
+        // Revive from unconscious once HP is above 0.
+        revive_from_unconscious(character);
 
         // Tick minute-based conditions and timed stat boosts for one hour (60 minutes).
         for _ in 0..60 {
@@ -787,10 +836,9 @@ pub fn rest_party(
 
     // Restore HP and SP for each party member.
     for character in &mut party.members {
-        // Only skip characters with an explicit fatal or unconscious condition.
-        // Characters at 0 HP with no condition set (the normal post-combat state
-        // before a Dead condition is introduced) are healed normally.
-        if character.conditions.is_fatal() || character.conditions.is_unconscious() {
+        // Skip characters with a fatal condition; unconscious characters are
+        // healed and revived below once their HP rises above 0.
+        if character.conditions.is_fatal() {
             continue;
         }
 
@@ -807,6 +855,9 @@ pub fn rest_party(
             as u16)
             .min(character.sp.base);
         character.sp.current = (character.sp.current + sp_to_restore).min(character.sp.base);
+
+        // Revive from unconscious once HP is above 0.
+        revive_from_unconscious(character);
 
         // Tick conditions for the full duration of rest.
         for _ in 0..total_minutes {
@@ -1643,9 +1694,12 @@ mod tests {
         );
     }
 
-    /// `rest_party_hour()` must not modify HP/SP of an unconscious character.
+    /// An unconscious character at 0 HP must be healed by `rest_party_hour`
+    /// and the UNCONSCIOUS condition must be cleared once HP > 0.
     #[test]
-    fn test_rest_party_hour_skips_unconscious_characters() {
+    fn test_rest_party_hour_revives_unconscious_character() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
         let mut party = Party::new();
         let mut hero = Character::new(
             "Out".to_string(),
@@ -1655,20 +1709,34 @@ mod tests {
             Alignment::Good,
         );
         hero.hp.base = 20;
-        hero.hp.current = 5;
+        hero.hp.current = 0;
         hero.conditions.add(Condition::UNCONSCIOUS);
+        hero.add_condition(ActiveCondition::new(
+            "unconscious".to_string(),
+            ConditionDuration::Permanent,
+        ));
         party.add_member(hero).unwrap();
 
-        rest_party_hour(
-            &mut party,
-            RestDuration::Full.restore_fraction_per_hour(),
-            1,
-        )
-        .unwrap();
+        // Run full 12-hour rest
+        let frac = RestDuration::Full.restore_fraction_per_hour();
+        for hour in 1..=RestDuration::Full.hours() {
+            rest_party_hour(&mut party, frac, hour).unwrap();
+        }
 
         assert_eq!(
-            party.members[0].hp.current, 5,
-            "unconscious character must not gain HP from rest_party_hour"
+            party.members[0].hp.current, 20,
+            "unconscious character must be fully healed after full rest"
+        );
+        assert!(
+            !party.members[0].conditions.has(Condition::UNCONSCIOUS),
+            "UNCONSCIOUS condition must be cleared once HP > 0"
+        );
+        assert!(
+            party.members[0]
+                .active_conditions
+                .iter()
+                .all(|c| c.condition_id != "unconscious"),
+            "active_conditions must not contain 'unconscious' after revival"
         );
     }
 
@@ -1771,5 +1839,116 @@ mod tests {
 
         // Dead character should not heal
         assert_eq!(party.members[0].hp.current, initial_hp);
+    }
+
+    /// `revive_from_unconscious` must be a no-op when the character has FINE condition.
+    #[test]
+    fn test_revive_from_unconscious_noop_when_fine() {
+        let mut c = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        c.hp.current = 10;
+        // No UNCONSCIOUS flag set
+        revive_from_unconscious(&mut c);
+        assert!(
+            c.conditions.is_fine(),
+            "conditions must remain FINE after revive_from_unconscious on a healthy character"
+        );
+    }
+
+    /// `revive_from_unconscious` must clear both the bitflag and the ActiveCondition entry.
+    #[test]
+    fn test_revive_from_unconscious_clears_both() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut c = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        c.hp.current = 5;
+        c.conditions.add(Condition::UNCONSCIOUS);
+        c.add_condition(ActiveCondition::new(
+            "unconscious".to_string(),
+            ConditionDuration::Permanent,
+        ));
+
+        revive_from_unconscious(&mut c);
+
+        assert!(
+            !c.conditions.has(Condition::UNCONSCIOUS),
+            "UNCONSCIOUS bitflag must be cleared"
+        );
+        assert!(
+            c.active_conditions
+                .iter()
+                .all(|ac| ac.condition_id != "unconscious"),
+            "active_conditions must not contain 'unconscious' after revival"
+        );
+    }
+
+    /// `rest_party` must revive an unconscious character (0 HP) and clear the condition.
+    #[test]
+    fn test_rest_revives_unconscious_character() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let item_db = make_food_db();
+        let mut party = Party::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp.base = 20;
+        hero.hp.current = 0;
+        hero.conditions.add(Condition::UNCONSCIOUS);
+        hero.add_condition(ActiveCondition::new(
+            "unconscious".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        // Give 1 food ration (sufficient for 1 member).
+        hero.inventory.add_item(1, 0).unwrap();
+        party.add_member(hero).unwrap();
+
+        rest_party(&mut party, &item_db, 12).unwrap();
+
+        assert!(
+            party.members[0].hp.current > 0,
+            "unconscious character must have HP > 0 after rest"
+        );
+        assert!(
+            !party.members[0].conditions.has(Condition::UNCONSCIOUS),
+            "UNCONSCIOUS condition must be cleared after rest revives character"
+        );
+    }
+
+    /// `rest_party` must completely skip characters with DEAD condition.
+    #[test]
+    fn test_rest_does_not_heal_fatal_character() {
+        let item_db = make_food_db();
+        let mut party = create_test_party();
+        party.members[0].hp.current = 0;
+        party.members[0].conditions.add(Condition::DEAD);
+        give_food(&mut party, 3);
+
+        let initial_hp = party.members[0].hp.current;
+        rest_party(&mut party, &item_db, 12).unwrap();
+
+        assert_eq!(
+            party.members[0].hp.current, initial_hp,
+            "character with DEAD condition must receive no HP during rest"
+        );
+        assert!(
+            party.members[0].conditions.has(Condition::DEAD),
+            "DEAD condition must remain set after rest"
+        );
     }
 }

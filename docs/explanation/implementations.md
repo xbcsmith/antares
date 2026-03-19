@@ -1,5 +1,521 @@
 # Implementations
 
+## Phase 1: Unconscious Characters — Complete Implementation (Complete)
+
+### Overview
+
+Phase 1 wires the `unconscious` condition end-to-end across the entire domain,
+resource, and combat stack. Before this work, characters whose HP dropped to 0
+continued to act, were counted as valid targets, and could not be revived
+through rest or healing items. All four quality gates pass with zero errors and
+zero warnings across **3715 tests**.
+
+### Problem Statement
+
+The following defects existed before this phase:
+
+1. `apply_damage` reduced HP to 0 but never set `UNCONSCIOUS` — 0-HP characters
+   could still act and were still counted as alive.
+2. `Character::is_alive()` checked only `!conditions.is_fatal()`, not
+   `hp.current > 0`. A 0-HP character with `Condition::FINE` was considered
+   alive — inconsistent with `Monster::is_alive()`.
+3. No `"unconscious"` entry existed in either `conditions.ron` file, so the
+   data-driven condition lifecycle had no definition to reconcile against.
+4. `rest_party` and `rest_party_hour` skipped characters with `is_unconscious()`
+   set, making rest-based revival impossible.
+5. `HealHp` consumables raised HP above 0 but left `UNCONSCIOUS` set, leaving
+   characters visually downed despite having HP.
+6. Spell HP modifications on player characters had no revival check.
+7. `Condition::is_dead()` did not exist; callers had no way to distinguish plain
+   `DEAD` from `STONE` and `ERADICATED`.
+
+### Files Changed
+
+| File                                     | Change                                                                                                |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `campaigns/tutorial/data/conditions.ron` | Added `"unconscious"` condition entry                                                                 |
+| `data/test_campaign/data/conditions.ron` | Added `"unconscious"` condition entry                                                                 |
+| `src/domain/character.rs`                | `Condition::is_dead()` helper; `Character::is_alive()` HP guard; 3 new tests                          |
+| `src/domain/resources.rs`                | New `revive_from_unconscious`; updated `rest_party_hour` and `rest_party`; 7 new/updated tests        |
+| `src/domain/combat/engine.rs`            | `apply_damage` sets `UNCONSCIOUS`; 4 new tests                                                        |
+| `src/domain/items/consumable_usage.rs`   | `HealHp` calls `revive_from_unconscious`; 2 new tests                                                 |
+| `src/domain/combat/spell_casting.rs`     | `SingleCharacter`, `AllCharacters`, `Self_` branches call `revive_from_unconscious` after `hp.modify` |
+| `src/sdk/database.rs`                    | 1 new RON-load test for `"unconscious"` condition                                                     |
+
+### 1.1 — `"unconscious"` condition entries (RON data files)
+
+Both `campaigns/tutorial/data/conditions.ron` and
+`data/test_campaign/data/conditions.ron` now contain:
+
+```antares/data/test_campaign/data/conditions.ron#L168-178
+    (
+        id: "unconscious",
+        name: "Unconscious",
+        description: "Character is at 0 HP and cannot act. Revived by healing above 0 HP or by resting.",
+        effects: [
+            StatusEffect("unconscious"),
+        ],
+        default_duration: Permanent,
+        icon_id: Some("icon_unconscious"),
+    ),
+```
+
+`status_str_to_flag` already mapped `"unconscious"` → `Condition::UNCONSCIOUS`,
+so `reconcile_character_conditions` immediately picks up the new definition.
+
+### 1.2 — `Condition::is_dead()` helper (`src/domain/character.rs`)
+
+```antares/src/domain/character.rs#L541-553
+    /// Returns true if the character is dead (DEAD bit is set) but is not
+    /// stoned or eradicated, which set higher bits.
+    pub fn is_dead(&self) -> bool {
+        self.has(Self::DEAD) && self.0 < Self::STONE
+    }
+```
+
+`is_fatal()` returns `true` for STONE (`160`) and ERADICATED (`255`) because
+those values include the DEAD bit. `is_dead()` distinguishes a plain dead
+character (value `128`) from stone/eradicated and is used by Phase 2
+resurrection logic.
+
+### 1.3 — `Character::is_alive()` HP guard (`src/domain/character.rs`)
+
+```antares/src/domain/character.rs#L1264-1267
+    pub fn is_alive(&self) -> bool {
+        self.hp.current > 0 && !self.conditions.is_fatal()
+    }
+```
+
+**Cascading effects (no further changes required):**
+
+- `Character::can_act()` delegates to `is_alive()` — automatically fixed.
+- `Combatant::is_alive()` in `engine.rs` delegates to `character.is_alive()` — fixed.
+- `CombatState::alive_party_count()` uses `Combatant::is_alive()` — fixed.
+  A party where all members have 0 HP now correctly yields `alive_party_count() == 0`
+  and triggers `CombatStatus::Defeat` via `check_combat_end()`.
+- `select_monster_target` in `src/game/systems/combat.rs` filters on
+  `pc.is_alive()` — 0-HP characters are no longer valid monster targets.
+
+### 1.4 — `revive_from_unconscious` helper (`src/domain/resources.rs`)
+
+```antares/src/domain/resources.rs#L534-550
+pub fn revive_from_unconscious(character: &mut crate::domain::character::Character) {
+    use crate::domain::character::Condition;
+    if character.conditions.has(Condition::UNCONSCIOUS) && character.hp.current > 0 {
+        character.conditions.remove(Condition::UNCONSCIOUS);
+        character.remove_condition("unconscious");
+    }
+}
+```
+
+This is the **single authoritative** place to clear the unconscious state.
+It clears both the `UNCONSCIOUS` bitflag AND the `ActiveCondition` entry so
+that `reconcile_character_conditions` cannot re-set the flag on the next tick.
+
+### 1.5 — `apply_damage` sets UNCONSCIOUS (`src/domain/combat/engine.rs`)
+
+The `Combatant::Player` branch sets both state sides on first-hit-to-zero:
+
+```antares/src/domain/combat/engine.rs#L721-748
+        Combatant::Player(character) => {
+            use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+            let old_hp = character.hp.current;
+            character.hp.modify(-(damage as i32));
+            let just_downed = character.hp.current == 0 && old_hp > 0;
+            if just_downed
+                && !character
+                    .conditions
+                    .has(crate::domain::character::Condition::UNCONSCIOUS)
+            {
+                character
+                    .conditions
+                    .add(crate::domain::character::Condition::UNCONSCIOUS);
+                character.add_condition(ActiveCondition::new(
+                    "unconscious".to_string(),
+                    ConditionDuration::Permanent,
+                ));
+            }
+            just_downed
+        }
+```
+
+### 1.6 — `HealHp` calls `revive_from_unconscious` (`src/domain/items/consumable_usage.rs`)
+
+One line appended at the end of the `ConsumableEffect::HealHp` arm:
+
+```antares/src/domain/items/consumable_usage.rs#L241-242
+            // Revive from unconscious if HP is now above 0.
+            crate::domain::resources::revive_from_unconscious(character);
+```
+
+`apply_consumable_effect_exploration` delegates to `apply_consumable_effect`
+for `HealHp`, so the exploration (out-of-combat) path is covered automatically.
+
+### 1.7 — Spell healing path (`src/domain/combat/spell_casting.rs`)
+
+`crate::domain::resources::revive_from_unconscious(pc.as_mut())` is called
+immediately after every `pc.hp.modify(-dmg)` in the `SingleCharacter`,
+`AllCharacters`, and `Self_` branches of `execute_spell_cast_with_spell`.
+The function's built-in `hp.current > 0` guard makes it a safe no-op for
+damage spells.
+
+### 1.8 — `rest_party` and `rest_party_hour` revive unconscious characters
+
+Both functions previously had this skip guard:
+
+```antares/src/domain/resources.rs#L662-664
+        if character.conditions.is_fatal() {
+            continue;
+        }
+```
+
+The `|| character.conditions.is_unconscious()` clause was removed; after HP
+restoration `revive_from_unconscious(character)` is called. Unconscious
+characters are now healed normally by rest and revived once HP > 0.
+
+### Complete Test Matrix
+
+| Test                                                 | File                  | What it verifies                                                              |
+| ---------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------- |
+| `test_apply_damage_sets_unconscious_at_zero_hp`      | `engine.rs`           | Lethal damage sets `UNCONSCIOUS` bitflag and `Permanent` `ActiveCondition`    |
+| `test_apply_damage_already_at_zero_no_double_push`   | `engine.rs`           | No second `ActiveCondition` pushed when already at 0 HP                       |
+| `test_unconscious_party_triggers_defeat`             | `engine.rs`           | `alive_party_count() == 0` triggers `CombatStatus::Defeat`                    |
+| `test_monster_skips_unconscious_target`              | `engine.rs`           | 0-HP party member not counted as valid target                                 |
+| `test_character_is_alive_false_at_zero_hp`           | `character.rs`        | `is_alive()` returns `false` when `hp.current == 0`                           |
+| `test_character_can_act_false_at_zero_hp`            | `character.rs`        | `can_act()` returns `false` when `hp.current == 0`                            |
+| `test_condition_is_dead_helper`                      | `character.rs`        | `is_dead()` true for `DEAD` only, false for `STONE`/`ERADICATED`              |
+| `test_heal_hp_clears_unconscious`                    | `consumable_usage.rs` | `HealHp` consumable clears `UNCONSCIOUS` when HP rises above 0                |
+| `test_heal_hp_does_not_clear_when_still_zero`        | `consumable_usage.rs` | `HealHp(0)` leaves `UNCONSCIOUS` intact                                       |
+| `test_revive_from_unconscious_noop_when_fine`        | `resources.rs`        | No-op on healthy character                                                    |
+| `test_revive_from_unconscious_clears_both`           | `resources.rs`        | Clears bitflag and `ActiveCondition` entry                                    |
+| `test_rest_party_hour_revives_unconscious_character` | `resources.rs`        | 0-HP character fully healed and revived after 12-hour rest                    |
+| `test_rest_revives_unconscious_character`            | `resources.rs`        | End-to-end `rest_party` revival                                               |
+| `test_rest_does_not_heal_fatal_character`            | `resources.rs`        | `DEAD` characters still completely skipped                                    |
+| `test_unconscious_condition_in_ron_loaded`           | `database.rs`         | `"unconscious"` loads correctly from `data/test_campaign/data/conditions.ron` |
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` Section 4 exactly
+- [x] `Condition::UNCONSCIOUS` constant used — no magic numbers
+- [x] `ActiveCondition` + bitflag always written together (both sides of state)
+- [x] `revive_from_unconscious` is the single authoritative revival function
+- [x] Test data uses `data/test_campaign`, never `campaigns/tutorial` (Rule 5)
+- [x] RON format used for all data files
+- [x] SPDX headers present on all `.rs` files
+- [x] All public functions have `///` doc comments
+
+### Quality Gate Results
+
+```text
+cargo fmt --all                                    → clean (no output)
+cargo check --all-targets --all-features           → Finished, 0 errors
+cargo clippy --all-targets --all-features -D warns → Finished, 0 warnings
+cargo nextest run --all-features                   → 3715 passed, 8 skipped, 0 failed
+```
+
+---
+
+## Phase 1: Unconscious Character — `apply_damage` Sets UNCONSCIOUS in Combat (Complete)
+
+### Overview
+
+This change implements the combat-side half of the Unconscious Character
+feature. Previously, when a player character's HP dropped to 0 from combat
+damage the engine returned `true` (indicating "died") but left both the
+`conditions` bitflag and `active_conditions` vector untouched. The character
+was therefore visually dead without ever having the `UNCONSCIOUS` condition
+set, making it impossible for downstream systems (rest recovery, UI, save/load)
+to distinguish "was knocked out in combat" from "was never touched".
+
+### Files Changed
+
+| File                          | Change                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/domain/combat/engine.rs` | Updated `Combatant::Player` branch in `apply_damage` to set `UNCONSCIOUS` when HP first hits 0; 3 tests |
+
+### Change to `apply_damage` (`src/domain/combat/engine.rs`)
+
+The `Combatant::Player` branch was extended:
+
+```antares/src/domain/combat/engine.rs#L721-748
+        Combatant::Player(character) => {
+            use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+            let old_hp = character.hp.current;
+            character.hp.modify(-(damage as i32));
+            let just_downed = character.hp.current == 0 && old_hp > 0;
+            if just_downed
+                && !character
+                    .conditions
+                    .has(crate::domain::character::Condition::UNCONSCIOUS)
+            {
+                // Set both the bitflag AND the ActiveCondition so that
+                // reconcile_character_conditions does not clear the flag on
+                // the next turn tick.
+                character
+                    .conditions
+                    .add(crate::domain::character::Condition::UNCONSCIOUS);
+                character.add_condition(ActiveCondition::new(
+                    "unconscious".to_string(),
+                    ConditionDuration::Permanent,
+                ));
+            }
+            just_downed
+        }
+```
+
+**Invariants preserved**:
+
+- The function still returns `true` only on the transition from HP > 0 to HP == 0
+  (`just_downed`), matching the previous semantics consumed by callers.
+- The UNCONSCIOUS condition is only written if it is not already set, preventing
+  a double-push of the `ActiveCondition` entry on repeated damage to an
+  already-downed character.
+- Both the `Condition` bitflag **and** the `ActiveCondition` entry are written
+  together so that `reconcile_character_conditions` cannot re-clear one without
+  the other.
+
+### Tests Added (3 new tests)
+
+| Test                                               | What it covers                                                                                                                                       |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_apply_damage_sets_unconscious_at_zero_hp`    | Exact-lethal damage (10 dmg, 10 HP) returns `true`, sets `UNCONSCIOUS` bitflag, and inserts a `Permanent` `ActiveCondition` with id `"unconscious"`. |
+| `test_apply_damage_already_at_zero_no_double_push` | Applying damage to a character already at 0 HP and already UNCONSCIOUS does **not** push a second `active_conditions` entry.                         |
+| `test_unconscious_party_triggers_defeat`           | A party where every member has `hp.current == 0` causes `alive_party_count() == 0` and `check_combat_end()` sets `CombatStatus::Defeat`.             |
+
+### Design Decisions
+
+1. **Why `Permanent` duration?**
+   UNCONSCIOUS from combat damage is not time-limited; it is a state that
+   persists until explicitly lifted (e.g., by `revive_from_unconscious` during
+   rest, or by a curative spell). Using `ConditionDuration::Permanent` matches
+   the contract already established for the rest-recovery path.
+
+2. **Why the `!has(UNCONSCIOUS)` guard?**
+   `Character::add_condition` already deduplicates by condition ID (it
+   overwrites the duration of an existing entry rather than pushing a new one),
+   so a double `ActiveCondition` push would not occur anyway. The bitflag
+   guard is still present for clarity and to make the intent explicit:
+   we only act on the first-time transition to 0 HP.
+
+3. **Why `just_downed` (old_hp > 0) rather than a plain HP == 0 check?**
+   A character already at 0 HP receiving further damage (`old_hp == 0`) must
+   not re-trigger the condition logic. `just_downed` captures exactly the
+   first-hit-to-zero transition.
+
+### Architecture Compliance
+
+- [x] Uses `Condition::UNCONSCIOUS` constant — no magic numbers.
+- [x] Uses `character.add_condition` — the established `ActiveCondition` insertion contract.
+- [x] `ConditionDuration::Permanent` from `crate::domain::conditions` — correct module path.
+- [x] No architectural deviations from `architecture.md`.
+
+### Quality Gate Results
+
+```text
+cargo fmt         → clean (no output)
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo nextest run → 3711 tests run: 3711 passed, 8 skipped
+```
+
+---
+
+## Phase 1: Unconscious Character — `revive_from_unconscious`, Rest Healing, and New Tests (Complete)
+
+### Overview
+
+Phase 1 implements the core "revive from unconscious during rest" mechanic in
+`src/domain/resources.rs`. Previously, unconscious characters were silently
+skipped by both `rest_party_hour` and `rest_party`, meaning they could never
+recover through resting. This phase changes that behaviour: unconscious
+characters are now healed normally during rest, and the `UNCONSCIOUS` condition
+is automatically cleared once their HP rises above 0.
+
+### Files Changed
+
+| File                      | Change                                                                                              |
+| ------------------------- | --------------------------------------------------------------------------------------------------- |
+| `src/domain/resources.rs` | New `revive_from_unconscious`, updated `rest_party_hour`, updated `rest_party`, 7 new/updated tests |
+
+### New Function: `revive_from_unconscious` (`src/domain/resources.rs`)
+
+```antares/src/domain/resources.rs#L534-579
+pub fn revive_from_unconscious(character: &mut crate::domain::character::Character) {
+    use crate::domain::character::Condition;
+    if character.conditions.has(Condition::UNCONSCIOUS) && character.hp.current > 0 {
+        character.conditions.remove(Condition::UNCONSCIOUS);
+        character.remove_condition("unconscious");
+    }
+}
+```
+
+**Contract**:
+
+- No-op if the character is not unconscious.
+- No-op if `hp.current == 0` (character has not been healed yet).
+- Clears **both** the `UNCONSCIOUS` bitflag on `character.conditions` and any
+  `ActiveCondition` with `condition_id == "unconscious"` from
+  `active_conditions`. Both must be cleared together to prevent
+  `reconcile_character_conditions` from re-setting the bitflag on the next
+  turn tick.
+
+### Changes to `rest_party_hour`
+
+- **Removed** `|| character.conditions.is_unconscious()` from the fatal-check
+  guard. Unconscious characters are now healed by the normal HP/SP restoration
+  path.
+- **Added** a call to `revive_from_unconscious(character)` after the SP
+  restoration line, before condition ticking. This means that on the first tick
+  where `hp.current` rises above 0, the `UNCONSCIOUS` condition is cleared
+  immediately.
+
+### Changes to `rest_party`
+
+- Same guard change as `rest_party_hour` — `is_unconscious()` removed from the
+  `is_fatal()` guard.
+- Same `revive_from_unconscious(character)` call added after SP restoration,
+  before the condition ticking loop.
+
+### Tests Added / Updated (7 total)
+
+| Test                                                 | Location    | What it covers                                                                                                                                                                                  |
+| ---------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_rest_party_hour_revives_unconscious_character` | `mod tests` | Replaces the old "skips" test. Verifies that a 0-HP unconscious character is fully healed after a 12-hour rest **and** that `UNCONSCIOUS` bitflag + `active_conditions` entry are both cleared. |
+| `test_revive_from_unconscious_noop_when_fine`        | `mod tests` | `revive_from_unconscious` is a no-op on a healthy character with no `UNCONSCIOUS` flag.                                                                                                         |
+| `test_revive_from_unconscious_clears_both`           | `mod tests` | Verifies both the bitflag and the `ActiveCondition` entry are cleared when HP > 0.                                                                                                              |
+| `test_rest_revives_unconscious_character`            | `mod tests` | End-to-end `rest_party` path: 0-HP unconscious character recovers HP > 0 and condition is cleared.                                                                                              |
+| `test_rest_does_not_heal_fatal_character`            | `mod tests` | Confirms that `DEAD`-condition characters are still completely skipped by `rest_party`.                                                                                                         |
+
+### Design Decisions
+
+1. **Why clear `active_conditions` as well as the bitflag?**
+   The `reconcile_character_conditions` system (called each turn tick) reads
+   `active_conditions` and re-applies bitflags from it. If only the bitflag
+   were cleared, it would be re-set on the very next tick. Both sides of the
+   condition state must be kept in sync.
+
+2. **Why place `revive_from_unconscious` after HP/SP restoration, not before?**
+   The revival check requires `hp.current > 0`. At the point the call is made,
+   the tick has already raised HP via `max(current, target)` (hourly) or
+   `current + restore` (full rest). Calling it before restoration would always
+   be a no-op for a character starting at 0 HP.
+
+3. **Why is the guard only `is_fatal()` now?**
+   Fatal conditions (DEAD, STONE, ERADICATED) are genuinely unrecoverable
+   through rest. Unconscious is a recoverable state and should be treated as
+   "low HP" rather than "skip entirely".
+
+### Architecture Compliance
+
+- [x] `revive_from_unconscious` is a public free function in
+      `src/domain/resources.rs` — consistent with the existing `consume_food`,
+      `rest_party_hour`, etc. pattern.
+- [x] Uses `Condition::UNCONSCIOUS` constant — no magic numbers.
+- [x] Uses `character.remove_condition("unconscious")` — the established
+      `ActiveCondition` removal contract.
+- [x] No architectural deviations from `architecture.md`.
+
+### Quality Gate Results
+
+```text
+cargo fmt         → clean (no output)
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo nextest run (resources:: filter) → 102 tests, 102 passed, 0 failed
+```
+
+---
+
+## Phase 1: Unconscious Character — `apply_consumable_effect` HealHp Revival (Complete)
+
+### Overview
+
+This change wires `revive_from_unconscious` into the consumable-usage path so
+that healing items (potions, etc.) can revive a knocked-out character just as
+rest already does. Previously a `HealHp` consumable raised `hp.current` above 0
+but left both the `UNCONSCIOUS` bitflag and the `ActiveCondition` entry intact,
+meaning the character remained visually unconscious despite having HP.
+
+### Files Changed
+
+| File                                   | Change                                                                      |
+| -------------------------------------- | --------------------------------------------------------------------------- |
+| `src/domain/items/consumable_usage.rs` | Added `revive_from_unconscious` call at end of `HealHp` branch; 2 new tests |
+
+### Change to `apply_consumable_effect` (`src/domain/items/consumable_usage.rs`)
+
+One line appended to the end of the `ConsumableEffect::HealHp` match arm:
+
+```antares/src/domain/items/consumable_usage.rs#L229-242
+        ConsumableEffect::HealHp(amount) => {
+            let pre = character.hp.current as i32;
+            character.hp.modify(amount as i32);
+            // Clamp to base — over-healing is not allowed
+            if character.hp.current > character.hp.base {
+                character.hp.current = character.hp.base;
+            }
+            let post = character.hp.current as i32;
+            let healed = post - pre;
+            if healed > 0 {
+                result.healing = healed;
+            }
+            // Revive from unconscious if HP is now above 0.
+            crate::domain::resources::revive_from_unconscious(character);
+        }
+```
+
+**Invariants preserved**:
+
+- `revive_from_unconscious` is a no-op when `hp.current == 0`, so a `HealHp(0)`
+  applied to an unconscious character leaves the condition untouched.
+- The function delegates entirely to the existing `revive_from_unconscious`
+  contract, which clears **both** the `UNCONSCIOUS` bitflag and the
+  `ActiveCondition` entry atomically.
+- Over-healing is still clamped to `hp.base` before the revival check, so the
+  revival sees the correctly bounded HP value.
+
+### Tests Added (2 new tests)
+
+| Test                                          | What it covers                                                                                                                                                      |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_heal_hp_clears_unconscious`             | A `HealHp(10)` on a 0-HP unconscious character raises HP to 10, reports `healing > 0`, and clears both the `UNCONSCIOUS` bitflag and the `active_conditions` entry. |
+| `test_heal_hp_does_not_clear_when_still_zero` | A `HealHp(0)` on a 0-HP unconscious character leaves HP at 0 and leaves `UNCONSCIOUS` set — revival must not fire unless HP actually rises above 0.                 |
+
+### Design Decisions
+
+1. **Why call `revive_from_unconscious` rather than inline the logic?**
+   `revive_from_unconscious` is the canonical revival function used by both
+   `rest_party_hour` and `rest_party`. Reusing it keeps the revival contract
+   in one place; any future change to revival semantics (e.g., applying a
+   grace-period condition) only needs to be made there.
+
+2. **Why after the clamp, not before?**
+   The revival guard is `hp.current > 0`. The clamp step can only lower HP
+   (from over-healing), never to 0, so placement after the clamp is safe and
+   ensures the revive check sees the final, correct HP value.
+
+3. **Why is `HealHp(0)` expected to leave UNCONSCIOUS intact?**
+   A zero-amount heal is a no-op on HP. Clearing UNCONSCIOUS without any actual
+   healing would be incorrect: the character's HP is still 0 and they would
+   immediately re-trigger unconscious logic on the next damage event.
+
+### Architecture Compliance
+
+- [x] Delegates to `revive_from_unconscious` — no duplicated revival logic.
+- [x] Uses `Condition::UNCONSCIOUS` constant — no magic numbers.
+- [x] No architectural deviations from `architecture.md`.
+
+### Quality Gate Results
+
+```text
+cargo fmt         → clean (no output)
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo test (heal_hp filter) → 5 tests: 5 passed, 0 failed
+```
+
+---
+
 ## Phase 5: locked_objects_and_keys — Save/Load Persistence, Trap Effects, and Documentation (Complete)
 
 ### Overview

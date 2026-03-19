@@ -2071,6 +2071,18 @@ mod tests {
     }
 
     #[test]
+    fn test_unconscious_condition_in_ron_loaded() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("data/test_campaign/data/conditions.ron");
+        let db = ConditionDatabase::load_from_file(&path)
+            .expect("should load conditions from test_campaign");
+        assert!(
+            db.has_condition(&"unconscious".to_string()),
+            "conditions.ron must contain an 'unconscious' entry"
+        );
+    }
+
+    #[test]
     fn test_content_database_character_loading() {
         use crate::domain::character::{Alignment, Sex};
         use crate::domain::character_definition::CharacterDefinition;

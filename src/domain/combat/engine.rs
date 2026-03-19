@@ -720,9 +720,27 @@ pub fn apply_damage(
 
     let died = match target {
         Combatant::Player(character) => {
+            use crate::domain::conditions::{ActiveCondition, ConditionDuration};
             let old_hp = character.hp.current;
             character.hp.modify(-(damage as i32));
-            character.hp.current == 0 && old_hp > 0
+            let just_downed = character.hp.current == 0 && old_hp > 0;
+            if just_downed
+                && !character
+                    .conditions
+                    .has(crate::domain::character::Condition::UNCONSCIOUS)
+            {
+                // Set both the bitflag AND the ActiveCondition so that
+                // reconcile_character_conditions does not clear the flag on
+                // the next turn tick.
+                character
+                    .conditions
+                    .add(crate::domain::character::Condition::UNCONSCIOUS);
+                character.add_condition(ActiveCondition::new(
+                    "unconscious".to_string(),
+                    ConditionDuration::Permanent,
+                ));
+            }
+            just_downed
         }
         Combatant::Monster(monster) => monster.take_damage(damage),
     };
@@ -1917,6 +1935,163 @@ mod tests {
         if let Some(Combatant::Player(c)) = combat.participants.first() {
             assert_eq!(c.hp.current, 0);
         }
+    }
+
+    #[test]
+    fn test_apply_damage_sets_unconscious_at_zero_hp() {
+        use crate::domain::conditions::ConditionDuration;
+
+        let mut combat = CombatState::new(Handicap::Even);
+        let character = create_test_character("Hero", 10);
+        combat.add_player(character);
+
+        // Deal exactly enough to bring HP to 0
+        let result = apply_damage(&mut combat, CombatantId::Player(0), 10);
+        assert!(result.is_ok());
+        assert!(
+            result.unwrap(),
+            "should return true when character is just downed"
+        );
+
+        if let Some(Combatant::Player(c)) = combat.participants.first() {
+            assert_eq!(c.hp.current, 0, "HP must be 0 after lethal damage");
+            assert!(
+                c.conditions
+                    .has(crate::domain::character::Condition::UNCONSCIOUS),
+                "UNCONSCIOUS bitflag must be set when HP drops to 0"
+            );
+            let has_active = c
+                .active_conditions
+                .iter()
+                .any(|ac| ac.condition_id == "unconscious");
+            assert!(
+                has_active,
+                "active_conditions must contain 'unconscious' entry"
+            );
+            // Verify it is Permanent
+            let entry = c
+                .active_conditions
+                .iter()
+                .find(|ac| ac.condition_id == "unconscious")
+                .unwrap();
+            assert_eq!(
+                entry.duration,
+                ConditionDuration::Permanent,
+                "unconscious ActiveCondition must have Permanent duration"
+            );
+        } else {
+            panic!("Player combatant not found");
+        }
+    }
+
+    #[test]
+    fn test_apply_damage_already_at_zero_no_double_push() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut combat = CombatState::new(Handicap::Even);
+        let mut character = create_test_character("Hero", 10);
+        // Pre-set hp to 0 and UNCONSCIOUS (simulating already-downed state)
+        character.hp.current = 0;
+        character
+            .conditions
+            .add(crate::domain::character::Condition::UNCONSCIOUS);
+        character.add_condition(ActiveCondition::new(
+            "unconscious".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        combat.add_player(character);
+
+        // Apply damage to an already-downed character
+        let _ = apply_damage(&mut combat, CombatantId::Player(0), 5);
+
+        if let Some(Combatant::Player(c)) = combat.participants.first() {
+            let count = c
+                .active_conditions
+                .iter()
+                .filter(|ac| ac.condition_id == "unconscious")
+                .count();
+            assert_eq!(
+                count, 1,
+                "must not push a second 'unconscious' ActiveCondition when already at 0 HP"
+            );
+        } else {
+            panic!("Player combatant not found");
+        }
+    }
+
+    #[test]
+    fn test_unconscious_party_triggers_defeat() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut combat = CombatState::new(Handicap::Even);
+        let mut char1 = create_test_character("Hero1", 10);
+        let mut char2 = create_test_character("Hero2", 10);
+
+        // Set both characters to 0 HP and UNCONSCIOUS
+        char1.hp.current = 0;
+        char1
+            .conditions
+            .add(crate::domain::character::Condition::UNCONSCIOUS);
+        char1.add_condition(ActiveCondition::new(
+            "unconscious".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        char2.hp.current = 0;
+        char2
+            .conditions
+            .add(crate::domain::character::Condition::UNCONSCIOUS);
+        char2.add_condition(ActiveCondition::new(
+            "unconscious".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        combat.add_player(char1);
+        combat.add_player(char2);
+
+        // Add a monster so there's an alive opponent
+        let monster = create_test_monster("Goblin", 10);
+        combat.add_monster(monster);
+
+        // All party members at 0 HP means alive_party_count() == 0
+        assert_eq!(
+            combat.alive_party_count(),
+            0,
+            "all 0-HP party members must count as not alive"
+        );
+
+        combat.check_combat_end();
+        assert_eq!(
+            combat.status,
+            CombatStatus::Defeat,
+            "combat must end in Defeat when all party members are at 0 HP"
+        );
+    }
+
+    /// A party member at 0 HP is considered not alive and must not be counted
+    /// as a valid target (`alive_party_count() == 0` when all are at 0 HP).
+    /// This verifies that `Character::is_alive()` correctly gates monster targeting.
+    #[test]
+    fn test_monster_skips_unconscious_target() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut combat = CombatState::new(Handicap::Even);
+        let mut hero = create_test_character("Hero", 10);
+
+        // Simulate being downed: 0 HP + UNCONSCIOUS
+        hero.hp.current = 0;
+        hero.conditions
+            .add(crate::domain::character::Condition::UNCONSCIOUS);
+        hero.add_condition(ActiveCondition::new(
+            "unconscious".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        combat.add_player(hero);
+
+        // Alive party count must be 0 — monsters have no valid targets
+        assert_eq!(
+            combat.alive_party_count(),
+            0,
+            "an unconscious (0 HP) party member must not count as a valid target"
+        );
     }
 
     #[test]
