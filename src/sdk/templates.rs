@@ -537,6 +537,112 @@ pub fn timed_might_potion(id: ItemId, duration_minutes: u16, name: &str) -> Item
     }
 }
 
+// ===== Resurrection Templates =====
+
+/// Creates a default resurrection scroll template.
+///
+/// A single-use item that revives a dead character to 1 HP. Campaign creators
+/// can modify the HP amount via [`resurrection_scroll_with_hp`] or adjust the
+/// cost and charges on the returned item.
+///
+/// This item is intentionally **not** combat-usable: raising the dead is a
+/// solemn act performed between battles.
+///
+/// Callers (application layer) are responsible for checking
+/// `CampaignConfig::permadeath` before applying this item.
+///
+/// # Arguments
+///
+/// * `id` - Item ID
+/// * `name` - Item name (e.g. `"Resurrection Scroll"`)
+///
+/// # Returns
+///
+/// Returns an `Item` configured as a resurrection scroll (restores 1 HP,
+/// not combat-usable).
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::templates::resurrection_scroll;
+/// use antares::domain::items::ItemType;
+/// use antares::domain::items::types::ConsumableEffect;
+///
+/// let scroll = resurrection_scroll(50, "Resurrection Scroll");
+/// assert_eq!(scroll.name, "Resurrection Scroll");
+/// assert!(scroll.is_consumable());
+/// if let ItemType::Consumable(data) = scroll.item_type {
+///     assert!(matches!(data.effect, ConsumableEffect::Resurrect(1)));
+///     assert!(!data.is_combat_usable);
+/// }
+/// ```
+#[allow(deprecated)]
+pub fn resurrection_scroll(id: ItemId, name: &str) -> Item {
+    resurrection_scroll_with_hp(id, name, 1)
+}
+
+/// Creates a resurrection scroll template with a configurable HP restore amount.
+///
+/// A single-use item that revives a dead character to `hp` hit points.
+/// Campaign creators can modify the HP amount and cost.
+///
+/// This item is intentionally **not** combat-usable: raising the dead is a
+/// solemn act performed between battles. Set `is_combat_usable` to `true` on
+/// the returned item if the campaign requires combat resurrection.
+///
+/// Callers (application layer) are responsible for checking
+/// `CampaignConfig::permadeath` before applying this item.
+///
+/// # Arguments
+///
+/// * `id` - Item ID
+/// * `name` - Item name (e.g. `"Resurrection Scroll"`)
+/// * `hp` - Hit points to restore on use (clamped to the character's base HP)
+///
+/// # Returns
+///
+/// Returns an `Item` configured as a resurrection scroll.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::templates::resurrection_scroll_with_hp;
+/// use antares::domain::items::ItemType;
+/// use antares::domain::items::types::ConsumableEffect;
+///
+/// let scroll = resurrection_scroll_with_hp(50, "Resurrection Scroll", 1);
+/// assert_eq!(scroll.name, "Resurrection Scroll");
+/// assert!(scroll.is_consumable());
+/// if let ItemType::Consumable(data) = scroll.item_type {
+///     assert!(matches!(data.effect, ConsumableEffect::Resurrect(1)));
+///     assert!(!data.is_combat_usable);
+/// }
+/// ```
+#[allow(deprecated)]
+pub fn resurrection_scroll_with_hp(id: ItemId, name: &str, hp: u16) -> Item {
+    Item {
+        id,
+        name: name.to_string(),
+        item_type: ItemType::Consumable(ConsumableData {
+            effect: ConsumableEffect::Resurrect(hp),
+            is_combat_usable: false,
+            duration_minutes: None,
+        }),
+        base_cost: 1000,
+        sell_cost: 500,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 0,
+        is_cursed: false,
+        icon_path: None,
+        tags: vec![],
+        mesh_descriptor_override: None,
+        mesh_id: None,
+    }
+}
+
 // ===== Ammo Templates =====
 
 /// Creates an arrow bundle template
@@ -550,16 +656,16 @@ pub fn timed_might_potion(id: ItemId, duration_minutes: u16, name: &str) -> Item
 /// assert!(arrows.name.contains("Arrow"));
 /// ```
 #[allow(deprecated)]
-pub fn arrow_bundle(id: ItemId, count: u16) -> Item {
+pub fn arrow_bundle(id: ItemId, quantity: u16) -> Item {
     Item {
         id,
-        name: format!("Arrows ({})", count),
+        name: format!("Arrows ({})", quantity),
         item_type: ItemType::Ammo(AmmoData {
             ammo_type: AmmoType::Arrow,
-            quantity: count,
+            quantity,
         }),
-        base_cost: (count as u32) * 2,
-        sell_cost: count as u32,
+        base_cost: (quantity as u32) * 2,
+        sell_cost: quantity as u32,
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -985,6 +1091,54 @@ mod tests {
             assert!(
                 matches!(data.effect, ConsumableEffect::BoostResistance(_, 25)),
                 "effect must be BoostResistance with amount 25"
+            );
+        } else {
+            panic!("expected Consumable item type");
+        }
+    }
+
+    /// `resurrection_scroll()` must return a consumable with
+    /// `ConsumableEffect::Resurrect(1)` that is not combat-usable.
+    #[test]
+    fn test_resurrection_scroll_template() {
+        let scroll = resurrection_scroll(50, "Resurrection Scroll");
+        assert_eq!(scroll.id, 50);
+        assert_eq!(scroll.name, "Resurrection Scroll");
+        assert!(
+            scroll.is_consumable(),
+            "resurrection scroll must be consumable"
+        );
+        if let ItemType::Consumable(ref data) = scroll.item_type {
+            assert!(
+                matches!(data.effect, ConsumableEffect::Resurrect(1)),
+                "effect must be Resurrect(1)"
+            );
+            assert!(
+                !data.is_combat_usable,
+                "resurrection scroll must not be combat-usable by default"
+            );
+            assert!(
+                data.duration_minutes.is_none(),
+                "resurrection scroll must have no duration (instant effect)"
+            );
+        } else {
+            panic!("expected Consumable item type");
+        }
+        assert!(scroll.base_cost > 0, "base cost must be positive");
+        assert!(scroll.sell_cost > 0, "sell cost must be positive");
+        assert!(!scroll.is_cursed);
+    }
+
+    /// `resurrection_scroll_with_hp(id, name, 5)` must return a scroll that
+    /// restores 5 HP on use.
+    #[test]
+    fn test_resurrection_scroll_with_hp_template() {
+        let scroll = resurrection_scroll_with_hp(51, "Greater Resurrection Scroll", 5);
+        assert_eq!(scroll.id, 51);
+        if let ItemType::Consumable(ref data) = scroll.item_type {
+            assert!(
+                matches!(data.effect, ConsumableEffect::Resurrect(5)),
+                "effect must be Resurrect(5)"
             );
         } else {
             panic!("expected Consumable item type");

@@ -576,11 +576,66 @@ pub struct ConditionDatabase {
 }
 
 impl ConditionDatabase {
-    /// Creates an empty condition database
+    /// Creates a condition database pre-populated with the two system conditions.
+    ///
+    /// Every campaign must contain `"unconscious"` and `"dead"` for HP-damage
+    /// and death-state handling to work correctly. Pre-populating them here
+    /// ensures that any code path that constructs a `ContentDatabase`
+    /// programmatically (SDK tooling, unit tests) has them available by
+    /// default.
+    ///
+    /// Campaigns that load their own `conditions.ron` file will replace these
+    /// defaults with the file contents via [`load_from_file`], so existing RON
+    /// files that define `"unconscious"` and `"dead"` are not affected.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::database::ConditionDatabase;
+    ///
+    /// let db = ConditionDatabase::new();
+    /// // System conditions are always present.
+    /// assert!(db.has_condition(&"unconscious".to_string()));
+    /// assert!(db.has_condition(&"dead".to_string()));
+    /// ```
     pub fn new() -> Self {
-        Self {
+        use crate::domain::conditions::{ConditionDuration, ConditionEffect};
+
+        let mut db = Self {
             conditions: HashMap::new(),
+        };
+
+        // Pre-populate the two system conditions that every campaign requires.
+        // These defaults are overwritten when a campaign loads its own
+        // conditions.ron (which should also contain these entries).
+        let system_conditions = vec![
+            ConditionDefinition {
+                id: "unconscious".to_string(),
+                name: "Unconscious".to_string(),
+                description: "Character is at 0 HP and cannot act. \
+                     Revived by healing above 0 HP or by resting."
+                    .to_string(),
+                effects: vec![ConditionEffect::StatusEffect("unconscious".to_string())],
+                default_duration: ConditionDuration::Permanent,
+                icon_id: Some("icon_unconscious".to_string()),
+            },
+            ConditionDefinition {
+                id: "dead".to_string(),
+                name: "Dead".to_string(),
+                description: "Character is dead. Requires resurrection to revive. \
+                     Cannot act, be targeted, or be healed by rest."
+                    .to_string(),
+                effects: vec![ConditionEffect::StatusEffect("dead".to_string())],
+                default_duration: ConditionDuration::Permanent,
+                icon_id: Some("icon_dead".to_string()),
+            },
+        ];
+
+        for c in system_conditions {
+            db.conditions.insert(c.id.clone(), c);
         }
+
+        db
     }
 
     /// Loads conditions from a RON file
@@ -611,9 +666,15 @@ impl ConditionDatabase {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
         let path = path.as_ref();
 
-        // Return empty database if file doesn't exist
+        // Return a truly empty database if the file doesn't exist.
+        // We intentionally do NOT call Self::new() here so that the
+        // pre-populated system conditions are absent — callers can then
+        // detect the missing file via ContentDatabase::validate() rather
+        // than silently operating with stale defaults.
         if !path.exists() {
-            return Ok(Self::new());
+            return Ok(Self {
+                conditions: HashMap::new(),
+            });
         }
 
         // Read and parse RON file
@@ -1530,6 +1591,20 @@ impl ContentDatabase {
             }
         }
 
+        // System conditions: "unconscious" and "dead" must always be present.
+        // Their absence causes silent bugs — characters at 0 HP will not
+        // receive the UNCONSCIOUS condition, and dead characters will not be
+        // recognised by rest / resurrection logic.
+        for required_id in &["unconscious", "dead"] {
+            if !self.conditions.has_condition(&required_id.to_string()) {
+                return Err(DatabaseError::ValidationError(format!(
+                    "Campaign is missing required system condition '{}'. \
+                     Characters at 0 HP will not behave correctly.",
+                    required_id
+                )));
+            }
+        }
+
         Ok(())
     }
 
@@ -1686,7 +1761,17 @@ mod tests {
         assert_eq!(stats.spell_count, 0);
         assert_eq!(stats.map_count, 0);
         assert_eq!(stats.character_count, 0);
-        assert_eq!(stats.total(), 0);
+        // ConditionDatabase::new() pre-populates "unconscious" and "dead".
+        // Every other sub-database starts empty, so total equals 2.
+        assert_eq!(
+            stats.condition_count, 2,
+            "new() must pre-populate 2 system conditions"
+        );
+        assert_eq!(
+            stats.total(),
+            2,
+            "total() must be 2 (only the 2 pre-populated system conditions)"
+        );
     }
 
     #[test]
@@ -1995,7 +2080,25 @@ mod tests {
     #[test]
     fn test_content_database_default() {
         let db = ContentDatabase::default();
-        assert_eq!(db.stats().total(), 0);
+        // ContentDatabase::default() delegates to new(), which pre-populates
+        // the two system conditions ("unconscious" and "dead") via
+        // ConditionDatabase::new(). All other content databases start empty.
+        let stats = db.stats();
+        assert_eq!(
+            stats.condition_count, 2,
+            "new() must pre-populate 2 system conditions"
+        );
+        assert_eq!(stats.class_count, 0);
+        assert_eq!(stats.race_count, 0);
+        assert_eq!(stats.item_count, 0);
+        assert_eq!(stats.monster_count, 0);
+        assert_eq!(stats.spell_count, 0);
+        assert_eq!(stats.map_count, 0);
+        assert_eq!(stats.quest_count, 0);
+        assert_eq!(stats.dialogue_count, 0);
+        assert_eq!(stats.character_count, 0);
+        assert_eq!(stats.npc_count, 0);
+        assert_eq!(stats.creature_count, 0);
     }
 
     #[test]
@@ -2007,8 +2110,40 @@ mod tests {
     #[test]
     fn test_condition_database_new() {
         let db = ConditionDatabase::new();
-        assert_eq!(db.count(), 0);
-        assert!(db.all_conditions().is_empty());
+        // ConditionDatabase::new() pre-populates the two system conditions.
+        assert_eq!(
+            db.count(),
+            2,
+            "new() must pre-populate 'unconscious' and 'dead'"
+        );
+        assert!(db.has_condition(&"unconscious".to_string()));
+        assert!(db.has_condition(&"dead".to_string()));
+    }
+
+    /// `ConditionDatabase::new()` must contain `"unconscious"` so that
+    /// any programmatically-created database is immediately valid.
+    #[test]
+    fn test_default_condition_database_includes_unconscious() {
+        let db = ConditionDatabase::new();
+        assert!(
+            db.has_condition(&"unconscious".to_string()),
+            "ConditionDatabase::new() must pre-populate 'unconscious'"
+        );
+        let cond = db.get_condition(&"unconscious".to_string()).unwrap();
+        assert_eq!(cond.name, "Unconscious");
+    }
+
+    /// `ConditionDatabase::new()` must contain `"dead"` so that
+    /// any programmatically-created database is immediately valid.
+    #[test]
+    fn test_default_condition_database_includes_dead() {
+        let db = ConditionDatabase::new();
+        assert!(
+            db.has_condition(&"dead".to_string()),
+            "ConditionDatabase::new() must pre-populate 'dead'"
+        );
+        let cond = db.get_condition(&"dead".to_string()).unwrap();
+        assert_eq!(cond.name, "Dead");
     }
 
     #[test]
@@ -2066,8 +2201,148 @@ mod tests {
 
     #[test]
     fn test_condition_database_load_nonexistent_file() {
+        // load_from_file returns an *empty* database (not pre-populated) when
+        // the file does not exist, so that callers can detect the missing file
+        // via validate() rather than silently using stale defaults.
         let db = ConditionDatabase::load_from_file("nonexistent_file.ron").unwrap();
         assert_eq!(db.count(), 0);
+    }
+
+    /// `ContentDatabase::validate()` must return an error when the
+    /// `"unconscious"` system condition is absent from the database.
+    #[test]
+    fn test_validate_warns_missing_unconscious() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Build a conditions file that has "dead" but NOT "unconscious".
+        let mut tmp = NamedTempFile::new().unwrap();
+        let ron = r#"[
+            (
+                id: "dead",
+                name: "Dead",
+                description: "Character is dead.",
+                effects: [StatusEffect("dead")],
+                default_duration: Permanent,
+                icon_id: None,
+            ),
+        ]"#;
+        tmp.write_all(ron.as_bytes()).unwrap();
+        tmp.flush().unwrap();
+
+        let cond_db = ConditionDatabase::load_from_file(tmp.path()).unwrap();
+        assert_eq!(cond_db.count(), 1, "fixture must contain only 'dead'");
+
+        // Replace the conditions database so "unconscious" is absent.
+        let mut db = ContentDatabase::new();
+        db.conditions = cond_db;
+
+        let result = db.validate();
+        assert!(
+            result.is_err(),
+            "validate() must fail when 'unconscious' is missing"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("unconscious"),
+            "error must mention the missing condition id; got: {msg}"
+        );
+    }
+
+    /// `ContentDatabase::validate()` must return an error when the
+    /// `"dead"` system condition is absent from the database.
+    #[test]
+    fn test_validate_warns_missing_dead() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Build a conditions file that has "unconscious" but NOT "dead".
+        let mut tmp = NamedTempFile::new().unwrap();
+        let ron = r#"[
+            (
+                id: "unconscious",
+                name: "Unconscious",
+                description: "Character is at 0 HP.",
+                effects: [StatusEffect("unconscious")],
+                default_duration: Permanent,
+                icon_id: None,
+            ),
+        ]"#;
+        tmp.write_all(ron.as_bytes()).unwrap();
+        tmp.flush().unwrap();
+
+        let cond_db = ConditionDatabase::load_from_file(tmp.path()).unwrap();
+        assert_eq!(
+            cond_db.count(),
+            1,
+            "fixture must contain only 'unconscious'"
+        );
+
+        // Replace the conditions database so "dead" is absent.
+        let mut db = ContentDatabase::new();
+        db.conditions = cond_db;
+
+        let result = db.validate();
+        assert!(
+            result.is_err(),
+            "validate() must fail when 'dead' is missing"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("dead"),
+            "error must mention the missing condition id; got: {msg}"
+        );
+    }
+
+    /// Loading `data/test_campaign/data/spells.ron` must yield at least one
+    /// spell that has `resurrect_hp: Some(1)` — the "Resurrect" entry added
+    /// in Phase 3.
+    #[test]
+    fn test_resurrect_spell_loads_from_test_campaign() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("data/test_campaign/data/spells.ron");
+        let db =
+            SpellDatabase::load_from_file(&path).expect("should load spells from test_campaign");
+
+        // Spell ID 776 is the "Resurrect" entry added in Phase 3.
+        let spell = db
+            .get_spell(776)
+            .expect("test_campaign/data/spells.ron must contain spell with id 776 (Resurrect)");
+
+        assert_eq!(spell.name, "Resurrect");
+        assert_eq!(
+            spell.resurrect_hp,
+            Some(1),
+            "Resurrect must have resurrect_hp: Some(1)"
+        );
+        assert_eq!(spell.level, 5, "Resurrect must be level 5");
+        assert_eq!(spell.gem_cost, 2, "Resurrect must cost 2 gems");
+    }
+
+    #[test]
+    fn test_unconscious_condition_in_ron_loaded() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("data/test_campaign/data/conditions.ron");
+        let db = ConditionDatabase::load_from_file(&path)
+            .expect("should load conditions from test_campaign");
+        assert!(
+            db.has_condition(&"unconscious".to_string()),
+            "conditions.ron must contain an 'unconscious' entry"
+        );
+    }
+
+    /// `ConditionDatabase` loaded from `data/test_campaign/data/conditions.ron`
+    /// must contain a `"dead"` entry (added in Phase 2).
+    #[test]
+    fn test_dead_condition_in_ron_loaded() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("data/test_campaign/data/conditions.ron");
+        let db = ConditionDatabase::load_from_file(&path)
+            .expect("should load conditions from test_campaign");
+        assert!(
+            db.has_condition(&"dead".to_string()),
+            "conditions.ron must contain a 'dead' entry (Phase 2 requirement)"
+        );
     }
 
     #[test]
@@ -3358,6 +3633,93 @@ mod tests {
         assert!(
             trail_entry.unwrap().quantity > 0,
             "Trail Ration quantity in initialized MerchantStock must be > 0"
+        );
+    }
+
+    /// Phase 4: Verify that the test-campaign priest NPC has a `service_catalog`
+    /// containing the `"resurrect"` service.
+    ///
+    /// This test satisfies the Phase 4.4 requirement:
+    /// `test_temple_npc_has_resurrect_service` — Test campaign priest NPC has
+    /// `service_catalog` with `"resurrect"`.
+    #[test]
+    fn test_temple_npc_has_resurrect_service() {
+        let path = "data/test_campaign/data/npcs.ron";
+
+        if !std::path::Path::new(path).exists() {
+            return;
+        }
+
+        let db = NpcDatabase::load_from_file(path)
+            .expect("Failed to load data/test_campaign/data/npcs.ron");
+
+        // The dedicated fixture priest must exist
+        let priest = db
+            .get_npc("temple_priest")
+            .expect("temple_priest NPC not found in test campaign");
+
+        // Must be marked as a priest
+        assert!(
+            priest.is_priest,
+            "temple_priest must have is_priest == true"
+        );
+
+        // Must have a service catalog
+        let catalog = priest
+            .service_catalog
+            .as_ref()
+            .expect("temple_priest must have a service_catalog");
+
+        // The catalog must contain the resurrect service
+        assert!(
+            catalog.has_service("resurrect"),
+            "temple_priest service_catalog must contain 'resurrect'"
+        );
+
+        // Verify cost and gem_cost of the resurrect service
+        let service = catalog
+            .get_service("resurrect")
+            .expect("resurrect service must be retrievable");
+
+        assert!(
+            service.cost > 0,
+            "resurrect service must have a non-zero gold cost"
+        );
+        assert!(
+            service.gem_cost >= 1,
+            "resurrect service must require at least 1 gem"
+        );
+
+        // Also verify that the existing tutorial priest NPCs now have resurrect
+        let priest2 = db.get_npc("tutorial_priestess_town");
+        if let Some(p) = priest2 {
+            if let Some(cat) = &p.service_catalog {
+                assert!(
+                    cat.has_service("resurrect"),
+                    "tutorial_priestess_town should have resurrect service"
+                );
+            }
+        }
+
+        let priest3 = db.get_npc("tutorial_priest_town2");
+        if let Some(p) = priest3 {
+            if let Some(cat) = &p.service_catalog {
+                assert!(
+                    cat.has_service("resurrect"),
+                    "tutorial_priest_town2 should have resurrect service"
+                );
+            }
+        }
+
+        // Verify the NpcDatabase::priests() filter works for the test campaign
+        let priests = db.priests();
+        assert!(
+            !priests.is_empty(),
+            "test campaign must have at least one priest NPC"
+        );
+        assert!(
+            priests.iter().any(|p| p.id == "temple_priest"),
+            "NpcDatabase::priests() must include temple_priest"
         );
     }
 }

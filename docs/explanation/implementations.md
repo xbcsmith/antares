@@ -1,5 +1,1224 @@
 # Implementations
 
+## Phase 4: NPC Temple/Priest Resurrection Service (Complete)
+
+### Overview
+
+Phase 4 adds the application-layer transaction and UI that allow players to
+visit a priest NPC at a temple and spend gold and gems to resurrect dead party
+members. It builds directly on the domain primitives established in Phases 1–3
+(`revive_from_dead`, `Condition::is_dead`, `check_permadeath_allows_resurrection`).
+
+### Problem Statement
+
+After Phase 3, all the domain and SDK plumbing for death and resurrection was in
+place, but there was no way for a player to actually trigger a resurrection during
+normal gameplay. Specifically:
+
+- No NPC in either campaign had `is_priest: true` combined with a `"resurrect"`
+  service catalog entry.
+- There was no application-layer function that wired together NPC lookup, resource
+  checks, permadeath enforcement, and `revive_from_dead` in a single atomic call.
+- There was no UI plugin for the temple service flow.
+
+### Files Changed
+
+| File                               | Change                                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `src/application/mod.rs`           | Added `TempleServiceState` struct and `GameMode::TempleService(TempleServiceState)` variant            |
+| `src/application/resources.rs`     | Added `perform_resurrection_service` with 7 tests                                                      |
+| `src/game/systems/temple_ui.rs`    | New file — `TemplePlugin`, events, systems, `visible_dead_members` helper, 10 tests                    |
+| `src/game/systems/mod.rs`          | Added `pub mod temple_ui;`                                                                             |
+| `src/bin/antares.rs`               | Registered `TemplePlugin`                                                                              |
+| `campaigns/tutorial/data/npcs.ron` | Set `is_priest: true` + `resurrect` service on `tutorial_priest_town2` and `tutorial_priestess_town`   |
+| `data/test_campaign/data/npcs.ron` | Added `temple_priest` fixture NPC; set `is_priest: true` + `resurrect` service on existing priest NPCs |
+| `src/sdk/database.rs`              | Added `test_temple_npc_has_resurrect_service` test                                                     |
+
+---
+
+### 4.1 — NPC Data (`campaigns/tutorial/data/npcs.ron`, `data/test_campaign/data/npcs.ron`)
+
+Both `tutorial_priest_town2` and `tutorial_priestess_town` now have:
+
+```ron
+is_priest: true,
+service_catalog: Some((
+    services: [
+        (
+            service_id: "resurrect",
+            cost: 500,
+            gem_cost: 1,
+            description: "Resurrect a dead party member for 500 gold and 1 gem.",
+        ),
+    ],
+)),
+```
+
+The test campaign also gains a dedicated `"temple_priest"` fixture NPC with the
+same service entry, making it easy for tests to build against a stable ID.
+
+---
+
+### 4.2 — `TempleServiceState` (`src/application/mod.rs`)
+
+```rust
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TempleServiceState {
+    pub npc_id: String,
+    pub selected_member_index: Option<usize>,
+    pub status_message: Option<String>,
+}
+```
+
+Stored inside `GameMode::TempleService(TempleServiceState)`. The `status_message`
+field is written by the action system with success or error text so the UI can
+display it without a separate Bevy resource.
+
+---
+
+### 4.3 — `perform_resurrection_service` (`src/application/resources.rs`)
+
+```rust
+pub fn perform_resurrection_service(
+    game_state: &mut GameState,
+    npc_id: &str,
+    character_index: usize,
+    content: &ContentDatabase,
+) -> Result<(), String>
+```
+
+Atomic 8-step transaction:
+
+1. Look up NPC by `npc_id`; error if absent.
+2. Locate the `"resurrect"` service in the NPC's `service_catalog`; clone it to
+   release the immutable `content` borrow before mutating `game_state`.
+3. Call `check_permadeath_allows_resurrection` on `campaign_config`; return `Err`
+   if permadeath is enabled.
+4. Verify `party.members[character_index]` exists and `conditions.is_dead()`;
+   return `Err` otherwise (stone/eradicated characters are not considered dead).
+5. Check `party.gold >= service.cost`; return `Err("Insufficient gold …")` if not.
+6. Check `party.gems >= service.gem_cost`; return `Err("Insufficient gems …")` if not.
+7. Deduct gold and gems.
+8. Call `revive_from_dead(character, 1)`.
+
+All preconditions are checked before any state mutation, so failed calls leave
+`game_state` unchanged.
+
+---
+
+### 4.4 — `TemplePlugin` and temple UI (`src/game/systems/temple_ui.rs`)
+
+Follows the exact structural pattern of `inn_ui.rs`:
+
+| Symbol                     | Purpose                                                                 |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `TempleUiRoot`             | Marker `Component` for the UI root entity                               |
+| `TemplePlugin`             | Registers events and systems                                            |
+| `TempleResurrectCharacter` | Event — resurrect party member at `character_index`                     |
+| `ExitTemple`               | Event — return to `GameMode::Exploration`                               |
+| `SelectTempleMember`       | Event — highlight a member in the dead-member list                      |
+| `TempleNavState`           | `Resource` — keyboard focus index and exit-button focus flag            |
+| `temple_ui_system`         | egui panel: list dead members with cost; show status message            |
+| `temple_selection_system`  | Applies `SelectTempleMember` events to `TempleServiceState`             |
+| `temple_action_system`     | Calls `perform_resurrection_service`; writes result to `status_message` |
+| `temple_input_system`      | Arrow keys navigate list; Enter/Space confirms; Escape exits            |
+| `visible_dead_members`     | Pure helper — filters `party.members` to those where `is_dead()`        |
+
+The UI renders only when `GameMode::TempleService(_)` is active and lists only
+members where `Condition::is_dead()` is `true` — stone and eradicated characters
+are excluded automatically.
+
+---
+
+### Complete Test Matrix (Phase 4)
+
+| Test                                                     | File           | Verifies                                                  |
+| -------------------------------------------------------- | -------------- | --------------------------------------------------------- |
+| `test_perform_resurrection_service_success`              | `resources.rs` | Gold/gems deducted; character revived to 1 HP             |
+| `test_perform_resurrection_service_insufficient_gold`    | `resources.rs` | `Err("Insufficient gold")` when gold < cost               |
+| `test_perform_resurrection_service_insufficient_gems`    | `resources.rs` | `Err("Insufficient gems")` when gems < gem_cost           |
+| `test_perform_resurrection_service_target_not_dead`      | `resources.rs` | `Err("not dead")` when character is alive                 |
+| `test_perform_resurrection_service_npc_not_found`        | `resources.rs` | `Err("not found")` for unknown NPC ID                     |
+| `test_perform_resurrection_service_no_resurrect_service` | `resources.rs` | `Err("resurrect")` when NPC lacks the service             |
+| `test_perform_resurrection_service_permadeath`           | `resources.rs` | `Err("permadeath")` when campaign permadeath is enabled   |
+| `test_perform_resurrection_service_zero_cost_succeeds`   | `resources.rs` | Zero-cost service succeeds with empty treasury            |
+| `test_temple_npc_has_resurrect_service`                  | `database.rs`  | `temple_priest` in test campaign has `resurrect` service  |
+| `test_temple_ui_shows_dead_members_only`                 | `temple_ui.rs` | `visible_dead_members` includes only `is_dead()` members  |
+| `test_temple_ui_does_not_show_eradicated`                | `temple_ui.rs` | Stone and eradicated chars excluded from visible list     |
+| `test_visible_dead_members_empty_party`                  | `temple_ui.rs` | Empty party → empty list                                  |
+| `test_visible_dead_members_all_alive`                    | `temple_ui.rs` | All-living party → empty list                             |
+| `test_visible_dead_members_all_dead`                     | `temple_ui.rs` | All-dead party → full list                                |
+| `test_visible_dead_members_correct_party_indices`        | `temple_ui.rs` | Returned indices map to correct `party.members` slots     |
+| `test_temple_service_state_new`                          | `temple_ui.rs` | `TempleServiceState::new` has sane defaults               |
+| `test_temple_service_state_clear`                        | `temple_ui.rs` | `clear()` resets selection and message but keeps `npc_id` |
+| `test_game_mode_temple_service_variant`                  | `temple_ui.rs` | `GameMode::TempleService` is matchable                    |
+| `test_temple_plugin_builds`                              | `temple_ui.rs` | Plugin registers without panic                            |
+
+---
+
+### Architecture Compliance
+
+- `perform_resurrection_service` lives in the **application layer** (not domain)
+  because it reads `CampaignConfig.permadeath` and touches both party resources
+  and character conditions simultaneously — exactly the cross-cutting concern the
+  application layer is designed for.
+- `visible_dead_members` is a pure function with no Bevy dependency; it can be
+  called in any context and is fully unit-tested without a running `App`.
+- `TempleServiceState` is `Serialize + Deserialize` so save games captured while
+  the temple UI is open round-trip correctly.
+- Stone and eradicated characters are silently excluded from the resurrection list
+  because `Condition::is_dead()` returns `false` for those condition values —
+  no special-case logic is required in the UI.
+
+### Quality Gate Results
+
+```
+cargo fmt --all                              ✓ zero diffs
+cargo check --all-targets --all-features    ✓ zero errors, zero warnings
+cargo clippy --all-targets -- -D warnings   ✓ zero warnings
+cargo nextest run --all-features            ✓ 3757/3758 passed
+                                              (1 pre-existing flaky timing test
+                                               unrelated to Phase 4)
+```
+
+New test count: **+19 tests** (8 in `resources.rs`, 1 in `database.rs`, 10 in `temple_ui.rs`).
+
+---
+
+## Phase 3: SDK Validation and Content Database Defaults (Complete)
+
+### Overview
+
+Phase 3 ensures that missing `"unconscious"` and `"dead"` conditions are
+detected early at validation time, that every programmatically-created
+`ContentDatabase` already contains those system conditions, and that campaign
+creators have ready-made templates for resurrection items and spells.
+
+### Problem Statement
+
+After Phase 2, the domain layer correctly used `"unconscious"` and `"dead"`
+`ActiveCondition` entries at runtime. However:
+
+- A campaign whose `conditions.ron` omits either entry would silently break
+  0-HP handling — `ContentDatabase::validate()` raised no error.
+- Tests and SDK tooling that called `ContentDatabase::new()` directly had no
+  system conditions in the database, making validation checks meaningless for
+  programmatic workflows.
+- There was no canonical `resurrection_scroll()` template for campaign
+  creators to start from.
+- Neither the test-campaign nor the tutorial campaign had a `"resurrect"`
+  spell with `resurrect_hp: Some(1)` in their `spells.ron` fixtures.
+
+### Files Changed
+
+| File                                 | Change                                                                                                                                                                                                                               |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/sdk/database.rs`                | `ConditionDatabase::new()` pre-populates system conditions; `load_from_file` returns a truly empty DB for missing files; `ContentDatabase::validate()` checks for required system conditions; updated stale tests; added 5 new tests |
+| `src/sdk/templates.rs`               | Added `resurrection_scroll()` and `resurrection_scroll_with_hp()` template functions; added 2 new tests                                                                                                                              |
+| `data/test_campaign/data/spells.ron` | Added `"Resurrect"` spell (id 776, `resurrect_hp: Some(1)`)                                                                                                                                                                          |
+| `campaigns/tutorial/data/spells.ron` | Added `"Resurrect"` spell (id 776, `resurrect_hp: Some(1)`)                                                                                                                                                                          |
+
+---
+
+### 3.1 — `ContentDatabase::validate()` system-condition checks (`src/sdk/database.rs`)
+
+Added at the end of `validate()`, before the final `Ok(())`:
+
+```rust
+for required_id in &["unconscious", "dead"] {
+    if !self.conditions.has_condition(&required_id.to_string()) {
+        return Err(DatabaseError::ValidationError(format!(
+            "Campaign is missing required system condition '{}'. \
+             Characters at 0 HP will not behave correctly.",
+            required_id
+        )));
+    }
+}
+```
+
+Missing system conditions are treated as **errors** (not warnings) because
+their absence causes silent runtime bugs in HP-damage and death-state handling.
+
+---
+
+### 3.2 — `ConditionDatabase::new()` pre-populates system conditions (`src/sdk/database.rs`)
+
+`ConditionDatabase::new()` now inserts `"unconscious"` and `"dead"` into the
+map before returning:
+
+```rust
+pub fn new() -> Self {
+    use crate::domain::conditions::{ConditionDuration, ConditionEffect};
+    let mut db = Self { conditions: HashMap::new() };
+    let system_conditions = vec![
+        ConditionDefinition {
+            id: "unconscious".to_string(), name: "Unconscious".to_string(),
+            effects: vec![ConditionEffect::StatusEffect("unconscious".to_string())],
+            default_duration: ConditionDuration::Permanent,
+            icon_id: Some("icon_unconscious".to_string()), ..
+        },
+        ConditionDefinition {
+            id: "dead".to_string(), name: "Dead".to_string(),
+            effects: vec![ConditionEffect::StatusEffect("dead".to_string())],
+            default_duration: ConditionDuration::Permanent,
+            icon_id: Some("icon_dead".to_string()), ..
+        },
+    ];
+    for c in system_conditions { db.conditions.insert(c.id.clone(), c); }
+    db
+}
+```
+
+Because `ContentDatabase::new()` calls `ConditionDatabase::new()`, every
+fresh `ContentDatabase` already has the two system conditions and passes
+`validate()` without needing a `conditions.ron` file.
+
+**`load_from_file` for missing files** was changed to return a truly empty
+database (`Self { conditions: HashMap::new() }`) rather than calling
+`Self::new()`. This ensures that a campaign whose `conditions.ron` does not
+exist is detected by `validate()` instead of silently inheriting the
+pre-populated defaults.
+
+**Updated existing tests** (`test_content_database_new`,
+`test_content_database_default`, `test_condition_database_new`) to reflect the
+new baseline of 2 pre-populated conditions.
+
+---
+
+### 3.3 — `resurrection_scroll()` template (`src/sdk/templates.rs`)
+
+Two new public template functions follow the same pattern as `healing_potion()`:
+
+```rust
+/// Creates a resurrection scroll that restores 1 HP (not combat-usable).
+pub fn resurrection_scroll(id: ItemId, name: &str) -> Item {
+    resurrection_scroll_with_hp(id, name, 1)
+}
+
+/// Creates a resurrection scroll that restores `hp` hit points.
+pub fn resurrection_scroll_with_hp(id: ItemId, name: &str, hp: u16) -> Item {
+    Item {
+        item_type: ItemType::Consumable(ConsumableData {
+            effect: ConsumableEffect::Resurrect(hp),
+            is_combat_usable: false,
+            duration_minutes: None,
+        }),
+        base_cost: 1000,
+        sell_cost: 500,
+        ..
+    }
+}
+```
+
+The scroll is intentionally **not combat-usable** by default; campaign authors
+can override this. The base cost (1 000 gold) reflects the rarity of
+resurrection magic.
+
+---
+
+### 3.4 — `"Resurrect"` spell in both `spells.ron` fixtures
+
+Appended to `data/test_campaign/data/spells.ron` and
+`campaigns/tutorial/data/spells.ron`:
+
+```ron
+(
+    id: 776,
+    name: "Resurrect",
+    school: Cleric,
+    level: 5,
+    sp_cost: 15,
+    gem_cost: 2,
+    context: Anytime,
+    target: SingleCharacter,
+    description: "Resurrects a dead character to 1 HP.",
+    damage: None,
+    duration: 0,
+    saving_throw: false,
+    applied_conditions: [],
+    resurrect_hp: Some(1),
+),
+```
+
+**ID rationale:** Existing Cleric L1–L3 spells occupy IDs 257–775
+(0x0101–0x0307). ID 776 (0x0308) is the first unused slot immediately after
+the last Cleric L3 spell (775 = 0x0307), making it a natural extension point.
+The plan-suggested ID 0x0105 (261) was already occupied by "Light". The
+`resurrect_hp` field defaults to `None` via `#[serde(default)]`, so all
+existing spell entries are unaffected.
+
+---
+
+### Complete Test Matrix (Phase 3)
+
+| Test name                                              | File           | Verifies                                                                          |
+| ------------------------------------------------------ | -------------- | --------------------------------------------------------------------------------- |
+| `test_default_condition_database_includes_unconscious` | `database.rs`  | `ConditionDatabase::new()` contains `"unconscious"` with correct name             |
+| `test_default_condition_database_includes_dead`        | `database.rs`  | `ConditionDatabase::new()` contains `"dead"` with correct name                    |
+| `test_validate_warns_missing_unconscious`              | `database.rs`  | `validate()` returns `Err` containing `"unconscious"` when condition is absent    |
+| `test_validate_warns_missing_dead`                     | `database.rs`  | `validate()` returns `Err` containing `"dead"` when condition is absent           |
+| `test_resurrect_spell_loads_from_test_campaign`        | `database.rs`  | `spells.ron` contains spell 776 with `resurrect_hp: Some(1)`, level 5, gem_cost 2 |
+| `test_resurrection_scroll_template`                    | `templates.rs` | `resurrection_scroll()` returns `Resurrect(1)`, not combat-usable, positive costs |
+| `test_resurrection_scroll_with_hp_template`            | `templates.rs` | `resurrection_scroll_with_hp(…, 5)` returns `Resurrect(5)`                        |
+
+---
+
+### Architecture Compliance
+
+| Rule                                                                | Compliance                                                                                                          |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `ConditionDatabase::new()` pre-populates; `load_from_file` does not | Programmatic databases are safe; loaded databases can still fail validation if they omit system conditions          |
+| Domain layer does not enforce conditions                            | Validation is SDK-layer only; domain code never reads from `ConditionDatabase` at runtime                           |
+| `#[serde(default)]` backward compatibility                          | `resurrect_hp` field on `Spell` already had `#[serde(default)]`; all existing RON spell entries load without change |
+| Templates follow existing patterns                                  | `resurrection_scroll()` matches the signature and field layout of `healing_potion()`                                |
+| Test data in `data/`, not `campaigns/tutorial`                      | Spell added to both, with `data/test_campaign/data/spells.ron` as the primary test fixture                          |
+
+### Quality Gate Results
+
+| Gate                                                       | Result                           |
+| ---------------------------------------------------------- | -------------------------------- |
+| `cargo fmt --all`                                          | ✅ PASS                          |
+| `cargo check --all-targets --all-features`                 | ✅ PASS                          |
+| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ PASS                          |
+| `cargo nextest run --all-features`                         | ✅ PASS — 3739 passed, 8 skipped |
+
+---
+
+## Phase 2: Core Dead Condition (Complete)
+
+### Overview
+
+Phase 2 builds directly on the Phase 1 unconscious infrastructure to add the
+`DEAD` condition, the unconscious → dead transition on further damage, a
+configurable instant-death mode, a `revive_from_dead` helper, resurrection
+mechanics for both consumable items and spells, campaign-level permadeath
+enforcement, and consistent data-driven `DEAD` handling across the whole
+engine.
+
+### Problem Statement
+
+After Phase 1, a character at 0 HP was correctly marked `UNCONSCIOUS` and
+could not act or be targeted. However, no mechanism existed to:
+
+- Transition from unconscious to dead when an unconscious character was
+  struck again.
+- Kill a character immediately without the unconscious step (instant-death
+  mode).
+- Resurrect a character using a consumable item or a spell.
+- Block resurrection when the campaign has permadeath enabled.
+- Keep `apply_starvation_damage` consistent with the data-driven dual
+  representation (bitflag + `ActiveCondition`).
+
+### Files Changed
+
+| File                                     | Change                                                                                                                                                                             |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `campaigns/tutorial/data/conditions.ron` | Added `"dead"` entry                                                                                                                                                               |
+| `data/test_campaign/data/conditions.ron` | Added `"dead"` entry                                                                                                                                                               |
+| `src/domain/campaign.rs`                 | Added `permadeath` and `unconscious_before_death` fields to `CampaignConfig`                                                                                                       |
+| `src/application/mod.rs`                 | Added `campaign_config: CampaignConfig` field to `GameState`; initialized in `new()` and `new_game()`                                                                              |
+| `src/domain/combat/engine.rs`            | Added `unconscious_before_death` to `CombatState`; rewrote `apply_damage` player branch with full dead/unconscious state machine                                                   |
+| `src/game/systems/combat.rs`             | `start_encounter` copies `campaign_config.unconscious_before_death` into `CombatState`; permadeath guards in `perform_cast_action_with_rng` and `perform_use_item_action_with_rng` |
+| `src/domain/resources.rs`                | Added `revive_from_dead`; fixed `apply_starvation_damage` to also push `ActiveCondition("dead")`                                                                                   |
+| `src/domain/items/types.rs`              | Added `ConsumableEffect::Resurrect(u16)` variant                                                                                                                                   |
+| `src/domain/items/consumable_usage.rs`   | `apply_consumable_effect` handles `Resurrect`; 3 new tests                                                                                                                         |
+| `src/domain/magic/types.rs`              | Added `resurrect_hp: Option<u16>` field to `Spell`; initialized to `None` in `Spell::new()`                                                                                        |
+| `src/domain/combat/spell_casting.rs`     | `execute_spell_cast_with_spell` handles `resurrect_hp`; 2 new tests                                                                                                                |
+| `src/domain/magic/database.rs`           | Added `resurrect_hp: None` to test `Spell` struct literal                                                                                                                          |
+| `src/domain/visual/item_mesh.rs`         | Added `Resurrect(_)` arm (radiant gold color) to exhaustive match                                                                                                                  |
+| `src/game/systems/inventory_ui.rs`       | Added `Resurrect(_)` arm to consumable log message match                                                                                                                           |
+| `src/application/resources.rs`           | Added `check_permadeath_allows_resurrection`; 2 new tests                                                                                                                          |
+| `src/sdk/database.rs`                    | Added `test_dead_condition_in_ron_loaded` test                                                                                                                                     |
+
+---
+
+### 2.1 — `"dead"` condition entries (RON data files)
+
+Both condition fixture files now contain a `"dead"` entry identical in
+structure to the `"unconscious"` entry added in Phase 1:
+
+```ron
+(
+    id: "dead",
+    name: "Dead",
+    description: "Character is dead. Requires resurrection to revive. Cannot act, be targeted, or be healed by rest.",
+    effects: [
+        StatusEffect("dead"),
+    ],
+    default_duration: Permanent,
+    icon_id: Some("icon_dead"),
+),
+```
+
+The entry was appended to both:
+
+- `campaigns/tutorial/data/conditions.ron`
+- `data/test_campaign/data/conditions.ron`
+
+---
+
+### 2.2 — Permadeath and death-mode flags (`src/domain/campaign.rs`)
+
+`CampaignConfig` gained two serde-defaulted boolean fields:
+
+```rust
+/// If true, dead characters cannot be resurrected by any means.
+#[serde(default)]
+pub permadeath: bool,
+
+/// If true, 0 HP → unconscious first; further damage → dead.
+/// If false, 0 HP sets DEAD immediately (instant-death mode).
+#[serde(default = "default_true")]
+pub unconscious_before_death: bool,
+```
+
+A module-private `fn default_true() -> bool { true }` helper was added so
+that serde can default `unconscious_before_death` to `true` on
+deserialization of existing `campaign.ron` files that omit the field.
+
+`impl Default for CampaignConfig` was updated to include both fields
+(`permadeath: false`, `unconscious_before_death: true`).
+
+`GameState` (`src/application/mod.rs`) received a new
+`#[serde(default)] pub campaign_config: CampaignConfig` field, initialized
+via `CampaignConfig::default()` in both `GameState::new()` and
+`GameState::new_game()`.
+
+---
+
+### 2.3 — `unconscious_before_death` in `CombatState` and `apply_damage` (`src/domain/combat/engine.rs`)
+
+**`CombatState`** gained:
+
+```rust
+/// Copied from `CampaignConfig::unconscious_before_death` at combat start.
+#[serde(default = "default_true")]
+pub unconscious_before_death: bool,
+```
+
+`CombatState::new()` initializes it to `true`.
+
+**`start_encounter`** (`src/game/systems/combat.rs`) now copies the
+campaign value immediately after constructing the state:
+
+```rust
+cs.unconscious_before_death = game_state.campaign_config.unconscious_before_death;
+```
+
+**`apply_damage` player branch** was rewritten with a three-way state
+machine. The `bool` is copied to a local (`let unconscious_before_death =
+combat.unconscious_before_death`) before the mutable borrow on the
+participant to satisfy the borrow checker:
+
+| Situation                                              | Outcome                                                             |
+| ------------------------------------------------------ | ------------------------------------------------------------------- |
+| Already `UNCONSCIOUS`, `hp == 0`, takes damage         | `UNCONSCIOUS` cleared; `DEAD` + `ActiveCondition("dead")` set       |
+| First hit to 0 HP, `unconscious_before_death == true`  | `UNCONSCIOUS` + `ActiveCondition("unconscious")` set (Phase 1 path) |
+| First hit to 0 HP, `unconscious_before_death == false` | `DEAD` + `ActiveCondition("dead")` set immediately (instant-death)  |
+
+Both the bitflag and the `ActiveCondition` entry are always kept in sync so
+that `reconcile_character_conditions` does not flip the state on the next
+tick.
+
+---
+
+### 2.4 — `apply_starvation_damage` data-driven consistency (`src/domain/resources.rs`)
+
+The pre-existing code set only the `DEAD` bitflag when starvation reduced
+HP to 0. Phase 2 adds the matching `ActiveCondition`:
+
+```rust
+if character.hp.current == 0 {
+    use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+    character.conditions.add(crate::domain::character::Condition::DEAD);
+    character.add_condition(ActiveCondition::new(
+        "dead".to_string(),
+        ConditionDuration::Permanent,
+    ));
+}
+```
+
+---
+
+### 2.5 — `ConsumableEffect::Resurrect(u16)` (`src/domain/items/types.rs`)
+
+A new variant was appended to `ConsumableEffect`:
+
+```rust
+/// Resurrect a dead character, restoring them to `hp` hit points.
+/// No-op if `is_dead()` is false (Stone / Eradicated). Caller enforces permadeath.
+Resurrect(u16),
+```
+
+All exhaustive match sites were updated:
+
+- `src/domain/items/consumable_usage.rs` — handling logic (see 2.7)
+- `src/domain/visual/item_mesh.rs` — radiant gold/amber primary color
+  `[1.0, 0.84, 0.0, 1.0]`
+- `src/game/systems/inventory_ui.rs` — log messages ("resurrected with N HP"
+  / "could not be resurrected")
+
+---
+
+### 2.6 — `revive_from_dead` helper (`src/domain/resources.rs`)
+
+Added alongside `revive_from_unconscious`:
+
+```rust
+pub fn revive_from_dead(character: &mut Character, hp: u16) {
+    use crate::domain::character::Condition;
+    if !character.conditions.is_dead() {
+        return; // STONE / ERADICATED — no-op.
+    }
+    character.conditions.remove(Condition::DEAD);
+    character.remove_condition("dead");
+    let restored = hp.min(character.hp.base);
+    character.hp.current = restored;
+}
+```
+
+The `is_dead()` guard (added in Phase 1) means `STONE` (value 160) and
+`ERADICATED` (value 255) are explicitly excluded — their higher bitfield
+values prevent `is_dead()` from returning `true`.
+
+---
+
+### 2.7 — `ConsumableEffect::Resurrect` in `apply_consumable_effect` (`src/domain/items/consumable_usage.rs`)
+
+```rust
+ConsumableEffect::Resurrect(hp) => {
+    if character.conditions.is_dead() {
+        crate::domain::resources::revive_from_dead(character, hp);
+        result.healing = hp as i32;
+    }
+}
+```
+
+`apply_consumable_effect_exploration` delegates to
+`apply_consumable_effect` and handles `Resurrect` automatically.
+
+---
+
+### 2.8 — `Spell::resurrect_hp` field (`src/domain/magic/types.rs`)
+
+```rust
+/// When `Some(hp)`, the spell is a resurrection spell.
+#[serde(default)]
+pub resurrect_hp: Option<u16>,
+```
+
+`Spell::new()` initializes it to `None`. Existing RON spell files are
+unaffected because `#[serde(default)]` fills in `None` on deserialization.
+
+`execute_spell_cast_with_spell` (`src/domain/combat/spell_casting.rs`) was
+extended with a resurrection block that runs after the normal damage block:
+
+```rust
+if let Some(hp) = spell.resurrect_hp {
+    if let CombatantId::Player(idx) = target {
+        if let Some(Combatant::Player(pc)) =
+            combat_state.get_combatant_mut(&target)
+        {
+            if pc.conditions.is_dead() {
+                crate::domain::resources::revive_from_dead(pc.as_mut(), hp);
+                result = result.with_healing(hp as i32, vec![idx]);
+            }
+        }
+    }
+}
+```
+
+---
+
+### 2.9 — `check_permadeath_allows_resurrection` (`src/application/resources.rs`)
+
+```rust
+pub fn check_permadeath_allows_resurrection(
+    config: &CampaignConfig,
+) -> Result<(), String> {
+    if config.permadeath {
+        Err("Resurrection is not allowed in this campaign (permadeath enabled).".to_string())
+    } else {
+        Ok(())
+    }
+}
+```
+
+**Game-layer callers** both use the collapsed form required by
+`clippy::collapsible_if`:
+
+- `perform_cast_action_with_rng` — looks up the spell, checks
+  `resurrect_hp.is_some() && check_permadeath_allows_resurrection(...).is_err()`,
+  and returns `Ok(())` silently when blocked.
+- `perform_use_item_action_with_rng` — reads the item from the user's
+  inventory slot, pattern-matches `ConsumableEffect::Resurrect(_)`, and
+  applies the same guard before delegating to `execute_item_use_by_slot`.
+
+---
+
+### Complete Test Matrix (Phase 2)
+
+| Test name                                            | File                       | Verifies                                                                |
+| ---------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------- |
+| `test_unconscious_before_death_mode_default`         | `campaign.rs`              | `CampaignConfig::default()` has correct defaults                        |
+| `test_combat_state_unconscious_before_death_default` | `engine.rs`                | `CombatState::new()` defaults `unconscious_before_death` to `true`      |
+| `test_apply_damage_already_at_zero_no_double_push`   | `engine.rs`                | Updated: further damage on unconscious → DEAD, UNCONSCIOUS cleared      |
+| `test_unconscious_to_dead_on_further_damage`         | `engine.rs`                | Further damage on unconscious character sets DEAD                       |
+| `test_instant_death_mode_skips_unconscious`          | `engine.rs`                | `unconscious_before_death == false` → DEAD immediately at 0 HP          |
+| `test_apply_starvation_damage_sets_dead_condition`   | `resources.rs`             | Starvation sets DEAD bitflag AND pushes `ActiveCondition("dead")`       |
+| `test_revive_from_dead_clears_both`                  | `resources.rs`             | Clears DEAD flag, removes ActiveCondition, sets HP                      |
+| `test_revive_from_dead_clamps_to_base`               | `resources.rs`             | Restored HP is clamped to `hp.base`                                     |
+| `test_revive_from_dead_noop_on_stone`                | `resources.rs`             | STONE character is not revived                                          |
+| `test_revive_from_dead_noop_on_eradicated`           | `resources.rs`             | ERADICATED character is not revived                                     |
+| `test_resurrect_consumable_clears_dead`              | `consumable_usage.rs`      | `Resurrect(5)` on dead character sets HP to 5 and clears DEAD           |
+| `test_resurrect_consumable_noop_on_alive`            | `consumable_usage.rs`      | `Resurrect(5)` on living character is a no-op                           |
+| `test_resurrect_consumable_noop_on_eradicated`       | `consumable_usage.rs`      | `Resurrect(5)` on ERADICATED character is a no-op                       |
+| `test_resurrect_spell_revives_dead_player`           | `spell_casting.rs`         | Spell with `resurrect_hp: Some(1)` removes DEAD and sets HP to 1        |
+| `test_resurrect_spell_noop_on_alive`                 | `spell_casting.rs`         | Resurrection spell targeting living player is a no-op                   |
+| `test_permadeath_allows_resurrection_by_default`     | `application/resources.rs` | `check_permadeath_allows_resurrection` returns `Ok` when permadeath off |
+| `test_permadeath_blocks_resurrection`                | `application/resources.rs` | Returns `Err` when permadeath enabled                                   |
+| `test_dead_character_skipped_in_rest`                | `resources.rs`             | Dead character is not healed by `rest_party`                            |
+| `test_dead_condition_in_ron_loaded`                  | `sdk/database.rs`          | `data/test_campaign/data/conditions.ron` contains `"dead"`              |
+
+---
+
+### Architecture Compliance
+
+| Rule                                                       | Compliance                                                                                                                                              |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dual representation (bitflag + `ActiveCondition`)          | Both are always written and cleared together in every code path                                                                                         |
+| Domain layer does not read `CampaignConfig`                | `revive_from_dead`, `apply_consumable_effect`, and spell casting perform no permadeath check — enforcement is exclusively in the game/application layer |
+| `is_dead()` distinguishes plain DEAD from STONE/ERADICATED | All revive paths use `is_dead()` as the guard                                                                                                           |
+| `#[serde(default)]` backward compatibility                 | New fields on `CampaignConfig`, `CombatState`, and `Spell` all use `#[serde(default)]` so existing RON files continue to deserialize                    |
+| Exhaustive enum matches                                    | All three `ConsumableEffect` match sites were updated for `Resurrect(_)`                                                                                |
+
+### Quality Gate Results
+
+| Gate                                                       | Result                           |
+| ---------------------------------------------------------- | -------------------------------- |
+| `cargo fmt --all`                                          | ✅ PASS                          |
+| `cargo check --all-targets --all-features`                 | ✅ PASS                          |
+| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ PASS                          |
+| `cargo nextest run --all-features`                         | ✅ PASS — 3732 passed, 8 skipped |
+
+---
+
+## Phase 1: Unconscious Characters — Complete Implementation (Complete)
+
+### Overview
+
+Phase 1 wires the `unconscious` condition end-to-end across the entire domain,
+resource, and combat stack. Before this work, characters whose HP dropped to 0
+continued to act, were counted as valid targets, and could not be revived
+through rest or healing items. All four quality gates pass with zero errors and
+zero warnings across **3715 tests**.
+
+### Problem Statement
+
+The following defects existed before this phase:
+
+1. `apply_damage` reduced HP to 0 but never set `UNCONSCIOUS` — 0-HP characters
+   could still act and were still counted as alive.
+2. `Character::is_alive()` checked only `!conditions.is_fatal()`, not
+   `hp.current > 0`. A 0-HP character with `Condition::FINE` was considered
+   alive — inconsistent with `Monster::is_alive()`.
+3. No `"unconscious"` entry existed in either `conditions.ron` file, so the
+   data-driven condition lifecycle had no definition to reconcile against.
+4. `rest_party` and `rest_party_hour` skipped characters with `is_unconscious()`
+   set, making rest-based revival impossible.
+5. `HealHp` consumables raised HP above 0 but left `UNCONSCIOUS` set, leaving
+   characters visually downed despite having HP.
+6. Spell HP modifications on player characters had no revival check.
+7. `Condition::is_dead()` did not exist; callers had no way to distinguish plain
+   `DEAD` from `STONE` and `ERADICATED`.
+
+### Files Changed
+
+| File                                     | Change                                                                                                |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `campaigns/tutorial/data/conditions.ron` | Added `"unconscious"` condition entry                                                                 |
+| `data/test_campaign/data/conditions.ron` | Added `"unconscious"` condition entry                                                                 |
+| `src/domain/character.rs`                | `Condition::is_dead()` helper; `Character::is_alive()` HP guard; 3 new tests                          |
+| `src/domain/resources.rs`                | New `revive_from_unconscious`; updated `rest_party_hour` and `rest_party`; 7 new/updated tests        |
+| `src/domain/combat/engine.rs`            | `apply_damage` sets `UNCONSCIOUS`; 4 new tests                                                        |
+| `src/domain/items/consumable_usage.rs`   | `HealHp` calls `revive_from_unconscious`; 2 new tests                                                 |
+| `src/domain/combat/spell_casting.rs`     | `SingleCharacter`, `AllCharacters`, `Self_` branches call `revive_from_unconscious` after `hp.modify` |
+| `src/sdk/database.rs`                    | 1 new RON-load test for `"unconscious"` condition                                                     |
+
+### 1.1 — `"unconscious"` condition entries (RON data files)
+
+Both `campaigns/tutorial/data/conditions.ron` and
+`data/test_campaign/data/conditions.ron` now contain:
+
+```antares/data/test_campaign/data/conditions.ron#L168-178
+    (
+        id: "unconscious",
+        name: "Unconscious",
+        description: "Character is at 0 HP and cannot act. Revived by healing above 0 HP or by resting.",
+        effects: [
+            StatusEffect("unconscious"),
+        ],
+        default_duration: Permanent,
+        icon_id: Some("icon_unconscious"),
+    ),
+```
+
+`status_str_to_flag` already mapped `"unconscious"` → `Condition::UNCONSCIOUS`,
+so `reconcile_character_conditions` immediately picks up the new definition.
+
+### 1.2 — `Condition::is_dead()` helper (`src/domain/character.rs`)
+
+```antares/src/domain/character.rs#L541-553
+    /// Returns true if the character is dead (DEAD bit is set) but is not
+    /// stoned or eradicated, which set higher bits.
+    pub fn is_dead(&self) -> bool {
+        self.has(Self::DEAD) && self.0 < Self::STONE
+    }
+```
+
+`is_fatal()` returns `true` for STONE (`160`) and ERADICATED (`255`) because
+those values include the DEAD bit. `is_dead()` distinguishes a plain dead
+character (value `128`) from stone/eradicated and is used by Phase 2
+resurrection logic.
+
+### 1.3 — `Character::is_alive()` HP guard (`src/domain/character.rs`)
+
+```antares/src/domain/character.rs#L1264-1267
+    pub fn is_alive(&self) -> bool {
+        self.hp.current > 0 && !self.conditions.is_fatal()
+    }
+```
+
+**Cascading effects (no further changes required):**
+
+- `Character::can_act()` delegates to `is_alive()` — automatically fixed.
+- `Combatant::is_alive()` in `engine.rs` delegates to `character.is_alive()` — fixed.
+- `CombatState::alive_party_count()` uses `Combatant::is_alive()` — fixed.
+  A party where all members have 0 HP now correctly yields `alive_party_count() == 0`
+  and triggers `CombatStatus::Defeat` via `check_combat_end()`.
+- `select_monster_target` in `src/game/systems/combat.rs` filters on
+  `pc.is_alive()` — 0-HP characters are no longer valid monster targets.
+
+### 1.4 — `revive_from_unconscious` helper (`src/domain/resources.rs`)
+
+```antares/src/domain/resources.rs#L534-550
+pub fn revive_from_unconscious(character: &mut crate::domain::character::Character) {
+    use crate::domain::character::Condition;
+    if character.conditions.has(Condition::UNCONSCIOUS) && character.hp.current > 0 {
+        character.conditions.remove(Condition::UNCONSCIOUS);
+        character.remove_condition("unconscious");
+    }
+}
+```
+
+This is the **single authoritative** place to clear the unconscious state.
+It clears both the `UNCONSCIOUS` bitflag AND the `ActiveCondition` entry so
+that `reconcile_character_conditions` cannot re-set the flag on the next tick.
+
+### 1.5 — `apply_damage` sets UNCONSCIOUS (`src/domain/combat/engine.rs`)
+
+The `Combatant::Player` branch sets both state sides on first-hit-to-zero:
+
+```antares/src/domain/combat/engine.rs#L721-748
+        Combatant::Player(character) => {
+            use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+            let old_hp = character.hp.current;
+            character.hp.modify(-(damage as i32));
+            let just_downed = character.hp.current == 0 && old_hp > 0;
+            if just_downed
+                && !character
+                    .conditions
+                    .has(crate::domain::character::Condition::UNCONSCIOUS)
+            {
+                character
+                    .conditions
+                    .add(crate::domain::character::Condition::UNCONSCIOUS);
+                character.add_condition(ActiveCondition::new(
+                    "unconscious".to_string(),
+                    ConditionDuration::Permanent,
+                ));
+            }
+            just_downed
+        }
+```
+
+### 1.6 — `HealHp` calls `revive_from_unconscious` (`src/domain/items/consumable_usage.rs`)
+
+One line appended at the end of the `ConsumableEffect::HealHp` arm:
+
+```antares/src/domain/items/consumable_usage.rs#L241-242
+            // Revive from unconscious if HP is now above 0.
+            crate::domain::resources::revive_from_unconscious(character);
+```
+
+`apply_consumable_effect_exploration` delegates to `apply_consumable_effect`
+for `HealHp`, so the exploration (out-of-combat) path is covered automatically.
+
+### 1.7 — Spell healing path (`src/domain/combat/spell_casting.rs`)
+
+`crate::domain::resources::revive_from_unconscious(pc.as_mut())` is called
+immediately after every `pc.hp.modify(-dmg)` in the `SingleCharacter`,
+`AllCharacters`, and `Self_` branches of `execute_spell_cast_with_spell`.
+The function's built-in `hp.current > 0` guard makes it a safe no-op for
+damage spells.
+
+### 1.8 — `rest_party` and `rest_party_hour` revive unconscious characters
+
+Both functions previously had this skip guard:
+
+```antares/src/domain/resources.rs#L662-664
+        if character.conditions.is_fatal() {
+            continue;
+        }
+```
+
+The `|| character.conditions.is_unconscious()` clause was removed; after HP
+restoration `revive_from_unconscious(character)` is called. Unconscious
+characters are now healed normally by rest and revived once HP > 0.
+
+### Complete Test Matrix
+
+| Test                                                 | File                  | What it verifies                                                              |
+| ---------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------- |
+| `test_apply_damage_sets_unconscious_at_zero_hp`      | `engine.rs`           | Lethal damage sets `UNCONSCIOUS` bitflag and `Permanent` `ActiveCondition`    |
+| `test_apply_damage_already_at_zero_no_double_push`   | `engine.rs`           | No second `ActiveCondition` pushed when already at 0 HP                       |
+| `test_unconscious_party_triggers_defeat`             | `engine.rs`           | `alive_party_count() == 0` triggers `CombatStatus::Defeat`                    |
+| `test_monster_skips_unconscious_target`              | `engine.rs`           | 0-HP party member not counted as valid target                                 |
+| `test_character_is_alive_false_at_zero_hp`           | `character.rs`        | `is_alive()` returns `false` when `hp.current == 0`                           |
+| `test_character_can_act_false_at_zero_hp`            | `character.rs`        | `can_act()` returns `false` when `hp.current == 0`                            |
+| `test_condition_is_dead_helper`                      | `character.rs`        | `is_dead()` true for `DEAD` only, false for `STONE`/`ERADICATED`              |
+| `test_heal_hp_clears_unconscious`                    | `consumable_usage.rs` | `HealHp` consumable clears `UNCONSCIOUS` when HP rises above 0                |
+| `test_heal_hp_does_not_clear_when_still_zero`        | `consumable_usage.rs` | `HealHp(0)` leaves `UNCONSCIOUS` intact                                       |
+| `test_revive_from_unconscious_noop_when_fine`        | `resources.rs`        | No-op on healthy character                                                    |
+| `test_revive_from_unconscious_clears_both`           | `resources.rs`        | Clears bitflag and `ActiveCondition` entry                                    |
+| `test_rest_party_hour_revives_unconscious_character` | `resources.rs`        | 0-HP character fully healed and revived after 12-hour rest                    |
+| `test_rest_revives_unconscious_character`            | `resources.rs`        | End-to-end `rest_party` revival                                               |
+| `test_rest_does_not_heal_fatal_character`            | `resources.rs`        | `DEAD` characters still completely skipped                                    |
+| `test_unconscious_condition_in_ron_loaded`           | `database.rs`         | `"unconscious"` loads correctly from `data/test_campaign/data/conditions.ron` |
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` Section 4 exactly
+- [x] `Condition::UNCONSCIOUS` constant used — no magic numbers
+- [x] `ActiveCondition` + bitflag always written together (both sides of state)
+- [x] `revive_from_unconscious` is the single authoritative revival function
+- [x] Test data uses `data/test_campaign`, never `campaigns/tutorial` (Rule 5)
+- [x] RON format used for all data files
+- [x] SPDX headers present on all `.rs` files
+- [x] All public functions have `///` doc comments
+
+### Quality Gate Results
+
+```text
+cargo fmt --all                                    → clean (no output)
+cargo check --all-targets --all-features           → Finished, 0 errors
+cargo clippy --all-targets --all-features -D warns → Finished, 0 warnings
+cargo nextest run --all-features                   → 3715 passed, 8 skipped, 0 failed
+```
+
+---
+
+## Phase 1: Unconscious Character — `apply_damage` Sets UNCONSCIOUS in Combat (Complete)
+
+### Overview
+
+This change implements the combat-side half of the Unconscious Character
+feature. Previously, when a player character's HP dropped to 0 from combat
+damage the engine returned `true` (indicating "died") but left both the
+`conditions` bitflag and `active_conditions` vector untouched. The character
+was therefore visually dead without ever having the `UNCONSCIOUS` condition
+set, making it impossible for downstream systems (rest recovery, UI, save/load)
+to distinguish "was knocked out in combat" from "was never touched".
+
+### Files Changed
+
+| File                          | Change                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/domain/combat/engine.rs` | Updated `Combatant::Player` branch in `apply_damage` to set `UNCONSCIOUS` when HP first hits 0; 3 tests |
+
+### Change to `apply_damage` (`src/domain/combat/engine.rs`)
+
+The `Combatant::Player` branch was extended:
+
+```antares/src/domain/combat/engine.rs#L721-748
+        Combatant::Player(character) => {
+            use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+            let old_hp = character.hp.current;
+            character.hp.modify(-(damage as i32));
+            let just_downed = character.hp.current == 0 && old_hp > 0;
+            if just_downed
+                && !character
+                    .conditions
+                    .has(crate::domain::character::Condition::UNCONSCIOUS)
+            {
+                // Set both the bitflag AND the ActiveCondition so that
+                // reconcile_character_conditions does not clear the flag on
+                // the next turn tick.
+                character
+                    .conditions
+                    .add(crate::domain::character::Condition::UNCONSCIOUS);
+                character.add_condition(ActiveCondition::new(
+                    "unconscious".to_string(),
+                    ConditionDuration::Permanent,
+                ));
+            }
+            just_downed
+        }
+```
+
+**Invariants preserved**:
+
+- The function still returns `true` only on the transition from HP > 0 to HP == 0
+  (`just_downed`), matching the previous semantics consumed by callers.
+- The UNCONSCIOUS condition is only written if it is not already set, preventing
+  a double-push of the `ActiveCondition` entry on repeated damage to an
+  already-downed character.
+- Both the `Condition` bitflag **and** the `ActiveCondition` entry are written
+  together so that `reconcile_character_conditions` cannot re-clear one without
+  the other.
+
+### Tests Added (3 new tests)
+
+| Test                                               | What it covers                                                                                                                                       |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_apply_damage_sets_unconscious_at_zero_hp`    | Exact-lethal damage (10 dmg, 10 HP) returns `true`, sets `UNCONSCIOUS` bitflag, and inserts a `Permanent` `ActiveCondition` with id `"unconscious"`. |
+| `test_apply_damage_already_at_zero_no_double_push` | Applying damage to a character already at 0 HP and already UNCONSCIOUS does **not** push a second `active_conditions` entry.                         |
+| `test_unconscious_party_triggers_defeat`           | A party where every member has `hp.current == 0` causes `alive_party_count() == 0` and `check_combat_end()` sets `CombatStatus::Defeat`.             |
+
+### Design Decisions
+
+1. **Why `Permanent` duration?**
+   UNCONSCIOUS from combat damage is not time-limited; it is a state that
+   persists until explicitly lifted (e.g., by `revive_from_unconscious` during
+   rest, or by a curative spell). Using `ConditionDuration::Permanent` matches
+   the contract already established for the rest-recovery path.
+
+2. **Why the `!has(UNCONSCIOUS)` guard?**
+   `Character::add_condition` already deduplicates by condition ID (it
+   overwrites the duration of an existing entry rather than pushing a new one),
+   so a double `ActiveCondition` push would not occur anyway. The bitflag
+   guard is still present for clarity and to make the intent explicit:
+   we only act on the first-time transition to 0 HP.
+
+3. **Why `just_downed` (old_hp > 0) rather than a plain HP == 0 check?**
+   A character already at 0 HP receiving further damage (`old_hp == 0`) must
+   not re-trigger the condition logic. `just_downed` captures exactly the
+   first-hit-to-zero transition.
+
+### Architecture Compliance
+
+- [x] Uses `Condition::UNCONSCIOUS` constant — no magic numbers.
+- [x] Uses `character.add_condition` — the established `ActiveCondition` insertion contract.
+- [x] `ConditionDuration::Permanent` from `crate::domain::conditions` — correct module path.
+- [x] No architectural deviations from `architecture.md`.
+
+### Quality Gate Results
+
+```text
+cargo fmt         → clean (no output)
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo nextest run → 3711 tests run: 3711 passed, 8 skipped
+```
+
+---
+
+## Phase 1: Unconscious Character — `revive_from_unconscious`, Rest Healing, and New Tests (Complete)
+
+### Overview
+
+Phase 1 implements the core "revive from unconscious during rest" mechanic in
+`src/domain/resources.rs`. Previously, unconscious characters were silently
+skipped by both `rest_party_hour` and `rest_party`, meaning they could never
+recover through resting. This phase changes that behaviour: unconscious
+characters are now healed normally during rest, and the `UNCONSCIOUS` condition
+is automatically cleared once their HP rises above 0.
+
+### Files Changed
+
+| File                      | Change                                                                                              |
+| ------------------------- | --------------------------------------------------------------------------------------------------- |
+| `src/domain/resources.rs` | New `revive_from_unconscious`, updated `rest_party_hour`, updated `rest_party`, 7 new/updated tests |
+
+### New Function: `revive_from_unconscious` (`src/domain/resources.rs`)
+
+```antares/src/domain/resources.rs#L534-579
+pub fn revive_from_unconscious(character: &mut crate::domain::character::Character) {
+    use crate::domain::character::Condition;
+    if character.conditions.has(Condition::UNCONSCIOUS) && character.hp.current > 0 {
+        character.conditions.remove(Condition::UNCONSCIOUS);
+        character.remove_condition("unconscious");
+    }
+}
+```
+
+**Contract**:
+
+- No-op if the character is not unconscious.
+- No-op if `hp.current == 0` (character has not been healed yet).
+- Clears **both** the `UNCONSCIOUS` bitflag on `character.conditions` and any
+  `ActiveCondition` with `condition_id == "unconscious"` from
+  `active_conditions`. Both must be cleared together to prevent
+  `reconcile_character_conditions` from re-setting the bitflag on the next
+  turn tick.
+
+### Changes to `rest_party_hour`
+
+- **Removed** `|| character.conditions.is_unconscious()` from the fatal-check
+  guard. Unconscious characters are now healed by the normal HP/SP restoration
+  path.
+- **Added** a call to `revive_from_unconscious(character)` after the SP
+  restoration line, before condition ticking. This means that on the first tick
+  where `hp.current` rises above 0, the `UNCONSCIOUS` condition is cleared
+  immediately.
+
+### Changes to `rest_party`
+
+- Same guard change as `rest_party_hour` — `is_unconscious()` removed from the
+  `is_fatal()` guard.
+- Same `revive_from_unconscious(character)` call added after SP restoration,
+  before the condition ticking loop.
+
+### Tests Added / Updated (7 total)
+
+| Test                                                 | Location    | What it covers                                                                                                                                                                                  |
+| ---------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_rest_party_hour_revives_unconscious_character` | `mod tests` | Replaces the old "skips" test. Verifies that a 0-HP unconscious character is fully healed after a 12-hour rest **and** that `UNCONSCIOUS` bitflag + `active_conditions` entry are both cleared. |
+| `test_revive_from_unconscious_noop_when_fine`        | `mod tests` | `revive_from_unconscious` is a no-op on a healthy character with no `UNCONSCIOUS` flag.                                                                                                         |
+| `test_revive_from_unconscious_clears_both`           | `mod tests` | Verifies both the bitflag and the `ActiveCondition` entry are cleared when HP > 0.                                                                                                              |
+| `test_rest_revives_unconscious_character`            | `mod tests` | End-to-end `rest_party` path: 0-HP unconscious character recovers HP > 0 and condition is cleared.                                                                                              |
+| `test_rest_does_not_heal_fatal_character`            | `mod tests` | Confirms that `DEAD`-condition characters are still completely skipped by `rest_party`.                                                                                                         |
+
+### Design Decisions
+
+1. **Why clear `active_conditions` as well as the bitflag?**
+   The `reconcile_character_conditions` system (called each turn tick) reads
+   `active_conditions` and re-applies bitflags from it. If only the bitflag
+   were cleared, it would be re-set on the very next tick. Both sides of the
+   condition state must be kept in sync.
+
+2. **Why place `revive_from_unconscious` after HP/SP restoration, not before?**
+   The revival check requires `hp.current > 0`. At the point the call is made,
+   the tick has already raised HP via `max(current, target)` (hourly) or
+   `current + restore` (full rest). Calling it before restoration would always
+   be a no-op for a character starting at 0 HP.
+
+3. **Why is the guard only `is_fatal()` now?**
+   Fatal conditions (DEAD, STONE, ERADICATED) are genuinely unrecoverable
+   through rest. Unconscious is a recoverable state and should be treated as
+   "low HP" rather than "skip entirely".
+
+### Architecture Compliance
+
+- [x] `revive_from_unconscious` is a public free function in
+      `src/domain/resources.rs` — consistent with the existing `consume_food`,
+      `rest_party_hour`, etc. pattern.
+- [x] Uses `Condition::UNCONSCIOUS` constant — no magic numbers.
+- [x] Uses `character.remove_condition("unconscious")` — the established
+      `ActiveCondition` removal contract.
+- [x] No architectural deviations from `architecture.md`.
+
+### Quality Gate Results
+
+```text
+cargo fmt         → clean (no output)
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo nextest run (resources:: filter) → 102 tests, 102 passed, 0 failed
+```
+
+---
+
+## Phase 1: Unconscious Character — `apply_consumable_effect` HealHp Revival (Complete)
+
+### Overview
+
+This change wires `revive_from_unconscious` into the consumable-usage path so
+that healing items (potions, etc.) can revive a knocked-out character just as
+rest already does. Previously a `HealHp` consumable raised `hp.current` above 0
+but left both the `UNCONSCIOUS` bitflag and the `ActiveCondition` entry intact,
+meaning the character remained visually unconscious despite having HP.
+
+### Files Changed
+
+| File                                   | Change                                                                      |
+| -------------------------------------- | --------------------------------------------------------------------------- |
+| `src/domain/items/consumable_usage.rs` | Added `revive_from_unconscious` call at end of `HealHp` branch; 2 new tests |
+
+### Change to `apply_consumable_effect` (`src/domain/items/consumable_usage.rs`)
+
+One line appended to the end of the `ConsumableEffect::HealHp` match arm:
+
+```antares/src/domain/items/consumable_usage.rs#L229-242
+        ConsumableEffect::HealHp(amount) => {
+            let pre = character.hp.current as i32;
+            character.hp.modify(amount as i32);
+            // Clamp to base — over-healing is not allowed
+            if character.hp.current > character.hp.base {
+                character.hp.current = character.hp.base;
+            }
+            let post = character.hp.current as i32;
+            let healed = post - pre;
+            if healed > 0 {
+                result.healing = healed;
+            }
+            // Revive from unconscious if HP is now above 0.
+            crate::domain::resources::revive_from_unconscious(character);
+        }
+```
+
+**Invariants preserved**:
+
+- `revive_from_unconscious` is a no-op when `hp.current == 0`, so a `HealHp(0)`
+  applied to an unconscious character leaves the condition untouched.
+- The function delegates entirely to the existing `revive_from_unconscious`
+  contract, which clears **both** the `UNCONSCIOUS` bitflag and the
+  `ActiveCondition` entry atomically.
+- Over-healing is still clamped to `hp.base` before the revival check, so the
+  revival sees the correctly bounded HP value.
+
+### Tests Added (2 new tests)
+
+| Test                                          | What it covers                                                                                                                                                      |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_heal_hp_clears_unconscious`             | A `HealHp(10)` on a 0-HP unconscious character raises HP to 10, reports `healing > 0`, and clears both the `UNCONSCIOUS` bitflag and the `active_conditions` entry. |
+| `test_heal_hp_does_not_clear_when_still_zero` | A `HealHp(0)` on a 0-HP unconscious character leaves HP at 0 and leaves `UNCONSCIOUS` set — revival must not fire unless HP actually rises above 0.                 |
+
+### Design Decisions
+
+1. **Why call `revive_from_unconscious` rather than inline the logic?**
+   `revive_from_unconscious` is the canonical revival function used by both
+   `rest_party_hour` and `rest_party`. Reusing it keeps the revival contract
+   in one place; any future change to revival semantics (e.g., applying a
+   grace-period condition) only needs to be made there.
+
+2. **Why after the clamp, not before?**
+   The revival guard is `hp.current > 0`. The clamp step can only lower HP
+   (from over-healing), never to 0, so placement after the clamp is safe and
+   ensures the revive check sees the final, correct HP value.
+
+3. **Why is `HealHp(0)` expected to leave UNCONSCIOUS intact?**
+   A zero-amount heal is a no-op on HP. Clearing UNCONSCIOUS without any actual
+   healing would be incorrect: the character's HP is still 0 and they would
+   immediately re-trigger unconscious logic on the next damage event.
+
+### Architecture Compliance
+
+- [x] Delegates to `revive_from_unconscious` — no duplicated revival logic.
+- [x] Uses `Condition::UNCONSCIOUS` constant — no magic numbers.
+- [x] No architectural deviations from `architecture.md`.
+
+### Quality Gate Results
+
+```text
+cargo fmt         → clean (no output)
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo test (heal_hp filter) → 5 tests: 5 passed, 0 failed
+```
+
+---
+
 ## Phase 5: locked_objects_and_keys — Save/Load Persistence, Trap Effects, and Documentation (Complete)
 
 ### Overview

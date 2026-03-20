@@ -21,6 +21,7 @@ pub mod resources;
 pub mod save_game;
 
 use crate::application::menu::MenuState;
+use crate::domain::campaign::CampaignConfig;
 use crate::domain::character::{Party, Roster};
 use crate::domain::party_manager::{PartyManagementError, PartyManager};
 use crate::domain::types::{GameTime, InnkeeperId, TimeOfDay};
@@ -63,6 +64,13 @@ pub enum GameMode {
     /// Container interaction split-screen inventory (opened with `E` when
     /// facing a chest, crate, hole in the wall, etc.).
     ContainerInventory(crate::application::container_inventory_state::ContainerInventoryState),
+    /// Priest/Temple resurrection service interface.
+    ///
+    /// Entered when the player interacts with an NPC that has `is_priest: true`
+    /// and a `service_catalog` containing the `"resurrect"` service.  Displays
+    /// dead party members and allows the player to spend gold and gems to revive
+    /// them via [`crate::application::resources::perform_resurrection_service`].
+    TempleService(TempleServiceState),
     /// Rest duration selection menu.
     ///
     /// Shown when the player presses R in Exploration mode.  Presents three
@@ -75,7 +83,8 @@ pub enum GameMode {
     ///
     /// Input is blocked during this mode (except `GameAction::Menu` which
     /// cancels the rest in a future enhancement). The orchestration system
-    /// drives the rest sequence one hour per Bevy frame.
+    /// drives the rest sequence one hour per Bevy frame and detect encounter
+    /// interruptions.
     Resting(RestState),
 }
 
@@ -224,6 +233,77 @@ pub struct InnManagementState {
     pub selected_party_slot: Option<usize>,
     /// Currently selected roster index for swap operations
     pub selected_roster_slot: Option<usize>,
+}
+
+// ===== Temple Service State =====
+
+/// State for an active priest/temple resurrection service session.
+///
+/// Stored inside [`GameMode::TempleService`] while the player is interacting
+/// with a priest NPC that offers the `"resurrect"` service.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::TempleServiceState;
+///
+/// let state = TempleServiceState::new("tutorial_priestess_town".to_string());
+/// assert_eq!(state.npc_id, "tutorial_priestess_town");
+/// assert!(state.selected_member_index.is_none());
+/// assert!(state.status_message.is_none());
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TempleServiceState {
+    /// The NPC ID of the priest conducting the service (e.g., `"temple_priest"`)
+    pub npc_id: String,
+    /// Currently selected party-member index in the list of dead members shown by the UI
+    pub selected_member_index: Option<usize>,
+    /// Last status or error message to display in the UI (`None` when idle)
+    pub status_message: Option<String>,
+}
+
+impl TempleServiceState {
+    /// Creates a new temple service state for the given priest NPC.
+    ///
+    /// # Arguments
+    ///
+    /// * `npc_id` - The NPC ID of the priest (e.g., `"tutorial_priestess_town"`)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::TempleServiceState;
+    ///
+    /// let state = TempleServiceState::new("tutorial_priestess_town".to_string());
+    /// assert_eq!(state.npc_id, "tutorial_priestess_town");
+    /// assert!(state.selected_member_index.is_none());
+    /// ```
+    pub fn new(npc_id: String) -> Self {
+        Self {
+            npc_id,
+            selected_member_index: None,
+            status_message: None,
+        }
+    }
+
+    /// Clears the current selection and status message.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::TempleServiceState;
+    ///
+    /// let mut state = TempleServiceState::new("temple_priest".to_string());
+    /// state.selected_member_index = Some(0);
+    /// state.status_message = Some("Resurrection complete!".to_string());
+    /// state.clear();
+    /// assert!(state.selected_member_index.is_none());
+    /// assert!(state.status_message.is_none());
+    /// ```
+    pub fn clear(&mut self) {
+        self.selected_member_index = None;
+        self.status_message = None;
+    }
 }
 
 impl InnManagementState {
@@ -595,6 +675,14 @@ pub struct GameState {
     /// has a `stock_template` when a new game session begins.
     #[serde(default)]
     pub npc_runtime: NpcRuntimeStore,
+
+    /// Campaign-level gameplay rules (permadeath, death mode, difficulty, etc.).
+    ///
+    /// Loaded from the campaign's `config.ron` file and stored in the save so
+    /// the rules remain constant for the lifetime of that playthrough.
+    /// Defaults to `CampaignConfig::default()` for new games without a campaign.
+    #[serde(default)]
+    pub campaign_config: CampaignConfig,
 }
 
 /// Errors returned by `GameState::initialize_roster`.
@@ -682,6 +770,7 @@ impl GameState {
             quests: QuestLog::new(),
             encountered_characters: std::collections::HashSet::new(),
             npc_runtime: NpcRuntimeStore::new(),
+            campaign_config: CampaignConfig::default(),
         }
     }
 
@@ -762,6 +851,7 @@ impl GameState {
             quests: QuestLog::new(),
             encountered_characters: std::collections::HashSet::new(),
             npc_runtime: NpcRuntimeStore::new(),
+            campaign_config: CampaignConfig::default(),
         };
 
         // Phase 2: Initialize roster from content database (premade characters)

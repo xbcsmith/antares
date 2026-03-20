@@ -282,6 +282,7 @@ mod tests {
             duration: 0,
             saving_throw: false,
             applied_conditions: Vec::new(),
+            resurrect_hp: None,
         }
     }
 

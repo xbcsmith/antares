@@ -2457,6 +2457,16 @@ fn handle_use_item_action_exploration(
             ConsumableEffect::IsFood(_) => {
                 format!("{item_name} used.")
             }
+            ConsumableEffect::Resurrect(_) => {
+                if result.healing == 0 {
+                    format!("{item_name} used. {character_name} could not be resurrected.")
+                } else {
+                    format!(
+                        "{item_name} used. {character_name} has been resurrected with {} HP.",
+                        result.healing
+                    )
+                }
+            }
         };
 
         if let Some(ref mut log) = game_log {

@@ -439,7 +439,7 @@ Work required:
 
 This change is not backward compatible with existing RON item data that uses `tags` for helmet and boot slot routing. All affected item definitions must be migrated at the same time.
 
-✅ PLAN WRITTEN - [Armor Classification Expansion Implementation Plan](./armor_classification_expansion_implementation_plan.md)
+✅ COMPLETED - [Armor Classification Expansion Implementation Plan](./armor_classification_expansion_implementation_plan.md)
 
 ### Equipped Weapon Damage in Combat
 
@@ -466,7 +466,7 @@ Testing requirements:
 - `test_get_character_attack_returns_unarmed_fallback` — unit test: `equipment.weapon = None`, assert returned `Attack.damage == UNARMED_DAMAGE`.
 - `test_get_character_attack_invalid_item_id_falls_back_to_unarmed` — equip a non-existent item_id (not in ItemDatabase), assert fallback to `UNARMED_DAMAGE` rather than panic.
 
-✅ PLAN WRITTEN - [Equipped Weapon Damage Implementation Plan](./equipped_weapon_damage_implementation_plan.md)
+✅ COMPLETED - [Equipped Weapon Damage Implementation Plan](./equipped_weapon_damage_implementation_plan.md)
 
 ### Dropped Items World Persistence
 
@@ -492,7 +492,7 @@ Work required:
 
 This item is tracked here for future planning. It does not need to be addressed in the current inventory system implementation plan.
 
-✅ PLAN WRITTEN - [Dropped Item Persistence Implementation Plan](./dropped_item_persistence_implementation_plan.md)
+✅ COMPLETED - [Dropped Item Persistence Implementation Plan](./dropped_item_persistence_implementation_plan.md)
 
 ## Creature Registry
 
@@ -665,7 +665,7 @@ We need to implement locked objects and keys in the game engine. Currently there
 
 Write a plan with a phased approach to implementing locked objects and keys in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Locked Objects and Keys Implementation Plan](./locked_objects_and_keys_implementation_plan.md)
+✅ COMPLETED - [Locked Objects and Keys Implementation Plan](./locked_objects_and_keys_implementation_plan.md)
 
 ### Inventory Navigation
 
@@ -792,7 +792,7 @@ Write a detailed plan before implementing. Follow the rules in PLAN.md and
 AGENTS.md. All existing tests must continue to pass; add new tests for rollover
 logic (minute→hour→day→month→year) and for each new `TimeCondition` variant.
 
-✅ PLAN WRITTEN - [Time System Extension Plan](./time_system_extension_plan.md)
+✅ COMPLETED - [Time System Extension Plan](./time_system_extension_plan.md)
 
 ### Automap and mini map
 
@@ -810,4 +810,4 @@ Food Ration should be a consumable item with a condition "can rest".
 
 Write a plan with a phased approach to implementing a food system in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Food System Implementation Plan](./food_system_implementation_plan.md)
+✅ COMPLETED - [Food System Implementation Plan](./food_system_implementation_plan.md)

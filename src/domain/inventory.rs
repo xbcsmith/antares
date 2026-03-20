@@ -399,7 +399,7 @@ impl ServiceEntry {
     /// ```
     /// use antares::domain::inventory::ServiceEntry;
     ///
-    /// let service = ServiceEntry::with_gem_cost("raise_dead", 500, 1, "Raise a dead character");
+    /// let service = ServiceEntry::with_gem_cost("resurrect", 500, 1, "Resurrect a dead character");
     /// assert_eq!(service.gem_cost, 1);
     /// ```
     pub fn with_gem_cost(
@@ -435,7 +435,7 @@ impl ServiceEntry {
 /// catalog.services.push(ServiceEntry::new("cure_poison", 25, "Cure poison"));
 ///
 /// assert!(catalog.has_service("heal_all"));
-/// assert!(!catalog.has_service("raise_dead"));
+/// assert!(!catalog.has_service("resurrect"));
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ServiceCatalog {
@@ -772,7 +772,7 @@ mod tests {
     fn test_service_catalog_get_service_not_found() {
         let catalog = ServiceCatalog::new();
 
-        let service = catalog.get_service("raise_dead");
+        let service = catalog.get_service("resurrect");
 
         assert!(
             service.is_none(),
@@ -917,7 +917,8 @@ mod tests {
 
     #[test]
     fn test_service_entry_with_gem_cost() {
-        let service = ServiceEntry::with_gem_cost("raise_dead", 500, 1, "Raise the dead");
+        let service =
+            ServiceEntry::with_gem_cost("resurrect", 500, 1, "Resurrect a dead character");
         assert_eq!(service.gem_cost, 1);
         assert_eq!(service.cost, 500);
     }
@@ -948,10 +949,10 @@ mod tests {
             .services
             .push(ServiceEntry::new("heal_all", 50, "Heal all party members"));
         catalog.services.push(ServiceEntry::with_gem_cost(
-            "raise_dead",
+            "resurrect",
             500,
             1,
-            "Raise a dead character",
+            "Resurrect a dead character",
         ));
 
         let serialized = ron::to_string(&catalog).expect("Failed to serialize");

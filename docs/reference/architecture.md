@@ -1985,7 +1985,7 @@ pub struct SpellCast {
 
 _Cleric Spells:_
 
-- Healing (First Aid, Cure Wounds, Raise Dead)
+- Healing (First Aid, Cure Wounds, Resurrect)
 - Protection (Protection From X, Bless)
 - Status Cure (Cure Poison, Cure Disease, Cure Paralysis)
 - Combat Support (Turn Undead, Holy Word)

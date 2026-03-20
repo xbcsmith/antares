@@ -776,6 +776,9 @@ impl ItemMeshDescriptor {
             // Food items use an earthy brown to visually distinguish them
             // from magical potions and scrolls.
             ConsumableEffect::IsFood(_) => [0.55, 0.35, 0.10, 1.0],
+            // Resurrection scrolls use a radiant gold/amber to signal their
+            // life-restoring power and distinguish them from ordinary potions.
+            ConsumableEffect::Resurrect(_) => [1.0, 0.84, 0.0, 1.0],
         };
 
         Self {
