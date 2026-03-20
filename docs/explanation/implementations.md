@@ -1,5 +1,110 @@
 # Implementations
 
+## Phase 1: Fog-of-War Foundation (Complete)
+
+### Overview
+
+Phase 1 establishes the visited-tile foundation required for both the mini map
+and the full-screen automap. The goal of this phase was to ensure visibility is
+recorded correctly in domain state before any new rendering/UI work is layered
+on top.
+
+### Problem Statement
+
+The existing movement flow only marked the single destination tile as visited.
+That left several gaps relative to the automap plan:
+
+- The immediate area around the party was not revealed during movement.
+- The party's starting area could remain unrevealed until the first move.
+- Fog-of-war persistence needed explicit round-trip verification through save/load.
+- No dedicated tests existed for radius-based visibility behavior.
+
+### Files Changed
+
+| File                                  | Change                                                                                                                                 |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/world/movement.rs`        | Added `VISIBILITY_RADIUS`, introduced `mark_visible_area`, replaced single-tile visit marking in `move_party`, and added phase-1 tests |
+| `src/domain/world/mod.rs`             | Re-exported `mark_visible_area` and `VISIBILITY_RADIUS`                                                                                |
+| `src/game/systems/map.rs`             | Wired starting-area reveal into `map_change_handler` and added map-load visibility test                                                |
+| `src/bin/antares.rs`                  | Marked the starting area visible during initial campaign boot                                                                          |
+| `docs/explanation/implementations.md` | Added this implementation summary                                                                                                      |
+
+---
+
+### 1.1 — Visibility Radius in Movement (`src/domain/world/movement.rs`)
+
+Added a module-level constant:
+
+```text
+src/domain/world/movement.rs#L1-1
+pub const VISIBILITY_RADIUS: u32 = 1;
+```
+
+and introduced:
+
+```text
+src/domain/world/movement.rs#L1-1
+pub fn mark_visible_area(world: &mut World, center: Position, radius: u32)
+```
+
+The helper iterates the Chebyshev square around `center` and marks each
+in-bounds tile as visited. Out-of-bounds coordinates are ignored rather than
+causing panics.
+
+`move_party` now reveals the full visible area after a successful move instead
+of marking only the single destination tile.
+
+### 1.2 — Starting Area Reveal on Map Load (`src/game/systems/map.rs`)
+
+The map transition path now reveals the area around the arrival position inside
+`map_change_handler` immediately after `current_map` and `party_position` are
+updated. This ensures teleports, portals, and other map transitions expose the
+starting neighborhood as soon as the party arrives.
+
+### 1.3 — Starting Area Reveal on Initial Campaign Boot (`src/bin/antares.rs`)
+
+Initial game startup now mirrors map-transition behavior by calling
+`mark_visible_area` after the campaign's starting position is applied. This
+ensures a brand-new game begins with the intended starting area already marked
+visited, instead of waiting for the first movement action.
+
+### 1.4 — Save/Load Verification
+
+Phase 1 confirmed that `Tile.visited` already participates in the existing RON
+serialization path. A dedicated regression test now serializes a save containing
+visited tiles, deserializes it, and verifies the visited state survives the
+round-trip unchanged.
+
+### 1.5 — Test Coverage Added
+
+The following tests were added to satisfy the phase requirements:
+
+- `test_mark_visible_area_marks_radius`
+- `test_mark_visible_area_clamps_to_bounds`
+- `test_visited_persists_after_save_load`
+- `test_starting_tile_marked_on_map_load`
+
+The existing movement test was also strengthened so successful movement now
+verifies the destination area is revealed, not just the party position update.
+
+### Deliverables Completed
+
+- [x] `mark_visible_area(world, pos, radius)` helper
+- [x] `VISIBILITY_RADIUS` constant
+- [x] Starting-area mark wired in `src/game/systems/map.rs`
+- [x] Initial campaign starting area marked during boot
+- [x] All phase-1 tests implemented
+
+### Outcome
+
+After this phase, exploration visibility behaves as the automap plan requires:
+
+- Movement reveals all tiles within `VISIBILITY_RADIUS` of the party.
+- Starting positions on both initial load and map transitions are revealed immediately.
+- Visited state persists across save/load.
+- The behavior is covered by targeted regression tests for radius, bounds, map load,
+  and serialization persistence.
+
 ## Phase 4: NPC Temple/Priest Resurrection Service (Complete)
 
 ### Overview
@@ -53,6 +158,129 @@ service_catalog: Some((
     ],
 )),
 ```
+
+The test campaign also gains a dedicated `"temple_priest"` fixture NPC with the
+same service entry, making it easy for tests to build against a stable ID.
+
+---
+
+### 4.2 — `TempleServiceState` (`src/application/mod.rs`)
+
+```text
+src/application/mod.rs#L1-1
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TempleServiceState {
+    pub npc_id: String,
+    pub selected_member_index: Option<usize>,
+    pub status_message: Option<String>,
+}
+```
+
+Stored inside `GameMode::TempleService(TempleServiceState)`. The `status_message`
+field is written by the action system with success or error text so the UI can
+display it without a separate Bevy resource.
+
+---
+
+### 4.3 — `perform_resurrection_service` (`src/application/resources.rs`)
+
+```text
+src/application/resources.rs#L1-1
+pub fn perform_resurrection_service(
+    game_state: &mut GameState,
+    npc_id: &str,
+    character_index: usize,
+    content: &ContentDatabase,
+) -> Result<(), String>
+```
+
+Atomic 8-step transaction:
+
+1. Look up NPC by `npc_id`; error if absent.
+2. Locate the `"resurrect"` service in the NPC's `service_catalog`; clone it to
+   release the immutable `content` borrow before mutating `game_state`.
+3. Call `check_permadeath_allows_resurrection` on `campaign_config`; return `Err`
+   if permadeath is enabled.
+4. Verify `party.members[character_index]` exists and `conditions.is_dead()`;
+   return `Err` otherwise (stone/eradicated characters are not considered dead).
+5. Check `party.gold >= service.cost`; return `Err("Insufficient gold …")` if not.
+6. Check `party.gems >= service.gem_cost`; return `Err("Insufficient gems …")` if not.
+7. Deduct gold and gems.
+8. Call `revive_from_dead(character, 1)`.
+
+All preconditions are checked before any state mutation, so failed calls leave
+`game_state` unchanged.
+
+---
+
+### 4.4 — `TemplePlugin` and temple UI (`src/game/systems/temple_ui.rs`)
+
+Follows the exact structural pattern of `inn_ui.rs`:
+
+| Symbol                     | Purpose                                                      |
+| -------------------------- | ------------------------------------------------------------ |
+| `TempleUiRoot`             | Marker `Component` for the UI root entity                    |
+| `TemplePlugin`             | Registers events and systems                                 |
+| `TempleResurrectCharacter` | Event — resurrect party member at `character_index`          |
+| `ExitTemple`               | Event — return to `GameMode::Exploration`                    |
+| `SelectTempleMember`       | Event — highlight a member in the dead-member list           |
+| `TempleNavState`           | `Resource` — keyboard focus index and exit-button focus flag |
+
+````
+
+## Phase 4: NPC Temple/Priest Resurrection Service (Complete)
+
+### Overview
+
+Phase 4 adds the application-layer transaction and UI that allow players to
+visit a priest NPC at a temple and spend gold and gems to resurrect dead party
+members. It builds directly on the domain primitives established in Phases 1–3
+(`revive_from_dead`, `Condition::is_dead`, `check_permadeath_allows_resurrection`).
+
+### Problem Statement
+
+After Phase 3, all the domain and SDK plumbing for death and resurrection was in
+place, but there was no way for a player to actually trigger a resurrection during
+normal gameplay. Specifically:
+
+- No NPC in either campaign had `is_priest: true` combined with a `"resurrect"`
+  service catalog entry.
+- There was no application-layer function that wired together NPC lookup, resource
+  checks, permadeath enforcement, and `revive_from_dead` in a single atomic call.
+- There was no UI plugin for the temple service flow.
+
+### Files Changed
+
+| File                               | Change                                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `src/application/mod.rs`           | Added `TempleServiceState` struct and `GameMode::TempleService(TempleServiceState)` variant            |
+| `src/application/resources.rs`     | Added `perform_resurrection_service` with 7 tests                                                      |
+| `src/game/systems/temple_ui.rs`    | New file — `TemplePlugin`, events, systems, `visible_dead_members` helper, 10 tests                    |
+| `src/game/systems/mod.rs`          | Added `pub mod temple_ui;`                                                                             |
+| `src/bin/antares.rs`               | Registered `TemplePlugin`                                                                              |
+| `campaigns/tutorial/data/npcs.ron` | Set `is_priest: true` + `resurrect` service on `tutorial_priest_town2` and `tutorial_priestess_town`   |
+| `data/test_campaign/data/npcs.ron` | Added `temple_priest` fixture NPC; set `is_priest: true` + `resurrect` service on existing priest NPCs |
+| `src/sdk/database.rs`              | Added `test_temple_npc_has_resurrect_service` test                                                     |
+
+---
+
+### 4.1 — NPC Data (`campaigns/tutorial/data/npcs.ron`, `data/test_campaign/data/npcs.ron`)
+
+Both `tutorial_priest_town2` and `tutorial_priestess_town` now have:
+
+```ron
+is_priest: true,
+service_catalog: Some((
+    services: [
+        (
+            service_id: "resurrect",
+            cost: 500,
+            gem_cost: 1,
+            description: "Resurrect a dead party member for 500 gold and 1 gem.",
+        ),
+    ],
+)),
+````
 
 The test campaign also gains a dedicated `"temple_priest"` fixture NPC with the
 same service entry, making it easy for tests to build against a stable ID.

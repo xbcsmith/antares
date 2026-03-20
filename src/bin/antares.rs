@@ -245,6 +245,11 @@ impl Plugin for AntaresPlugin {
         game_state
             .world
             .set_party_position(self.campaign.config.starting_position);
+        antares::domain::world::mark_visible_area(
+            &mut game_state.world,
+            self.campaign.config.starting_position,
+            antares::domain::world::VISIBILITY_RADIUS,
+        );
         game_state.world.party_facing = self.campaign.config.starting_direction;
 
         // Insert global state and content DB as a resource

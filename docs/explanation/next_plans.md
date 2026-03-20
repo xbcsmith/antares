@@ -90,12 +90,12 @@ Characters with 0 HP are unconcious and should not be allowed to attack monsters
 
 Write a plan with a phased approach to implementing unconcious characters in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Unconcious Characters Implementation Plan](./unconcious_characters_implementation_plan.md)
+✅ COMPLETED - [Unconcious Characters Implementation Plan](./unconcious_characters_implementation_plan.md)
 
 
 ### Game Tray Icon Implementation Plan
 
-We need to add a tray icon for hte game like the ones we added for the SDK.
+We need to add a tray icon for the game like the ones we added for the SDK.
 
 ✅ PLAN WRITTEN - [Game Tray Icon Implementation Plan](./game_tray_icon_implementation_plan.md)
 
