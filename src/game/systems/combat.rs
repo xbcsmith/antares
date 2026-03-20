@@ -1110,6 +1110,9 @@ pub fn start_encounter(
 
     let mut cs = CombatState::new(handicap);
 
+    // Copy the campaign death mode so apply_damage respects it for this combat.
+    cs.unconscious_before_death = game_state.campaign_config.unconscious_before_death;
+
     // Phase 2: set the ambush flag so the game layer can suppress player
     // actions during round 1.
     cs.ambush_round_active = combat_event_type == CombatEventType::Ambush;
@@ -3011,6 +3014,20 @@ pub fn perform_cast_action_with_rng(
         return Ok(());
     }
 
+    // Permadeath guard: if this spell is a resurrection spell and the campaign
+    // has permadeath enabled, block the cast silently.
+    if let Some(spell) = content.db().spells.get_spell(action.spell_id) {
+        if spell.resurrect_hp.is_some()
+            && crate::application::resources::check_permadeath_allows_resurrection(
+                &global_state.0.campaign_config,
+            )
+            .is_err()
+        {
+            // Permadeath is enabled — silently block the resurrection spell.
+            return Ok(());
+        }
+    }
+
     // Execute the spell via the domain-level helper. It handles validation,
     // resource consumption and applies effects to combat participants.
     // We treat casting failures (insufficient SP, silenced, etc.) as non-fatal no-ops.
@@ -3056,6 +3073,9 @@ pub fn perform_cast_action_with_rng(
 /// applies consumable effects (healing, cure, attribute boosts, etc.). Failures
 /// (invalid slot, restrictions) are treated as non-fatal no-ops to keep the
 /// game loop robust.
+///
+/// Enforces permadeath: if the item carries a `Resurrect` effect and the
+/// active campaign has `permadeath == true`, the action is silently skipped.
 pub fn perform_use_item_action_with_rng(
     combat_res: &mut CombatResource,
     action: &UseItemAction,
@@ -3076,6 +3096,38 @@ pub fn perform_use_item_action_with_rng(
         }
     } else {
         return Ok(());
+    }
+
+    // Permadeath guard: if the item being used is a Resurrect consumable and
+    // the campaign has permadeath enabled, skip the action silently.
+    {
+        use crate::domain::combat::engine::Combatant;
+        use crate::domain::items::types::ConsumableEffect;
+        use crate::domain::items::ItemType;
+
+        let is_resurrect = combat_res
+            .state
+            .get_combatant(&action.user)
+            .and_then(|c| {
+                if let Combatant::Player(pc) = c {
+                    pc.inventory.items.get(action.inventory_index)
+                } else {
+                    None
+                }
+            })
+            .and_then(|slot| content.db().items.get_item(slot.item_id))
+            .map(|item| matches!(&item.item_type, ItemType::Consumable(d) if matches!(d.effect, ConsumableEffect::Resurrect(_))))
+            .unwrap_or(false);
+
+        if is_resurrect
+            && crate::application::resources::check_permadeath_allows_resurrection(
+                &global_state.0.campaign_config,
+            )
+            .is_err()
+        {
+            // Permadeath is enabled — silently block the resurrection.
+            return Ok(());
+        }
     }
 
     // Execute the item use via the domain-level helper. It handles validation,

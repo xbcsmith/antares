@@ -578,6 +578,61 @@ pub fn revive_from_unconscious(character: &mut crate::domain::character::Charact
     }
 }
 
+/// Revives a dead character, restoring them to `hp` hit points.
+///
+/// Clears the `DEAD` bitflag, removes the `"dead"` `ActiveCondition` entry,
+/// and sets `hp.current` to `hp.min(character.hp.base)`.
+///
+/// This function is a **no-op** if `character.conditions.is_dead()` returns
+/// `false` (i.e. the character is `STONE` or `ERADICATED` — those cannot be
+/// revived here and require different treatment).
+///
+/// The **caller** is responsible for checking campaign permadeath before
+/// calling this function.
+///
+/// # Arguments
+///
+/// * `character` - The dead character to revive.
+/// * `hp`        - Hit points to restore (clamped to `character.hp.base`).
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Character, Sex, Alignment, Condition};
+/// use antares::domain::conditions::{ActiveCondition, ConditionDuration};
+/// use antares::domain::resources::revive_from_dead;
+///
+/// let mut c = Character::new(
+///     "Hero".to_string(),
+///     "human".to_string(),
+///     "knight".to_string(),
+///     Sex::Male,
+///     Alignment::Good,
+/// );
+/// c.hp.base = 20;
+/// c.hp.current = 0;
+/// c.conditions.add(Condition::DEAD);
+/// c.add_condition(ActiveCondition::new(
+///     "dead".to_string(),
+///     ConditionDuration::Permanent,
+/// ));
+///
+/// revive_from_dead(&mut c, 5);
+///
+/// assert!(!c.conditions.has(Condition::DEAD));
+/// assert_eq!(c.hp.current, 5);
+/// ```
+pub fn revive_from_dead(character: &mut crate::domain::character::Character, hp: u16) {
+    use crate::domain::character::Condition;
+    if !character.conditions.is_dead() {
+        return; // Not plain-dead (could be Stone/Eradicated) — no-op.
+    }
+    character.conditions.remove(Condition::DEAD);
+    character.remove_condition("dead");
+    let restored = hp.min(character.hp.base);
+    character.hp.current = restored;
+}
+
 /// Restores one hour of HP and SP for every living party member.
 ///
 /// This is the **pure healing tick** used by the rest-orchestration loop.
@@ -912,11 +967,19 @@ pub fn apply_starvation_damage(party: &mut Party, damage_per_member: u16) {
 
         character.hp.current = character.hp.current.saturating_sub(damage_per_member);
 
-        // If HP drops to 0, character dies
+        // If HP drops to 0, character dies.
+        // Both the bitflag AND an ActiveCondition are set so that the
+        // data-driven condition system and the bitflag-based combat checks
+        // stay in sync (same pattern used in apply_damage).
         if character.hp.current == 0 {
+            use crate::domain::conditions::{ActiveCondition, ConditionDuration};
             character
                 .conditions
                 .add(crate::domain::character::Condition::DEAD);
+            character.add_condition(ActiveCondition::new(
+                "dead".to_string(),
+                ConditionDuration::Permanent,
+            ));
         }
     }
 }
@@ -1826,6 +1889,41 @@ mod tests {
         assert!(party.members[0].conditions.is_fatal());
     }
 
+    /// `apply_starvation_damage` must set both the `DEAD` bitflag AND push an
+    /// `ActiveCondition("dead")` entry when a character's HP reaches 0.
+    #[test]
+    fn test_apply_starvation_damage_sets_dead_condition() {
+        use crate::domain::conditions::ConditionDuration;
+
+        let mut party = create_test_party();
+        party.members[0].hp.current = 3;
+
+        apply_starvation_damage(&mut party, 5);
+
+        assert_eq!(party.members[0].hp.current, 0, "HP must reach 0");
+        assert!(
+            party.members[0]
+                .conditions
+                .has(crate::domain::character::Condition::DEAD),
+            "DEAD bitflag must be set by apply_starvation_damage"
+        );
+        let has_active = party.members[0]
+            .active_conditions
+            .iter()
+            .any(|ac| ac.condition_id == "dead");
+        assert!(has_active, "ActiveCondition('dead') must be pushed");
+        let entry = party.members[0]
+            .active_conditions
+            .iter()
+            .find(|ac| ac.condition_id == "dead")
+            .unwrap();
+        assert_eq!(
+            entry.duration,
+            ConditionDuration::Permanent,
+            "dead ActiveCondition must have Permanent duration"
+        );
+    }
+
     #[test]
     fn test_dead_character_skipped_in_rest() {
         let item_db = make_food_db();
@@ -1930,7 +2028,129 @@ mod tests {
         );
     }
 
-    /// `rest_party` must completely skip characters with DEAD condition.
+    /// `revive_from_dead` must clear the DEAD bitflag, remove the active
+    /// condition, and set `hp.current` to the requested value.
+    #[test]
+    fn test_revive_from_dead_clears_both() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut c = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        c.hp.base = 20;
+        c.hp.current = 0;
+        c.conditions.add(Condition::DEAD);
+        c.add_condition(ActiveCondition::new(
+            "dead".to_string(),
+            ConditionDuration::Permanent,
+        ));
+
+        revive_from_dead(&mut c, 5);
+
+        assert!(
+            !c.conditions.has(Condition::DEAD),
+            "DEAD bitflag must be cleared after revive_from_dead"
+        );
+        assert_eq!(
+            c.hp.current, 5,
+            "hp.current must be set to the requested HP"
+        );
+        assert!(
+            !c.active_conditions
+                .iter()
+                .any(|ac| ac.condition_id == "dead"),
+            "active_conditions must not contain 'dead' after revive_from_dead"
+        );
+    }
+
+    /// `revive_from_dead` must clamp restored HP to `hp.base`.
+    #[test]
+    fn test_revive_from_dead_clamps_to_base() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut c = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        c.hp.base = 10;
+        c.hp.current = 0;
+        c.conditions.add(Condition::DEAD);
+        c.add_condition(ActiveCondition::new(
+            "dead".to_string(),
+            ConditionDuration::Permanent,
+        ));
+
+        // Request more HP than base — must clamp.
+        revive_from_dead(&mut c, 50);
+
+        assert_eq!(
+            c.hp.current, 10,
+            "revive_from_dead must clamp restored HP to hp.base"
+        );
+    }
+
+    /// `revive_from_dead` must be a no-op when the character is STONE
+    /// (STONE value ≥ STONE constant, so `is_dead()` returns false).
+    #[test]
+    fn test_revive_from_dead_noop_on_stone() {
+        let mut c = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        c.hp.base = 20;
+        c.hp.current = 0;
+        c.conditions.add(Condition::STONE);
+
+        revive_from_dead(&mut c, 5);
+
+        // HP must remain 0 — no revival
+        assert_eq!(
+            c.hp.current, 0,
+            "revive_from_dead must be a no-op for STONE"
+        );
+        assert!(
+            c.conditions.has(Condition::STONE),
+            "STONE condition must remain unchanged"
+        );
+    }
+
+    /// `revive_from_dead` must be a no-op when the character is ERADICATED
+    /// (value 255, `is_dead()` returns false).
+    #[test]
+    fn test_revive_from_dead_noop_on_eradicated() {
+        let mut c = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        c.hp.base = 20;
+        c.hp.current = 0;
+        c.conditions.add(Condition::ERADICATED);
+
+        revive_from_dead(&mut c, 5);
+
+        assert_eq!(
+            c.hp.current, 0,
+            "revive_from_dead must be a no-op for ERADICATED"
+        );
+        assert!(
+            c.conditions.has(Condition::ERADICATED),
+            "ERADICATED condition must remain unchanged"
+        );
+    }
+
     #[test]
     fn test_rest_does_not_heal_fatal_character() {
         let item_db = make_food_db();

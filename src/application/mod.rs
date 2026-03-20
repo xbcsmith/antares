@@ -21,6 +21,7 @@ pub mod resources;
 pub mod save_game;
 
 use crate::application::menu::MenuState;
+use crate::domain::campaign::CampaignConfig;
 use crate::domain::character::{Party, Roster};
 use crate::domain::party_manager::{PartyManagementError, PartyManager};
 use crate::domain::types::{GameTime, InnkeeperId, TimeOfDay};
@@ -595,6 +596,14 @@ pub struct GameState {
     /// has a `stock_template` when a new game session begins.
     #[serde(default)]
     pub npc_runtime: NpcRuntimeStore,
+
+    /// Campaign-level gameplay rules (permadeath, death mode, difficulty, etc.).
+    ///
+    /// Loaded from the campaign's `config.ron` file and stored in the save so
+    /// the rules remain constant for the lifetime of that playthrough.
+    /// Defaults to `CampaignConfig::default()` for new games without a campaign.
+    #[serde(default)]
+    pub campaign_config: CampaignConfig,
 }
 
 /// Errors returned by `GameState::initialize_roster`.
@@ -682,6 +691,7 @@ impl GameState {
             quests: QuestLog::new(),
             encountered_characters: std::collections::HashSet::new(),
             npc_runtime: NpcRuntimeStore::new(),
+            campaign_config: CampaignConfig::default(),
         }
     }
 
@@ -762,6 +772,7 @@ impl GameState {
             quests: QuestLog::new(),
             encountered_characters: std::collections::HashSet::new(),
             npc_runtime: NpcRuntimeStore::new(),
+            campaign_config: CampaignConfig::default(),
         };
 
         // Phase 2: Initialize roster from content database (premade characters)

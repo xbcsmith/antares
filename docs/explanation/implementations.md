@@ -1,5 +1,324 @@
 # Implementations
 
+## Phase 2: Core Dead Condition (Complete)
+
+### Overview
+
+Phase 2 builds directly on the Phase 1 unconscious infrastructure to add the
+`DEAD` condition, the unconscious → dead transition on further damage, a
+configurable instant-death mode, a `revive_from_dead` helper, resurrection
+mechanics for both consumable items and spells, campaign-level permadeath
+enforcement, and consistent data-driven `DEAD` handling across the whole
+engine.
+
+### Problem Statement
+
+After Phase 1, a character at 0 HP was correctly marked `UNCONSCIOUS` and
+could not act or be targeted. However, no mechanism existed to:
+
+- Transition from unconscious to dead when an unconscious character was
+  struck again.
+- Kill a character immediately without the unconscious step (instant-death
+  mode).
+- Resurrect a character using a consumable item or a spell.
+- Block resurrection when the campaign has permadeath enabled.
+- Keep `apply_starvation_damage` consistent with the data-driven dual
+  representation (bitflag + `ActiveCondition`).
+
+### Files Changed
+
+| File                                     | Change                                                                                                                                                                             |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `campaigns/tutorial/data/conditions.ron` | Added `"dead"` entry                                                                                                                                                               |
+| `data/test_campaign/data/conditions.ron` | Added `"dead"` entry                                                                                                                                                               |
+| `src/domain/campaign.rs`                 | Added `permadeath` and `unconscious_before_death` fields to `CampaignConfig`                                                                                                       |
+| `src/application/mod.rs`                 | Added `campaign_config: CampaignConfig` field to `GameState`; initialized in `new()` and `new_game()`                                                                              |
+| `src/domain/combat/engine.rs`            | Added `unconscious_before_death` to `CombatState`; rewrote `apply_damage` player branch with full dead/unconscious state machine                                                   |
+| `src/game/systems/combat.rs`             | `start_encounter` copies `campaign_config.unconscious_before_death` into `CombatState`; permadeath guards in `perform_cast_action_with_rng` and `perform_use_item_action_with_rng` |
+| `src/domain/resources.rs`                | Added `revive_from_dead`; fixed `apply_starvation_damage` to also push `ActiveCondition("dead")`                                                                                   |
+| `src/domain/items/types.rs`              | Added `ConsumableEffect::Resurrect(u16)` variant                                                                                                                                   |
+| `src/domain/items/consumable_usage.rs`   | `apply_consumable_effect` handles `Resurrect`; 3 new tests                                                                                                                         |
+| `src/domain/magic/types.rs`              | Added `resurrect_hp: Option<u16>` field to `Spell`; initialized to `None` in `Spell::new()`                                                                                        |
+| `src/domain/combat/spell_casting.rs`     | `execute_spell_cast_with_spell` handles `resurrect_hp`; 2 new tests                                                                                                                |
+| `src/domain/magic/database.rs`           | Added `resurrect_hp: None` to test `Spell` struct literal                                                                                                                          |
+| `src/domain/visual/item_mesh.rs`         | Added `Resurrect(_)` arm (radiant gold color) to exhaustive match                                                                                                                  |
+| `src/game/systems/inventory_ui.rs`       | Added `Resurrect(_)` arm to consumable log message match                                                                                                                           |
+| `src/application/resources.rs`           | Added `check_permadeath_allows_resurrection`; 2 new tests                                                                                                                          |
+| `src/sdk/database.rs`                    | Added `test_dead_condition_in_ron_loaded` test                                                                                                                                     |
+
+---
+
+### 2.1 — `"dead"` condition entries (RON data files)
+
+Both condition fixture files now contain a `"dead"` entry identical in
+structure to the `"unconscious"` entry added in Phase 1:
+
+```ron
+(
+    id: "dead",
+    name: "Dead",
+    description: "Character is dead. Requires resurrection to revive. Cannot act, be targeted, or be healed by rest.",
+    effects: [
+        StatusEffect("dead"),
+    ],
+    default_duration: Permanent,
+    icon_id: Some("icon_dead"),
+),
+```
+
+The entry was appended to both:
+
+- `campaigns/tutorial/data/conditions.ron`
+- `data/test_campaign/data/conditions.ron`
+
+---
+
+### 2.2 — Permadeath and death-mode flags (`src/domain/campaign.rs`)
+
+`CampaignConfig` gained two serde-defaulted boolean fields:
+
+```rust
+/// If true, dead characters cannot be resurrected by any means.
+#[serde(default)]
+pub permadeath: bool,
+
+/// If true, 0 HP → unconscious first; further damage → dead.
+/// If false, 0 HP sets DEAD immediately (instant-death mode).
+#[serde(default = "default_true")]
+pub unconscious_before_death: bool,
+```
+
+A module-private `fn default_true() -> bool { true }` helper was added so
+that serde can default `unconscious_before_death` to `true` on
+deserialization of existing `campaign.ron` files that omit the field.
+
+`impl Default for CampaignConfig` was updated to include both fields
+(`permadeath: false`, `unconscious_before_death: true`).
+
+`GameState` (`src/application/mod.rs`) received a new
+`#[serde(default)] pub campaign_config: CampaignConfig` field, initialized
+via `CampaignConfig::default()` in both `GameState::new()` and
+`GameState::new_game()`.
+
+---
+
+### 2.3 — `unconscious_before_death` in `CombatState` and `apply_damage` (`src/domain/combat/engine.rs`)
+
+**`CombatState`** gained:
+
+```rust
+/// Copied from `CampaignConfig::unconscious_before_death` at combat start.
+#[serde(default = "default_true")]
+pub unconscious_before_death: bool,
+```
+
+`CombatState::new()` initializes it to `true`.
+
+**`start_encounter`** (`src/game/systems/combat.rs`) now copies the
+campaign value immediately after constructing the state:
+
+```rust
+cs.unconscious_before_death = game_state.campaign_config.unconscious_before_death;
+```
+
+**`apply_damage` player branch** was rewritten with a three-way state
+machine. The `bool` is copied to a local (`let unconscious_before_death =
+combat.unconscious_before_death`) before the mutable borrow on the
+participant to satisfy the borrow checker:
+
+| Situation                                              | Outcome                                                             |
+| ------------------------------------------------------ | ------------------------------------------------------------------- |
+| Already `UNCONSCIOUS`, `hp == 0`, takes damage         | `UNCONSCIOUS` cleared; `DEAD` + `ActiveCondition("dead")` set       |
+| First hit to 0 HP, `unconscious_before_death == true`  | `UNCONSCIOUS` + `ActiveCondition("unconscious")` set (Phase 1 path) |
+| First hit to 0 HP, `unconscious_before_death == false` | `DEAD` + `ActiveCondition("dead")` set immediately (instant-death)  |
+
+Both the bitflag and the `ActiveCondition` entry are always kept in sync so
+that `reconcile_character_conditions` does not flip the state on the next
+tick.
+
+---
+
+### 2.4 — `apply_starvation_damage` data-driven consistency (`src/domain/resources.rs`)
+
+The pre-existing code set only the `DEAD` bitflag when starvation reduced
+HP to 0. Phase 2 adds the matching `ActiveCondition`:
+
+```rust
+if character.hp.current == 0 {
+    use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+    character.conditions.add(crate::domain::character::Condition::DEAD);
+    character.add_condition(ActiveCondition::new(
+        "dead".to_string(),
+        ConditionDuration::Permanent,
+    ));
+}
+```
+
+---
+
+### 2.5 — `ConsumableEffect::Resurrect(u16)` (`src/domain/items/types.rs`)
+
+A new variant was appended to `ConsumableEffect`:
+
+```rust
+/// Resurrect a dead character, restoring them to `hp` hit points.
+/// No-op if `is_dead()` is false (Stone / Eradicated). Caller enforces permadeath.
+Resurrect(u16),
+```
+
+All exhaustive match sites were updated:
+
+- `src/domain/items/consumable_usage.rs` — handling logic (see 2.7)
+- `src/domain/visual/item_mesh.rs` — radiant gold/amber primary color
+  `[1.0, 0.84, 0.0, 1.0]`
+- `src/game/systems/inventory_ui.rs` — log messages ("resurrected with N HP"
+  / "could not be resurrected")
+
+---
+
+### 2.6 — `revive_from_dead` helper (`src/domain/resources.rs`)
+
+Added alongside `revive_from_unconscious`:
+
+```rust
+pub fn revive_from_dead(character: &mut Character, hp: u16) {
+    use crate::domain::character::Condition;
+    if !character.conditions.is_dead() {
+        return; // STONE / ERADICATED — no-op.
+    }
+    character.conditions.remove(Condition::DEAD);
+    character.remove_condition("dead");
+    let restored = hp.min(character.hp.base);
+    character.hp.current = restored;
+}
+```
+
+The `is_dead()` guard (added in Phase 1) means `STONE` (value 160) and
+`ERADICATED` (value 255) are explicitly excluded — their higher bitfield
+values prevent `is_dead()` from returning `true`.
+
+---
+
+### 2.7 — `ConsumableEffect::Resurrect` in `apply_consumable_effect` (`src/domain/items/consumable_usage.rs`)
+
+```rust
+ConsumableEffect::Resurrect(hp) => {
+    if character.conditions.is_dead() {
+        crate::domain::resources::revive_from_dead(character, hp);
+        result.healing = hp as i32;
+    }
+}
+```
+
+`apply_consumable_effect_exploration` delegates to
+`apply_consumable_effect` and handles `Resurrect` automatically.
+
+---
+
+### 2.8 — `Spell::resurrect_hp` field (`src/domain/magic/types.rs`)
+
+```rust
+/// When `Some(hp)`, the spell is a resurrection spell.
+#[serde(default)]
+pub resurrect_hp: Option<u16>,
+```
+
+`Spell::new()` initializes it to `None`. Existing RON spell files are
+unaffected because `#[serde(default)]` fills in `None` on deserialization.
+
+`execute_spell_cast_with_spell` (`src/domain/combat/spell_casting.rs`) was
+extended with a resurrection block that runs after the normal damage block:
+
+```rust
+if let Some(hp) = spell.resurrect_hp {
+    if let CombatantId::Player(idx) = target {
+        if let Some(Combatant::Player(pc)) =
+            combat_state.get_combatant_mut(&target)
+        {
+            if pc.conditions.is_dead() {
+                crate::domain::resources::revive_from_dead(pc.as_mut(), hp);
+                result = result.with_healing(hp as i32, vec![idx]);
+            }
+        }
+    }
+}
+```
+
+---
+
+### 2.9 — `check_permadeath_allows_resurrection` (`src/application/resources.rs`)
+
+```rust
+pub fn check_permadeath_allows_resurrection(
+    config: &CampaignConfig,
+) -> Result<(), String> {
+    if config.permadeath {
+        Err("Resurrection is not allowed in this campaign (permadeath enabled).".to_string())
+    } else {
+        Ok(())
+    }
+}
+```
+
+**Game-layer callers** both use the collapsed form required by
+`clippy::collapsible_if`:
+
+- `perform_cast_action_with_rng` — looks up the spell, checks
+  `resurrect_hp.is_some() && check_permadeath_allows_resurrection(...).is_err()`,
+  and returns `Ok(())` silently when blocked.
+- `perform_use_item_action_with_rng` — reads the item from the user's
+  inventory slot, pattern-matches `ConsumableEffect::Resurrect(_)`, and
+  applies the same guard before delegating to `execute_item_use_by_slot`.
+
+---
+
+### Complete Test Matrix (Phase 2)
+
+| Test name                                            | File                       | Verifies                                                                |
+| ---------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------- |
+| `test_unconscious_before_death_mode_default`         | `campaign.rs`              | `CampaignConfig::default()` has correct defaults                        |
+| `test_combat_state_unconscious_before_death_default` | `engine.rs`                | `CombatState::new()` defaults `unconscious_before_death` to `true`      |
+| `test_apply_damage_already_at_zero_no_double_push`   | `engine.rs`                | Updated: further damage on unconscious → DEAD, UNCONSCIOUS cleared      |
+| `test_unconscious_to_dead_on_further_damage`         | `engine.rs`                | Further damage on unconscious character sets DEAD                       |
+| `test_instant_death_mode_skips_unconscious`          | `engine.rs`                | `unconscious_before_death == false` → DEAD immediately at 0 HP          |
+| `test_apply_starvation_damage_sets_dead_condition`   | `resources.rs`             | Starvation sets DEAD bitflag AND pushes `ActiveCondition("dead")`       |
+| `test_revive_from_dead_clears_both`                  | `resources.rs`             | Clears DEAD flag, removes ActiveCondition, sets HP                      |
+| `test_revive_from_dead_clamps_to_base`               | `resources.rs`             | Restored HP is clamped to `hp.base`                                     |
+| `test_revive_from_dead_noop_on_stone`                | `resources.rs`             | STONE character is not revived                                          |
+| `test_revive_from_dead_noop_on_eradicated`           | `resources.rs`             | ERADICATED character is not revived                                     |
+| `test_resurrect_consumable_clears_dead`              | `consumable_usage.rs`      | `Resurrect(5)` on dead character sets HP to 5 and clears DEAD           |
+| `test_resurrect_consumable_noop_on_alive`            | `consumable_usage.rs`      | `Resurrect(5)` on living character is a no-op                           |
+| `test_resurrect_consumable_noop_on_eradicated`       | `consumable_usage.rs`      | `Resurrect(5)` on ERADICATED character is a no-op                       |
+| `test_resurrect_spell_revives_dead_player`           | `spell_casting.rs`         | Spell with `resurrect_hp: Some(1)` removes DEAD and sets HP to 1        |
+| `test_resurrect_spell_noop_on_alive`                 | `spell_casting.rs`         | Resurrection spell targeting living player is a no-op                   |
+| `test_permadeath_allows_resurrection_by_default`     | `application/resources.rs` | `check_permadeath_allows_resurrection` returns `Ok` when permadeath off |
+| `test_permadeath_blocks_resurrection`                | `application/resources.rs` | Returns `Err` when permadeath enabled                                   |
+| `test_dead_character_skipped_in_rest`                | `resources.rs`             | Dead character is not healed by `rest_party`                            |
+| `test_dead_condition_in_ron_loaded`                  | `sdk/database.rs`          | `data/test_campaign/data/conditions.ron` contains `"dead"`              |
+
+---
+
+### Architecture Compliance
+
+| Rule                                                       | Compliance                                                                                                                                              |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dual representation (bitflag + `ActiveCondition`)          | Both are always written and cleared together in every code path                                                                                         |
+| Domain layer does not read `CampaignConfig`                | `revive_from_dead`, `apply_consumable_effect`, and spell casting perform no permadeath check — enforcement is exclusively in the game/application layer |
+| `is_dead()` distinguishes plain DEAD from STONE/ERADICATED | All revive paths use `is_dead()` as the guard                                                                                                           |
+| `#[serde(default)]` backward compatibility                 | New fields on `CampaignConfig`, `CombatState`, and `Spell` all use `#[serde(default)]` so existing RON files continue to deserialize                    |
+| Exhaustive enum matches                                    | All three `ConsumableEffect` match sites were updated for `Resurrect(_)`                                                                                |
+
+### Quality Gate Results
+
+| Gate                                                       | Result                           |
+| ---------------------------------------------------------- | -------------------------------- |
+| `cargo fmt --all`                                          | ✅ PASS                          |
+| `cargo check --all-targets --all-features`                 | ✅ PASS                          |
+| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ PASS                          |
+| `cargo nextest run --all-features`                         | ✅ PASS — 3732 passed, 8 skipped |
+
+---
+
 ## Phase 1: Unconscious Characters — Complete Implementation (Complete)
 
 ### Overview

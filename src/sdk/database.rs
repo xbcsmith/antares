@@ -2082,6 +2082,20 @@ mod tests {
         );
     }
 
+    /// `ConditionDatabase` loaded from `data/test_campaign/data/conditions.ron`
+    /// must contain a `"dead"` entry (added in Phase 2).
+    #[test]
+    fn test_dead_condition_in_ron_loaded() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("data/test_campaign/data/conditions.ron");
+        let db = ConditionDatabase::load_from_file(&path)
+            .expect("should load conditions from test_campaign");
+        assert!(
+            db.has_condition(&"dead".to_string()),
+            "conditions.ron must contain a 'dead' entry (Phase 2 requirement)"
+        );
+    }
+
     #[test]
     fn test_content_database_character_loading() {
         use crate::domain::character::{Alignment, Sex};

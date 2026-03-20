@@ -389,6 +389,26 @@ pub enum ConsumableEffect {
     /// }
     /// ```
     IsFood(u8),
+    /// Resurrect a dead character, restoring them to `hp` hit points.
+    ///
+    /// - Clears the `DEAD` bitflag and removes the `"dead"` `ActiveCondition`.
+    /// - Restores `hp.current` to `hp` (clamped to `hp.base`).
+    /// - Is a **no-op** if the character is not plain-dead (`is_dead() == false`),
+    ///   e.g. when the character is `STONE` or `ERADICATED`.
+    /// - The **caller** is responsible for enforcing campaign permadeath before
+    ///   applying this effect.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::types::ConsumableEffect;
+    ///
+    /// let scroll = ConsumableEffect::Resurrect(1);
+    /// if let ConsumableEffect::Resurrect(hp) = scroll {
+    ///     assert_eq!(hp, 1);
+    /// }
+    /// ```
+    Resurrect(u16),
 }
 
 /// Attribute types that can be boosted

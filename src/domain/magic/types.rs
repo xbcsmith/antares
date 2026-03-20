@@ -209,6 +209,20 @@ pub struct Spell {
     /// Conditions applied by this spell
     #[serde(default)]
     pub applied_conditions: Vec<crate::domain::conditions::ConditionId>,
+
+    /// Optional resurrection effect: restores a dead character to this many HP.
+    ///
+    /// When `Some(hp)`, the spell acts as a resurrection spell targeting a
+    /// `SingleCharacter`. The domain layer calls [`revive_from_dead`] with the
+    /// given HP value when the target has the `DEAD` condition.
+    /// When `None`, normal damage / condition logic applies.
+    ///
+    /// The **caller** (application/game layer) is responsible for enforcing
+    /// campaign permadeath before allowing a resurrection spell to fire.
+    ///
+    /// [`revive_from_dead`]: crate::domain::resources::revive_from_dead
+    #[serde(default)]
+    pub resurrect_hp: Option<u16>,
 }
 
 impl Spell {
@@ -267,6 +281,7 @@ impl Spell {
             duration,
             saving_throw,
             applied_conditions: Vec::new(),
+            resurrect_hp: None,
         }
     }
 

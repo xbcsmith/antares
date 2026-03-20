@@ -286,6 +286,15 @@ pub fn apply_consumable_effect(
             // Food items are consumed by the rest system, not this path.
             // Silently return the zeroed result so callers can detect no-op.
         }
+
+        ConsumableEffect::Resurrect(hp) => {
+            // Caller is responsible for permadeath validation before reaching
+            // this point. This function only performs the domain operation.
+            if character.conditions.is_dead() {
+                crate::domain::resources::revive_from_dead(character, hp);
+                result.healing = hp as i32;
+            }
+        }
     }
 
     result
@@ -1033,6 +1042,111 @@ mod tests {
         assert!(
             !result.resistance_boost_is_timed,
             "combat path must not set resistance_boost_is_timed"
+        );
+    }
+
+    // ===== Resurrect Tests =====
+
+    /// `ConsumableEffect::Resurrect(hp)` on a dead character must clear the
+    /// `DEAD` bitflag, remove the `"dead"` `ActiveCondition`, and set
+    /// `hp.current` to the requested value.
+    #[test]
+    fn test_resurrect_consumable_clears_dead() {
+        use crate::domain::character::Condition;
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(20, 10, 0, 0);
+        ch.hp.current = 0;
+        ch.conditions.add(Condition::DEAD);
+        ch.add_condition(ActiveCondition::new(
+            "dead".to_string(),
+            ConditionDuration::Permanent,
+        ));
+
+        let data = ConsumableData {
+            effect: ConsumableEffect::Resurrect(5),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+        let result = apply_consumable_effect(&mut ch, &data);
+
+        assert!(
+            !ch.conditions.has(Condition::DEAD),
+            "DEAD bitflag must be cleared after Resurrect"
+        );
+        assert_eq!(
+            ch.hp.current, 5,
+            "hp.current must be set to the requested HP after Resurrect"
+        );
+        assert!(
+            !ch.active_conditions
+                .iter()
+                .any(|ac| ac.condition_id == "dead"),
+            "active_conditions must not contain 'dead' after Resurrect"
+        );
+        assert_eq!(
+            result.healing, 5,
+            "result.healing must equal the restored HP"
+        );
+    }
+
+    /// `ConsumableEffect::Resurrect(hp)` on a living character (not dead) must
+    /// be a complete no-op — HP unchanged, no conditions altered.
+    #[test]
+    fn test_resurrect_consumable_noop_on_alive() {
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(20, 10, 0, 0);
+        ch.hp.current = 15;
+        // Character is alive — DEAD flag is NOT set
+
+        let data = ConsumableData {
+            effect: ConsumableEffect::Resurrect(5),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+        let result = apply_consumable_effect(&mut ch, &data);
+
+        assert_eq!(
+            ch.hp.current, 15,
+            "hp.current must be unchanged when Resurrect targets a living character"
+        );
+        assert_eq!(
+            result.healing, 0,
+            "result.healing must be 0 when Resurrect is a no-op"
+        );
+    }
+
+    /// `ConsumableEffect::Resurrect(hp)` on an ERADICATED character must be a
+    /// no-op because `is_dead()` returns false for ERADICATED (value 255).
+    #[test]
+    fn test_resurrect_consumable_noop_on_eradicated() {
+        use crate::domain::character::Condition;
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(20, 10, 0, 0);
+        ch.hp.current = 0;
+        ch.conditions.add(Condition::ERADICATED);
+
+        let data = ConsumableData {
+            effect: ConsumableEffect::Resurrect(5),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+        let result = apply_consumable_effect(&mut ch, &data);
+
+        assert_eq!(
+            ch.hp.current, 0,
+            "hp.current must remain 0 for ERADICATED — Resurrect is a no-op"
+        );
+        assert!(
+            ch.conditions.has(Condition::ERADICATED),
+            "ERADICATED condition must remain set"
+        );
+        assert_eq!(
+            result.healing, 0,
+            "result.healing must be 0 for ERADICATED no-op"
         );
     }
 }

@@ -370,6 +370,24 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
         result = result.with_damage(total_damage, affected.clone());
     }
 
+    // Resurrection spell handling.
+    // When `spell.resurrect_hp` is `Some(hp)` the spell targets a single dead
+    // party member and revives them to `hp` HP.  Permadeath validation is the
+    // caller's (application/game layer) responsibility — the domain layer only
+    // performs the revive operation.
+    if let Some(hp) = spell.resurrect_hp {
+        if let CombatantId::Player(idx) = target {
+            if let Some(crate::domain::combat::engine::Combatant::Player(pc)) =
+                combat_state.get_combatant_mut(&target)
+            {
+                if pc.conditions.is_dead() {
+                    crate::domain::resources::revive_from_dead(pc.as_mut(), hp);
+                    result = result.with_healing(hp as i32, vec![idx]);
+                }
+            }
+        }
+    }
+
     // Advance round/turn using content condition definitions (same behavior as attacks)
     let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = content
         .conditions
@@ -679,5 +697,159 @@ mod tests {
             assert!(m.hp.current <= initial_mon_hp);
         }
         assert!(res.success || res.damage.is_some());
+    }
+
+    /// A spell with `resurrect_hp: Some(1)` targeting a dead player must
+    /// clear `DEAD`, set `hp.current` to 1, and report healing in the result.
+    #[test]
+    fn test_resurrect_spell_revives_dead_player() {
+        use crate::domain::character::Condition;
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+
+        // Caster: high-level cleric with enough SP
+        let caster = create_test_paladin(9, 20);
+        cs.add_player(caster);
+
+        // Target: dead party member
+        let mut dead_hero = Character::new(
+            "Dead Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        dead_hero.hp.base = 20;
+        dead_hero.hp.current = 0;
+        dead_hero.conditions.add(Condition::DEAD);
+        dead_hero.add_condition(ActiveCondition::new(
+            "dead".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        cs.add_player(dead_hero);
+
+        // Resurrection spell: level 5 Cleric, targets SingleCharacter, resurrect_hp = Some(1)
+        let mut raise_dead = Spell::new(
+            0x0105,
+            "Raise Dead",
+            SpellSchool::Cleric,
+            5,
+            15,
+            5,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Resurrects a dead party member to 1 HP",
+            None,
+            0,
+            false,
+        );
+        raise_dead.resurrect_hp = Some(1);
+
+        let content = ContentDatabase::new();
+        let mut rng = rand::rng();
+
+        let res = execute_spell_cast_with_spell(
+            &mut cs,
+            CombatantId::Player(0),
+            &raise_dead,
+            CombatantId::Player(1),
+            &content,
+            &mut rng,
+        )
+        .expect("resurrection spell must succeed");
+
+        // Verify the dead hero was revived
+        if let Some(Combatant::Player(hero)) = cs.get_combatant(&CombatantId::Player(1)) {
+            assert!(
+                !hero.conditions.has(Condition::DEAD),
+                "DEAD flag must be cleared after resurrection spell"
+            );
+            assert_eq!(
+                hero.hp.current, 1,
+                "hp.current must be 1 after resurrection spell with resurrect_hp=Some(1)"
+            );
+            assert!(
+                !hero
+                    .active_conditions
+                    .iter()
+                    .any(|ac| ac.condition_id == "dead"),
+                "active_conditions must not contain 'dead' after resurrection"
+            );
+        } else {
+            panic!("Target hero not found");
+        }
+
+        assert!(
+            res.healing.is_some(),
+            "SpellResult must report healing after resurrection"
+        );
+        assert_eq!(res.healing, Some(1));
+    }
+
+    /// A resurrection spell targeting a living player (not dead) must be a
+    /// complete no-op — HP and conditions are unchanged.
+    #[test]
+    fn test_resurrect_spell_noop_on_alive() {
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+
+        let caster = create_test_paladin(9, 20);
+        cs.add_player(caster);
+
+        // Target: alive party member with some HP
+        let mut alive_hero = Character::new(
+            "Alive Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        alive_hero.hp.base = 20;
+        alive_hero.hp.current = 10;
+        cs.add_player(alive_hero);
+
+        let mut raise_dead = Spell::new(
+            0x0105,
+            "Raise Dead",
+            SpellSchool::Cleric,
+            5,
+            15,
+            5,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Resurrects a dead party member to 1 HP",
+            None,
+            0,
+            false,
+        );
+        raise_dead.resurrect_hp = Some(1);
+
+        let content = ContentDatabase::new();
+        let mut rng = rand::rng();
+
+        let res = execute_spell_cast_with_spell(
+            &mut cs,
+            CombatantId::Player(0),
+            &raise_dead,
+            CombatantId::Player(1),
+            &content,
+            &mut rng,
+        )
+        .expect("resurrection spell execution must not error");
+
+        // Living hero's HP must be unchanged
+        if let Some(Combatant::Player(hero)) = cs.get_combatant(&CombatantId::Player(1)) {
+            assert_eq!(
+                hero.hp.current, 10,
+                "hp.current must be unchanged when Resurrect targets a living character"
+            );
+        } else {
+            panic!("Target hero not found");
+        }
+
+        assert!(
+            res.healing.is_none(),
+            "SpellResult must not report healing when Resurrect is a no-op"
+        );
     }
 }
