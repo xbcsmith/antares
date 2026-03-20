@@ -255,6 +255,48 @@ fn test_multiple_campaigns_save_load() {
 }
 
 #[test]
+fn test_automap_state_round_trips_save() {
+    let temp_dir = TempDir::new().unwrap();
+    let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+    let campaign = create_test_campaign("automap_roundtrip", "Automap Round Trip", "1.0.0");
+    let mut game_state = GameState::new();
+    game_state.campaign = Some(campaign);
+
+    let mut map = antares::domain::world::Map::new(
+        1,
+        "Automap Test Map".to_string(),
+        "Map for visited-tile persistence".to_string(),
+        10,
+        10,
+    );
+    let visited_pos = Position { x: 4, y: 6 };
+    map.get_tile_mut(visited_pos)
+        .expect("visited tile must exist")
+        .mark_visited();
+
+    game_state.world.add_map(map);
+    game_state.world.set_current_map(1);
+    game_state.world.set_party_position(Position { x: 5, y: 5 });
+
+    manager.save("automap_roundtrip", &game_state).unwrap();
+
+    let loaded_state = manager.load("automap_roundtrip").unwrap();
+    let loaded_map = loaded_state
+        .world
+        .get_current_map()
+        .expect("current map must exist after load");
+    let loaded_tile = loaded_map
+        .get_tile(visited_pos)
+        .expect("visited tile must exist after load");
+
+    assert!(
+        loaded_tile.visited,
+        "visited tile state must persist through save/load round-trip"
+    );
+}
+
+#[test]
 fn test_campaign_config_variations() {
     // Test different campaign configurations
     let mut campaign = create_test_campaign("config_test", "Config Test", "1.0.0");

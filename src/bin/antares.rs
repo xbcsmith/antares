@@ -389,6 +389,7 @@ mod tests {
             msaa_samples: 8,
             shadow_quality: ShadowQuality::Ultra,
             show_combat_monster_hp_bars: true,
+            show_minimap: true,
         };
 
         let resource = GraphicsConfigResource {
@@ -410,6 +411,7 @@ mod tests {
             msaa_samples: 4,
             shadow_quality: ShadowQuality::Medium,
             show_combat_monster_hp_bars: true,
+            show_minimap: true,
         };
 
         let campaign = create_test_campaign(graphics.clone());

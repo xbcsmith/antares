@@ -233,9 +233,17 @@ pub struct GraphicsConfig {
     /// Show combat monster HP hover bars projected above monster visuals.
     #[serde(default = "default_show_combat_monster_hp_bars")]
     pub show_combat_monster_hp_bars: bool,
+
+    /// Show the exploration mini map in the HUD.
+    #[serde(default = "default_show_minimap")]
+    pub show_minimap: bool,
 }
 
 fn default_show_combat_monster_hp_bars() -> bool {
+    true
+}
+
+fn default_show_minimap() -> bool {
     true
 }
 
@@ -248,6 +256,7 @@ impl Default for GraphicsConfig {
             msaa_samples: 4,
             shadow_quality: ShadowQuality::Medium,
             show_combat_monster_hp_bars: true,
+            show_minimap: true,
         }
     }
 }
@@ -797,6 +806,7 @@ mod tests {
         assert_eq!(config.graphics.msaa_samples, 4);
         assert_eq!(config.graphics.shadow_quality, ShadowQuality::Medium);
         assert!(config.graphics.show_combat_monster_hp_bars);
+        assert!(config.graphics.show_minimap);
 
         // Verify audio defaults
         assert_eq!(config.audio.master_volume, 0.8);
@@ -1116,6 +1126,7 @@ mod tests {
                 msaa_samples: 8,
                 shadow_quality: High,
                 show_combat_monster_hp_bars: false,
+                show_minimap: false,
             ),
             audio: (
                 master_volume: 0.7,
@@ -1157,6 +1168,7 @@ mod tests {
         assert_eq!(config.graphics.resolution, (1920, 1080));
         assert!(config.graphics.fullscreen);
         assert!(!config.graphics.show_combat_monster_hp_bars);
+        assert!(!config.graphics.show_minimap);
         assert_eq!(config.audio.master_volume, 0.7);
         assert_eq!(config.camera.fov, 80.0);
     }
@@ -1208,6 +1220,7 @@ mod tests {
 
         let config = GameConfig::load_or_default(temp_file.path()).unwrap();
         assert!(config.graphics.show_combat_monster_hp_bars);
+        assert!(config.graphics.show_minimap);
     }
 
     #[test]
@@ -1354,6 +1367,24 @@ mod tests {
             config.automap,
             vec!["M".to_string()],
             "missing `automap` field must default to ['M']"
+        );
+    }
+
+    #[test]
+    fn test_graphics_config_serde_show_minimap_default() {
+        let ron_without_show_minimap = r#"(
+            resolution: (1280, 720),
+            fullscreen: false,
+            vsync: true,
+            msaa_samples: 4,
+            shadow_quality: Medium,
+            show_combat_monster_hp_bars: true,
+        )"#;
+        let config: GraphicsConfig =
+            ron::from_str(ron_without_show_minimap).expect("deserialization must succeed");
+        assert!(
+            config.show_minimap,
+            "missing `show_minimap` field must default to true"
         );
     }
 

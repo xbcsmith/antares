@@ -522,3 +522,155 @@ only terrain:
 
 This completes the first POI visualization pass and establishes the structure
 for richer quest-objective integration in later phases.
+
+## Phase 5: Config, Save/Load Verification, and SDK Integration (Complete)
+
+### Overview
+
+Phase 5 finalizes the automap/mini-map feature set by wiring the remaining
+configuration, persistence, and SDK editor pieces together. The focus of this
+phase was to make the feature campaign-configurable, preserve discovered map
+state through save/load, and expose the new settings in the Campaign Builder.
+
+### Problem Statement
+
+After Phase 4, the runtime map features existed, but the surrounding project
+integration was still incomplete:
+
+- `GraphicsConfig` had no `show_minimap` toggle.
+- Campaign config templates and shipped campaign configs did not document or
+  provide the new automap / mini-map settings.
+- Save/load round-trip verification for discovered automap state still needed a
+  dedicated regression test.
+- The Campaign Builder config editor did not expose mini-map visibility or the
+  automap key binding.
+
+### Files Changed
+
+| File                                        | Change                                                                                      |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `src/sdk/game_config.rs`                    | Added `show_minimap`, serde defaults, config loading coverage, and validation/default tests |
+| `src/game/systems/hud.rs`                   | Honored `graphics.show_minimap` and added visibility test                                   |
+| `campaigns/config.template.ron`             | Documented `show_minimap` and `automap` settings                                            |
+| `data/test_campaign/config.ron`             | Added `show_minimap: true` and `automap: ["M"]`                                             |
+| `campaigns/tutorial/config.ron`             | Added `show_minimap: true` and `automap: ["M"]`                                             |
+| `sdk/campaign_builder/src/config_editor.rs` | Added Show Mini Map checkbox and Automap key binding editor support                         |
+| `tests/campaign_integration_test.rs`        | Added save/load regression test for discovered automap state                                |
+| `docs/explanation/implementations.md`       | Added this implementation summary                                                           |
+
+---
+
+### 5.1 — `GraphicsConfig.show_minimap` and Config Defaults
+
+Added the new graphics toggle:
+
+- `show_minimap: bool`
+
+with serde default behavior and a default value of `true`.
+
+This means older config files that omit the field continue to load cleanly while
+new campaigns can explicitly disable the exploration mini map.
+
+`ControlsConfig.automap` from Phase 3 was also verified as part of this phase,
+including default behavior and config round-trip coverage.
+
+### 5.2 — Runtime Mini Map Visibility Control
+
+`update_mini_map` now checks `global_state.0.config.graphics.show_minimap`.
+
+Behavior is now:
+
+- if `show_minimap == true`, `MiniMapRoot` remains visible and the mini map is rendered
+- if `show_minimap == false`, `MiniMapRoot` is set to `Display::None` and the system exits early
+
+This keeps the feature purely config-driven at runtime without affecting automap.
+
+### 5.3 — Campaign Config Template and Config Files
+
+Updated:
+
+- `campaigns/config.template.ron`
+- `data/test_campaign/config.ron`
+- `campaigns/tutorial/config.ron`
+
+to include:
+
+- `graphics.show_minimap: true`
+- `controls.automap: ["M"]`
+
+The template comments now document both settings so campaign authors can
+discover and customize them easily.
+
+### 5.4 — Save/Load Verification
+
+Added `test_automap_state_round_trips_save` in
+`tests/campaign_integration_test.rs`.
+
+This test:
+
+1. creates a map
+2. marks a tile as visited
+3. saves the game
+4. loads the game
+5. verifies the visited tile is still marked visited
+
+That provides explicit regression coverage for discovered automap/fog-of-war
+state persistence through the standard save pipeline.
+
+### 5.5 — SDK Config Editor Integration
+
+Updated `sdk/campaign_builder/src/config_editor.rs` to expose the new settings.
+
+#### Added editor state
+
+- `controls_automap_buffer: String`
+
+#### Added graphics UI
+
+- **Show Mini Map** checkbox bound to `game_config.graphics.show_minimap`
+
+#### Added controls UI
+
+- **Automap** key binding field using the same capture / clear / validate
+  workflow as the existing inventory and rest bindings
+
+#### Updated editor plumbing
+
+- `update_edit_buffers`
+- `update_config_from_buffers`
+- key capture routing
+- validation logic
+- test coverage for automap buffer and validation behavior
+
+### 5.6 — Test Coverage Added
+
+Added and verified the phase-required tests:
+
+- `test_controls_config_automap_defaults_when_missing_from_ron`
+- `test_graphics_config_serde_show_minimap_default`
+- `test_mini_map_hidden_when_show_minimap_false`
+- `test_automap_state_round_trips_save`
+
+Also added supporting Campaign Builder tests for the new automap editor field.
+
+### Deliverables Completed
+
+- [x] `show_minimap: bool` in `GraphicsConfig` with serde default
+- [x] `automap` key confirmed in `ControlsConfig`
+- [x] `campaigns/config.template.ron` updated
+- [x] `data/test_campaign/config.ron` updated
+- [x] `campaigns/tutorial/config.ron` updated
+- [x] SDK Config Editor: mini map toggle + automap key binding field
+- [x] All phase-5 tests implemented
+
+### Outcome
+
+After this phase, the automap/mini-map feature set is fully integrated:
+
+- the automap key is configurable per campaign
+- the mini map can be disabled through config
+- older config files continue to load safely with sensible defaults
+- discovered map state survives save/load
+- the Campaign Builder exposes both new settings for authors
+
+This completes the planned automap and mini-map implementation sequence.

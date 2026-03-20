@@ -742,7 +742,22 @@ fn update_mini_map(
     global_state: Res<GlobalState>,
     mini_map_image: Res<MiniMapImage>,
     mut images: ResMut<Assets<Image>>,
+    mut mini_map_root_query: Query<&mut Node, With<MiniMapRoot>>,
 ) {
+    let show_minimap = global_state.0.config.graphics.show_minimap;
+
+    for mut node in &mut mini_map_root_query {
+        node.display = if show_minimap {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+
+    if !show_minimap {
+        return;
+    }
+
     let Some(map) = global_state.0.world.get_current_map() else {
         return;
     };
@@ -3143,6 +3158,53 @@ mod minimap_tests {
         let offset = mini_map_pixel_offset(pixel_x, pixel_y, mini_map_image_size());
 
         assert_eq!(&data[offset..offset + 4], &POI_MERCHANT_COLOR);
+    }
+
+    #[test]
+    fn test_mini_map_hidden_when_show_minimap_false() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Assets<Image>>();
+
+        let size = mini_map_image_size();
+        let image = Image::new_fill(
+            Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            &vec![0; (size * size * 4) as usize],
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::all(),
+        );
+        let handle = {
+            let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+            images.add(image)
+        };
+        app.world_mut().insert_resource(MiniMapImage { handle });
+
+        app.world_mut().spawn((Node::default(), MiniMapRoot));
+
+        let mut state = GameState::new();
+        state.config.graphics.show_minimap = false;
+        let map = Map::new(1, "Mini Map".to_string(), "Test".to_string(), 13, 13);
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+        state.world.set_party_position(Position::new(5, 5));
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .run_system_cached(update_mini_map)
+            .expect("update_mini_map system should run in test");
+
+        let world = app.world_mut();
+        let mut query = world.query::<(&Node, &MiniMapRoot)>();
+        let (node, _) = query
+            .single(world)
+            .expect("MiniMapRoot entity should exist in test world");
+
+        assert_eq!(node.display, Display::None);
     }
 }
 
