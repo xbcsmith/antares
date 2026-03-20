@@ -100,7 +100,7 @@ pub fn check_permadeath_allows_resurrection(config: &CampaignConfig) -> Result<(
 /// ## Steps performed
 ///
 /// 1. Looks up the NPC by `npc_id` in `content.npcs`.
-/// 2. Verifies the NPC has a `"raise_dead"` service entry in its
+/// 2. Verifies the NPC has a `"resurrect"` service entry in its
 ///    `service_catalog` and reads the gold/gem cost from it.
 /// 3. Checks campaign permadeath via
 ///    [`check_permadeath_allows_resurrection`].
@@ -134,7 +134,7 @@ pub fn check_permadeath_allows_resurrection(config: &CampaignConfig) -> Result<(
 /// | Condition                                              | Error contains         |
 /// |--------------------------------------------------------|------------------------|
 /// | `npc_id` not in `content.npcs`                        | `"not found"`          |
-/// | NPC has no `service_catalog` or no `"raise_dead"` entry| `"raise_dead"`        |
+/// | NPC has no `service_catalog` or no `"resurrect"` entry| `"resurrect"`        |
 /// | Campaign has `permadeath == true`                      | `"permadeath"`         |
 /// | No party member at `character_index`                   | `"No party member"`    |
 /// | Target character is not dead                           | `"not dead"`           |
@@ -157,7 +157,7 @@ pub fn check_permadeath_allows_resurrection(config: &CampaignConfig) -> Result<(
 /// priest.is_priest = true;
 /// let mut catalog = ServiceCatalog::new();
 /// catalog.services.push(ServiceEntry::with_gem_cost(
-///     "raise_dead", 500, 1, "Raise a dead party member",
+///     "resurrect", 500, 1, "Raise a dead party member",
 /// ));
 /// priest.service_catalog = Some(catalog);
 /// db.npcs.add_npc(priest).unwrap();
@@ -190,7 +190,7 @@ pub fn perform_resurrection_service(
     character_index: usize,
     content: &ContentDatabase,
 ) -> Result<(), String> {
-    // Step 1 & 2: Look up NPC and clone the raise_dead service entry.
+    // Step 1 & 2: Look up NPC and clone the resurrect service entry.
     // The clone releases the immutable borrow of `content` before we touch
     // the mutable `game_state` below.
     let service = {
@@ -205,8 +205,8 @@ pub fn perform_resurrection_service(
             .ok_or_else(|| format!("NPC '{}' does not offer any services", npc_id))?;
 
         catalog
-            .get_service("raise_dead")
-            .ok_or_else(|| format!("NPC '{}' does not offer the 'raise_dead' service", npc_id))?
+            .get_service("resurrect")
+            .ok_or_else(|| format!("NPC '{}' does not offer the 'resurrect' service", npc_id))?
             .clone()
     };
 
@@ -268,14 +268,14 @@ mod tests {
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /// Builds a `ContentDatabase` with a single priest NPC that offers the
-    /// `"raise_dead"` service for `cost` gold and `gem_cost` gems.
+    /// `"resurrect"` service for `cost` gold and `gem_cost` gems.
     fn content_with_priest(cost: u32, gem_cost: u32) -> ContentDatabase {
         let mut db = ContentDatabase::new();
         let mut priest = NpcDefinition::new("temple_priest", "Temple Priest", "priest.png");
         priest.is_priest = true;
         let mut catalog = ServiceCatalog::new();
         catalog.services.push(ServiceEntry::with_gem_cost(
-            "raise_dead",
+            "resurrect",
             cost,
             gem_cost,
             "Raise a dead party member",
@@ -286,8 +286,8 @@ mod tests {
     }
 
     /// Builds a `ContentDatabase` with a priest NPC that has a catalog but
-    /// does NOT include a `"raise_dead"` service.
-    fn content_with_priest_no_raise_dead() -> ContentDatabase {
+    /// does NOT include a `"resurrect"` service.
+    fn content_with_priest_no_resurrect() -> ContentDatabase {
         let mut db = ContentDatabase::new();
         let mut priest = NpcDefinition::new("temple_priest", "Temple Priest", "priest.png");
         priest.is_priest = true;
@@ -494,10 +494,10 @@ mod tests {
         );
     }
 
-    /// Returns `Err` when the NPC exists but has no `"raise_dead"` service.
+    /// Returns `Err` when the NPC exists but has no `"resurrect"` service.
     #[test]
-    fn test_perform_resurrection_service_no_raise_dead_service() {
-        let content = content_with_priest_no_raise_dead();
+    fn test_perform_resurrection_service_no_resurrect_service() {
+        let content = content_with_priest_no_resurrect();
         let mut state = GameState::new();
         state.party.gold = 1_000;
         state.party.gems = 5;
@@ -506,12 +506,12 @@ mod tests {
         let result = perform_resurrection_service(&mut state, "temple_priest", 0, &content);
         assert!(
             result.is_err(),
-            "expected Err when NPC lacks raise_dead service"
+            "expected Err when NPC lacks resurrect service"
         );
         let msg = result.unwrap_err();
         assert!(
-            msg.contains("raise_dead"),
-            "error must mention 'raise_dead', got: {}",
+            msg.contains("resurrect"),
+            "error must mention 'resurrect', got: {}",
             msg
         );
     }

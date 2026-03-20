@@ -730,9 +730,9 @@ mod tests {
         cs.add_player(dead_hero);
 
         // Resurrection spell: level 5 Cleric, targets SingleCharacter, resurrect_hp = Some(1)
-        let mut raise_dead = Spell::new(
+        let mut resurrect = Spell::new(
             0x0105,
-            "Raise Dead",
+            "Resurrect",
             SpellSchool::Cleric,
             5,
             15,
@@ -744,7 +744,7 @@ mod tests {
             0,
             false,
         );
-        raise_dead.resurrect_hp = Some(1);
+        resurrect.resurrect_hp = Some(1);
 
         let content = ContentDatabase::new();
         let mut rng = rand::rng();
@@ -752,7 +752,7 @@ mod tests {
         let res = execute_spell_cast_with_spell(
             &mut cs,
             CombatantId::Player(0),
-            &raise_dead,
+            &resurrect,
             CombatantId::Player(1),
             &content,
             &mut rng,
@@ -808,9 +808,9 @@ mod tests {
         alive_hero.hp.current = 10;
         cs.add_player(alive_hero);
 
-        let mut raise_dead = Spell::new(
+        let mut resurrect = Spell::new(
             0x0105,
-            "Raise Dead",
+            "Resurrect",
             SpellSchool::Cleric,
             5,
             15,
@@ -822,7 +822,7 @@ mod tests {
             0,
             false,
         );
-        raise_dead.resurrect_hp = Some(1);
+        resurrect.resurrect_hp = Some(1);
 
         let content = ContentDatabase::new();
         let mut rng = rand::rng();
@@ -830,7 +830,7 @@ mod tests {
         let res = execute_spell_cast_with_spell(
             &mut cs,
             CombatantId::Player(0),
-            &raise_dead,
+            &resurrect,
             CombatantId::Player(1),
             &content,
             &mut rng,

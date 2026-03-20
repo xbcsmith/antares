@@ -104,7 +104,7 @@ services), and adds campaign-level permadeath configuration.
   resurrection effect field.
 
 - **`ServiceEntry` and `ServiceCatalog`** in `src/domain/inventory.rs`
-  (L333–514): fully implemented. `ServiceEntry::with_gem_cost("raise_dead",
+  (L333–514): fully implemented. `ServiceEntry::with_gem_cost("resurrect",
 ...)` appears in existing tests. `NpcDatabase::priests()` exists in
   `src/sdk/database.rs` (L930–932). The data infrastructure for NPC
   resurrection services already exists.
@@ -169,7 +169,7 @@ Permanent)` will be cleared the next time `reconcile_character_conditions`
 
 14. **No application-layer resurrection service function**: The
     `ServiceCatalog` infrastructure exists, but there is no function to
-    execute a `"raise_dead"` service transaction (charge gold/gems, call
+    execute a `"resurrect"` service transaction (charge gold/gems, call
     the domain revive helper, validate permadeath).
 
 15. **SDK `ContentDatabase::validate()` does not warn on missing system
@@ -1017,12 +1017,12 @@ effect is `ConsumableEffect::Resurrect(1)` and `is_combat_usable == false`.
 
 **File:** `data/test_campaign/data/spells.ron`
 
-**Action:** Add a `"raise_dead"` spell entry using the `resurrect_hp` field:
+**Action:** Add a `"resurrect"` spell entry using the `resurrect_hp` field:
 
 ```ron
 (
     id: 0x0105,
-    name: "Raise Dead",
+    name: "Resurrect",
     school: Cleric,
     level: 5,
     sp_cost: 15,
@@ -1051,7 +1051,7 @@ effect is `ConsumableEffect::Resurrect(1)` and `is_combat_usable == false`.
 | `test_validate_warns_missing_unconscious`              | `database.rs`  | `ContentDatabase::validate()` returns an error when `"unconscious"` is absent              |
 | `test_validate_warns_missing_dead`                     | `database.rs`  | `ContentDatabase::validate()` returns an error when `"dead"` is absent                     |
 | `test_resurrection_scroll_template`                    | `templates.rs` | `resurrection_scroll()` returns an item with `ConsumableEffect::Resurrect(1)`              |
-| `test_raise_dead_spell_loads_from_test_campaign`       | `database.rs`  | Loading `data/test_campaign/data/spells.ron` includes a spell with `resurrect_hp: Some(1)` |
+| `test_resurrect_spell_loads_from_test_campaign`        | `database.rs`  | Loading `data/test_campaign/data/spells.ron` includes a spell with `resurrect_hp: Some(1)` |
 
 ---
 
@@ -1061,7 +1061,7 @@ effect is `ConsumableEffect::Resurrect(1)` and `is_combat_usable == false`.
       `"dead"` conditions
 - [ ] `ConditionDatabase::new()` pre-populates system conditions
 - [ ] `resurrection_scroll()` template function and test in `templates.rs`
-- [ ] `"raise_dead"` spell entry in `data/test_campaign/data/spells.ron`
+- [ ] `"resurrect"` spell entry in `data/test_campaign/data/spells.ron`
       and `campaigns/tutorial/data/spells.ron`
 - [ ] All tests in 3.5 pass
 - [ ] All four quality gates pass
@@ -1073,7 +1073,7 @@ effect is `ConsumableEffect::Resurrect(1)` and `is_combat_usable == false`.
 - `validate()` errors on any campaign missing these system conditions.
 - Campaign creators can use `resurrection_scroll()` from `templates.rs`
   as a starting point.
-- The `"raise_dead"` spell is available in the test campaign fixture.
+- The `"resurrect"` spell is available in the test campaign fixture.
 
 ---
 
@@ -1084,12 +1084,12 @@ and the corresponding UI.
 
 ---
 
-#### 4.1 Add `"raise_dead"` Service to Priest NPC Data
+#### 4.1 Add `"resurrect"` Service to Priest NPC Data
 
 **Files to modify:**
 
 - `campaigns/tutorial/data/npcs.ron` — add or update the existing priest
-  NPC entry to include a `service_catalog` with a `"raise_dead"` entry.
+  NPC entry to include a `service_catalog` with a `"resurrect"` entry.
 - `data/test_campaign/data/npcs.ron` — same change for the fixture NPC.
 
 **Service catalog entry format (RON):**
@@ -1098,7 +1098,7 @@ and the corresponding UI.
 service_catalog: Some((
     services: [
         (
-            service_id: "raise_dead",
+            service_id: "resurrect",
             cost: 500,
             gem_cost: 1,
             description: "Resurrect a dead party member for 500 gold and 1 gem.",
@@ -1123,7 +1123,7 @@ The NPC must have `is_priest: true`. A typical tutorial priest NPC ID is
 ///
 /// Steps performed:
 /// 1. Looks up the NPC by `npc_id` in `content.npcs`.
-/// 2. Verifies the NPC has a `"raise_dead"` service entry.
+/// 2. Verifies the NPC has a `"resurrect"` service entry.
 /// 3. Checks campaign permadeath via `check_permadeath_allows_resurrection`.
 /// 4. Verifies the target character is dead (`conditions.is_dead() == true`).
 /// 5. Verifies the party has enough gold and gems.
@@ -1169,7 +1169,7 @@ Follow the exact structural pattern of `src/game/systems/inn_ui.rs`:
 - A `TempleUiRoot` marker component.
 - A `TemplePlugin` that registers systems.
 - `setup_temple_ui`: spawns the UI on NPC interaction when the NPC is a
-  priest with `service_catalog.has_service("raise_dead") == true`.
+  priest with `service_catalog.has_service("resurrect") == true`.
 - `update_temple_ui`: displays each dead party member's name and the cost
   in gold and gems. Living and unconscious members are not shown.
 - `handle_temple_input`: on confirm, calls
@@ -1187,24 +1187,24 @@ The UI must show only dead party members (those where
 
 #### 4.4 Testing Requirements
 
-| Test name                                                 | File           | What it verifies                                                   |
-| --------------------------------------------------------- | -------------- | ------------------------------------------------------------------ |
-| `test_perform_resurrection_service_success`               | `resources.rs` | Gold/gems are deducted and dead character is revived to 1 HP       |
-| `test_perform_resurrection_service_insufficient_gold`     | `resources.rs` | Returns `Err` when party gold < service cost                       |
-| `test_perform_resurrection_service_insufficient_gems`     | `resources.rs` | Returns `Err` when party gems < gem cost                           |
-| `test_perform_resurrection_service_target_not_dead`       | `resources.rs` | Returns `Err` when target character is alive                       |
-| `test_perform_resurrection_service_npc_not_found`         | `resources.rs` | Returns `Err` when NPC ID is not in database                       |
-| `test_perform_resurrection_service_no_raise_dead_service` | `resources.rs` | Returns `Err` when NPC lacks `"raise_dead"` service                |
-| `test_perform_resurrection_service_permadeath`            | `resources.rs` | Returns `Err` when `campaign_config.permadeath == true`            |
-| `test_temple_npc_has_raise_dead_service`                  | `database.rs`  | Test campaign priest NPC has `service_catalog` with `"raise_dead"` |
-| `test_temple_ui_shows_dead_members_only`                  | `temple_ui.rs` | UI lists only members with `is_dead() == true`                     |
-| `test_temple_ui_does_not_show_eradicated`                 | `temple_ui.rs` | Eradicated characters do not appear in the temple list             |
+| Test name                                                | File           | What it verifies                                                  |
+| -------------------------------------------------------- | -------------- | ----------------------------------------------------------------- |
+| `test_perform_resurrection_service_success`              | `resources.rs` | Gold/gems are deducted and dead character is revived to 1 HP      |
+| `test_perform_resurrection_service_insufficient_gold`    | `resources.rs` | Returns `Err` when party gold < service cost                      |
+| `test_perform_resurrection_service_insufficient_gems`    | `resources.rs` | Returns `Err` when party gems < gem cost                          |
+| `test_perform_resurrection_service_target_not_dead`      | `resources.rs` | Returns `Err` when target character is alive                      |
+| `test_perform_resurrection_service_npc_not_found`        | `resources.rs` | Returns `Err` when NPC ID is not in database                      |
+| `test_perform_resurrection_service_no_resurrect_service` | `resources.rs` | Returns `Err` when NPC lacks `"resurrect"` service                |
+| `test_perform_resurrection_service_permadeath`           | `resources.rs` | Returns `Err` when `campaign_config.permadeath == true`           |
+| `test_temple_npc_has_resurrect_service`                  | `database.rs`  | Test campaign priest NPC has `service_catalog` with `"resurrect"` |
+| `test_temple_ui_shows_dead_members_only`                 | `temple_ui.rs` | UI lists only members with `is_dead() == true`                    |
+| `test_temple_ui_does_not_show_eradicated`                | `temple_ui.rs` | Eradicated characters do not appear in the temple list            |
 
 ---
 
 #### 4.5 Deliverables
 
-- [ ] Tutorial and test campaign priest NPC has `"raise_dead"` service in
+- [ ] Tutorial and test campaign priest NPC has `"resurrect"` service in
       `service_catalog`
 - [ ] `perform_resurrection_service` function in `src/application/resources.rs`
 - [ ] `TemplePlugin` / temple UI system registered in
@@ -1217,7 +1217,7 @@ The UI must show only dead party members (those where
 #### 4.6 Success Criteria
 
 - Players can interact with a `is_priest: true` NPC that has the
-  `"raise_dead"` service to revive dead party members for gold and gems.
+  `"resurrect"` service to revive dead party members for gold and gems.
 - The service fails gracefully when the party lacks funds, when permadeath
   is enabled, or when no party member is dead.
 - Eradicated characters do not appear in the list.

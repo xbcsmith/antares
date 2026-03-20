@@ -2295,28 +2295,28 @@ mod tests {
     }
 
     /// Loading `data/test_campaign/data/spells.ron` must yield at least one
-    /// spell that has `resurrect_hp: Some(1)` — the "Raise Dead" entry added
+    /// spell that has `resurrect_hp: Some(1)` — the "Resurrect" entry added
     /// in Phase 3.
     #[test]
-    fn test_raise_dead_spell_loads_from_test_campaign() {
+    fn test_resurrect_spell_loads_from_test_campaign() {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("data/test_campaign/data/spells.ron");
         let db =
             SpellDatabase::load_from_file(&path).expect("should load spells from test_campaign");
 
-        // Spell ID 776 is the "Raise Dead" entry added in Phase 3.
+        // Spell ID 776 is the "Resurrect" entry added in Phase 3.
         let spell = db
             .get_spell(776)
-            .expect("test_campaign/data/spells.ron must contain spell with id 776 (Raise Dead)");
+            .expect("test_campaign/data/spells.ron must contain spell with id 776 (Resurrect)");
 
-        assert_eq!(spell.name, "Raise Dead");
+        assert_eq!(spell.name, "Resurrect");
         assert_eq!(
             spell.resurrect_hp,
             Some(1),
-            "Raise Dead must have resurrect_hp: Some(1)"
+            "Resurrect must have resurrect_hp: Some(1)"
         );
-        assert_eq!(spell.level, 5, "Raise Dead must be level 5");
-        assert_eq!(spell.gem_cost, 2, "Raise Dead must cost 2 gems");
+        assert_eq!(spell.level, 5, "Resurrect must be level 5");
+        assert_eq!(spell.gem_cost, 2, "Resurrect must cost 2 gems");
     }
 
     #[test]
@@ -3637,13 +3637,13 @@ mod tests {
     }
 
     /// Phase 4: Verify that the test-campaign priest NPC has a `service_catalog`
-    /// containing the `"raise_dead"` service.
+    /// containing the `"resurrect"` service.
     ///
     /// This test satisfies the Phase 4.4 requirement:
-    /// `test_temple_npc_has_raise_dead_service` — Test campaign priest NPC has
-    /// `service_catalog` with `"raise_dead"`.
+    /// `test_temple_npc_has_resurrect_service` — Test campaign priest NPC has
+    /// `service_catalog` with `"resurrect"`.
     #[test]
-    fn test_temple_npc_has_raise_dead_service() {
+    fn test_temple_npc_has_resurrect_service() {
         let path = "data/test_campaign/data/npcs.ron";
 
         if !std::path::Path::new(path).exists() {
@@ -3670,33 +3670,33 @@ mod tests {
             .as_ref()
             .expect("temple_priest must have a service_catalog");
 
-        // The catalog must contain the raise_dead service
+        // The catalog must contain the resurrect service
         assert!(
-            catalog.has_service("raise_dead"),
-            "temple_priest service_catalog must contain 'raise_dead'"
+            catalog.has_service("resurrect"),
+            "temple_priest service_catalog must contain 'resurrect'"
         );
 
-        // Verify cost and gem_cost of the raise_dead service
+        // Verify cost and gem_cost of the resurrect service
         let service = catalog
-            .get_service("raise_dead")
-            .expect("raise_dead service must be retrievable");
+            .get_service("resurrect")
+            .expect("resurrect service must be retrievable");
 
         assert!(
             service.cost > 0,
-            "raise_dead service must have a non-zero gold cost"
+            "resurrect service must have a non-zero gold cost"
         );
         assert!(
             service.gem_cost >= 1,
-            "raise_dead service must require at least 1 gem"
+            "resurrect service must require at least 1 gem"
         );
 
-        // Also verify that the existing tutorial priest NPCs now have raise_dead
+        // Also verify that the existing tutorial priest NPCs now have resurrect
         let priest2 = db.get_npc("tutorial_priestess_town");
         if let Some(p) = priest2 {
             if let Some(cat) = &p.service_catalog {
                 assert!(
-                    cat.has_service("raise_dead"),
-                    "tutorial_priestess_town should have raise_dead service"
+                    cat.has_service("resurrect"),
+                    "tutorial_priestess_town should have resurrect service"
                 );
             }
         }
@@ -3705,8 +3705,8 @@ mod tests {
         if let Some(p) = priest3 {
             if let Some(cat) = &p.service_catalog {
                 assert!(
-                    cat.has_service("raise_dead"),
-                    "tutorial_priest_town2 should have raise_dead service"
+                    cat.has_service("resurrect"),
+                    "tutorial_priest_town2 should have resurrect service"
                 );
             }
         }

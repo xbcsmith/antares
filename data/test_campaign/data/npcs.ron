@@ -15,7 +15,7 @@
         service_catalog: Some((
             services: [
                 (
-                    service_id: "raise_dead",
+                    service_id: "resurrect",
                     cost: 500,
                     gem_cost: 1,
                     description: "Resurrect a dead party member for 500 gold and 1 gem.",
@@ -80,7 +80,7 @@
         service_catalog: Some((
             services: [
                 (
-                    service_id: "raise_dead",
+                    service_id: "resurrect",
                     cost: 500,
                     gem_cost: 1,
                     description: "Resurrect a dead party member for 500 gold and 1 gem.",
@@ -192,7 +192,7 @@
         service_catalog: Some((
             services: [
                 (
-                    service_id: "raise_dead",
+                    service_id: "resurrect",
                     cost: 500,
                     gem_cost: 1,
                     description: "Resurrect a dead party member for 500 gold and 1 gem.",

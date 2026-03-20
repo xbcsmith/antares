@@ -15,7 +15,7 @@ After Phase 3, all the domain and SDK plumbing for death and resurrection was in
 place, but there was no way for a player to actually trigger a resurrection during
 normal gameplay. Specifically:
 
-- No NPC in either campaign had `is_priest: true` combined with a `"raise_dead"`
+- No NPC in either campaign had `is_priest: true` combined with a `"resurrect"`
   service catalog entry.
 - There was no application-layer function that wired together NPC lookup, resource
   checks, permadeath enforcement, and `revive_from_dead` in a single atomic call.
@@ -23,16 +23,16 @@ normal gameplay. Specifically:
 
 ### Files Changed
 
-| File                               | Change                                                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `src/application/mod.rs`           | Added `TempleServiceState` struct and `GameMode::TempleService(TempleServiceState)` variant             |
-| `src/application/resources.rs`     | Added `perform_resurrection_service` with 7 tests                                                       |
-| `src/game/systems/temple_ui.rs`    | New file — `TemplePlugin`, events, systems, `visible_dead_members` helper, 10 tests                     |
-| `src/game/systems/mod.rs`          | Added `pub mod temple_ui;`                                                                              |
-| `src/bin/antares.rs`               | Registered `TemplePlugin`                                                                               |
-| `campaigns/tutorial/data/npcs.ron` | Set `is_priest: true` + `raise_dead` service on `tutorial_priest_town2` and `tutorial_priestess_town`   |
-| `data/test_campaign/data/npcs.ron` | Added `temple_priest` fixture NPC; set `is_priest: true` + `raise_dead` service on existing priest NPCs |
-| `src/sdk/database.rs`              | Added `test_temple_npc_has_raise_dead_service` test                                                     |
+| File                               | Change                                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `src/application/mod.rs`           | Added `TempleServiceState` struct and `GameMode::TempleService(TempleServiceState)` variant            |
+| `src/application/resources.rs`     | Added `perform_resurrection_service` with 7 tests                                                      |
+| `src/game/systems/temple_ui.rs`    | New file — `TemplePlugin`, events, systems, `visible_dead_members` helper, 10 tests                    |
+| `src/game/systems/mod.rs`          | Added `pub mod temple_ui;`                                                                             |
+| `src/bin/antares.rs`               | Registered `TemplePlugin`                                                                              |
+| `campaigns/tutorial/data/npcs.ron` | Set `is_priest: true` + `resurrect` service on `tutorial_priest_town2` and `tutorial_priestess_town`   |
+| `data/test_campaign/data/npcs.ron` | Added `temple_priest` fixture NPC; set `is_priest: true` + `resurrect` service on existing priest NPCs |
+| `src/sdk/database.rs`              | Added `test_temple_npc_has_resurrect_service` test                                                     |
 
 ---
 
@@ -45,7 +45,7 @@ is_priest: true,
 service_catalog: Some((
     services: [
         (
-            service_id: "raise_dead",
+            service_id: "resurrect",
             cost: 500,
             gem_cost: 1,
             description: "Resurrect a dead party member for 500 gold and 1 gem.",
@@ -90,7 +90,7 @@ pub fn perform_resurrection_service(
 Atomic 8-step transaction:
 
 1. Look up NPC by `npc_id`; error if absent.
-2. Locate the `"raise_dead"` service in the NPC's `service_catalog`; clone it to
+2. Locate the `"resurrect"` service in the NPC's `service_catalog`; clone it to
    release the immutable `content` borrow before mutating `game_state`.
 3. Call `check_permadeath_allows_resurrection` on `campaign_config`; return `Err`
    if permadeath is enabled.
@@ -132,27 +132,27 @@ are excluded automatically.
 
 ### Complete Test Matrix (Phase 4)
 
-| Test                                                      | File           | Verifies                                                  |
-| --------------------------------------------------------- | -------------- | --------------------------------------------------------- |
-| `test_perform_resurrection_service_success`               | `resources.rs` | Gold/gems deducted; character revived to 1 HP             |
-| `test_perform_resurrection_service_insufficient_gold`     | `resources.rs` | `Err("Insufficient gold")` when gold < cost               |
-| `test_perform_resurrection_service_insufficient_gems`     | `resources.rs` | `Err("Insufficient gems")` when gems < gem_cost           |
-| `test_perform_resurrection_service_target_not_dead`       | `resources.rs` | `Err("not dead")` when character is alive                 |
-| `test_perform_resurrection_service_npc_not_found`         | `resources.rs` | `Err("not found")` for unknown NPC ID                     |
-| `test_perform_resurrection_service_no_raise_dead_service` | `resources.rs` | `Err("raise_dead")` when NPC lacks the service            |
-| `test_perform_resurrection_service_permadeath`            | `resources.rs` | `Err("permadeath")` when campaign permadeath is enabled   |
-| `test_perform_resurrection_service_zero_cost_succeeds`    | `resources.rs` | Zero-cost service succeeds with empty treasury            |
-| `test_temple_npc_has_raise_dead_service`                  | `database.rs`  | `temple_priest` in test campaign has `raise_dead` service |
-| `test_temple_ui_shows_dead_members_only`                  | `temple_ui.rs` | `visible_dead_members` includes only `is_dead()` members  |
-| `test_temple_ui_does_not_show_eradicated`                 | `temple_ui.rs` | Stone and eradicated chars excluded from visible list     |
-| `test_visible_dead_members_empty_party`                   | `temple_ui.rs` | Empty party → empty list                                  |
-| `test_visible_dead_members_all_alive`                     | `temple_ui.rs` | All-living party → empty list                             |
-| `test_visible_dead_members_all_dead`                      | `temple_ui.rs` | All-dead party → full list                                |
-| `test_visible_dead_members_correct_party_indices`         | `temple_ui.rs` | Returned indices map to correct `party.members` slots     |
-| `test_temple_service_state_new`                           | `temple_ui.rs` | `TempleServiceState::new` has sane defaults               |
-| `test_temple_service_state_clear`                         | `temple_ui.rs` | `clear()` resets selection and message but keeps `npc_id` |
-| `test_game_mode_temple_service_variant`                   | `temple_ui.rs` | `GameMode::TempleService` is matchable                    |
-| `test_temple_plugin_builds`                               | `temple_ui.rs` | Plugin registers without panic                            |
+| Test                                                     | File           | Verifies                                                  |
+| -------------------------------------------------------- | -------------- | --------------------------------------------------------- |
+| `test_perform_resurrection_service_success`              | `resources.rs` | Gold/gems deducted; character revived to 1 HP             |
+| `test_perform_resurrection_service_insufficient_gold`    | `resources.rs` | `Err("Insufficient gold")` when gold < cost               |
+| `test_perform_resurrection_service_insufficient_gems`    | `resources.rs` | `Err("Insufficient gems")` when gems < gem_cost           |
+| `test_perform_resurrection_service_target_not_dead`      | `resources.rs` | `Err("not dead")` when character is alive                 |
+| `test_perform_resurrection_service_npc_not_found`        | `resources.rs` | `Err("not found")` for unknown NPC ID                     |
+| `test_perform_resurrection_service_no_resurrect_service` | `resources.rs` | `Err("resurrect")` when NPC lacks the service             |
+| `test_perform_resurrection_service_permadeath`           | `resources.rs` | `Err("permadeath")` when campaign permadeath is enabled   |
+| `test_perform_resurrection_service_zero_cost_succeeds`   | `resources.rs` | Zero-cost service succeeds with empty treasury            |
+| `test_temple_npc_has_resurrect_service`                  | `database.rs`  | `temple_priest` in test campaign has `resurrect` service  |
+| `test_temple_ui_shows_dead_members_only`                 | `temple_ui.rs` | `visible_dead_members` includes only `is_dead()` members  |
+| `test_temple_ui_does_not_show_eradicated`                | `temple_ui.rs` | Stone and eradicated chars excluded from visible list     |
+| `test_visible_dead_members_empty_party`                  | `temple_ui.rs` | Empty party → empty list                                  |
+| `test_visible_dead_members_all_alive`                    | `temple_ui.rs` | All-living party → empty list                             |
+| `test_visible_dead_members_all_dead`                     | `temple_ui.rs` | All-dead party → full list                                |
+| `test_visible_dead_members_correct_party_indices`        | `temple_ui.rs` | Returned indices map to correct `party.members` slots     |
+| `test_temple_service_state_new`                          | `temple_ui.rs` | `TempleServiceState::new` has sane defaults               |
+| `test_temple_service_state_clear`                        | `temple_ui.rs` | `clear()` resets selection and message but keeps `npc_id` |
+| `test_game_mode_temple_service_variant`                  | `temple_ui.rs` | `GameMode::TempleService` is matchable                    |
+| `test_temple_plugin_builds`                              | `temple_ui.rs` | Plugin registers without panic                            |
 
 ---
 
@@ -206,7 +206,7 @@ After Phase 2, the domain layer correctly used `"unconscious"` and `"dead"`
   programmatic workflows.
 - There was no canonical `resurrection_scroll()` template for campaign
   creators to start from.
-- Neither the test-campaign nor the tutorial campaign had a `"raise_dead"`
+- Neither the test-campaign nor the tutorial campaign had a `"resurrect"`
   spell with `resurrect_hp: Some(1)` in their `spells.ron` fixtures.
 
 ### Files Changed
@@ -215,8 +215,8 @@ After Phase 2, the domain layer correctly used `"unconscious"` and `"dead"`
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `src/sdk/database.rs`                | `ConditionDatabase::new()` pre-populates system conditions; `load_from_file` returns a truly empty DB for missing files; `ContentDatabase::validate()` checks for required system conditions; updated stale tests; added 5 new tests |
 | `src/sdk/templates.rs`               | Added `resurrection_scroll()` and `resurrection_scroll_with_hp()` template functions; added 2 new tests                                                                                                                              |
-| `data/test_campaign/data/spells.ron` | Added `"Raise Dead"` spell (id 776, `resurrect_hp: Some(1)`)                                                                                                                                                                         |
-| `campaigns/tutorial/data/spells.ron` | Added `"Raise Dead"` spell (id 776, `resurrect_hp: Some(1)`)                                                                                                                                                                         |
+| `data/test_campaign/data/spells.ron` | Added `"Resurrect"` spell (id 776, `resurrect_hp: Some(1)`)                                                                                                                                                                          |
+| `campaigns/tutorial/data/spells.ron` | Added `"Resurrect"` spell (id 776, `resurrect_hp: Some(1)`)                                                                                                                                                                          |
 
 ---
 
@@ -316,7 +316,7 @@ resurrection magic.
 
 ---
 
-### 3.4 — `"Raise Dead"` spell in both `spells.ron` fixtures
+### 3.4 — `"Resurrect"` spell in both `spells.ron` fixtures
 
 Appended to `data/test_campaign/data/spells.ron` and
 `campaigns/tutorial/data/spells.ron`:
@@ -324,7 +324,7 @@ Appended to `data/test_campaign/data/spells.ron` and
 ```ron
 (
     id: 776,
-    name: "Raise Dead",
+    name: "Resurrect",
     school: Cleric,
     level: 5,
     sp_cost: 15,
@@ -357,7 +357,7 @@ existing spell entries are unaffected.
 | `test_default_condition_database_includes_dead`        | `database.rs`  | `ConditionDatabase::new()` contains `"dead"` with correct name                    |
 | `test_validate_warns_missing_unconscious`              | `database.rs`  | `validate()` returns `Err` containing `"unconscious"` when condition is absent    |
 | `test_validate_warns_missing_dead`                     | `database.rs`  | `validate()` returns `Err` containing `"dead"` when condition is absent           |
-| `test_raise_dead_spell_loads_from_test_campaign`       | `database.rs`  | `spells.ron` contains spell 776 with `resurrect_hp: Some(1)`, level 5, gem_cost 2 |
+| `test_resurrect_spell_loads_from_test_campaign`        | `database.rs`  | `spells.ron` contains spell 776 with `resurrect_hp: Some(1)`, level 5, gem_cost 2 |
 | `test_resurrection_scroll_template`                    | `templates.rs` | `resurrection_scroll()` returns `Resurrect(1)`, not combat-usable, positive costs |
 | `test_resurrection_scroll_with_hp_template`            | `templates.rs` | `resurrection_scroll_with_hp(…, 5)` returns `Resurrect(5)`                        |
 

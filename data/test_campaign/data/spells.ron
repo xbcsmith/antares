@@ -657,7 +657,7 @@
     ),
     (
         id: 776,
-        name: "Raise Dead",
+        name: "Resurrect",
         school: Cleric,
         level: 5,
         sp_cost: 15,

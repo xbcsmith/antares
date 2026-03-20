@@ -7,7 +7,7 @@
 //! priest NPC to resurrect dead party members.  This system is active when the
 //! game is in [`GameMode::TempleService`] mode, which is entered when the
 //! player interacts with an NPC that has `is_priest: true` and a
-//! `service_catalog` containing the `"raise_dead"` service.
+//! `service_catalog` containing the `"resurrect"` service.
 //!
 //! ## Layout
 //!
@@ -36,7 +36,7 @@
 //! ## Mode Transitions
 //!
 //! The dialogue system (or any code that knows an NPC `is_priest` with
-//! `"raise_dead"`) transitions to [`GameMode::TempleService`] by writing:
+//! `"resurrect"`) transitions to [`GameMode::TempleService`] by writing:
 //!
 //! ```rust,ignore
 //! game_state.mode = GameMode::TempleService(TempleServiceState::new(npc_id));
@@ -220,7 +220,7 @@ fn temple_ui_system(
 
     let service_cost = npc
         .and_then(|n| n.service_catalog.as_ref())
-        .and_then(|c| c.get_service("raise_dead"))
+        .and_then(|c| c.get_service("resurrect"))
         .map(|s| (s.cost, s.gem_cost))
         .unwrap_or((500, 1));
 

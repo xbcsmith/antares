@@ -67,7 +67,7 @@ pub enum GameMode {
     /// Priest/Temple resurrection service interface.
     ///
     /// Entered when the player interacts with an NPC that has `is_priest: true`
-    /// and a `service_catalog` containing the `"raise_dead"` service.  Displays
+    /// and a `service_catalog` containing the `"resurrect"` service.  Displays
     /// dead party members and allows the player to spend gold and gems to revive
     /// them via [`crate::application::resources::perform_resurrection_service`].
     TempleService(TempleServiceState),
@@ -240,7 +240,7 @@ pub struct InnManagementState {
 /// State for an active priest/temple resurrection service session.
 ///
 /// Stored inside [`GameMode::TempleService`] while the player is interacting
-/// with a priest NPC that offers the `"raise_dead"` service.
+/// with a priest NPC that offers the `"resurrect"` service.
 ///
 /// # Examples
 ///

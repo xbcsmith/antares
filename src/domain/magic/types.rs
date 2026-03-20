@@ -303,7 +303,7 @@ impl Spell {
     ///
     /// let spell = Spell::new(
     ///     0x0103,
-    ///     "Raise Dead",
+    ///     "Resurrect",
     ///     SpellSchool::Cleric,
     ///     5,
     ///     15,
