@@ -1,5 +1,204 @@
 # Implementations
 
+## Phase 3: SDK Validation and Content Database Defaults (Complete)
+
+### Overview
+
+Phase 3 ensures that missing `"unconscious"` and `"dead"` conditions are
+detected early at validation time, that every programmatically-created
+`ContentDatabase` already contains those system conditions, and that campaign
+creators have ready-made templates for resurrection items and spells.
+
+### Problem Statement
+
+After Phase 2, the domain layer correctly used `"unconscious"` and `"dead"`
+`ActiveCondition` entries at runtime. However:
+
+- A campaign whose `conditions.ron` omits either entry would silently break
+  0-HP handling — `ContentDatabase::validate()` raised no error.
+- Tests and SDK tooling that called `ContentDatabase::new()` directly had no
+  system conditions in the database, making validation checks meaningless for
+  programmatic workflows.
+- There was no canonical `resurrection_scroll()` template for campaign
+  creators to start from.
+- Neither the test-campaign nor the tutorial campaign had a `"raise_dead"`
+  spell with `resurrect_hp: Some(1)` in their `spells.ron` fixtures.
+
+### Files Changed
+
+| File                                 | Change                                                                                                                                                                                                                               |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/sdk/database.rs`                | `ConditionDatabase::new()` pre-populates system conditions; `load_from_file` returns a truly empty DB for missing files; `ContentDatabase::validate()` checks for required system conditions; updated stale tests; added 5 new tests |
+| `src/sdk/templates.rs`               | Added `resurrection_scroll()` and `resurrection_scroll_with_hp()` template functions; added 2 new tests                                                                                                                              |
+| `data/test_campaign/data/spells.ron` | Added `"Raise Dead"` spell (id 776, `resurrect_hp: Some(1)`)                                                                                                                                                                         |
+| `campaigns/tutorial/data/spells.ron` | Added `"Raise Dead"` spell (id 776, `resurrect_hp: Some(1)`)                                                                                                                                                                         |
+
+---
+
+### 3.1 — `ContentDatabase::validate()` system-condition checks (`src/sdk/database.rs`)
+
+Added at the end of `validate()`, before the final `Ok(())`:
+
+```rust
+for required_id in &["unconscious", "dead"] {
+    if !self.conditions.has_condition(&required_id.to_string()) {
+        return Err(DatabaseError::ValidationError(format!(
+            "Campaign is missing required system condition '{}'. \
+             Characters at 0 HP will not behave correctly.",
+            required_id
+        )));
+    }
+}
+```
+
+Missing system conditions are treated as **errors** (not warnings) because
+their absence causes silent runtime bugs in HP-damage and death-state handling.
+
+---
+
+### 3.2 — `ConditionDatabase::new()` pre-populates system conditions (`src/sdk/database.rs`)
+
+`ConditionDatabase::new()` now inserts `"unconscious"` and `"dead"` into the
+map before returning:
+
+```rust
+pub fn new() -> Self {
+    use crate::domain::conditions::{ConditionDuration, ConditionEffect};
+    let mut db = Self { conditions: HashMap::new() };
+    let system_conditions = vec![
+        ConditionDefinition {
+            id: "unconscious".to_string(), name: "Unconscious".to_string(),
+            effects: vec![ConditionEffect::StatusEffect("unconscious".to_string())],
+            default_duration: ConditionDuration::Permanent,
+            icon_id: Some("icon_unconscious".to_string()), ..
+        },
+        ConditionDefinition {
+            id: "dead".to_string(), name: "Dead".to_string(),
+            effects: vec![ConditionEffect::StatusEffect("dead".to_string())],
+            default_duration: ConditionDuration::Permanent,
+            icon_id: Some("icon_dead".to_string()), ..
+        },
+    ];
+    for c in system_conditions { db.conditions.insert(c.id.clone(), c); }
+    db
+}
+```
+
+Because `ContentDatabase::new()` calls `ConditionDatabase::new()`, every
+fresh `ContentDatabase` already has the two system conditions and passes
+`validate()` without needing a `conditions.ron` file.
+
+**`load_from_file` for missing files** was changed to return a truly empty
+database (`Self { conditions: HashMap::new() }`) rather than calling
+`Self::new()`. This ensures that a campaign whose `conditions.ron` does not
+exist is detected by `validate()` instead of silently inheriting the
+pre-populated defaults.
+
+**Updated existing tests** (`test_content_database_new`,
+`test_content_database_default`, `test_condition_database_new`) to reflect the
+new baseline of 2 pre-populated conditions.
+
+---
+
+### 3.3 — `resurrection_scroll()` template (`src/sdk/templates.rs`)
+
+Two new public template functions follow the same pattern as `healing_potion()`:
+
+```rust
+/// Creates a resurrection scroll that restores 1 HP (not combat-usable).
+pub fn resurrection_scroll(id: ItemId, name: &str) -> Item {
+    resurrection_scroll_with_hp(id, name, 1)
+}
+
+/// Creates a resurrection scroll that restores `hp` hit points.
+pub fn resurrection_scroll_with_hp(id: ItemId, name: &str, hp: u16) -> Item {
+    Item {
+        item_type: ItemType::Consumable(ConsumableData {
+            effect: ConsumableEffect::Resurrect(hp),
+            is_combat_usable: false,
+            duration_minutes: None,
+        }),
+        base_cost: 1000,
+        sell_cost: 500,
+        ..
+    }
+}
+```
+
+The scroll is intentionally **not combat-usable** by default; campaign authors
+can override this. The base cost (1 000 gold) reflects the rarity of
+resurrection magic.
+
+---
+
+### 3.4 — `"Raise Dead"` spell in both `spells.ron` fixtures
+
+Appended to `data/test_campaign/data/spells.ron` and
+`campaigns/tutorial/data/spells.ron`:
+
+```ron
+(
+    id: 776,
+    name: "Raise Dead",
+    school: Cleric,
+    level: 5,
+    sp_cost: 15,
+    gem_cost: 2,
+    context: Anytime,
+    target: SingleCharacter,
+    description: "Resurrects a dead character to 1 HP.",
+    damage: None,
+    duration: 0,
+    saving_throw: false,
+    applied_conditions: [],
+    resurrect_hp: Some(1),
+),
+```
+
+**ID rationale:** Existing Cleric L1–L3 spells occupy IDs 257–775
+(0x0101–0x0307). ID 776 (0x0308) is the first unused slot immediately after
+the last Cleric L3 spell (775 = 0x0307), making it a natural extension point.
+The plan-suggested ID 0x0105 (261) was already occupied by "Light". The
+`resurrect_hp` field defaults to `None` via `#[serde(default)]`, so all
+existing spell entries are unaffected.
+
+---
+
+### Complete Test Matrix (Phase 3)
+
+| Test name                                              | File           | Verifies                                                                          |
+| ------------------------------------------------------ | -------------- | --------------------------------------------------------------------------------- |
+| `test_default_condition_database_includes_unconscious` | `database.rs`  | `ConditionDatabase::new()` contains `"unconscious"` with correct name             |
+| `test_default_condition_database_includes_dead`        | `database.rs`  | `ConditionDatabase::new()` contains `"dead"` with correct name                    |
+| `test_validate_warns_missing_unconscious`              | `database.rs`  | `validate()` returns `Err` containing `"unconscious"` when condition is absent    |
+| `test_validate_warns_missing_dead`                     | `database.rs`  | `validate()` returns `Err` containing `"dead"` when condition is absent           |
+| `test_raise_dead_spell_loads_from_test_campaign`       | `database.rs`  | `spells.ron` contains spell 776 with `resurrect_hp: Some(1)`, level 5, gem_cost 2 |
+| `test_resurrection_scroll_template`                    | `templates.rs` | `resurrection_scroll()` returns `Resurrect(1)`, not combat-usable, positive costs |
+| `test_resurrection_scroll_with_hp_template`            | `templates.rs` | `resurrection_scroll_with_hp(…, 5)` returns `Resurrect(5)`                        |
+
+---
+
+### Architecture Compliance
+
+| Rule                                                                | Compliance                                                                                                          |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `ConditionDatabase::new()` pre-populates; `load_from_file` does not | Programmatic databases are safe; loaded databases can still fail validation if they omit system conditions          |
+| Domain layer does not enforce conditions                            | Validation is SDK-layer only; domain code never reads from `ConditionDatabase` at runtime                           |
+| `#[serde(default)]` backward compatibility                          | `resurrect_hp` field on `Spell` already had `#[serde(default)]`; all existing RON spell entries load without change |
+| Templates follow existing patterns                                  | `resurrection_scroll()` matches the signature and field layout of `healing_potion()`                                |
+| Test data in `data/`, not `campaigns/tutorial`                      | Spell added to both, with `data/test_campaign/data/spells.ron` as the primary test fixture                          |
+
+### Quality Gate Results
+
+| Gate                                                       | Result                           |
+| ---------------------------------------------------------- | -------------------------------- |
+| `cargo fmt --all`                                          | ✅ PASS                          |
+| `cargo check --all-targets --all-features`                 | ✅ PASS                          |
+| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ PASS                          |
+| `cargo nextest run --all-features`                         | ✅ PASS — 3739 passed, 8 skipped |
+
+---
+
 ## Phase 2: Core Dead Condition (Complete)
 
 ### Overview
