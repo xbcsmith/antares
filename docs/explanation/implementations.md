@@ -1,5 +1,190 @@
 # Implementations
 
+## Phase 4: NPC Temple/Priest Resurrection Service (Complete)
+
+### Overview
+
+Phase 4 adds the application-layer transaction and UI that allow players to
+visit a priest NPC at a temple and spend gold and gems to resurrect dead party
+members. It builds directly on the domain primitives established in Phases 1–3
+(`revive_from_dead`, `Condition::is_dead`, `check_permadeath_allows_resurrection`).
+
+### Problem Statement
+
+After Phase 3, all the domain and SDK plumbing for death and resurrection was in
+place, but there was no way for a player to actually trigger a resurrection during
+normal gameplay. Specifically:
+
+- No NPC in either campaign had `is_priest: true` combined with a `"raise_dead"`
+  service catalog entry.
+- There was no application-layer function that wired together NPC lookup, resource
+  checks, permadeath enforcement, and `revive_from_dead` in a single atomic call.
+- There was no UI plugin for the temple service flow.
+
+### Files Changed
+
+| File                               | Change                                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/application/mod.rs`           | Added `TempleServiceState` struct and `GameMode::TempleService(TempleServiceState)` variant             |
+| `src/application/resources.rs`     | Added `perform_resurrection_service` with 7 tests                                                       |
+| `src/game/systems/temple_ui.rs`    | New file — `TemplePlugin`, events, systems, `visible_dead_members` helper, 10 tests                     |
+| `src/game/systems/mod.rs`          | Added `pub mod temple_ui;`                                                                              |
+| `src/bin/antares.rs`               | Registered `TemplePlugin`                                                                               |
+| `campaigns/tutorial/data/npcs.ron` | Set `is_priest: true` + `raise_dead` service on `tutorial_priest_town2` and `tutorial_priestess_town`   |
+| `data/test_campaign/data/npcs.ron` | Added `temple_priest` fixture NPC; set `is_priest: true` + `raise_dead` service on existing priest NPCs |
+| `src/sdk/database.rs`              | Added `test_temple_npc_has_raise_dead_service` test                                                     |
+
+---
+
+### 4.1 — NPC Data (`campaigns/tutorial/data/npcs.ron`, `data/test_campaign/data/npcs.ron`)
+
+Both `tutorial_priest_town2` and `tutorial_priestess_town` now have:
+
+```ron
+is_priest: true,
+service_catalog: Some((
+    services: [
+        (
+            service_id: "raise_dead",
+            cost: 500,
+            gem_cost: 1,
+            description: "Resurrect a dead party member for 500 gold and 1 gem.",
+        ),
+    ],
+)),
+```
+
+The test campaign also gains a dedicated `"temple_priest"` fixture NPC with the
+same service entry, making it easy for tests to build against a stable ID.
+
+---
+
+### 4.2 — `TempleServiceState` (`src/application/mod.rs`)
+
+```rust
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TempleServiceState {
+    pub npc_id: String,
+    pub selected_member_index: Option<usize>,
+    pub status_message: Option<String>,
+}
+```
+
+Stored inside `GameMode::TempleService(TempleServiceState)`. The `status_message`
+field is written by the action system with success or error text so the UI can
+display it without a separate Bevy resource.
+
+---
+
+### 4.3 — `perform_resurrection_service` (`src/application/resources.rs`)
+
+```rust
+pub fn perform_resurrection_service(
+    game_state: &mut GameState,
+    npc_id: &str,
+    character_index: usize,
+    content: &ContentDatabase,
+) -> Result<(), String>
+```
+
+Atomic 8-step transaction:
+
+1. Look up NPC by `npc_id`; error if absent.
+2. Locate the `"raise_dead"` service in the NPC's `service_catalog`; clone it to
+   release the immutable `content` borrow before mutating `game_state`.
+3. Call `check_permadeath_allows_resurrection` on `campaign_config`; return `Err`
+   if permadeath is enabled.
+4. Verify `party.members[character_index]` exists and `conditions.is_dead()`;
+   return `Err` otherwise (stone/eradicated characters are not considered dead).
+5. Check `party.gold >= service.cost`; return `Err("Insufficient gold …")` if not.
+6. Check `party.gems >= service.gem_cost`; return `Err("Insufficient gems …")` if not.
+7. Deduct gold and gems.
+8. Call `revive_from_dead(character, 1)`.
+
+All preconditions are checked before any state mutation, so failed calls leave
+`game_state` unchanged.
+
+---
+
+### 4.4 — `TemplePlugin` and temple UI (`src/game/systems/temple_ui.rs`)
+
+Follows the exact structural pattern of `inn_ui.rs`:
+
+| Symbol                     | Purpose                                                                 |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `TempleUiRoot`             | Marker `Component` for the UI root entity                               |
+| `TemplePlugin`             | Registers events and systems                                            |
+| `TempleResurrectCharacter` | Event — resurrect party member at `character_index`                     |
+| `ExitTemple`               | Event — return to `GameMode::Exploration`                               |
+| `SelectTempleMember`       | Event — highlight a member in the dead-member list                      |
+| `TempleNavState`           | `Resource` — keyboard focus index and exit-button focus flag            |
+| `temple_ui_system`         | egui panel: list dead members with cost; show status message            |
+| `temple_selection_system`  | Applies `SelectTempleMember` events to `TempleServiceState`             |
+| `temple_action_system`     | Calls `perform_resurrection_service`; writes result to `status_message` |
+| `temple_input_system`      | Arrow keys navigate list; Enter/Space confirms; Escape exits            |
+| `visible_dead_members`     | Pure helper — filters `party.members` to those where `is_dead()`        |
+
+The UI renders only when `GameMode::TempleService(_)` is active and lists only
+members where `Condition::is_dead()` is `true` — stone and eradicated characters
+are excluded automatically.
+
+---
+
+### Complete Test Matrix (Phase 4)
+
+| Test                                                      | File           | Verifies                                                  |
+| --------------------------------------------------------- | -------------- | --------------------------------------------------------- |
+| `test_perform_resurrection_service_success`               | `resources.rs` | Gold/gems deducted; character revived to 1 HP             |
+| `test_perform_resurrection_service_insufficient_gold`     | `resources.rs` | `Err("Insufficient gold")` when gold < cost               |
+| `test_perform_resurrection_service_insufficient_gems`     | `resources.rs` | `Err("Insufficient gems")` when gems < gem_cost           |
+| `test_perform_resurrection_service_target_not_dead`       | `resources.rs` | `Err("not dead")` when character is alive                 |
+| `test_perform_resurrection_service_npc_not_found`         | `resources.rs` | `Err("not found")` for unknown NPC ID                     |
+| `test_perform_resurrection_service_no_raise_dead_service` | `resources.rs` | `Err("raise_dead")` when NPC lacks the service            |
+| `test_perform_resurrection_service_permadeath`            | `resources.rs` | `Err("permadeath")` when campaign permadeath is enabled   |
+| `test_perform_resurrection_service_zero_cost_succeeds`    | `resources.rs` | Zero-cost service succeeds with empty treasury            |
+| `test_temple_npc_has_raise_dead_service`                  | `database.rs`  | `temple_priest` in test campaign has `raise_dead` service |
+| `test_temple_ui_shows_dead_members_only`                  | `temple_ui.rs` | `visible_dead_members` includes only `is_dead()` members  |
+| `test_temple_ui_does_not_show_eradicated`                 | `temple_ui.rs` | Stone and eradicated chars excluded from visible list     |
+| `test_visible_dead_members_empty_party`                   | `temple_ui.rs` | Empty party → empty list                                  |
+| `test_visible_dead_members_all_alive`                     | `temple_ui.rs` | All-living party → empty list                             |
+| `test_visible_dead_members_all_dead`                      | `temple_ui.rs` | All-dead party → full list                                |
+| `test_visible_dead_members_correct_party_indices`         | `temple_ui.rs` | Returned indices map to correct `party.members` slots     |
+| `test_temple_service_state_new`                           | `temple_ui.rs` | `TempleServiceState::new` has sane defaults               |
+| `test_temple_service_state_clear`                         | `temple_ui.rs` | `clear()` resets selection and message but keeps `npc_id` |
+| `test_game_mode_temple_service_variant`                   | `temple_ui.rs` | `GameMode::TempleService` is matchable                    |
+| `test_temple_plugin_builds`                               | `temple_ui.rs` | Plugin registers without panic                            |
+
+---
+
+### Architecture Compliance
+
+- `perform_resurrection_service` lives in the **application layer** (not domain)
+  because it reads `CampaignConfig.permadeath` and touches both party resources
+  and character conditions simultaneously — exactly the cross-cutting concern the
+  application layer is designed for.
+- `visible_dead_members` is a pure function with no Bevy dependency; it can be
+  called in any context and is fully unit-tested without a running `App`.
+- `TempleServiceState` is `Serialize + Deserialize` so save games captured while
+  the temple UI is open round-trip correctly.
+- Stone and eradicated characters are silently excluded from the resurrection list
+  because `Condition::is_dead()` returns `false` for those condition values —
+  no special-case logic is required in the UI.
+
+### Quality Gate Results
+
+```
+cargo fmt --all                              ✓ zero diffs
+cargo check --all-targets --all-features    ✓ zero errors, zero warnings
+cargo clippy --all-targets -- -D warnings   ✓ zero warnings
+cargo nextest run --all-features            ✓ 3757/3758 passed
+                                              (1 pre-existing flaky timing test
+                                               unrelated to Phase 4)
+```
+
+New test count: **+19 tests** (8 in `resources.rs`, 1 in `database.rs`, 10 in `temple_ui.rs`).
+
+---
+
 ## Phase 3: SDK Validation and Content Database Defaults (Complete)
 
 ### Overview

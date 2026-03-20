@@ -1,5 +1,29 @@
 [
     (
+        id: "temple_priest",
+        name: "Temple Priest",
+        description: "A devoted priest of the temple who can restore life to the fallen for a price.",
+        portrait_id: "priest_1",
+        dialogue_id: None,
+        creature_id: Some(54),
+        sprite: None,
+        quest_ids: [],
+        faction: Some("Temple"),
+        is_merchant: false,
+        is_innkeeper: false,
+        is_priest: true,
+        service_catalog: Some((
+            services: [
+                (
+                    service_id: "raise_dead",
+                    cost: 500,
+                    gem_cost: 1,
+                    description: "Resurrect a dead party member for 500 gold and 1 gem.",
+                ),
+            ],
+        )),
+    ),
+    (
         id: "tutorial_elder_village",
         name: "Village Elder Town Square",
         description: "The wise elder of the village who can provide quests and local lore.",
@@ -52,6 +76,17 @@
         faction: Some("Temple"),
         is_merchant: false,
         is_innkeeper: false,
+        is_priest: true,
+        service_catalog: Some((
+            services: [
+                (
+                    service_id: "raise_dead",
+                    cost: 500,
+                    gem_cost: 1,
+                    description: "Resurrect a dead party member for 500 gold and 1 gem.",
+                ),
+            ],
+        )),
     ),
     (
         id: "tutorial_wizard_arcturus",
@@ -153,6 +188,17 @@
         faction: Some("Temple"),
         is_merchant: false,
         is_innkeeper: false,
+        is_priest: true,
+        service_catalog: Some((
+            services: [
+                (
+                    service_id: "raise_dead",
+                    cost: 500,
+                    gem_cost: 1,
+                    description: "Resurrect a dead party member for 500 gold and 1 gem.",
+                ),
+            ],
+        )),
     ),
     (
         id: "tutorial_goblin_dying",

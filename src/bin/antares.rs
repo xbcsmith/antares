@@ -257,6 +257,7 @@ impl Plugin for AntaresPlugin {
         app.add_plugins(antares::game::systems::dialogue::DialoguePlugin);
         app.add_plugins(antares::game::systems::quest::QuestPlugin);
         app.add_plugins(antares::game::systems::inn_ui::InnUiPlugin);
+        app.add_plugins(antares::game::systems::temple_ui::TemplePlugin);
         app.add_plugins(antares::game::systems::inventory_ui::InventoryPlugin);
         app.add_plugins(antares::game::systems::merchant_inventory_ui::MerchantInventoryPlugin);
         app.add_plugins(antares::game::systems::container_inventory_ui::ContainerInventoryPlugin);

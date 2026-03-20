@@ -3635,4 +3635,91 @@ mod tests {
             "Trail Ration quantity in initialized MerchantStock must be > 0"
         );
     }
+
+    /// Phase 4: Verify that the test-campaign priest NPC has a `service_catalog`
+    /// containing the `"raise_dead"` service.
+    ///
+    /// This test satisfies the Phase 4.4 requirement:
+    /// `test_temple_npc_has_raise_dead_service` — Test campaign priest NPC has
+    /// `service_catalog` with `"raise_dead"`.
+    #[test]
+    fn test_temple_npc_has_raise_dead_service() {
+        let path = "data/test_campaign/data/npcs.ron";
+
+        if !std::path::Path::new(path).exists() {
+            return;
+        }
+
+        let db = NpcDatabase::load_from_file(path)
+            .expect("Failed to load data/test_campaign/data/npcs.ron");
+
+        // The dedicated fixture priest must exist
+        let priest = db
+            .get_npc("temple_priest")
+            .expect("temple_priest NPC not found in test campaign");
+
+        // Must be marked as a priest
+        assert!(
+            priest.is_priest,
+            "temple_priest must have is_priest == true"
+        );
+
+        // Must have a service catalog
+        let catalog = priest
+            .service_catalog
+            .as_ref()
+            .expect("temple_priest must have a service_catalog");
+
+        // The catalog must contain the raise_dead service
+        assert!(
+            catalog.has_service("raise_dead"),
+            "temple_priest service_catalog must contain 'raise_dead'"
+        );
+
+        // Verify cost and gem_cost of the raise_dead service
+        let service = catalog
+            .get_service("raise_dead")
+            .expect("raise_dead service must be retrievable");
+
+        assert!(
+            service.cost > 0,
+            "raise_dead service must have a non-zero gold cost"
+        );
+        assert!(
+            service.gem_cost >= 1,
+            "raise_dead service must require at least 1 gem"
+        );
+
+        // Also verify that the existing tutorial priest NPCs now have raise_dead
+        let priest2 = db.get_npc("tutorial_priestess_town");
+        if let Some(p) = priest2 {
+            if let Some(cat) = &p.service_catalog {
+                assert!(
+                    cat.has_service("raise_dead"),
+                    "tutorial_priestess_town should have raise_dead service"
+                );
+            }
+        }
+
+        let priest3 = db.get_npc("tutorial_priest_town2");
+        if let Some(p) = priest3 {
+            if let Some(cat) = &p.service_catalog {
+                assert!(
+                    cat.has_service("raise_dead"),
+                    "tutorial_priest_town2 should have raise_dead service"
+                );
+            }
+        }
+
+        // Verify the NpcDatabase::priests() filter works for the test campaign
+        let priests = db.priests();
+        assert!(
+            !priests.is_empty(),
+            "test campaign must have at least one priest NPC"
+        );
+        assert!(
+            priests.iter().any(|p| p.id == "temple_priest"),
+            "NpcDatabase::priests() must include temple_priest"
+        );
+    }
 }
