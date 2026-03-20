@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! HUD (Heads-Up Display) system for party status visualization
@@ -8,6 +8,7 @@
 //! - HP bars with color-coded health states and overlay text
 //! - HP values (current/max format) as text overlay on HP bar
 //! - Active condition indicators with emoji and color coding
+//! - Mini map, compass, and clock widgets in a consolidated top-right panel
 //!
 //! The HUD uses a horizontal strip layout at the bottom of the screen.
 //! Card count is dynamic and matches party size (1-6 members).
@@ -16,10 +17,12 @@
 use crate::application::GameMode;
 use crate::domain::character::{Condition, PARTY_MAX_SIZE};
 use crate::domain::conditions::ActiveCondition;
-use crate::domain::types::Direction;
+use crate::domain::types::{Direction, Position};
 use crate::game::components::inventory::{CharacterEntity, PartyEntities};
 use crate::game::resources::GlobalState;
+use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use std::collections::HashMap;
 use tracing::{debug, warn};
 
@@ -75,6 +78,17 @@ pub const COMPASS_BORDER_COLOR: Color = Color::srgba(0.4, 0.4, 0.4, 1.0);
 pub const COMPASS_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 1.0);
 pub const COMPASS_FONT_SIZE: f32 = 24.0;
 
+// Mini map display constants
+pub const MINI_MAP_SIZE_PX: f32 = 80.0;
+pub const MINI_MAP_VIEWPORT_RADIUS: u32 = 6;
+pub const MINI_MAP_TILE_PX: f32 = 6.0;
+pub const MINI_MAP_BG_COLOR: Color = Color::srgba(0.05, 0.05, 0.05, 0.9);
+pub const MINI_MAP_VISITED_FLOOR: [u8; 4] = [100, 100, 100, 255];
+pub const MINI_MAP_WALL: [u8; 4] = [60, 60, 60, 255];
+pub const MINI_MAP_PLAYER: [u8; 4] = [255, 255, 255, 255];
+pub const MINI_MAP_UNVISITED: [u8; 4] = [0, 0, 0, 0];
+pub const MINI_MAP_NPC_COLOR: [u8; 4] = [0, 200, 100, 255];
+
 // Clock display constants
 /// Font size used for both time and day lines in the clock widget
 pub const CLOCK_FONT_SIZE: f32 = 14.0;
@@ -105,6 +119,10 @@ pub const PORTRAIT_PLACEHOLDER_COLOR: Color = Color::srgba(0.3, 0.3, 0.4, 1.0);
 /// Marker component for the HUD root container
 #[derive(Component)]
 pub struct HudRoot;
+
+/// Marker component for the consolidated top-right panel container
+#[derive(Component)]
+pub struct TopRightPanel;
 
 /// Marker component for a character card in the HUD
 #[derive(Component)]
@@ -139,6 +157,14 @@ pub struct ConditionText {
 pub struct HpTextOverlay {
     pub party_index: usize,
 }
+
+/// Marker component for the mini map container
+#[derive(Component)]
+pub struct MiniMapRoot;
+
+/// Marker component for the mini map image node
+#[derive(Component)]
+pub struct MiniMapCanvas;
 
 /// Marker component for the compass container
 #[derive(Component)]
@@ -180,6 +206,24 @@ pub struct PortraitAssets {
     pub loaded_for_campaign: Option<String>,
 }
 
+/// Dynamic image handle used by the HUD mini map widget.
+///
+/// The image is created at startup and rewritten in-place each frame while the
+/// party is exploring. The UI `ImageNode` uses this handle directly.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::MINI_MAP_SIZE_PX;
+///
+/// assert_eq!(MINI_MAP_SIZE_PX as u32, 80);
+/// ```
+#[derive(Resource, Clone)]
+pub struct MiniMapImage {
+    /// Handle to the dynamic RGBA8 image used by the mini map canvas.
+    pub handle: Handle<Image>,
+}
+
 // ===== Plugin =====
 
 pub struct HudPlugin;
@@ -187,7 +231,11 @@ pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PortraitAssets::default())
-            .add_systems(Startup, (setup_hud, setup_party_entities))
+            .init_resource::<Assets<Image>>()
+            .add_systems(
+                Startup,
+                (initialize_mini_map_image, setup_hud, setup_party_entities).chain(),
+            )
             // update_hud must run during combat too so party HP bars reflect live
             // damage.  The exploration-only overlays (compass, clock, portraits) stay
             // gated so they don't render on top of the combat HUD.
@@ -196,6 +244,7 @@ impl Plugin for HudPlugin {
                 Update,
                 (
                     ensure_portraits_loaded,
+                    update_mini_map,
                     update_compass,
                     update_clock,
                     update_portraits,
@@ -243,6 +292,33 @@ fn setup_party_entities(mut commands: Commands) {
 
 // ===== Systems =====
 
+/// Creates the dynamic image resource backing the HUD mini map.
+///
+/// The image is an `RGBA8` texture sized to `MINI_MAP_SIZE_PX × MINI_MAP_SIZE_PX`
+/// and initialized fully transparent so fog-of-war is hidden until map data is
+/// rendered into it.
+///
+/// # Arguments
+///
+/// * `commands` - Bevy command buffer used to insert the resource
+/// * `images` - Asset storage for image creation
+fn initialize_mini_map_image(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    let size = mini_map_image_size();
+    let image = Image::new_fill(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &vec![0; (size * size * 4) as usize],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::all(),
+    );
+    let handle = images.add(image);
+    commands.insert_resource(MiniMapImage { handle });
+}
+
 /// Sets up the HUD UI hierarchy (runs once at startup)
 ///
 /// Creates the HUD container and character card slots using Bevy's
@@ -250,7 +326,8 @@ fn setup_party_entities(mut commands: Commands) {
 ///
 /// # Arguments
 /// * `commands` - Bevy command buffer for spawning entities
-fn setup_hud(mut commands: Commands) {
+/// * `mini_map_image` - Dynamic image handle used by the mini map canvas
+fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
     commands
         .spawn((
             Node {
@@ -363,78 +440,109 @@ fn setup_hud(mut commands: Commands) {
             }
         });
 
-    // Spawn compass display
+    // Spawn consolidated top-right panel containing mini map, compass, and clock.
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(20.0),
                 top: Val::Px(20.0),
-                width: Val::Px(COMPASS_SIZE),
-                height: Val::Px(COMPASS_SIZE),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(COMPASS_BACKGROUND_COLOR),
-            CompassRoot,
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text::new("N"),
-                TextFont {
-                    font_size: COMPASS_FONT_SIZE,
-                    ..default()
-                },
-                TextColor(COMPASS_TEXT_COLOR),
-                CompassText,
-            ));
-        });
-
-    // Spawn clock display (below the compass)
-    //
-    // The clock sits directly below the compass in a vertical flex column,
-    // anchored to the same right edge. It shows two lines: the current
-    // time ("HH:MM") and the current day ("Day N").
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
                 right: Val::Px(20.0),
-                top: Val::Px(CLOCK_TOP_OFFSET),
-                width: Val::Px(CLOCK_WIDTH),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::all(Val::Px(CLOCK_PADDING)),
-                row_gap: Val::Px(2.0),
+                row_gap: Val::Px(4.0),
                 ..default()
             },
-            BackgroundColor(CLOCK_BACKGROUND_COLOR),
-            ClockRoot,
+            BackgroundColor(Color::NONE),
+            TopRightPanel,
         ))
-        .with_children(|parent| {
-            // Time line: "HH:MM"
-            parent.spawn((
-                Text::new("00:00"),
-                TextFont {
-                    font_size: CLOCK_FONT_SIZE,
-                    ..default()
-                },
-                TextColor(CLOCK_DAY_TEXT_COLOR),
-                ClockTimeText,
-            ));
+        .with_children(|panel| {
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Px(MINI_MAP_SIZE_PX),
+                        height: Val::Px(MINI_MAP_SIZE_PX),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        padding: UiRect::all(Val::Px(0.0)),
+                        ..default()
+                    },
+                    BackgroundColor(MINI_MAP_BG_COLOR),
+                    MiniMapRoot,
+                ))
+                .with_children(|mini_map| {
+                    mini_map.spawn((
+                        Node {
+                            width: Val::Px(MINI_MAP_SIZE_PX),
+                            height: Val::Px(MINI_MAP_SIZE_PX),
+                            ..default()
+                        },
+                        ImageNode::new(mini_map_image.handle.clone()),
+                        MiniMapCanvas,
+                    ));
+                });
 
-            // Date line: "Y1 M1 D1"
-            parent.spawn((
-                Text::new("Y1 M1 D1"),
-                TextFont {
-                    font_size: CLOCK_FONT_SIZE,
-                    ..default()
-                },
-                TextColor(CLOCK_TEXT_COLOR),
-                ClockDateText,
-            ));
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Px(COMPASS_SIZE),
+                        height: Val::Px(COMPASS_SIZE),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(COMPASS_BACKGROUND_COLOR),
+                    CompassRoot,
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new("N"),
+                        TextFont {
+                            font_size: COMPASS_FONT_SIZE,
+                            ..default()
+                        },
+                        TextColor(COMPASS_TEXT_COLOR),
+                        CompassText,
+                    ));
+                });
+
+            panel
+                .spawn((
+                    Node {
+                        display: Display::None,
+                        width: Val::Px(CLOCK_WIDTH),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        padding: UiRect::all(Val::Px(CLOCK_PADDING)),
+                        row_gap: Val::Px(2.0),
+                        ..default()
+                    },
+                    BackgroundColor(CLOCK_BACKGROUND_COLOR),
+                    ClockRoot,
+                ))
+                .with_children(|parent| {
+                    // Time line: "HH:MM"
+                    parent.spawn((
+                        Text::new("00:00"),
+                        TextFont {
+                            font_size: CLOCK_FONT_SIZE,
+                            ..default()
+                        },
+                        TextColor(CLOCK_DAY_TEXT_COLOR),
+                        ClockTimeText,
+                    ));
+
+                    // Date line: "Y1 M1 D1"
+                    parent.spawn((
+                        Text::new("Y1 M1 D1"),
+                        TextFont {
+                            font_size: CLOCK_FONT_SIZE,
+                            ..default()
+                        },
+                        TextColor(CLOCK_TEXT_COLOR),
+                        ClockDateText,
+                    ));
+                });
         });
 }
 
@@ -528,6 +636,91 @@ fn update_hud(
         } else {
             **text = String::new();
         }
+    }
+}
+
+/// Updates the mini map image with the currently-visible world viewport.
+///
+/// The mini map is centered on the party and renders visited floor tiles,
+/// walls, the party marker, and discovered NPC dots. Unvisited or
+/// out-of-bounds tiles remain transparent.
+///
+/// # Arguments
+///
+/// * `global_state` - Game state containing world and party position
+/// * `mini_map_image` - Dynamic image handle resource
+/// * `images` - Asset storage containing the writable mini map image
+fn update_mini_map(
+    global_state: Res<GlobalState>,
+    mini_map_image: Res<MiniMapImage>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let Some(map) = global_state.0.world.get_current_map() else {
+        return;
+    };
+
+    let Some(image) = images.get_mut(&mini_map_image.handle) else {
+        return;
+    };
+
+    let size = mini_map_image_size();
+    let player_pos = global_state.0.world.party_position;
+    let viewport_diameter = mini_map_viewport_diameter() as i32;
+    let pixel_scale = mini_map_pixels_per_tile() as i32;
+    let center_tile_index = (viewport_diameter / 2).min(viewport_diameter.saturating_sub(1));
+
+    image.data = Some(vec![0; (size * size * 4) as usize]);
+
+    let Some(data) = image.data.as_mut() else {
+        return;
+    };
+
+    for tile_y in 0..viewport_diameter {
+        for tile_x in 0..viewport_diameter {
+            let world_x = player_pos.x + tile_x - center_tile_index;
+            let world_y = player_pos.y + tile_y - center_tile_index;
+            let world_pos = Position::new(world_x, world_y);
+
+            let color = if !map.is_valid_position(world_pos) {
+                MINI_MAP_UNVISITED
+            } else if let Some(tile) = map.get_tile(world_pos) {
+                if !tile.visited {
+                    MINI_MAP_UNVISITED
+                } else if world_pos == player_pos {
+                    MINI_MAP_PLAYER
+                } else if tile.is_blocked() {
+                    MINI_MAP_WALL
+                } else {
+                    MINI_MAP_VISITED_FLOOR
+                }
+            } else {
+                MINI_MAP_UNVISITED
+            };
+
+            fill_mini_map_tile(data, tile_x, tile_y, color, size, pixel_scale);
+        }
+    }
+
+    for npc in &map.npc_placements {
+        let dx = npc.position.x - player_pos.x;
+        let dy = npc.position.y - player_pos.y;
+        let radius = MINI_MAP_VIEWPORT_RADIUS as i32;
+
+        if dx.abs() > radius || dy.abs() > radius {
+            continue;
+        }
+
+        let Some(tile) = map.get_tile(npc.position) else {
+            continue;
+        };
+
+        if !tile.visited {
+            continue;
+        }
+
+        let tile_x = dx + center_tile_index;
+        let tile_y = dy + center_tile_index;
+        fill_mini_map_npc_dot(data, tile_x, tile_y, size, pixel_scale);
     }
 }
 
@@ -920,6 +1113,133 @@ fn ensure_portraits_loaded(
 // so the dedicated absolute-path helper is no longer needed.
 
 // ===== Helper Functions =====
+
+/// Returns the dynamic mini map image size in pixels.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::mini_map_image_size;
+///
+/// assert_eq!(mini_map_image_size(), 80);
+/// ```
+pub fn mini_map_image_size() -> u32 {
+    MINI_MAP_SIZE_PX as u32
+}
+
+/// Returns the mini map viewport diameter in tiles.
+///
+/// This is `radius * 2 + 1`, which keeps the player centered in the viewport.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::mini_map_viewport_diameter;
+///
+/// assert_eq!(mini_map_viewport_diameter(), 13);
+/// ```
+pub fn mini_map_viewport_diameter() -> u32 {
+    MINI_MAP_VIEWPORT_RADIUS * 2 + 1
+}
+
+/// Returns the number of pixels used to render one mini map tile.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::mini_map_pixels_per_tile;
+///
+/// assert_eq!(mini_map_pixels_per_tile(), 6);
+/// ```
+pub fn mini_map_pixels_per_tile() -> u32 {
+    MINI_MAP_TILE_PX as u32
+}
+
+/// Returns the starting byte offset of a pixel inside an RGBA8 mini map buffer.
+///
+/// # Arguments
+///
+/// * `x` - Pixel x coordinate
+/// * `y` - Pixel y coordinate
+/// * `image_size` - Width/height of the square image in pixels
+pub fn mini_map_pixel_offset(x: u32, y: u32, image_size: u32) -> usize {
+    ((y * image_size + x) * 4) as usize
+}
+
+/// Writes a solid-colored tile-sized block into the mini map pixel buffer.
+pub fn fill_mini_map_tile(
+    data: &mut [u8],
+    tile_x: i32,
+    tile_y: i32,
+    color: [u8; 4],
+    image_size: u32,
+    pixel_scale: i32,
+) {
+    if tile_x < 0 || tile_y < 0 || pixel_scale <= 0 {
+        return;
+    }
+
+    let start_x = tile_x * pixel_scale;
+    let start_y = tile_y * pixel_scale;
+
+    for py in 0..pixel_scale {
+        for px in 0..pixel_scale {
+            let x = start_x + px;
+            let y = start_y + py;
+
+            if x < 0 || y < 0 {
+                continue;
+            }
+
+            let x = x as u32;
+            let y = y as u32;
+
+            if x >= image_size || y >= image_size {
+                continue;
+            }
+
+            let offset = mini_map_pixel_offset(x, y, image_size);
+            data[offset..offset + 4].copy_from_slice(&color);
+        }
+    }
+}
+
+/// Writes a 2×2 NPC marker inside the tile cell on the mini map.
+pub fn fill_mini_map_npc_dot(
+    data: &mut [u8],
+    tile_x: i32,
+    tile_y: i32,
+    image_size: u32,
+    pixel_scale: i32,
+) {
+    if tile_x < 0 || tile_y < 0 || pixel_scale <= 0 {
+        return;
+    }
+
+    let start_x = tile_x * pixel_scale + (pixel_scale / 2) - 1;
+    let start_y = tile_y * pixel_scale + (pixel_scale / 2) - 1;
+
+    for py in 0..2 {
+        for px in 0..2 {
+            let x = start_x + px;
+            let y = start_y + py;
+
+            if x < 0 || y < 0 {
+                continue;
+            }
+
+            let x = x as u32;
+            let y = y as u32;
+
+            if x >= image_size || y >= image_size {
+                continue;
+            }
+
+            let offset = mini_map_pixel_offset(x, y, image_size);
+            data[offset..offset + 4].copy_from_slice(&MINI_MAP_NPC_COLOR);
+        }
+    }
+}
 
 /// Returns HP bar color based on health percentage
 ///
@@ -2111,6 +2431,150 @@ mod tests {
 }
 
 // ===== Clock Tests =====
+
+#[cfg(test)]
+mod minimap_tests {
+    use super::*;
+    use crate::application::GameState;
+    use crate::domain::types::Position;
+    use crate::domain::world::{Map, WallType};
+
+    fn setup_minimap_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Assets<Image>>();
+        {
+            let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+            let size = mini_map_image_size();
+            let image = Image::new_fill(
+                Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                &vec![0; (size * size * 4) as usize],
+                TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::all(),
+            );
+            let handle = images.add(image);
+            app.world_mut().insert_resource(MiniMapImage { handle });
+        }
+        app
+    }
+
+    #[test]
+    fn test_mini_map_image_dimensions() {
+        let app = setup_minimap_test_app();
+        let mini_map = app.world().resource::<MiniMapImage>().clone();
+        let images = app.world().resource::<Assets<Image>>();
+        let image = images.get(&mini_map.handle).unwrap();
+
+        assert_eq!(image.texture_descriptor.size.width, mini_map_image_size());
+        assert_eq!(image.texture_descriptor.size.height, mini_map_image_size());
+    }
+
+    #[test]
+    fn test_mini_map_player_pixel_is_white() {
+        let mut app = setup_minimap_test_app();
+
+        let mut state = GameState::new();
+        let map = Map::new(1, "Mini Map".to_string(), "Test".to_string(), 13, 13);
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+        state.world.set_party_position(Position::new(5, 5));
+        crate::domain::world::mark_visible_area(
+            &mut state.world,
+            Position::new(5, 5),
+            MINI_MAP_VIEWPORT_RADIUS,
+        );
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .run_system_cached(update_mini_map)
+            .expect("update_mini_map system should run in test");
+
+        let mini_map = app.world().resource::<MiniMapImage>().clone();
+        let images = app.world().resource::<Assets<Image>>();
+        let image = images.get(&mini_map.handle).unwrap();
+        let data = image.data.as_ref().unwrap();
+
+        let center_pixel = (mini_map_viewport_diameter() / 2) * mini_map_pixels_per_tile()
+            + (mini_map_pixels_per_tile() / 2);
+        let offset = mini_map_pixel_offset(center_pixel, center_pixel, mini_map_image_size());
+
+        assert_eq!(&data[offset..offset + 4], &MINI_MAP_PLAYER);
+    }
+
+    #[test]
+    fn test_mini_map_unvisited_is_transparent() {
+        let mut app = setup_minimap_test_app();
+
+        let mut state = GameState::new();
+        let map = Map::new(1, "Mini Map".to_string(), "Test".to_string(), 13, 13);
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+        state.world.set_party_position(Position::new(5, 5));
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .run_system_cached(update_mini_map)
+            .expect("update_mini_map system should run in test");
+
+        let mini_map = app.world().resource::<MiniMapImage>().clone();
+        let images = app.world().resource::<Assets<Image>>();
+        let image = images.get(&mini_map.handle).unwrap();
+        let data = image.data.as_ref().unwrap();
+
+        let pixel_x = (mini_map_viewport_diameter() / 2 + 1) * mini_map_pixels_per_tile();
+        let pixel_y = (mini_map_viewport_diameter() / 2) * mini_map_pixels_per_tile();
+        let offset = mini_map_pixel_offset(pixel_x, pixel_y, mini_map_image_size());
+
+        assert_eq!(data[offset + 3], 0);
+    }
+
+    #[test]
+    fn test_mini_map_visited_wall_color() {
+        let mut app = setup_minimap_test_app();
+
+        let mut state = GameState::new();
+        let mut map = Map::new(1, "Mini Map".to_string(), "Test".to_string(), 13, 13);
+        let wall_pos = Position::new(6, 5);
+        if let Some(tile) = map.get_tile_mut(wall_pos) {
+            tile.wall_type = WallType::Normal;
+            tile.blocked = true;
+            tile.mark_visited();
+        }
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+        state.world.set_party_position(Position::new(5, 5));
+        if let Some(tile) = state
+            .world
+            .get_current_map_mut()
+            .and_then(|m| m.get_tile_mut(Position::new(5, 5)))
+        {
+            tile.mark_visited();
+        }
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .run_system_cached(update_mini_map)
+            .expect("update_mini_map system should run in test");
+
+        let mini_map = app.world().resource::<MiniMapImage>().clone();
+        let images = app.world().resource::<Assets<Image>>();
+        let image = images.get(&mini_map.handle).unwrap();
+        let data = image.data.as_ref().unwrap();
+
+        let tile_x = mini_map_viewport_diameter() / 2 + 1;
+        let tile_y = mini_map_viewport_diameter() / 2;
+        let pixel_x = tile_x * mini_map_pixels_per_tile();
+        let pixel_y = tile_y * mini_map_pixels_per_tile();
+        let offset = mini_map_pixel_offset(pixel_x, pixel_y, mini_map_image_size());
+
+        assert_eq!(&data[offset..offset + 4], &MINI_MAP_WALL);
+    }
+}
 
 #[cfg(test)]
 mod clock_tests {
