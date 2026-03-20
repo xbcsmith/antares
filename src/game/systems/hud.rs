@@ -90,6 +90,14 @@ pub const MINI_MAP_PLAYER: [u8; 4] = [255, 255, 255, 255];
 pub const MINI_MAP_UNVISITED: [u8; 4] = [0, 0, 0, 0];
 pub const MINI_MAP_NPC_COLOR: [u8; 4] = [0, 200, 100, 255];
 
+// POI colors
+pub const POI_QUEST_COLOR: [u8; 4] = [255, 220, 0, 255];
+pub const POI_MERCHANT_COLOR: [u8; 4] = [0, 200, 100, 255];
+pub const POI_SIGN_COLOR: [u8; 4] = [180, 180, 255, 255];
+pub const POI_TELEPORT_COLOR: [u8; 4] = [200, 100, 255, 255];
+pub const POI_ENCOUNTER_COLOR: [u8; 4] = [220, 50, 50, 255];
+pub const POI_TREASURE_COLOR: [u8; 4] = [255, 180, 0, 255];
+
 // Automap display constants
 pub const AUTOMAP_MAX_IMAGE_SIZE_PX: u32 = 768;
 pub const AUTOMAP_MIN_TILE_PX: u32 = 4;
@@ -802,6 +810,20 @@ fn update_mini_map(
         let tile_y = dy + center_tile_index;
         fill_mini_map_npc_dot(data, tile_x, tile_y, size, pixel_scale);
     }
+
+    for (poi_position, poi) in map.collect_map_pois(&global_state.0.quests) {
+        let dx = poi_position.x - player_pos.x;
+        let dy = poi_position.y - player_pos.y;
+        let radius = MINI_MAP_VIEWPORT_RADIUS as i32;
+
+        if dx.abs() > radius || dy.abs() > radius {
+            continue;
+        }
+
+        let tile_x = dx + center_tile_index;
+        let tile_y = dy + center_tile_index;
+        fill_mini_map_poi_dot(data, tile_x, tile_y, poi_color(&poi), size, pixel_scale);
+    }
 }
 
 /// Updates compass direction display
@@ -937,14 +959,48 @@ fn setup_automap(mut commands: Commands, automap_image: Res<AutomapImage>) {
                     },
                     TextColor(Color::WHITE),
                 ));
-                legend.spawn((
-                    Text::new("White: Party position"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
+
+                for (color, label) in [
+                    (AUTOMAP_PLAYER, "You are here"),
+                    (POI_QUEST_COLOR, "Quest objective"),
+                    (POI_MERCHANT_COLOR, "Merchant"),
+                    (POI_SIGN_COLOR, "Sign / notice"),
+                    (POI_TELEPORT_COLOR, "Teleport"),
+                    (POI_ENCOUNTER_COLOR, "Monster encounter"),
+                    (POI_TREASURE_COLOR, "Treasure"),
+                ] {
+                    legend
+                        .spawn((
+                            Node {
+                                flex_direction: FlexDirection::Row,
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(8.0),
+                                ..default()
+                            },
+                            BackgroundColor(Color::NONE),
+                        ))
+                        .with_children(|row| {
+                            row.spawn((
+                                Node {
+                                    width: Val::Px(20.0),
+                                    height: Val::Px(20.0),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgba_u8(
+                                    color[0], color[1], color[2], color[3],
+                                )),
+                            ));
+                            row.spawn((
+                                Text::new(label),
+                                TextFont {
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+                }
+
                 legend.spawn((
                     Text::new("Gray: Explored floor"),
                     TextFont {
@@ -1080,6 +1136,21 @@ fn update_automap_image(
 
             fill_automap_tile(data, x, y, color, image_width, tile_px);
         }
+    }
+
+    for (poi_position, poi) in map.collect_map_pois(&global_state.0.quests) {
+        if poi_position.x < 0 || poi_position.y < 0 {
+            continue;
+        }
+
+        fill_automap_poi_dot(
+            data,
+            poi_position.x as u32,
+            poi_position.y as u32,
+            poi_color(&poi),
+            image_width,
+            tile_px,
+        );
     }
 
     for mut node in &mut canvas_query {
@@ -1567,6 +1638,44 @@ pub fn fill_mini_map_npc_dot(
     }
 }
 
+/// Writes a 2×2 POI marker inside the tile cell on the mini map.
+pub fn fill_mini_map_poi_dot(
+    data: &mut [u8],
+    tile_x: i32,
+    tile_y: i32,
+    color: [u8; 4],
+    image_size: u32,
+    pixel_scale: i32,
+) {
+    if tile_x < 0 || tile_y < 0 || pixel_scale <= 0 {
+        return;
+    }
+
+    let start_x = tile_x * pixel_scale + (pixel_scale / 2) - 1;
+    let start_y = tile_y * pixel_scale + (pixel_scale / 2) - 1;
+
+    for py in 0..2 {
+        for px in 0..2 {
+            let x = start_x + px;
+            let y = start_y + py;
+
+            if x < 0 || y < 0 {
+                continue;
+            }
+
+            let x = x as u32;
+            let y = y as u32;
+
+            if x >= image_size || y >= image_size {
+                continue;
+            }
+
+            let offset = mini_map_pixel_offset(x, y, image_size);
+            data[offset..offset + 4].copy_from_slice(&color);
+        }
+    }
+}
+
 /// Returns the color used for an automap tile based on visit state and terrain.
 ///
 /// # Arguments
@@ -1587,6 +1696,18 @@ pub fn automap_tile_color(tile: &crate::domain::world::Tile) -> [u8; 4] {
             TerrainType::Grass | TerrainType::Forest => AUTOMAP_VISITED_FOREST,
             _ => AUTOMAP_VISITED_FLOOR,
         },
+    }
+}
+
+/// Returns the display color for a point of interest.
+pub fn poi_color(poi: &crate::domain::world::PointOfInterest) -> [u8; 4] {
+    match poi {
+        crate::domain::world::PointOfInterest::QuestObjective { .. } => POI_QUEST_COLOR,
+        crate::domain::world::PointOfInterest::Merchant => POI_MERCHANT_COLOR,
+        crate::domain::world::PointOfInterest::Sign => POI_SIGN_COLOR,
+        crate::domain::world::PointOfInterest::Teleport => POI_TELEPORT_COLOR,
+        crate::domain::world::PointOfInterest::Encounter => POI_ENCOUNTER_COLOR,
+        crate::domain::world::PointOfInterest::Treasure => POI_TREASURE_COLOR,
     }
 }
 
@@ -1615,6 +1736,28 @@ pub fn fill_automap_tile(
 
     for py in 0..pixel_scale {
         for px in 0..pixel_scale {
+            let x = start_x + px;
+            let y = start_y + py;
+            let offset = automap_pixel_offset(x, y, image_width);
+            data[offset..offset + 4].copy_from_slice(&color);
+        }
+    }
+}
+
+/// Writes a 3×3 POI marker inside the tile cell on the automap.
+pub fn fill_automap_poi_dot(
+    data: &mut [u8],
+    tile_x: u32,
+    tile_y: u32,
+    color: [u8; 4],
+    image_width: u32,
+    pixel_scale: u32,
+) {
+    let start_x = tile_x * pixel_scale + (pixel_scale / 2).saturating_sub(1);
+    let start_y = tile_y * pixel_scale + (pixel_scale / 2).saturating_sub(1);
+
+    for py in 0..3 {
+        for px in 0..3 {
             let x = start_x + px;
             let y = start_y + py;
             let offset = automap_pixel_offset(x, y, image_width);
@@ -2955,6 +3098,51 @@ mod minimap_tests {
         let offset = mini_map_pixel_offset(pixel_x, pixel_y, mini_map_image_size());
 
         assert_eq!(&data[offset..offset + 4], &MINI_MAP_WALL);
+    }
+
+    #[test]
+    fn test_mini_map_poi_dot_rendered() {
+        let mut app = setup_minimap_test_app();
+
+        let mut state = GameState::new();
+        let mut map = Map::new(1, "Mini Map".to_string(), "Test".to_string(), 13, 13);
+        let merchant_pos = Position::new(6, 5);
+
+        if let Some(tile) = map.get_tile_mut(merchant_pos) {
+            tile.mark_visited();
+        }
+
+        if let Some(tile) = map.get_tile_mut(Position::new(5, 5)) {
+            tile.mark_visited();
+        }
+
+        map.npc_placements
+            .push(crate::domain::world::NpcPlacement::new(
+                "merchant_alder",
+                merchant_pos,
+            ));
+
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+        state.world.set_party_position(Position::new(5, 5));
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .run_system_cached(update_mini_map)
+            .expect("update_mini_map system should run in test");
+
+        let mini_map = app.world().resource::<MiniMapImage>().clone();
+        let images = app.world().resource::<Assets<Image>>();
+        let image = images.get(&mini_map.handle).unwrap();
+        let data = image.data.as_ref().unwrap();
+
+        let tile_x = mini_map_viewport_diameter() / 2 + 1;
+        let tile_y = mini_map_viewport_diameter() / 2;
+        let pixel_x = tile_x * mini_map_pixels_per_tile() + (mini_map_pixels_per_tile() / 2) - 1;
+        let pixel_y = tile_y * mini_map_pixels_per_tile() + (mini_map_pixels_per_tile() / 2) - 1;
+        let offset = mini_map_pixel_offset(pixel_x, pixel_y, mini_map_image_size());
+
+        assert_eq!(&data[offset..offset + 4], &POI_MERCHANT_COLOR);
     }
 }
 

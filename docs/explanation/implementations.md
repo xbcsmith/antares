@@ -384,3 +384,141 @@ the implementation plan:
 - Unvisited tiles render as black fog.
 - Visited tiles render with terrain/wall-aware colors.
 - The party position is clearly visible as a white marker.
+
+## Phase 4: POI Markers and Legend (Complete)
+
+### Overview
+
+Phase 4 adds semantic points-of-interest to the mini map and automap so the
+player can distinguish meaningful discovered locations from basic explored
+terrain. This phase also upgrades the automap side panel into a real legend
+that explains the POI symbol colors directly in the overlay.
+
+### Problem Statement
+
+After Phase 3, both map views could render explored terrain and the player
+position, but they still lacked semantic world markers. The remaining gaps were:
+
+- no `PointOfInterest` representation in the world layer
+- no helper for collecting discovered POIs from map content
+- no dedicated POI color palette shared by mini map and automap
+- no POI overlay rendering on either map surface
+- no legend entries explaining POI symbols on the automap overlay
+
+### Files Changed
+
+| File                                  | Change                                                                 |
+| ------------------------------------- | ---------------------------------------------------------------------- |
+| `src/domain/world/types.rs`           | Added `PointOfInterest`, `Map::collect_map_pois`, and POI tests        |
+| `src/domain/world/mod.rs`             | Re-exported `PointOfInterest`                                          |
+| `src/game/systems/hud.rs`             | Added POI colors, legend entries, mini map / automap POI overlay logic |
+| `docs/explanation/implementations.md` | Added this implementation summary                                      |
+
+---
+
+### 4.1 — `PointOfInterest` and Collection Helper
+
+Added `PointOfInterest` to the world layer with the planned semantic variants:
+
+- `QuestObjective { quest_id }`
+- `Merchant`
+- `Sign`
+- `Teleport`
+- `Encounter`
+- `Treasure`
+
+Also added `Map::collect_map_pois(...)`, which returns discovered POIs only for
+visited tiles. The helper currently collects POIs from:
+
+- merchant-like NPC placements
+- `MapEvent::Encounter`
+- `MapEvent::Treasure`
+- `MapEvent::Teleport`
+- `MapEvent::Sign`
+
+This keeps POI filtering in the world/domain layer instead of duplicating it in
+HUD rendering code.
+
+### 4.2 — POI Colors
+
+Added the phase POI color constants to `src/game/systems/hud.rs`:
+
+- `POI_QUEST_COLOR`
+- `POI_MERCHANT_COLOR`
+- `POI_SIGN_COLOR`
+- `POI_TELEPORT_COLOR`
+- `POI_ENCOUNTER_COLOR`
+- `POI_TREASURE_COLOR`
+
+Also added a shared `poi_color(...)` helper so mini map and automap render from
+the same source of truth.
+
+### 4.3 — Mini Map and Automap POI Overlay
+
+After base terrain rendering, both map systems now overlay POI dots:
+
+- mini map uses `fill_mini_map_poi_dot(...)` with 2×2 markers
+- automap uses `fill_automap_poi_dot(...)` with 3×3 markers
+
+The mini map only renders POIs that fall within the current player-centered
+viewport. The automap renders POIs across the whole full-map canvas. Both obey
+the discovered/visited-tile rule through `collect_map_pois(...)`.
+
+### 4.4 — Automap Legend Panel
+
+The `AutomapLegend` content is now populated with one static row per POI type
+plus the player marker. Each row contains:
+
+- a `20×20` colored square
+- a text label
+
+Legend entries now include:
+
+- White — You are here
+- Yellow — Quest objective
+- Green — Merchant
+- Light blue — Sign / notice
+- Purple — Teleport
+- Red — Monster encounter
+- Gold — Treasure
+
+The previously-existing terrain explanation lines remain below these symbol rows.
+
+### 4.5 — Test Coverage Added
+
+Added the required phase tests:
+
+- `test_collect_map_pois_only_visited`
+- `test_collect_map_pois_encounter`
+- `test_collect_map_pois_treasure`
+- `test_mini_map_poi_dot_rendered`
+
+These verify that:
+
+- unvisited POIs are suppressed
+- encounter and treasure events map to the correct POI types
+- visited merchant POIs render with the expected mini map color
+
+### Deliverables Completed
+
+- [x] `PointOfInterest` enum + POI collection helper
+- [x] POI color constants in `src/game/systems/hud.rs`
+- [x] POI overlay integrated into `update_mini_map`
+- [x] POI overlay integrated into `update_automap_image`
+- [x] Legend panel expanded with static POI entries
+- [x] All phase-4 tests implemented
+
+### Outcome
+
+After this phase, both map views now show discovered semantic markers instead of
+only terrain:
+
+- merchants appear as green markers
+- signs appear as light-blue markers
+- teleports appear as purple markers
+- encounters appear as red markers
+- treasure appears as gold markers
+- the automap legend explains every symbol directly in the overlay
+
+This completes the first POI visualization pass and establishes the structure
+for richer quest-objective integration in later phases.
