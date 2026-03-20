@@ -50,6 +50,8 @@ pub enum GameMode {
     Exploration,
     /// Turn-based tactical combat containing full combat state
     Combat(crate::domain::combat::engine::CombatState),
+    /// Full-screen automap overlay is open
+    Automap,
     /// Inventory management screen
     Inventory(crate::application::inventory_state::InventoryState),
     /// Inn party management interface

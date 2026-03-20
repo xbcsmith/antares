@@ -133,6 +133,9 @@ pub enum GameAction {
 
     /// Begin a party rest sequence
     Rest,
+
+    /// Open or close the full-screen automap overlay
+    Automap,
 }
 
 /// Key mapping structure for efficient input lookups
@@ -234,6 +237,15 @@ impl KeyMap {
                 bindings.insert(key_code, GameAction::Rest);
             } else {
                 warn!("Invalid key code in rest: {}", key_str);
+            }
+        }
+
+        // Map automap keys
+        for key_str in &config.automap {
+            if let Some(key_code) = parse_key_code(key_str) {
+                bindings.insert(key_code, GameAction::Automap);
+            } else {
+                warn!("Invalid key code in automap: {}", key_str);
             }
         }
 
@@ -468,6 +480,30 @@ fn handle_input(
     let current_time = time.elapsed_secs();
     let cooldown = input_config.controls.movement_cooldown;
 
+    // Check for automap toggle ("M" key by default) before menu handling so
+    // automap mode can consume Escape to close back to exploration.
+    if input_config
+        .key_map
+        .is_action_just_pressed(GameAction::Automap, &keyboard_input)
+    {
+        let game_state = &mut global_state.0;
+        match game_state.mode {
+            crate::application::GameMode::Exploration => {
+                game_state.mode = crate::application::GameMode::Automap;
+                info!("Automap opened: new_mode = {:?}", game_state.mode);
+            }
+            crate::application::GameMode::Automap => {
+                game_state.mode = crate::application::GameMode::Exploration;
+                info!(
+                    "Automap closed via automap key: new_mode = {:?}",
+                    game_state.mode
+                );
+            }
+            _ => {}
+        }
+        return; // Exit early after automap toggle
+    }
+
     // Check for menu toggle (ESC key) first — it should always take priority and
     // must not be blocked by movement cooldown.
     if input_config
@@ -475,8 +511,16 @@ fn handle_input(
         .is_action_just_pressed(GameAction::Menu, &keyboard_input)
     {
         let game_state = &mut global_state.0;
-        toggle_menu_state(game_state);
-        info!("Menu toggled: new_mode = {:?}", game_state.mode);
+        if matches!(game_state.mode, crate::application::GameMode::Automap) {
+            game_state.mode = crate::application::GameMode::Exploration;
+            info!(
+                "Automap closed via menu key: new_mode = {:?}",
+                game_state.mode
+            );
+        } else {
+            toggle_menu_state(game_state);
+            info!("Menu toggled: new_mode = {:?}", game_state.mode);
+        }
         return; // Exit early after menu toggle
     }
 
@@ -586,11 +630,13 @@ fn handle_input(
 
     // Menu toggle handled above before movement cooldown checks.
 
-    // Block all movement/interaction input when in Menu or Inventory mode.
+    // Block all movement/interaction input when in Menu, Inventory, or Automap mode.
     // Each mode's own system handles its own input processing.
     if matches!(
         game_state.mode,
-        crate::application::GameMode::Menu(_) | crate::application::GameMode::Inventory(_)
+        crate::application::GameMode::Menu(_)
+            | crate::application::GameMode::Inventory(_)
+            | crate::application::GameMode::Automap
     ) {
         return;
     }
@@ -1686,6 +1732,7 @@ mod tests {
             menu: vec!["P".to_string()],
             inventory: vec!["F".to_string()],
             rest: vec!["G".to_string()],
+            automap: vec!["M".to_string()],
             movement_cooldown: 0.1,
         };
 
@@ -1729,6 +1776,7 @@ mod tests {
             menu: vec!["Escape".to_string()],
             inventory: vec!["F".to_string()],
             rest: vec!["R".to_string()],
+            automap: vec!["M".to_string()],
             movement_cooldown: 0.2,
         };
 
@@ -1772,6 +1820,7 @@ mod tests {
             menu: vec!["Escape".to_string()],
             inventory: vec!["I".to_string()],
             rest: vec!["R".to_string()],
+            automap: vec!["M".to_string()],
             movement_cooldown: -0.1,
         };
 
@@ -1966,6 +2015,64 @@ mod integration_tests {
         assert!(
             matches!(gs.0.mode, crate::application::GameMode::Inventory(_)),
             "pressing I in Exploration must open the inventory"
+        );
+    }
+
+    /// Pressing `KeyCode::KeyM` in `GameMode::Exploration` must open the
+    /// full-screen automap overlay.
+    #[test]
+    fn test_gamemode_automap_toggle() {
+        let mut app = build_input_app();
+
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyM);
+        }
+        app.update();
+
+        {
+            let gs = app.world().resource::<GlobalState>();
+            assert!(
+                matches!(gs.0.mode, crate::application::GameMode::Automap),
+                "pressing M in Exploration must open Automap"
+            );
+        }
+
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.release(KeyCode::KeyM);
+            btn.press(KeyCode::KeyM);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Exploration),
+            "pressing M again in Automap must return to Exploration"
+        );
+    }
+
+    /// Pressing `Escape` while in `GameMode::Automap` must close the overlay
+    /// and return to exploration instead of opening the menu.
+    #[test]
+    fn test_gamemode_automap_escape_closes() {
+        let mut app = build_input_app();
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.mode = crate::application::GameMode::Automap;
+        }
+
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::Escape);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Exploration),
+            "pressing Escape in Automap must return to Exploration"
         );
     }
 

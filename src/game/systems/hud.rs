@@ -9,6 +9,7 @@
 //! - HP values (current/max format) as text overlay on HP bar
 //! - Active condition indicators with emoji and color coding
 //! - Mini map, compass, and clock widgets in a consolidated top-right panel
+//! - Full-screen automap overlay rendering for explored map tiles
 //!
 //! The HUD uses a horizontal strip layout at the bottom of the screen.
 //! Card count is dynamic and matches party size (1-6 members).
@@ -89,6 +90,19 @@ pub const MINI_MAP_PLAYER: [u8; 4] = [255, 255, 255, 255];
 pub const MINI_MAP_UNVISITED: [u8; 4] = [0, 0, 0, 0];
 pub const MINI_MAP_NPC_COLOR: [u8; 4] = [0, 200, 100, 255];
 
+// Automap display constants
+pub const AUTOMAP_MAX_IMAGE_SIZE_PX: u32 = 768;
+pub const AUTOMAP_MIN_TILE_PX: u32 = 4;
+pub const AUTOMAP_MAX_TILE_PX: u32 = 16;
+pub const AUTOMAP_BG_COLOR: Color = Color::srgba(0.02, 0.02, 0.02, 0.96);
+pub const AUTOMAP_UNVISITED: [u8; 4] = [0, 0, 0, 255];
+pub const AUTOMAP_VISITED_FLOOR: [u8; 4] = [120, 120, 120, 255];
+pub const AUTOMAP_VISITED_WALL: [u8; 4] = [70, 50, 50, 255];
+pub const AUTOMAP_VISITED_DOOR: [u8; 4] = [180, 140, 80, 255];
+pub const AUTOMAP_VISITED_WATER: [u8; 4] = [60, 80, 160, 255];
+pub const AUTOMAP_VISITED_FOREST: [u8; 4] = [50, 120, 50, 255];
+pub const AUTOMAP_PLAYER: [u8; 4] = [255, 255, 255, 255];
+
 // Clock display constants
 /// Font size used for both time and day lines in the clock widget
 pub const CLOCK_FONT_SIZE: f32 = 14.0;
@@ -166,6 +180,18 @@ pub struct MiniMapRoot;
 #[derive(Component)]
 pub struct MiniMapCanvas;
 
+/// Marker component for the full-screen automap root overlay
+#[derive(Component)]
+pub struct AutomapRoot;
+
+/// Marker component for the automap image canvas
+#[derive(Component)]
+pub struct AutomapCanvas;
+
+/// Marker component for the automap legend / side panel
+#[derive(Component)]
+pub struct AutomapLegend;
+
 /// Marker component for the compass container
 #[derive(Component)]
 pub struct CompassRoot;
@@ -224,6 +250,24 @@ pub struct MiniMapImage {
     pub handle: Handle<Image>,
 }
 
+/// Dynamic image handle used by the full-screen automap overlay.
+///
+/// The image is resized on demand to fit the current map and rewritten in-place
+/// whenever the automap is open.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::AUTOMAP_MAX_IMAGE_SIZE_PX;
+///
+/// assert!(AUTOMAP_MAX_IMAGE_SIZE_PX >= 256);
+/// ```
+#[derive(Resource, Clone)]
+pub struct AutomapImage {
+    /// Handle to the dynamic RGBA8 image used by the automap canvas.
+    pub handle: Handle<Image>,
+}
+
 // ===== Plugin =====
 
 pub struct HudPlugin;
@@ -234,12 +278,21 @@ impl Plugin for HudPlugin {
             .init_resource::<Assets<Image>>()
             .add_systems(
                 Startup,
-                (initialize_mini_map_image, setup_hud, setup_party_entities).chain(),
+                (
+                    initialize_mini_map_image,
+                    initialize_automap_image,
+                    setup_hud,
+                    setup_automap,
+                    setup_party_entities,
+                )
+                    .chain(),
             )
             // update_hud must run during combat too so party HP bars reflect live
             // damage.  The exploration-only overlays (compass, clock, portraits) stay
             // gated so they don't render on top of the combat HUD.
             .add_systems(Update, update_hud)
+            .add_systems(Update, update_automap_visibility)
+            .add_systems(Update, update_automap_image.run_if(in_automap_mode))
             .add_systems(
                 Update,
                 (
@@ -317,6 +370,33 @@ fn initialize_mini_map_image(mut commands: Commands, mut images: ResMut<Assets<I
     );
     let handle = images.add(image);
     commands.insert_resource(MiniMapImage { handle });
+}
+
+/// Creates the dynamic image resource backing the full-screen automap.
+///
+/// The initial image is a square transparent RGBA8 texture. The rendering
+/// system resizes and repaints it to match the active map when the automap is
+/// displayed.
+///
+/// # Arguments
+///
+/// * `commands` - Bevy command buffer used to insert the resource
+/// * `images` - Asset storage for image creation
+fn initialize_automap_image(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    let size = AUTOMAP_MAX_IMAGE_SIZE_PX;
+    let image = Image::new_fill(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &vec![0; (size * size * 4) as usize],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::all(),
+    );
+    let handle = images.add(image);
+    commands.insert_resource(AutomapImage { handle });
 }
 
 /// Sets up the HUD UI hierarchy (runs once at startup)
@@ -780,6 +860,234 @@ fn update_clock(
     }
 }
 
+/// Spawns the full-screen automap overlay hierarchy.
+///
+/// The overlay is hidden by default and becomes visible only while the game is
+/// in `GameMode::Automap`.
+///
+/// # Arguments
+///
+/// * `commands` - Bevy command buffer used to spawn UI entities
+/// * `automap_image` - Dynamic image resource used by the automap canvas
+fn setup_automap(mut commands: Commands, automap_image: Res<AutomapImage>) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                display: Display::None,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Stretch,
+                padding: UiRect::all(Val::Px(24.0)),
+                ..default()
+            },
+            BackgroundColor(AUTOMAP_BG_COLOR),
+            ZIndex(10),
+            AutomapRoot,
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    flex_grow: 1.0,
+                    height: Val::Percent(100.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+            ))
+            .with_children(|canvas_parent| {
+                canvas_parent.spawn((
+                    Node {
+                        width: Val::Px(AUTOMAP_MAX_IMAGE_SIZE_PX as f32),
+                        height: Val::Px(AUTOMAP_MAX_IMAGE_SIZE_PX as f32),
+                        ..default()
+                    },
+                    ImageNode::new(automap_image.handle.clone()),
+                    AutomapCanvas,
+                ));
+            });
+
+            root.spawn((
+                Node {
+                    width: Val::Px(240.0),
+                    height: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    align_items: AlignItems::FlexStart,
+                    justify_content: JustifyContent::FlexStart,
+                    padding: UiRect::all(Val::Px(12.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.08, 0.08, 0.08, 0.85)),
+                AutomapLegend,
+            ))
+            .with_children(|legend| {
+                legend.spawn((
+                    Text::new("Automap"),
+                    TextFont {
+                        font_size: 22.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+                legend.spawn((
+                    Text::new("White: Party position"),
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+                legend.spawn((
+                    Text::new("Gray: Explored floor"),
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+                legend.spawn((
+                    Text::new("Dark red: Wall"),
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+                legend.spawn((
+                    Text::new("Tan: Door"),
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+                legend.spawn((
+                    Text::new("Blue: Water"),
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+                legend.spawn((
+                    Text::new("Green: Forest / grass"),
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
+
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(24.0),
+                    bottom: Val::Px(24.0),
+                    ..default()
+                },
+                Text::new("M / Esc — close map"),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
+/// Updates automap root visibility based on the current game mode.
+///
+/// # Arguments
+///
+/// * `global_state` - Game state containing the current mode
+/// * `automap_query` - Query for the overlay root node
+fn update_automap_visibility(
+    global_state: Res<GlobalState>,
+    mut automap_query: Query<&mut Node, With<AutomapRoot>>,
+) {
+    let display = if matches!(global_state.0.mode, GameMode::Automap) {
+        Display::Flex
+    } else {
+        Display::None
+    };
+
+    for mut node in &mut automap_query {
+        node.display = display;
+    }
+}
+
+/// Updates the full-screen automap image while the automap overlay is open.
+///
+/// The rendered image covers the whole current map using fog-of-war coloring.
+///
+/// # Arguments
+///
+/// * `global_state` - Game state containing the world and player position
+/// * `automap_image` - Dynamic image resource used by the automap canvas
+/// * `images` - Asset storage containing the writable automap image
+/// * `canvas_query` - Query for the automap canvas node
+fn update_automap_image(
+    global_state: Res<GlobalState>,
+    automap_image: Res<AutomapImage>,
+    mut images: ResMut<Assets<Image>>,
+    mut canvas_query: Query<&mut Node, With<AutomapCanvas>>,
+) {
+    let Some(map) = global_state.0.world.get_current_map() else {
+        return;
+    };
+
+    let max_dimension = map.width.max(map.height).max(1);
+    let tile_px =
+        (AUTOMAP_MAX_IMAGE_SIZE_PX / max_dimension).clamp(AUTOMAP_MIN_TILE_PX, AUTOMAP_MAX_TILE_PX);
+    let image_width = map.width * tile_px;
+    let image_height = map.height * tile_px;
+
+    let Some(image) = images.get_mut(&automap_image.handle) else {
+        return;
+    };
+
+    image.texture_descriptor.size = Extent3d {
+        width: image_width,
+        height: image_height,
+        depth_or_array_layers: 1,
+    };
+    image.data = Some(vec![0; (image_width * image_height * 4) as usize]);
+
+    let Some(data) = image.data.as_mut() else {
+        return;
+    };
+
+    for y in 0..map.height {
+        for x in 0..map.width {
+            let pos = Position::new(x as i32, y as i32);
+            let Some(tile) = map.get_tile(pos) else {
+                continue;
+            };
+
+            let mut color = automap_tile_color(tile);
+            if pos == global_state.0.world.party_position {
+                color = AUTOMAP_PLAYER;
+            }
+
+            fill_automap_tile(data, x, y, color, image_width, tile_px);
+        }
+    }
+
+    for mut node in &mut canvas_query {
+        node.width = Val::Px(image_width as f32);
+        node.height = Val::Px(image_height as f32);
+    }
+}
+
 /// Updates portrait images and background colors based on campaign assets
 ///
 /// If an image matching the character's portrait exists it will be displayed
@@ -1114,6 +1422,24 @@ fn ensure_portraits_loaded(
 
 // ===== Helper Functions =====
 
+/// Run condition: returns true when the game is currently in automap mode.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::GameState;
+/// use antares::game::resources::GlobalState;
+/// use antares::game::systems::hud::in_automap_mode;
+/// use bevy::prelude::World;
+///
+/// let mut world = World::new();
+/// world.insert_resource(GlobalState(GameState::new()));
+/// assert!(!world.run_system_cached(in_automap_mode).unwrap());
+/// ```
+fn in_automap_mode(global_state: Res<GlobalState>) -> bool {
+    matches!(global_state.0.mode, GameMode::Automap)
+}
+
 /// Returns the dynamic mini map image size in pixels.
 ///
 /// # Examples
@@ -1237,6 +1563,62 @@ pub fn fill_mini_map_npc_dot(
 
             let offset = mini_map_pixel_offset(x, y, image_size);
             data[offset..offset + 4].copy_from_slice(&MINI_MAP_NPC_COLOR);
+        }
+    }
+}
+
+/// Returns the color used for an automap tile based on visit state and terrain.
+///
+/// # Arguments
+///
+/// * `tile` - Tile to classify for automap rendering
+pub fn automap_tile_color(tile: &crate::domain::world::Tile) -> [u8; 4] {
+    use crate::domain::world::{TerrainType, WallType};
+
+    if !tile.visited {
+        return AUTOMAP_UNVISITED;
+    }
+
+    match tile.wall_type {
+        WallType::Door => AUTOMAP_VISITED_DOOR,
+        WallType::Normal | WallType::Torch => AUTOMAP_VISITED_WALL,
+        WallType::None => match tile.terrain {
+            TerrainType::Water => AUTOMAP_VISITED_WATER,
+            TerrainType::Grass | TerrainType::Forest => AUTOMAP_VISITED_FOREST,
+            _ => AUTOMAP_VISITED_FLOOR,
+        },
+    }
+}
+
+/// Returns the starting byte offset of a pixel inside an RGBA8 automap buffer.
+///
+/// # Arguments
+///
+/// * `x` - Pixel x coordinate
+/// * `y` - Pixel y coordinate
+/// * `image_width` - Width of the image in pixels
+pub fn automap_pixel_offset(x: u32, y: u32, image_width: u32) -> usize {
+    ((y * image_width + x) * 4) as usize
+}
+
+/// Writes a solid-colored tile-sized block into the automap pixel buffer.
+pub fn fill_automap_tile(
+    data: &mut [u8],
+    tile_x: u32,
+    tile_y: u32,
+    color: [u8; 4],
+    image_width: u32,
+    pixel_scale: u32,
+) {
+    let start_x = tile_x * pixel_scale;
+    let start_y = tile_y * pixel_scale;
+
+    for py in 0..pixel_scale {
+        for px in 0..pixel_scale {
+            let x = start_x + px;
+            let y = start_y + py;
+            let offset = automap_pixel_offset(x, y, image_width);
+            data[offset..offset + 4].copy_from_slice(&color);
         }
     }
 }
@@ -2573,6 +2955,101 @@ mod minimap_tests {
         let offset = mini_map_pixel_offset(pixel_x, pixel_y, mini_map_image_size());
 
         assert_eq!(&data[offset..offset + 4], &MINI_MAP_WALL);
+    }
+}
+
+#[cfg(test)]
+mod automap_tests {
+    use super::*;
+    use crate::application::GameState;
+    use crate::domain::types::Position;
+    use crate::domain::world::{Map, TerrainType};
+
+    fn setup_automap_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Assets<Image>>();
+        {
+            let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+            let size = AUTOMAP_MAX_IMAGE_SIZE_PX;
+            let image = Image::new_fill(
+                Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                &vec![0; (size * size * 4) as usize],
+                TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::all(),
+            );
+            let handle = images.add(image);
+            app.world_mut().insert_resource(AutomapImage { handle });
+        }
+
+        app.world_mut()
+            .spawn((Node::default(), ImageNode::default(), AutomapCanvas));
+
+        app
+    }
+
+    #[test]
+    fn test_automap_image_unvisited_is_black() {
+        let mut app = setup_automap_test_app();
+
+        let mut state = GameState::new();
+        let map = Map::new(1, "Automap".to_string(), "Test".to_string(), 8, 8);
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+        state.world.set_party_position(Position::new(2, 2));
+        state.mode = GameMode::Automap;
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .run_system_cached(update_automap_image)
+            .expect("update_automap_image system should run in test");
+
+        let automap = app.world().resource::<AutomapImage>().clone();
+        let images = app.world().resource::<Assets<Image>>();
+        let image = images.get(&automap.handle).unwrap();
+        let data = image.data.as_ref().unwrap();
+        let offset = automap_pixel_offset(0, 0, image.texture_descriptor.size.width);
+
+        assert_eq!(&data[offset..offset + 4], &AUTOMAP_UNVISITED);
+    }
+
+    #[test]
+    fn test_automap_image_visited_floor_is_gray() {
+        let mut app = setup_automap_test_app();
+
+        let mut state = GameState::new();
+        let mut map = Map::new(1, "Automap".to_string(), "Test".to_string(), 8, 8);
+        let floor_pos = Position::new(1, 1);
+        if let Some(tile) = map.get_tile_mut(floor_pos) {
+            tile.terrain = TerrainType::Ground;
+            tile.mark_visited();
+        }
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+        state.world.set_party_position(Position::new(7, 7));
+        state.mode = GameMode::Automap;
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .run_system_cached(update_automap_image)
+            .expect("update_automap_image system should run in test");
+
+        let automap = app.world().resource::<AutomapImage>().clone();
+        let images = app.world().resource::<Assets<Image>>();
+        let image = images.get(&automap.handle).unwrap();
+        let tile_px =
+            (AUTOMAP_MAX_IMAGE_SIZE_PX / 8).clamp(AUTOMAP_MIN_TILE_PX, AUTOMAP_MAX_TILE_PX);
+        let pixel_x = tile_px;
+        let pixel_y = tile_px;
+        let data = image.data.as_ref().unwrap();
+        let offset = automap_pixel_offset(pixel_x, pixel_y, image.texture_descriptor.size.width);
+
+        assert_eq!(&data[offset..offset + 4], &AUTOMAP_VISITED_FLOOR);
     }
 }
 

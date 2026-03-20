@@ -238,3 +238,149 @@ After this phase, the top-right HUD layout matches the automap plan foundation:
 - The player renders as a white marker.
 - Discovered NPCs render as green mini map dots.
 - The future clock slot is already reserved in the final panel structure.
+
+## Phase 3: Full-Screen Automap Overlay (Complete)
+
+### Overview
+
+Phase 3 adds a full-screen automap overlay that opens from exploration with the
+automap key and renders the entire current map with fog-of-war and terrain-aware
+color coding. This phase builds directly on the visited-tile foundation from
+Phase 1 and the dynamic image rendering path established in Phase 2.
+
+### Problem Statement
+
+After Phase 2, the project had a functioning mini map but still lacked the
+larger full-map exploration view described in the implementation plan. Several
+pieces were still missing:
+
+- `GameMode` had no dedicated `Automap` variant.
+- Input handling had no automap action or toggle behavior.
+- `ControlsConfig` had no configurable automap key list.
+- The HUD had no full-screen automap overlay UI.
+- No rendering path existed for color-coding the entire map by visited state,
+  terrain, and wall type.
+
+### Files Changed
+
+| File                                  | Change                                                                                               |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `src/application/mod.rs`              | Added `GameMode::Automap`                                                                            |
+| `src/game/systems/input.rs`           | Added `GameAction::Automap`, controls parsing, automap toggle behavior, and input integration tests  |
+| `src/sdk/game_config.rs`              | Added `controls.automap`, default key handling, validation updates, serde coverage, and config tests |
+| `src/game/systems/hud.rs`             | Added automap overlay components, dynamic image resource, setup/visibility/render systems, and tests |
+| `docs/explanation/implementations.md` | Added this implementation summary                                                                    |
+
+---
+
+### 3.1 — `GameMode::Automap` and Input Toggle Flow
+
+Added the new application-layer mode:
+
+- `GameMode::Automap`
+
+Input handling now supports:
+
+- opening automap from `GameMode::Exploration` via the automap action
+- closing automap via the automap action again
+- closing automap via the menu action (`Escape`) without opening the normal menu
+
+This preserves the expected full-screen overlay behavior from the plan:
+
+- `M` from Exploration → Automap
+- `M` from Automap → Exploration
+- `Escape` from Automap → Exploration
+
+### 3.2 — `ControlsConfig` Automap Binding
+
+Added a new controls field in `ControlsConfig`:
+
+- `automap: Vec<String>`
+
+with serde default support and the default binding:
+
+- `["M"]`
+
+The controls pipeline now parses `automap` bindings into `KeyMap`, and config
+validation now rejects an empty automap key list just like inventory and rest
+bindings.
+
+Additional config coverage was added for:
+
+- default automap key presence
+- validation of empty/non-empty automap lists
+- RON round-trip persistence
+- serde defaulting when the field is omitted
+
+### 3.3 — Automap Overlay UI and Dynamic Image
+
+Added full-screen automap overlay infrastructure in `src/game/systems/hud.rs`:
+
+- `AutomapRoot`
+- `AutomapCanvas`
+- `AutomapLegend`
+- `AutomapImage`
+
+Added the required systems:
+
+- `setup_automap`
+- `update_automap_visibility`
+- `update_automap_image`
+
+The overlay is spawned at startup as a full-screen hidden UI layer with:
+
+- centered map canvas
+- right-side legend column
+- bottom-left hint text: `"M / Esc — close map"`
+
+Visibility is driven entirely by `GameMode::Automap`.
+
+### 3.4 — Automap Color Coding
+
+Implemented full-map rendering with fog-of-war and terrain/wall coloring:
+
+- Unvisited → black
+- Visited floor / generic ground → gray
+- Visited wall / torch wall → dark red-gray
+- Visited door → tan
+- Visited water → blue
+- Visited grass / forest → dark green
+- Player tile → white
+
+The rendering pass scales the image by map size using the planned approach:
+pixels-per-tile is derived from map dimensions and clamped between 4 and 16.
+
+### 3.5 — Test Coverage Added
+
+Added the required phase tests:
+
+- `test_gamemode_automap_toggle`
+- `test_gamemode_automap_escape_closes`
+- `test_automap_image_unvisited_is_black`
+- `test_automap_image_visited_floor_is_gray`
+- `test_controls_config_default_automap_key`
+
+Also added supporting config tests to cover automap serialization/defaulting and
+validation behavior.
+
+### Deliverables Completed
+
+- [x] `GameMode::Automap` variant
+- [x] `GameAction::Automap` + key parsing in `KeyMap`
+- [x] `automap: Vec<String>` in `ControlsConfig` with `serde(default)`
+- [x] Automap overlay setup, visibility toggle, and image update systems
+- [x] Full fog-of-war automap rendering with terrain color coding
+- [x] M / Escape toggle wired in input handling
+- [x] All phase-3 tests implemented
+
+### Outcome
+
+After this phase, the game supports a full-screen automap workflow that matches
+the implementation plan:
+
+- Pressing `M` from exploration opens the automap.
+- Pressing `M` again closes it.
+- Pressing `Escape` while automap is open closes it back to exploration.
+- Unvisited tiles render as black fog.
+- Visited tiles render with terrain/wall-aware colors.
+- The party position is clearly visible as a white marker.
