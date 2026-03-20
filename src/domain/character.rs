@@ -537,6 +537,27 @@ impl Condition {
         self.has(Self::UNCONSCIOUS)
     }
 
+    /// Returns true if the character is dead (DEAD bit is set) but is not
+    /// stoned or eradicated, which set higher bits.
+    ///
+    /// Use this to distinguish dead-but-raiseable characters from those
+    /// affected by stone or eradication — which have the DEAD bit included
+    /// but require different treatment.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::Condition;
+    /// let mut c = Condition::new();
+    /// c.add(Condition::DEAD);
+    /// assert!(c.is_dead());
+    /// c.add(Condition::STONE);
+    /// assert!(!c.is_dead()); // STONE value (160) >= STONE constant
+    /// ```
+    pub fn is_dead(&self) -> bool {
+        self.has(Self::DEAD) && self.0 < Self::STONE
+    }
+
     /// Returns true if the character is silenced
     pub fn is_silenced(&self) -> bool {
         self.has(Self::SILENCED)
@@ -1241,9 +1262,10 @@ impl Character {
         }
     }
 
-    /// Returns true if the character is alive (not dead, stoned, or eradicated)
+    /// Returns true if the character is alive (HP above 0 and not dead,
+    /// stoned, or eradicated).
     pub fn is_alive(&self) -> bool {
-        !self.conditions.is_fatal()
+        self.hp.current > 0 && !self.conditions.is_fatal()
     }
 
     /// Returns true if the character can act in combat
@@ -2098,6 +2120,75 @@ mod tests {
         condition.add(Condition::POISONED);
         assert!(condition.has(Condition::POISONED));
         assert!(!condition.is_fine());
+    }
+
+    #[test]
+    fn test_condition_is_dead_helper() {
+        let mut c = Condition::new();
+        // Not dead initially
+        assert!(!c.is_dead(), "FINE condition must not be dead");
+
+        // Set only DEAD bit
+        c.add(Condition::DEAD);
+        assert!(
+            c.is_dead(),
+            "DEAD bit alone must return true from is_dead()"
+        );
+
+        // STONE includes the DEAD bit but value >= STONE — must return false
+        let mut c2 = Condition::new();
+        c2.add(Condition::STONE);
+        assert!(
+            !c2.is_dead(),
+            "STONE must not be considered dead by is_dead()"
+        );
+
+        // ERADICATED is 255 — must return false
+        let mut c3 = Condition::new();
+        c3.add(Condition::ERADICATED);
+        assert!(
+            !c3.is_dead(),
+            "ERADICATED must not be considered dead by is_dead()"
+        );
+    }
+
+    #[test]
+    fn test_character_is_alive_false_at_zero_hp() {
+        let mut c = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Default HP > 0; character is alive
+        assert!(
+            c.is_alive(),
+            "character with HP > 0 and no conditions must be alive"
+        );
+
+        // Drop HP to 0 — must not be alive regardless of conditions
+        c.hp.current = 0;
+        assert!(
+            !c.is_alive(),
+            "character with hp.current == 0 must not be alive"
+        );
+    }
+
+    #[test]
+    fn test_character_can_act_false_at_zero_hp() {
+        let mut c = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        c.hp.current = 0;
+        assert!(
+            !c.can_act(),
+            "character with hp.current == 0 must not be able to act"
+        );
     }
 
     #[test]

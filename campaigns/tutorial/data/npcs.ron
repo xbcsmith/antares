@@ -154,9 +154,18 @@
         faction: Some("Temple"),
         is_merchant: true,
         is_innkeeper: false,
-        is_priest: false,
+        is_priest: true,
         stock_template: Some("holy_temple_menu"),
-        service_catalog: None,
+        service_catalog: Some((
+            services: [
+                (
+                    service_id: "resurrect",
+                    cost: 500,
+                    gem_cost: 1,
+                    description: "Resurrect a dead party member for 500 gold and 1 gem.",
+                ),
+            ],
+        )),
         economy: None,
     ),
     (
@@ -171,9 +180,18 @@
         faction: Some("Temple"),
         is_merchant: true,
         is_innkeeper: false,
-        is_priest: false,
+        is_priest: true,
         stock_template: Some("holy_temple_menu"),
-        service_catalog: None,
+        service_catalog: Some((
+            services: [
+                (
+                    service_id: "resurrect",
+                    cost: 500,
+                    gem_cost: 1,
+                    description: "Resurrect a dead party member for 500 gold and 1 gem.",
+                ),
+            ],
+        )),
         economy: None,
     ),
     (

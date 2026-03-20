@@ -1,8 +1,5 @@
 # Game Tray Icon Implementation Plan
 
-<!-- SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com> -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-
 ## Overview
 
 Adds the Antares icon to the game binary (`src/bin/antares.rs`) in three

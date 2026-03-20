@@ -238,6 +238,8 @@ pub fn apply_consumable_effect(
             if healed > 0 {
                 result.healing = healed;
             }
+            // Revive from unconscious if HP is now above 0.
+            crate::domain::resources::revive_from_unconscious(character);
         }
 
         ConsumableEffect::RestoreSp(amount) => {
@@ -283,6 +285,15 @@ pub fn apply_consumable_effect(
         ConsumableEffect::IsFood(_) => {
             // Food items are consumed by the rest system, not this path.
             // Silently return the zeroed result so callers can detect no-op.
+        }
+
+        ConsumableEffect::Resurrect(hp) => {
+            // Caller is responsible for permadeath validation before reaching
+            // this point. This function only performs the domain operation.
+            if character.conditions.is_dead() {
+                crate::domain::resources::revive_from_dead(character, hp);
+                result.healing = hp as i32;
+            }
         }
     }
 
@@ -482,6 +493,61 @@ mod tests {
         let result = apply_consumable_effect(&mut ch, &data);
         assert_eq!(ch.hp.current, 80, "current should increase by 30");
         assert_eq!(result.healing, 30);
+    }
+
+    /// A `HealHp` consumable applied to an unconscious (0 HP) character must
+    /// clear the UNCONSCIOUS condition once HP is raised above 0.
+    #[test]
+    fn test_heal_hp_clears_unconscious() {
+        use crate::domain::character::Condition;
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut ch = make_character(20, 0, 0, 0);
+        ch.conditions.add(Condition::UNCONSCIOUS);
+        ch.add_condition(ActiveCondition::new(
+            "unconscious".to_string(),
+            ConditionDuration::Permanent,
+        ));
+
+        let data = make_consumable_data(ConsumableEffect::HealHp(10), None);
+        let result = apply_consumable_effect(&mut ch, &data);
+
+        assert_eq!(ch.hp.current, 10, "HP should be 10 after healing");
+        assert!(result.healing > 0, "result.healing must be positive");
+        assert!(
+            !ch.conditions.has(Condition::UNCONSCIOUS),
+            "UNCONSCIOUS bitflag must be cleared after HealHp raises HP above 0"
+        );
+        assert!(
+            ch.active_conditions
+                .iter()
+                .all(|c| c.condition_id != "unconscious"),
+            "active_conditions must not contain 'unconscious' after revival"
+        );
+    }
+
+    /// A `HealHp(0)` that does not raise HP above 0 must leave UNCONSCIOUS set.
+    #[test]
+    fn test_heal_hp_does_not_clear_when_still_zero() {
+        use crate::domain::character::Condition;
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut ch = make_character(20, 0, 0, 0);
+        ch.conditions.add(Condition::UNCONSCIOUS);
+        ch.add_condition(ActiveCondition::new(
+            "unconscious".to_string(),
+            ConditionDuration::Permanent,
+        ));
+
+        // HealHp(0) — does not raise HP
+        let data = make_consumable_data(ConsumableEffect::HealHp(0), None);
+        apply_consumable_effect(&mut ch, &data);
+
+        assert_eq!(ch.hp.current, 0, "HP must remain 0 after HealHp(0)");
+        assert!(
+            ch.conditions.has(Condition::UNCONSCIOUS),
+            "UNCONSCIOUS must remain set when HP does not rise above 0"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -976,6 +1042,111 @@ mod tests {
         assert!(
             !result.resistance_boost_is_timed,
             "combat path must not set resistance_boost_is_timed"
+        );
+    }
+
+    // ===== Resurrect Tests =====
+
+    /// `ConsumableEffect::Resurrect(hp)` on a dead character must clear the
+    /// `DEAD` bitflag, remove the `"dead"` `ActiveCondition`, and set
+    /// `hp.current` to the requested value.
+    #[test]
+    fn test_resurrect_consumable_clears_dead() {
+        use crate::domain::character::Condition;
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(20, 10, 0, 0);
+        ch.hp.current = 0;
+        ch.conditions.add(Condition::DEAD);
+        ch.add_condition(ActiveCondition::new(
+            "dead".to_string(),
+            ConditionDuration::Permanent,
+        ));
+
+        let data = ConsumableData {
+            effect: ConsumableEffect::Resurrect(5),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+        let result = apply_consumable_effect(&mut ch, &data);
+
+        assert!(
+            !ch.conditions.has(Condition::DEAD),
+            "DEAD bitflag must be cleared after Resurrect"
+        );
+        assert_eq!(
+            ch.hp.current, 5,
+            "hp.current must be set to the requested HP after Resurrect"
+        );
+        assert!(
+            !ch.active_conditions
+                .iter()
+                .any(|ac| ac.condition_id == "dead"),
+            "active_conditions must not contain 'dead' after Resurrect"
+        );
+        assert_eq!(
+            result.healing, 5,
+            "result.healing must equal the restored HP"
+        );
+    }
+
+    /// `ConsumableEffect::Resurrect(hp)` on a living character (not dead) must
+    /// be a complete no-op — HP unchanged, no conditions altered.
+    #[test]
+    fn test_resurrect_consumable_noop_on_alive() {
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(20, 10, 0, 0);
+        ch.hp.current = 15;
+        // Character is alive — DEAD flag is NOT set
+
+        let data = ConsumableData {
+            effect: ConsumableEffect::Resurrect(5),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+        let result = apply_consumable_effect(&mut ch, &data);
+
+        assert_eq!(
+            ch.hp.current, 15,
+            "hp.current must be unchanged when Resurrect targets a living character"
+        );
+        assert_eq!(
+            result.healing, 0,
+            "result.healing must be 0 when Resurrect is a no-op"
+        );
+    }
+
+    /// `ConsumableEffect::Resurrect(hp)` on an ERADICATED character must be a
+    /// no-op because `is_dead()` returns false for ERADICATED (value 255).
+    #[test]
+    fn test_resurrect_consumable_noop_on_eradicated() {
+        use crate::domain::character::Condition;
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(20, 10, 0, 0);
+        ch.hp.current = 0;
+        ch.conditions.add(Condition::ERADICATED);
+
+        let data = ConsumableData {
+            effect: ConsumableEffect::Resurrect(5),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+        let result = apply_consumable_effect(&mut ch, &data);
+
+        assert_eq!(
+            ch.hp.current, 0,
+            "hp.current must remain 0 for ERADICATED — Resurrect is a no-op"
+        );
+        assert!(
+            ch.conditions.has(Condition::ERADICATED),
+            "ERADICATED condition must remain set"
+        );
+        assert_eq!(
+            result.healing, 0,
+            "result.healing must be 0 for ERADICATED no-op"
         );
     }
 }

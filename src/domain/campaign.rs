@@ -119,9 +119,13 @@ pub struct Campaign {
 ///     random_encounter_rate: 1.0,
 ///     rest_healing_rate: 1.0,
 ///     custom_rules: BTreeMap::new(),
+///     permadeath: false,
+///     unconscious_before_death: true,
 /// };
 ///
 /// assert_eq!(config.max_party_level, Some(20));
+/// assert!(!config.permadeath);
+/// assert!(config.unconscious_before_death);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CampaignConfig {
@@ -145,6 +149,24 @@ pub struct CampaignConfig {
 
     /// Custom campaign-specific rules
     pub custom_rules: BTreeMap<String, String>,
+
+    /// If true, dead characters cannot be resurrected by any means.
+    /// Campaign creators set this for permadeath runs. Default: false.
+    #[serde(default)]
+    pub permadeath: bool,
+
+    /// If true, a character that reaches 0 HP becomes unconscious first and
+    /// only dies if they receive further damage while unconscious.
+    /// If false, reaching 0 HP sets DEAD immediately (instant death mode).
+    /// Default: true (unconscious before death, classic RPG behavior).
+    #[serde(default = "default_true")]
+    pub unconscious_before_death: bool,
+}
+
+/// Serde helper: returns `true` as the default value for boolean fields that
+/// default to `true` rather than `false`.
+fn default_true() -> bool {
+    true
 }
 
 impl Default for CampaignConfig {
@@ -157,6 +179,8 @@ impl Default for CampaignConfig {
             random_encounter_rate: 1.0,
             rest_healing_rate: 1.0,
             custom_rules: BTreeMap::new(),
+            permadeath: false,
+            unconscious_before_death: true,
         }
     }
 }
@@ -195,6 +219,18 @@ mod tests {
         assert_eq!(config.experience_rate, 1.0);
         assert_eq!(config.gold_rate, 1.0);
         assert!(config.custom_rules.is_empty());
+    }
+
+    /// `CampaignConfig::default()` must have `unconscious_before_death == true`
+    /// and `permadeath == false` — the classic RPG behavior.
+    #[test]
+    fn test_unconscious_before_death_mode_default() {
+        let config = CampaignConfig::default();
+        assert!(
+            config.unconscious_before_death,
+            "unconscious_before_death must default to true (classic RPG mode)"
+        );
+        assert!(!config.permadeath, "permadeath must default to false");
     }
 
     #[test]

@@ -1055,10 +1055,10 @@ NpcDefinition(
             .services
             .push(ServiceEntry::new("heal_all", 50, "Heal the entire party"));
         catalog.services.push(ServiceEntry::with_gem_cost(
-            "raise_dead",
+            "resurrect",
             500,
             1,
-            "Raise a dead character",
+            "Resurrect a dead character",
         ));
 
         let priest = NpcDefinition {
@@ -1087,7 +1087,7 @@ NpcDefinition(
         assert!(deserialized.is_priest);
         let catalog = deserialized.service_catalog.as_ref().unwrap();
         assert!(catalog.has_service("heal_all"));
-        assert!(catalog.has_service("raise_dead"));
+        assert!(catalog.has_service("resurrect"));
     }
 
     #[test]
