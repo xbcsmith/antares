@@ -3206,6 +3206,58 @@ mod minimap_tests {
 
         assert_eq!(node.display, Display::None);
     }
+
+    #[test]
+    fn test_mini_map_quest_objective_poi_dot_rendered() {
+        let mut app = setup_minimap_test_app();
+
+        let mut state = GameState::new();
+        let mut map = Map::new(1, "Mini Map".to_string(), "Test".to_string(), 13, 13);
+        let objective_pos = Position::new(6, 5);
+
+        if let Some(tile) = map.get_tile_mut(objective_pos) {
+            tile.mark_visited();
+        }
+
+        if let Some(tile) = map.get_tile_mut(Position::new(5, 5)) {
+            tile.mark_visited();
+        }
+
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+        state.world.set_party_position(Position::new(5, 5));
+
+        let mut quest = crate::application::Quest::new(
+            "42".to_string(),
+            "Find the marker".to_string(),
+            "Reach the marked tile".to_string(),
+        );
+        quest.add_objective_with_location(
+            "Reach the objective".to_string(),
+            Some(1),
+            Some(objective_pos),
+        );
+        state.quests.add_quest(quest);
+
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .run_system_cached(update_mini_map)
+            .expect("update_mini_map system should run in test");
+
+        let mini_map = app.world().resource::<MiniMapImage>().clone();
+        let images = app.world().resource::<Assets<Image>>();
+        let image = images.get(&mini_map.handle).unwrap();
+        let data = image.data.as_ref().unwrap();
+
+        let tile_x = mini_map_viewport_diameter() / 2 + 1;
+        let tile_y = mini_map_viewport_diameter() / 2;
+        let pixel_x = tile_x * mini_map_pixels_per_tile() + (mini_map_pixels_per_tile() / 2) - 1;
+        let pixel_y = tile_y * mini_map_pixels_per_tile() + (mini_map_pixels_per_tile() / 2) - 1;
+        let offset = mini_map_pixel_offset(pixel_x, pixel_y, mini_map_image_size());
+
+        assert_eq!(&data[offset..offset + 4], &POI_QUEST_COLOR);
+    }
 }
 
 #[cfg(test)]

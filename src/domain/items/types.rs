@@ -75,10 +75,12 @@ pub enum WeaponClassification {
     Unarmed,
 }
 
-/// Armor classification determines proficiency requirement
-///
-/// Each armor piece belongs to exactly one classification, which maps to a
+/// Armor classification determines equipment slot and, in most cases,
 /// proficiency requirement.
+///
+/// Most armor pieces map to a proficiency. `Clothing` is the exception: it
+/// occupies the body armor slot but requires no armor proficiency, making it
+/// suitable for robes and other non-protective garments.
 ///
 /// # Examples
 ///
@@ -87,6 +89,9 @@ pub enum WeaponClassification {
 ///
 /// let classification = ArmorClassification::Heavy;
 /// assert_ne!(classification, ArmorClassification::Light);
+///
+/// let clothing = ArmorClassification::Clothing;
+/// assert_ne!(clothing, ArmorClassification::Light);
 ///
 /// let helmet = ArmorClassification::Helmet;
 /// assert_ne!(helmet, ArmorClassification::Light);
@@ -103,6 +108,10 @@ pub enum ArmorClassification {
     Medium,
     /// Heavy armor: plate mail, full plate
     Heavy,
+    /// Non-protective clothing worn in the body armor slot (robes, tunics)
+    ///
+    /// This classification does not require armor proficiency.
+    Clothing,
     /// All shield types
     Shield,
     /// Helmet / headgear — maps to equipment.helmet
@@ -209,6 +218,13 @@ pub struct WeaponData {
 ///     ac_bonus: 2,
 ///     weight: 15,
 ///     classification: ArmorClassification::Light,
+/// };
+///
+/// // Mage robe: 0 AC, clothing (no proficiency required)
+/// let robe = ArmorData {
+///     ac_bonus: 0,
+///     weight: 1,
+///     classification: ArmorClassification::Clothing,
 /// };
 ///
 /// // Plate mail: +8 AC, heavy armor
@@ -852,9 +868,12 @@ impl Item {
             ItemType::Weapon(data) => Some(ProficiencyDatabase::proficiency_for_weapon(
                 data.classification,
             )),
-            ItemType::Armor(data) => Some(ProficiencyDatabase::proficiency_for_armor(
-                data.classification,
-            )),
+            ItemType::Armor(data) => match data.classification {
+                ArmorClassification::Clothing => None,
+                _ => Some(ProficiencyDatabase::proficiency_for_armor(
+                    data.classification,
+                )),
+            },
             ItemType::Accessory(data) => {
                 // Accessories only require proficiency if they have a magic classification
                 data.classification

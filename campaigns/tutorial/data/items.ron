@@ -893,9 +893,9 @@
         id: 107,
         name: "Mage Robe",
         item_type: Armor((
-            ac_bonus: 1,
+            ac_bonus: 0,
             weight: 1,
-            classification: Light,
+            classification: Clothing,
         )),
         base_cost: 1,
         sell_cost: 0,

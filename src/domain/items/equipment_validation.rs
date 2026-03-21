@@ -187,7 +187,8 @@ fn has_slot_for_item(
             // Body-armor slot
             ArmorClassification::Light
             | ArmorClassification::Medium
-            | ArmorClassification::Heavy => true,
+            | ArmorClassification::Heavy
+            | ArmorClassification::Clothing => true,
             // Shield slot
             ArmorClassification::Shield => true,
             // Helmet slot
@@ -227,7 +228,7 @@ impl EquipmentSlot {
     /// | `ItemType`          | Classification / notes        | Target slot   |
     /// |---------------------|-------------------------------|---------------|
     /// | `Weapon(_)`         | any                           | `Weapon`      |
-    /// | `Armor(data)`       | `Light / Medium / Heavy`      | `Armor`       |
+    /// | `Armor(data)`       | `Light / Medium / Heavy / Clothing` | `Armor` |
     /// | `Armor(data)`       | `Shield`                      | `Shield`      |
     /// | `Armor(data)`       | `Helmet`                      | `Helmet`      |
     /// | `Armor(data)`       | `Boots`                       | `Boots`       |
@@ -266,7 +267,8 @@ impl EquipmentSlot {
             ItemType::Armor(data) => match data.classification {
                 ArmorClassification::Light
                 | ArmorClassification::Medium
-                | ArmorClassification::Heavy => Some(EquipmentSlot::Armor),
+                | ArmorClassification::Heavy
+                | ArmorClassification::Clothing => Some(EquipmentSlot::Armor),
                 ArmorClassification::Shield => Some(EquipmentSlot::Shield),
                 ArmorClassification::Helmet => Some(EquipmentSlot::Helmet),
                 ArmorClassification::Boots => Some(EquipmentSlot::Boots),

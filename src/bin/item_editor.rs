@@ -455,18 +455,20 @@ impl ItemEditor {
         println!("    [1] Light (leather, padded)");
         println!("    [2] Medium (chain mail, scale)");
         println!("    [3] Heavy (plate mail, full plate)");
-        println!("    [4] Shield (all shield types)");
-        println!("    [5] Helmet (headgear)");
-        println!("    [6] Boots (footwear)");
+        println!("    [4] Clothing (robes, tunics - no proficiency required)");
+        println!("    [5] Shield (all shield types)");
+        println!("    [6] Helmet (headgear)");
+        println!("    [7] Boots (footwear)");
 
         let choice = self.read_input("  Classification: ");
         match choice.trim() {
             "1" => ArmorClassification::Light,
             "2" => ArmorClassification::Medium,
             "3" => ArmorClassification::Heavy,
-            "4" => ArmorClassification::Shield,
-            "5" => ArmorClassification::Helmet,
-            "6" => ArmorClassification::Boots,
+            "4" => ArmorClassification::Clothing,
+            "5" => ArmorClassification::Shield,
+            "6" => ArmorClassification::Helmet,
+            "7" => ArmorClassification::Boots,
             _ => ArmorClassification::Light,
         }
     }

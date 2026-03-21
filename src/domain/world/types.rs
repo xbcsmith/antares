@@ -2831,9 +2831,25 @@ impl Map {
         }
 
         for quest in &quest_log.active_quests {
+            let Ok(quest_id) = quest.id.parse::<crate::domain::quest::QuestId>() else {
+                continue;
+            };
+
             for objective in &quest.objectives {
-                if !objective.completed {
+                if objective.completed {
                     continue;
+                }
+
+                let (Some(map_id), Some(position)) = (objective.map_id, objective.position) else {
+                    continue;
+                };
+
+                if map_id != self.id {
+                    continue;
+                }
+
+                if self.get_tile(position).is_some_and(|tile| tile.visited) {
+                    pois.push((position, PointOfInterest::QuestObjective { quest_id }));
                 }
             }
         }
@@ -5828,5 +5844,35 @@ mod tests {
         let pois = map.collect_map_pois(&application::QuestLog::new());
 
         assert!(pois.contains(&(treasure_pos, PointOfInterest::Treasure)));
+    }
+
+    #[test]
+    fn test_collect_map_pois_quest_objective() {
+        let mut map = Map::new(1, "POI Test".to_string(), "Desc".to_string(), 10, 10);
+        let objective_pos = Position::new(6, 1);
+
+        map.get_tile_mut(objective_pos)
+            .expect("objective tile must exist")
+            .mark_visited();
+
+        let mut quest_log = application::QuestLog::new();
+        let mut quest = application::Quest::new(
+            "42".to_string(),
+            "Find the marker".to_string(),
+            "Reach the target".to_string(),
+        );
+        quest.add_objective_with_location(
+            "Reach the target tile".to_string(),
+            Some(1),
+            Some(objective_pos),
+        );
+        quest_log.add_quest(quest);
+
+        let pois = map.collect_map_pois(&quest_log);
+
+        assert!(pois.contains(&(
+            objective_pos,
+            PointOfInterest::QuestObjective { quest_id: 42 }
+        )));
     }
 }
