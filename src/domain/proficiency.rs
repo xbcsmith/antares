@@ -667,12 +667,16 @@ impl ProficiencyDatabase {
     ///
     /// let prof = ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Boots);
     /// assert_eq!(prof, "light_armor");
+    ///
+    /// let prof = ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Clothing);
+    /// assert_eq!(prof, "clothing");
     /// ```
     pub fn proficiency_for_armor(classification: ArmorClassification) -> ProficiencyId {
         match classification {
             ArmorClassification::Light => "light_armor".to_string(),
             ArmorClassification::Medium => "medium_armor".to_string(),
             ArmorClassification::Heavy => "heavy_armor".to_string(),
+            ArmorClassification::Clothing => "clothing".to_string(),
             ArmorClassification::Shield => "shield".to_string(),
             ArmorClassification::Helmet => "light_armor".to_string(),
             ArmorClassification::Boots => "light_armor".to_string(),
@@ -1112,6 +1116,10 @@ mod tests {
         assert_eq!(
             ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Heavy),
             "heavy_armor"
+        );
+        assert_eq!(
+            ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Clothing),
+            "clothing"
         );
         assert_eq!(
             ProficiencyDatabase::proficiency_for_armor(ArmorClassification::Shield),

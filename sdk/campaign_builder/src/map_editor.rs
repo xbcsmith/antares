@@ -2305,7 +2305,7 @@ impl EventEditorState {
                     None
                 };
                 let key_item_id = if self.furniture_type == FurnitureType::Door {
-                    self.furniture_key_item_id.trim().parse::<u32>().ok()
+                    self.furniture_key_item_id.trim().parse::<u8>().ok()
                 } else {
                     None
                 };

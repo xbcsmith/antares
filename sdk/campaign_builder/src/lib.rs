@@ -4901,6 +4901,13 @@ impl eframe::App for CampaignBuilderApp {
                 }
             }
             EditorTab::Furniture => {
+                let available_mesh_ids: Vec<u32> = if self.obj_importer_state.furniture_id >= 10001
+                {
+                    (10001..=self.obj_importer_state.furniture_id).collect()
+                } else {
+                    vec![10001]
+                };
+
                 self.furniture_editor_state.show(
                     ui,
                     &mut self.furniture_definitions,
@@ -4909,15 +4916,15 @@ impl eframe::App for CampaignBuilderApp {
                     &mut self.unsaved_changes,
                     &mut self.status_message,
                     &mut self.file_load_merge_mode,
+                    &available_mesh_ids,
                 );
-                if let Some(mesh_id) = self
-                    .furniture_editor_state
-                    .requested_open_obj_importer
-                    .take()
+                if let Some(furniture_editor::FurnitureEditorSignal::OpenInObjImporter) =
+                    self.furniture_editor_state.requested_signal.take()
                 {
                     self.active_tab = EditorTab::Importer;
+                    self.obj_importer_state.export_type = obj_importer::ExportType::Furniture;
                     self.status_message =
-                        format!("Opening OBJ Importer for furniture mesh #{}", mesh_id);
+                        "Opening OBJ Importer for furniture mesh work".to_string();
                     ui.ctx().request_repaint();
                 }
             }

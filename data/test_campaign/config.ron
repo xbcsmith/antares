@@ -5,6 +5,7 @@ GameConfig(
         vsync: true,
         msaa_samples: 4,
         shadow_quality: Medium,
+        show_minimap: true,
     ),
     audio: AudioConfig(
         master_volume: 0.8,
@@ -22,6 +23,7 @@ GameConfig(
         menu: ["Escape"],
         inventory: ["I"],
         rest: ["R"],
+        automap: ["M"],
         movement_cooldown: 0.2,
     ),
     camera: CameraConfig(

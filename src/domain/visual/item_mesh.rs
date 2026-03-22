@@ -683,6 +683,15 @@ impl ItemMeshDescriptor {
                 emissive_color: [0.0; 3],
                 scale: BASE_SCALE * 1.2,
             },
+            ArmorClassification::Clothing => Self {
+                category: ItemMeshCategory::BodyArmor,
+                blade_length: 0.45,
+                primary_color: COLOR_LEATHER,
+                accent_color: COLOR_SILVER,
+                emissive: false,
+                emissive_color: [0.0; 3],
+                scale: BASE_SCALE * 0.95,
+            },
             ArmorClassification::Shield => Self {
                 category: ItemMeshCategory::Shield,
                 blade_length: 0.5,

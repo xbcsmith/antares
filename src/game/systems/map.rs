@@ -3,6 +3,7 @@
 
 use crate::domain::types;
 use crate::domain::world;
+use crate::domain::world::mark_visible_area;
 use crate::domain::world::CreatureBound;
 use crate::domain::world::SpriteReference;
 use crate::game::components::creature::CreatureVisual;
@@ -443,6 +444,11 @@ fn map_change_handler(
         if global_state.0.world.get_map(ev.target_map).is_some() {
             global_state.0.world.set_current_map(ev.target_map);
             global_state.0.world.set_party_position(ev.target_pos);
+            mark_visible_area(
+                &mut global_state.0.world,
+                ev.target_pos,
+                crate::domain::world::VISIBILITY_RADIUS,
+            );
             // Phase 2 (locks): seed lock_states for the newly active map so that
             // any LockedDoor / LockedContainer events on it are registered before
             // the player can interact with them.  init_lock_states is idempotent —
@@ -1741,8 +1747,10 @@ pub fn spawn_event_marker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::types::Position;
     use crate::domain::world::SpriteAnimation;
     use crate::game::components::dialogue::NpcDialogue;
+    use crate::game::resources::GlobalState;
 
     #[test]
     fn test_should_skip_marker_spawn_first_run_with_entities() {
@@ -1758,6 +1766,41 @@ mod tests {
     fn test_should_not_skip_when_last_map_some() {
         let some_map: Option<types::MapId> = Some(1u16);
         assert!(!should_skip_marker_spawn(&some_map, true));
+    }
+
+    #[test]
+    fn test_starting_tile_marked_on_map_load() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_systems(Update, map_change_handler);
+
+        let mut game_state = crate::application::GameState::new();
+        let map = crate::domain::world::Map::new(
+            1,
+            "Test Map".to_string(),
+            "Visibility test map".to_string(),
+            5,
+            5,
+        );
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(GlobalState(game_state));
+
+        let start = Position::new(2, 2);
+        app.world_mut().write_message(MapChangeEvent {
+            target_map: 1,
+            target_pos: start,
+        });
+        app.update();
+
+        let global_state = app.world().resource::<GlobalState>();
+        let current_map = global_state.0.world.get_current_map().unwrap();
+
+        assert!(current_map.get_tile(start).unwrap().visited);
+        assert!(current_map.get_tile(Position::new(1, 1)).unwrap().visited);
+        assert!(current_map.get_tile(Position::new(3, 3)).unwrap().visited);
+        assert!(!current_map.get_tile(Position::new(0, 0)).unwrap().visited);
     }
 
     #[test]

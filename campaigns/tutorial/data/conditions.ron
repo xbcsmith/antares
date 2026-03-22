@@ -50,6 +50,16 @@
         icon_id: Some("icon_cold_resistance"),
     ),
     (
+        id: "dead",
+        name: "Dead",
+        description: "Character is dead. Requires resurrection to revive. Cannot act, be targeted, or be healed by rest.",
+        effects: [
+            StatusEffect("dead"),
+        ],
+        default_duration: Permanent,
+        icon_id: Some("icon_dead"),
+    ),
+    (
         id: "fire_resistance",
         name: "Fire Resistance",
         description: "Resistance to fire damage.",
@@ -174,15 +184,5 @@
         ],
         default_duration: Permanent,
         icon_id: Some("icon_unconscious"),
-    ),
-    (
-        id: "dead",
-        name: "Dead",
-        description: "Character is dead. Requires resurrection to revive. Cannot act, be targeted, or be healed by rest.",
-        effects: [
-            StatusEffect("dead"),
-        ],
-        default_duration: Permanent,
-        icon_id: Some("icon_dead"),
     ),
 ]

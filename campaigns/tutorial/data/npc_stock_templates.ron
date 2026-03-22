@@ -1,131 +1,205 @@
-// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
-// SPDX-License-Identifier: Apache-2.0
-//
-// npc_stock_templates.ron - Tutorial campaign merchant stock templates
-//
-// This file defines stock templates used by merchant NPCs in the tutorial
-// campaign.  Template IDs must exactly match the `stock_template` field in
-// campaigns/tutorial/data/npcs.ron:
-//
-//   tutorial_merchant_town      → "town_merchant_basic"
-//   tutorial_merchant_town2     → "mountain_pass_merchant"
-//   tutorial_priestess_town     → "holy_temple_menu"
-//   tutorial_priest_town2       → "holy_temple_menu"
-//
-// All item IDs must reference items present in
-// campaigns/tutorial/data/items.ron.
-//
-// Field reference:
-//   id                - Unique string identifier (referenced by NpcDefinition::stock_template)
-//   entries           - List of stock entries
-//     item_id           - References a valid item ID in items.ron
-//     quantity          - Initial available quantity (0 = sold out)
-//     override_price    - Optional gold price override; None uses item base_cost * sell_rate
-//   magic_item_pool   - Pool of item IDs eligible for random magic-item slots.
-//                       Duplicates act as weighted entries (higher probability).
-//                       Empty list disables magic-item rotation entirely.
-//   magic_slot_count  - How many random magic items appear in the shop at once.
-//                       0 = no magic items (rotation disabled).
-//   magic_refresh_days - Number of in-game days between magic-item slot refreshes.
-//                        Defaults to 7. Values of 0 are treated as 1 at runtime.
-
 [
-    // ===== Town Merchant Basic =====
-    // The general-goods merchant in the starting town.  Stocks a broad
-    // selection of weapons and armor appropriate for early-game characters.
-    // Quantities are kept low to encourage return visits and resource
-    // management.  Food rations are stocked so the party can always purchase
-    // provisions for resting.
     MerchantStockTemplate(
         id: "town_merchant_basic",
         entries: [
-            // Weapons
-            TemplateStockEntry(item_id: 1,   quantity: 3,  override_price: None), // Club
-            TemplateStockEntry(item_id: 2,   quantity: 3,  override_price: None), // Dagger
-            TemplateStockEntry(item_id: 3,   quantity: 3,  override_price: None), // Short Sword
-            TemplateStockEntry(item_id: 4,   quantity: 2,  override_price: None), // Long Sword
-            TemplateStockEntry(item_id: 5,   quantity: 2,  override_price: None), // Mace
-            TemplateStockEntry(item_id: 6,   quantity: 1,  override_price: None), // Battle Axe
-            TemplateStockEntry(item_id: 7,   quantity: 1,  override_price: None), // Two-Handed Sword
-            TemplateStockEntry(item_id: 8,   quantity: 1,  override_price: None), // Long Bow
-            TemplateStockEntry(item_id: 9,   quantity: 1,  override_price: None), // Short Bow
-            // Armor
-            TemplateStockEntry(item_id: 20,  quantity: 1,  override_price: None), // Leather Armor
-            TemplateStockEntry(item_id: 21,  quantity: 1,  override_price: None), // Chain Mail
-            TemplateStockEntry(item_id: 22,  quantity: 1,  override_price: None), // Plate Mail
-            // Consumables
-            TemplateStockEntry(item_id: 50,  quantity: 3,  override_price: None), // Healing Potion
-            // Food — purchasable rations so the party can rest
-            TemplateStockEntry(item_id: 111, quantity: 10, override_price: None), // Food Ration  (IsFood 1)
-            TemplateStockEntry(item_id: 112, quantity: 5,  override_price: None), // Trail Ration (IsFood 3)
+            TemplateStockEntry(
+                item_id: 1,
+                quantity: 3,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 2,
+                quantity: 3,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 3,
+                quantity: 3,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 4,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 5,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 6,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 7,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 8,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 9,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 20,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 21,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 22,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 50,
+                quantity: 3,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 111,
+                quantity: 10,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 112,
+                quantity: 5,
+                override_price: None,
+            ),
         ],
         magic_item_pool: [
-            30,  // Chain Mail +1
-            11,  // Flaming Sword
-            12,  // Accurate Sword
-            30,  // Chain Mail +1 (weighted double — more likely to appear)
-            41,  // Amulet of Might
+            30,
+            11,
+            12,
+            30,
+            41,
         ],
         magic_slot_count: 5,
         magic_refresh_days: 7,
     ),
-
-    // ===== Mountain Pass Merchant =====
-    // The merchant at the mountain pass settlement.  Carries more advanced
-    // equipment than the town merchant, reflecting the harsher challenges
-    // awaiting the party deeper in the campaign.
     MerchantStockTemplate(
         id: "mountain_pass_merchant",
         entries: [
-            // Enhanced weapons
-            TemplateStockEntry(item_id: 10,  quantity: 2,  override_price: None), // Club +1
-            TemplateStockEntry(item_id: 105, quantity: 2,  override_price: None), // Long Bow +1
-            TemplateStockEntry(item_id: 4,   quantity: 1,  override_price: None), // Long Sword
-            TemplateStockEntry(item_id: 7,   quantity: 1,  override_price: None), // Two-Handed Sword
-            // Enhanced armor
-            TemplateStockEntry(item_id: 22,  quantity: 1,  override_price: None), // Plate Mail
-            TemplateStockEntry(item_id: 30,  quantity: 1,  override_price: None), // Chain Mail +1
-            TemplateStockEntry(item_id: 107, quantity: 2,  override_price: None), // Mage Robe
-            // Consumables
-            TemplateStockEntry(item_id: 50,  quantity: 5,  override_price: None), // Healing Potion
-            TemplateStockEntry(item_id: 51,  quantity: 3,  override_price: None), // Magic Potion
-            // Food — purchasable rations so the party can rest
-            TemplateStockEntry(item_id: 111, quantity: 8,  override_price: None), // Food Ration  (IsFood 1)
-            TemplateStockEntry(item_id: 112, quantity: 4,  override_price: None), // Trail Ration (IsFood 3)
+            TemplateStockEntry(
+                item_id: 10,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 105,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 4,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 7,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 22,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 30,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 107,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 50,
+                quantity: 5,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 51,
+                quantity: 3,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 111,
+                quantity: 8,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 112,
+                quantity: 4,
+                override_price: None,
+            ),
         ],
         magic_item_pool: [
-            40,  // Ring of Protection
-            11,  // Flaming Sword
-            12,  // Accurate Sword
-            42,  // Belt of Speed
-            41,  // Amulet of Might
-            43,  // Arcane Wand
-            31,  // Dragon Scale Mail
+            40,
+            11,
+            12,
+            42,
+            41,
+            43,
+            31,
         ],
         magic_slot_count: 7,
         magic_refresh_days: 7,
     ),
-
-    // ===== Holy Temple Menu =====
-    // Items sold by the temple merchants (tutorial_priestess_town and
-    // tutorial_priest_town2).  Focuses on healing consumables, divine
-    // accessories, and spiritual provisions.
     MerchantStockTemplate(
         id: "holy_temple_menu",
         entries: [
-            // Divine accessories
-            TemplateStockEntry(item_id: 44,  quantity: 1,  override_price: None), // Holy Symbol
-            // Healing and curative consumables
-            TemplateStockEntry(item_id: 50,  quantity: 3,  override_price: None), // Healing Potion
-            TemplateStockEntry(item_id: 51,  quantity: 2,  override_price: None), // Magic Potion
-            TemplateStockEntry(item_id: 52,  quantity: 2,  override_price: None), // Cure Poison Potion
-            TemplateStockEntry(item_id: 109, quantity: 2,  override_price: None), // Cure Disease Potion
-            // Food — temples traditionally provide provisions to pilgrims
-            TemplateStockEntry(item_id: 111, quantity: 5,  override_price: None), // Food Ration  (IsFood 1)
-            TemplateStockEntry(item_id: 112, quantity: 3,  override_price: None), // Trail Ration (IsFood 3)
+            TemplateStockEntry(
+                item_id: 44,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 50,
+                quantity: 3,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 51,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 52,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 109,
+                quantity: 2,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 111,
+                quantity: 5,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 112,
+                quantity: 3,
+                override_price: None,
+            ),
         ],
         magic_item_pool: [
-            101, // Mace of Undead (divine weapon)
+            101,
         ],
         magic_slot_count: 1,
         magic_refresh_days: 7,

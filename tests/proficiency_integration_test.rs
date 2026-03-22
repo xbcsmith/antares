@@ -86,6 +86,7 @@ fn get_armor_proficiency(classification: ArmorClassification) -> Option<Proficie
         ArmorClassification::Light => Some("light_armor".to_string()),
         ArmorClassification::Medium => Some("medium_armor".to_string()),
         ArmorClassification::Heavy => Some("heavy_armor".to_string()),
+        ArmorClassification::Clothing => None,
         ArmorClassification::Shield => Some("shield".to_string()),
         // Helmet and Boots both use light_armor proficiency
         ArmorClassification::Helmet => Some("light_armor".to_string()),

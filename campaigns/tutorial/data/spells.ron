@@ -15,6 +15,7 @@
         applied_conditions: [
             "awake",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 258,
@@ -32,6 +33,7 @@
         applied_conditions: [
             "bless",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 259,
@@ -49,6 +51,7 @@
         applied_conditions: [
             "blind",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 260,
@@ -64,6 +67,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 261,
@@ -79,6 +83,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 262,
@@ -94,6 +99,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 263,
@@ -109,6 +115,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 513,
@@ -124,6 +131,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 514,
@@ -141,6 +149,7 @@
         applied_conditions: [
             "heroism",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 515,
@@ -156,6 +165,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 516,
@@ -173,6 +183,7 @@
         applied_conditions: [
             "cold_resistance",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 517,
@@ -190,6 +201,7 @@
         applied_conditions: [
             "fire_resistance",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 518,
@@ -207,6 +219,7 @@
         applied_conditions: [
             "poison_resistance",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 519,
@@ -224,6 +237,7 @@
         applied_conditions: [
             "silenced",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 769,
@@ -239,6 +253,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 770,
@@ -254,6 +269,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 771,
@@ -269,6 +285,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 772,
@@ -284,6 +301,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 773,
@@ -299,6 +317,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 774,
@@ -314,6 +333,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 775,
@@ -329,6 +349,23 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
+    ),
+    (
+        id: 776,
+        name: "Resurrect",
+        school: Cleric,
+        level: 5,
+        sp_cost: 15,
+        gem_cost: 2,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Resurrects a dead character to 1 HP.",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        resurrect_hp: Some(1),
     ),
     (
         id: 1025,
@@ -346,6 +383,7 @@
         applied_conditions: [
             "awake",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 1026,
@@ -361,6 +399,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1027,
@@ -376,6 +415,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1028,
@@ -391,6 +431,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1029,
@@ -406,6 +447,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1030,
@@ -421,6 +463,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1031,
@@ -438,6 +481,7 @@
         applied_conditions: [
             "sleep",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 1281,
@@ -453,6 +497,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1282,
@@ -468,6 +513,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1283,
@@ -483,6 +529,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1284,
@@ -498,6 +545,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1285,
@@ -513,6 +561,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1286,
@@ -530,6 +579,7 @@
         applied_conditions: [
             "giants_strength",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 1287,
@@ -547,6 +597,7 @@
         applied_conditions: [
             "haste",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 1537,
@@ -562,6 +613,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1538,
@@ -577,6 +629,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1539,
@@ -592,6 +645,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1540,
@@ -607,6 +661,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1541,
@@ -622,6 +677,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        resurrect_hp: None,
     ),
     (
         id: 1542,
@@ -639,6 +695,7 @@
         applied_conditions: [
             "invisibility",
         ],
+        resurrect_hp: None,
     ),
     (
         id: 1543,
@@ -654,21 +711,6 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
-    ),
-    (
-        id: 776,
-        name: "Resurrect",
-        school: Cleric,
-        level: 5,
-        sp_cost: 15,
-        gem_cost: 2,
-        context: Anytime,
-        target: SingleCharacter,
-        description: "Resurrects a dead character to 1 HP.",
-        damage: None,
-        duration: 0,
-        saving_throw: false,
-        applied_conditions: [],
-        resurrect_hp: Some(1),
+        resurrect_hp: None,
     ),
 ]

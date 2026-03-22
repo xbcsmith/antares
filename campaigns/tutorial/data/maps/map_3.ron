@@ -5182,6 +5182,42 @@
             combat_event_type: Normal,
         ),
         (
+            x: 3,
+            y: 10,
+        ): Furniture(
+            name: "Door",
+            furniture_id: None,
+            furniture_type: Door,
+            rotation_y: None,
+            scale: 1.0,
+            material: Wood,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: true,
+            ),
+            color_tint: None,
+            key_item_id: None,
+        ),
+        (
+            x: 4,
+            y: 2,
+        ): Furniture(
+            name: "Door",
+            furniture_id: None,
+            furniture_type: Door,
+            rotation_y: None,
+            scale: 1.0,
+            material: Wood,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: true,
+            ),
+            color_tint: None,
+            key_item_id: None,
+        ),
+        (
             x: 5,
             y: 11,
         ): Encounter(
@@ -5208,110 +5244,6 @@
                 20,
                 30,
             ],
-        ),
-        (
-            x: 10,
-            y: 6,
-        ): Trap(
-            name: "Spike Trap",
-            description: "A hidden spike trap that deals 5 points of damage when triggered.",
-            damage: 5,
-            effect: None,
-        ),
-        (
-            x: 10,
-            y: 12,
-        ): Treasure(
-            name: "Worn Chest",
-            description: "A small chest containing assorted loot and coins.",
-            loot: [
-                12,
-                22,
-                31,
-            ],
-        ),
-        (
-            x: 13,
-            y: 2,
-        ): Treasure(
-            name: "Hidden Cache",
-            description: "A tucked-away cache of items and supplies.",
-            loot: [
-                11,
-                21,
-            ],
-        ),
-        (
-            x: 14,
-            y: 14,
-        ): Encounter(
-            name: "Boss Lair",
-            description: "A concentrated group of powerful monsters guarding a key location.",
-            monster_group: [
-                3,
-                3,
-                3,
-                20,
-            ],
-            time_condition: None,
-            facing: None,
-            proximity_facing: false,
-            rotation_speed: None,
-            combat_event_type: Normal,
-        ),
-        (
-            x: 4,
-            y: 2,
-        ): Furniture(
-            name: "Door",
-            furniture_id: None,
-            furniture_type: Door,
-            rotation_y: None,
-            scale: 1.0,
-            material: Wood,
-            flags: (
-                lit: false,
-                locked: false,
-                blocking: true,
-            ),
-            color_tint: None,
-            key_item_id: None,
-        ),
-        (
-            x: 12,
-            y: 3,
-        ): Furniture(
-            name: "Door",
-            furniture_id: None,
-            furniture_type: Door,
-            rotation_y: None,
-            scale: 1.0,
-            material: Wood,
-            flags: (
-                lit: false,
-                locked: false,
-                blocking: true,
-            ),
-            color_tint: None,
-            key_item_id: None,
-        ),
-        (
-            x: 9,
-            y: 4,
-        ): Furniture(
-            name: "Door",
-            furniture_id: None,
-            furniture_type: Door,
-            rotation_y: None,
-            scale: 1.0,
-            material: Wood,
-            flags: (
-                lit: false,
-                locked: false,
-                blocking: true,
-            ),
-            color_tint: None,
-            key_item_id: None,
         ),
         (
             x: 7,
@@ -5350,8 +5282,8 @@
             key_item_id: None,
         ),
         (
-            x: 3,
-            y: 10,
+            x: 9,
+            y: 4,
         ): Furniture(
             name: "Door",
             furniture_id: None,
@@ -5366,6 +5298,74 @@
             ),
             color_tint: None,
             key_item_id: None,
+        ),
+        (
+            x: 10,
+            y: 6,
+        ): Trap(
+            name: "Spike Trap",
+            description: "A hidden spike trap that deals 5 points of damage when triggered.",
+            damage: 5,
+            effect: None,
+        ),
+        (
+            x: 10,
+            y: 12,
+        ): Treasure(
+            name: "Worn Chest",
+            description: "A small chest containing assorted loot and coins.",
+            loot: [
+                12,
+                22,
+                31,
+            ],
+        ),
+        (
+            x: 12,
+            y: 3,
+        ): Furniture(
+            name: "Door",
+            furniture_id: None,
+            furniture_type: Door,
+            rotation_y: None,
+            scale: 1.0,
+            material: Wood,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: true,
+            ),
+            color_tint: None,
+            key_item_id: None,
+        ),
+        (
+            x: 13,
+            y: 2,
+        ): Treasure(
+            name: "Hidden Cache",
+            description: "A tucked-away cache of items and supplies.",
+            loot: [
+                11,
+                21,
+            ],
+        ),
+        (
+            x: 14,
+            y: 14,
+        ): Encounter(
+            name: "Boss Lair",
+            description: "A concentrated group of powerful monsters guarding a key location.",
+            monster_group: [
+                3,
+                3,
+                3,
+                20,
+            ],
+            time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
+            combat_event_type: Normal,
         ),
     },
     allow_random_encounters: true,

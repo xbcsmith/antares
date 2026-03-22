@@ -669,6 +669,9 @@ impl ItemsEditorState {
                                         if rations == 1 { "" } else { "s" }
                                     )
                                 }
+                                ConsumableEffect::Resurrect(hp) => {
+                                    format!("Resurrect ({} HP)", hp)
+                                }
                             };
                             ui.label(format!("  Effect: {}", effect_str));
                             ui.label(format!("  Combat Use: {}", data.is_combat_usable));
@@ -1299,6 +1302,7 @@ impl ItemsEditorState {
                         ConsumableEffect::BoostAttribute(_, _) => "Boost Attribute",
                         ConsumableEffect::BoostResistance(_, _) => "Boost Resistance",
                         ConsumableEffect::IsFood(_) => "Food (Rations)",
+                        ConsumableEffect::Resurrect(_) => "Resurrect",
                     };
                     egui::ComboBox::from_id_salt("consumable_effect")
                         .selected_text(effect_type)
@@ -1346,6 +1350,12 @@ impl ItemsEditorState {
                                 .clicked()
                             {
                                 data.effect = ConsumableEffect::IsFood(1);
+                            }
+                            if ui
+                                .selectable_label(effect_type == "Resurrect", "Resurrect")
+                                .clicked()
+                            {
+                                data.effect = ConsumableEffect::Resurrect(1);
                             }
                         });
                     ui.label("ℹ️").on_hover_text(concat!(
@@ -1460,6 +1470,13 @@ impl ItemsEditorState {
                             ));
                         });
                         ui.label("⚠️ Food items are not usable in combat.");
+                    }
+                    ConsumableEffect::Resurrect(hp) => {
+                        ui.horizontal(|ui| {
+                            ui.label("Resurrect HP:");
+                            ui.add(egui::DragValue::new(hp).range(1..=999));
+                        });
+                        ui.label("Restores a dead character to life with the specified HP.");
                     }
                 }
             }

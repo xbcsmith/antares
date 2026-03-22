@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Movement and navigation system
@@ -13,6 +13,20 @@
 use super::types::{Map, World};
 use crate::domain::types::{Direction, Position};
 use thiserror::Error;
+
+/// Default fog-of-war visibility radius around the party.
+///
+/// Visibility uses a Chebyshev square centered on the party position, so a
+/// radius of `1` reveals the current tile plus the eight surrounding tiles.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::VISIBILITY_RADIUS;
+///
+/// assert_eq!(VISIBILITY_RADIUS, 1);
+/// ```
+pub const VISIBILITY_RADIUS: u32 = 1;
 
 /// Errors that can occur during movement
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
@@ -32,6 +46,56 @@ pub enum MovementError {
     /// Door is locked and requires a key
     #[error("Door at position ({0}, {1}) is locked")]
     DoorLocked(i32, i32),
+}
+
+/// Marks all in-bounds tiles within a Chebyshev radius of `center` as visited.
+///
+/// The reveal area forms a square around `center`. Any tile coordinates that
+/// fall outside the current map bounds are skipped.
+///
+/// # Arguments
+///
+/// * `world` - The game world containing the current map
+/// * `center` - Center position of the reveal area
+/// * `radius` - Chebyshev radius to reveal
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::Position;
+/// use antares::domain::world::{mark_visible_area, Map, World};
+///
+/// let mut world = World::new();
+/// let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 5, 5);
+/// world.add_map(map);
+/// world.set_current_map(1);
+///
+/// mark_visible_area(&mut world, Position::new(2, 2), 1);
+///
+/// let map = world.get_current_map().unwrap();
+/// assert!(map.get_tile(Position::new(1, 1)).unwrap().visited);
+/// assert!(map.get_tile(Position::new(2, 2)).unwrap().visited);
+/// assert!(map.get_tile(Position::new(3, 3)).unwrap().visited);
+/// assert!(!map.get_tile(Position::new(0, 0)).unwrap().visited);
+/// ```
+pub fn mark_visible_area(world: &mut World, center: Position, radius: u32) {
+    let Some(map) = world.get_current_map_mut() else {
+        return;
+    };
+
+    let radius = radius as i32;
+    for dy in -radius..=radius {
+        for dx in -radius..=radius {
+            let pos = Position::new(center.x + dx, center.y + dy);
+            if !map.is_valid_position(pos) {
+                continue;
+            }
+
+            if let Some(tile) = map.get_tile_mut(pos) {
+                tile.mark_visited();
+            }
+        }
+    }
 }
 
 /// Moves the party in the specified direction
@@ -60,7 +124,7 @@ pub enum MovementError {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::world::{World, Map, move_party};
+/// use antares::domain::world::{move_party, Map, World};
 /// use antares::domain::types::{Direction, Position};
 ///
 /// let mut world = World::new();
@@ -105,13 +169,8 @@ pub fn move_party(world: &mut World, direction: Direction) -> Result<Position, M
     // Update party position
     world.set_party_position(new_pos);
 
-    // Mark tile as visited
-    if let Some(tile) = world
-        .get_current_map_mut()
-        .and_then(|m| m.get_tile_mut(new_pos))
-    {
-        tile.mark_visited();
-    }
+    // Reveal the area around the new position.
+    mark_visible_area(world, new_pos, VISIBILITY_RADIUS);
 
     Ok(new_pos)
 }
@@ -205,7 +264,99 @@ pub fn check_tile_blocked(map: &Map, position: Position) -> Result<bool, Movemen
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::save_game::SaveGame;
     use crate::domain::world::{TerrainType, WallType};
+
+    #[test]
+    fn test_mark_visible_area_marks_radius() {
+        let mut world = World::new();
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 5, 5);
+        world.add_map(map);
+        world.set_current_map(1);
+
+        mark_visible_area(&mut world, Position::new(2, 2), 1);
+
+        let map = world.get_current_map().unwrap();
+        for y in 1..=3 {
+            for x in 1..=3 {
+                assert!(
+                    map.get_tile(Position::new(x, y)).unwrap().visited,
+                    "expected tile ({x}, {y}) to be visited"
+                );
+            }
+        }
+
+        assert!(!map.get_tile(Position::new(0, 0)).unwrap().visited);
+        assert!(!map.get_tile(Position::new(4, 4)).unwrap().visited);
+    }
+
+    #[test]
+    fn test_mark_visible_area_clamps_to_bounds() {
+        let mut world = World::new();
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 5, 5);
+        world.add_map(map);
+        world.set_current_map(1);
+
+        mark_visible_area(&mut world, Position::new(0, 0), 1);
+
+        let map = world.get_current_map().unwrap();
+        let expected_visited = [
+            Position::new(0, 0),
+            Position::new(1, 0),
+            Position::new(0, 1),
+            Position::new(1, 1),
+        ];
+
+        for pos in expected_visited {
+            assert!(
+                map.get_tile(pos).unwrap().visited,
+                "expected tile ({}, {}) to be visited",
+                pos.x,
+                pos.y
+            );
+        }
+
+        assert!(!map.get_tile(Position::new(2, 0)).unwrap().visited);
+        assert!(!map.get_tile(Position::new(0, 2)).unwrap().visited);
+        assert!(!map.get_tile(Position::new(2, 2)).unwrap().visited);
+    }
+
+    #[test]
+    fn test_visited_persists_after_save_load() {
+        let mut state = crate::application::GameState::new();
+        let mut world = World::new();
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 5, 5);
+        world.add_map(map);
+        world.set_current_map(1);
+        state.world = world;
+
+        mark_visible_area(&mut state.world, Position::new(2, 2), 1);
+
+        let save = SaveGame::new(state.clone());
+        let serialized = ron::to_string(&save).unwrap();
+        let loaded: SaveGame = ron::from_str(&serialized).unwrap();
+
+        assert!(
+            loaded
+                .game_state
+                .world
+                .get_current_map()
+                .unwrap()
+                .get_tile(Position::new(2, 2))
+                .unwrap()
+                .visited
+        );
+        assert!(
+            loaded
+                .game_state
+                .world
+                .get_current_map()
+                .unwrap()
+                .get_tile(Position::new(1, 1))
+                .unwrap()
+                .visited
+        );
+    }
 
     #[test]
     fn test_move_party_basic() {
@@ -218,6 +369,30 @@ mod tests {
         let result = move_party(&mut world, Direction::North);
         assert!(result.is_ok());
         assert_eq!(world.party_position, Position::new(10, 9));
+        assert!(
+            world
+                .get_current_map()
+                .unwrap()
+                .get_tile(Position::new(10, 9))
+                .unwrap()
+                .visited
+        );
+        assert!(
+            world
+                .get_current_map()
+                .unwrap()
+                .get_tile(Position::new(9, 8))
+                .unwrap()
+                .visited
+        );
+        assert!(
+            world
+                .get_current_map()
+                .unwrap()
+                .get_tile(Position::new(11, 10))
+                .unwrap()
+                .visited
+        );
     }
 
     #[test]
