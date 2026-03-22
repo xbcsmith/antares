@@ -1,5 +1,120 @@
 # Implementations
 
+## Phase 3: Dialogue Mouse Support (Complete)
+
+### Overview
+
+Phase 3 extends the shared mouse activation model into the dialogue system so
+players can advance dialogue and select branching choices entirely with the
+mouse. The goal of this phase was to bring dialogue interaction into parity
+with the existing keyboard paths while preserving the same dialogue semantics
+and state transitions.
+
+### Problem Statement
+
+Before this phase, dialogue interaction still depended on keyboard input for
+two core actions:
+
+- advancing dialogue text required `Space` or `E`
+- selecting dialogue choices required arrow keys, digit keys, `Enter`, or `Space`
+
+That left the dialogue UI visually present on screen but not fully operable by
+mouse, which conflicted with the game-wide mouse support plan.
+
+### Files Changed
+
+| File                                   | Change                                                          |
+| -------------------------------------- | --------------------------------------------------------------- |
+| `src/game/systems/dialogue.rs`         | Added mouse-driven advance support for the dialogue panel       |
+| `src/game/systems/dialogue_visuals.rs` | Wired the dialogue panel root for Bevy-UI click detection       |
+| `src/game/systems/dialogue_choices.rs` | Added clickable choice buttons and mouse-driven choice dispatch |
+| `docs/explanation/implementations.md`  | Added this implementation summary                               |
+
+---
+
+### 3.1 — Dialogue Advance on Click
+
+The dialogue panel uses Bevy UI, so the implementation follows the Bevy-UI path
+from the plan rather than switching to egui.
+
+The dialogue text panel root was upgraded to participate in interaction by
+adding `Button` and `Interaction::None` to the panel entity created by
+`spawn_dialogue_bubble`. The dialogue input system now reads optional mouse
+input and the panel interaction state, then uses the shared
+`mouse_input::is_activated(...)` helper to emit `AdvanceDialogue` when the
+player clicks the dialogue panel.
+
+This preserves the existing keyboard behavior while adding a parallel mouse
+route with identical semantics.
+
+### 3.2 — Clickable Dialogue Choices
+
+Dialogue choice rows were upgraded from passive layout/text nodes into
+interactive Bevy UI buttons.
+
+Each spawned choice row now carries:
+
+- `Button`
+- `Interaction::None`
+- `ChoiceButton { choice_index }`
+
+The choice input system now has a second mouse query alongside the existing
+keyboard path. When a choice button is activated through the shared mouse
+helper, it immediately emits `SelectDialogueChoice { choice_index }` and resets
+`ChoiceSelectionState` just like the existing digit-key immediate confirm path.
+
+Hovering alone remains non-destructive and does not dispatch a choice.
+
+### 3.3 — Interaction Model
+
+The dialogue mouse interaction model is intentionally aligned with earlier
+phases:
+
+- clicking the dialogue panel advances the conversation exactly like pressing
+  `Space`
+- clicking a choice selects it immediately exactly like pressing its digit key
+- hovered state by itself never causes dialogue progression or choice
+  selection
+
+This keeps the canonical activation rule consistent across combat, menus, and
+dialogue.
+
+### 3.4 — Test Coverage Added
+
+Added the required Phase 3 mouse interaction tests:
+
+- `test_mouse_click_advances_dialogue`
+- `test_mouse_click_choice_dispatches_select`
+- `test_mouse_hover_choice_does_not_select`
+- `test_mouse_click_choice_resets_choice_state`
+
+These tests verify that:
+
+- dialogue panel clicks emit `AdvanceDialogue`
+- clicking a choice dispatches the correct `SelectDialogueChoice`
+- hovered choice state alone does not emit a selection
+- click selection resets `ChoiceSelectionState` to its idle defaults
+
+### 3.5 — Deliverables Completed
+
+- [x] Dialogue text panel wired for advance-on-click using the Bevy-UI path
+- [x] `ChoiceButton` marker component added to the dialogue choice system
+- [x] Choice nodes spawned with `Button`, `Interaction::None`, and choice marker data
+- [x] `choice_input_system` extended with mouse activation handling
+- [x] Phase 3 tests implemented
+- [x] Quality gates run
+
+### 3.6 — Outcome
+
+After this phase, the dialogue system is fully operable by mouse:
+
+- clicking the dialogue panel advances dialogue
+- clicking a choice immediately selects it
+- hovering alone never triggers any action
+
+This completes the dialogue portion of the game-wide mouse input plan and keeps
+the shared Bevy-UI activation model consistent across all implemented phases.
+
 ## Phase 2: Menu Mouse Support (Complete)
 
 ### Overview

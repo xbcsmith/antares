@@ -26,7 +26,9 @@ use bevy::prelude::*;
 use crate::application::dialogue::{DialogueState, RecruitmentContext};
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
+use crate::game::components::dialogue::DialoguePanelRoot;
 use crate::game::resources::GlobalState;
+use crate::game::systems::mouse_input;
 
 use crate::domain::dialogue::{DialogueAction, DialogueCondition, DialogueId};
 
@@ -123,12 +125,29 @@ impl Plugin for DialoguePlugin {
 /// * `advance_writer` - Message writer for AdvanceDialogue messages
 fn dialogue_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
+    dialogue_panel_query: Query<(&Interaction, Ref<Interaction>), With<DialoguePanelRoot>>,
     global_state: Res<GlobalState>,
     mut advance_writer: MessageWriter<AdvanceDialogue>,
 ) {
-    if matches!(global_state.0.mode, GameMode::Dialogue(_))
-        && (keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::KeyE))
-    {
+    if !matches!(global_state.0.mode, GameMode::Dialogue(_)) {
+        return;
+    }
+
+    let keyboard_advance =
+        keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::KeyE);
+    let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
+    let mouse_advance = dialogue_panel_query
+        .iter()
+        .any(|(interaction, interaction_ref)| {
+            mouse_input::is_activated(
+                interaction,
+                interaction_ref.is_changed(),
+                mouse_just_pressed,
+            )
+        });
+
+    if keyboard_advance || mouse_advance {
         advance_writer.write(AdvanceDialogue);
     }
 }
@@ -1804,6 +1823,72 @@ mod tests {
 
         // Verify we're in exploration mode
         assert!(matches!(global_state.0.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_mouse_click_advances_dialogue() {
+        use crate::application::dialogue::DialogueState;
+        use crate::domain::types::Position;
+        use crate::game::components::dialogue::DialoguePanelRoot;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<AdvanceDialogue>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.add_systems(Update, dialogue_input_system);
+
+        {
+            let mut global_state = app.world_mut().resource_mut::<GlobalState>();
+            let dialogue_state = DialogueState::start_simple(
+                "Hello".to_string(),
+                "Speaker".to_string(),
+                None,
+                Some(Position::new(1, 1)),
+            );
+            global_state.0.mode = GameMode::Dialogue(dialogue_state);
+        }
+
+        app.world_mut()
+            .spawn((Button, Interaction::Pressed, DialoguePanelRoot));
+
+        app.update();
+
+        let reader = app.world_mut().resource_mut::<Messages<AdvanceDialogue>>();
+        assert_eq!(reader.len(), 1);
+    }
+
+    #[test]
+    fn test_mouse_hover_dialogue_panel_does_not_advance() {
+        use crate::application::dialogue::DialogueState;
+        use crate::domain::types::Position;
+        use crate::game::components::dialogue::DialoguePanelRoot;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<AdvanceDialogue>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.add_systems(Update, dialogue_input_system);
+
+        {
+            let mut global_state = app.world_mut().resource_mut::<GlobalState>();
+            let dialogue_state = DialogueState::start_simple(
+                "Hello".to_string(),
+                "Speaker".to_string(),
+                None,
+                Some(Position::new(1, 1)),
+            );
+            global_state.0.mode = GameMode::Dialogue(dialogue_state);
+        }
+
+        app.world_mut()
+            .spawn((Button, Interaction::Hovered, DialoguePanelRoot));
+
+        app.update();
+
+        let reader = app.world_mut().resource_mut::<Messages<AdvanceDialogue>>();
+        assert_eq!(reader.len(), 0);
     }
 
     #[test]

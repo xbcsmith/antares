@@ -63,6 +63,8 @@ pub fn spawn_dialogue_bubble(
         // Spawn the root panel container
         let panel_root = commands
             .spawn((
+                Button,
+                Interaction::None,
                 Node {
                     position_type: PositionType::Absolute,
                     bottom: DIALOGUE_PANEL_BOTTOM,
