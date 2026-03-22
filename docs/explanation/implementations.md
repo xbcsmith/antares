@@ -1,5 +1,132 @@
 # Implementations
 
+## Phase 2: Menu Mouse Support (Complete)
+
+### Overview
+
+Phase 2 extends the shared mouse activation model into the menu system so both
+menu buttons and settings sliders are fully operable by mouse. The goal of this
+phase was to remove the remaining keyboard-only gaps in the in-game menu,
+bringing button activation and audio setting adjustment into parity with the
+planned game-wide mouse input model.
+
+### Problem Statement
+
+Before this phase, the menu system still had two major mouse-input gaps:
+
+- `menu_button_interaction` only reacted to direct `Interaction::Pressed`
+  transitions and did not use the shared hovered-click fallback introduced in
+  Phase 1.
+- Settings sliders were effectively keyboard-only because their values were
+  changed through keyboard navigation logic rather than direct mouse click/drag
+  interaction on the slider widgets.
+
+That meant the menu appeared mouse-driven visually, but some interactions were
+either fragile or incomplete from an actual usability perspective.
+
+### Files Changed
+
+| File                                  | Change                                                                    |
+| ------------------------------------- | ------------------------------------------------------------------------- |
+| `src/game/systems/menu.rs`            | Added hovered-click menu button activation and mouse-driven slider logic  |
+| `src/game/components/menu.rs`         | Added slider-track marker data needed to identify settings slider widgets |
+| `docs/explanation/implementations.md` | Added this implementation summary                                         |
+
+---
+
+### 2.1 — Shared Activation in `menu_button_interaction`
+
+Updated `menu_button_interaction` to use the shared Phase 1 mouse helpers
+instead of checking only for `Interaction::Pressed`.
+
+The system now reads:
+
+- `Ref<Interaction>` so it can detect whether the interaction changed this frame
+- optional mouse button input so the left-click state is computed once per frame
+
+This means a menu button activates when either:
+
+- it enters `Interaction::Pressed` this frame, or
+- the left mouse button is just pressed while the button is hovered
+
+This matches the same canonical Bevy UI activation rule already established for
+combat, so menu buttons and combat buttons now behave consistently.
+
+### 2.2 — Mouse-Driven Settings Sliders
+
+Implemented direct mouse interaction for settings sliders by introducing slider
+track marker data and a dedicated slider mouse handler in the menu systems.
+
+The chosen implementation remains in Bevy UI rather than switching the settings
+screen to egui. This keeps the menu architecture consistent with the existing
+menu panel and button hierarchy while adding the missing interaction behavior.
+
+The slider track path now supports:
+
+- click-to-set based on cursor position along the track width
+- drag-to-adjust while the left mouse button remains held
+- per-slider routing back into the matching audio config field
+
+This gives the settings menu the expected slider behavior without requiring any
+keyboard input.
+
+### 2.3 — Slider Interaction Model
+
+The slider mouse system computes a normalized horizontal cursor position within
+the slider track bounds and maps that to the slider's `0.0..=1.0` value range.
+
+Behavior is intentionally simple and deterministic:
+
+- click near the left edge sets a low value
+- click near the center sets an approximately 50% value
+- click near the right edge sets a high value
+- dragging continuously updates the value as the cursor moves
+
+Hover alone never mutates slider state. The slider only changes when activation
+or drag conditions are satisfied.
+
+### 2.4 — Test Coverage Added
+
+Added the required coverage for both menu buttons and sliders:
+
+**Menu button tests**
+
+- `test_mouse_click_resume_button`
+- `test_mouse_hovered_click_save_button`
+- `test_mouse_hover_does_not_dispatch_menu`
+
+**Slider tests**
+
+- `test_slider_mouse_click_sets_value`
+- `test_slider_drag_updates_value`
+
+These tests verify that:
+
+- mouse button activation matches the expected menu action semantics
+- hovered state alone is non-destructive
+- slider values update from pointer position
+- dragging changes values continuously rather than only on initial click
+
+### 2.5 — Deliverables Completed
+
+- [x] `menu_button_interaction` updated with hovered-click fallback using Phase 1 helpers
+- [x] Slider track marker component added and slider widgets upgraded for click/drag
+- [x] `handle_slider_mouse` registered in `MenuPlugin`
+- [x] Tests from Phase 2 implemented
+- [x] Quality gates run
+
+### 2.6 — Outcome
+
+After this phase, the menu system supports mouse interaction across both
+navigation buttons and settings sliders:
+
+- menu buttons activate reliably through the shared canonical activation helper
+- audio sliders can be adjusted by click and drag
+- hover alone never dispatches an action
+
+This completes the menu portion of the game-wide mouse input plan and prepares
+the same interaction model for dialogue and inventory phases.
+
 ## Phase 1: Shared Mouse Activation Utility (Complete)
 
 ### Overview
