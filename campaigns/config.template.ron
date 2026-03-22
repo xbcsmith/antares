@@ -40,6 +40,11 @@ GameConfig(
         // High   = detailed shadows
         // Ultra  = maximum quality, highest cost
         shadow_quality: Medium,
+
+        // Show the exploration mini map in the top-right HUD
+        // true = mini map visible during exploration
+        // false = hide mini map entirely
+        show_minimap: true,
     ),
 
     // ========================================================================
@@ -102,6 +107,10 @@ GameConfig(
         // The party will rest for a full 12 hours, healing HP and SP
         // Default: "R" key
         rest: ["R"],
+
+        // Keys for opening and closing the full-screen automap
+        // Default: "M" key
+        automap: ["M"],
 
         // Movement cooldown in seconds
         // Prevents accidental double-moves or rapid movement

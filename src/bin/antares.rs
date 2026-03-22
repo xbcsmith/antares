@@ -245,6 +245,11 @@ impl Plugin for AntaresPlugin {
         game_state
             .world
             .set_party_position(self.campaign.config.starting_position);
+        antares::domain::world::mark_visible_area(
+            &mut game_state.world,
+            self.campaign.config.starting_position,
+            antares::domain::world::VISIBILITY_RADIUS,
+        );
         game_state.world.party_facing = self.campaign.config.starting_direction;
 
         // Insert global state and content DB as a resource
@@ -384,6 +389,7 @@ mod tests {
             msaa_samples: 8,
             shadow_quality: ShadowQuality::Ultra,
             show_combat_monster_hp_bars: true,
+            show_minimap: true,
         };
 
         let resource = GraphicsConfigResource {
@@ -405,6 +411,7 @@ mod tests {
             msaa_samples: 4,
             shadow_quality: ShadowQuality::Medium,
             show_combat_monster_hp_bars: true,
+            show_minimap: true,
         };
 
         let campaign = create_test_campaign(graphics.clone());

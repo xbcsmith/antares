@@ -62,6 +62,7 @@
 //!         turn_right: ["D", "ArrowRight"],
 //!         interact: ["Space", "E"],
 //!         menu: ["Escape"],
+//!         automap: ["M"],
 //!         movement_cooldown: 0.2,
 //!     ),
 //!     camera: (
@@ -232,9 +233,17 @@ pub struct GraphicsConfig {
     /// Show combat monster HP hover bars projected above monster visuals.
     #[serde(default = "default_show_combat_monster_hp_bars")]
     pub show_combat_monster_hp_bars: bool,
+
+    /// Show the exploration mini map in the HUD.
+    #[serde(default = "default_show_minimap")]
+    pub show_minimap: bool,
 }
 
 fn default_show_combat_monster_hp_bars() -> bool {
+    true
+}
+
+fn default_show_minimap() -> bool {
     true
 }
 
@@ -247,6 +256,7 @@ impl Default for GraphicsConfig {
             msaa_samples: 4,
             shadow_quality: ShadowQuality::Medium,
             show_combat_monster_hp_bars: true,
+            show_minimap: true,
         }
     }
 }
@@ -381,6 +391,10 @@ pub struct ControlsConfig {
     #[serde(default = "default_rest_keys")]
     pub rest: Vec<String>,
 
+    /// Keys for opening or closing the automap overlay
+    #[serde(default = "default_automap_keys")]
+    pub automap: Vec<String>,
+
     /// Movement cooldown in seconds (prevents double-moves)
     pub movement_cooldown: f32,
 }
@@ -391,6 +405,10 @@ fn default_inventory_keys() -> Vec<String> {
 
 fn default_rest_keys() -> Vec<String> {
     vec!["R".to_string()]
+}
+
+fn default_automap_keys() -> Vec<String> {
+    vec!["M".to_string()]
 }
 
 impl Default for ControlsConfig {
@@ -404,6 +422,7 @@ impl Default for ControlsConfig {
             menu: vec!["Escape".to_string()],
             inventory: default_inventory_keys(),
             rest: default_rest_keys(),
+            automap: default_automap_keys(),
             movement_cooldown: 0.2,
         }
     }
@@ -415,7 +434,8 @@ impl ControlsConfig {
     /// # Errors
     ///
     /// Returns `ConfigError::ValidationError` if movement cooldown is negative,
-    /// if the inventory key list is empty, or if the rest key list is empty.
+    /// if the inventory key list is empty, if the rest key list is empty, or if
+    /// the automap key list is empty.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.movement_cooldown < 0.0 {
             return Err(ConfigError::ValidationError(format!(
@@ -433,6 +453,12 @@ impl ControlsConfig {
         if self.rest.is_empty() {
             return Err(ConfigError::ValidationError(
                 "rest key list must not be empty".to_string(),
+            ));
+        }
+
+        if self.automap.is_empty() {
+            return Err(ConfigError::ValidationError(
+                "automap key list must not be empty".to_string(),
             ));
         }
 
@@ -780,6 +806,7 @@ mod tests {
         assert_eq!(config.graphics.msaa_samples, 4);
         assert_eq!(config.graphics.shadow_quality, ShadowQuality::Medium);
         assert!(config.graphics.show_combat_monster_hp_bars);
+        assert!(config.graphics.show_minimap);
 
         // Verify audio defaults
         assert_eq!(config.audio.master_volume, 0.8);
@@ -808,6 +835,7 @@ mod tests {
         assert_eq!(config.controls.turn_right, vec!["D", "ArrowRight"]);
         assert_eq!(config.controls.interact, vec!["Space", "E"]);
         assert_eq!(config.controls.menu, vec!["Escape"]);
+        assert_eq!(config.controls.automap, vec!["M"]);
         assert_eq!(config.controls.movement_cooldown, 0.2);
     }
 
@@ -1041,6 +1069,12 @@ mod tests {
     }
 
     #[test]
+    fn test_controls_config_default_automap_key() {
+        let config = ControlsConfig::default();
+        assert_eq!(config.automap, vec!["M".to_string()]);
+    }
+
+    #[test]
     fn test_controls_config_validates_empty_rest_list() {
         let config = ControlsConfig {
             rest: vec![],
@@ -1062,6 +1096,27 @@ mod tests {
     }
 
     #[test]
+    fn test_controls_config_validates_empty_automap_list() {
+        let config = ControlsConfig {
+            automap: vec![],
+            ..Default::default()
+        };
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::ValidationError(_))
+        ));
+    }
+
+    #[test]
+    fn test_controls_config_validate_non_empty_automap_keys() {
+        let config = ControlsConfig {
+            automap: vec!["M".to_string()],
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
     fn test_load_valid_config_file() {
         let ron_content = r#"(
             graphics: (
@@ -1071,6 +1126,7 @@ mod tests {
                 msaa_samples: 8,
                 shadow_quality: High,
                 show_combat_monster_hp_bars: false,
+                show_minimap: false,
             ),
             audio: (
                 master_volume: 0.7,
@@ -1112,6 +1168,7 @@ mod tests {
         assert_eq!(config.graphics.resolution, (1920, 1080));
         assert!(config.graphics.fullscreen);
         assert!(!config.graphics.show_combat_monster_hp_bars);
+        assert!(!config.graphics.show_minimap);
         assert_eq!(config.audio.master_volume, 0.7);
         assert_eq!(config.camera.fov, 80.0);
     }
@@ -1163,6 +1220,7 @@ mod tests {
 
         let config = GameConfig::load_or_default(temp_file.path()).unwrap();
         assert!(config.graphics.show_combat_monster_hp_bars);
+        assert!(config.graphics.show_minimap);
     }
 
     #[test]
@@ -1265,7 +1323,23 @@ mod tests {
         assert_eq!(
             deserialized.rest,
             vec!["R".to_string(), "F5".to_string()],
-            "rest field must survive a RON round-trip"
+            "rest key bindings must survive RON round-trip"
+        );
+    }
+
+    #[test]
+    fn test_controls_config_ron_roundtrip_includes_automap() {
+        let original = ControlsConfig {
+            automap: vec!["M".to_string(), "Tab".to_string()],
+            ..Default::default()
+        };
+        let ron_string = ron::to_string(&original).expect("serialization must succeed");
+        let deserialized: ControlsConfig =
+            ron::from_str(&ron_string).expect("deserialization must succeed");
+        assert_eq!(
+            deserialized.automap,
+            vec!["M".to_string(), "Tab".to_string()],
+            "automap key bindings must survive RON round-trip"
         );
     }
 
@@ -1287,7 +1361,52 @@ mod tests {
         assert_eq!(
             config.rest,
             vec!["R".to_string()],
-            "rest must default to [\"R\"] when absent from RON"
+            "missing `rest` field must default to ['R']"
+        );
+        assert_eq!(
+            config.automap,
+            vec!["M".to_string()],
+            "missing `automap` field must default to ['M']"
+        );
+    }
+
+    #[test]
+    fn test_graphics_config_serde_show_minimap_default() {
+        let ron_without_show_minimap = r#"(
+            resolution: (1280, 720),
+            fullscreen: false,
+            vsync: true,
+            msaa_samples: 4,
+            shadow_quality: Medium,
+            show_combat_monster_hp_bars: true,
+        )"#;
+        let config: GraphicsConfig =
+            ron::from_str(ron_without_show_minimap).expect("deserialization must succeed");
+        assert!(
+            config.show_minimap,
+            "missing `show_minimap` field must default to true"
+        );
+    }
+
+    #[test]
+    fn test_controls_config_automap_defaults_when_missing_from_ron() {
+        let ron_without_automap = r#"(
+            move_forward: ["W"],
+            move_back: ["S"],
+            turn_left: ["A"],
+            turn_right: ["D"],
+            interact: ["E"],
+            menu: ["Escape"],
+            inventory: ["I"],
+            rest: ["R"],
+            movement_cooldown: 0.2,
+        )"#;
+        let config: ControlsConfig =
+            ron::from_str(ron_without_automap).expect("deserialization must succeed");
+        assert_eq!(
+            config.automap,
+            vec!["M".to_string()],
+            "missing `automap` field must default to ['M']"
         );
     }
 }

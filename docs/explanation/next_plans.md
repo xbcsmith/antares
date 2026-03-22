@@ -25,7 +25,6 @@ Write a plan with a phased approach to implementing custom fonts. THINK HARD and
 
 ✅ PLAN WRITTEN - [custom fonts](./custom_fonts_plan.md)
 
-
 ### Encounter Visibility Follow-up (Skeleton)
 
 Applied now:
@@ -74,7 +73,6 @@ Write a plan with a phased approach to implementing a game log in the game engin
 
 ✅ PLAN WRITTEN - [Game Log Implementation Plan](./game_log_implementation_plan.md)
 
-
 ### Automap and mini map
 
 We need to implement an automap and mini map in the game engine. The automap should be a full map of the current level that is revealed as the player explores. The mini map should be a smaller version of the automap that is always visible in the corner of the screen. The mini map should show the player's current position and the surrounding area. The automap should be accessible from the game menu and should allow the player to see the entire level and their current position on it. The automap should be mapped to the M key and configurable through the game config. We will combine the mini map, compas, and clock into a single UI element in the top right corner of the screen. The mini map should also show important locations like quest objectives, merchants, and points of interest. The automap should have a fog of war effect that hides unexplored areas of the map. The automap should also have a legend that shows what different symbols on the map mean (e.g. red dot for monsters, green dot for merchants, etc).
@@ -83,19 +81,17 @@ Write a plan with a phased approach to implementing an automap and mini map in t
 
 ✅ PLAN WRITTEN - [Automap and Mini Map Implementation Plan](./automap_and_mini_map_implementation_plan.md)
 
-
 ### Unconcious Characters and Dead Characters
 
 Characters with 0 HP are unconcious and should not be allowed to attack monsters. They should also not be allowed to be attacked by monsters. They should be able to be healed by other characters. Unconcious IS a condition. It is a special condition because of combat implecations. We should add it to the Conditions in a Campaign. Characters remain unconcious until they are healed with a Spell, Scroll, or by resting. We should also add Dead to the Conditions in a Campaign. I haven't yet because it requires a lot of wiring because you need to resurrect dead characters either with a Spell, Scroll, or a Priest/Priestess. Dead should be able to be permanent if the Campaign creator wants it to be. We can also add Uncoincious and Dead as conditions from a Spell or Scroll or Consumable.The default should be "until ressurected". The default template for conditions in the SDK should include Unconcious and Dead so that Creators do not forget to add them to their campaigns.
 
 Write a plan with a phased approach to implementing unconcious characters in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Unconcious Characters Implementation Plan](./unconcious_characters_implementation_plan.md)
-
+✅ COMPLETED - [Unconcious Characters Implementation Plan](./unconcious_characters_implementation_plan.md)
 
 ### Game Tray Icon Implementation Plan
 
-We need to add a tray icon for hte game like the ones we added for the SDK.
+We need to add a tray icon for the game like the ones we added for the SDK.
 
 ✅ PLAN WRITTEN - [Game Tray Icon Implementation Plan](./game_tray_icon_implementation_plan.md)
 
@@ -109,5 +105,12 @@ Trees are still horrible. Grass sucks as well. Is tree bark textures being appli
 You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same.
 Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
 
-
 Time does not advance when the party moves. The clock only ever increments the hour when resting. Time should advance every time the party moves a tile (the minutes should advance). Time should advance when the party travels between maps.
+
+Navigating the locked item menu doesn't work like expected. Once a character is seslected the arrow keys move the party instead of moving the selected values. ESC always brings up the game menu when it should ESC the dialog/menu/inventory screen without bringing up the main menu
+
+Mini Map follows the party but does not update with images of the actual map. The party indicator runs out of the box after the party moves a few tile. Same problem with the actual map exists. I went and visited the merchant and got no updates. Datetime has disappeared. The datetime is supposed to be show as well as the compass. See examples of the minimap @screenshots/minimap_blank.png and the full map blank @screenshots/full_map_blank.png
+
+All the doors are facing the wrong way
+
+Show/Hide Tray ICON SDK is not working

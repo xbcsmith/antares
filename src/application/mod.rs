@@ -50,6 +50,8 @@ pub enum GameMode {
     Exploration,
     /// Turn-based tactical combat containing full combat state
     Combat(crate::domain::combat::engine::CombatState),
+    /// Full-screen automap overlay is open
+    Automap,
     /// Inventory management screen
     Inventory(crate::application::inventory_state::InventoryState),
     /// Inn party management interface
@@ -549,6 +551,12 @@ pub struct QuestObjective {
     pub description: String,
     /// Whether completed
     pub completed: bool,
+    /// Map identifier for objective-related POI display, if known
+    #[serde(default)]
+    pub map_id: Option<crate::domain::types::MapId>,
+    /// Objective position for automap / mini map POI display, if known
+    #[serde(default)]
+    pub position: Option<crate::domain::types::Position>,
 }
 
 /// A quest in the game
@@ -577,9 +585,21 @@ impl Quest {
 
     /// Adds an objective to the quest
     pub fn add_objective(&mut self, description: String) {
+        self.add_objective_with_location(description, None, None);
+    }
+
+    /// Adds a new objective with optional map metadata for automap POI display
+    pub fn add_objective_with_location(
+        &mut self,
+        description: String,
+        map_id: Option<crate::domain::types::MapId>,
+        position: Option<crate::domain::types::Position>,
+    ) {
         self.objectives.push(QuestObjective {
             description,
             completed: false,
+            map_id,
+            position,
         });
     }
 

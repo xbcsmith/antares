@@ -97,10 +97,22 @@ impl QuestSystem {
             quest.description.clone(),
         );
 
-        // Populate readable objectives
+        // Populate readable objectives, preserving map/location metadata where
+        // the domain objective provides it so automap / mini-map POIs can be
+        // reconstructed from the persisted application quest log.
         for stage in &quest.stages {
             for obj in &stage.objectives {
-                app_quest.add_objective(obj.description());
+                let (map_id, position) = match obj {
+                    QuestObjective::ReachLocation {
+                        map_id, position, ..
+                    } => (Some(*map_id), Some(*position)),
+                    QuestObjective::EscortNpc {
+                        map_id, position, ..
+                    } => (Some(*map_id), Some(*position)),
+                    _ => (None, None),
+                };
+
+                app_quest.add_objective_with_location(obj.description(), map_id, position);
             }
         }
 

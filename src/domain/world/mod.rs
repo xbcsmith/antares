@@ -43,7 +43,9 @@ pub use lock::{
     try_bash, try_lockpick, try_unlock, LockState, UnlockOutcome, BASH_TRAP_INCREMENT,
     LOCKPICK_FAIL_TRAP_INCREMENT, TRAP_CHANCE_MAX,
 };
-pub use movement::{check_tile_blocked, move_party, MovementError};
+pub use movement::{
+    check_tile_blocked, mark_visible_area, move_party, MovementError, VISIBILITY_RADIUS,
+};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};
 pub use npc_runtime::{
     MerchantStockTemplate, MerchantStockTemplateDatabase, NpcRuntimeState, NpcRuntimeStore,
@@ -52,8 +54,8 @@ pub use types::{
     ArchConfig, AsyncMeshConfig, AsyncMeshTaskId, ColumnConfig, ColumnStyle, DetailLevel,
     DoorFrameConfig, EncounterGroup, EncounterTable, FurnitureAppearancePreset, FurnitureCategory,
     FurnitureFlags, FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, InstanceData,
-    LayeredSprite, Map, MapEvent, RailingConfig, ResolvedNpc, RockVariant, SpriteAnimation,
-    SpriteLayer, SpriteMaterialProperties, SpriteReference, SpriteSelectionRule, StructureType,
-    TerrainType, Tile, TileVisualMetadata, TimeCondition, TreeType, WallSegmentConfig, WallType,
-    WaterFlowDirection, World,
+    LayeredSprite, Map, MapEvent, PointOfInterest, RailingConfig, ResolvedNpc, RockVariant,
+    SpriteAnimation, SpriteLayer, SpriteMaterialProperties, SpriteReference, SpriteSelectionRule,
+    StructureType, TerrainType, Tile, TileVisualMetadata, TimeCondition, TreeType,
+    WallSegmentConfig, WallType, WaterFlowDirection, World,
 };

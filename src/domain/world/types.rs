@@ -10,6 +10,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.2 for complete specifications.
 
+use crate::application;
 use crate::domain::combat::types::CombatEventType;
 use crate::domain::types::{Direction, GameTime, ItemId, MapId, Position, TimeOfDay};
 use crate::domain::world::dropped_items::DroppedItem;
@@ -18,6 +19,25 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 // ===== Tile Types =====
+
+/// A notable location on a map, shown as a colored dot on maps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PointOfInterest {
+    /// A quest objective marker for the given quest ID.
+    QuestObjective {
+        quest_id: crate::domain::quest::QuestId,
+    },
+    /// A merchant NPC location.
+    Merchant,
+    /// A readable sign or notice.
+    Sign,
+    /// A teleport destination or trigger.
+    Teleport,
+    /// A monster encounter location.
+    Encounter,
+    /// A treasure location.
+    Treasure,
+}
 
 /// Wall type for tiles
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2734,8 +2754,107 @@ impl Map {
     }
 
     /// Gets an event at the specified position
-    pub fn get_event(&self, pos: Position) -> Option<&MapEvent> {
-        self.events.get(&pos)
+    pub fn get_event(&self, position: Position) -> Option<&MapEvent> {
+        self.events.get(&position)
+    }
+
+    /// Collects all discovered points of interest for this map.
+    ///
+    /// Only POIs on visited tiles are returned. POIs come from merchant NPC
+    /// placements, selected map events, and active quest objectives that target
+    /// positions on this map.
+    ///
+    /// # Arguments
+    ///
+    /// * `active_quests` - Currently active quests to inspect for location-based objectives
+    ///
+    /// # Returns
+    ///
+    /// A vector of `(Position, PointOfInterest)` entries for discovered POIs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application;
+    /// use antares::domain::types::Position;
+    /// use antares::domain::world::{Map, PointOfInterest};
+    ///
+    /// let mut map = Map::new(1, "Town".to_string(), "Desc".to_string(), 10, 10);
+    /// let pos = Position::new(2, 3);
+    /// map.get_tile_mut(pos).unwrap().mark_visited();
+    /// map.npc_placements.push(antares::domain::world::NpcPlacement::new("merchant", pos));
+    ///
+    /// let pois = map.collect_map_pois(&application::QuestLog::new());
+    /// assert!(pois.contains(&(pos, PointOfInterest::Merchant)));
+    /// ```
+    pub fn collect_map_pois(
+        &self,
+        quest_log: &application::QuestLog,
+    ) -> Vec<(Position, PointOfInterest)> {
+        let mut pois = Vec::new();
+
+        for placement in &self.npc_placements {
+            let Some(tile) = self.get_tile(placement.position) else {
+                continue;
+            };
+
+            if !tile.visited {
+                continue;
+            }
+
+            let npc_id_lower = placement.npc_id.to_lowercase();
+            if npc_id_lower.contains("merchant") {
+                pois.push((placement.position, PointOfInterest::Merchant));
+            }
+        }
+
+        for (position, event) in &self.events {
+            let Some(tile) = self.get_tile(*position) else {
+                continue;
+            };
+
+            if !tile.visited {
+                continue;
+            }
+
+            let poi = match event {
+                MapEvent::Encounter { .. } => Some(PointOfInterest::Encounter),
+                MapEvent::Treasure { .. } => Some(PointOfInterest::Treasure),
+                MapEvent::Teleport { .. } => Some(PointOfInterest::Teleport),
+                MapEvent::Sign { .. } => Some(PointOfInterest::Sign),
+                _ => None,
+            };
+
+            if let Some(poi) = poi {
+                pois.push((*position, poi));
+            }
+        }
+
+        for quest in &quest_log.active_quests {
+            let Ok(quest_id) = quest.id.parse::<crate::domain::quest::QuestId>() else {
+                continue;
+            };
+
+            for objective in &quest.objectives {
+                if objective.completed {
+                    continue;
+                }
+
+                let (Some(map_id), Some(position)) = (objective.map_id, objective.position) else {
+                    continue;
+                };
+
+                if map_id != self.id {
+                    continue;
+                }
+
+                if self.get_tile(position).is_some_and(|tile| tile.visited) {
+                    pois.push((position, PointOfInterest::QuestObjective { quest_id }));
+                }
+            }
+        }
+
+        pois
     }
 
     /// Removes and returns an event at the specified position
@@ -5637,5 +5756,123 @@ mod tests {
             }
             other => panic!("expected Furniture event, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_collect_map_pois_only_visited() {
+        let mut map = Map::new(1, "POI Test".to_string(), "Desc".to_string(), 10, 10);
+        let merchant_pos = Position::new(2, 2);
+        let encounter_pos = Position::new(4, 4);
+
+        map.get_tile_mut(merchant_pos)
+            .expect("merchant tile must exist")
+            .mark_visited();
+
+        map.npc_placements
+            .push(crate::domain::world::NpcPlacement::new(
+                "merchant_bob",
+                merchant_pos,
+            ));
+
+        map.add_event(
+            encounter_pos,
+            MapEvent::Encounter {
+                name: "Ambush".to_string(),
+                description: String::new(),
+                monster_group: vec![1],
+                time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
+                combat_event_type: CombatEventType::Normal,
+            },
+        );
+
+        let pois = map.collect_map_pois(&application::QuestLog::new());
+
+        assert!(pois.contains(&(merchant_pos, PointOfInterest::Merchant)));
+        assert!(!pois.contains(&(encounter_pos, PointOfInterest::Encounter)));
+        assert_eq!(pois.len(), 1, "only visited POIs should be returned");
+    }
+
+    #[test]
+    fn test_collect_map_pois_encounter() {
+        let mut map = Map::new(1, "POI Test".to_string(), "Desc".to_string(), 10, 10);
+        let encounter_pos = Position::new(3, 3);
+
+        map.get_tile_mut(encounter_pos)
+            .expect("encounter tile must exist")
+            .mark_visited();
+
+        map.add_event(
+            encounter_pos,
+            MapEvent::Encounter {
+                name: "Ambush".to_string(),
+                description: String::new(),
+                monster_group: vec![2],
+                time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
+                combat_event_type: CombatEventType::Normal,
+            },
+        );
+
+        let pois = map.collect_map_pois(&application::QuestLog::new());
+
+        assert!(pois.contains(&(encounter_pos, PointOfInterest::Encounter)));
+    }
+
+    #[test]
+    fn test_collect_map_pois_treasure() {
+        let mut map = Map::new(1, "POI Test".to_string(), "Desc".to_string(), 10, 10);
+        let treasure_pos = Position::new(5, 5);
+
+        map.get_tile_mut(treasure_pos)
+            .expect("treasure tile must exist")
+            .mark_visited();
+
+        map.add_event(
+            treasure_pos,
+            MapEvent::Treasure {
+                name: "Chest".to_string(),
+                description: String::new(),
+                loot: vec![7, 8],
+            },
+        );
+
+        let pois = map.collect_map_pois(&application::QuestLog::new());
+
+        assert!(pois.contains(&(treasure_pos, PointOfInterest::Treasure)));
+    }
+
+    #[test]
+    fn test_collect_map_pois_quest_objective() {
+        let mut map = Map::new(1, "POI Test".to_string(), "Desc".to_string(), 10, 10);
+        let objective_pos = Position::new(6, 1);
+
+        map.get_tile_mut(objective_pos)
+            .expect("objective tile must exist")
+            .mark_visited();
+
+        let mut quest_log = application::QuestLog::new();
+        let mut quest = application::Quest::new(
+            "42".to_string(),
+            "Find the marker".to_string(),
+            "Reach the target".to_string(),
+        );
+        quest.add_objective_with_location(
+            "Reach the target tile".to_string(),
+            Some(1),
+            Some(objective_pos),
+        );
+        quest_log.add_quest(quest);
+
+        let pois = map.collect_map_pois(&quest_log);
+
+        assert!(pois.contains(&(
+            objective_pos,
+            PointOfInterest::QuestObjective { quest_id: 42 }
+        )));
     }
 }
