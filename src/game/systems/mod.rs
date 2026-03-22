@@ -34,6 +34,7 @@ pub mod map;
 pub mod menu;
 pub mod merchant_inventory_ui;
 pub mod monster_rendering;
+pub mod mouse_input;
 pub mod performance;
 pub mod procedural_meshes;
 pub mod quest;

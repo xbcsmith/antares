@@ -1,5 +1,104 @@
 # Implementations
 
+## Phase 1: Shared Mouse Activation Utility (Complete)
+
+### Overview
+
+Phase 1 establishes a single canonical mouse-activation model for Bevy UI
+buttons used by runtime game systems. The goal of this phase was to extract the
+existing combat-specific dual-path click handling into a shared helper so later
+mouse-input phases can reuse one implementation rather than duplicating
+interaction logic.
+
+### Problem Statement
+
+Before this phase, combat embedded the same mouse activation pattern inline in
+multiple places. That created several gaps relative to the mouse-input plan:
+
+- `Interaction::Pressed` handling and hovered-click fallback were duplicated.
+- The left-mouse `just_pressed` query pattern was repeated at each call site.
+- Combat contained multiple copies of logic that should become the canonical
+  game-wide Bevy UI activation rule.
+- Later menu and dialogue mouse phases would have needed to copy combat logic
+  again instead of depending on a shared utility.
+
+### Files Changed
+
+| File                                  | Change                                                                                                  |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/mouse_input.rs`     | Added shared `is_activated` / `mouse_just_pressed` helpers, full doc comments, doctests, and unit tests |
+| `src/game/systems/mod.rs`             | Registered the new `mouse_input` systems module                                                         |
+| `src/game/systems/combat.rs`          | Replaced inline mouse-activation duplication with shared helper calls                                   |
+| `docs/explanation/implementations.md` | Added this implementation summary                                                                       |
+
+---
+
+### 1.1 — Shared Mouse Activation Helpers (`src/game/systems/mouse_input.rs`)
+
+Added a new `src/game/systems/mouse_input.rs` module as the single source of
+truth for Bevy UI mouse activation semantics.
+
+The module provides two small inline helpers:
+
+- `is_activated(interaction, interaction_ref, mouse_just_pressed)` returns
+  `true` when a button was newly pressed this frame or when the left mouse was
+  just pressed while the widget is hovered.
+- `mouse_just_pressed(mouse_buttons)` wraps the optional Bevy mouse-button
+  resource lookup so callers do not repeat the same `Option` plumbing.
+
+Both functions are documented with `///` comments and runnable doctests so the
+activation contract is explicit and testable in one place.
+
+### 1.2 — Combat Mechanical Refactor (`src/game/systems/combat.rs`)
+
+Refactored combat to consume the shared helpers instead of open-coding the same
+logic.
+
+The following combat paths now use `mouse_input::is_activated` and
+`mouse_input::mouse_just_pressed`:
+
+- blocked-input logging when it is not the player's turn
+- action-button activation in `combat_input_system`
+- enemy-card activation in `select_target`
+
+This was intentionally a mechanical refactor: the existing combat semantics were
+preserved so mouse activation still behaves identically for both direct
+`Interaction::Pressed` transitions and hovered left-click fallback.
+
+### 1.3 — Test Coverage Added
+
+Added the required unit tests for the shared helper behavior:
+
+- `test_is_activated_pressed_changed`
+- `test_is_activated_pressed_unchanged`
+- `test_is_activated_hovered_with_mouse_press`
+- `test_is_activated_hovered_without_mouse_press`
+- `test_is_activated_none`
+- `test_mouse_just_pressed_none_resource`
+
+Existing combat mouse tests continue to validate that the refactor preserved the
+runtime behavior expected by combat action buttons and target selection.
+
+### 1.4 — Deliverables Completed
+
+- [x] `src/game/systems/mouse_input.rs` created with SPDX header,
+      `is_activated`, `mouse_just_pressed`, and unit tests
+- [x] `src/game/systems/mod.rs` declares the new `mouse_input` module
+- [x] `combat_input_system` and `select_target` refactored to use helpers
+- [x] Combat mouse behavior preserved through the existing combat tests
+
+### 1.5 — Outcome
+
+After this phase, Antares has a reusable mouse activation utility that defines
+the canonical Bevy UI click model for future mouse-input work.
+
+This reduces duplication, keeps combat behavior unchanged, and gives later
+phases (menu buttons, dialogue choices, and other Bevy UI interactions) a
+single helper to call instead of re-implementing pressed-versus-hovered-click
+logic independently.
+
+## Phase 1: Fog-of-War Foundation (Complete)
+
 ## Phase 1: Fog-of-War Foundation (Complete)
 
 ### Overview
