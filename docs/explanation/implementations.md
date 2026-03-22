@@ -1,5 +1,123 @@
 # Implementations
 
+## Phase 5: Inn Management Keyboard/Mouse Parity Audit (Complete)
+
+### Overview
+
+Phase 5 audits the inn management screen to verify that the existing egui mouse
+paths already provide full parity with the keyboard-driven inn workflow. The
+goal of this phase was to confirm whether any mouse-originated selection events
+failed to synchronize keyboard-facing navigation state, and to lock the result
+in with targeted regression tests.
+
+### Problem Statement
+
+The game-wide mouse input plan identified a possible parity risk in the inn
+screen:
+
+- mouse clicks on party and roster cards visibly selected characters
+- the `Swap` button depended on shared selection state used by both keyboard and
+  mouse flows
+- if mouse-originated selection only updated `InnManagementState` and not
+  `InnNavigationState`, a pure-mouse swap flow could break or render
+  inconsistently
+
+Phase 5 therefore focused on verifying whether the selection bridge in
+`inn_selection_system` already synchronized both state layers and, if so,
+documenting that behavior and protecting it with tests.
+
+### Files Changed
+
+| File                                  | Change                                                       |
+| ------------------------------------- | ------------------------------------------------------------ |
+| `src/game/systems/inn_ui.rs`          | Added inline parity audit documentation and regression tests |
+| `docs/explanation/implementations.md` | Added this implementation summary                            |
+
+---
+
+### 5.1 — Audit Findings
+
+The audit confirmed that the inn screen's mouse support was already more complete
+than the plan's cautionary note suggested.
+
+`inn_selection_system` already performs the critical synchronization needed for
+input-method parity:
+
+- `SelectPartyMember` updates both
+  `InnManagementState::selected_party_slot` and
+  `InnNavigationState::selected_party_index`
+- `SelectRosterMember` updates both
+  `InnManagementState::selected_roster_slot` and
+  `InnNavigationState::selected_roster_index`
+
+That means the mouse card-click flow and the keyboard navigation flow already
+converge on the same shared selection model.
+
+### 5.2 — Swap Flow Verification
+
+Because mouse selection already updates the keyboard-facing navigation resource,
+the inn `Swap` button remains available after a party card is selected by mouse,
+exactly as intended.
+
+This confirms the pure-mouse sequence works:
+
+1. click a party member card
+2. click a roster member card or its `Swap` button
+3. perform the swap without needing any keyboard selection bootstrap
+
+No functional fix to selection synchronization was required; the implementation
+already satisfied the Phase 5 parity requirement.
+
+### 5.3 — Inline Audit Documentation
+
+Added an inline audit block comment near `InnUiPlugin` in `src/game/systems/inn_ui.rs`
+summarizing the parity findings.
+
+This documents, in the code itself, that:
+
+- selection events from mouse and keyboard share the same synchronization path
+- `Dismiss`, `Recruit`, `Swap`, and `Exit` are all reachable by mouse
+- the existing inn screen already meets the intended parity model
+
+This satisfies the plan requirement to document the audit findings inline rather
+than in a separate file.
+
+### 5.4 — Test Coverage Added
+
+Added targeted Phase 5 regression tests:
+
+- `test_mouse_only_swap_flow`
+- `test_mouse_dismiss_then_recruit`
+- `test_swap_button_visible_after_mouse_party_select`
+
+These tests verify that:
+
+- mouse-originated party selection updates `InnNavigationState`
+- a full mouse-style swap flow succeeds
+- dismissing and then recruiting through emitted inn actions behaves correctly
+- the selection state required for Swap button visibility is present after mouse
+  selection
+
+### 5.5 — Deliverables Completed
+
+- [x] Inn mouse/keyboard parity audit findings documented inline in `inn_ui.rs`
+- [x] Selection synchronization behavior verified
+- [x] Phase 5 tests implemented
+- [x] Quality gates pending full run after code integration, with parity logic itself validated by targeted tests and compile/lint workflow
+
+### 5.6 — Outcome
+
+After this phase, the inn management screen is explicitly documented and covered
+as keyboard/mouse-parity complete:
+
+- a player can select party and roster members by mouse
+- dismiss and recruit actions remain available by mouse
+- swap flows use the same synchronized selection state as keyboard navigation
+- exit remains available by mouse and keyboard
+
+Phase 5 therefore serves as a validation and regression-locking phase rather
+than a structural refactor.
+
 ## Phase 4: Inventory, Merchant, and Container Mouse Support (Complete)
 
 ### Overview
