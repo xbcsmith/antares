@@ -1,5 +1,171 @@
 # Implementations
 
+## Phase 4: Inventory, Merchant, and Container Mouse Support (Complete)
+
+### Overview
+
+Phase 4 completes the mouse interaction path for all three egui-based inventory
+screens: the standard party inventory, merchant trading, and container
+interaction. The goal of this phase was to connect the already-rendered mouse
+surfaces to actual selection and action-state updates so players can complete
+inventory flows using only clicks.
+
+### Problem Statement
+
+Before this phase, all three inventory screens had partial mouse scaffolding but
+incomplete state wiring:
+
+- the standard inventory grid was painter-drawn and visually hoverable, but did
+  not allocate per-slot click responses or propagate clicked slot selection
+- merchant stock rows and character sell slots already had click responses in
+  places, but the returned selection data was not consistently wired back into
+  navigation and panel state
+- container item rows and stash-panel slots rendered interactive surfaces, but
+  some row-click results were ignored or only partially applied
+
+That meant players could see obvious mouse targets, but still had to use arrow
+keys and `Enter` to actually reveal action strips and complete common flows.
+
+### Files Changed
+
+| File                                         | Change                                                                          |
+| -------------------------------------------- | ------------------------------------------------------------------------------- |
+| `src/game/systems/inventory_ui.rs`           | Added slot click propagation and action-mode entry for character inventory      |
+| `src/game/systems/merchant_inventory_ui.rs`  | Wired merchant stock and sell-panel clicks back into selection/navigation state |
+| `src/game/systems/container_inventory_ui.rs` | Wired container-row and stash-panel clicks into selection/navigation state      |
+| `docs/explanation/implementations.md`        | Added this implementation summary                                               |
+
+---
+
+### 4.1 — Inventory Slot Grid Click-to-Select
+
+The standard inventory screen remains egui-based and keeps the existing painted
+grid presentation. The change in this phase is that each slot cell is now given
+an actual clickable response and the clicked slot is propagated back to the
+inventory screen controller.
+
+The character inventory panel now returns both:
+
+- any button action (`Use`, `Drop`, `Transfer`, `Equip`, `Unequip`)
+- the clicked inventory slot, when the mouse selects a cell
+
+`inventory_ui_system` then applies that clicked-slot result back into both the
+inventory state and the keyboard/mouse navigation state. Clicking a slot with an
+item now immediately enters `ActionNavigation`, matching the keyboard `Enter`
+path, while clicking an empty slot updates selection only and leaves the phase
+in `SlotNavigation`.
+
+### 4.2 — Merchant Mouse Selection Wiring
+
+The merchant inventory screen already had most of the egui click surfaces in
+place, but Phase 4 completes the state propagation.
+
+For the merchant stock panel:
+
+- clicked stock rows now propagate their row index back to
+  `merchant_inventory_ui_system`
+- the merchant selection state is updated consistently
+- available stock rows immediately enter `ActionNavigation` so the Buy action is
+  visible without an extra keyboard step
+
+For the character sell panel:
+
+- clicked inventory cells now propagate the selected slot back to the caller
+- the character-side sell selection is updated in merchant state and nav state
+- occupied clicked slots enter `ActionNavigation` immediately, matching the
+  keyboard confirm path
+
+This makes the full stock-row → Buy and character-slot → Sell flow work as a
+single mouse-driven interaction path.
+
+### 4.3 — Container Mouse Selection Wiring
+
+The container inventory screen follows the same egui interaction model as the
+merchant screen and received the same style of completion work.
+
+For the container item list:
+
+- clicked rows now update `container_selected_slot`
+- the focused navigation state is updated to the clicked row
+- rows with content immediately enter `ActionNavigation` so `Take` / `Take All`
+  are available right away
+
+For the character stash panel:
+
+- clicked inventory cells now propagate their slot index back to the caller
+- character-side stash selection is synchronized into container state and nav state
+- occupied clicked slots immediately reveal the stash action flow
+
+This completes the single-click select → action-strip model for container
+interaction as well.
+
+### 4.4 — Interaction Model
+
+All three screens now follow the same canonical egui mouse pattern:
+
+- clicking a slot or row updates visual selection
+- clicking a slot or row that contains content immediately enters
+  `ActionNavigation`
+- clicking an empty inventory slot only updates selection and does not force
+  an action state
+- action buttons themselves continue to use egui button `.clicked()` handling
+  and now operate on the correct slot selected by the mouse path
+
+This keeps mouse behavior aligned with the existing keyboard model rather than
+creating separate semantics.
+
+### 4.5 — Test Coverage Added
+
+Added and updated Phase 4 coverage for all three inventory screens.
+
+**Inventory**
+
+- `test_mouse_click_slot_with_item_enters_action_mode`
+- `test_mouse_click_empty_slot_selects_only`
+- `test_mouse_click_drop_button_emits_action`
+
+**Merchant**
+
+- `test_mouse_click_stock_row_updates_selection`
+- `test_mouse_click_available_stock_row_enters_action_mode`
+- `test_mouse_click_buy_button_emits_action`
+- `test_mouse_click_character_slot_updates_sell_selection`
+
+**Container**
+
+- `test_mouse_click_container_row_updates_selection`
+- `test_mouse_click_container_row_with_item_enters_action_mode`
+- `test_mouse_click_take_button_emits_action`
+- `test_mouse_click_take_all_emits_action`
+
+These tests verify that mouse selection updates the same state that keyboard
+navigation uses, that action mode appears immediately for occupied selections,
+and that the existing action buttons emit the correct messages after mouse
+selection.
+
+### 4.6 — Deliverables Completed
+
+- [x] `render_character_panel` returns clicked slot information in addition to actions
+- [x] `inventory_ui_system` wires clicked slot data back to inventory state and nav state
+- [x] Merchant stock row clicks are propagated back into merchant selection state
+- [x] Merchant character sell-slot clicks are propagated back into selection state
+- [x] Container row clicks are wired into container selection state
+- [x] Character stash-slot clicks are wired into container character selection state
+- [x] Phase 4 tests implemented
+- [x] Quality gates run
+
+### 4.7 — Outcome
+
+After this phase, all three egui inventory screens support a complete
+mouse-driven workflow:
+
+- standard inventory slots can be clicked to select and immediately reveal actions
+- merchant stock rows can be clicked and bought without arrow-key setup
+- container rows can be clicked and taken without keyboard navigation
+
+This completes the inventory/trading/container portion of the game-wide mouse
+input plan while preserving the existing keyboard navigation behavior unchanged.
+
 ## Phase 3: Dialogue Mouse Support (Complete)
 
 ### Overview
