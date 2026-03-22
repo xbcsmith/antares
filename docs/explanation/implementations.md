@@ -619,6 +619,42 @@ state persistence through the standard save pipeline.
 
 ### 5.5 — SDK Config Editor Integration
 
+### 5.6 — HUD Regression Fixes for Mini Map, Automap, and Clock
+
+A follow-up HUD regression fix corrected several runtime presentation problems in
+`src/game/systems/hud.rs`:
+
+- the clock widget existed in the HUD tree but was spawned with `display: Display::None`,
+  so neither the time nor date was visible at runtime
+- the mini map and full automap could appear blank at runtime even though their
+  backing dynamic images were being updated
+- the party marker behavior could appear incorrect because the player indicator
+  rendering and the HUD image binding path were not both being refreshed reliably
+- NPC and POI overlays needed to stay tied to discovered tiles so newly explored
+  merchants and other notable map features appear only after exploration reveals them
+
+The fix now:
+
+- makes `ClockRoot` visible by default so the datetime renders beneath the compass
+- preserves discovered terrain colors on both map views, then overlays the party marker
+  afterward
+- renders directional player markers for both the mini map and automap so the
+  indicator remains centered within the current tile while still showing facing
+- rebinds the HUD mini map and automap canvas nodes to their dynamic image handles
+  during update, ensuring the UI keeps displaying the current writable map textures
+- keeps POI overlays gated to visited tiles so merchants and other discovered map
+  features only appear once their tiles have actually been explored
+- adds debug logging around map painting so future regressions can distinguish
+  between fog-of-war state problems and UI image binding problems quickly
+
+Additional regression coverage was added in `src/game/systems/hud.rs` for:
+
+- visible clock root startup behavior
+- directional mini map player marker rendering
+- directional automap player marker rendering
+
+### 5.5 — SDK Config Editor Integration
+
 Updated `sdk/campaign_builder/src/config_editor.rs` to expose the new settings.
 
 #### Added editor state

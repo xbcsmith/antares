@@ -411,6 +411,7 @@ impl FurnitureEditorState {
                 status_message,
                 campaign_dir,
                 furniture_file,
+                available_mesh_ids,
             ),
         }
 
@@ -797,6 +798,7 @@ impl FurnitureEditorState {
         status_message: &mut String,
         campaign_dir: Option<&PathBuf>,
         furniture_file: &str,
+        available_mesh_ids: &[u32],
     ) {
         let is_add = self.mode == FurnitureEditorMode::Add;
         ui.heading(if is_add {

@@ -414,9 +414,6 @@
         mesh_descriptor_override: None,
         mesh_id: Some(9104),
     ),
-
-    // ===== Helmets and Boots =====
-
     (
         id: 25,
         name: "Iron Helmet",
@@ -1015,10 +1012,6 @@
         mesh_descriptor_override: None,
         mesh_id: Some(9205),
     ),
-
-    // ===== Key Items (IDs 200-202) =====
-
-    // Dungeon Gate Key — opens dungeon entrance doors
     (
         id: 200,
         name: "Dungeon Gate Key",
@@ -1039,8 +1032,6 @@
         mesh_descriptor_override: None,
         mesh_id: None,
     ),
-
-    // Old Chest Key — generic chest key
     (
         id: 201,
         name: "Old Chest Key",
@@ -1061,8 +1052,6 @@
         mesh_descriptor_override: None,
         mesh_id: None,
     ),
-
-    // Iron Lock Key — used for locked iron doors in tutorial
     (
         id: 202,
         name: "Iron Lock Key",

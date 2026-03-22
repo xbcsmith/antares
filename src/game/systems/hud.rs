@@ -300,6 +300,8 @@ impl Plugin for HudPlugin {
             // gated so they don't render on top of the combat HUD.
             .add_systems(Update, update_hud)
             .add_systems(Update, update_automap_visibility)
+            .add_systems(Update, bind_mini_map_canvas_image)
+            .add_systems(Update, bind_automap_canvas_image)
             .add_systems(Update, update_automap_image.run_if(in_automap_mode))
             .add_systems(
                 Update,
@@ -596,7 +598,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
             panel
                 .spawn((
                     Node {
-                        display: Display::None,
+                        display: Display::Flex,
                         width: Val::Px(CLOCK_WIDTH),
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
@@ -772,6 +774,21 @@ fn update_mini_map(
     let pixel_scale = mini_map_pixels_per_tile() as i32;
     let center_tile_index = (viewport_diameter / 2).min(viewport_diameter.saturating_sub(1));
 
+    debug!(
+        "update_mini_map: map='{}' size={}x{} player=({}, {}) facing={:?}",
+        map.name,
+        map.width,
+        map.height,
+        player_pos.x,
+        player_pos.y,
+        global_state.0.world.party_facing
+    );
+
+    image.texture_descriptor.size = Extent3d {
+        width: size,
+        height: size,
+        depth_or_array_layers: 1,
+    };
     image.data = Some(vec![0; (size * size * 4) as usize]);
 
     let Some(data) = image.data.as_mut() else {
@@ -789,12 +806,10 @@ fn update_mini_map(
             } else if let Some(tile) = map.get_tile(world_pos) {
                 if !tile.visited {
                     MINI_MAP_UNVISITED
-                } else if world_pos == player_pos {
-                    MINI_MAP_PLAYER
                 } else if tile.is_blocked() {
                     MINI_MAP_WALL
                 } else {
-                    MINI_MAP_VISITED_FLOOR
+                    automap_tile_color(tile)
                 }
             } else {
                 MINI_MAP_UNVISITED
@@ -823,6 +838,10 @@ fn update_mini_map(
 
         let tile_x = dx + center_tile_index;
         let tile_y = dy + center_tile_index;
+        debug!(
+            "update_mini_map: drawing npc '{}' at world=({}, {}) viewport=({}, {}) visited={}",
+            npc.npc_id, npc.position.x, npc.position.y, tile_x, tile_y, tile.visited
+        );
         fill_mini_map_npc_dot(data, tile_x, tile_y, size, pixel_scale);
     }
 
@@ -835,9 +854,56 @@ fn update_mini_map(
             continue;
         }
 
+        let Some(tile) = map.get_tile(poi_position) else {
+            continue;
+        };
+
+        if !tile.visited {
+            continue;
+        }
+
         let tile_x = dx + center_tile_index;
         let tile_y = dy + center_tile_index;
+        debug!(
+            "update_mini_map: drawing poi {:?} at world=({}, {}) viewport=({}, {})",
+            poi, poi_position.x, poi_position.y, tile_x, tile_y
+        );
         fill_mini_map_poi_dot(data, tile_x, tile_y, poi_color(&poi), size, pixel_scale);
+    }
+
+    fill_mini_map_player_marker(
+        data,
+        center_tile_index,
+        center_tile_index,
+        size,
+        pixel_scale,
+        global_state.0.world.party_facing,
+    );
+
+    let painted_pixels = data.chunks_exact(4).filter(|px| px[3] != 0).count();
+    debug!(
+        "update_mini_map: painted_pixels={} viewport_diameter={} pixel_scale={}",
+        painted_pixels, viewport_diameter, pixel_scale
+    );
+}
+
+/// Ensures the mini map canvas always points at the current dynamic image handle.
+///
+/// This rebinding is cheap and protects the HUD from cases where the UI node
+/// loses or never receives the correct image binding during startup or later UI
+/// refreshes.
+///
+/// # Arguments
+///
+/// * `mini_map_image` - Dynamic mini map image resource
+/// * `canvas_query` - Query for mini map canvas image nodes
+fn bind_mini_map_canvas_image(
+    mini_map_image: Res<MiniMapImage>,
+    mut canvas_query: Query<&mut ImageNode, With<MiniMapCanvas>>,
+) {
+    for mut image_node in &mut canvas_query {
+        image_node.image = mini_map_image.handle.clone();
+        image_node.color = Color::WHITE;
     }
 }
 
@@ -1096,6 +1162,25 @@ fn update_automap_visibility(
     }
 }
 
+/// Ensures the automap canvas always points at the current dynamic image handle.
+///
+/// This rebinding mirrors the mini map behavior and keeps the full-screen map
+/// canvas synchronized with the writable automap image resource.
+///
+/// # Arguments
+///
+/// * `automap_image` - Dynamic automap image resource
+/// * `canvas_query` - Query for automap canvas image nodes
+fn bind_automap_canvas_image(
+    automap_image: Res<AutomapImage>,
+    mut canvas_query: Query<&mut ImageNode, With<AutomapCanvas>>,
+) {
+    for mut image_node in &mut canvas_query {
+        image_node.image = automap_image.handle.clone();
+        image_node.color = Color::WHITE;
+    }
+}
+
 /// Updates the full-screen automap image while the automap overlay is open.
 ///
 /// The rendered image covers the whole current map using fog-of-war coloring.
@@ -1126,6 +1211,17 @@ fn update_automap_image(
         return;
     };
 
+    debug!(
+        "update_automap_image: map='{}' size={}x{} player=({}, {}) facing={:?} tile_px={}",
+        map.name,
+        map.width,
+        map.height,
+        global_state.0.world.party_position.x,
+        global_state.0.world.party_position.y,
+        global_state.0.world.party_facing,
+        tile_px
+    );
+
     image.texture_descriptor.size = Extent3d {
         width: image_width,
         height: image_height,
@@ -1144,11 +1240,7 @@ fn update_automap_image(
                 continue;
             };
 
-            let mut color = automap_tile_color(tile);
-            if pos == global_state.0.world.party_position {
-                color = AUTOMAP_PLAYER;
-            }
-
+            let color = automap_tile_color(tile);
             fill_automap_tile(data, x, y, color, image_width, tile_px);
         }
     }
@@ -1158,6 +1250,10 @@ fn update_automap_image(
             continue;
         }
 
+        debug!(
+            "update_automap_image: drawing poi {:?} at world=({}, {})",
+            poi, poi_position.x, poi_position.y
+        );
         fill_automap_poi_dot(
             data,
             poi_position.x as u32,
@@ -1167,6 +1263,24 @@ fn update_automap_image(
             tile_px,
         );
     }
+
+    let player = global_state.0.world.party_position;
+    if player.x >= 0 && player.y >= 0 {
+        fill_automap_player_marker(
+            data,
+            player.x as u32,
+            player.y as u32,
+            image_width,
+            tile_px,
+            global_state.0.world.party_facing,
+        );
+    }
+
+    let painted_pixels = data.chunks_exact(4).filter(|px| px[3] != 0).count();
+    debug!(
+        "update_automap_image: painted_pixels={} image={}x{}",
+        painted_pixels, image_width, image_height
+    );
 
     for mut node in &mut canvas_query {
         node.width = Val::Px(image_width as f32);
@@ -1616,6 +1730,51 @@ pub fn fill_mini_map_tile(
     }
 }
 
+/// Writes a directional player marker inside the tile cell on the mini map.
+pub fn fill_mini_map_player_marker(
+    data: &mut [u8],
+    tile_x: i32,
+    tile_y: i32,
+    image_size: u32,
+    pixel_scale: i32,
+    facing: Direction,
+) {
+    if tile_x < 0 || tile_y < 0 || pixel_scale <= 0 {
+        return;
+    }
+
+    let start_x = tile_x * pixel_scale;
+    let start_y = tile_y * pixel_scale;
+    let center_x = start_x + (pixel_scale / 2);
+    let center_y = start_y + (pixel_scale / 2);
+
+    let marker_pixels: &[(i32, i32)] = match facing {
+        Direction::North => &[(-1, 1), (0, 0), (0, 1), (0, 2), (1, 1)],
+        Direction::East => &[(-1, -1), (0, 0), (1, -1), (1, 0), (1, 1)],
+        Direction::South => &[(-1, 0), (0, 0), (0, 1), (0, 2), (1, 0)],
+        Direction::West => &[(-1, 0), (-1, -1), (-1, 1), (0, 0), (1, -1)],
+    };
+
+    for (dx, dy) in marker_pixels {
+        let x = center_x + dx;
+        let y = center_y + dy;
+
+        if x < 0 || y < 0 {
+            continue;
+        }
+
+        let x = x as u32;
+        let y = y as u32;
+
+        if x >= image_size || y >= image_size {
+            continue;
+        }
+
+        let offset = mini_map_pixel_offset(x, y, image_size);
+        data[offset..offset + 4].copy_from_slice(&MINI_MAP_PLAYER);
+    }
+}
+
 /// Writes a 2×2 NPC marker inside the tile cell on the mini map.
 pub fn fill_mini_map_npc_dot(
     data: &mut [u8],
@@ -1744,13 +1903,13 @@ pub fn fill_automap_tile(
     tile_y: u32,
     color: [u8; 4],
     image_width: u32,
-    pixel_scale: u32,
+    tile_px: u32,
 ) {
-    let start_x = tile_x * pixel_scale;
-    let start_y = tile_y * pixel_scale;
+    let start_x = tile_x * tile_px;
+    let start_y = tile_y * tile_px;
 
-    for py in 0..pixel_scale {
-        for px in 0..pixel_scale {
+    for py in 0..tile_px {
+        for px in 0..tile_px {
             let x = start_x + px;
             let y = start_y + py;
             let offset = automap_pixel_offset(x, y, image_width);
@@ -1778,6 +1937,42 @@ pub fn fill_automap_poi_dot(
             let offset = automap_pixel_offset(x, y, image_width);
             data[offset..offset + 4].copy_from_slice(&color);
         }
+    }
+}
+
+/// Writes a directional player marker inside the tile cell on the automap.
+pub fn fill_automap_player_marker(
+    data: &mut [u8],
+    tile_x: u32,
+    tile_y: u32,
+    image_width: u32,
+    tile_px: u32,
+    facing: Direction,
+) {
+    let start_x = tile_x * tile_px;
+    let start_y = tile_y * tile_px;
+    let center_x = start_x + tile_px / 2;
+    let center_y = start_y + tile_px / 2;
+
+    let marker_pixels: &[(i32, i32)] = match facing {
+        Direction::North => &[(-1, 1), (0, 0), (0, 1), (0, 2), (1, 1)],
+        Direction::East => &[(-1, -1), (0, 0), (1, -1), (1, 0), (1, 1)],
+        Direction::South => &[(-1, 0), (0, 0), (0, 1), (0, 2), (1, 0)],
+        Direction::West => &[(-1, -1), (-1, 0), (-1, 1), (0, 0), (1, -1)],
+    };
+
+    for (dx, dy) in marker_pixels {
+        let x = center_x as i32 + dx;
+        let y = center_y as i32 + dy;
+
+        if x < 0 || y < 0 {
+            continue;
+        }
+
+        let x = x as u32;
+        let y = y as u32;
+        let offset = automap_pixel_offset(x, y, image_width);
+        data[offset..offset + 4].copy_from_slice(&AUTOMAP_PLAYER);
     }
 }
 
@@ -3321,6 +3516,49 @@ mod automap_tests {
     }
 
     #[test]
+    fn test_automap_image_player_marker_points_east() {
+        let mut app = setup_automap_test_app();
+
+        let mut state = GameState::new();
+        let mut map = Map::new(1, "Automap".to_string(), "Test".to_string(), 8, 8);
+        let player_pos = Position::new(2, 2);
+
+        if let Some(tile) = map.get_tile_mut(player_pos) {
+            tile.mark_visited();
+        }
+
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+        state.world.set_party_position(player_pos);
+        state.world.party_facing = Direction::East;
+        state.mode = GameMode::Automap;
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .run_system_cached(update_automap_image)
+            .expect("update_automap_image system should run in test");
+
+        let automap = app.world().resource::<AutomapImage>().clone();
+        let images = app.world().resource::<Assets<Image>>();
+        let image = images.get(&automap.handle).unwrap();
+        let tile_px =
+            (AUTOMAP_MAX_IMAGE_SIZE_PX / 8).clamp(AUTOMAP_MIN_TILE_PX, AUTOMAP_MAX_TILE_PX);
+        let center_x = player_pos.x as u32 * tile_px + tile_px / 2;
+        let center_y = player_pos.y as u32 * tile_px + tile_px / 2;
+        let arrow_tip_offset = automap_pixel_offset(
+            center_x + 1,
+            center_y - 1,
+            image.texture_descriptor.size.width,
+        );
+        let data = image.data.as_ref().unwrap();
+
+        assert_eq!(
+            &data[arrow_tip_offset..arrow_tip_offset + 4],
+            &AUTOMAP_PLAYER
+        );
+    }
+
+    #[test]
     fn test_automap_image_visited_floor_is_gray() {
         let mut app = setup_automap_test_app();
 
@@ -3655,6 +3893,17 @@ mod clock_tests {
         let mut root_q = world.query_filtered::<Entity, With<ClockRoot>>();
         let root_count = root_q.iter(world).count();
         assert_eq!(root_count, 1, "Expected exactly one ClockRoot entity");
+
+        // ClockRoot should be visible so the clock actually renders in the HUD
+        let mut root_node_q = world.query_filtered::<&Node, With<ClockRoot>>();
+        let root_node = root_node_q
+            .single(world)
+            .expect("Expected ClockRoot node to exist");
+        assert_eq!(
+            root_node.display,
+            Display::Flex,
+            "ClockRoot should be visible by default"
+        );
     }
 
     /// After startup + one update, the clock text must reflect the default
@@ -3713,7 +3962,7 @@ mod clock_tests {
         app.insert_resource(GlobalState(state));
 
         app.update(); // Startup
-        app.update(); // Update
+        app.update(); // Update (runs update_clock)
 
         let world = app.world_mut();
 
@@ -3722,18 +3971,43 @@ mod clock_tests {
         let time_text: &str = time_text_ref;
         assert!(
             time_text.contains("00:00"),
-            "ClockTimeText should be '00:00' after 18h advance from 06:00, got '{}'",
+            "ClockTimeText should contain '00:00' after 18h advance, got '{}'",
             time_text
         );
 
-        // After 18h from Day 1, 06:00 → Day 2, 00:00 — still Year 1, Month 1
         let mut date_q = world.query_filtered::<&Text, With<ClockDateText>>();
         let date_text_ref = date_q.single(world).unwrap();
         let date_text: &str = date_text_ref;
         assert!(
             date_text.contains("Y1 M1 D2"),
-            "ClockDateText should contain 'Y1 M1 D2' after rolling over midnight, got '{}'",
+            "ClockDateText should contain 'Y1 M1 D2' after 18h advance, got '{}'",
             date_text
         );
+    }
+
+    #[test]
+    fn test_fill_mini_map_player_marker_points_north() {
+        let image_size = mini_map_image_size();
+        let mut data = vec![0; (image_size * image_size * 4) as usize];
+        let center_tile = (mini_map_viewport_diameter() / 2) as i32;
+        let pixel_scale = mini_map_pixels_per_tile() as i32;
+
+        fill_mini_map_player_marker(
+            &mut data,
+            center_tile,
+            center_tile,
+            image_size,
+            pixel_scale,
+            Direction::North,
+        );
+
+        let start_x = center_tile * pixel_scale;
+        let start_y = center_tile * pixel_scale;
+        let center_x = start_x + (pixel_scale / 2);
+        let center_y = start_y + (pixel_scale / 2);
+
+        let tip_offset =
+            mini_map_pixel_offset((center_x + 1) as u32, (center_y + 1) as u32, image_size);
+        assert_eq!(&data[tip_offset..tip_offset + 4], &MINI_MAP_PLAYER);
     }
 }

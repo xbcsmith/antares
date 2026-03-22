@@ -109,4 +109,8 @@ Time does not advance when the party moves. The clock only ever increments the h
 
 Navigating the locked item menu doesn't work like expected. Once a character is seslected the arrow keys move the party instead of moving the selected values. ESC always brings up the game menu when it should ESC the dialog/menu/inventory screen without bringing up the main menu
 
+Mini Map follows the party but does not update with images of the actual map. The party indicator runs out of the box after the party moves a few tile. Same problem with the actual map exists. I went and visited the merchant and got no updates. Datetime has disappeared. The datetime is supposed to be show as well as the compass. See examples of the minimap @screenshots/minimap_blank.png and the full map blank @screenshots/full_map_blank.png
+
 All the doors are facing the wrong way
+
+Show/Hide Tray ICON SDK is not working

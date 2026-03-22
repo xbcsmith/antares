@@ -1292,7 +1292,8 @@ fn handle_input(
         .key_map
         .is_action_pressed(GameAction::MoveForward, &keyboard_input)
     {
-        let target = world.position_ahead();
+        let target = game_state.world.position_ahead();
+        let facing = game_state.world.party_facing;
 
         // Phase 3: deny movement into a locked furniture door, surfacing
         // MovementError::DoorLocked semantics at the input layer.
@@ -1306,9 +1307,31 @@ fn handle_input(
             if let Some(ref mut log) = game_log {
                 log.add(msg);
             }
-        } else if let Some(map) = world.get_current_map() {
+        } else if let Some(content) = game_content.as_deref() {
+            match game_state.move_party_and_handle_events(facing, content.db()) {
+                Ok(()) => moved = true,
+                Err(crate::application::MoveHandleError::Movement(
+                    crate::domain::world::MovementError::DoorLocked(_, _),
+                )) => {
+                    let msg = "The door is locked.".to_string();
+                    info!("{}", msg);
+                    if let Some(ref mut log) = game_log {
+                        log.add(msg);
+                    }
+                }
+                Err(crate::application::MoveHandleError::Movement(
+                    crate::domain::world::MovementError::Blocked(_, _),
+                )) => {}
+                Err(crate::application::MoveHandleError::Movement(
+                    crate::domain::world::MovementError::OutOfBounds(_, _),
+                )) => {}
+                Err(err) => {
+                    warn!("move forward failed: {}", err);
+                }
+            }
+        } else if let Some(map) = game_state.world.get_current_map() {
             if !map.is_blocked(target) {
-                world.set_party_position(target);
+                game_state.world.set_party_position(target);
                 moved = true;
             }
         }
@@ -1318,14 +1341,39 @@ fn handle_input(
         .key_map
         .is_action_pressed(GameAction::MoveBack, &keyboard_input)
     {
-        // Calculate position behind party
-        let back_facing = world.party_facing.turn_left().turn_left();
-        let target = back_facing.forward(world.party_position);
+        // Route backward movement through the same world movement path so
+        // fog-of-war reveal and tile events stay in sync with position updates.
+        let back_facing = game_state.world.party_facing.turn_left().turn_left();
 
-        if let Some(map) = world.get_current_map() {
-            if !map.is_blocked(target) {
-                world.set_party_position(target);
-                moved = true;
+        if let Some(content) = game_content.as_deref() {
+            match game_state.move_party_and_handle_events(back_facing, content.db()) {
+                Ok(()) => moved = true,
+                Err(crate::application::MoveHandleError::Movement(
+                    crate::domain::world::MovementError::DoorLocked(_, _),
+                )) => {
+                    let msg = "The door is locked.".to_string();
+                    info!("{}", msg);
+                    if let Some(ref mut log) = game_log {
+                        log.add(msg);
+                    }
+                }
+                Err(crate::application::MoveHandleError::Movement(
+                    crate::domain::world::MovementError::Blocked(_, _),
+                )) => {}
+                Err(crate::application::MoveHandleError::Movement(
+                    crate::domain::world::MovementError::OutOfBounds(_, _),
+                )) => {}
+                Err(err) => {
+                    warn!("move backward failed: {}", err);
+                }
+            }
+        } else {
+            let target = back_facing.forward(game_state.world.party_position);
+            if let Some(map) = game_state.world.get_current_map() {
+                if !map.is_blocked(target) {
+                    game_state.world.set_party_position(target);
+                    moved = true;
+                }
             }
         }
     }
@@ -1334,7 +1382,15 @@ fn handle_input(
         .key_map
         .is_action_pressed(GameAction::TurnLeft, &keyboard_input)
     {
-        world.turn_left();
+        game_state.world.turn_left();
+        if matches!(game_state.mode, crate::application::GameMode::Exploration) {
+            let party_position = game_state.world.party_position;
+            crate::domain::world::mark_visible_area(
+                &mut game_state.world,
+                party_position,
+                crate::domain::world::VISIBILITY_RADIUS,
+            );
+        }
         moved = true;
     }
     // Turn right
@@ -1342,7 +1398,15 @@ fn handle_input(
         .key_map
         .is_action_pressed(GameAction::TurnRight, &keyboard_input)
     {
-        world.turn_right();
+        game_state.world.turn_right();
+        if matches!(game_state.mode, crate::application::GameMode::Exploration) {
+            let party_position = game_state.world.party_position;
+            crate::domain::world::mark_visible_area(
+                &mut game_state.world,
+                party_position,
+                crate::domain::world::VISIBILITY_RADIUS,
+            );
+        }
         moved = true;
     }
 

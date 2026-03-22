@@ -74,6 +74,7 @@ impl SpellsEditorState {
             saving_throw: false,
             description: String::new(),
             applied_conditions: Vec::new(),
+            resurrect_hp: None,
         }
     }
 
