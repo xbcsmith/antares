@@ -1,5 +1,195 @@
 # Implementations
 
+## Phase 1: Low-Risk Extraction of Pure Input Helpers (Complete)
+
+### Overview
+
+Phase 1 extracts the lowest-risk pure helper logic from
+`src/game/systems/input.rs` into focused helper modules without changing the
+observable behavior of the Bevy input system. The goal of this phase is to make
+the main input system easier to scan and prepare the file for later phases in
+`docs/explanation/input_refactor_plan.md`, while preserving the existing
+execution flow.
+
+### Problem Statement
+
+Before this phase, `src/game/systems/input.rs` mixed three different concerns in
+one large file section:
+
+- pure key decoding and key-to-action mapping logic
+- pure mode-toggle and adjacency helpers
+- the Bevy `handle_input` system itself
+
+That made the input system harder to read because important but low-risk helper
+logic sat inline with gameplay routing, map interaction behavior, and Bevy query
+plumbing. It also spread helper-focused tests across the monolithic input
+module, which made it harder to see which tests validated reusable pure logic
+versus end-to-end system behavior.
+
+Phase 1 therefore focused on a narrow, low-risk extraction only. It did not
+change the structure of `handle_input`, the ordering of input handling branches,
+or any interaction semantics.
+
+### Files Changed
+
+| File                                    | Change                                                                   |
+| --------------------------------------- | ------------------------------------------------------------------------ |
+| `src/game/systems/input.rs`             | Re-exported extracted helpers and removed inline pure helper definitions |
+| `src/game/systems/input/keymap.rs`      | Added `GameAction`, `KeyMap`, `parse_key_code`, and helper-local tests   |
+| `src/game/systems/input/menu_toggle.rs` | Added `toggle_menu_state` and helper-local tests                         |
+| `src/game/systems/input/helpers.rs`     | Added `get_adjacent_positions` and helper-local tests                    |
+| `docs/explanation/implementations.md`   | Added this Phase 1 implementation summary                                |
+
+---
+
+### 1.1 — Extracted `keymap.rs`
+
+Phase 1 moved the config-driven key mapping helpers into
+`src/game/systems/input/keymap.rs`.
+
+This module now owns:
+
+- `GameAction`
+- `KeyMap`
+- `parse_key_code`
+
+These items are pure helper logic from the perspective of the input system:
+they decode configured key strings, compile them into Bevy `KeyCode` mappings,
+and expose lightweight lookup helpers for pressed and just-pressed actions.
+
+Keeping them together has two benefits:
+
+- the mapping rules are now isolated from the large `handle_input` execution
+  path
+- the direct unit tests for key parsing and keymap compilation now live next to
+  the code they validate
+
+This matches the Phase 1 plan’s recommendation to move pure input-decoding logic
+first before attempting any system split.
+
+### 1.2 — Extracted `menu_toggle.rs`
+
+Phase 1 moved `toggle_menu_state` into
+`src/game/systems/input/menu_toggle.rs`.
+
+This helper remains intentionally small and behavior-preserving:
+
+- if the current mode is `GameMode::Menu`, it restores the stored resume mode
+- otherwise, it opens the menu and records the current mode as the resume target
+
+This extraction is low risk because the helper is pure with respect to input
+routing decisions: it only transforms `GameState.mode` and does not depend on
+Bevy scheduling, messages, or world queries.
+
+The `handle_input` system continues to call the same helper at the same point in
+the menu-toggle branch, so input priority and early-return behavior remain
+unchanged.
+
+### 1.3 — Extracted `helpers.rs`
+
+Phase 1 moved `get_adjacent_positions` into
+`src/game/systems/input/helpers.rs`.
+
+This helper returns the 8 neighboring positions around a tile in clockwise order
+starting at north. It is used by exploration interaction logic for nearby NPC
+and adjacent-event checks.
+
+This extraction is also low risk because:
+
+- the helper is fully deterministic
+- it has no Bevy dependencies
+- it has a clear input/output contract
+- existing adjacency tests can move directly with it
+
+The canonical adjacency ordering remains unchanged, which is important because
+interaction checks rely on stable surrounding-tile enumeration.
+
+### 1.4 — Test Relocation Completed
+
+Phase 1 also moved the direct helper-validation tests into the extracted helper
+modules, as specified in the refactor plan.
+
+The tests grouped with the extracted modules now cover:
+
+- adjacent-position helper behavior
+- parse-key-code behavior
+- keymap construction and lookup behavior
+- menu toggle behavior
+
+This keeps pure unit tests close to the helper code they validate and reduces
+test sprawl inside the monolithic input system file.
+
+High-level integration tests and behavior-driven `handle_input` tests remain in
+`input.rs`, because they still validate system-level behavior rather than a pure
+helper contract.
+
+### 1.5 — Behavior Preservation
+
+Phase 1 deliberately does not change the runtime behavior of the input system.
+
+Specifically, this phase preserves:
+
+- menu toggle priority over movement handling
+- inventory, rest, and automap branch ordering
+- exploration interaction behavior
+- movement cooldown behavior
+- dialogue cancellation on movement
+- victory overlay dismissal after movement
+
+Only helper placement changed. The Bevy system still owns the same orchestration
+logic, and the extracted items are re-exported through the `input` module so
+call sites keep the same public access pattern.
+
+### 1.6 — Architecture and Scope Compliance
+
+Phase 1 follows the project guidance in `AGENTS.md` by staying narrowly scoped
+and avoiding premature structural changes.
+
+This phase does **not**:
+
+- modify core architecture data structures
+- change `GameMode` semantics
+- change world interaction rules
+- introduce new data formats
+- alter campaign or fixture behavior
+
+Instead, it performs the exact low-risk extraction step called for in
+`docs/explanation/input_refactor_plan.md`:
+
+- extract pure helpers first
+- keep behavior stable
+- move direct tests with the helpers they validate
+
+That makes later phases safer because future changes can work from smaller,
+better-named seams.
+
+### 1.7 — Deliverables Completed
+
+- [x] `GameAction` extracted to `keymap.rs`
+- [x] `KeyMap` extracted to `keymap.rs`
+- [x] `parse_key_code` extracted to `keymap.rs`
+- [x] `toggle_menu_state` extracted to `menu_toggle.rs`
+- [x] `get_adjacent_positions` extracted to `helpers.rs`
+- [x] Direct helper tests moved alongside extracted helpers
+- [x] `input.rs` reduced by removing inline pure helper definitions
+- [x] `docs/explanation/implementations.md` updated
+
+### 1.8 — Outcome
+
+After Phase 1, `src/game/systems/input.rs` is smaller and easier to navigate,
+while all extracted logic remains accessible through the same input module
+surface.
+
+This creates the first safe decomposition seam for the remaining refactor plan:
+
+- key decoding is now isolated
+- menu toggling is now isolated
+- adjacency calculations are now isolated
+- helper-local tests now live with helper-local code
+
+That is the intended stopping point for Phase 1: less monolithic structure with
+no intentional behavior drift.
+
 ## Phase 7: Regression Test Suite and Documentation (Complete)
 
 ### Overview

@@ -34,9 +34,9 @@
 //! ```
 
 use crate::application::dialogue::RecruitmentContext;
-use crate::domain::types::Position;
+
 use crate::domain::world::{MapEvent, WallType};
-use crate::game::components::dialogue::NpcDialogue;
+
 use crate::game::components::furniture::DoorState;
 use crate::game::components::FurnitureEntity;
 use crate::game::resources::{GlobalState, LockInteractionPending};
@@ -49,7 +49,14 @@ use crate::game::systems::ui::GameLog;
 use crate::sdk::game_config::ControlsConfig;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use std::collections::HashMap;
+
+mod helpers;
+mod keymap;
+mod menu_toggle;
+
+pub use helpers::get_adjacent_positions;
+pub use keymap::{parse_key_code, GameAction, KeyMap};
+pub use menu_toggle::toggle_menu_state;
 
 /// Input plugin with config-driven key mappings
 ///
@@ -109,340 +116,6 @@ pub struct InputConfigResource {
     pub key_map: KeyMap,
 }
 
-/// Game actions that can be triggered by input
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum GameAction {
-    /// Move forward in current facing direction
-    MoveForward,
-
-    /// Move backward (opposite of facing direction)
-    MoveBack,
-
-    /// Turn left (rotate counterclockwise)
-    TurnLeft,
-
-    /// Turn right (rotate clockwise)
-    TurnRight,
-
-    /// Interact with objects (open doors, talk to NPCs)
-    Interact,
-
-    /// Open menu
-    Menu,
-
-    /// Open or close the inventory screen
-    Inventory,
-
-    /// Begin a party rest sequence
-    Rest,
-
-    /// Open or close the full-screen automap overlay
-    Automap,
-}
-
-/// Key mapping structure for efficient input lookups
-///
-/// Maps `KeyCode` to `GameAction` for fast input processing.
-#[derive(Debug, Clone)]
-pub struct KeyMap {
-    /// Map from KeyCode to GameAction
-    bindings: HashMap<KeyCode, GameAction>,
-}
-
-impl KeyMap {
-    /// Create a KeyMap from ControlsConfig
-    ///
-    /// Translates string key names to Bevy KeyCode and builds the lookup map.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Controls configuration with key binding strings
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::game::systems::input::KeyMap;
-    /// use antares::sdk::game_config::ControlsConfig;
-    ///
-    /// let config = ControlsConfig::default();
-    /// let key_map = KeyMap::from_controls_config(&config);
-    /// ```
-    pub fn from_controls_config(config: &ControlsConfig) -> Self {
-        let mut bindings = HashMap::new();
-
-        // Map move_forward keys
-        for key_str in &config.move_forward {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::MoveForward);
-            } else {
-                warn!("Invalid key code in move_forward: {}", key_str);
-            }
-        }
-
-        // Map move_back keys
-        for key_str in &config.move_back {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::MoveBack);
-            } else {
-                warn!("Invalid key code in move_back: {}", key_str);
-            }
-        }
-
-        // Map turn_left keys
-        for key_str in &config.turn_left {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::TurnLeft);
-            } else {
-                warn!("Invalid key code in turn_left: {}", key_str);
-            }
-        }
-
-        // Map turn_right keys
-        for key_str in &config.turn_right {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::TurnRight);
-            } else {
-                warn!("Invalid key code in turn_right: {}", key_str);
-            }
-        }
-
-        // Map interact keys
-        for key_str in &config.interact {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::Interact);
-            } else {
-                warn!("Invalid key code in interact: {}", key_str);
-            }
-        }
-
-        // Map menu keys
-        for key_str in &config.menu {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::Menu);
-            } else {
-                warn!("Invalid key code in menu: {}", key_str);
-            }
-        }
-
-        // Map inventory keys
-        for key_str in &config.inventory {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::Inventory);
-            } else {
-                warn!("Invalid key code in inventory: {}", key_str);
-            }
-        }
-
-        // Map rest keys
-        for key_str in &config.rest {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::Rest);
-            } else {
-                warn!("Invalid key code in rest: {}", key_str);
-            }
-        }
-
-        // Map automap keys
-        for key_str in &config.automap {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::Automap);
-            } else {
-                warn!("Invalid key code in automap: {}", key_str);
-            }
-        }
-
-        Self { bindings }
-    }
-
-    /// Get the action bound to a specific key code
-    ///
-    /// # Arguments
-    ///
-    /// * `key_code` - The key code to look up
-    ///
-    /// # Returns
-    ///
-    /// Returns `Some(GameAction)` if the key is bound, `None` otherwise
-    pub fn get_action(&self, key_code: KeyCode) -> Option<GameAction> {
-        self.bindings.get(&key_code).copied()
-    }
-
-    /// Check if any of the keys for an action are currently pressed
-    ///
-    /// # Arguments
-    ///
-    /// * `action` - The game action to check
-    /// * `keyboard_input` - Bevy keyboard input state
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if any key bound to the action is pressed
-    pub fn is_action_pressed(
-        &self,
-        action: GameAction,
-        keyboard_input: &ButtonInput<KeyCode>,
-    ) -> bool {
-        self.bindings.iter().any(|(key_code, bound_action)| {
-            *bound_action == action && keyboard_input.pressed(*key_code)
-        })
-    }
-
-    /// Check if any of the keys for an action were just pressed this frame
-    ///
-    /// # Arguments
-    ///
-    /// * `action` - The game action to check
-    /// * `keyboard_input` - Bevy keyboard input state
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if any key bound to the action was just pressed
-    pub fn is_action_just_pressed(
-        &self,
-        action: GameAction,
-        keyboard_input: &ButtonInput<KeyCode>,
-    ) -> bool {
-        self.bindings.iter().any(|(key_code, bound_action)| {
-            *bound_action == action && keyboard_input.just_pressed(*key_code)
-        })
-    }
-}
-
-/// Parse a key code string into Bevy's KeyCode enum
-///
-/// Supports common key names and aliases for compatibility.
-///
-/// # Arguments
-///
-/// * `key_str` - String representation of the key (e.g., "W", "ArrowUp", "Space")
-///
-/// # Returns
-///
-/// Returns `Some(KeyCode)` if the string is recognized, `None` otherwise
-///
-/// # Examples
-///
-/// ```
-/// use antares::game::systems::input::parse_key_code;
-/// use bevy::prelude::KeyCode;
-///
-/// assert_eq!(parse_key_code("W"), Some(KeyCode::KeyW));
-/// assert_eq!(parse_key_code("ArrowUp"), Some(KeyCode::ArrowUp));
-/// assert_eq!(parse_key_code("Space"), Some(KeyCode::Space));
-/// assert_eq!(parse_key_code("Invalid"), None);
-/// ```
-pub fn parse_key_code(key_str: &str) -> Option<KeyCode> {
-    match key_str {
-        // Letter keys
-        "A" => Some(KeyCode::KeyA),
-        "B" => Some(KeyCode::KeyB),
-        "C" => Some(KeyCode::KeyC),
-        "D" => Some(KeyCode::KeyD),
-        "E" => Some(KeyCode::KeyE),
-        "F" => Some(KeyCode::KeyF),
-        "G" => Some(KeyCode::KeyG),
-        "H" => Some(KeyCode::KeyH),
-        "I" => Some(KeyCode::KeyI),
-        "J" => Some(KeyCode::KeyJ),
-        "K" => Some(KeyCode::KeyK),
-        "L" => Some(KeyCode::KeyL),
-        "M" => Some(KeyCode::KeyM),
-        "N" => Some(KeyCode::KeyN),
-        "O" => Some(KeyCode::KeyO),
-        "P" => Some(KeyCode::KeyP),
-        "Q" => Some(KeyCode::KeyQ),
-        "R" => Some(KeyCode::KeyR),
-        "S" => Some(KeyCode::KeyS),
-        "T" => Some(KeyCode::KeyT),
-        "U" => Some(KeyCode::KeyU),
-        "V" => Some(KeyCode::KeyV),
-        "W" => Some(KeyCode::KeyW),
-        "X" => Some(KeyCode::KeyX),
-        "Y" => Some(KeyCode::KeyY),
-        "Z" => Some(KeyCode::KeyZ),
-
-        // Arrow keys
-        "ArrowUp" | "Up" => Some(KeyCode::ArrowUp),
-        "ArrowDown" | "Down" => Some(KeyCode::ArrowDown),
-        "ArrowLeft" | "Left" => Some(KeyCode::ArrowLeft),
-        "ArrowRight" | "Right" => Some(KeyCode::ArrowRight),
-
-        // Special keys
-        "Space" | "Spacebar" => Some(KeyCode::Space),
-        "Enter" | "Return" => Some(KeyCode::Enter),
-        "Escape" | "Esc" => Some(KeyCode::Escape),
-        "Tab" => Some(KeyCode::Tab),
-        "Backspace" => Some(KeyCode::Backspace),
-
-        // Number keys
-        "0" | "Digit0" => Some(KeyCode::Digit0),
-        "1" | "Digit1" => Some(KeyCode::Digit1),
-        "2" | "Digit2" => Some(KeyCode::Digit2),
-        "3" | "Digit3" => Some(KeyCode::Digit3),
-        "4" | "Digit4" => Some(KeyCode::Digit4),
-        "5" | "Digit5" => Some(KeyCode::Digit5),
-        "6" | "Digit6" => Some(KeyCode::Digit6),
-        "7" | "Digit7" => Some(KeyCode::Digit7),
-        "8" | "Digit8" => Some(KeyCode::Digit8),
-        "9" | "Digit9" => Some(KeyCode::Digit9),
-
-        // Function keys
-        "F1" => Some(KeyCode::F1),
-        "F2" => Some(KeyCode::F2),
-        "F3" => Some(KeyCode::F3),
-        "F4" => Some(KeyCode::F4),
-        "F5" => Some(KeyCode::F5),
-        "F6" => Some(KeyCode::F6),
-        "F7" => Some(KeyCode::F7),
-        "F8" => Some(KeyCode::F8),
-        "F9" => Some(KeyCode::F9),
-        "F10" => Some(KeyCode::F10),
-        "F11" => Some(KeyCode::F11),
-        "F12" => Some(KeyCode::F12),
-
-        // Modifier keys
-        "Shift" | "ShiftLeft" => Some(KeyCode::ShiftLeft),
-        "ShiftRight" => Some(KeyCode::ShiftRight),
-        "Control" | "Ctrl" | "ControlLeft" => Some(KeyCode::ControlLeft),
-        "ControlRight" | "CtrlRight" => Some(KeyCode::ControlRight),
-        "Alt" | "AltLeft" => Some(KeyCode::AltLeft),
-        "AltRight" => Some(KeyCode::AltRight),
-
-        _ => {
-            // Try lowercase version
-            let lowercase = key_str.to_lowercase();
-            if lowercase != key_str {
-                return parse_key_code(&lowercase);
-            }
-            None
-        }
-    }
-}
-
-/// Toggle the in-game menu: open it if not open, or close it and return to the previous mode if open.
-///
-/// This helper intentionally does not consider movement cooldown so it can be called
-/// from input handlers that must ensure the menu key always works.
-///
-/// # Arguments
-///
-/// * `game_state` - Mutable reference to the current `GameState`
-fn toggle_menu_state(game_state: &mut crate::application::GameState) {
-    use crate::application::menu::MenuState;
-    match &game_state.mode {
-        crate::application::GameMode::Menu(menu_state) => {
-            let resume_mode = menu_state.get_resume_mode();
-            info!("Closing menu, resuming to: {:?}", resume_mode);
-            game_state.mode = resume_mode;
-        }
-        current_mode => {
-            info!("Opening menu from: {:?}", current_mode);
-            let menu_state = MenuState::new(current_mode.clone());
-            game_state.mode = crate::application::GameMode::Menu(menu_state);
-        }
-    }
-}
-
 /// Handle keyboard input and translate to game actions.
 ///
 /// This system processes keyboard input using the configured key mappings,
@@ -472,7 +145,7 @@ fn handle_input(
     mut last_move_time: Local<f32>,
     victory_roots: Query<Entity, With<crate::game::systems::combat::VictorySummaryRoot>>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
-    dialogue_query: Query<&NpcDialogue>,
+
     primary_window: Query<&Window, With<PrimaryWindow>>,
     game_content: Option<Res<crate::application::resources::GameContent>>,
     // Query for furniture door entities — provides open/locked state and
@@ -1262,7 +935,7 @@ fn handle_input(
                     MapEvent::RecruitableCharacter {
                         name,
                         character_id,
-                        dialogue_id,
+                        dialogue_id: _dialogue_id,
                         ..
                     } => {
                         info!(
@@ -1270,22 +943,10 @@ fn handle_input(
                             name, character_id, position
                         );
                         // Find the NPC entity at this position
-                        let speaker_entity = npc_query
+                        let _speaker_entity = npc_query
                             .iter()
                             .find(|(_, _, tile_coord)| tile_coord.0 == position)
                             .map(|(entity, _, _)| entity);
-
-                        // Use specific dialogue ID if the NPC has one, otherwise fallback to 100
-                        // Use specific dialogue ID from event if available,
-                        // OR fallback to NPC component,
-                        // OR fallback to default 100
-                        let dialogue_id = dialogue_id
-                            .or_else(|| {
-                                speaker_entity
-                                    .and_then(|entity| dialogue_query.get(entity).ok())
-                                    .map(|npc_dlg| npc_dlg.dialogue_id)
-                            })
-                            .unwrap_or(100);
 
                         // Set recruitment context so the dialogue system knows who to recruit
                         recruitment_context.0 = Some(RecruitmentContext {
@@ -1295,8 +956,13 @@ fn handle_input(
 
                         map_event_messages.write(MapEventTriggered {
                             event: MapEvent::NpcDialogue {
+                                name: name.clone(),
+                                description: String::new(),
                                 npc_id: character_id.clone(),
-                                dialogue_id: Some(dialogue_id),
+                                time_condition: None,
+                                facing: None,
+                                proximity_facing: false,
+                                rotation_speed: None,
                             },
                             position,
                         });
@@ -1449,57 +1115,6 @@ fn handle_input(
     }
 }
 
-/// Returns all 8 adjacent positions around a given position
-///
-/// Returns tiles in clockwise order starting from North:
-/// N, NE, E, SE, S, SW, W, NW
-///
-/// # Arguments
-///
-/// * `position` - The center position
-///
-/// # Returns
-///
-/// Array of 8 `Position` values representing adjacent tiles
-fn get_adjacent_positions(position: Position) -> [Position; 8] {
-    [
-        Position::new(position.x, position.y - 1),     // North
-        Position::new(position.x + 1, position.y - 1), // NorthEast
-        Position::new(position.x + 1, position.y),     // East
-        Position::new(position.x + 1, position.y + 1), // SouthEast
-        Position::new(position.x, position.y + 1),     // South
-        Position::new(position.x - 1, position.y + 1), // SouthWest
-        Position::new(position.x - 1, position.y),     // West
-        Position::new(position.x - 1, position.y - 1), // NorthWest
-    ]
-}
-
-#[cfg(test)]
-mod adjacent_tile_tests {
-    use super::*;
-
-    #[test]
-    fn test_adjacent_positions_count() {
-        let center = Position::new(5, 5);
-        let adjacent = get_adjacent_positions(center);
-        assert_eq!(adjacent.len(), 8);
-    }
-
-    #[test]
-    fn test_adjacent_positions_north() {
-        let center = Position::new(5, 5);
-        let adjacent = get_adjacent_positions(center);
-        assert_eq!(adjacent[0], Position::new(5, 4)); // North
-    }
-
-    #[test]
-    fn test_adjacent_positions_east() {
-        let center = Position::new(5, 5);
-        let adjacent = get_adjacent_positions(center);
-        assert_eq!(adjacent[2], Position::new(6, 5)); // East
-    }
-}
-
 #[cfg(test)]
 mod dialogue_inventory_tests {
     use super::*;
@@ -1636,249 +1251,6 @@ mod dialogue_inventory_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_key_map_rest_action() {
-        let config = ControlsConfig::default();
-        let key_map = KeyMap::from_controls_config(&config);
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyR),
-            Some(GameAction::Rest),
-            "KeyCode::KeyR must map to GameAction::Rest with default config"
-        );
-    }
-
-    #[test]
-    fn test_custom_rest_key() {
-        let config = ControlsConfig {
-            rest: vec!["F5".to_string()],
-            ..Default::default()
-        };
-        let key_map = KeyMap::from_controls_config(&config);
-        assert_eq!(
-            key_map.get_action(KeyCode::F5),
-            Some(GameAction::Rest),
-            "F5 must map to GameAction::Rest when configured as rest key"
-        );
-        // Default R key must not be mapped when overridden
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyR),
-            None,
-            "KeyR must not be mapped when rest is overridden to F5"
-        );
-    }
-
-    #[test]
-    fn test_key_map_inventory_action() {
-        let config = ControlsConfig::default();
-        let key_map = KeyMap::from_controls_config(&config);
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyI),
-            Some(GameAction::Inventory),
-            "KeyCode::KeyI must map to GameAction::Inventory with default config"
-        );
-    }
-
-    #[test]
-    fn test_parse_key_code_letters() {
-        assert_eq!(parse_key_code("W"), Some(KeyCode::KeyW));
-        assert_eq!(parse_key_code("A"), Some(KeyCode::KeyA));
-        assert_eq!(parse_key_code("S"), Some(KeyCode::KeyS));
-        assert_eq!(parse_key_code("D"), Some(KeyCode::KeyD));
-    }
-
-    #[test]
-    fn test_parse_key_code_arrows() {
-        assert_eq!(parse_key_code("ArrowUp"), Some(KeyCode::ArrowUp));
-        assert_eq!(parse_key_code("ArrowDown"), Some(KeyCode::ArrowDown));
-        assert_eq!(parse_key_code("ArrowLeft"), Some(KeyCode::ArrowLeft));
-        assert_eq!(parse_key_code("ArrowRight"), Some(KeyCode::ArrowRight));
-    }
-
-    #[test]
-    fn test_parse_key_code_arrow_aliases() {
-        assert_eq!(parse_key_code("Up"), Some(KeyCode::ArrowUp));
-        assert_eq!(parse_key_code("Down"), Some(KeyCode::ArrowDown));
-        assert_eq!(parse_key_code("Left"), Some(KeyCode::ArrowLeft));
-        assert_eq!(parse_key_code("Right"), Some(KeyCode::ArrowRight));
-    }
-
-    #[test]
-    fn test_parse_key_code_special() {
-        assert_eq!(parse_key_code("Space"), Some(KeyCode::Space));
-        assert_eq!(parse_key_code("Spacebar"), Some(KeyCode::Space));
-        assert_eq!(parse_key_code("Escape"), Some(KeyCode::Escape));
-        assert_eq!(parse_key_code("Esc"), Some(KeyCode::Escape));
-        assert_eq!(parse_key_code("Enter"), Some(KeyCode::Enter));
-    }
-
-    #[test]
-    fn test_toggle_menu_state_from_exploration_and_back() {
-        // Start in Exploration mode
-        let mut state = crate::application::GameState::new();
-        assert!(matches!(
-            state.mode,
-            crate::application::GameMode::Exploration
-        ));
-
-        // Toggle to Menu
-        toggle_menu_state(&mut state);
-        assert!(matches!(state.mode, crate::application::GameMode::Menu(_)));
-
-        // Toggle back to Exploration
-        toggle_menu_state(&mut state);
-        assert!(matches!(
-            state.mode,
-            crate::application::GameMode::Exploration
-        ));
-    }
-
-    #[test]
-    fn test_toggle_menu_state_preserves_previous_mode() {
-        // Ensure the MenuState records the previous mode correctly
-        let mut state = crate::application::GameState::new();
-        toggle_menu_state(&mut state);
-
-        if let crate::application::GameMode::Menu(menu_state) = &state.mode {
-            assert!(matches!(
-                menu_state.get_resume_mode(),
-                crate::application::GameMode::Exploration
-            ));
-        } else {
-            panic!("Expected to be in Menu mode after toggle");
-        }
-    }
-
-    #[test]
-    fn test_parse_key_code_invalid() {
-        assert_eq!(parse_key_code("InvalidKey"), None);
-        assert_eq!(parse_key_code(""), None);
-    }
-
-    #[test]
-    fn test_key_map_from_default_config() {
-        let config = ControlsConfig::default();
-        let key_map = KeyMap::from_controls_config(&config);
-
-        // Check that default keys are mapped correctly
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyW),
-            Some(GameAction::MoveForward)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::ArrowUp),
-            Some(GameAction::MoveForward)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyS),
-            Some(GameAction::MoveBack)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::ArrowDown),
-            Some(GameAction::MoveBack)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyA),
-            Some(GameAction::TurnLeft)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::ArrowLeft),
-            Some(GameAction::TurnLeft)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyD),
-            Some(GameAction::TurnRight)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::ArrowRight),
-            Some(GameAction::TurnRight)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::Space),
-            Some(GameAction::Interact)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyE),
-            Some(GameAction::Interact)
-        );
-        assert_eq!(key_map.get_action(KeyCode::Escape), Some(GameAction::Menu));
-    }
-
-    #[test]
-    fn test_key_map_custom_config() {
-        let config = ControlsConfig {
-            move_forward: vec!["I".to_string()],
-            move_back: vec!["K".to_string()],
-            turn_left: vec!["J".to_string()],
-            turn_right: vec!["L".to_string()],
-            interact: vec!["U".to_string()],
-            menu: vec!["P".to_string()],
-            inventory: vec!["F".to_string()],
-            rest: vec!["G".to_string()],
-            automap: vec!["M".to_string()],
-            movement_cooldown: 0.1,
-        };
-
-        let key_map = KeyMap::from_controls_config(&config);
-
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyI),
-            Some(GameAction::MoveForward)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyK),
-            Some(GameAction::MoveBack)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyJ),
-            Some(GameAction::TurnLeft)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyL),
-            Some(GameAction::TurnRight)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyU),
-            Some(GameAction::Interact)
-        );
-        assert_eq!(key_map.get_action(KeyCode::KeyP), Some(GameAction::Menu));
-
-        // Old defaults should not be mapped
-        assert_eq!(key_map.get_action(KeyCode::KeyW), None);
-        assert_eq!(key_map.get_action(KeyCode::Space), None);
-    }
-
-    #[test]
-    fn test_key_map_multiple_keys_per_action() {
-        let config = ControlsConfig {
-            move_forward: vec!["W".to_string(), "ArrowUp".to_string(), "I".to_string()],
-            move_back: vec!["S".to_string()],
-            turn_left: vec!["A".to_string()],
-            turn_right: vec!["D".to_string()],
-            interact: vec!["Space".to_string()],
-            menu: vec!["Escape".to_string()],
-            inventory: vec!["F".to_string()],
-            rest: vec!["R".to_string()],
-            automap: vec!["M".to_string()],
-            movement_cooldown: 0.2,
-        };
-
-        let key_map = KeyMap::from_controls_config(&config);
-
-        // All three keys should map to MoveForward
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyW),
-            Some(GameAction::MoveForward)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::ArrowUp),
-            Some(GameAction::MoveForward)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyI),
-            Some(GameAction::MoveForward)
-        );
-    }
 
     #[test]
     fn test_controls_config_default_cooldown() {
@@ -2115,8 +1487,8 @@ mod integration_tests {
 
         let mut map =
             crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
-        let party_pos = Position::new(5, 5);
-        let npc_pos = Position::new(5, 4);
+        let party_pos = crate::domain::types::Position::new(5, 5);
+        let npc_pos = crate::domain::types::Position::new(5, 4);
         map.npc_placements.push(crate::domain::world::NpcPlacement {
             npc_id: "test_npc".to_string(),
             position: npc_pos,
@@ -2168,8 +1540,8 @@ mod integration_tests {
 
         let mut map =
             crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
-        let party_pos = Position::new(5, 5);
-        let npc_pos = Position::new(5, 4);
+        let party_pos = crate::domain::types::Position::new(5, 5);
+        let npc_pos = crate::domain::types::Position::new(5, 4);
         map.npc_placements.push(crate::domain::world::NpcPlacement {
             npc_id: "test_npc".to_string(),
             position: npc_pos,
@@ -2567,18 +1939,17 @@ mod interaction_tests {
     #[test]
     fn test_npc_interaction_adjacent_positions() {
         // Arrange
-        let center = Position::new(5, 5);
+        let center = crate::domain::types::Position::new(5, 5);
         let adjacent = get_adjacent_positions(center);
 
-        // Assert - verify all 8 positions are adjacent
-        assert!(adjacent.contains(&Position::new(5, 4))); // North
-        assert!(adjacent.contains(&Position::new(6, 4))); // NorthEast
-        assert!(adjacent.contains(&Position::new(6, 5))); // East
-        assert!(adjacent.contains(&Position::new(6, 6))); // SouthEast
-        assert!(adjacent.contains(&Position::new(5, 6))); // South
-        assert!(adjacent.contains(&Position::new(4, 6))); // SouthWest
-        assert!(adjacent.contains(&Position::new(4, 5))); // West
-        assert!(adjacent.contains(&Position::new(4, 4))); // NorthWest
+        assert!(adjacent.contains(&crate::domain::types::Position::new(5, 4))); // North
+        assert!(adjacent.contains(&crate::domain::types::Position::new(6, 4))); // NorthEast
+        assert!(adjacent.contains(&crate::domain::types::Position::new(6, 5))); // East
+        assert!(adjacent.contains(&crate::domain::types::Position::new(6, 6))); // SouthEast
+        assert!(adjacent.contains(&crate::domain::types::Position::new(5, 6))); // South
+        assert!(adjacent.contains(&crate::domain::types::Position::new(4, 6))); // SouthWest
+        assert!(adjacent.contains(&crate::domain::types::Position::new(4, 5))); // West
+        assert!(adjacent.contains(&crate::domain::types::Position::new(4, 4))); // NorthWest
     }
 
     /// Test that sign interaction detects signs in adjacent positions.
@@ -2589,7 +1960,7 @@ mod interaction_tests {
         let mut map =
             crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
 
-        let sign_pos = Position::new(5, 4);
+        let sign_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             sign_pos,
             MapEvent::Sign {
@@ -2617,13 +1988,13 @@ mod interaction_tests {
         let mut map =
             crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
 
-        let teleport_pos = Position::new(5, 4);
+        let teleport_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             teleport_pos,
             MapEvent::Teleport {
                 name: "TestPortal".to_string(),
                 description: "Portal to destination".to_string(),
-                destination: Position::new(2, 2),
+                destination: crate::domain::types::Position::new(2, 2),
                 map_id: 1,
             },
         );
@@ -2644,7 +2015,7 @@ mod interaction_tests {
         let mut map =
             crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
 
-        let npc_pos = Position::new(5, 4);
+        let npc_pos = crate::domain::types::Position::new(5, 4);
         map.npc_placements
             .push(crate::domain::world::NpcPlacement::new("test_npc", npc_pos));
 
@@ -2668,7 +2039,7 @@ mod interaction_tests {
         let mut map =
             crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
 
-        let recruit_pos = Position::new(5, 4);
+        let recruit_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             recruit_pos,
             MapEvent::RecruitableCharacter {
@@ -2704,7 +2075,7 @@ mod interaction_tests {
         let mut map =
             crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
 
-        let encounter_pos = Position::new(5, 4);
+        let encounter_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             encounter_pos,
             MapEvent::Encounter {
@@ -2990,7 +2361,8 @@ mod door_interaction_tests {
         let map = Map::new(1, "DoorTestMap".to_string(), "Test".to_string(), 10, 10);
         gs.world.add_map(map);
         gs.world.set_current_map(1);
-        gs.world.set_party_position(Position::new(5, 5));
+        gs.world
+            .set_party_position(crate::domain::types::Position::new(5, 5));
         // Default party_facing is North → position_ahead() == (5, 4).
 
         app.insert_resource(GlobalState(gs));
@@ -3008,7 +2380,11 @@ mod door_interaction_tests {
 
     /// Spawn a furniture door entity at `position` with the given locked state.
     /// Returns the spawned entity ID.
-    fn spawn_door_entity(app: &mut App, position: Position, is_locked: bool) -> Entity {
+    fn spawn_door_entity(
+        app: &mut App,
+        position: crate::domain::types::Position,
+        is_locked: bool,
+    ) -> Entity {
         app.world_mut()
             .spawn((
                 FurnitureEntity::new(crate::domain::world::FurnitureType::Door, !is_locked),
@@ -3063,7 +2439,7 @@ mod door_interaction_tests {
         let mut app = build_door_test_app();
 
         // Door directly north of the party (= position_ahead when facing North).
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         let door_entity = spawn_door_entity(&mut app, door_pos, false);
 
         {
@@ -3088,7 +2464,7 @@ mod door_interaction_tests {
     #[test]
     fn test_furniture_door_closes_on_second_interact() {
         let mut app = build_door_test_app();
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         let door_entity = spawn_door_entity(&mut app, door_pos, false);
         let key = interact_key();
 
@@ -3118,7 +2494,7 @@ mod door_interaction_tests {
     #[test]
     fn test_locked_furniture_door_stays_closed_without_key() {
         let mut app = build_door_test_app();
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         let door_entity = spawn_door_entity(&mut app, door_pos, true); // locked
 
         {
@@ -3156,7 +2532,7 @@ mod door_interaction_tests {
         }
 
         // Locked door that requires KEY_ITEM.
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         let mut door_state = DoorState::new(true, 0.0);
         door_state.key_item_id = Some(KEY_ITEM);
         let door_entity = app
@@ -3187,7 +2563,7 @@ mod door_interaction_tests {
     #[test]
     fn test_furniture_door_open_unblocks_tile() {
         let mut app = build_door_test_app();
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
 
         // Pre-block the tile to simulate an initially-closed door.
         {
@@ -3224,7 +2600,7 @@ mod door_interaction_tests {
     #[test]
     fn test_furniture_door_close_reblocks_tile() {
         let mut app = build_door_test_app();
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
 
         // Spawn a door that starts open.
         let mut open_state = DoorState::new(false, 0.0);
@@ -3283,7 +2659,7 @@ mod door_interaction_tests {
         let mut app = build_door_test_app();
 
         // Door to the east — party faces North so this is off to the side.
-        let door_pos = Position::new(6, 5);
+        let door_pos = crate::domain::types::Position::new(6, 5);
         let door_entity = spawn_door_entity(&mut app, door_pos, false);
 
         {
@@ -3305,7 +2681,7 @@ mod door_interaction_tests {
     fn test_locked_furniture_door_blocks_forward_movement() {
         let mut app = build_door_test_app();
 
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         // Spawn a locked, closed door with no key — permanently blocks movement.
         app.world_mut().spawn((
             FurnitureEntity::new(crate::domain::world::FurnitureType::Door, true),
@@ -3338,7 +2714,7 @@ mod door_interaction_tests {
     fn test_open_furniture_door_allows_forward_movement() {
         let mut app = build_door_test_app();
 
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         let mut open_state = DoorState::new(false, 0.0);
         open_state.is_open = true;
         app.world_mut().spawn((
@@ -3392,8 +2768,8 @@ mod locked_container_map_event_tests {
     const CONTAINER_KEY_ID: crate::domain::types::ItemId = 55;
     const CONTAINER_LOCK_ID: &str = "test_container_lock";
 
-    fn container_pos() -> Position {
-        Position::new(5, 4)
+    fn container_pos() -> crate::domain::types::Position {
+        crate::domain::types::Position::new(5, 4)
     }
 
     fn build_locked_container_app() -> App {
@@ -3421,7 +2797,8 @@ mod locked_container_map_event_tests {
         );
         gs.world.add_map(map);
         gs.world.set_current_map(1);
-        gs.world.set_party_position(Position::new(5, 5));
+        gs.world
+            .set_party_position(crate::domain::types::Position::new(5, 5));
 
         let hero = Character::new(
             "Test Hero".to_string(),
@@ -3574,8 +2951,8 @@ mod locked_door_map_event_tests {
     const LOCK_ID: &str = "test_door_lock";
 
     /// Position of the locked door (position_ahead from party at (5,5) facing North).
-    fn door_pos() -> Position {
-        Position::new(5, 4)
+    fn door_pos() -> crate::domain::types::Position {
+        crate::domain::types::Position::new(5, 4)
     }
 
     /// Build a minimal Bevy app for locked-door interaction tests.
@@ -3617,7 +2994,8 @@ mod locked_door_map_event_tests {
         );
         gs.world.add_map(map);
         gs.world.set_current_map(1);
-        gs.world.set_party_position(Position::new(5, 5));
+        gs.world
+            .set_party_position(crate::domain::types::Position::new(5, 5));
 
         // Add a default party member so inventory operations work.
         let hero = Character::new(
