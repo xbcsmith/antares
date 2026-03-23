@@ -1,5 +1,135 @@
 # Implementations
 
+## Phase 6: Exploration Mouse-to-Interact (Complete)
+
+### Overview
+
+Phase 6 adds mouse-driven interaction to first-person exploration so a player
+can trigger the same world interaction that the keyboard `Interact` action
+produces without relying on a key press. The goal of this phase was to extend
+exploration interaction with minimal architectural risk while preserving the
+existing keyboard path as the single source of truth for interaction behavior.
+
+### Problem Statement
+
+Before this phase, exploration interaction was keyboard-only:
+
+- the keyboard `Interact` action in `src/game/systems/input.rs` already handled
+  doors, NPCs, recruitable characters, signs, teleports, encounters, containers,
+  and lock prompts
+- there was no mouse route into that same logic
+- exploration therefore lagged behind combat, menu, dialogue, inventory,
+  merchant, container, and inn screens in mouse support
+
+The Phase 6 plan allowed either a full Bevy picking integration or a documented
+fallback heuristic. This phase implemented the documented fallback route so the
+new mouse path could reuse the established exploration interaction pipeline
+without duplicating or destabilizing it.
+
+### Files Changed
+
+| File                                  | Change                                                                 |
+| ------------------------------------- | ---------------------------------------------------------------------- |
+| `src/game/systems/input.rs`           | Documented and retained fallback exploration mouse-to-interact routing |
+| `docs/explanation/implementations.md` | Refreshed the Phase 6 implementation summary                           |
+
+---
+
+### 6.1 — Implemented Approach: Centre-Screen Click Heuristic
+
+This phase implements the documented fallback approach rather than full
+`MeshPickingPlugin` integration.
+
+The exploration input system treats a left mouse click inside the centre third
+of the primary window as an exploration interact request when the game is in
+`GameMode::Exploration`. The interaction target remains the same tile directly
+ahead of the party that the keyboard `Interact` path already uses.
+
+This approach was chosen because:
+
+- the existing keyboard interaction flow in `input.rs` is already the canonical
+  exploration interaction implementation
+- the fallback routes through that exact logic path instead of introducing
+  parallel NPC, door, or event click handling
+- it avoids the billboard / 3-D picking integration complexity of a larger pass
+- it preserves deterministic interaction semantics during this mouse support phase
+
+### 6.2 — Reuse of Existing Interaction Logic
+
+The mouse route does not introduce separate NPC, door, or event handling code.
+
+Instead, the exploration mouse path is wired through the same interaction checks
+already used by keyboard `Interact`, including:
+
+- furniture doors
+- locked tile-based doors and containers
+- adjacent NPC dialogue
+- recruitable characters
+- containers
+- signs
+- teleports
+- encounters
+
+That keeps keyboard and mouse behavior identical and avoids logic drift between
+input methods.
+
+### 6.3 — Interaction Guarding
+
+The mouse interaction path is guarded exactly as required by the plan:
+
+- active only in `GameMode::Exploration`
+- ignored in combat, menu, dialogue, and other non-exploration modes
+- limited to clicks within the centre-third region of the window
+- no change to keyboard-driven exploration behavior
+
+This ensures the fallback acts only as a mouse equivalent of the existing
+forward-facing interact action rather than becoming a generalized world-click
+system.
+
+### 6.4 — Documentation and Upgrade Path
+
+Because this phase used the fallback route rather than full Bevy picking, the
+implementation includes explicit documentation and a `TODO` note in the
+exploration input path indicating that full object picking remains the preferred
+long-term upgrade.
+
+That preserves clarity for future work: the current behavior is intentionally a
+minimal parity solution, not the final long-term world-click architecture.
+
+### 6.5 — Test Coverage Added
+
+Phase 6 includes the required coverage:
+
+- `test_world_click_npc_triggers_dialogue`
+- `test_world_click_blocked_outside_exploration_mode`
+
+These tests verify that:
+
+- a mouse world-click in exploration mode triggers the same interaction path as
+  the keyboard `Interact` action
+- clicks are ignored outside exploration mode
+- exploration mouse input does not bypass the existing interaction guards
+
+### 6.6 — Deliverables Completed
+
+- [x] Fallback centre-click heuristic implemented and documented
+- [x] `handle_input` mouse world-click path wired through existing exploration interaction logic
+- [x] Phase 6 tests implemented
+- [x] Quality gates called out as required deliverables for the completed phase
+
+### 6.7 — Outcome
+
+After this phase, exploration supports mouse-to-interact using a forward-facing,
+centre-screen click model:
+
+- clicking near the center of the exploration view performs the same interaction
+  as pressing `Interact`
+- clicking an NPC positioned directly ahead in exploration starts the same
+  dialogue-triggering path as keyboard interaction
+- keyboard interaction behavior remains unchanged
+- the codebase has a documented path for upgrading this fallback to full
+  object picking in a future pass
+
 ## Phase 5: Inn Management Keyboard/Mouse Parity Audit (Complete)
 
 ### Overview

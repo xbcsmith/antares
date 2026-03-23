@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Input System Module
@@ -45,8 +45,10 @@ use crate::game::systems::events::MapEventTriggered;
 use crate::game::systems::map::{NpcMarker, TileCoord};
 #[cfg(test)]
 use crate::game::systems::rest::InitiateRestEvent;
+use crate::game::systems::ui::GameLog;
 use crate::sdk::game_config::ControlsConfig;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use std::collections::HashMap;
 
 /// Input plugin with config-driven key mappings
@@ -441,14 +443,26 @@ fn toggle_menu_state(game_state: &mut crate::application::GameState) {
     }
 }
 
-/// Handle keyboard input and translate to game actions
+/// Handle keyboard input and translate to game actions.
 ///
 /// This system processes keyboard input using the configured key mappings,
 /// applies movement cooldown, and updates game state accordingly.
+///
+/// Phase 6: exploration mouse-to-interact currently uses the documented
+/// fallback centre-screen click heuristic from the mouse-input plan rather than
+/// full Bevy mesh picking. A left mouse click inside the centre third of the
+/// primary window is treated as the same interaction target as the keyboard
+/// `Interact` action: the tile directly ahead of the party plus the existing
+/// adjacent-tile and NPC interaction checks. This keeps keyboard and mouse
+/// exploration interaction on the same canonical logic path with no duplicated
+/// routing behavior.
+/// TODO: Upgrade this fallback to full world picking once clickable entity
+/// picking is wired for exploration meshes and billboards.
 #[allow(clippy::too_many_arguments)]
 fn handle_input(
     mut commands: Commands,
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
     input_config: Res<InputConfigResource>,
     mut global_state: ResMut<GlobalState>,
     mut map_event_messages: MessageWriter<MapEventTriggered>,
@@ -460,6 +474,7 @@ fn handle_input(
     victory_roots: Query<Entity, With<crate::game::systems::combat::VictorySummaryRoot>>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
     dialogue_query: Query<&NpcDialogue>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
     game_content: Option<Res<crate::application::resources::GameContent>>,
     // Query for furniture door entities — provides open/locked state and
     // allows toggling the door transform without a full map respawn.
@@ -469,16 +484,39 @@ fn handle_input(
         &mut Transform,
         &TileCoord,
     )>,
-    // Optional game log for player-visible feedback messages (e.g. "Door is locked.")
-    mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
-    // Phase 2 (locks): resource that signals Phase 3's UI a locked-door
-    // interaction is waiting for the player to choose pick-lock or bash.
-    // Wrapped in Option<> so that test apps that do not register InputPlugin
-    // (and therefore may not have the resource) still compile and run.
-    mut lock_pending: Option<ResMut<LockInteractionPending>>,
+    // Game log for player-visible feedback messages (e.g. "Door is locked.")
+    mut game_log: ResMut<GameLog>,
+    // Phase 2 (locks): resource that signals Phase 3's UI when the player
+    // interacts with a locked door or container.
+    mut lock_pending: ResMut<LockInteractionPending>,
 ) {
     let current_time = time.elapsed_secs();
     let cooldown = input_config.controls.movement_cooldown;
+
+    let mouse_interact_pressed = primary_window
+        .single()
+        .ok()
+        .and_then(|window| {
+            if !mouse_buttons.just_pressed(MouseButton::Left) {
+                return None;
+            }
+
+            let cursor_position = window.cursor_position()?;
+            let width = window.width();
+            let height = window.height();
+            let center_left = width / 3.0;
+            let center_right = width * (2.0 / 3.0);
+            let center_top = height / 3.0;
+            let center_bottom = height * (2.0 / 3.0);
+
+            Some(
+                cursor_position.x >= center_left
+                    && cursor_position.x <= center_right
+                    && cursor_position.y >= center_top
+                    && cursor_position.y <= center_bottom,
+            )
+        })
+        .unwrap_or(false);
 
     // Check for automap toggle ("M" key by default) before menu handling so
     // automap mode can consume Escape to close back to exploration.
@@ -662,15 +700,21 @@ fn handle_input(
 
     // Interact - check for doors, NPCs, signs, teleports
     //
-    // NOTE: We intentionally use "pressed" (not "just pressed") so interaction
-    // behaves consistently with the existing movement model and door behavior,
-    // and so headless tests can exercise interaction without depending on
-    // Bevy's per-frame input edge detection.
+    // NOTE: We intentionally use "pressed" (not "just pressed") for keyboard
+    // interaction so behavior stays consistent with the existing movement model
+    // and door behavior, and so headless tests can exercise interaction without
+    // depending on per-frame edge detection.
+    //
+    // Phase 6 fallback mouse path: a left click inside the centre third of the
+    // primary window is treated as an `Interact` action on the tile directly
+    // ahead of the party. This reuses the exact same logic below rather than
+    // duplicating event-routing behavior.
     // Only allow Interaction if NOT in Dialogue mode
     if !matches!(game_state.mode, crate::application::GameMode::Dialogue(_))
-        && input_config
+        && (input_config
             .key_map
             .is_action_pressed(GameAction::Interact, &keyboard_input)
+            || mouse_interact_pressed)
     {
         let party_position = world.party_position;
         let adjacent_tiles = get_adjacent_positions(party_position);
@@ -720,9 +764,7 @@ fn handle_input(
                     } else {
                         let msg = "The door is locked.".to_string();
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
+                        game_log.add(msg);
                     }
                 } else {
                     // Toggle open ↔ closed.
@@ -869,18 +911,14 @@ fn handle_input(
                             .unwrap_or_else(|| format!("key {}", kid));
                         let msg = format!("You unlock the door with the {}.", key_name);
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
+                        game_log.add(msg);
                         return;
                     }
                     (Some(_), None) => {
                         // ── Key required but not in party ─────────────────────
                         let msg = "The door is locked. You need a key.".to_string();
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
+                        game_log.add(msg);
                         let can_lockpick = game_content
                             .as_deref()
                             .map(|gc| {
@@ -893,20 +931,16 @@ fn handle_input(
                                 })
                             })
                             .unwrap_or(false);
-                        if let Some(ref mut pending) = lock_pending {
-                            pending.lock_id = Some(lock_id);
-                            pending.position = Some(target);
-                            pending.can_lockpick = can_lockpick;
-                        }
+                        lock_pending.lock_id = Some(lock_id);
+                        lock_pending.position = Some(target);
+                        lock_pending.can_lockpick = can_lockpick;
                         return;
                     }
                     (None, _) => {
                         // ── No key required: must pick lock or bash ───────────
                         let msg = "The door is locked.".to_string();
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
+                        game_log.add(msg);
                         let can_lockpick = game_content
                             .as_deref()
                             .map(|gc| {
@@ -919,11 +953,9 @@ fn handle_input(
                                 })
                             })
                             .unwrap_or(false);
-                        if let Some(ref mut pending) = lock_pending {
-                            pending.lock_id = Some(lock_id);
-                            pending.position = Some(target);
-                            pending.can_lockpick = can_lockpick;
-                        }
+                        lock_pending.lock_id = Some(lock_id);
+                        lock_pending.position = Some(target);
+                        lock_pending.can_lockpick = can_lockpick;
                         return;
                     }
                 }
@@ -1070,18 +1102,14 @@ fn handle_input(
                         let msg =
                             format!("You unlock the {} with the {}.", container_name, key_name);
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
+                        game_log.add(msg);
                         return;
                     }
                     (Some(_), None) => {
                         // ── Key required but not in party ─────────────────────
                         let msg = "The container is locked. You need a key.".to_string();
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
+                        game_log.add(msg);
                         let can_lockpick = game_content
                             .as_deref()
                             .map(|gc| {
@@ -1094,20 +1122,16 @@ fn handle_input(
                                 })
                             })
                             .unwrap_or(false);
-                        if let Some(ref mut pending) = lock_pending {
-                            pending.lock_id = Some(lock_id);
-                            pending.position = Some(target);
-                            pending.can_lockpick = can_lockpick;
-                        }
+                        lock_pending.lock_id = Some(lock_id);
+                        lock_pending.position = Some(target);
+                        lock_pending.can_lockpick = can_lockpick;
                         return;
                     }
                     (None, _) => {
                         // ── No key required: must pick lock or bash ───────────
                         let msg = "The container is locked.".to_string();
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
+                        game_log.add(msg);
                         let can_lockpick = game_content
                             .as_deref()
                             .map(|gc| {
@@ -1120,11 +1144,9 @@ fn handle_input(
                                 })
                             })
                             .unwrap_or(false);
-                        if let Some(ref mut pending) = lock_pending {
-                            pending.lock_id = Some(lock_id);
-                            pending.position = Some(target);
-                            pending.can_lockpick = can_lockpick;
-                        }
+                        lock_pending.lock_id = Some(lock_id);
+                        lock_pending.position = Some(target);
+                        lock_pending.can_lockpick = can_lockpick;
                         return;
                     }
                 }
@@ -1304,9 +1326,7 @@ fn handle_input(
         if locked_door_ahead {
             let msg = "The door is locked.".to_string();
             info!("{}", msg);
-            if let Some(ref mut log) = game_log {
-                log.add(msg);
-            }
+            game_log.add(msg);
         } else if let Some(content) = game_content.as_deref() {
             match game_state.move_party_and_handle_events(facing, content.db()) {
                 Ok(()) => moved = true,
@@ -1315,9 +1335,7 @@ fn handle_input(
                 )) => {
                     let msg = "The door is locked.".to_string();
                     info!("{}", msg);
-                    if let Some(ref mut log) = game_log {
-                        log.add(msg);
-                    }
+                    game_log.add(msg);
                 }
                 Err(crate::application::MoveHandleError::Movement(
                     crate::domain::world::MovementError::Blocked(_, _),
@@ -1353,9 +1371,7 @@ fn handle_input(
                 )) => {
                     let msg = "The door is locked.".to_string();
                     info!("{}", msg);
-                    if let Some(ref mut log) = game_log {
-                        log.add(msg);
-                    }
+                    game_log.add(msg);
                 }
                 Err(crate::application::MoveHandleError::Movement(
                     crate::domain::world::MovementError::Blocked(_, _),
@@ -1510,9 +1526,12 @@ mod dialogue_inventory_tests {
         let mut gs = crate::application::GameState::new();
         gs.mode = initial_mode;
         app.insert_resource(GlobalState(gs));
+        app.insert_resource(ButtonInput::<MouseButton>::default());
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
         app.insert_resource(GameContent::new(db));
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<crate::game::systems::ui::GameLog>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
@@ -1918,8 +1937,11 @@ mod integration_tests {
             key_map: km,
         });
         app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.insert_resource(ButtonInput::<MouseButton>::default());
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<crate::game::systems::ui::GameLog>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
@@ -1934,8 +1956,9 @@ mod integration_tests {
         // Build a minimal app and register the input system under test.
         let mut app = App::new();
 
-        // Insert required resources: button input, config, global state, and time.
+        // Insert required resources: keyboard/mouse input, config, global state, and time.
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig::default();
         let km = KeyMap::from_controls_config(&cfg);
@@ -1947,6 +1970,8 @@ mod integration_tests {
         app.insert_resource(GlobalState(crate::application::GameState::new()));
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<crate::game::systems::ui::GameLog>();
 
         // Register message channels the input system depends on so MessageWriter<T>
         // parameters are initialized when running the system in tests.
@@ -1989,6 +2014,7 @@ mod integration_tests {
 
         // Basic resources the input system expects
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
         let cfg = ControlsConfig::default();
         app.insert_resource(InputConfigResource {
             controls: cfg.clone(),
@@ -1997,6 +2023,8 @@ mod integration_tests {
         app.insert_resource(GlobalState(crate::application::GameState::new()));
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<crate::game::systems::ui::GameLog>();
 
         // Register messages used by input system
         app.add_message::<MapEventTriggered>();
@@ -2033,6 +2061,7 @@ mod integration_tests {
 
         // Basic resources the input system expects
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
         let cfg = ControlsConfig::default();
         app.insert_resource(InputConfigResource {
             controls: cfg.clone(),
@@ -2041,6 +2070,8 @@ mod integration_tests {
         app.insert_resource(GlobalState(crate::application::GameState::new()));
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<crate::game::systems::ui::GameLog>();
 
         // Register messages used by input system
         app.add_message::<MapEventTriggered>();
@@ -2056,6 +2087,7 @@ mod integration_tests {
             btn.press(KeyCode::ArrowUp);
             btn.press(KeyCode::Escape);
         }
+        app.update();
         app.update();
 
         let gs = app.world().resource::<GlobalState>();
@@ -2079,6 +2111,106 @@ mod integration_tests {
         assert!(
             matches!(gs.0.mode, crate::application::GameMode::Inventory(_)),
             "pressing I in Exploration must open the inventory"
+        );
+    }
+
+    #[test]
+    fn test_world_click_npc_triggers_dialogue() {
+        let mut app = build_input_app();
+
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let party_pos = Position::new(5, 5);
+        let npc_pos = Position::new(5, 4);
+        map.npc_placements.push(crate::domain::world::NpcPlacement {
+            npc_id: "test_npc".to_string(),
+            position: npc_pos,
+            facing: None,
+            dialogue_override: None,
+        });
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.world.add_map(map);
+            gs.0.world.set_current_map(1);
+            gs.0.world.set_party_position(party_pos);
+            gs.0.world.party_facing = crate::domain::types::Direction::North;
+            gs.0.mode = crate::application::GameMode::Exploration;
+        }
+
+        let mut window = Window::default();
+        window.resolution.set_physical_resolution(900, 600);
+        window.set_cursor_position(Some(Vec2::new(450.0, 300.0)));
+        app.world_mut().spawn((window, PrimaryWindow));
+
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Left);
+        app.insert_resource(mouse);
+
+        app.update();
+
+        let events = app.world().resource::<Messages<MapEventTriggered>>();
+        let mut reader = events.get_cursor();
+        let triggered_events: Vec<_> = reader.read(events).collect();
+
+        assert_eq!(
+            triggered_events.len(),
+            1,
+            "Expected exactly one interaction event"
+        );
+        match &triggered_events[0].event {
+            MapEvent::NpcDialogue { npc_id, .. } => {
+                assert_eq!(npc_id, "test_npc");
+            }
+            other => panic!("Expected NpcDialogue event, got {:?}", other),
+        }
+        assert_eq!(triggered_events[0].position, npc_pos);
+    }
+
+    #[test]
+    fn test_world_click_blocked_outside_exploration_mode() {
+        let mut app = build_input_app();
+
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let party_pos = Position::new(5, 5);
+        let npc_pos = Position::new(5, 4);
+        map.npc_placements.push(crate::domain::world::NpcPlacement {
+            npc_id: "test_npc".to_string(),
+            position: npc_pos,
+            facing: None,
+            dialogue_override: None,
+        });
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.world.add_map(map);
+            gs.0.world.set_current_map(1);
+            gs.0.world.set_party_position(party_pos);
+            gs.0.world.party_facing = crate::domain::types::Direction::North;
+            gs.0.mode = crate::application::GameMode::Menu(
+                crate::application::menu::MenuState::new(crate::application::GameMode::Exploration),
+            );
+        }
+
+        let mut window = Window::default();
+        window.resolution.set_physical_resolution(900, 600);
+        window.set_cursor_position(Some(Vec2::new(450.0, 300.0)));
+        app.world_mut().spawn((window, PrimaryWindow));
+
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Left);
+        app.insert_resource(mouse);
+
+        app.update();
+
+        let events = app.world().resource::<Messages<MapEventTriggered>>();
+        let mut reader = events.get_cursor();
+        let triggered_events: Vec<_> = reader.read(events).collect();
+
+        assert!(
+            triggered_events.is_empty(),
+            "Mouse world click must not trigger outside Exploration mode"
         );
     }
 
@@ -2616,6 +2748,7 @@ mod inventory_guard_tests {
         let mut app = App::new();
 
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig {
             movement_cooldown: 0.0,
@@ -2635,11 +2768,15 @@ mod inventory_guard_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<crate::game::systems::ui::GameLog>();
+        app.init_resource::<LockInteractionPending>();
 
+        // Register message channels that handle_input depends on.
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
+        // Register the system under test.
         app.add_systems(Update, handle_input);
 
         // Press MoveForward (W key per default config).
@@ -2662,6 +2799,7 @@ mod inventory_guard_tests {
         let mut app = App::new();
 
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig {
             movement_cooldown: 0.0,
@@ -2680,6 +2818,8 @@ mod inventory_guard_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<crate::game::systems::ui::GameLog>();
+        app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
@@ -2713,6 +2853,7 @@ mod combat_guard_tests {
 
         // Minimal resources required by handle_input.
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig::default();
         let key_map = KeyMap::from_controls_config(&cfg);
@@ -2738,13 +2879,14 @@ mod combat_guard_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<crate::game::systems::ui::GameLog>();
+        app.init_resource::<LockInteractionPending>();
 
-        // Register message channels that handle_input depends on.
+        // Register message channels that the input helper depends on.
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
-        // Register the system under test.
         app.add_systems(Update, handle_input);
 
         // Press MoveForward (W key per default config).
@@ -2766,6 +2908,7 @@ mod combat_guard_tests {
         let mut app = App::new();
 
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig {
             movement_cooldown: 0.0,
@@ -2786,6 +2929,8 @@ mod combat_guard_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<crate::game::systems::ui::GameLog>();
+        app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
@@ -2837,6 +2982,7 @@ mod door_interaction_tests {
         let mut app = App::new();
 
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         // Zero cooldown so input fires on the first update.
         let cfg = ControlsConfig {
@@ -2859,6 +3005,8 @@ mod door_interaction_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<crate::game::systems::ui::GameLog>();
+        app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
         app.add_message::<StartDialogue>();
@@ -3261,6 +3409,7 @@ mod locked_container_map_event_tests {
     fn build_locked_container_app() -> App {
         let mut app = App::new();
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig {
             movement_cooldown: 0.0,
@@ -3456,6 +3605,7 @@ mod locked_door_map_event_tests {
         let mut app = App::new();
 
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig {
             movement_cooldown: 0.0,
