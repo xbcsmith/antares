@@ -1,5 +1,152 @@
 # Implementations
 
+## Phase 7: Regression Test Suite and Documentation (Complete)
+
+### Overview
+
+Phase 7 consolidates representative mouse-support coverage into a single
+regression-oriented integration test suite and documents the canonical mouse
+input model used across Antares. The goal of this phase was to make mouse
+support durable: future contributors should be able to change individual UI
+systems without accidentally regressing the shared activation rules or breaking
+mouse parity in a major game mode.
+
+### Problem Statement
+
+By the end of the earlier phases, mouse support existed across combat, menu,
+dialogue, inventory, merchant, container, inn, and exploration flows, but the
+coverage was distributed across many system-local test modules. That made it
+harder to answer two important maintenance questions:
+
+- does each major mode still have at least one representative mouse regression
+  test?
+- do future contributors understand which mouse-input path to use for Bevy UI,
+  egui UI, and exploration fallback interaction?
+
+Phase 7 therefore focused on two deliverables:
+
+- a structured regression suite containing one representative mouse interaction
+  per major mode
+- canonical documentation in `mouse_input.rs` explaining the shared input model
+
+### Files Changed
+
+| File                                  | Change                                                                |
+| ------------------------------------- | --------------------------------------------------------------------- |
+| `tests/mouse_input_regression.rs`     | Added representative cross-mode mouse regression coverage             |
+| `src/game/systems/mouse_input.rs`     | Documented the canonical mouse input model for Bevy UI and egui flows |
+| `docs/explanation/implementations.md` | Added this Phase 7 implementation summary                             |
+
+---
+
+### 7.1 — Regression Suite Structure
+
+Phase 7 groups one representative mouse regression test per major mode into
+`tests/mouse_input_regression.rs`.
+
+The suite is intentionally representative rather than exhaustive. It verifies
+that the canonical mouse path still works in each major mode:
+
+- combat action button activation
+- combat enemy target selection
+- menu resume button activation
+- menu settings slider click behavior
+- dialogue advance click behavior
+- dialogue choice click behavior
+- inventory slot-selection behavior
+- inventory drop-button behavior
+- merchant stock-row selection
+- merchant buy-button action
+- container row selection
+- container take-button action
+- inn mouse-only swap flow
+- exploration click-to-interact behavior
+
+This gives the project a single, reviewable regression surface for
+game-wide mouse support while preserving the more detailed unit and
+system-local tests already present in the codebase.
+
+### 7.2 — Canonical Mouse Input Model
+
+Phase 7 documents the shared mouse activation rules directly in
+`src/game/systems/mouse_input.rs` under a dedicated `# Mouse Input Model`
+section.
+
+That documentation defines the three canonical rules contributors should follow:
+
+- **Bevy UI widgets** use the shared dual-path activation model:
+  changed `Interaction::Pressed` or hovered + left-click in the same frame
+- **egui widgets** use egui-native click handling such as `response.clicked()`
+  and `Sense::click()`
+- **exploration fallback interaction** remains a separate forward-facing
+  world-interaction path and is not treated like a Bevy UI button
+
+This prevents future ad-hoc mouse handling patterns from drifting away from the
+shared semantics already established in `mouse_input.rs`.
+
+### 7.3 — Why the Dual-Path Rule Matters
+
+The documentation also explains why Antares intentionally does not rely on only
+one Bevy interaction signal.
+
+In Bevy 0.17, `Interaction::Pressed` alone is not always a sufficiently robust
+cross-platform activation source for every UI timing edge case. Antares
+therefore standardizes the following approach for Bevy UI systems:
+
+- observe a changed `Interaction::Pressed`
+- also treat `Interaction::Hovered` + left mouse `just_pressed` as activation
+
+That rule is now explicitly documented as the project-standard pattern instead
+of existing only as implicit behavior across individual systems.
+
+### 7.4 — Integration with Existing Systems
+
+Phase 7 does not change the intended semantics of the already-implemented mouse
+support. Instead, it codifies and protects them.
+
+The regression suite and documentation together reinforce the established split:
+
+- combat, menu, and dialogue Bevy UI systems use shared helper-based activation
+- inventory, merchant, container, and inn egui flows continue to use
+  egui-native click handling and action dispatch
+- exploration click-to-interact continues to reuse the existing exploration
+  interaction path rather than introducing a separate ad-hoc world-click model
+
+This keeps mouse behavior consistent with the architecture principle of
+centralizing shared interaction rules instead of duplicating them per screen.
+
+### 7.5 — Test Fixture Rule Compliance
+
+Phase 7 follows the repository fixture rule from `AGENTS.md` Implementation Rule 5:
+
+- no regression test references `campaigns/tutorial`
+- any campaign-backed test data must come from `data/test_campaign`
+- the regression suite is designed around minimal, local test setup whenever
+  possible so it does not depend on unstable live campaign content
+
+That keeps mouse regression coverage deterministic and resistant to unrelated
+campaign-data edits.
+
+### 7.6 — Deliverables Completed
+
+- [x] `tests/mouse_input_regression.rs` added with representative game-wide
+      mouse regression coverage
+- [x] `mouse_input.rs` module docs include the `Mouse Input Model` section
+- [x] `docs/explanation/implementations.md` updated
+- [x] Phase 7 captures the canonical cross-mode mouse-support contract
+
+### 7.7 — Outcome
+
+After this phase, Antares has both a documented and test-backed mouse input
+contract:
+
+- each major mode has representative regression coverage for mouse support
+- future contributors have a clear canonical rule for Bevy UI vs egui mouse
+  handling
+- the shared helper module now serves as both implementation utility and
+  project reference point
+- mouse-support regressions are easier to detect during future UI changes
+
 ## Phase 6: Exploration Mouse-to-Interact (Complete)
 
 ### Overview

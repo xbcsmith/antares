@@ -16,6 +16,54 @@
 //!   pressed this frame.
 //! - `Interaction::None` never activates.
 //!
+//! # Mouse Input Model
+//!
+//! Antares uses a dual-path mouse activation model for Bevy UI widgets.
+//!
+//! In Bevy 0.17, relying only on `Interaction::Pressed` is not always robust
+//! enough for every platform and UI timing edge case. Some widgets reliably
+//! report the left mouse button press while hovered, but may not always produce
+//! a fresh `Interaction::Pressed` transition in the exact frame a system checks
+//! it. To keep mouse behavior stable across combat, menu, and dialogue screens,
+//! Antares treats activation as either:
+//!
+//! - a changed `Interaction::Pressed`, or
+//! - a left-click that happened while the widget was currently `Hovered`.
+//!
+//! This module is the single shared definition of that rule.
+//!
+//! ## egui screens
+//!
+//! For egui-managed screens, use egui's own click model:
+//!
+//! - use `response.clicked()`
+//! - ensure the widget was created with `Sense::click()` when appropriate
+//! - do not add Bevy `Button` / `Interaction` components to egui nodes
+//!
+//! egui owns those widgets and already provides the correct event model.
+//!
+//! ## Bevy UI screens
+//!
+//! For Bevy-UI-button screens, follow the shared helper path:
+//!
+//! 1. Spawn the widget with `Button` and an `Interaction` component
+//!    initialized to `Interaction::None`.
+//! 2. Add `Option<Res<ButtonInput<MouseButton>>>` to the system signature.
+//! 3. Call `mouse_input::mouse_just_pressed(...)` and
+//!    `mouse_input::is_activated(...)` instead of inlining ad-hoc click logic.
+//!
+//! This keeps mouse activation semantics identical across systems and avoids
+//! drift between individual screens.
+//!
+//! ## Adding mouse support to a new Bevy UI system
+//!
+//! 1. Accept optional mouse-button input in the system signature.
+//! 2. Compute `mouse_just_pressed(...)` once per frame.
+//! 3. Route widget activation checks through `is_activated(...)`.
+//!
+//! Any new Bevy UI screen should prefer this module over custom
+//! `just_pressed(MouseButton::Left)` patterns embedded directly in the system.
+//!
 //! # Examples
 //!
 //! ```

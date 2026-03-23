@@ -40,7 +40,7 @@ use crate::game::components::dialogue::NpcDialogue;
 use crate::game::components::furniture::DoorState;
 use crate::game::components::FurnitureEntity;
 use crate::game::resources::{GlobalState, LockInteractionPending};
-use crate::game::systems::dialogue::{PendingRecruitmentContext, StartDialogue};
+use crate::game::systems::dialogue::PendingRecruitmentContext;
 use crate::game::systems::events::MapEventTriggered;
 use crate::game::systems::map::{NpcMarker, TileCoord};
 #[cfg(test)]
@@ -466,7 +466,6 @@ fn handle_input(
     input_config: Res<InputConfigResource>,
     mut global_state: ResMut<GlobalState>,
     mut map_event_messages: MessageWriter<MapEventTriggered>,
-    mut dialogue_writer: MessageWriter<StartDialogue>,
     mut recruitment_context: ResMut<PendingRecruitmentContext>,
 
     time: Res<Time>,
@@ -1294,10 +1293,12 @@ fn handle_input(
                             event_position: position,
                         });
 
-                        dialogue_writer.write(StartDialogue {
-                            dialogue_id,
-                            speaker_entity,
-                            fallback_position: Some(position),
+                        map_event_messages.write(MapEventTriggered {
+                            event: MapEvent::NpcDialogue {
+                                npc_id: character_id.clone(),
+                                dialogue_id: Some(dialogue_id),
+                            },
+                            position,
                         });
                         return;
                     }
@@ -1533,7 +1534,6 @@ mod dialogue_inventory_tests {
         app.init_resource::<LockInteractionPending>();
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
         app.add_systems(Update, handle_input);
         app
@@ -1943,7 +1943,6 @@ mod integration_tests {
         app.init_resource::<LockInteractionPending>();
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
         app.add_systems(Update, handle_input);
         app
@@ -1973,10 +1972,8 @@ mod integration_tests {
         app.init_resource::<LockInteractionPending>();
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
-        // Register message channels the input system depends on so MessageWriter<T>
-        // parameters are initialized when running the system in tests.
+        // Register message channels the input system depends on.
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         // Add the handle_input system (the system under test)
@@ -2028,7 +2025,6 @@ mod integration_tests {
 
         // Register messages used by input system
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         // Add just the input system (we want to simulate input frames)
@@ -2075,7 +2071,6 @@ mod integration_tests {
 
         // Register messages used by input system
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         // Add the input system so frames process input
@@ -2773,7 +2768,6 @@ mod inventory_guard_tests {
 
         // Register message channels that handle_input depends on.
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         // Register the system under test.
@@ -2822,7 +2816,6 @@ mod inventory_guard_tests {
         app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         app.add_systems(Update, handle_input);
@@ -2882,9 +2875,8 @@ mod combat_guard_tests {
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.init_resource::<LockInteractionPending>();
 
-        // Register message channels that the input helper depends on.
+        // Register message channels that handle_input depends on.
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         app.add_systems(Update, handle_input);
@@ -2933,7 +2925,6 @@ mod combat_guard_tests {
         app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         // Spawn a victory overlay marker to verify cleanup behavior.
@@ -3009,7 +3000,6 @@ mod door_interaction_tests {
         app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         app.add_systems(Update, handle_input);
@@ -3449,7 +3439,6 @@ mod locked_container_map_event_tests {
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
         app.add_message::<MapEventTriggered>();
-        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         app.add_systems(Update, handle_input);
@@ -3600,7 +3589,7 @@ mod locked_door_map_event_tests {
     /// - `LockInteractionPending` (Phase 2 resource)
     /// - `GameLog` (for log message assertions)
     /// - `PendingRecruitmentContext`
-    /// - Messages: `MapEventTriggered`, `StartDialogue`, `InitiateRestEvent`
+    /// - Messages: `MapEventTriggered`, `InitiateRestEvent`
     fn build_locked_door_app() -> App {
         let mut app = App::new();
 
@@ -3647,7 +3636,6 @@ mod locked_door_map_event_tests {
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         app.add_systems(Update, handle_input);
