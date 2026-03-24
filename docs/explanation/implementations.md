@@ -1,5 +1,229 @@
 # Implementations
 
+## Phase 6: Exploration Interaction Extraction (Complete)
+
+### Overview
+
+Phase 6 extracts the exploration `Interact` behavior from
+`src/game/systems/input.rs` into a dedicated interaction module so the
+monolithic input system no longer owns the largest and most complex chunk of
+exploration interaction routing inline. The goal of this phase is to isolate
+exploration interaction behavior behind a focused helper while preserving the
+existing interaction order, lock handling, NPC and recruitable routing, and
+world-event triggering semantics.
+
+### Problem Statement
+
+After Phase 5, the input system already had clearer seams for frame decoding,
+global toggles, mode guards, and world-click fallback, but the exploration
+interaction branch still contained the densest block of inline logic in the
+entire file.
+
+That inline branch owned all of the following responsibilities at once:
+
+- furniture door interaction
+- tile-based locked door interaction
+- tile-based locked container interaction
+- plain tile-door fallback
+- adjacent NPC interaction
+- recruitable character interaction
+- current-tile encounter fallback
+- current-tile container fallback
+- adjacent sign / teleport / encounter / container event routing
+
+This made `handle_input` harder to follow and left the interaction logic without
+a clean ownership boundary of its own. Phase 6 therefore moves the exploration
+interaction flow into a dedicated module.
+
+### Files Changed
+
+| File                                             | Change                                                                       |
+| ------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `src/game/systems/input.rs`                      | Replaced the inline exploration interaction branch with a helper call        |
+| `src/game/systems/input/exploration_interact.rs` | Added extracted exploration interaction helpers and the main interaction API |
+| `docs/explanation/implementations.md`            | Added this Phase 6 implementation summary                                    |
+
+---
+
+### 6.1 — Added `exploration_interact.rs`
+
+Phase 6 introduces a dedicated interaction module:
+
+- `src/game/systems/input/exploration_interact.rs`
+
+This module now owns the extracted exploration interaction path and provides the
+main entry point:
+
+- `handle_exploration_interact(...) -> bool`
+
+That helper returns whether the interaction was handled so the calling system
+can preserve the same frame-consumption behavior that previously existed in
+`handle_input`.
+
+This is the central structural change for the phase: the Bevy system no longer
+needs to inline the full exploration interaction flow.
+
+### 6.2 — Extracted Focused Internal Helpers
+
+Per the plan, the interaction module now decomposes the exploration path into
+focused helpers.
+
+The extracted helpers include:
+
+- `try_interact_furniture_door(...)`
+- `try_interact_locked_door_event(...)`
+- `try_interact_locked_container_event(...)`
+- `try_interact_npc_or_recruitable(...)`
+- `try_interact_adjacent_world_events(...)`
+
+I also added:
+
+- `try_interact_plain_tile_door(...)`
+
+That extra helper preserves the plain tile-door fallback as a distinct
+responsibility, which keeps the interaction pipeline easier to scan and keeps
+the door-related behavior grouped logically.
+
+### 6.3 — Preserved Interaction Ordering
+
+A key requirement for this phase was preserving existing interaction behavior.
+The extracted module keeps the same effective interaction order:
+
+1. furniture doors
+2. tile-based locked doors
+3. tile-based locked containers
+4. plain tile-door fallback
+5. adjacent NPC dialogue
+6. current-tile recruitable fallback
+7. adjacent recruitable routing
+8. current-tile encounter fallback
+9. current-tile container fallback
+10. adjacent sign / teleport / encounter / container routing
+
+This matters because these branches are not interchangeable. Earlier checks can
+consume the frame and intentionally prevent later branches from running. Phase 6
+changes ownership, not interaction precedence.
+
+### 6.4 — Behavior Now Owned by the Interaction Module
+
+The extracted interaction module now owns the behavior listed in the refactor
+plan:
+
+- furniture doors
+- tile-based locked doors
+- tile-based locked containers
+- adjacent NPC dialogue
+- recruitable character dialogue / events
+- signs
+- teleports
+- encounters
+- tile-ahead and adjacent interaction checks
+
+That makes `exploration_interact.rs` the clear home for exploration interaction
+behavior rather than leaving those responsibilities distributed implicitly inside
+the main input system.
+
+### 6.5 — Lock and Door Semantics Preserved
+
+Phase 6 preserves the existing lock-related and door-related behavior.
+
+That includes:
+
+- furniture doors toggling open and closed
+- locked furniture doors checking party inventory for the required key
+- tile-based locked doors opening immediately when already unlocked
+- tile-based locked doors consuming the required key when present
+- tile-based locked doors populating `LockInteractionPending` when a key is
+  missing or no key is required
+- tile-based locked containers replacing themselves with `Container` events when
+  opened
+- plain `WallType::Door` tiles still opening as the non-locked fallback
+
+This is important because these branches contain the highest interaction density
+in the exploration input path, and preserving them exactly was the main risk of
+the phase.
+
+### 6.6 — NPC, Recruitable, and World-Event Routing Preserved
+
+Phase 6 also keeps the same event-routing behavior for exploration interaction.
+
+That includes:
+
+- adjacent NPCs still emitting `MapEventTriggered` with `NpcDialogue`
+- recruitable characters still setting `PendingRecruitmentContext`
+- recruitable characters still routing through dialogue-trigger messages
+- current-tile encounter fallback still firing when the party is already on the
+  encounter tile
+- current-tile container fallback still firing when the party already stands on
+  a container tile
+- adjacent signs, teleports, encounters, and containers still routing through
+  `MapEventTriggered`
+
+This preserves the canonical world interaction flow while moving the logic to a
+dedicated module.
+
+### 6.7 — `handle_input` Is Much Smaller
+
+After this extraction, the main input system no longer contains the full
+exploration interaction block inline.
+
+Instead, the relevant section now reads at a much higher level:
+
+- check whether interaction is allowed
+- check whether the frame contains an interaction attempt
+- delegate to `handle_exploration_interact(...)`
+- return early if the interaction was consumed
+
+That is the exact intended benefit for this phase: remove the largest chunk of
+complex logic from the monolithic system while keeping behavior stable.
+
+### 6.8 — Architecture and Scope Compliance
+
+Phase 6 stays within the staged extraction plan and does not change core game
+data structures or mode semantics.
+
+It does not:
+
+- change `GameMode`
+- change `GameState`
+- split the Bevy input system into multiple systems yet
+- change movement behavior
+- change cooldown behavior
+- change the world-click input contract
+
+Instead, it isolates exploration interaction as its own responsibility boundary,
+which aligns with the architecture goal of separating concerns and prepares the
+codebase for the later movement extraction and system split phases.
+
+### 6.9 — Deliverables Completed
+
+- [x] `exploration_interact.rs` created
+- [x] `handle_exploration_interact(...) -> bool` added
+- [x] furniture-door interaction moved into extracted helpers
+- [x] tile-based locked-door interaction moved into extracted helpers
+- [x] tile-based locked-container interaction moved into extracted helpers
+- [x] NPC and recruitable interaction moved into extracted helpers
+- [x] adjacent and current-tile world-event routing moved into extracted helpers
+- [x] `handle_input` updated to delegate exploration interaction
+- [x] `docs/explanation/implementations.md` updated
+
+### 6.10 — Outcome
+
+After Phase 6, the exploration interaction path has a dedicated ownership
+boundary and the monolithic input system is significantly easier to read.
+
+The input flow is now structured more clearly into layers:
+
+- frame decoding
+- global toggles
+- mode guards
+- world-click fallback
+- exploration interaction
+- exploration movement
+
+That is the intended stopping point for Phase 6 and sets up the next phase:
+extracting exploration movement.
+
 ## Phase 5: Exploration World-Click Fallback Extraction (Complete)
 
 ### Overview
