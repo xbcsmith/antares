@@ -55,12 +55,16 @@ mod global_toggles;
 mod helpers;
 mod keymap;
 mod menu_toggle;
+mod mode_guards;
 
 pub use frame_input::{decode_frame_input, FrameInputIntent};
 pub use global_toggles::handle_global_mode_toggles;
 pub use helpers::get_adjacent_positions;
 pub use keymap::{parse_key_code, GameAction, KeyMap};
 pub use menu_toggle::toggle_menu_state;
+pub use mode_guards::{
+    input_blocked_for_mode, interaction_blocked_for_mode, movement_blocked_for_mode,
+};
 
 /// Input plugin with config-driven key mappings
 ///
@@ -188,38 +192,12 @@ fn handle_input(
         return;
     }
 
-    // ALLOW input processing in Dialogue mode to enable "Move to Cancel"
-    // But block Interaction actions (doors, etc.) if in Dialogue.
-    // BLOCK all movement/interaction input when in Menu mode (menu system handles its own input)
-
     let game_state = &mut global_state.0;
 
-    // Menu toggle handled above before movement cooldown checks.
-
-    // Block all movement/interaction input when in Menu, Inventory, or Automap mode.
-    // Each mode's own system handles its own input processing.
-    if matches!(
-        game_state.mode,
-        crate::application::GameMode::Menu(_)
-            | crate::application::GameMode::Inventory(_)
-            | crate::application::GameMode::Automap
-    ) {
-        return;
-    }
-
-    // Block all movement/interaction input when in Combat mode.
-    // Combat action input is handled exclusively by combat_input_system.
-    if matches!(game_state.mode, crate::application::GameMode::Combat(_)) {
-        return;
-    }
-
-    // Block all movement/interaction input when resting or in the rest menu.
-    // The rest orchestration system drives the rest sequence; the player
-    // cannot walk away mid-rest.
-    if matches!(
-        game_state.mode,
-        crate::application::GameMode::Resting(_) | crate::application::GameMode::RestMenu
-    ) {
+    // Global toggles were already handled above before movement cooldown checks.
+    // The remaining flow allows movement in Dialogue (to preserve move-to-cancel)
+    // while centralizing the explicit mode-blocking rules in `mode_guards.rs`.
+    if input_blocked_for_mode(&game_state.mode) {
         return;
     }
 
@@ -237,10 +215,7 @@ fn handle_input(
     // primary window is treated as an `Interact` action on the tile directly
     // ahead of the party. This reuses the exact same logic below rather than
     // duplicating event-routing behavior.
-    // Only allow Interaction if NOT in Dialogue mode
-    if !matches!(game_state.mode, crate::application::GameMode::Dialogue(_))
-        && frame_input.is_interact_attempt()
-    {
+    if !interaction_blocked_for_mode(&game_state.mode) && frame_input.is_interact_attempt() {
         let party_position = world.party_position;
         let adjacent_tiles = get_adjacent_positions(party_position);
 

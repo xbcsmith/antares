@@ -1,5 +1,192 @@
 # Implementations
 
+## Phase 4: Mode-Guard Extraction (Complete)
+
+### Overview
+
+Phase 4 extracts the input mode-blocking rules from
+`src/game/systems/input.rs` into a dedicated helper module so movement and
+interaction gating are explicit, reusable, and easier to reason about. The goal
+of this phase is to centralize the rules that determine when non-global input is
+blocked while preserving the existing special-case behavior for dialogue, where
+movement is still allowed to support move-to-cancel.
+
+### Problem Statement
+
+After Phase 3, the top-level global toggles had been extracted, but
+`handle_input` still owned the mode-blocking logic inline. That left a cluster
+of early-return rules embedded directly in the Bevy system for:
+
+- menu
+- inventory
+- automap
+- combat
+- rest-related modes
+- dialogue-specific interaction restrictions
+
+Those rules were correct, but they were still spread across the main input
+system, making them harder to reuse and harder to verify independently. Phase 4
+therefore isolates those policies in a focused helper module.
+
+### Files Changed
+
+| File                                    | Change                                                                        |
+| --------------------------------------- | ----------------------------------------------------------------------------- |
+| `src/game/systems/input.rs`             | Replaced inline mode guards with calls into the extracted guard helpers       |
+| `src/game/systems/input/mode_guards.rs` | Added movement, interaction, and combined blocking helpers plus grouped tests |
+| `docs/explanation/implementations.md`   | Added this Phase 4 implementation summary                                     |
+
+---
+
+### 4.1 — Added Explicit Mode-Guard Helpers
+
+Phase 4 introduces a dedicated helper module:
+
+- `src/game/systems/input/mode_guards.rs`
+
+This module now owns three explicit guard helpers:
+
+- `movement_blocked_for_mode(...)`
+- `interaction_blocked_for_mode(...)`
+- `input_blocked_for_mode(...)`
+
+These helpers make the blocking rules visible as named policy decisions instead
+of requiring readers to infer them from a sequence of inline `matches!`
+expressions inside `handle_input`.
+
+### 4.2 — Centralized the Blocking Rules
+
+The extracted mode-guard helpers centralize the current rules for the modes
+identified in the refactor plan.
+
+Movement is blocked for:
+
+- `GameMode::Menu(_)`
+- `GameMode::Inventory(_)`
+- `GameMode::Automap`
+- `GameMode::Combat(_)`
+- `GameMode::Resting(_)`
+- `GameMode::RestMenu`
+
+Interaction is blocked for all of the above, plus:
+
+- `GameMode::Dialogue(_)`
+
+This preserves the current gameplay contract:
+
+- dialogue still allows movement so the player can cancel dialogue by moving
+- dialogue still blocks interaction so active dialogue does not fall through
+  into doors, NPCs, or other map-event interaction logic
+
+### 4.3 — Preserved Dialogue-Specific Restrictions
+
+The most important subtlety in this phase is that dialogue is not treated like
+the other blocked modes.
+
+Phase 4 keeps the existing intentional asymmetry:
+
+- movement remains allowed in dialogue
+- interaction remains blocked in dialogue
+
+This matters because the current input flow supports "move to cancel" behavior,
+and that behavior would break if dialogue were treated as a full movement block.
+
+To make that distinction explicit, Phase 4 uses:
+
+- `input_blocked_for_mode(...)` for full early-return blocking
+- `interaction_blocked_for_mode(...)` for the interaction branch specifically
+
+That makes the dialogue exception easier to see and safer to preserve in later
+refactor phases.
+
+### 4.4 — Simplified `handle_input`
+
+After this phase, `handle_input` no longer owns the low-level mode-blocking
+policy directly.
+
+Instead, it now:
+
+- delegates full non-global blocking to `input_blocked_for_mode(...)`
+- delegates interaction-specific blocking to `interaction_blocked_for_mode(...)`
+
+This reduces top-level branching and makes the remaining structure of the input
+system clearer:
+
+- decode frame input
+- handle global toggles
+- apply movement cooldown
+- apply mode guards
+- process interaction or movement behavior
+
+That is the intended result of this phase: clearer orchestration without
+changing behavior.
+
+### 4.5 — Tests Grouped with the Guard Logic
+
+Phase 4 groups direct guard-policy tests with the extracted helper module.
+
+These tests cover the plan’s requested guard categories, including:
+
+- inventory guard behavior
+- combat guard behavior
+- blocked movement in specific modes
+- blocked interaction in specific modes
+- dialogue-specific movement-vs-interaction behavior
+
+This keeps the policy tests close to the helpers that implement the policy and
+makes later changes to mode gating easier to validate in isolation.
+
+### 4.6 — Behavior Preservation
+
+Phase 4 does not intentionally change gameplay behavior.
+
+The extracted helpers preserve the established semantics:
+
+- menu, inventory, automap, combat, and rest-related modes block exploration
+  movement and interaction
+- dialogue blocks interaction but still allows movement
+- non-global mode guards still run after global toggle handling
+- cooldown and exploration behavior remain unchanged
+
+This is a policy extraction phase, not a behavior rewrite.
+
+### 4.7 — Architecture and Scope Compliance
+
+Phase 4 remains within the staged extraction workflow from
+`docs/explanation/input_refactor_plan.md`.
+
+It does not:
+
+- change `GameMode` definitions
+- change game-state data structures
+- split the Bevy system into separate systems yet
+- extract exploration interaction execution yet
+- extract exploration movement execution yet
+
+Instead, it isolates a pure decision layer that later phases can reuse when the
+input system is split further.
+
+### 4.8 — Deliverables Completed
+
+- [x] `movement_blocked_for_mode(...)` added
+- [x] `interaction_blocked_for_mode(...)` added
+- [x] `input_blocked_for_mode(...)` added
+- [x] mode blocking centralized for menu, inventory, combat, automap, and
+      rest-related modes
+- [x] dialogue-specific interaction restriction preserved explicitly
+- [x] related guard tests grouped with the extracted helper
+- [x] `docs/explanation/implementations.md` updated
+
+### 4.9 — Outcome
+
+After Phase 4, the input system’s blocking rules are explicit and reusable
+instead of being embedded as inline early-return conditions inside
+`handle_input`.
+
+This makes the input flow easier to reason about and prepares the codebase for
+the next planned extraction steps, especially the decomposition of exploration
+interaction and exploration movement behavior.
+
 ## Phase 3: Global Toggle Extraction (Complete)
 
 ### Overview
