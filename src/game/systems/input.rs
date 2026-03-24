@@ -51,11 +51,13 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 mod frame_input;
+mod global_toggles;
 mod helpers;
 mod keymap;
 mod menu_toggle;
 
 pub use frame_input::{decode_frame_input, FrameInputIntent};
+pub use global_toggles::handle_global_mode_toggles;
 pub use helpers::get_adjacent_positions;
 pub use keymap::{parse_key_code, GameAction, KeyMap};
 pub use menu_toggle::toggle_menu_state;
@@ -173,114 +175,8 @@ fn handle_input(
         primary_window.single().ok(),
     );
 
-    // Check for automap toggle ("M" key by default) before menu handling so
-    // automap mode can consume Escape to close back to exploration.
-    if frame_input.automap_toggle {
-        let game_state = &mut global_state.0;
-        match game_state.mode {
-            crate::application::GameMode::Exploration => {
-                game_state.mode = crate::application::GameMode::Automap;
-                info!("Automap opened: new_mode = {:?}", game_state.mode);
-            }
-            crate::application::GameMode::Automap => {
-                game_state.mode = crate::application::GameMode::Exploration;
-                info!(
-                    "Automap closed via automap key: new_mode = {:?}",
-                    game_state.mode
-                );
-            }
-            _ => {}
-        }
-        return; // Exit early after automap toggle
-    }
-
-    // Check for menu toggle (ESC key) first — it should always take priority and
-    // must not be blocked by movement cooldown.
-    if frame_input.menu_toggle {
-        let game_state = &mut global_state.0;
-        if matches!(game_state.mode, crate::application::GameMode::Automap) {
-            game_state.mode = crate::application::GameMode::Exploration;
-            info!(
-                "Automap closed via menu key: new_mode = {:?}",
-                game_state.mode
-            );
-        } else {
-            toggle_menu_state(game_state);
-            info!("Menu toggled: new_mode = {:?}", game_state.mode);
-        }
-        return; // Exit early after menu toggle
-    }
-
-    // Check for inventory toggle ("I" key) — same priority as menu toggle.
-    if frame_input.inventory_toggle {
-        let game_state = &mut global_state.0;
-
-        // Capture the npc_id from dialogue state before any mutable borrow.
-        let dialogue_npc_id: Option<String> =
-            if let crate::application::GameMode::Dialogue(ref ds) = game_state.mode {
-                ds.speaker_npc_id.clone()
-            } else {
-                None
-            };
-
-        match &game_state.mode {
-            crate::application::GameMode::Inventory(inv_state) => {
-                // Close inventory: restore previous mode
-                let resume = inv_state.get_resume_mode();
-                info!("Inventory closed: restored mode = {:?}", resume);
-                game_state.mode = resume;
-            }
-            crate::application::GameMode::Dialogue(_) => {
-                // In dialogue: only open merchant inventory when the NPC is a merchant.
-                if let Some(npc_id) = dialogue_npc_id {
-                    if let Some(content) = game_content.as_deref() {
-                        if let Some(npc_def) = content.db().npcs.get_npc(&npc_id) {
-                            if npc_def.is_merchant {
-                                game_state.ensure_npc_runtime_initialized(content.db());
-                                let npc_name = npc_def.name.clone();
-                                info!(
-                                    "I key in Dialogue: opening merchant inventory for '{}'",
-                                    npc_id
-                                );
-                                game_state.enter_merchant_inventory(npc_id, npc_name);
-                            } else {
-                                // Non-merchant NPC: silently ignore the I key press.
-                                info!(
-                                    "I key in Dialogue: NPC '{}' is not a merchant, ignoring",
-                                    npc_id
-                                );
-                            }
-                        }
-                    }
-                }
-                // Whether we opened the merchant inventory or not, consume the
-                // key press and return so it doesn't fall through to other branches.
-            }
-            crate::application::GameMode::Menu(_) | crate::application::GameMode::Combat(_) => {
-                // Do not open inventory from menu or combat mode
-            }
-            _ => {
-                game_state.enter_inventory();
-                info!("Inventory opened: mode = {:?}", game_state.mode);
-            }
-        }
-        return; // Exit early after inventory toggle
-    }
-
-    // Check for rest action ("R" key) — opens the rest-duration menu only
-    // during Exploration mode.  All other modes silently ignore the key press.
-    if frame_input.rest {
-        let game_state = &mut global_state.0;
-        if matches!(game_state.mode, crate::application::GameMode::Exploration) {
-            info!("Rest key pressed: opening rest menu");
-            game_state.enter_rest_menu();
-        } else {
-            info!(
-                "Rest key pressed but mode is {:?} — ignoring",
-                game_state.mode
-            );
-        }
-        return; // Consume the key press regardless of mode
+    if handle_global_mode_toggles(&mut global_state.0, frame_input, game_content.as_deref()) {
+        return;
     }
 
     // Throttle movement input using cooldown. Only block when an actual movement

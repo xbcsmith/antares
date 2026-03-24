@@ -1,5 +1,195 @@
 # Implementations
 
+## Phase 3: Global Toggle Extraction (Complete)
+
+### Overview
+
+Phase 3 extracts the top-of-frame global mode-toggle handling from
+`src/game/systems/input.rs` into a dedicated helper so the main Bevy input
+system no longer owns the branching logic for menu, automap, inventory, and
+rest toggles inline. The goal of this phase is to isolate non-exploration global
+mode transitions from exploration movement and interaction behavior while
+preserving execution order and frame-consumption semantics.
+
+### Problem Statement
+
+After Phase 2 introduced `FrameInputIntent`, the `handle_input` system decoded
+input once per frame, but it still contained a large top-of-function block for
+global toggles:
+
+- automap toggle
+- menu toggle
+- inventory toggle
+- rest toggle
+
+That meant the input system still mixed two different concerns:
+
+- global mode transitions that should be handled before exploration behavior
+- exploration-specific behavior such as movement cooldown, interaction, and
+  world routing
+
+Phase 3 extracts those global toggles into a single helper so the main system
+can delegate that responsibility and return early when the frame is consumed.
+
+### Files Changed
+
+| File                                       | Change                                                                  |
+| ------------------------------------------ | ----------------------------------------------------------------------- |
+| `src/game/systems/input.rs`                | Routed top-level toggle handling through a dedicated global helper      |
+| `src/game/systems/input/global_toggles.rs` | Added `handle_global_mode_toggles(...)` and grouped global-toggle tests |
+| `docs/explanation/implementations.md`      | Added this Phase 3 implementation summary                               |
+
+---
+
+### 3.1 — Added `handle_global_mode_toggles(...)`
+
+Phase 3 introduces a focused helper in
+`src/game/systems/input/global_toggles.rs`:
+
+- `handle_global_mode_toggles(...) -> bool`
+
+This helper is responsible only for the documented global toggles:
+
+- menu toggle
+- automap toggle
+- inventory toggle
+- rest toggle
+
+It returns `true` when one of those branches consumed the frame and `false`
+when the caller should continue with the rest of input processing.
+
+That return contract is important because it preserves the existing early-return
+structure in `handle_input` without keeping the full branching logic inline.
+
+### 3.2 — Preserved Deterministic Processing Order
+
+The extracted helper preserves the original branch order exactly:
+
+1. automap toggle
+2. menu toggle
+3. inventory toggle
+4. rest toggle
+
+This matters because these branches are not interchangeable.
+
+Examples:
+
+- automap must still get first chance to consume its dedicated toggle key
+- menu must still be able to close automap back to exploration
+- inventory must still be processed before rest when both are requested
+- rest must still act only after higher-priority global toggles are checked
+
+Phase 3 therefore changes placement, not ordering.
+
+### 3.3 — Global Toggle Semantics Preserved
+
+The helper keeps the same runtime behavior that existed inline in
+`handle_input`.
+
+That includes:
+
+- automap opening from `GameMode::Exploration`
+- automap closing back to `GameMode::Exploration`
+- Escape closing automap back to exploration instead of opening the menu
+- menu toggle using `toggle_menu_state(...)` outside automap
+- inventory opening in supported modes
+- inventory closing back to its recorded resume mode
+- inventory remaining ignored in unsupported modes such as menu and combat
+- dialogue inventory behavior still opening merchant inventory only for merchant
+  NPCs
+- rest only opening `GameMode::RestMenu` from exploration
+- rest remaining ignored outside exploration while still consuming the frame
+
+This ensures the extraction remains low risk and fully aligned with the
+refactor plan’s “preserve behavior first” guidance.
+
+### 3.4 — `handle_input` Is Now Smaller and Clearer
+
+After this phase, the top of `handle_input` now performs two high-level steps:
+
+- decode `FrameInputIntent`
+- delegate global toggle handling
+
+If the global helper consumes the frame, `handle_input` returns immediately.
+Otherwise, the function proceeds into movement cooldown, mode guards,
+interaction, and movement behavior.
+
+This makes the main system easier to scan because it now has a cleaner split
+between:
+
+- global mode toggles
+- everything else
+
+That is the intended benefit for this phase and a prerequisite for later
+phases that will extract mode guards and exploration behavior.
+
+### 3.5 — Tests Grouped with the Extracted Toggle Logic
+
+Phase 3 groups the direct global-toggle behavior tests with the extracted helper
+module.
+
+These tests cover the plan’s requested behavior set:
+
+- Escape opening and closing the menu
+- automap open and close behavior
+- inventory open and close behavior
+- inventory ignored in unsupported modes
+- rest behavior across supported and unsupported modes
+
+Additional priority tests were also grouped with the helper to verify that the
+documented top-of-frame ordering remains stable when multiple toggle intents are
+present in the same frame.
+
+Keeping these tests with `global_toggles.rs` makes the ownership of this logic
+clear and reduces high-level toggle test sprawl inside `input.rs`.
+
+### 3.6 — Architecture and Scope Compliance
+
+Phase 3 remains within the intended low-risk extraction path.
+
+It does not:
+
+- change `GameState` data structures
+- change `GameMode` definitions
+- split the Bevy input system into multiple systems yet
+- move exploration interaction into its own module yet
+- move exploration movement into its own module yet
+
+Instead, it isolates a responsibility boundary that was already present in the
+code:
+
+- global mode toggles are now handled together
+- exploration behavior remains below that layer
+
+This matches both the architecture guidance and the refactor plan’s staged
+ownership model.
+
+### 3.7 — Deliverables Completed
+
+- [x] `handle_global_mode_toggles(...) -> bool` added
+- [x] menu toggle handling extracted
+- [x] automap toggle handling extracted
+- [x] inventory toggle handling extracted
+- [x] rest toggle handling extracted
+- [x] top-of-frame consumption semantics preserved
+- [x] related global-toggle tests grouped with the extracted helper
+- [x] `docs/explanation/implementations.md` updated
+
+### 3.8 — Outcome
+
+After Phase 3, `handle_input` no longer owns the large block of global
+toggle-specific branching at the top of the function.
+
+The input system is now better structured into layers:
+
+- frame decoding
+- global mode toggles
+- movement cooldown and mode guards
+- exploration interaction and movement behavior
+
+That is the intended stopping point for Phase 3 and sets up the next extraction
+step: mode blocking rules.
+
 ## Phase 2: Input-Intent Layer Extraction (Complete)
 
 ### Overview
