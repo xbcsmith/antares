@@ -8,6 +8,7 @@
 //! Later input-system phases can operate on `FrameInputIntent` instead of
 //! repeatedly querying the active key map and window state inline.
 
+use crate::game::systems::input::world_click::mouse_center_interact_pressed;
 use crate::game::systems::input::{GameAction, KeyMap};
 use bevy::prelude::*;
 use bevy::window::Window;
@@ -103,9 +104,8 @@ impl FrameInputIntent {
 
 /// Decodes all relevant per-frame input state into a `FrameInputIntent`.
 ///
-/// The decoder applies the configured `KeyMap` to keyboard input and evaluates
-/// the exploration centre-screen click heuristic against the provided primary
-/// window, if one is available.
+/// The decoder applies the configured `KeyMap` to keyboard input and delegates
+/// exploration mouse fallback decoding to the dedicated world-click helper.
 ///
 /// Toggle-style actions use `just_pressed` semantics:
 ///
@@ -119,11 +119,9 @@ impl FrameInputIntent {
 /// - movement
 /// - interact
 ///
-/// Mouse centre interaction requires:
-///
-/// - a primary window
-/// - left mouse `just_pressed`
-/// - a cursor position inside the centre third of the window on both axes
+/// Mouse centre interaction is resolved through the shared world-click helper so
+/// the frame decoder does not own primary-window lookup policy or the
+/// centre-third heuristic directly.
 ///
 /// # Arguments
 ///
@@ -171,63 +169,8 @@ pub fn decode_frame_input(
         turn_left: key_map.is_action_pressed(GameAction::TurnLeft, keyboard_input),
         turn_right: key_map.is_action_pressed(GameAction::TurnRight, keyboard_input),
         interact: key_map.is_action_pressed(GameAction::Interact, keyboard_input),
-        mouse_center_interact: is_center_screen_interact_click(mouse_buttons, primary_window),
+        mouse_center_interact: mouse_center_interact_pressed(mouse_buttons, primary_window),
     }
-}
-
-/// Returns whether the frame contains a centre-screen exploration interact click.
-///
-/// This preserves the existing fallback heuristic used by the exploration input
-/// system: a left-click inside the centre third of the primary window is
-/// treated as an interaction request.
-///
-/// # Arguments
-///
-/// * `mouse_buttons` - Current mouse button state
-/// * `primary_window` - Optional primary window to inspect
-///
-/// # Returns
-///
-/// `true` if the click qualifies as a centre-screen interaction click,
-/// otherwise `false`.
-///
-/// # Examples
-///
-/// ```
-/// use antares::game::systems::input::frame_input::is_center_screen_interact_click;
-/// use bevy::prelude::{ButtonInput, MouseButton};
-///
-/// let mouse = ButtonInput::<MouseButton>::default();
-///
-/// assert!(!is_center_screen_interact_click(&mouse, None));
-/// ```
-pub fn is_center_screen_interact_click(
-    mouse_buttons: &ButtonInput<MouseButton>,
-    primary_window: Option<&Window>,
-) -> bool {
-    let Some(window) = primary_window else {
-        return false;
-    };
-
-    if !mouse_buttons.just_pressed(MouseButton::Left) {
-        return false;
-    }
-
-    let Some(cursor_position) = window.cursor_position() else {
-        return false;
-    };
-
-    let width = window.width();
-    let height = window.height();
-    let center_left = width / 3.0;
-    let center_right = width * (2.0 / 3.0);
-    let center_top = height / 3.0;
-    let center_bottom = height * (2.0 / 3.0);
-
-    cursor_position.x >= center_left
-        && cursor_position.x <= center_right
-        && cursor_position.y >= center_top
-        && cursor_position.y <= center_bottom
 }
 
 #[cfg(test)]
@@ -426,32 +369,5 @@ mod tests {
         let intent = decode_frame_input(&key_map, &keyboard, &mouse, Some(&window));
 
         assert!(!intent.mouse_center_interact);
-    }
-
-    #[test]
-    fn test_is_center_screen_interact_click_false_without_left_click() {
-        let mouse = ButtonInput::<MouseButton>::default();
-        let window = window_with_cursor(900, 600, Some(Vec2::new(450.0, 300.0)));
-
-        assert!(!is_center_screen_interact_click(&mouse, Some(&window)));
-    }
-
-    #[test]
-    fn test_is_center_screen_interact_click_true_on_center_boundary() {
-        let mut mouse = ButtonInput::<MouseButton>::default();
-        let window = window_with_cursor(900, 600, Some(Vec2::new(300.0, 200.0)));
-
-        mouse.press(MouseButton::Left);
-
-        assert!(is_center_screen_interact_click(&mouse, Some(&window)));
-    }
-
-    #[test]
-    fn test_is_center_screen_interact_click_false_without_primary_window() {
-        let mut mouse = ButtonInput::<MouseButton>::default();
-
-        mouse.press(MouseButton::Left);
-
-        assert!(!is_center_screen_interact_click(&mouse, None));
     }
 }

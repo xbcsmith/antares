@@ -56,6 +56,7 @@ mod helpers;
 mod keymap;
 mod menu_toggle;
 mod mode_guards;
+mod world_click;
 
 pub use frame_input::{decode_frame_input, FrameInputIntent};
 pub use global_toggles::handle_global_mode_toggles;
@@ -65,6 +66,7 @@ pub use menu_toggle::toggle_menu_state;
 pub use mode_guards::{
     input_blocked_for_mode, interaction_blocked_for_mode, movement_blocked_for_mode,
 };
+pub use world_click::{is_cursor_in_center_third, mouse_center_interact_pressed};
 
 /// Input plugin with config-driven key mappings
 ///

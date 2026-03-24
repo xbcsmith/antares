@@ -1,5 +1,183 @@
 # Implementations
 
+## Phase 5: Exploration World-Click Fallback Extraction (Complete)
+
+### Overview
+
+Phase 5 extracts the exploration mouse fallback heuristic into a dedicated
+helper module so primary-window lookup, cursor validation, and the centre-third
+click rule are no longer embedded in the input decoding path. The goal of this
+phase is to isolate the current world-click fallback behind a small explicit
+seam that can be replaced later by mesh or world picking without reopening the
+rest of the input system.
+
+### Problem Statement
+
+After Phase 4, the input system already had clearer boundaries for frame
+decoding, global toggles, and mode guards, but the centre-screen exploration
+mouse fallback was still effectively owned by the frame-input decoding layer.
+
+That left the project with two problems:
+
+- the exploration click heuristic was not isolated as its own responsibility
+- upgrading the mouse fallback later would still require touching the frame
+  decoder instead of a focused world-click boundary
+
+Phase 5 therefore extracts that fallback into a small helper module dedicated to
+exploration world-click behavior.
+
+### Files Changed
+
+| File                                    | Change                                                                |
+| --------------------------------------- | --------------------------------------------------------------------- |
+| `src/game/systems/input.rs`             | Re-exported the extracted world-click helper API                      |
+| `src/game/systems/input/frame_input.rs` | Delegated mouse fallback decoding to the extracted world-click helper |
+| `src/game/systems/input/world_click.rs` | Added centre-screen world-click helpers and grouped world-click tests |
+| `docs/explanation/implementations.md`   | Added this Phase 5 implementation summary                             |
+
+---
+
+### 5.1 — Added `world_click.rs`
+
+Phase 5 introduces a dedicated helper module:
+
+- `src/game/systems/input/world_click.rs`
+
+This module now owns the exploration mouse fallback heuristic and keeps that
+responsibility out of the frame decoder.
+
+The module provides:
+
+- `mouse_center_interact_pressed(...)`
+- `is_cursor_in_center_third(...)`
+
+Together, these helpers make the current world-click policy explicit instead of
+leaving it implied inside a broader input-decoding function.
+
+### 5.2 — Ownership Moved to the World-Click Layer
+
+The extracted helper now owns the exact responsibilities identified in the plan:
+
+- left-click detection
+- primary-window lookup handling
+- cursor-position validation
+- centre-third heuristic evaluation
+
+That means `frame_input.rs` no longer needs to know how exploration mouse
+fallback works internally. It only delegates to the world-click helper and
+records the result in `FrameInputIntent`.
+
+This is the key structural improvement for this phase: the decode layer still
+produces the same intent shape, but the heuristic now lives at a cleaner
+responsibility boundary.
+
+### 5.3 — Behavior Preserved
+
+Phase 5 does not intentionally change runtime behavior.
+
+The extracted world-click helper preserves the existing fallback semantics:
+
+- only `MouseButton::Left` is considered
+- the click must be `just_pressed`
+- an active primary window must be available
+- the cursor must be present
+- the click must land inside the centre third of the window on both axes
+
+The exploration interaction path still treats this result as the same canonical
+interaction trigger used by the keyboard interaction route. Only the ownership of
+the heuristic changed.
+
+### 5.4 — `frame_input.rs` Now Delegates Instead of Owning the Heuristic
+
+Before this phase, `frame_input.rs` directly implemented the centre-screen click
+fallback helper.
+
+After Phase 5, `decode_frame_input(...)` delegates mouse fallback decoding to
+`mouse_center_interact_pressed(...)` in `world_click.rs`.
+
+This keeps the decoder focused on combining already-decided low-level action
+results into `FrameInputIntent`, while the world-click module focuses on the
+mouse fallback policy itself.
+
+That separation is important because it reduces coupling between:
+
+- generic frame decoding
+- exploration-specific click heuristics
+
+### 5.5 — Tests Grouped with the World-Click Helper
+
+Phase 5 groups direct world-click heuristic tests with the extracted helper
+module.
+
+These tests cover the documented fallback contract, including:
+
+- no primary window
+- no left-click
+- no cursor position
+- centred click success
+- outside-centre click rejection
+- inclusive boundary handling
+- just-outside boundary rejection
+
+This places the direct validation next to the helper that owns the behavior and
+makes future world-click changes easier to review in isolation.
+
+### 5.6 — Expected Benefit Achieved
+
+The planned benefit for this phase was to create a clean seam for upgrading the
+mouse fallback later.
+
+That benefit is now in place:
+
+- the current centre-screen heuristic is isolated
+- the rest of the input system no longer depends on its internal details
+- future replacement with mesh/world picking can happen behind a dedicated
+  module boundary
+
+This reduces the risk of reopening unrelated input orchestration code when the
+fallback is eventually replaced.
+
+### 5.7 — Architecture and Scope Compliance
+
+Phase 5 remains tightly scoped to extraction and does not alter core game
+structures or mode semantics.
+
+It does not:
+
+- change `GameState`
+- change `GameMode`
+- change exploration interaction routing
+- change movement or cooldown behavior
+- split the input system into multiple Bevy systems yet
+
+Instead, it implements the exact seam called for in the plan by isolating the
+exploration world-click fallback in its own helper module.
+
+### 5.8 — Deliverables Completed
+
+- [x] `mouse_center_interact_pressed(...)` extracted
+- [x] primary-window lookup moved behind the helper boundary
+- [x] cursor-position validation moved behind the helper boundary
+- [x] centre-third heuristic moved to `world_click.rs`
+- [x] world-click helper tests grouped with the extracted module
+- [x] `docs/explanation/implementations.md` updated
+
+### 5.9 — Outcome
+
+After Phase 5, the exploration mouse fallback has a dedicated ownership boundary
+instead of being embedded inside the frame-input layer.
+
+The input system is now cleaner in stages:
+
+- frame decoding
+- global toggles
+- mode guards
+- world-click fallback
+- exploration interaction and movement behavior
+
+That is the intended stopping point for Phase 5 and prepares the next phase:
+extracting exploration interaction behavior itself.
+
 ## Phase 4: Mode-Guard Extraction (Complete)
 
 ### Overview
