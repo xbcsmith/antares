@@ -50,10 +50,12 @@ use crate::sdk::game_config::ControlsConfig;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
+mod frame_input;
 mod helpers;
 mod keymap;
 mod menu_toggle;
 
+pub use frame_input::{decode_frame_input, FrameInputIntent};
 pub use helpers::get_adjacent_positions;
 pub use keymap::{parse_key_code, GameAction, KeyMap};
 pub use menu_toggle::toggle_menu_state;
@@ -164,38 +166,16 @@ fn handle_input(
 ) {
     let current_time = time.elapsed_secs();
     let cooldown = input_config.controls.movement_cooldown;
-
-    let mouse_interact_pressed = primary_window
-        .single()
-        .ok()
-        .and_then(|window| {
-            if !mouse_buttons.just_pressed(MouseButton::Left) {
-                return None;
-            }
-
-            let cursor_position = window.cursor_position()?;
-            let width = window.width();
-            let height = window.height();
-            let center_left = width / 3.0;
-            let center_right = width * (2.0 / 3.0);
-            let center_top = height / 3.0;
-            let center_bottom = height * (2.0 / 3.0);
-
-            Some(
-                cursor_position.x >= center_left
-                    && cursor_position.x <= center_right
-                    && cursor_position.y >= center_top
-                    && cursor_position.y <= center_bottom,
-            )
-        })
-        .unwrap_or(false);
+    let frame_input = decode_frame_input(
+        &input_config.key_map,
+        &keyboard_input,
+        &mouse_buttons,
+        primary_window.single().ok(),
+    );
 
     // Check for automap toggle ("M" key by default) before menu handling so
     // automap mode can consume Escape to close back to exploration.
-    if input_config
-        .key_map
-        .is_action_just_pressed(GameAction::Automap, &keyboard_input)
-    {
+    if frame_input.automap_toggle {
         let game_state = &mut global_state.0;
         match game_state.mode {
             crate::application::GameMode::Exploration => {
@@ -216,10 +196,7 @@ fn handle_input(
 
     // Check for menu toggle (ESC key) first — it should always take priority and
     // must not be blocked by movement cooldown.
-    if input_config
-        .key_map
-        .is_action_just_pressed(GameAction::Menu, &keyboard_input)
-    {
+    if frame_input.menu_toggle {
         let game_state = &mut global_state.0;
         if matches!(game_state.mode, crate::application::GameMode::Automap) {
             game_state.mode = crate::application::GameMode::Exploration;
@@ -235,10 +212,7 @@ fn handle_input(
     }
 
     // Check for inventory toggle ("I" key) — same priority as menu toggle.
-    if input_config
-        .key_map
-        .is_action_just_pressed(GameAction::Inventory, &keyboard_input)
-    {
+    if frame_input.inventory_toggle {
         let game_state = &mut global_state.0;
 
         // Capture the npc_id from dialogue state before any mutable borrow.
@@ -295,10 +269,7 @@ fn handle_input(
 
     // Check for rest action ("R" key) — opens the rest-duration menu only
     // during Exploration mode.  All other modes silently ignore the key press.
-    if input_config
-        .key_map
-        .is_action_just_pressed(GameAction::Rest, &keyboard_input)
-    {
+    if frame_input.rest {
         let game_state = &mut global_state.0;
         if matches!(game_state.mode, crate::application::GameMode::Exploration) {
             info!("Rest key pressed: opening rest menu");
@@ -314,18 +285,7 @@ fn handle_input(
 
     // Throttle movement input using cooldown. Only block when an actual movement
     // action is being attempted.
-    let is_movement_attempt = input_config
-        .key_map
-        .is_action_pressed(GameAction::MoveForward, &keyboard_input)
-        || input_config
-            .key_map
-            .is_action_pressed(GameAction::MoveBack, &keyboard_input)
-        || input_config
-            .key_map
-            .is_action_pressed(GameAction::TurnLeft, &keyboard_input)
-        || input_config
-            .key_map
-            .is_action_pressed(GameAction::TurnRight, &keyboard_input);
+    let is_movement_attempt = frame_input.is_movement_attempt();
 
     if is_movement_attempt && (current_time - *last_move_time < cooldown) {
         // Movement attempted but still within cooldown window - ignore movement input.
@@ -383,10 +343,7 @@ fn handle_input(
     // duplicating event-routing behavior.
     // Only allow Interaction if NOT in Dialogue mode
     if !matches!(game_state.mode, crate::application::GameMode::Dialogue(_))
-        && (input_config
-            .key_map
-            .is_action_pressed(GameAction::Interact, &keyboard_input)
-            || mouse_interact_pressed)
+        && frame_input.is_interact_attempt()
     {
         let party_position = world.party_position;
         let adjacent_tiles = get_adjacent_positions(party_position);
@@ -977,10 +934,7 @@ fn handle_input(
         info!("No interactable object nearby");
     }
     // Move forward
-    else if input_config
-        .key_map
-        .is_action_pressed(GameAction::MoveForward, &keyboard_input)
-    {
+    else if frame_input.move_forward {
         let target = game_state.world.position_ahead();
         let facing = game_state.world.party_facing;
 
@@ -1022,10 +976,7 @@ fn handle_input(
         }
     }
     // Move backward
-    else if input_config
-        .key_map
-        .is_action_pressed(GameAction::MoveBack, &keyboard_input)
-    {
+    else if frame_input.move_back {
         // Route backward movement through the same world movement path so
         // fog-of-war reveal and tile events stay in sync with position updates.
         let back_facing = game_state.world.party_facing.turn_left().turn_left();
@@ -1061,10 +1012,7 @@ fn handle_input(
         }
     }
     // Turn left
-    else if input_config
-        .key_map
-        .is_action_pressed(GameAction::TurnLeft, &keyboard_input)
-    {
+    else if frame_input.turn_left {
         game_state.world.turn_left();
         if matches!(game_state.mode, crate::application::GameMode::Exploration) {
             let party_position = game_state.world.party_position;
@@ -1077,10 +1025,7 @@ fn handle_input(
         moved = true;
     }
     // Turn right
-    else if input_config
-        .key_map
-        .is_action_pressed(GameAction::TurnRight, &keyboard_input)
-    {
+    else if frame_input.turn_right {
         game_state.world.turn_right();
         if matches!(game_state.mode, crate::application::GameMode::Exploration) {
             let party_position = game_state.world.party_position;

@@ -1,5 +1,215 @@
 # Implementations
 
+## Phase 2: Input-Intent Layer Extraction (Complete)
+
+### Overview
+
+Phase 2 introduces a small per-frame input-intent layer for
+`src/game/systems/input.rs` so the Bevy input system can decode raw button state
+once and then execute behavior from a compact intent object. The goal of this
+phase is to separate raw polling from behavior execution without changing input
+priority, cooldown behavior, or exploration interaction semantics.
+
+### Problem Statement
+
+After Phase 1, the pure helper functions had been extracted, but the
+`handle_input` system still repeatedly queried the key map and button resources
+inline. That left several problems in place:
+
+- behavior execution was still mixed with raw keyboard polling
+- toggle handling and movement handling still depended on repeated
+  `is_action_pressed` and `is_action_just_pressed` checks
+- the exploration mouse interaction heuristic was still decoded inline inside
+  the Bevy system
+- the order of behavior branches was correct, but harder to read because the
+  system interleaved polling details with routing logic
+
+Phase 2 therefore adds a single decoded frame object and a helper that computes
+it once per frame.
+
+### Files Changed
+
+| File                                    | Change                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------- |
+| `src/game/systems/input.rs`             | Added `frame_input` module usage and switched `handle_input` to decoded intent checks |
+| `src/game/systems/input/frame_input.rs` | Added `FrameInputIntent`, `decode_frame_input`, mouse-centre helper, and tests        |
+| `docs/explanation/implementations.md`   | Added this Phase 2 implementation summary                                             |
+
+---
+
+### 2.1 — Added `FrameInputIntent`
+
+Phase 2 adds `FrameInputIntent` in
+`src/game/systems/input/frame_input.rs`.
+
+This type captures the per-frame actions the input system cares about after raw
+input has already been interpreted:
+
+- `menu_toggle`
+- `inventory_toggle`
+- `automap_toggle`
+- `rest`
+- `move_forward`
+- `move_back`
+- `turn_left`
+- `turn_right`
+- `interact`
+- `mouse_center_interact`
+
+This keeps the input system behavior-oriented. Instead of repeatedly asking
+whether a specific key binding is active, the main system can now work from a
+small value that describes the already-decoded intent for the frame.
+
+The struct also includes two small helper methods:
+
+- `is_movement_attempt()`
+- `is_interact_attempt()`
+
+These preserve existing grouping semantics for cooldown gating and interaction
+routing while making the relevant behavior checks more obvious in
+`handle_input`.
+
+### 2.2 — Added `decode_frame_input(...)`
+
+Phase 2 adds a dedicated decoder function:
+
+- `decode_frame_input(...) -> FrameInputIntent`
+
+This helper computes all relevant keyboard and mouse-driven actions once per
+frame from:
+
+- the active `KeyMap`
+- keyboard button state
+- mouse button state
+- the optional primary window
+
+This preserves the existing semantic split:
+
+- toggle-like actions use `just_pressed`
+- movement and interaction use `pressed`
+- centre-screen mouse interaction remains a one-frame click-driven action
+
+The main value of the helper is not new behavior. The value is that the
+polling logic now has a single home, which makes later extraction phases safer.
+
+### 2.3 — Moved Centre-Screen Mouse Decoding Behind the Intent Layer
+
+Before Phase 2, the exploration centre-screen mouse interaction heuristic was
+decoded inline inside `handle_input`.
+
+Phase 2 moves that decoding behind a focused helper in the new module. The
+intent decoder now owns the logic for deciding whether the current frame should
+set `mouse_center_interact`.
+
+That preserves the same fallback heuristic:
+
+- a primary window must exist
+- left mouse must be `just_pressed`
+- the cursor must be inside the centre third of the window on both axes
+
+The exploration interaction branch in `handle_input` still uses the exact same
+behavior path. Only the location of the decode step changed.
+
+### 2.4 — `handle_input` Now Reads Intent Instead of Polling Repeatedly
+
+Phase 2 updates `handle_input` to decode a `FrameInputIntent` once near the top
+of the system and then use that intent for branch decisions.
+
+This means the main system now reads more directly in behavior order:
+
+- automap toggle
+- menu toggle
+- inventory toggle
+- rest
+- movement cooldown gate
+- interaction
+- movement / turning execution
+
+That makes the control flow easier to scan because the system is no longer
+crowded with repeated low-level polling expressions.
+
+### 2.5 — Behavior Preservation
+
+Phase 2 does not intentionally change runtime behavior.
+
+The following semantics are preserved:
+
+- automap toggle still runs before menu handling
+- menu toggle still has priority and still bypasses movement cooldown
+- inventory toggle behavior and dialogue merchant rules are unchanged
+- rest still uses the same exploration-only behavior
+- movement cooldown still keys off the same movement action group
+- interaction still accepts keyboard interact or centre-screen mouse interact
+- movement and turning still execute in the same deterministic priority order
+
+This phase is therefore an execution seam, not a gameplay change.
+
+### 2.6 — Tests Added for the Intent Layer
+
+Phase 2 adds module-local tests in `frame_input.rs` for the newly extracted
+decode behavior.
+
+These tests validate:
+
+- default `FrameInputIntent` values
+- movement-attempt grouping
+- interact-attempt grouping
+- toggle decoding from configured keys
+- continuous movement and interact decoding
+- custom key binding decoding
+- centre-screen mouse interaction detection
+- negative cases for no window, no cursor, and outside-centre clicks
+
+This keeps the direct tests close to the new decode logic, consistent with the
+refactor plan’s guidance to keep helper-focused tests near the code they
+validate.
+
+### 2.7 — Architecture and Scope Compliance
+
+Phase 2 remains within the low-risk refactor path described in
+`docs/explanation/input_refactor_plan.md`.
+
+It does **not**:
+
+- split the Bevy system into multiple systems yet
+- change `GameMode` semantics
+- move exploration interaction execution into a separate module yet
+- move exploration movement execution into a separate module yet
+- change world or party data structures
+
+Instead, it creates the intended seam between:
+
+- raw frame polling
+- behavior execution
+
+That matches the documented recommendation to introduce decoded frame input
+before attempting deeper system decomposition.
+
+### 2.8 — Deliverables Completed
+
+- [x] `FrameInputIntent` added
+- [x] `decode_frame_input(...)` added
+- [x] centre-screen mouse interaction decoding moved behind the intent layer
+- [x] `handle_input` updated to use decoded frame intent
+- [x] module-local unit tests added for the new intent layer
+- [x] `docs/explanation/implementations.md` updated
+
+### 2.9 — Outcome
+
+After Phase 2, the input system has a clearer separation between input decoding
+and behavior execution.
+
+The main Bevy system is still monolithic for now, but it is easier to follow
+because it now operates on a compact decoded frame object instead of repeatedly
+polling raw button state inline.
+
+That is the intended Phase 2 stopping point and sets up the next planned steps:
+
+- global toggle extraction
+- mode guard extraction
+- exploration interaction extraction
+- exploration movement extraction
+
 ## Phase 1: Low-Risk Extraction of Pure Input Helpers (Complete)
 
 ### Overview
