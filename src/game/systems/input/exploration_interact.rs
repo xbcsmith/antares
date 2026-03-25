@@ -692,3 +692,441 @@ fn populate_lock_pending(
     lock_pending.position = Some(position);
     lock_pending.can_lockpick = can_lockpick;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::resources::GameContent;
+    use crate::domain::character::{Alignment, Character, Sex};
+    use crate::domain::world::npc::NpcDefinition;
+    use crate::domain::world::{LockState, Map, NpcPlacement};
+    use crate::game::components::furniture::{DoorState, FurnitureEntity};
+    use crate::game::resources::GlobalState;
+    use crate::game::systems::map::TileCoord;
+    use crate::sdk::database::ContentDatabase;
+    use bevy::prelude::{App, ButtonInput, Entity, KeyCode, Messages, Transform, Update};
+
+    const DOOR_KEY_ID: ItemId = 99;
+    const CONTAINER_KEY_ID: ItemId = 55;
+    const DOOR_LOCK_ID: &str = "test_door_lock";
+    const CONTAINER_LOCK_ID: &str = "test_container_lock";
+
+    fn build_interaction_app() -> App {
+        let mut app = App::new();
+
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
+
+        let controls = crate::sdk::game_config::ControlsConfig {
+            movement_cooldown: 0.0,
+            ..crate::sdk::game_config::ControlsConfig::default()
+        };
+        let key_map = crate::game::systems::input::KeyMap::from_controls_config(&controls);
+        app.insert_resource(crate::game::systems::input::InputConfigResource { controls, key_map });
+
+        let mut gs = crate::application::GameState::new();
+        let map = Map::new(
+            1,
+            "InteractionTestMap".to_string(),
+            "Test".to_string(),
+            10,
+            10,
+        );
+        gs.world.add_map(map);
+        gs.world.set_current_map(1);
+        gs.world.set_party_position(Position::new(5, 5));
+
+        let hero = Character::new(
+            "Test Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+
+        app.insert_resource(GlobalState(gs));
+        app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<GameLog>();
+        app.add_message::<MapEventTriggered>();
+
+        app
+    }
+
+    fn add_locked_door_event(app: &mut App, key_item_id: Option<ItemId>) {
+        let mut gs = app.world_mut().resource_mut::<GlobalState>();
+        if let Some(map) = gs.0.world.get_current_map_mut() {
+            map.add_event(
+                Position::new(5, 4),
+                MapEvent::LockedDoor {
+                    name: "Locked Door".to_string(),
+                    description: String::new(),
+                    lock_id: DOOR_LOCK_ID.to_string(),
+                    key_item_id,
+                    initial_trap_chance: 0,
+                },
+            );
+            map.lock_states
+                .insert(DOOR_LOCK_ID.to_string(), LockState::new(DOOR_LOCK_ID));
+            if let Some(tile) = map.get_tile_mut(Position::new(5, 4)) {
+                tile.wall_type = WallType::Door;
+                tile.blocked = true;
+            }
+        }
+    }
+
+    fn add_locked_container_event(app: &mut App, key_item_id: Option<ItemId>) {
+        let mut gs = app.world_mut().resource_mut::<GlobalState>();
+        if let Some(map) = gs.0.world.get_current_map_mut() {
+            map.add_event(
+                Position::new(5, 4),
+                MapEvent::LockedContainer {
+                    name: "Iron Chest".to_string(),
+                    lock_id: CONTAINER_LOCK_ID.to_string(),
+                    key_item_id,
+                    items: vec![],
+                    initial_trap_chance: 0,
+                },
+            );
+            map.lock_states.insert(
+                CONTAINER_LOCK_ID.to_string(),
+                LockState::new(CONTAINER_LOCK_ID),
+            );
+        }
+    }
+
+    fn give_key_to_party(app: &mut App, key_id: ItemId) {
+        let mut gs = app.world_mut().resource_mut::<GlobalState>();
+        gs.0.party.members[0]
+            .inventory
+            .add_item(key_id, 1)
+            .expect("inventory must not be full for test key");
+    }
+
+    fn merchant_content() -> GameContent {
+        let mut db = ContentDatabase::new();
+        let merchant = NpcDefinition::merchant("merchant_tom", "Tom the Merchant", "tom.png");
+        db.npcs.add_npc(merchant).unwrap();
+        GameContent::new(db)
+    }
+
+    fn spawn_furniture_door(
+        app: &mut App,
+        position: Position,
+        is_locked: bool,
+        key_item_id: Option<ItemId>,
+    ) -> Entity {
+        let mut door_state = DoorState::new(is_locked, 0.0);
+        door_state.key_item_id = key_item_id;
+
+        app.world_mut()
+            .spawn((
+                FurnitureEntity::new(crate::domain::world::FurnitureType::Door, !is_locked),
+                door_state,
+                Transform::default(),
+                TileCoord(position),
+            ))
+            .id()
+    }
+
+    fn run_interaction(
+        app: &mut App,
+        game_content: Option<&GameContent>,
+    ) -> (bool, Vec<MapEventTriggered>) {
+        let mut gs = app.world_mut().resource_mut::<GlobalState>();
+        let mut recruitment_context = app.world_mut().resource_mut::<PendingRecruitmentContext>();
+        let mut game_log = app.world_mut().resource_mut::<GameLog>();
+        let mut lock_pending = app.world_mut().resource_mut::<LockInteractionPending>();
+        let mut messages = app
+            .world_mut()
+            .resource_mut::<Messages<MapEventTriggered>>();
+
+        let mut map_event_messages = messages.writer();
+        let npc_query = app.world_mut().query::<(Entity, &NpcMarker, &TileCoord)>();
+        let mut door_entity_query = app.world_mut().query::<(
+            &mut FurnitureEntity,
+            &mut DoorState,
+            &mut Transform,
+            &TileCoord,
+        )>();
+
+        let handled = handle_exploration_interact(
+            &mut gs.0,
+            &mut map_event_messages,
+            &mut recruitment_context,
+            &npc_query,
+            game_content,
+            &mut door_entity_query,
+            &mut game_log,
+            &mut lock_pending,
+        );
+
+        let mut reader = messages.get_cursor();
+        let fired: Vec<MapEventTriggered> = reader.read(&messages).cloned().collect();
+
+        (handled, fired)
+    }
+
+    #[test]
+    fn test_try_interact_furniture_door_opens_unlocked_door() {
+        let mut app = build_interaction_app();
+        let door_entity = spawn_furniture_door(&mut app, Position::new(5, 4), false, None);
+
+        let (handled, fired) = run_interaction(&mut app, None);
+
+        assert!(handled);
+        assert!(fired.is_empty());
+
+        let door_state = app
+            .world()
+            .entity(door_entity)
+            .get::<DoorState>()
+            .expect("door must still have DoorState");
+        assert!(door_state.is_open);
+    }
+
+    #[test]
+    fn test_try_interact_furniture_door_locked_without_key_logs_message() {
+        let mut app = build_interaction_app();
+        spawn_furniture_door(&mut app, Position::new(5, 4), true, Some(DOOR_KEY_ID));
+
+        let (handled, fired) = run_interaction(&mut app, None);
+
+        assert!(handled);
+        assert!(fired.is_empty());
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.messages
+                .iter()
+                .any(|message| message == "The door is locked."),
+            "expected locked-door feedback"
+        );
+    }
+
+    #[test]
+    fn test_try_interact_locked_door_event_consumes_key_and_opens_tile() {
+        let mut app = build_interaction_app();
+        add_locked_door_event(&mut app, Some(DOOR_KEY_ID));
+        give_key_to_party(&mut app, DOOR_KEY_ID);
+
+        let (handled, fired) = run_interaction(&mut app, Some(&merchant_content()));
+
+        assert!(handled);
+        assert!(fired.is_empty());
+
+        let gs = app.world().resource::<GlobalState>();
+        let map = gs.0.world.get_current_map().unwrap();
+        let tile = map.get_tile(Position::new(5, 4)).unwrap();
+        assert_eq!(tile.wall_type, WallType::None);
+        assert!(!tile.blocked);
+        assert!(map.get_event(Position::new(5, 4)).is_none());
+        assert!(!gs.0.party.members[0]
+            .inventory
+            .items
+            .iter()
+            .any(|slot| slot.item_id == DOOR_KEY_ID));
+    }
+
+    #[test]
+    fn test_try_interact_locked_door_event_without_key_sets_pending() {
+        let mut app = build_interaction_app();
+        add_locked_door_event(&mut app, Some(DOOR_KEY_ID));
+
+        let (handled, fired) = run_interaction(&mut app, None);
+
+        assert!(handled);
+        assert!(fired.is_empty());
+
+        let pending = app.world().resource::<LockInteractionPending>();
+        assert_eq!(pending.lock_id.as_deref(), Some(DOOR_LOCK_ID));
+        assert_eq!(pending.position, Some(Position::new(5, 4)));
+    }
+
+    #[test]
+    fn test_try_interact_locked_container_event_with_key_emits_container_message() {
+        let mut app = build_interaction_app();
+        add_locked_container_event(&mut app, Some(CONTAINER_KEY_ID));
+        give_key_to_party(&mut app, CONTAINER_KEY_ID);
+
+        let (handled, fired) = run_interaction(&mut app, Some(&merchant_content()));
+
+        assert!(handled);
+        assert_eq!(fired.len(), 1);
+        assert!(matches!(fired[0].event, MapEvent::Container { .. }));
+        assert_eq!(fired[0].position, Position::new(5, 4));
+    }
+
+    #[test]
+    fn test_try_interact_locked_container_event_without_key_sets_pending() {
+        let mut app = build_interaction_app();
+        add_locked_container_event(&mut app, Some(CONTAINER_KEY_ID));
+
+        let (handled, fired) = run_interaction(&mut app, None);
+
+        assert!(handled);
+        assert!(fired.is_empty());
+
+        let pending = app.world().resource::<LockInteractionPending>();
+        assert_eq!(pending.lock_id.as_deref(), Some(CONTAINER_LOCK_ID));
+        assert_eq!(pending.position, Some(Position::new(5, 4)));
+    }
+
+    #[test]
+    fn test_try_interact_plain_tile_door_opens_tile() {
+        let mut app = build_interaction_app();
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            if let Some(map) = gs.0.world.get_current_map_mut() {
+                if let Some(tile) = map.get_tile_mut(Position::new(5, 4)) {
+                    tile.wall_type = WallType::Door;
+                    tile.blocked = true;
+                }
+            }
+        }
+
+        let (handled, fired) = run_interaction(&mut app, None);
+
+        assert!(handled);
+        assert!(fired.is_empty());
+
+        let gs = app.world().resource::<GlobalState>();
+        let tile =
+            gs.0.world
+                .get_current_map()
+                .unwrap()
+                .get_tile(Position::new(5, 4))
+                .unwrap();
+        assert_eq!(tile.wall_type, WallType::None);
+        assert!(!tile.blocked);
+    }
+
+    #[test]
+    fn test_try_interact_npc_or_recruitable_emits_adjacent_npc_dialogue() {
+        let mut app = build_interaction_app();
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            if let Some(map) = gs.0.world.get_current_map_mut() {
+                map.npc_placements
+                    .push(NpcPlacement::new("test_npc", Position::new(5, 4)));
+            }
+        }
+
+        let (handled, fired) = run_interaction(&mut app, None);
+
+        assert!(handled);
+        assert_eq!(fired.len(), 1);
+        match &fired[0].event {
+            MapEvent::NpcDialogue { npc_id, .. } => assert_eq!(npc_id, "test_npc"),
+            other => panic!("expected NpcDialogue, got {:?}", other),
+        }
+        assert_eq!(fired[0].position, Position::new(5, 4));
+    }
+
+    #[test]
+    fn test_try_interact_npc_or_recruitable_sets_recruitment_context() {
+        let mut app = build_interaction_app();
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            if let Some(map) = gs.0.world.get_current_map_mut() {
+                map.add_event(
+                    Position::new(5, 4),
+                    MapEvent::RecruitableCharacter {
+                        name: "Test Recruit".to_string(),
+                        description: String::new(),
+                        character_id: "hero_01".to_string(),
+                        dialogue_id: None,
+                        time_condition: None,
+                        facing: None,
+                    },
+                );
+            }
+        }
+
+        let (handled, fired) = run_interaction(&mut app, None);
+
+        assert!(handled);
+        assert_eq!(fired.len(), 1);
+
+        let recruitment_context = app.world().resource::<PendingRecruitmentContext>();
+        let context = recruitment_context
+            .0
+            .as_ref()
+            .expect("recruitment context must be set");
+        assert_eq!(context.character_id, "hero_01");
+        assert_eq!(context.event_position, Position::new(5, 4));
+    }
+
+    #[test]
+    fn test_try_interact_adjacent_world_events_emits_sign_event() {
+        let mut app = build_interaction_app();
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            if let Some(map) = gs.0.world.get_current_map_mut() {
+                map.add_event(
+                    Position::new(5, 4),
+                    MapEvent::Sign {
+                        name: "Test Sign".to_string(),
+                        description: String::new(),
+                        text: "Hello".to_string(),
+                        time_condition: None,
+                        facing: None,
+                    },
+                );
+            }
+        }
+
+        let (handled, fired) = run_interaction(&mut app, None);
+
+        assert!(handled);
+        assert_eq!(fired.len(), 1);
+        assert!(matches!(fired[0].event, MapEvent::Sign { .. }));
+        assert_eq!(fired[0].position, Position::new(5, 4));
+    }
+
+    #[test]
+    fn test_try_interact_adjacent_world_events_emits_current_tile_encounter() {
+        let mut app = build_interaction_app();
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            if let Some(map) = gs.0.world.get_current_map_mut() {
+                map.add_event(
+                    Position::new(5, 5),
+                    MapEvent::Encounter {
+                        name: "Skeleton".to_string(),
+                        description: String::new(),
+                        monster_group: vec![1],
+                        time_condition: None,
+                        facing: None,
+                        proximity_facing: false,
+                        rotation_speed: None,
+                        combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
+                    },
+                );
+            }
+        }
+
+        let (handled, fired) = run_interaction(&mut app, None);
+
+        assert!(handled);
+        assert_eq!(fired.len(), 1);
+        assert!(matches!(fired[0].event, MapEvent::Encounter { .. }));
+        assert_eq!(fired[0].position, Position::new(5, 5));
+    }
+
+    #[test]
+    fn test_handle_exploration_interact_returns_false_when_nothing_is_interactable() {
+        let mut app = build_interaction_app();
+
+        let (handled, fired) = run_interaction(&mut app, None);
+
+        assert!(!handled);
+        assert!(fired.is_empty());
+    }
+}

@@ -1,5 +1,182 @@
 # Implementations
 
+## Phase 9: Test Restructuring (Complete)
+
+### Overview
+
+Phase 9 restructures the input-refactor test layout so the code no longer reads
+like a focused implementation followed by a giant test appendix in
+`src/game/systems/input.rs`. The goal of this phase is to move helper-level and
+module-owned behavior tests closer to the extracted modules they validate while
+keeping broader cross-system behavior separate.
+
+### Problem Statement
+
+By the end of Phase 8, the production input code had been split into focused
+modules and ordered Bevy systems, but the test layout still reflected the old
+monolithic structure.
+
+That meant `src/game/systems/input.rs` still carried a large amount of test code
+covering behaviors that now clearly belonged to extracted modules such as:
+
+- exploration interaction
+- exploration movement
+- world-click behavior
+- mode guards
+- frame input decoding
+- global toggle handling
+
+This made the implementation file noisier than necessary and diluted the value
+of the earlier extraction work. Phase 9 therefore continues the refactor at the
+test-organization level.
+
+### Files Changed
+
+| File                                             | Change                                                             |
+| ------------------------------------------------ | ------------------------------------------------------------------ |
+| `src/game/systems/input/exploration_interact.rs` | Added focused module-local exploration interaction tests           |
+| `src/game/systems/input/exploration_movement.rs` | Added focused module-local exploration movement and cooldown tests |
+| `docs/explanation/implementations.md`            | Added this Phase 9 implementation summary                          |
+
+---
+
+### 9.1 — Kept Module-Local Tests with Module-Owned Behavior
+
+Phase 9 follows the plan’s first rule: keep module-local unit tests with the
+module they validate.
+
+To support that, I added focused tests directly to the extracted movement and
+interaction modules.
+
+`exploration_movement.rs` now owns direct tests for:
+
+- movement-attempt grouping
+- cooldown gating
+- locked-door movement feedback
+- turning behavior
+- forward and backward movement behavior
+- dialogue cancellation on movement
+- victory overlay cleanup on movement
+
+`exploration_interact.rs` now owns direct tests for:
+
+- furniture-door interaction
+- locked-door event interaction
+- locked-container event interaction
+- plain tile-door fallback
+- adjacent NPC interaction
+- recruitable interaction and recruitment-context setup
+- adjacent and current-tile world-event routing
+- no-interactable fallback behavior
+
+This makes the test layout better match the ownership boundaries introduced in
+Phases 6 and 7.
+
+### 9.2 — Preserved the Separation Between Focused and Broad Tests
+
+Phase 9 also follows the plan’s second rule: keep high-level cross-system or
+cross-mode behavior separate from cheap focused tests.
+
+The tests added in this phase are module-local and behavior-focused. They verify
+the extracted helpers and module-owned orchestration at the level those modules
+actually own.
+
+This means the codebase now has a clearer distinction between:
+
+- focused local tests that validate one extracted module’s behavior
+- broader system or integration tests that still exercise the scheduled input
+  flow across multiple systems
+
+That separation reduces noise in the main implementation file without reducing
+the ability to test higher-level behavior elsewhere.
+
+### 9.3 — Reduced Test Duplication at the Right Level
+
+The plan also called for reducing duplication. Phase 9 does that by preferring
+cheap, focused tests in the modules that now own the behavior.
+
+Instead of requiring every regression to be proven only through the top-level
+input orchestration, the extracted modules now have direct tests for the logic
+they own. This keeps coverage cheaper and more local:
+
+- movement helper logic can now be validated in `exploration_movement.rs`
+- interaction routing can now be validated in `exploration_interact.rs`
+
+This does not remove all broader tests, but it reduces the pressure on the
+implementation file to serve as both production orchestration and the primary
+home for every detailed scenario.
+
+### 9.4 — Implementation File Is Now Cleaner by Intent
+
+Phase 9’s main architectural result is not a new gameplay feature. It is a
+cleaner code-reading experience.
+
+The refactor plan explicitly wanted to move away from a “giant implementation
+plus giant test appendix” model. After this phase, that goal is materially
+closer:
+
+- extracted modules now carry more of their own behavior tests
+- the implementation file better reflects orchestration responsibilities
+- future maintenance work can happen closer to the code that actually owns the
+  behavior being changed
+
+This makes later cleanup and review work easier because test intent is more
+obvious from file placement.
+
+### 9.5 — Behavior Preservation
+
+Phase 9 is a test-organization phase, not a gameplay-change phase.
+
+The production behavior remains unchanged. What changed is where direct behavior
+tests now live and how the test structure aligns with the extracted module
+boundaries from the earlier phases.
+
+This means the phase improves maintainability without introducing new gameplay
+risk.
+
+### 9.6 — Architecture and Scope Compliance
+
+Phase 9 remains aligned with the staged workflow in
+`docs/explanation/input_refactor_plan.md`.
+
+It does not:
+
+- change `GameMode`
+- change `GameState`
+- change domain logic
+- change input behavior ordering
+- change world interaction semantics
+- introduce new fixture data or campaign dependencies
+
+Instead, it completes the test-structure portion of the refactor by moving the
+test organization closer to the modular ownership model already established in
+the production code.
+
+### 9.7 — Deliverables Completed
+
+- [x] module-local tests added beside extracted exploration interaction logic
+- [x] module-local tests added beside extracted exploration movement logic
+- [x] helper-owned behavior is now tested closer to the owning module
+- [x] implementation file moved further away from the “giant test appendix”
+      structure
+- [x] duplication reduced by preferring cheaper focused module-local coverage
+- [x] `docs/explanation/implementations.md` updated
+
+### 9.8 — Outcome
+
+After Phase 9, the input refactor is cleaner not only in production structure
+but also in test structure.
+
+The codebase now more clearly reflects the intended model:
+
+- helper and module behavior tested locally
+- broader integration behavior kept separate
+- less noise in the main implementation file
+- ownership boundaries reinforced by test placement as well as code placement
+
+This completes the test-structure phase of the refactor plan and prepares the
+codebase for the final cleanup and documentation pass.
+
 ## Phase 8: Split the Monolithic Bevy Input System into Focused Systems (Complete)
 
 ### Overview
