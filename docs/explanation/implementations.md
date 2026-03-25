@@ -1,5 +1,233 @@
 # Implementations
 
+## Phase 8: Split the Monolithic Bevy Input System into Focused Systems (Complete)
+
+### Overview
+
+Phase 8 replaces the remaining single large Bevy input system in
+`src/game/systems/input.rs` with several smaller systems that each own a focused
+responsibility and run in an explicit order. The goal of this phase is to make
+the input flow easier to understand, reduce system-configuration pressure from a
+large parameter list, and preserve the exact behavior ordering established in the
+earlier extraction phases.
+
+### Problem Statement
+
+After Phase 7, the code inside `input.rs` had already been decomposed into
+helper modules for:
+
+- frame decoding
+- global toggles
+- mode guards
+- world-click fallback
+- exploration interaction
+- exploration movement
+
+However, the Bevy layer still invoked those behaviors through one large system.
+That meant the project still had the final orchestration problem the refactor
+plan set out to solve:
+
+- one very large system function
+- one large parameter list spanning multiple responsibilities
+- behavior ordering still encoded inside one function body
+- helper extraction completed, but system-level decomposition still unfinished
+
+Phase 8 completes that final orchestration split by replacing the monolithic
+system with a small ordered set of Bevy systems.
+
+### Files Changed
+
+| File                                  | Change                                                      |
+| ------------------------------------- | ----------------------------------------------------------- |
+| `src/game/systems/input.rs`           | Split the monolithic input system into focused Bevy systems |
+| `docs/explanation/implementations.md` | Added this Phase 8 implementation summary                   |
+
+---
+
+### 8.1 — Introduced Focused Bevy Input Systems
+
+Phase 8 replaces the old single orchestration system with the following focused
+systems:
+
+1. `handle_global_input_toggles`
+2. `handle_exploration_input_interact`
+3. `handle_exploration_input_movement`
+
+This closely follows the split proposed in the refactor plan. The cleanup work
+for victory overlays remains coupled to movement inside the extracted movement
+module, which is still the clearest representation of current behavior.
+
+This means the Bevy scheduling layer now mirrors the ownership boundaries that
+were created in earlier phases instead of funneling all input through one
+monolithic entry point.
+
+### 8.2 — Preserved Explicit Scheduling Order
+
+A key requirement of Phase 8 was preserving the existing behavior order
+explicitly rather than relying on implicit registration behavior.
+
+The new system registration keeps that order explicit:
+
+1. global toggles first
+2. exploration interaction after global toggles
+3. exploration movement after interaction
+
+This matters because input precedence is part of gameplay behavior.
+
+Examples:
+
+- global toggles must still preempt exploration behavior
+- interaction must still get first chance to consume a frame before movement
+- movement must still occur only after higher-priority branches have had their
+  chance to run
+
+Phase 8 preserves this with explicit scheduling dependencies instead of one
+inline function body.
+
+### 8.3 — `handle_global_input_toggles` Owns Top-of-Frame Global Control
+
+The first split system, `handle_global_input_toggles`, is responsible only for
+the top-of-frame global mode transitions.
+
+It:
+
+- decodes frame input
+- runs global toggle handling
+- preserves menu / automap / inventory / rest priority
+
+This system intentionally does not perform exploration interaction or movement.
+That keeps the highest-priority control flow isolated and easy to reason about.
+
+### 8.4 — `handle_exploration_input_interact` Owns Interaction Dispatch
+
+The second split system, `handle_exploration_input_interact`, is responsible for
+the exploration interaction stage.
+
+It:
+
+- decodes frame input
+- applies the current mode guards
+- checks whether interaction is allowed
+- checks whether the frame contains an interaction attempt
+- delegates to `handle_exploration_interact(...)`
+
+This preserves the interaction-before-movement ordering from the previous single
+system while giving interaction its own Bevy-level entry point.
+
+### 8.5 — `handle_exploration_input_movement` Owns Movement Dispatch
+
+The third split system, `handle_exploration_input_movement`, is responsible for
+movement and turning.
+
+It:
+
+- decodes frame input
+- applies mode guards
+- applies cooldown gating
+- respects the current interaction-precedence rule
+- delegates to `handle_exploration_movement(...)`
+
+This keeps movement orchestration focused and ensures the movement layer only
+runs after global toggles and interaction have already had an opportunity to
+consume the frame.
+
+### 8.6 — Movement-Coupled Cleanup Intentionally Stayed with Movement
+
+The refactor plan noted that victory-overlay cleanup could either become its own
+system or remain coupled to movement if that was still the clearest expression
+of behavior.
+
+Phase 8 keeps that cleanup inside the movement module.
+
+That is the right tradeoff for the current code because the cleanup remains a
+movement-triggered effect:
+
+- it happens only after successful movement or turning
+- it is already implemented inside the extracted movement helper
+- splitting it further right now would increase scheduling complexity without
+  improving the current behavior model
+
+So the Bevy system split is complete without forcing an unnecessary fourth
+system.
+
+### 8.7 — Tests Updated to Use the Split System Registration
+
+Phase 8 also updates the existing input-focused tests in `input.rs` so they now
+register the split systems instead of the removed monolithic orchestration
+system.
+
+This preserves test intent while aligning the test harness with the new runtime
+structure.
+
+The updated test setup now explicitly registers the same ordered system chain
+used by the plugin itself, which keeps the tests behaviorally representative of
+the production schedule.
+
+### 8.8 — Behavior Preservation
+
+Phase 8 does not intentionally change gameplay behavior.
+
+The split preserves:
+
+- global toggle priority
+- interaction-before-movement ordering
+- movement cooldown behavior
+- mode blocking rules
+- exploration interaction routing
+- exploration movement behavior
+- dialogue-cancel-on-move behavior
+- movement-triggered victory-overlay cleanup
+
+This phase changes only the Bevy orchestration shape, not the intended player
+experience.
+
+### 8.9 — Architecture and Scope Compliance
+
+Phase 8 is the natural culmination of the staged extraction workflow from
+`docs/explanation/input_refactor_plan.md`.
+
+It does not:
+
+- change `GameMode`
+- change `GameState`
+- change domain-layer movement or interaction semantics
+- change the input data model
+- introduce new campaign or fixture behavior
+
+Instead, it finishes the Bevy-layer refactor so the runtime structure now
+matches the already-extracted helper/module structure.
+
+This aligns with the architecture goal of separating concerns across focused,
+composable systems rather than concentrating all input orchestration in one
+large function.
+
+### 8.10 — Deliverables Completed
+
+- [x] monolithic Bevy input system replaced with multiple focused systems
+- [x] global toggle handling runs in its own Bevy system
+- [x] exploration interaction runs in its own Bevy system
+- [x] exploration movement runs in its own Bevy system
+- [x] explicit ordering preserved in scheduling
+- [x] movement-coupled cleanup intentionally retained with movement
+- [x] input-focused test setup updated to register the split systems
+- [x] `docs/explanation/implementations.md` updated
+
+### 8.11 — Outcome
+
+After Phase 8, the input code is split cleanly at both levels:
+
+- helper/module level
+- Bevy system scheduling level
+
+The input pipeline is now much easier to follow:
+
+1. global toggles
+2. exploration interaction
+3. exploration movement
+
+That is the intended endpoint of the Bevy-system split phase and resolves the
+last major monolithic structure identified in the refactor plan.
+
 ## Phase 7: Exploration Movement Extraction (Complete)
 
 ### Overview

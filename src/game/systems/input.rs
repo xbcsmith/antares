@@ -112,7 +112,14 @@ impl Plugin for InputPlugin {
         // signal Phase 3's UI when the player interacts with a locked door.
         app.init_resource::<LockInteractionPending>();
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
     }
 }
 
@@ -128,10 +135,11 @@ pub struct InputConfigResource {
     pub key_map: KeyMap,
 }
 
-/// Handle keyboard input and translate to game actions.
+/// Handles top-of-frame global toggle input before exploration-specific systems.
 ///
-/// This system processes keyboard input using the configured key mappings,
-/// applies movement cooldown, and updates game state accordingly.
+/// This system decodes the current frame input and applies only the global mode
+/// toggles (menu, automap, inventory, and rest). Later input systems run after
+/// this one so the established priority order remains explicit in scheduling.
 ///
 /// Phase 6: exploration mouse-to-interact currently uses the documented
 /// fallback centre-screen click heuristic from the mouse-input plan rather than
@@ -143,36 +151,99 @@ pub struct InputConfigResource {
 /// routing behavior.
 /// TODO: Upgrade this fallback to full world picking once clickable entity
 /// picking is wired for exploration meshes and billboards.
+fn handle_global_input_toggles(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    input_config: Res<InputConfigResource>,
+    mut global_state: ResMut<GlobalState>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    game_content: Option<Res<crate::application::resources::GameContent>>,
+) {
+    let frame_input = decode_frame_input(
+        &input_config.key_map,
+        &keyboard_input,
+        &mouse_buttons,
+        primary_window.single().ok(),
+    );
+
+    let _frame_consumed =
+        handle_global_mode_toggles(&mut global_state.0, frame_input, game_content.as_deref());
+}
+
+/// Handles exploration interaction input after global toggles have run.
+///
+/// This system preserves the existing interaction-before-movement ordering while
+/// delegating the actual exploration interaction behavior to the extracted
+/// interaction module.
 #[allow(clippy::too_many_arguments)]
-fn handle_input(
-    mut commands: Commands,
+fn handle_exploration_input_interact(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     input_config: Res<InputConfigResource>,
     mut global_state: ResMut<GlobalState>,
     mut map_event_messages: MessageWriter<MapEventTriggered>,
     mut recruitment_context: ResMut<PendingRecruitmentContext>,
-
-    time: Res<Time>,
-    mut last_move_time: Local<f32>,
-    victory_roots: Query<Entity, With<crate::game::systems::combat::VictorySummaryRoot>>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
-
     primary_window: Query<&Window, With<PrimaryWindow>>,
     game_content: Option<Res<crate::application::resources::GameContent>>,
-    // Query for furniture door entities — provides open/locked state and
-    // allows toggling the door transform without a full map respawn.
     mut door_entity_query: Query<(
         &mut FurnitureEntity,
         &mut DoorState,
         &mut Transform,
         &TileCoord,
     )>,
-    // Game log for player-visible feedback messages (e.g. "Door is locked.")
     mut game_log: ResMut<GameLog>,
-    // Phase 2 (locks): resource that signals Phase 3's UI when the player
-    // interacts with a locked door or container.
     mut lock_pending: ResMut<LockInteractionPending>,
+) {
+    let frame_input = decode_frame_input(
+        &input_config.key_map,
+        &keyboard_input,
+        &mouse_buttons,
+        primary_window.single().ok(),
+    );
+    let game_state = &mut global_state.0;
+
+    if input_blocked_for_mode(&game_state.mode) {
+        return;
+    }
+
+    if interaction_blocked_for_mode(&game_state.mode) || !frame_input.is_interact_attempt() {
+        return;
+    }
+
+    let _interaction_handled = handle_exploration_interact(
+        game_state,
+        &mut map_event_messages,
+        &mut recruitment_context,
+        &npc_query,
+        game_content.as_deref(),
+        &mut door_entity_query,
+        &mut game_log,
+        &mut lock_pending,
+    );
+}
+
+/// Handles exploration movement and turning after interaction has had a chance
+/// to consume the frame.
+#[allow(clippy::too_many_arguments)]
+fn handle_exploration_input_movement(
+    mut commands: Commands,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    input_config: Res<InputConfigResource>,
+    mut global_state: ResMut<GlobalState>,
+    time: Res<Time>,
+    mut last_move_time: Local<f32>,
+    victory_roots: Query<Entity, With<crate::game::systems::combat::VictorySummaryRoot>>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    game_content: Option<Res<crate::application::resources::GameContent>>,
+    door_entity_query: Query<(
+        &mut FurnitureEntity,
+        &mut DoorState,
+        &mut Transform,
+        &TileCoord,
+    )>,
+    mut game_log: ResMut<GameLog>,
 ) {
     let current_time = time.elapsed_secs();
     let cooldown = input_config.controls.movement_cooldown;
@@ -182,50 +253,21 @@ fn handle_input(
         &mouse_buttons,
         primary_window.single().ok(),
     );
-
-    if handle_global_mode_toggles(&mut global_state.0, frame_input, game_content.as_deref()) {
-        return;
-    }
-
-    // Throttle movement input using cooldown. Only block when an actual movement
-    // action is being attempted.
-    if movement_blocked_by_cooldown(frame_input, current_time, *last_move_time, cooldown) {
-        // Movement attempted but still within cooldown window - ignore movement input.
-        return;
-    }
-
     let game_state = &mut global_state.0;
 
-    // Global toggles were already handled above before movement cooldown checks.
-    // The remaining flow allows movement in Dialogue (to preserve move-to-cancel)
-    // while centralizing the explicit mode-blocking rules in `mode_guards.rs`.
     if input_blocked_for_mode(&game_state.mode) {
         return;
     }
 
-    // Interact - check for doors, NPCs, signs, teleports
-    //
-    // NOTE: We intentionally use "pressed" (not "just pressed") for keyboard
-    // interaction so behavior stays consistent with the existing movement model
-    // and door behavior, and so headless tests can exercise interaction without
-    // depending on per-frame edge detection.
-    //
-    // Phase 6 fallback mouse path: a left click inside the centre third of the
-    // primary window is treated as an `Interact` action on the tile directly
-    // ahead of the party. This reuses the exact same logic below rather than
-    // duplicating event-routing behavior.
-    if !interaction_blocked_for_mode(&game_state.mode) && frame_input.is_interact_attempt() {
-        let _interaction_handled = handle_exploration_interact(
-            game_state,
-            &mut map_event_messages,
-            &mut recruitment_context,
-            &npc_query,
-            game_content.as_deref(),
-            &mut door_entity_query,
-            &mut game_log,
-            &mut lock_pending,
-        );
-    } else if handle_exploration_movement(
+    if movement_blocked_by_cooldown(frame_input, current_time, *last_move_time, cooldown) {
+        return;
+    }
+
+    if frame_input.is_interact_attempt() && !interaction_blocked_for_mode(&game_state.mode) {
+        return;
+    }
+
+    if handle_exploration_movement(
         &mut commands,
         frame_input,
         game_state,
@@ -275,7 +317,14 @@ mod dialogue_inventory_tests {
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
         app
     }
 
@@ -441,7 +490,14 @@ mod integration_tests {
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
         app
     }
 
@@ -473,8 +529,15 @@ mod integration_tests {
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
 
-        // Add the handle_input system (the system under test)
-        app.add_systems(Update, handle_input);
+        // Add the split input systems under test
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Press Escape - should open the menu
         {
@@ -524,8 +587,15 @@ mod integration_tests {
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
 
-        // Add just the input system (we want to simulate input frames)
-        app.add_systems(Update, handle_input);
+        // Add the split input systems so frames process input in explicit order
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Frame 1: press MoveForward
         {
@@ -570,8 +640,15 @@ mod integration_tests {
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
 
-        // Add the input system so frames process input
-        app.add_systems(Update, handle_input);
+        // Add the split input systems so frames process input in explicit order
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Single frame: press MoveForward and Menu at the same time
         {
@@ -1266,8 +1343,15 @@ mod inventory_guard_tests {
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
 
-        // Register the system under test.
-        app.add_systems(Update, handle_input);
+        // Register the split systems under test.
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Press MoveForward (W key per default config).
         {
@@ -1314,7 +1398,14 @@ mod inventory_guard_tests {
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Press TurnLeft (A key per default config).
         {
@@ -1375,7 +1466,14 @@ mod combat_guard_tests {
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Press MoveForward (W key per default config).
         {
@@ -1427,7 +1525,14 @@ mod combat_guard_tests {
         app.world_mut()
             .spawn(crate::game::systems::combat::VictorySummaryRoot);
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Turn left (movement control) to trigger post-combat overlay dismissal.
         {
@@ -1499,7 +1604,14 @@ mod door_interaction_tests {
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
         app
     }
 
@@ -1943,7 +2055,14 @@ mod locked_container_map_event_tests {
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
         app
     }
 
@@ -2141,7 +2260,14 @@ mod locked_door_map_event_tests {
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
         app
     }
 
