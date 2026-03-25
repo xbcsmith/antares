@@ -47,6 +47,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 mod exploration_interact;
+mod exploration_movement;
 mod frame_input;
 mod global_toggles;
 mod helpers;
@@ -56,6 +57,9 @@ mod mode_guards;
 mod world_click;
 
 pub use exploration_interact::handle_exploration_interact;
+pub use exploration_movement::{
+    handle_exploration_movement, is_movement_attempt, movement_blocked_by_cooldown,
+};
 pub use frame_input::{decode_frame_input, FrameInputIntent};
 pub use global_toggles::handle_global_mode_toggles;
 pub use helpers::get_adjacent_positions;
@@ -185,9 +189,7 @@ fn handle_input(
 
     // Throttle movement input using cooldown. Only block when an actual movement
     // action is being attempted.
-    let is_movement_attempt = frame_input.is_movement_attempt();
-
-    if is_movement_attempt && (current_time - *last_move_time < cooldown) {
+    if movement_blocked_by_cooldown(frame_input, current_time, *last_move_time, cooldown) {
         // Movement attempted but still within cooldown window - ignore movement input.
         return;
     }
@@ -201,8 +203,6 @@ fn handle_input(
         return;
     }
 
-    let mut moved = false;
-
     // Interact - check for doors, NPCs, signs, teleports
     //
     // NOTE: We intentionally use "pressed" (not "just pressed") for keyboard
@@ -215,7 +215,7 @@ fn handle_input(
     // ahead of the party. This reuses the exact same logic below rather than
     // duplicating event-routing behavior.
     if !interaction_blocked_for_mode(&game_state.mode) && frame_input.is_interact_attempt() {
-        if handle_exploration_interact(
+        let _interaction_handled = handle_exploration_interact(
             game_state,
             &mut map_event_messages,
             &mut recruitment_context,
@@ -224,133 +224,18 @@ fn handle_input(
             &mut door_entity_query,
             &mut game_log,
             &mut lock_pending,
-        ) {
-            return;
-        }
-    }
-    // Move forward
-    else if frame_input.move_forward {
-        let target = game_state.world.position_ahead();
-        let facing = game_state.world.party_facing;
-
-        // Phase 3: deny movement into a locked furniture door, surfacing
-        // MovementError::DoorLocked semantics at the input layer.
-        let locked_door_ahead = door_entity_query
-            .iter()
-            .any(|(_, ds, _, tc)| tc.0 == target && ds.is_locked && !ds.is_open);
-
-        if locked_door_ahead {
-            let msg = "The door is locked.".to_string();
-            info!("{}", msg);
-            game_log.add(msg);
-        } else if let Some(content) = game_content.as_deref() {
-            match game_state.move_party_and_handle_events(facing, content.db()) {
-                Ok(()) => moved = true,
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::DoorLocked(_, _),
-                )) => {
-                    let msg = "The door is locked.".to_string();
-                    info!("{}", msg);
-                    game_log.add(msg);
-                }
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::Blocked(_, _),
-                )) => {}
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::OutOfBounds(_, _),
-                )) => {}
-                Err(err) => {
-                    warn!("move forward failed: {}", err);
-                }
-            }
-        } else if let Some(map) = game_state.world.get_current_map() {
-            if !map.is_blocked(target) {
-                game_state.world.set_party_position(target);
-                moved = true;
-            }
-        }
-    }
-    // Move backward
-    else if frame_input.move_back {
-        // Route backward movement through the same world movement path so
-        // fog-of-war reveal and tile events stay in sync with position updates.
-        let back_facing = game_state.world.party_facing.turn_left().turn_left();
-
-        if let Some(content) = game_content.as_deref() {
-            match game_state.move_party_and_handle_events(back_facing, content.db()) {
-                Ok(()) => moved = true,
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::DoorLocked(_, _),
-                )) => {
-                    let msg = "The door is locked.".to_string();
-                    info!("{}", msg);
-                    game_log.add(msg);
-                }
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::Blocked(_, _),
-                )) => {}
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::OutOfBounds(_, _),
-                )) => {}
-                Err(err) => {
-                    warn!("move backward failed: {}", err);
-                }
-            }
-        } else {
-            let target = back_facing.forward(game_state.world.party_position);
-            if let Some(map) = game_state.world.get_current_map() {
-                if !map.is_blocked(target) {
-                    game_state.world.set_party_position(target);
-                    moved = true;
-                }
-            }
-        }
-    }
-    // Turn left
-    else if frame_input.turn_left {
-        game_state.world.turn_left();
-        if matches!(game_state.mode, crate::application::GameMode::Exploration) {
-            let party_position = game_state.world.party_position;
-            crate::domain::world::mark_visible_area(
-                &mut game_state.world,
-                party_position,
-                crate::domain::world::VISIBILITY_RADIUS,
-            );
-        }
-        moved = true;
-    }
-    // Turn right
-    else if frame_input.turn_right {
-        game_state.world.turn_right();
-        if matches!(game_state.mode, crate::application::GameMode::Exploration) {
-            let party_position = game_state.world.party_position;
-            crate::domain::world::mark_visible_area(
-                &mut game_state.world,
-                party_position,
-                crate::domain::world::VISIBILITY_RADIUS,
-            );
-        }
-        moved = true;
-    }
-
-    if moved {
-        *last_move_time = current_time;
-
-        // If we moved while in Dialogue mode, cancel the dialogue
-        if matches!(game_state.mode, crate::application::GameMode::Dialogue(_)) {
-            info!("Movement detected during dialogue - cancelling dialogue");
-            // Switch back to exploration mode
-            game_state.mode = crate::application::GameMode::Exploration;
-        }
-
-        // Dismiss post-combat victory overlay once normal movement controls are
-        // used again in exploration flow.
-        if moved {
-            for entity in victory_roots.iter() {
-                commands.entity(entity).despawn();
-            }
-        }
-
+        );
+    } else if handle_exploration_movement(
+        &mut commands,
+        frame_input,
+        game_state,
+        game_content.as_deref(),
+        &door_entity_query,
+        &mut game_log,
+        current_time,
+        &mut last_move_time,
+        &victory_roots,
+    ) {
         // TODO: Check for events at new position (Phase 4)
     }
 }

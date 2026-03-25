@@ -1,5 +1,212 @@
 # Implementations
 
+## Phase 7: Exploration Movement Extraction (Complete)
+
+### Overview
+
+Phase 7 extracts exploration movement and turning behavior from
+`src/game/systems/input.rs` into a dedicated movement module so the monolithic
+input system no longer owns cooldown gating, forward and backward movement,
+turning, and movement-coupled side effects inline. The goal of this phase is to
+separate exploration movement from exploration interaction while preserving
+movement priority, cooldown semantics, dialogue-cancel-on-move behavior, and
+victory-overlay cleanup.
+
+### Problem Statement
+
+After Phase 6 extracted exploration interaction, the input system was much
+smaller, but the remaining movement branch still combined several distinct
+responsibilities in one place:
+
+- movement-attempt detection for cooldown gating
+- cooldown blocking logic
+- forward movement
+- backward movement
+- turn-left and turn-right handling
+- visibility refresh during turning
+- movement-time updates
+- dialogue cancellation on movement
+- victory-overlay cleanup after movement
+
+That meant movement and interaction were still asymmetrical in structure: the
+interaction flow had a dedicated module, but movement behavior remained inline in
+the input system. Phase 7 therefore isolates exploration movement behind a
+focused helper module.
+
+### Files Changed
+
+| File                                             | Change                                                                          |
+| ------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `src/game/systems/input.rs`                      | Replaced inline movement and cooldown logic with calls into the movement helper |
+| `src/game/systems/input/exploration_movement.rs` | Added movement-attempt, cooldown, and exploration movement helpers              |
+| `docs/explanation/implementations.md`            | Added this Phase 7 implementation summary                                       |
+
+---
+
+### 7.1 — Added `exploration_movement.rs`
+
+Phase 7 introduces a dedicated movement module:
+
+- `src/game/systems/input/exploration_movement.rs`
+
+This module now owns the extracted exploration movement flow and provides the
+main entry point:
+
+- `handle_exploration_movement(...) -> bool`
+
+That helper returns whether movement or turning was performed and consumed the
+frame, preserving the existing calling pattern from `handle_input`.
+
+### 7.2 — Added Focused Movement Helpers
+
+Per the refactor plan, the movement module now provides focused helpers for the
+movement layer:
+
+- `is_movement_attempt(...)`
+- `movement_blocked_by_cooldown(...)`
+- `handle_exploration_movement(...) -> bool`
+
+It also encapsulates internal movement operations behind smaller helpers:
+
+- `handle_move_forward(...)`
+- `handle_move_back(...)`
+- `handle_turn_left(...)`
+- `handle_turn_right(...)`
+- `refresh_visibility_if_exploring(...)`
+- `log_locked_door(...)`
+
+This keeps the main movement entry point readable and groups related behavior by
+responsibility rather than leaving one long inline movement branch in
+`handle_input`.
+
+### 7.3 — Cooldown Gating Now Lives with Movement
+
+Before this phase, movement cooldown gating was still performed inline in
+`handle_input`.
+
+Phase 7 moves that policy into the movement layer via
+`movement_blocked_by_cooldown(...)`, which now owns the rule:
+
+- cooldown applies only when the frame contains a movement attempt
+- forward, backward, turn-left, and turn-right all count as movement attempts
+
+This keeps cooldown logic next to the movement behavior it governs and reduces
+cross-cutting movement policy inside the top-level input system.
+
+### 7.4 — Preserved Movement Priority and Semantics
+
+The extracted movement module preserves the existing movement priority exactly:
+
+1. move forward
+2. move backward
+3. turn left
+4. turn right
+
+That ordering matters because only one movement path should consume the frame,
+and it matches the original inline logic in `handle_input`.
+
+The extracted module also preserves the original movement semantics:
+
+- forward movement still checks for locked furniture doors directly ahead
+- forward and backward movement still route through
+  `move_party_and_handle_events(...)` when content is available
+- fallback map-blocking movement still applies when content is unavailable
+- turning still refreshes visibility in exploration mode
+- locked-door movement still logs the same standard player-visible message
+
+### 7.5 — Movement-Coupled Side Effects Preserved
+
+Phase 7 explicitly keeps the movement-coupled side effects in the movement layer,
+as called for in the plan.
+
+That includes:
+
+- updating `last_move_time` after successful movement or turning
+- cancelling dialogue when movement occurs during dialogue mode
+- despawning post-combat victory overlays after movement resumes
+
+These behaviors are still coupled to successful movement semantics, so they
+remain part of the extracted movement flow rather than being split out
+prematurely.
+
+### 7.6 — `handle_input` Is Now Focused on Orchestration
+
+After this extraction, `handle_input` no longer owns the inline movement branch
+or cooldown implementation details.
+
+At a high level, the input system now reads as:
+
+- decode frame input
+- handle global toggles
+- apply movement cooldown policy
+- apply mode guards
+- delegate exploration interaction
+- delegate exploration movement
+
+That is the intended structural benefit of this phase: movement logic is now
+independent from interaction logic, which makes both easier to follow.
+
+### 7.7 — Behavior Preservation
+
+Phase 7 does not intentionally change gameplay behavior.
+
+The extracted movement module preserves:
+
+- movement attempt grouping
+- cooldown timing semantics
+- forward and backward movement behavior
+- turning behavior
+- visibility refresh on turn in exploration mode
+- dialogue cancellation on move
+- victory overlay cleanup on move
+- locked-door feedback messages
+
+This phase changes ownership and structure, not the intended player-facing
+results.
+
+### 7.8 — Architecture and Scope Compliance
+
+Phase 7 remains within the staged extraction workflow from
+`docs/explanation/input_refactor_plan.md`.
+
+It does not:
+
+- change `GameMode`
+- change `GameState`
+- change movement rules or world data structures
+- split the Bevy input system into multiple systems yet
+- alter exploration interaction behavior
+
+Instead, it gives exploration movement the same kind of focused ownership
+boundary that exploration interaction received in Phase 6.
+
+### 7.9 — Deliverables Completed
+
+- [x] `exploration_movement.rs` created
+- [x] `is_movement_attempt(...)` added
+- [x] `movement_blocked_by_cooldown(...)` added
+- [x] `handle_exploration_movement(...) -> bool` added
+- [x] forward movement moved into the extracted module
+- [x] backward movement moved into the extracted module
+- [x] turn-left / turn-right handling moved into the extracted module
+- [x] cooldown gating moved into the movement layer
+- [x] movement-time update logic moved into the movement layer
+- [x] move-triggered dialogue cancellation preserved in the movement layer
+- [x] move-triggered victory-overlay cleanup preserved in the movement layer
+- [x] `docs/explanation/implementations.md` updated
+
+### 7.10 — Outcome
+
+After Phase 7, both major exploration branches now have dedicated ownership
+boundaries:
+
+- exploration interaction
+- exploration movement
+
+That significantly reduces the remaining complexity inside `handle_input` and
+prepares the codebase for the next planned step: splitting the monolithic input
+system into multiple Bevy systems.
+
 ## Phase 6: Exploration Interaction Extraction (Complete)
 
 ### Overview
