@@ -108,8 +108,9 @@ impl Plugin for InputPlugin {
             key_map,
         });
 
-        // Phase 2 (locks): register LockInteractionPending so handle_input can
-        // signal Phase 3's UI when the player interacts with a locked door.
+        // Register lock-interaction state so the split exploration interaction
+        // system can signal lock UI when the player interacts with a locked
+        // door or container.
         app.init_resource::<LockInteractionPending>();
 
         app.add_systems(
@@ -140,17 +141,6 @@ pub struct InputConfigResource {
 /// This system decodes the current frame input and applies only the global mode
 /// toggles (menu, automap, inventory, and rest). Later input systems run after
 /// this one so the established priority order remains explicit in scheduling.
-///
-/// Phase 6: exploration mouse-to-interact currently uses the documented
-/// fallback centre-screen click heuristic from the mouse-input plan rather than
-/// full Bevy mesh picking. A left mouse click inside the centre third of the
-/// primary window is treated as the same interaction target as the keyboard
-/// `Interact` action: the tile directly ahead of the party plus the existing
-/// adjacent-tile and NPC interaction checks. This keeps keyboard and mouse
-/// exploration interaction on the same canonical logic path with no duplicated
-/// routing behavior.
-/// TODO: Upgrade this fallback to full world picking once clickable entity
-/// picking is wired for exploration meshes and billboards.
 fn handle_global_input_toggles(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
@@ -278,7 +268,8 @@ fn handle_exploration_input_movement(
         &mut last_move_time,
         &victory_roots,
     ) {
-        // TODO: Check for events at new position (Phase 4)
+        // Future follow-up: evaluate whether any move-triggered event check
+        // should be separated further from movement orchestration.
     }
 }
 
@@ -290,10 +281,10 @@ mod dialogue_inventory_tests {
     use crate::sdk::database::ContentDatabase;
     use bevy::prelude::{App, ButtonInput, KeyCode, Time, Update};
 
-    /// Helper: build a minimal Bevy app for I-key-in-dialogue tests.
+    /// Helper: build a minimal Bevy app for dialogue inventory-toggle tests.
     ///
     /// Inserts a `GameContent` resource populated with the given `ContentDatabase`
-    /// so the `handle_input` system can resolve NPC definitions.
+    /// so the split input systems can resolve NPC definitions.
     fn build_dialogue_input_app(
         db: ContentDatabase,
         initial_mode: crate::application::GameMode,
@@ -472,7 +463,7 @@ mod integration_tests {
     use bevy::prelude::{App, ButtonInput, KeyCode, Time, Update};
 
     /// Helper: build a minimal Bevy `App` wired up with all resources and
-    /// message channels that `handle_input` requires.
+    /// message channels that the split input systems require.
     fn build_input_app() -> App {
         let mut app = App::new();
         app.insert_resource(ButtonInput::<KeyCode>::default());
@@ -650,13 +641,14 @@ mod integration_tests {
             ),
         );
 
-        // Single frame: press MoveForward and Menu at the same time
+        // Single frame: press MoveForward and Menu at the same time.
+        // With the split systems, global toggles run first and consume the
+        // frame, so one update is sufficient to verify priority.
         {
             let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
             btn.press(KeyCode::ArrowUp);
             btn.press(KeyCode::Escape);
         }
-        app.update();
         app.update();
 
         let gs = app.world().resource::<GlobalState>();
@@ -728,7 +720,7 @@ mod integration_tests {
             "Expected exactly one interaction event"
         );
         match &triggered_events[0].event {
-            MapEvent::NpcDialogue { npc_id, .. } => {
+            crate::domain::world::MapEvent::NpcDialogue { npc_id, .. } => {
                 assert_eq!(npc_id, "test_npc");
             }
             other => panic!("Expected NpcDialogue event, got {:?}", other),
@@ -1165,7 +1157,7 @@ mod interaction_tests {
         let sign_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             sign_pos,
-            MapEvent::Sign {
+            crate::domain::world::MapEvent::Sign {
                 name: "TestSign".to_string(),
                 description: "This is a test sign".to_string(),
                 text: "You found it!".to_string(),
@@ -1179,7 +1171,10 @@ mod interaction_tests {
 
         // Assert
         assert!(event.is_some());
-        assert!(matches!(event, Some(MapEvent::Sign { .. })));
+        assert!(matches!(
+            event,
+            Some(crate::domain::world::MapEvent::Sign { .. })
+        ));
     }
 
     /// Test that teleport events are properly stored and retrievable.
@@ -1193,7 +1188,7 @@ mod interaction_tests {
         let teleport_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             teleport_pos,
-            MapEvent::Teleport {
+            crate::domain::world::MapEvent::Teleport {
                 name: "TestPortal".to_string(),
                 description: "Portal to destination".to_string(),
                 destination: crate::domain::types::Position::new(2, 2),
@@ -1206,7 +1201,10 @@ mod interaction_tests {
 
         // Assert
         assert!(event.is_some());
-        assert!(matches!(event, Some(MapEvent::Teleport { .. })));
+        assert!(matches!(
+            event,
+            Some(crate::domain::world::MapEvent::Teleport { .. })
+        ));
     }
 
     /// Test that NPC placements are properly stored and retrievable.
@@ -1244,7 +1242,7 @@ mod interaction_tests {
         let recruit_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             recruit_pos,
-            MapEvent::RecruitableCharacter {
+            crate::domain::world::MapEvent::RecruitableCharacter {
                 name: "TestRecruit".to_string(),
                 description: "A recruitable character".to_string(),
                 character_id: "hero_01".to_string(),
@@ -1259,9 +1257,14 @@ mod interaction_tests {
 
         // Assert
         assert!(event.is_some());
-        assert!(matches!(event, Some(MapEvent::RecruitableCharacter { .. })));
-        if let Some(MapEvent::RecruitableCharacter {
-            character_id, name, ..
+        assert!(matches!(
+            event,
+            Some(crate::domain::world::MapEvent::RecruitableCharacter { .. })
+        ));
+        if let Some(crate::domain::world::MapEvent::RecruitableCharacter {
+            character_id,
+            name,
+            ..
         }) = event
         {
             assert_eq!(character_id, "hero_01");
@@ -1280,7 +1283,7 @@ mod interaction_tests {
         let encounter_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             encounter_pos,
-            MapEvent::Encounter {
+            crate::domain::world::MapEvent::Encounter {
                 name: "Skeleton".to_string(),
                 description: "A rattling skeleton".to_string(),
                 monster_group: vec![1],
@@ -1297,13 +1300,16 @@ mod interaction_tests {
 
         // Assert
         assert!(event.is_some());
-        assert!(matches!(event, Some(MapEvent::Encounter { .. })));
+        assert!(matches!(
+            event,
+            Some(crate::domain::world::MapEvent::Encounter { .. })
+        ));
     }
 }
 
-/// T1-8: Verify that `handle_input` silently ignores all movement input when
-/// `GameMode::Combat` is active.  The party position must remain unchanged after
-/// pressing the forward-movement key.
+/// T1-8: Verify that the split input systems silently ignore all movement input
+/// when `GameMode::Combat` is active. The party position must remain unchanged
+/// after pressing the forward-movement key.
 #[cfg(test)]
 mod inventory_guard_tests {
     use super::*;
@@ -1339,7 +1345,7 @@ mod inventory_guard_tests {
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.init_resource::<LockInteractionPending>();
 
-        // Register message channels that handle_input depends on.
+        // Register message channels that the split input systems depend on.
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
 
@@ -1431,7 +1437,7 @@ mod combat_guard_tests {
     fn test_movement_blocked_in_combat_mode() {
         let mut app = App::new();
 
-        // Minimal resources required by handle_input.
+        // Minimal resources required by the split input systems.
         app.insert_resource(ButtonInput::<KeyCode>::default());
         app.insert_resource(ButtonInput::<MouseButton>::default());
 
@@ -1452,7 +1458,7 @@ mod combat_guard_tests {
             crate::domain::character::Alignment::Good,
         );
         gs.party.add_member(hero).unwrap();
-        // enter_combat sets GameMode::Combat so the guard in handle_input fires.
+        // enter_combat sets GameMode::Combat so the split movement/input guards fire.
         gs.enter_combat();
         let original_position = gs.world.party_position;
 
@@ -1462,7 +1468,7 @@ mod combat_guard_tests {
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.init_resource::<LockInteractionPending>();
 
-        // Register message channels that handle_input depends on.
+        // Register message channels that the split input systems depend on.
         app.add_message::<MapEventTriggered>();
         app.add_message::<InitiateRestEvent>();
 

@@ -1,5 +1,175 @@
 # Implementations
 
+## Phase 10: Final Cleanup and Documentation Pass (Complete)
+
+### Overview
+
+Phase 10 completes the input refactor with a final cleanup pass focused on
+naming clarity, stale-comment removal, documentation polish, and final
+maintainability improvements. The goal of this phase is not to introduce new
+input behavior, but to make the finished structure easier for future
+contributors to understand and extend.
+
+### Problem Statement
+
+By the end of Phase 9, the input refactor had already achieved its structural
+goals:
+
+- key mapping was separated from gameplay execution
+- world-click fallback was isolated
+- global toggles, mode guards, interaction, and movement were extracted
+- the monolithic Bevy input system had been split into smaller systems
+- tests had begun moving toward module-local ownership
+
+However, final polish work still remained:
+
+- some comments still referred to the old single-system structure
+- some helper and test descriptions still used outdated wording
+- the final orchestration shape needed a documented closing summary
+- the implementation log needed a final pass reflecting the completed refactor
+
+Phase 10 therefore focuses on cleanup and documentation rather than behavioral
+change.
+
+### Files Changed
+
+| File                                  | Change                                                         |
+| ------------------------------------- | -------------------------------------------------------------- |
+| `src/game/systems/input.rs`           | Removed stale monolithic-system wording and refreshed comments |
+| `docs/explanation/implementations.md` | Added this Phase 10 implementation summary                     |
+
+---
+
+### 10.1 — Removed Stale Structural Comments
+
+The largest cleanup item in this phase was removing comments that still referred
+to the previous monolithic `handle_input` structure after the Bevy-layer split
+had already been completed.
+
+This included updating comments that previously implied:
+
+- one system still owned all input responsibilities
+- lock interaction state was registered specifically for the old orchestration
+  path
+- test helpers were still building around a single input system
+
+Those comments were refreshed so they now describe the actual final structure:
+an explicitly ordered set of smaller systems layered over extracted helper
+modules.
+
+### 10.2 — Clarified Final Responsibility Boundaries
+
+Phase 10 also tightens the wording around the final responsibility boundaries in
+the input stack.
+
+After the full refactor, the canonical structure is:
+
+- key decoding and frame intent
+- global mode toggles
+- mode guards
+- world-click fallback
+- exploration interaction
+- exploration movement
+- ordered Bevy orchestration across multiple systems
+
+The cleanup pass makes that structure easier to see in the source by ensuring
+comments and descriptions align with the final design rather than intermediate
+states from earlier phases.
+
+### 10.3 — Preserved the Canonical Mouse/Input Model
+
+The final cleanup pass keeps the documented mouse interaction model consistent
+with the refactor’s final structure.
+
+In particular:
+
+- the center-screen exploration fallback remains isolated behind the world-click
+  helper boundary
+- exploration interaction continues to treat mouse fallback and keyboard
+  interaction as the same canonical interaction path
+- no new ad-hoc mouse handling path was introduced during cleanup
+
+This means the code comments now better match the final canonical model already
+established during earlier phases.
+
+### 10.4 — Documentation Is Now Aligned with the Finished Refactor
+
+This phase also updates the implementation summary file to reflect the fact that
+the refactor has now passed through all planned structural stages.
+
+The project now has a single explanation log that documents the whole input
+refactor from:
+
+- low-risk helper extraction
+- decoded frame intent
+- global toggle extraction
+- mode guard extraction
+- world-click isolation
+- exploration interaction extraction
+- exploration movement extraction
+- Bevy system split
+- test restructuring
+- final cleanup
+
+That gives future contributors a complete trail of what changed and why.
+
+### 10.5 — Behavior Preservation
+
+Phase 10 does not intentionally change gameplay behavior.
+
+This phase is explicitly a cleanup/documentation pass, so it preserves:
+
+- global toggle priority
+- interaction-before-movement ordering
+- world-click fallback semantics
+- movement cooldown behavior
+- dialogue movement cancellation
+- victory overlay cleanup after movement
+- extracted module ownership boundaries
+
+The value of this phase is clarity, not new runtime semantics.
+
+### 10.6 — Architecture and Scope Compliance
+
+Phase 10 remains within the documented final-cleanup scope from the refactor
+plan.
+
+It does not:
+
+- alter `GameMode`
+- alter `GameState`
+- change interaction semantics
+- change movement semantics
+- introduce new files or new architectural data structures
+- change campaign or fixture behavior
+
+Instead, it completes the refactor by making the finished structure easier to
+read, verify, and maintain.
+
+### 10.7 — Deliverables Completed
+
+- [x] stale comments referring to the old structure were removed or updated
+- [x] final wording was aligned to the split-system architecture
+- [x] documentation now reflects the completed refactor
+- [x] `docs/explanation/implementations.md` updated with the final cleanup pass
+
+### 10.8 — Outcome
+
+After Phase 10, the input refactor is complete as a maintainable final shape
+rather than just a sequence of extractions.
+
+The final structure is now clearer for future contributors:
+
+- input decoding is separate from behavior execution
+- exploration interaction is separate from movement
+- world-click fallback is isolated behind a dedicated helper
+- Bevy orchestration is split into smaller ordered systems
+- tests are moving toward ownership-based placement
+- documentation reflects the finished design instead of intermediate stages
+
+This completes the planned input refactor lifecycle and leaves the codebase in a
+more understandable and extensible state.
+
 ## Phase 9: Test Restructuring (Complete)
 
 ### Overview

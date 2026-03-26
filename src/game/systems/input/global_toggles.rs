@@ -169,7 +169,6 @@ mod tests {
     use crate::application::dialogue::DialogueState;
     use crate::application::resources::GameContent;
     use crate::domain::character::{Alignment, Character, Sex};
-    use crate::domain::combat::state::CombatState;
     use crate::domain::world::npc::NpcDefinition;
     use crate::sdk::database::ContentDatabase;
 
@@ -229,7 +228,7 @@ mod tests {
             Alignment::Good,
         );
         state.party.add_member(hero).unwrap();
-        state.mode = GameMode::Combat(CombatState::new(&state.party));
+        state.enter_combat();
         state
     }
 
