@@ -3,11 +3,11 @@
 
 //! Exploration movement helpers.
 //!
-//! This module isolates exploration movement and turning behavior from the
-//! monolithic input system. It owns movement-attempt detection, cooldown
-//! gating, forward/backward movement, turning, dialogue-cancel-on-move
-//! behavior, and victory-overlay cleanup coupling that currently remains part
-//! of movement semantics.
+//! This module isolates exploration movement and turning behavior for the split
+//! input systems. It owns movement-attempt detection, cooldown gating,
+//! forward/backward movement, turning, dialogue-cancel-on-move behavior, and
+//! victory-overlay cleanup coupling that currently remains part of movement
+//! semantics.
 
 use crate::application::resources::GameContent;
 use crate::application::{GameMode, GameState, MoveHandleError};

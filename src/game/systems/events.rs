@@ -123,9 +123,9 @@ fn check_for_events(
                     }
                     // Phase 2 (locks): LockedDoor and LockedContainer tiles are
                     // blocked so the party cannot physically stand on them. Skip
-                    // auto-triggering here; interaction is driven by the E-key
-                    // path in `handle_input` (or explicit MapEventTriggered in
-                    // tests).
+                    // auto-triggering here; interaction is driven by the split
+                    // exploration-interaction input path (or explicit
+                    // `MapEventTriggered` in tests).
                     MapEvent::LockedDoor { .. } | MapEvent::LockedContainer { .. } => {
                         info!(
                             "Party at {:?} is on a LockedDoor/LockedContainer event; \
@@ -692,10 +692,11 @@ fn handle_events(
             }
 
             // Phase 2 (locks): handle a LockedDoor event triggered via
-            // MapEventTriggered (e.g. from programmatic tests or a future
+            // `MapEventTriggered` (e.g. from programmatic tests or a future
             // game-world trigger system). The primary player path goes through
-            // `handle_input`, but this arm handles the same logic for the
-            // message-triggered path so both paths are consistent.
+            // the split exploration-interaction input flow, but this arm
+            // handles the same logic for the message-triggered path so both
+            // paths are consistent.
             MapEvent::LockedDoor {
                 name,
                 lock_id,
@@ -2145,8 +2146,9 @@ mod tests {
 /// `MapEventTriggered` message sets `LockInteractionPending`.
 ///
 /// These tests exercise the `handle_events` match arm for `LockedDoor` that
-/// was added in Phase 2. The primary player path goes through `handle_input`,
-/// but `handle_events` must handle the same logic for programmatic tests and
+/// was added in Phase 2. The primary player path goes through the split
+/// exploration-interaction input flow, but `handle_events` must handle the same
+/// logic for programmatic tests and
 /// future game-world trigger systems.
 #[cfg(test)]
 mod locked_door_event_tests {

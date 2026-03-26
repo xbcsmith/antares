@@ -3,11 +3,10 @@
 
 //! Exploration interaction helpers.
 //!
-//! This module owns the exploration `Interact` flow that was previously embedded
-//! directly in the monolithic input system. The helpers here preserve the
-//! existing interaction order while isolating furniture doors, locked map
-//! events, adjacent NPC / recruitable routing, and adjacent world-event checks
-//! behind a single entry point.
+//! This module owns the exploration `Interact` flow used by the split input
+//! systems. The helpers here preserve the existing interaction order while
+//! isolating furniture doors, locked map events, adjacent NPC / recruitable
+//! routing, and adjacent world-event checks behind a single entry point.
 //!
 //! The intended top-level entry point is [`handle_exploration_interact`], which
 //! returns `true` when the interaction was handled and the calling system should

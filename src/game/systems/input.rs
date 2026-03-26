@@ -343,7 +343,7 @@ mod dialogue_inventory_tests {
     /// Pressing `I` while in `GameMode::Dialogue` with a merchant NPC must
     /// transition the game mode to `GameMode::MerchantInventory`.
     #[test]
-    fn test_handle_input_i_in_dialogue_with_merchant_opens_merchant_inventory() {
+    fn test_split_input_i_in_dialogue_with_merchant_opens_merchant_inventory() {
         let db = merchant_db();
         let initial_mode =
             crate::application::GameMode::Dialogue(dialogue_state_for("merchant_tom"));
@@ -369,7 +369,7 @@ mod dialogue_inventory_tests {
     /// Pressing `I` while in `GameMode::Dialogue` with a non-merchant NPC must
     /// leave the mode unchanged (still `Dialogue`).
     #[test]
-    fn test_handle_input_i_in_dialogue_with_non_merchant_does_not_open_inventory() {
+    fn test_split_input_i_in_dialogue_with_non_merchant_does_not_open_inventory() {
         let db = non_merchant_db();
         let initial_mode = crate::application::GameMode::Dialogue(dialogue_state_for("elder_bob"));
         let mut app = build_dialogue_input_app(db, initial_mode);
@@ -391,7 +391,7 @@ mod dialogue_inventory_tests {
     /// Pressing `I` while in `GameMode::Dialogue` with `npc_id: None` must
     /// do nothing — mode stays `Dialogue`.
     #[test]
-    fn test_handle_input_i_in_dialogue_with_no_npc_id_does_nothing() {
+    fn test_split_input_i_in_dialogue_with_no_npc_id_does_nothing() {
         let db = ContentDatabase::new();
         // DialogueState with speaker_npc_id = None
         let dialogue_state = crate::application::dialogue::DialogueState::start(1, 1, None, None);
@@ -658,7 +658,7 @@ mod integration_tests {
     /// Pressing `KeyCode::KeyI` in `GameMode::Exploration` must transition the
     /// mode to `GameMode::Inventory(_)`.
     #[test]
-    fn test_handle_input_i_opens_inventory() {
+    fn test_split_input_i_opens_inventory() {
         let mut app = build_input_app();
 
         // Press "I" – should open inventory
@@ -836,7 +836,7 @@ mod integration_tests {
     /// Pressing `KeyCode::KeyI` while already in `GameMode::Inventory` must
     /// restore the previous mode (toggle off).
     #[test]
-    fn test_handle_input_i_closes_inventory() {
+    fn test_split_input_i_closes_inventory() {
         let mut app = build_input_app();
 
         // Frame 1: open inventory
@@ -875,7 +875,7 @@ mod integration_tests {
     /// This test manually sets the game mode to `Menu` without using the
     /// keyboard so that no stale `just_pressed` state leaks between frames.
     #[test]
-    fn test_handle_input_i_ignored_in_menu_mode() {
+    fn test_split_input_i_ignored_in_menu_mode() {
         let mut app = build_input_app();
 
         // Place the game state directly into Menu mode without pressing ESC,
@@ -913,7 +913,7 @@ mod integration_tests {
     /// menu (`GameMode::RestMenu`).  No `InitiateRestEvent` is fired at this
     /// point — that happens when the player selects a duration from the menu.
     #[test]
-    fn test_handle_input_r_in_exploration_fires_initiate_rest_event() {
+    fn test_split_input_r_in_exploration_fires_initiate_rest_event() {
         let mut app = build_input_app();
 
         // Confirm we start in Exploration mode.
@@ -955,7 +955,7 @@ mod integration_tests {
     /// Pressing `R` while in `GameMode::Menu` must NOT open the rest menu
     /// and must NOT fire `InitiateRestEvent`.
     #[test]
-    fn test_handle_input_r_ignored_in_menu_mode() {
+    fn test_split_input_r_ignored_in_menu_mode() {
         let mut app = build_input_app();
 
         // Put game state into Menu mode directly.
@@ -993,7 +993,7 @@ mod integration_tests {
     /// Pressing `R` while in `GameMode::Inventory` must NOT open the rest menu
     /// and must NOT fire `InitiateRestEvent`.
     #[test]
-    fn test_handle_input_r_ignored_in_inventory_mode() {
+    fn test_split_input_r_ignored_in_inventory_mode() {
         let mut app = build_input_app();
 
         // Open inventory first (without pressing I, to avoid stale key state).
@@ -1031,7 +1031,7 @@ mod integration_tests {
     /// Pressing `R` while in `GameMode::Combat` must NOT open the rest menu
     /// and must NOT fire `InitiateRestEvent`.
     #[test]
-    fn test_handle_input_r_ignored_in_combat_mode() {
+    fn test_split_input_r_ignored_in_combat_mode() {
         let mut app = build_input_app();
 
         // Enter combat mode directly.
@@ -1077,7 +1077,7 @@ mod integration_tests {
     /// Pressing `R` in Exploration opens RestMenu.  Pressing `R` again while
     /// in RestMenu must be ignored (R only acts in Exploration mode).
     #[test]
-    fn test_handle_input_r_in_exploration_two_frames_two_events() {
+    fn test_split_input_r_in_exploration_two_frames_two_events() {
         let mut app = build_input_app();
 
         // Frame 1: press R in Exploration — opens RestMenu.

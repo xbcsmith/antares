@@ -8616,9 +8616,10 @@ mod tests {
         );
     }
 
-    /// T1-8: The `GameMode::Combat` guard in `handle_input` is validated by the
-    /// dedicated integration test `test_movement_blocked_in_combat_mode` located
-    /// in `src/game/systems/input.rs` (module `combat_guard_tests`).
+    /// T1-8: The `GameMode::Combat` guard in the split input systems is validated
+    /// by the dedicated integration test
+    /// `test_movement_blocked_in_combat_mode` located in
+    /// `src/game/systems/input.rs` (module `combat_guard_tests`).
     ///
     /// This stub asserts the precondition that entering combat mode sets the mode
     /// correctly, confirming the guard has something to match against.
@@ -8639,7 +8640,7 @@ mod tests {
 
         assert!(
             matches!(gs.mode, crate::application::GameMode::Combat(_)),
-            "GameMode must be Combat after enter_combat() so the handle_input guard fires"
+            "GameMode must be Combat after enter_combat() so the split input-system combat guard fires"
         );
     }
 

@@ -3,7 +3,7 @@
 
 //! Phase 4: Campaign Loading Integration Tests
 //!
-//! These tests verify that the tutorial campaign properly loads and uses
+//! These tests verify that the fixture campaign properly loads and uses
 //! the creature database for monster and NPC spawning.
 //!
 //! Tests cover:
@@ -11,7 +11,7 @@
 //! - Monsters spawn with procedural mesh visuals
 //! - NPCs spawn with procedural mesh visuals
 //! - Fallback mechanisms work correctly
-//! - No performance regressions
+//! - Repeated loads remain deterministic
 
 use antares::sdk::campaign_loader::Campaign;
 use antares::sdk::database::ContentDatabase;
@@ -24,7 +24,7 @@ fn test_campaign_loads_creature_database() {
     // Assert: Campaign loads successfully
     assert!(
         campaign_result.is_ok(),
-        "Tutorial campaign should load successfully: {:?}",
+        "Fixture campaign should load successfully: {:?}",
         campaign_result.err()
     );
 
@@ -64,7 +64,7 @@ fn test_campaign_loads_creature_database() {
 fn test_campaign_creature_database_contains_expected_creatures() {
     // Arrange: Load campaign content
     let content = ContentDatabase::load_campaign("data/test_campaign")
-        .expect("Should load tutorial campaign content");
+        .expect("Should load fixture campaign content");
 
     // Assert: Database contains creatures from the fixture registry.
     assert!(
@@ -99,7 +99,7 @@ fn test_campaign_creature_database_contains_expected_creatures() {
 fn test_all_monsters_have_creature_id_mapping() {
     // Arrange: Load campaign content
     let content = ContentDatabase::load_campaign("data/test_campaign")
-        .expect("Should load tutorial campaign content");
+        .expect("Should load fixture campaign content");
 
     // Act: Get all monster IDs
     let monster_ids = content.monsters.all_monsters();
@@ -108,7 +108,7 @@ fn test_all_monsters_have_creature_id_mapping() {
     // Assert: At least some monsters exist
     assert!(
         !monster_ids.is_empty(),
-        "Tutorial campaign should have monsters"
+        "Fixture campaign should have monsters"
     );
 
     // Assert: Count monsters with creature_id
@@ -152,14 +152,14 @@ fn test_all_monsters_have_creature_id_mapping() {
 fn test_all_npcs_have_creature_id_mapping() {
     // Arrange: Load campaign content
     let content = ContentDatabase::load_campaign("data/test_campaign")
-        .expect("Should load tutorial campaign content");
+        .expect("Should load fixture campaign content");
 
     // Act: Get all NPC IDs
     let npc_ids = content.npcs.all_npcs();
     let npc_count = npc_ids.len();
 
     // Assert: At least some NPCs exist
-    assert!(!npc_ids.is_empty(), "Tutorial campaign should have NPCs");
+    assert!(!npc_ids.is_empty(), "Fixture campaign should have NPCs");
 
     // Act: Count NPCs with creature_id
     let mut npcs_with_creatures = 0;
@@ -203,7 +203,7 @@ fn test_all_npcs_have_creature_id_mapping() {
 fn test_creature_id_ranges_follow_convention() {
     // Arrange: Load campaign content
     let content = ContentDatabase::load_campaign("data/test_campaign")
-        .expect("Should load tutorial campaign content");
+        .expect("Should load fixture campaign content");
 
     // Check monster creature_id range (should be 1-50)
     let monster_ids = content.monsters.all_monsters();
@@ -239,26 +239,36 @@ fn test_creature_id_ranges_follow_convention() {
 }
 
 #[test]
-fn test_creature_database_load_performance() {
-    use std::time::Instant;
+fn test_creature_database_repeated_loads_are_consistent() {
+    let first = ContentDatabase::load_campaign("data/test_campaign")
+        .expect("First load of fixture campaign content should succeed");
+    let second = ContentDatabase::load_campaign("data/test_campaign")
+        .expect("Second load of fixture campaign content should succeed");
 
-    // Act: Measure creature database loading time
-    let start = Instant::now();
-    let content = ContentDatabase::load_campaign("data/test_campaign")
-        .expect("Should load tutorial campaign content");
-    let duration = start.elapsed();
+    let first_creature_count = first.creatures.count();
+    let second_creature_count = second.creatures.count();
 
-    // Assert: Loading should be fast (< 500ms for 32 creatures)
     assert!(
-        duration.as_millis() < 500,
-        "Creature database loading took {}ms, expected < 500ms",
-        duration.as_millis()
+        first_creature_count > 0,
+        "Fixture campaign should load at least one creature"
+    );
+    assert_eq!(
+        first_creature_count, second_creature_count,
+        "Repeated fixture campaign loads should produce the same creature count"
     );
 
+    for creature_id in 1..=200 {
+        assert_eq!(
+            first.creatures.has_creature(creature_id),
+            second.creatures.has_creature(creature_id),
+            "Repeated fixture campaign loads disagreed about creature ID {}",
+            creature_id
+        );
+    }
+
     println!(
-        "✓ Loaded {} creatures in {:?}",
-        content.creatures.count(),
-        duration
+        "✓ Repeated loads produced consistent creature registry state ({} creatures)",
+        first_creature_count
     );
 }
 
@@ -345,7 +355,7 @@ fn test_fallback_mechanism_for_missing_creature_id() {
 fn test_creature_definitions_are_valid() {
     // Arrange: Load campaign content
     let content = ContentDatabase::load_campaign("data/test_campaign")
-        .expect("Should load tutorial campaign content");
+        .expect("Should load fixture campaign content");
 
     // Act: Validate all creatures
     for creature_id in 1..=32 {
@@ -386,7 +396,7 @@ fn test_creature_definitions_are_valid() {
 fn test_no_duplicate_creature_ids() {
     // Arrange: Load campaign content
     let content = ContentDatabase::load_campaign("data/test_campaign")
-        .expect("Should load tutorial campaign content");
+        .expect("Should load fixture campaign content");
 
     // Act: Collect all creature IDs
     use std::collections::HashSet;

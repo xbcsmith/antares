@@ -681,10 +681,9 @@ fn inventory_input_system(
     // ── Phase: SlotNavigation ──────────────────────────────────────────────
 
     // NOTE: The configured inventory toggle key ("I" by default) is intentionally
-    // NOT handled here.  `handle_input` (InputPlugin) owns the open/close toggle
-    // for that key.  Duplicating it here would cause the inventory to open and
-    // close in the same frame because both systems run in Update with no ordering
-    // guarantee between them.
+    // NOT handled here. The split input systems owned by `InputPlugin` handle the
+    // open/close toggle for that key before inventory UI input runs. Duplicating
+    // it here would cause the inventory to open and close in the same frame.
 
     // Esc in slot mode — close inventory
     if keyboard.just_pressed(KeyCode::Escape) {

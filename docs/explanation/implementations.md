@@ -33,10 +33,17 @@ change.
 
 ### Files Changed
 
-| File                                  | Change                                                         |
-| ------------------------------------- | -------------------------------------------------------------- |
-| `src/game/systems/input.rs`           | Removed stale monolithic-system wording and refreshed comments |
-| `docs/explanation/implementations.md` | Added this Phase 10 implementation summary                     |
+| File                                             | Change                                                                    |
+| ------------------------------------------------ | ------------------------------------------------------------------------- |
+| `src/game/systems/input.rs`                      | Aligned integration-test naming and refreshed split-system comments       |
+| `src/game/systems/input/exploration_interact.rs` | Updated module docs to describe the final split input architecture        |
+| `src/game/systems/input/exploration_movement.rs` | Updated module docs to describe the final split input architecture        |
+| `src/game/systems/events.rs`                     | Removed stale `handle_input` references from lock-interaction comments    |
+| `src/game/systems/inventory_ui.rs`               | Clarified that inventory toggling is owned by the split input systems     |
+| `src/game/systems/map.rs`                        | Refreshed lock-initialization comments for the exploration input flow     |
+| `src/game/systems/procedural_meshes.rs`          | Updated door-interaction comments to match the extracted input flow       |
+| `src/game/systems/combat.rs`                     | Refreshed cross-reference comments for the split combat input guard       |
+| `docs/explanation/implementations.md`            | Updated this Phase 10 implementation summary to reflect completed cleanup |
 
 ---
 
@@ -46,16 +53,20 @@ The largest cleanup item in this phase was removing comments that still referred
 to the previous monolithic `handle_input` structure after the Bevy-layer split
 had already been completed.
 
-This included updating comments that previously implied:
+This cleanup was applied across the input-adjacent systems that still described
+lock interaction, inventory toggles, or door interaction in terms of the old
+single-system path.
 
-- one system still owned all input responsibilities
-- lock interaction state was registered specifically for the old orchestration
-  path
-- test helpers were still building around a single input system
+The refreshed comments now describe the actual final structure:
 
-Those comments were refreshed so they now describe the actual final structure:
-an explicitly ordered set of smaller systems layered over extracted helper
-modules.
+- global toggles run first
+- exploration interaction runs next
+- exploration movement runs after interaction
+- shared supporting systems describe that ordered split flow rather than a
+  retired `handle_input` entry point
+
+That makes the surrounding systems read consistently with the finished input
+architecture instead of an intermediate refactor state.
 
 ### 10.2 — Clarified Final Responsibility Boundaries
 
@@ -72,9 +83,13 @@ After the full refactor, the canonical structure is:
 - exploration movement
 - ordered Bevy orchestration across multiple systems
 
-The cleanup pass makes that structure easier to see in the source by ensuring
-comments and descriptions align with the final design rather than intermediate
-states from earlier phases.
+This phase also aligns test naming with that final architecture. Integration
+tests that still used `handle_input_*` names were updated to refer to the split
+input flow explicitly, which makes the remaining test inventory easier to scan
+and less tied to the pre-refactor implementation shape.
+
+The cleanup pass therefore improves both source comments and test readability so
+the final design is visible in code, docs, and test names.
 
 ### 10.3 — Preserved the Canonical Mouse/Input Model
 
@@ -87,6 +102,8 @@ In particular:
   helper boundary
 - exploration interaction continues to treat mouse fallback and keyboard
   interaction as the same canonical interaction path
+- the broader Bevy UI mouse helper model in `mouse_input.rs` remains the
+  canonical shared activation rule for UI widgets
 - no new ad-hoc mouse handling path was introduced during cleanup
 
 This means the code comments now better match the final canonical model already
@@ -150,6 +167,8 @@ read, verify, and maintain.
 
 - [x] stale comments referring to the old structure were removed or updated
 - [x] final wording was aligned to the split-system architecture
+- [x] input integration-test naming was aligned with the split-system model
+- [x] mouse/input documentation remains consistent with the final canonical model
 - [x] documentation now reflects the completed refactor
 - [x] `docs/explanation/implementations.md` updated with the final cleanup pass
 

@@ -141,8 +141,8 @@ impl Plugin for MapManagerPlugin {
             // Phase 3: register SetFacing message and proximity/facing systems
             .add_plugins(crate::game::systems::facing::FacingPlugin)
             // Phase 2 (locks): seed lock_states for every map present at startup.
-            // This runs once before the first frame so that player interaction
-            // (handle_input E-key path) can find lock entries immediately.
+            // This runs once before the first frame so that the split
+            // exploration-interaction input flow can find lock entries immediately.
             .add_systems(Startup, init_map_lock_states_system)
             // Process explicit map change requests first, then let the marker
             // spawner observe the changed world state and spawn/despawn accordingly.
@@ -417,8 +417,9 @@ fn resolve_encounter_creature_id(
 ///
 /// Calling [`Map::init_lock_states`] is idempotent — it skips any lock whose
 /// `lock_id` is already present in `lock_states` — so it is safe to call
-/// multiple times.  However, it must run before any player interaction so that
-/// `handle_input`'s E-key path can look up lock entries immediately.
+/// multiple times. However, it must run before any player interaction so that
+/// the split exploration-interaction input flow can look up lock entries
+/// immediately.
 ///
 /// # Examples
 ///
