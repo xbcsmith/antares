@@ -1,5 +1,172 @@
 # Implementations
 
+## Phase 1: Merchant Dialogue Policy and Metadata Foundation (Complete)
+
+### Overview
+
+Phase 1 establishes the merchant dialogue authoring contract and the metadata
+foundation needed for later SDK automation.
+
+The core goal of this phase is to make merchant-capable dialogue
+machine-checkable and non-destructively manageable before any Campaign Builder
+automation starts creating, augmenting, or removing merchant dialogue content.
+
+### Problem Statement
+
+Before this phase, the codebase had runtime support for merchant opening through
+`DialogueAction::OpenMerchant { npc_id }`, but it lacked a structured content
+policy for merchant dialogue authoring.
+
+That created several gaps:
+
+- merchant-capable dialogue was not defined as an explicit contract
+- there was no structured metadata to distinguish SDK-managed merchant content
+  from author-authored dialogue
+- there was no shared helper surface for creating, augmenting, detecting, or
+  removing merchant dialogue content
+- later SDK phases would have had to rely on brittle text conventions or
+  destructive rewrites
+
+Phase 1 addresses those gaps in the dialogue domain model first so later SDK
+phases can build on explicit, reversible behavior.
+
+### Files Changed
+
+| File                                          | Change                                                                          |
+| --------------------------------------------- | ------------------------------------------------------------------------------- |
+| `src/domain/dialogue.rs`                      | Added merchant dialogue metadata, helper APIs, template generation, and tests   |
+| `sdk/campaign_builder/src/npc_editor.rs`      | Documented merchant dialogue policy touchpoints for future NPC editor work      |
+| `sdk/campaign_builder/src/dialogue_editor.rs` | Documented merchant dialogue policy touchpoints for future dialogue editor work |
+| `docs/explanation/implementations.md`         | Added this Phase 1 implementation summary                                       |
+
+---
+
+### 1.1 — Merchant Dialogue Contract Is Now Explicit
+
+This phase defines the machine-checkable merchant dialogue rule directly in the
+dialogue domain layer:
+
+- merchant-capable dialogue must explicitly contain
+  `DialogueAction::OpenMerchant { npc_id }`
+
+That rule is now encoded through helper APIs on `DialogueTree` and
+`DialogueAction` rather than remaining an implicit runtime assumption.
+
+The key helper added is:
+
+- `DialogueTree::contains_open_merchant_for_npc(...)`
+
+This gives later SDK phases a precise way to validate or repair merchant
+dialogue content.
+
+### 1.2 — SDK-Managed Merchant Metadata Was Added
+
+To support non-destructive merchant dialogue insertion and removal, this phase
+adds structured SDK-owned metadata:
+
+- `DialogueSdkMetadata`
+- `DialogueSdkManagedContent`
+
+These markers identify SDK-managed merchant content such as:
+
+- full merchant template trees
+- inserted merchant branches
+- SDK-managed merchant choices
+- SDK-managed merchant open nodes
+
+This is the foundation that later phases will use to distinguish:
+
+- author-created dialogue content
+- SDK-generated or SDK-inserted merchant content
+
+That distinction is necessary so merchant disablement can remove only the
+machine-managed merchant pieces while preserving unrelated authored dialogue.
+
+### 1.3 — Standard Merchant Template Rules Were Implemented in the Domain Model
+
+Phase 1 also implements the standard merchant template foundation directly in
+`src/domain/dialogue.rs`.
+
+The new helper surface includes:
+
+- `DialogueTree::standard_merchant_template(...)`
+- `DialogueTree::ensure_standard_merchant_branch(...)`
+- `DialogueTree::remove_sdk_managed_merchant_content(...)`
+- `DialogueTree::next_available_node_id(...)`
+- `DialogueTree::has_sdk_managed_merchant_content(...)`
+- `DialogueNode::has_sdk_managed_merchant_content(...)`
+- `DialogueChoice::sdk_managed_merchant_choice(...)`
+- `DialogueChoice::is_sdk_managed_merchant_choice(...)`
+- `DialogueAction::opens_merchant_for_npc(...)`
+
+This gives the project a deterministic, reusable foundation for the later SDK
+phases that will actually wire merchant lifecycle behavior into the Campaign
+Builder.
+
+### 1.4 — Augmentation and Removal Rules Are Now Reversible
+
+The implementation follows the planned non-destructive model:
+
+- merchant augmentation occurs at the root node
+- SDK-managed merchant content is inserted in a deterministic way
+- merchant removal deletes only SDK-managed merchant choices and nodes
+- unrelated custom nodes and choices remain intact
+
+This is the key architectural outcome of Phase 1: merchant dialogue lifecycle
+operations can now be reasoned about as reversible content transformations
+rather than destructive overwrites.
+
+### 1.5 — SDK Integration Points Were Documented
+
+Phase 1 also updates the key Campaign Builder editor modules with policy-level
+documentation so later implementation phases have clear integration anchors:
+
+- `sdk/campaign_builder/src/npc_editor.rs`
+- `sdk/campaign_builder/src/dialogue_editor.rs`
+
+These edits do not yet automate merchant generation or repair in the UI, but
+they document where that lifecycle work will attach and why those editors are
+the correct integration points.
+
+### 1.6 — Test Coverage Added for the Foundation Rules
+
+Focused in-memory tests were added in `src/domain/dialogue.rs` to cover the new
+foundation behavior:
+
+- standard merchant template contains explicit `OpenMerchant`
+- SDK metadata is applied to merchant-managed content
+- merchant branch insertion works for existing dialogue
+- insertion is a no-op when merchant content already exists
+- removal preserves unrelated custom dialogue content
+- insertion is idempotent
+- removal is idempotent
+- merchant action matching uses exact NPC IDs
+
+These tests keep the merchant dialogue foundation deterministic and safe for
+later SDK automation phases.
+
+### 1.7 — Deliverables Completed
+
+- [x] Merchant dialogue validity contract defined and documented
+- [x] SDK-managed merchant metadata strategy defined
+- [x] Standard merchant template shape defined
+- [x] Helper surface for detect/create/augment/remove merchant dialogue behavior designed
+- [x] Foundation tests specified and implemented
+
+### 1.8 — Outcome
+
+After Phase 1, the project now has a dialogue-domain foundation that supports
+the planned merchant authoring workflow without relying on brittle heuristics.
+
+The key result is not UI automation yet, but explicit structure:
+
+- merchant dialogue validity is machine-checkable
+- SDK-managed merchant content is distinguishable
+- standard merchant content can be generated deterministically
+- merchant branches can be inserted non-destructively
+- merchant branches can be removed non-destructively
+- later SDK phases now have a safe, reusable foundation to build on
+
 ## Phase 10: Final Cleanup and Documentation Pass (Complete)
 
 ### Overview

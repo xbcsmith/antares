@@ -237,6 +237,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: false,
+            sdk_metadata: Default::default(),
         });
         tree.add_node(node);
 
@@ -268,6 +269,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: false,
+            sdk_metadata: Default::default(),
         });
         tree.add_node(node1);
 
@@ -287,6 +289,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: false,
+            sdk_metadata: Default::default(),
         });
         tree.add_node(node1);
 
@@ -297,6 +300,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: false,
+            sdk_metadata: Default::default(),
         });
         tree.add_node(node2);
 
@@ -307,6 +311,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: false,
+            sdk_metadata: Default::default(),
         });
         tree.add_node(node3);
 
@@ -328,6 +333,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: false,
+            sdk_metadata: Default::default(),
         });
         node1.choices.push(DialogueChoice {
             text: "Farewell".to_string(),
@@ -335,6 +341,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: true,
+            sdk_metadata: Default::default(),
         });
         tree.add_node(node1);
 
@@ -345,6 +352,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: false,
+            sdk_metadata: Default::default(),
         });
         tree.add_node(node2);
 
@@ -365,6 +373,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: false,
+            sdk_metadata: Default::default(),
         });
         tree.add_node(node1);
 
@@ -375,6 +384,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: false,
+            sdk_metadata: Default::default(),
         });
         tree.add_node(node2);
 
@@ -385,6 +395,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: false,
+            sdk_metadata: Default::default(),
         });
         node3.choices.push(DialogueChoice {
             text: "Exit to 4".to_string(),
@@ -392,6 +403,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: false,
+            sdk_metadata: Default::default(),
         });
         tree.add_node(node3);
 
@@ -402,6 +414,7 @@ mod tests {
             conditions: vec![],
             actions: vec![],
             ends_dialogue: true,
+            sdk_metadata: Default::default(),
         });
         tree.add_node(node4);
 

@@ -19,6 +19,28 @@
 //! - Portrait path validation
 //! - Import/export RON support
 //!
+//! # Merchant Dialogue Policy
+//!
+//! Phase 1 of the merchant dialogue template plan establishes the authoring
+//! contract that merchant NPCs must have dialogue with an explicit
+//! `DialogueAction::OpenMerchant { npc_id }` path. The SDK-facing policy
+//! touchpoints in this editor are:
+//!
+//! - `NpcDefinition::is_merchant` and `NpcDefinition::dialogue_id` must be
+//!   treated as linked authoring data, not independent fields
+//! - SDK-managed merchant dialogue content must remain distinguishable from
+//!   author-authored dialogue content so later phases can insert and remove
+//!   merchant branches non-destructively
+//! - enabling merchant behavior for an NPC will eventually require either
+//!   generating a standard merchant dialogue tree or augmenting the assigned
+//!   tree with a standard merchant branch
+//! - disabling merchant behavior for an NPC must eventually remove only
+//!   SDK-managed merchant dialogue content, leaving the rest of the assigned
+//!   dialogue intact
+//!
+//! Phase 1 does not yet automate those lifecycle changes in this editor, but
+//! this module is one of the primary integration points for that later work.
+//!
 //! # Architecture
 //!
 //! Follows standard SDK editor pattern:
@@ -46,7 +68,12 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-/// Editor state for NPC editing
+/// Editor state for NPC editing.
+///
+/// Merchant dialogue lifecycle work integrates here in later phases because the
+/// editor already owns the merchant-role toggle, the dialogue assignment field,
+/// and the loaded dialogue collection used to inspect or repair merchant
+/// dialogue compliance.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct NpcEditorState {
     /// All NPC definitions being edited
@@ -163,7 +190,13 @@ pub enum NpcEditorMode {
     Edit,
 }
 
-/// Buffer for NPC form fields
+/// Buffer for NPC form fields.
+///
+/// The combination of `is_merchant` and `dialogue_id` is a merchant-dialogue
+/// policy touchpoint. A merchant NPC is considered valid only when its assigned
+/// dialogue tree explicitly contains `DialogueAction::OpenMerchant { npc_id }`.
+/// Later phases use this buffer as the source of truth when deciding whether
+/// merchant dialogue must be generated, augmented, or cleaned up.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NpcEditBuffer {
     pub id: String,
@@ -254,10 +287,15 @@ impl NpcEditorState {
 
     /// Shows the NPC editor UI
     ///
+    /// Merchant dialogue policy is intentionally surfaced here because this
+    /// method receives the loaded dialogue trees that later phases must inspect
+    /// for explicit `OpenMerchant` support before persisting merchant NPC
+    /// changes.
+    ///
     /// # Arguments
     ///
     /// * `ui` - The egui UI context
-    /// * `dialogues` - Available dialogue trees for autocomplete
+    /// * `dialogues` - Available dialogue trees for autocomplete and merchant dialogue policy checks
     /// * `quests` - Available quests for multi-select
     /// * `campaign_dir` - Optional campaign directory for portrait loading
     /// * `display_config` - Display configuration for layout
@@ -641,6 +679,9 @@ impl NpcEditorState {
                 // Role badges
                 if npc.is_merchant {
                     ui.label(egui::RichText::new("🏪 Merchant").color(egui::Color32::GOLD));
+                    ui.small(
+                        "Merchant policy: assigned dialogue must explicitly contain an OpenMerchant action.",
+                    );
                 }
                 if npc.is_innkeeper {
                     ui.label(egui::RichText::new("🛏️ Innkeeper").color(egui::Color32::LIGHT_BLUE));

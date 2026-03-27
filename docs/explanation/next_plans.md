@@ -63,7 +63,7 @@ Work required:
 
 Write a plan with a phased approach to implementing game-wide mouse input support in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Game Wide Mouse Input Support](./game_wide_mouse_input_support_plan.md)
+✅ COMPLETED - [Game Wide Mouse Input Support](./game_wide_mouse_input_support_plan.md)
 
 ### Game Log
 

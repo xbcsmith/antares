@@ -18,6 +18,22 @@
 //! - Condition and action configuration
 //! - Dialogue tree validation and preview
 //! - Import/export RON support
+//!
+//! # Merchant Dialogue Policy
+//!
+//! Phase 1 of the merchant dialogue template plan establishes the dialogue-side
+//! authoring contract for merchant NPCs.
+//!
+//! Merchant-capable dialogue must:
+//!
+//! - explicitly contain `DialogueAction::OpenMerchant { npc_id }`
+//! - remain distinguishable when merchant content was generated or inserted by
+//!   the SDK
+//! - support later non-destructive removal of SDK-managed merchant content
+//!
+//! This editor is a primary policy touchpoint because later phases will use it
+//! to inspect, display, and preserve SDK-managed merchant branches inside
+//! otherwise custom dialogue trees.
 
 use crate::ui_helpers::{
     autocomplete_item_selector, autocomplete_quest_selector, show_standard_list_item,
@@ -35,7 +51,11 @@ use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Editor state for dialogue tree editing
+/// Editor state for dialogue tree editing.
+///
+/// Merchant dialogue lifecycle work integrates here in later phases because the
+/// editor owns the loaded dialogue trees that must be inspected for explicit
+/// `OpenMerchant` support and for SDK-managed merchant metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DialogueEditorState {
     /// All dialogue trees being edited
@@ -125,7 +145,11 @@ pub enum DialogueEditorMode {
     Editing,
 }
 
-/// Buffer for dialogue tree form fields
+/// Buffer for dialogue tree form fields.
+///
+/// Merchant dialogue policy later uses the edited tree identity and display
+/// metadata as the stable anchor for SDK-generated merchant templates and
+/// SDK-inserted merchant branches.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DialogueEditBuffer {
     pub id: String,
