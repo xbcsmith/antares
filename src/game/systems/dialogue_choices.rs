@@ -19,20 +19,32 @@ use crate::application::GameMode;
 use crate::game::components::dialogue::*;
 use crate::game::resources::GlobalState;
 use crate::game::systems::dialogue::SelectDialogueChoice;
+use crate::game::systems::mouse_input;
 
 /// Spawns dialogue choice UI when choices become available
 ///
 /// This system attaches screen-space choice entries as children of the
 /// `DialogueChoiceList` node created by the dialogue panel. It uses a column
 /// layout and creates a lightweight `Node` per choice that contains the
-/// `Text`, `TextFont`, `TextColor`, `BackgroundColor` and `DialogueChoiceButton`
-/// marker components.
+/// `Text`, `TextFont`, `TextColor`, `BackgroundColor`, `Button`, `Interaction`,
+/// `ChoiceButton`, and `DialogueChoiceButton` marker components.
 ///
 /// Conditions for spawn:
 /// - Game is in Dialogue mode
 /// - Choices are available in the current dialogue state
 /// - No choices have been spawned (tracked via `ChoiceSelectionState`)
 /// - A `DialogueChoiceList` container exists (created by the dialogue panel)
+///
+/// Marker component attached to clickable dialogue choice rows.
+///
+/// This records the logical dialogue choice index so mouse activation can emit
+/// the same `SelectDialogueChoice` message used by keyboard input.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChoiceButton {
+    /// Index of the dialogue choice represented by this row.
+    pub choice_index: usize,
+}
+
 pub fn spawn_choice_ui(
     mut commands: Commands,
     global_state: Res<GlobalState>,
@@ -107,6 +119,8 @@ pub fn spawn_choice_ui(
             // Each choice is a Node with text and selection marker
             let choice_entity = commands
                 .spawn((
+                    Button,
+                    Interaction::None,
                     Node {
                         margin: UiRect::vertical(Val::Px(4.0)),
                         padding: UiRect::all(Val::Px(6.0)),
@@ -122,6 +136,9 @@ pub fn spawn_choice_ui(
                         ..default()
                     },
                     TextColor(text_color),
+                    ChoiceButton {
+                        choice_index: index,
+                    },
                     DialogueChoiceButton {
                         choice_index: index,
                         selected,
@@ -196,9 +213,11 @@ pub fn update_choice_visuals(
 /// * `mut ev_select` - Message writer for SelectDialogueChoice messages
 pub fn choice_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
     mut global_state: ResMut<GlobalState>,
     mut choice_state: ResMut<ChoiceSelectionState>,
     mut ev_select: MessageWriter<SelectDialogueChoice>,
+    interaction_query: Query<(&Interaction, Ref<Interaction>, &ChoiceButton), With<Button>>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Dialogue(_)) {
         return;
@@ -223,6 +242,24 @@ pub fn choice_input_system(
 
     if choice_state.choice_count == 0 {
         return; // No choices available, and not closing
+    }
+
+    let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
+
+    for (interaction, interaction_ref, choice_button) in interaction_query.iter() {
+        if mouse_input::is_activated(
+            interaction,
+            interaction_ref.is_changed(),
+            mouse_just_pressed,
+        ) && choice_button.choice_index < choice_state.choice_count
+        {
+            ev_select.write(SelectDialogueChoice {
+                choice_index: choice_button.choice_index,
+            });
+            choice_state.selected_index = 0;
+            choice_state.choice_count = 0;
+            return;
+        }
     }
 
     // Navigate up
@@ -325,6 +362,8 @@ mod tests {
     fn test_choice_list_component_marker() {
         // Verify new screen-space marker exists
         let _list = DialogueChoiceList;
+        let button = ChoiceButton { choice_index: 1 };
+        assert_eq!(button.choice_index, 1);
         // Component should compile and be usable - verified by type checking
     }
 
@@ -597,5 +636,126 @@ mod tests {
         let choice_state = app.world().resource::<ChoiceSelectionState>();
         assert_eq!(choice_state.choice_count, 0);
         assert_eq!(choice_state.selected_index, 0);
+    }
+
+    #[test]
+    fn test_mouse_click_choice_dispatches_select() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<SelectDialogueChoice>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.insert_resource(ChoiceSelectionState {
+            selected_index: 1,
+            choice_count: 3,
+        });
+        app.insert_resource(ButtonInput::<MouseButton>::default());
+        app.add_systems(Update, choice_input_system);
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.mode =
+                GameMode::Dialogue(crate::application::dialogue::DialogueState::start_simple(
+                    "Hello".to_string(),
+                    "Speaker".to_string(),
+                    None,
+                    None,
+                ));
+        }
+
+        app.world_mut().spawn((
+            Button,
+            Interaction::Pressed,
+            ChoiceButton { choice_index: 1 },
+        ));
+
+        app.update();
+
+        let reader = app
+            .world_mut()
+            .resource_mut::<Messages<SelectDialogueChoice>>();
+        let mut cursor = reader.get_cursor();
+        let events: Vec<_> = cursor.read(&reader).cloned().collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].choice_index, 1);
+    }
+
+    #[test]
+    fn test_mouse_hover_choice_does_not_select() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<SelectDialogueChoice>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.insert_resource(ChoiceSelectionState {
+            selected_index: 1,
+            choice_count: 3,
+        });
+        app.insert_resource(ButtonInput::<MouseButton>::default());
+        app.add_systems(Update, choice_input_system);
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.mode =
+                GameMode::Dialogue(crate::application::dialogue::DialogueState::start_simple(
+                    "Hello".to_string(),
+                    "Speaker".to_string(),
+                    None,
+                    None,
+                ));
+        }
+
+        app.world_mut().spawn((
+            Button,
+            Interaction::Hovered,
+            ChoiceButton { choice_index: 1 },
+        ));
+
+        app.update();
+
+        let reader = app
+            .world_mut()
+            .resource_mut::<Messages<SelectDialogueChoice>>();
+        let mut cursor = reader.get_cursor();
+        let events: Vec<_> = cursor.read(&reader).cloned().collect();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn test_mouse_click_choice_resets_choice_state() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<SelectDialogueChoice>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.insert_resource(ChoiceSelectionState {
+            selected_index: 2,
+            choice_count: 3,
+        });
+        app.insert_resource(ButtonInput::<MouseButton>::default());
+        app.add_systems(Update, choice_input_system);
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.mode =
+                GameMode::Dialogue(crate::application::dialogue::DialogueState::start_simple(
+                    "Hello".to_string(),
+                    "Speaker".to_string(),
+                    None,
+                    None,
+                ));
+        }
+
+        app.world_mut().spawn((
+            Button,
+            Interaction::Pressed,
+            ChoiceButton { choice_index: 1 },
+        ));
+
+        app.update();
+
+        let choice_state = app.world().resource::<ChoiceSelectionState>();
+        assert_eq!(choice_state.selected_index, 0);
+        assert_eq!(choice_state.choice_count, 0);
     }
 }

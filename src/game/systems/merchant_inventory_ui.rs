@@ -618,20 +618,18 @@ fn merchant_inventory_ui_system(
                     game_content.as_deref(),
                     &merchant_state.npc_id,
                 );
-                if let Some(ref r) = panel_result {
-                    match r {
-                        CharacterPanelResult::Sell(action) => {
-                            sell_writer.write(SellItemAction {
-                                npc_id: merchant_state.npc_id.clone(),
-                                character_index: action.character_index,
-                                slot_index: action.slot_index,
-                            });
-                        }
-                        CharacterPanelResult::SelectSlot(slot_idx) => {
-                            select_char_writer
-                                .write(SelectMerchantCharacterSlotAction { slot_index: *slot_idx });
-                        }
-                    }
+
+                if let Some(action) = panel_result.sell_action {
+                    sell_writer.write(SellItemAction {
+                        npc_id: merchant_state.npc_id.clone(),
+                        character_index: action.character_index,
+                        slot_index: action.slot_index,
+                    });
+                }
+
+                if let Some(slot_idx) = panel_result.clicked_slot {
+                    select_char_writer
+                        .write(SelectMerchantCharacterSlotAction { slot_index: slot_idx });
                 }
             });
 
@@ -653,21 +651,19 @@ fn merchant_inventory_ui_system(
                     &global_state,
                     game_content.as_deref(),
                 );
-                if let Some(ref r) = panel_result {
-                    match r {
-                        StockPanelResult::Buy(action) => {
-                            buy_writer.write(BuyItemAction {
-                                npc_id: action.npc_id.clone(),
-                                stock_index: action.stock_index,
-                                character_index: action.character_index,
-                            });
-                        }
-                        StockPanelResult::SelectSlot(slot_idx) => {
-                            select_stock_writer.write(SelectMerchantStockSlotAction {
-                                stock_index: *slot_idx,
-                            });
-                        }
-                    }
+
+                if let Some(action) = panel_result.buy_action {
+                    buy_writer.write(BuyItemAction {
+                        npc_id: action.npc_id.clone(),
+                        stock_index: action.stock_index,
+                        character_index: action.character_index,
+                    });
+                }
+
+                if let Some(slot_idx) = panel_result.clicked_row {
+                    select_stock_writer.write(SelectMerchantStockSlotAction {
+                        stock_index: slot_idx,
+                    });
                 }
             });
         });
@@ -682,15 +678,14 @@ struct SellAction {
     slot_index: usize,
 }
 
-/// Discriminated return value from `render_character_sell_panel`.
+/// Result returned from `render_character_sell_panel`.
 ///
-/// Either the player clicked the **Sell** button for the selected slot, or they
-/// mouse-clicked a cell to change the current selection.
-enum CharacterPanelResult {
-    /// Player clicked the Sell button — execute a sell action.
-    Sell(SellAction),
-    /// Player clicked an inventory cell — update the selection to this slot.
-    SelectSlot(usize),
+/// Carries both the optional action button click and the optional clicked slot
+/// so the caller can update selection state and enter action mode immediately
+/// when appropriate.
+struct CharacterPanelResult {
+    sell_action: Option<SellAction>,
+    clicked_slot: Option<usize>,
 }
 
 /// Render the character inventory panel (left side) and return a
@@ -706,14 +701,20 @@ fn render_character_sell_panel(
     global_state: &GlobalState,
     game_content: Option<&GameContent>,
     npc_id: &str,
-) -> Option<CharacterPanelResult> {
+) -> CharacterPanelResult {
     if party_index >= global_state.0.party.members.len() {
-        return None;
+        return CharacterPanelResult {
+            sell_action: None,
+            clicked_slot: None,
+        };
     }
 
     let character = &global_state.0.party.members[party_index];
     let items = &character.inventory.items;
-    let mut result: Option<CharacterPanelResult> = None;
+    let mut result = CharacterPanelResult {
+        sell_action: None,
+        clicked_slot: None,
+    };
 
     let has_action = selected_slot.map(|s| s < items.len()).unwrap_or(false);
     let action_reserve = if has_action { PANEL_ACTION_H } else { 0.0 };
@@ -857,8 +858,8 @@ fn render_character_sell_panel(
             }
 
             // Click → select this slot
-            if cell_response.clicked() && slot_idx < items.len() {
-                result = Some(CharacterPanelResult::SelectSlot(slot_idx));
+            if cell_response.clicked() {
+                result.clicked_slot = Some(slot_idx);
             }
         });
     }
@@ -916,10 +917,10 @@ fn render_character_sell_panel(
                         .on_hover_text(format!("Sell this item for {} gold", sell_price))
                         .clicked()
                     {
-                        result = Some(CharacterPanelResult::Sell(SellAction {
+                        result.sell_action = Some(SellAction {
                             character_index: party_index,
                             slot_index: slot_idx,
-                        }));
+                        });
                     }
                     ui.label(
                         egui::RichText::new(format!("Sell value: {} gp", sell_price))
@@ -934,14 +935,6 @@ fn render_character_sell_panel(
     result
 }
 
-/// Discriminated return value from `render_merchant_stock_panel`.
-enum StockPanelResult {
-    /// Player clicked the Buy button — execute a buy action.
-    Buy(BuyAction),
-    /// Player clicked a stock row — update the selection.
-    SelectSlot(usize),
-}
-
 /// Return value from `render_merchant_stock_panel`.
 struct BuyAction {
     npc_id: String,
@@ -949,8 +942,19 @@ struct BuyAction {
     character_index: usize,
 }
 
-/// Render the merchant stock panel (right side) and return a [`StockPanelResult`]
-/// describing any mouse interaction (row click → select, Buy button → buy).
+/// Result returned from `render_merchant_stock_panel`.
+///
+/// Carries both the optional buy action and the optional clicked stock row so
+/// the caller can update merchant selection state and enter action mode
+/// immediately when the row has content.
+struct MerchantStockPanelResult {
+    buy_action: Option<BuyAction>,
+    clicked_row: Option<usize>,
+}
+
+/// Render the merchant stock panel (right side) and return a
+/// [`MerchantStockPanelResult`] describing any mouse interaction
+/// (row click → select, Buy button → buy).
 #[allow(clippy::too_many_arguments)]
 fn render_merchant_stock_panel(
     ui: &mut egui::Ui,
@@ -961,8 +965,11 @@ fn render_merchant_stock_panel(
     size: egui::Vec2,
     global_state: &GlobalState,
     game_content: Option<&GameContent>,
-) -> Option<StockPanelResult> {
-    let mut result: Option<StockPanelResult> = None;
+) -> MerchantStockPanelResult {
+    let mut result = MerchantStockPanelResult {
+        buy_action: None,
+        clicked_row: None,
+    };
 
     // Retrieve stock entries
     let stock_entries: Vec<(ItemId, u8, u32)> = {
@@ -1117,8 +1124,8 @@ fn render_merchant_stock_panel(
                     }
 
                     // Mouse click on a stock row → select it
-                    if response.clicked() && is_available {
-                        result = Some(StockPanelResult::SelectSlot(i));
+                    if response.clicked() {
+                        result.clicked_row = Some(i);
                     }
                 });
             }
@@ -1196,11 +1203,11 @@ fn render_merchant_stock_panel(
                             .on_hover_text(hover_text)
                             .clicked()
                         {
-                            result = Some(StockPanelResult::Buy(BuyAction {
+                            result.buy_action = Some(BuyAction {
                                 npc_id: merchant_state.npc_id.clone(),
                                 stock_index: stock_idx,
                                 character_index: merchant_state.active_character_index,
-                            }));
+                            });
                         }
                     });
                 });
@@ -1247,6 +1254,19 @@ fn merchant_inventory_action_system(
         select_stock_reader.read().map(|e| e.stock_index).collect();
 
     for stock_index in select_stock_events {
+        let enter_action_mode = if let GameMode::MerchantInventory(ref ms) = global_state.0.mode {
+            global_state
+                .0
+                .npc_runtime
+                .get(&ms.npc_id)
+                .and_then(|rt| rt.stock.as_ref())
+                .and_then(|stock| stock.entries.get(stock_index))
+                .map(|entry| entry.is_available())
+                .unwrap_or(false)
+        } else {
+            false
+        };
+
         if let GameMode::MerchantInventory(ref mut ms) = global_state.0.mode {
             // Switch focus to merchant panel and set the selection.
             ms.focus = crate::application::merchant_inventory_state::MerchantFocus::Right;
@@ -1255,13 +1275,29 @@ fn merchant_inventory_action_system(
         }
         nav_state.selected_slot_index = Some(stock_index);
         nav_state.focused_action_index = 0;
-        nav_state.phase = NavigationPhase::SlotNavigation;
+        nav_state.phase = if enter_action_mode {
+            NavigationPhase::ActionNavigation
+        } else {
+            NavigationPhase::SlotNavigation
+        };
     }
 
     // Character cell click: update character_selected_slot and nav_state.
     let select_char_events: Vec<usize> = select_char_reader.read().map(|e| e.slot_index).collect();
 
     for slot_index in select_char_events {
+        let enter_action_mode = if let GameMode::MerchantInventory(ref ms) = global_state.0.mode {
+            global_state
+                .0
+                .party
+                .members
+                .get(ms.active_character_index)
+                .map(|ch| slot_index < ch.inventory.items.len())
+                .unwrap_or(false)
+        } else {
+            false
+        };
+
         if let GameMode::MerchantInventory(ref mut ms) = global_state.0.mode {
             // Switch focus to character panel and set the selection.
             ms.focus = crate::application::merchant_inventory_state::MerchantFocus::Left;
@@ -1270,7 +1306,11 @@ fn merchant_inventory_action_system(
         }
         nav_state.selected_slot_index = Some(slot_index);
         nav_state.focused_action_index = 0;
-        nav_state.phase = NavigationPhase::SlotNavigation;
+        nav_state.phase = if enter_action_mode {
+            NavigationPhase::ActionNavigation
+        } else {
+            NavigationPhase::SlotNavigation
+        };
     }
 
     // ── Buy events ────────────────────────────────────────────────────────

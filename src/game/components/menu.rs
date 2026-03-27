@@ -111,6 +111,46 @@ pub enum VolumeSlider {
     Ambient,
 }
 
+/// Marker component for a clickable slider track in the settings menu.
+///
+/// Attach this to the Bevy UI button node that represents the interactive
+/// track for an audio slider. The associated `slider_type` identifies which
+/// config field should be updated when the user clicks or drags on the track.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::components::menu::{SliderTrack, VolumeSlider};
+///
+/// let track = SliderTrack::new(VolumeSlider::Master);
+/// assert_eq!(track.slider_type, VolumeSlider::Master);
+/// ```
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SliderTrack {
+    /// Which volume channel this track controls.
+    pub slider_type: VolumeSlider,
+}
+
+impl SliderTrack {
+    /// Create a new slider-track marker for the given volume channel.
+    ///
+    /// # Arguments
+    ///
+    /// * `slider_type` - The volume slider type associated with the track
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::menu::{SliderTrack, VolumeSlider};
+    ///
+    /// let track = SliderTrack::new(VolumeSlider::Music);
+    /// assert_eq!(track.slider_type, VolumeSlider::Music);
+    /// ```
+    pub fn new(slider_type: VolumeSlider) -> Self {
+        Self { slider_type }
+    }
+}
+
 /// Component for tracking slider state and value in settings menu.
 ///
 /// Attached to a slider entity to track its current value (0.0-1.0 range)
@@ -179,6 +219,28 @@ impl SettingSlider {
     /// Adjust slider value by a delta, clamped to valid range.
     pub fn adjust(&mut self, delta: f32) {
         self.current_value = (self.current_value + delta).clamp(0.0, 1.0);
+    }
+
+    /// Set the slider value directly from a normalized scalar in the range
+    /// `0.0..=1.0`.
+    ///
+    /// Values outside the valid range are clamped.
+    ///
+    /// # Arguments
+    ///
+    /// * `normalized` - The desired slider value as a normalized fraction
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::menu::{SettingSlider, VolumeSlider};
+    ///
+    /// let mut slider = SettingSlider::new(VolumeSlider::Ambient, 0.2);
+    /// slider.set_normalized(0.75);
+    /// assert_eq!(slider.current_value, 0.75);
+    /// ```
+    pub fn set_normalized(&mut self, normalized: f32) {
+        self.current_value = normalized.clamp(0.0, 1.0);
     }
 }
 

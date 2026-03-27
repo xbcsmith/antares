@@ -52,6 +52,7 @@
 //! # let monster_group: Vec<u8> = vec![1, 2];
 //! let _ = start_encounter(&mut gs, &content, &monster_group, CombatEventType::Normal);
 //! ```
+use crate::game::systems::mouse_input;
 use bevy::prelude::*;
 
 use crate::application::resources::GameContent;
@@ -2315,13 +2316,11 @@ fn combat_input_system(
                 || kb.just_pressed(KeyCode::Enter)
                 || kb.just_pressed(KeyCode::Escape)
         });
-        let mouse_just_pressed = mouse_buttons
-            .as_ref()
-            .is_some_and(|m| m.just_pressed(MouseButton::Left));
+        let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
         let any_mouse_input = mouse_just_pressed
             || interactions
                 .iter()
-                .any(|(i, i_ref, _)| *i == Interaction::Pressed && i_ref.is_changed());
+                .any(|(i, i_ref, _)| mouse_input::is_activated(i, i_ref.is_changed(), false));
         if any_key_input || any_mouse_input {
             info!("Combat: input blocked — not player turn");
         }
@@ -2336,18 +2335,15 @@ fn combat_input_system(
     let mut execute_selected_action = false;
 
     // --- Mouse: robust click handling ---
-    let mouse_just_pressed = mouse_buttons
-        .as_ref()
-        .is_some_and(|m| m.just_pressed(MouseButton::Left));
+    let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
     let mut mouse_dispatched = false;
 
     for (interaction, interaction_ref, button) in interactions.iter_mut() {
-        let changed_pressed = *interaction == Interaction::Pressed && interaction_ref.is_changed();
-        // Fallback path: if left mouse was just pressed while hovering,
-        // treat that as a click for reliability across platforms.
-        let hovered_click = mouse_just_pressed && *interaction == Interaction::Hovered;
-
-        if changed_pressed || hovered_click {
+        if mouse_input::is_activated(
+            interaction,
+            interaction_ref.is_changed(),
+            mouse_just_pressed,
+        ) {
             if let Some(actor) = current_actor {
                 dispatch_combat_action(
                     button.button_type,
@@ -2633,15 +2629,14 @@ fn select_target(
 
     let attacker = target_sel.0.unwrap();
 
-    let mouse_just_pressed = mouse_buttons
-        .as_ref()
-        .is_some_and(|m| m.just_pressed(MouseButton::Left));
+    let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
 
     for (interaction, interaction_ref, enemy_card) in interactions.iter_mut() {
-        let changed_pressed = *interaction == Interaction::Pressed && interaction_ref.is_changed();
-        let hovered_click = mouse_just_pressed && *interaction == Interaction::Hovered;
-
-        if changed_pressed || hovered_click {
+        if mouse_input::is_activated(
+            interaction,
+            interaction_ref.is_changed(),
+            mouse_just_pressed,
+        ) {
             confirm_attack_target(
                 attacker,
                 enemy_card.participant_index,
@@ -8621,9 +8616,10 @@ mod tests {
         );
     }
 
-    /// T1-8: The `GameMode::Combat` guard in `handle_input` is validated by the
-    /// dedicated integration test `test_movement_blocked_in_combat_mode` located
-    /// in `src/game/systems/input.rs` (module `combat_guard_tests`).
+    /// T1-8: The `GameMode::Combat` guard in the split input systems is validated
+    /// by the dedicated integration test
+    /// `test_movement_blocked_in_combat_mode` located in
+    /// `src/game/systems/input.rs` (module `combat_guard_tests`).
     ///
     /// This stub asserts the precondition that entering combat mode sets the mode
     /// correctly, confirming the guard has something to match against.
@@ -8644,7 +8640,7 @@ mod tests {
 
         assert!(
             matches!(gs.mode, crate::application::GameMode::Combat(_)),
-            "GameMode must be Combat after enter_combat() so the handle_input guard fires"
+            "GameMode must be Combat after enter_combat() so the split input-system combat guard fires"
         );
     }
 

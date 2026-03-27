@@ -14,7 +14,26 @@ use crate::game::systems::ui::GameLog;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-/// Plugin for inn party management UI
+/// Inn mouse/keyboard parity audit (Phase 5)
+///
+/// Current mouse parity status against `inn_input_system`:
+/// - Select party member: mouse card click emits `SelectPartyMember` and
+///   `inn_selection_system` syncs both `InnManagementState::selected_party_slot`
+///   and `InnNavigationState::selected_party_index`.
+/// - Dismiss party member: mouse `Dismiss` button emits `InnDismissCharacter`.
+/// - Select roster member: mouse card click emits `SelectRosterMember` and
+///   `inn_selection_system` syncs both `InnManagementState::selected_roster_slot`
+///   and `InnNavigationState::selected_roster_index`.
+/// - Recruit roster member: mouse `Recruit` button emits `InnRecruitCharacter`.
+/// - Swap party ↔ roster: mouse `Swap` button becomes available after a party
+///   card click because `selected_party_slot` and `selected_party_index` are
+///   both populated by the same selection event path.
+/// - Exit inn: mouse `Exit Inn` button emits `ExitInn`.
+///
+/// Conclusion:
+/// Mouse and keyboard selection state are already synchronized through
+/// `inn_selection_system`, so the Phase 5 work here is to preserve that parity
+/// explicitly and lock it in with regression tests.
 pub struct InnUiPlugin;
 
 impl Plugin for InnUiPlugin {
@@ -1103,6 +1122,211 @@ mod tests {
 
         // Just verify plugin builds without errors
         // Plugin registered successfully if we reach here
+    }
+
+    #[test]
+    fn test_mouse_only_swap_flow() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        app.add_message::<InnRecruitCharacter>();
+        app.add_message::<InnDismissCharacter>();
+        app.add_message::<InnSwapCharacters>();
+        app.add_message::<ExitInn>();
+        app.add_message::<SelectPartyMember>();
+        app.add_message::<SelectRosterMember>();
+        app.init_resource::<InnNavigationState>();
+
+        app.add_systems(Update, (inn_selection_system, inn_action_system).chain());
+
+        let mut game = GameState::new();
+        let inn_id = "test_inn".to_string();
+
+        let party_character = Character::new(
+            "PartyHero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let roster_character = Character::new(
+            "InnMage".to_string(),
+            "elf".to_string(),
+            "mage".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+
+        game.roster
+            .add_character(party_character.clone(), CharacterLocation::InParty)
+            .unwrap();
+        game.roster
+            .add_character(
+                roster_character.clone(),
+                CharacterLocation::AtInn(inn_id.clone()),
+            )
+            .unwrap();
+        game.party.add_member(party_character).unwrap();
+
+        game.mode = GameMode::InnManagement(InnManagementState {
+            current_inn_id: inn_id,
+            selected_party_slot: None,
+            selected_roster_slot: None,
+        });
+
+        app.insert_resource(GlobalState(game));
+
+        app.world_mut()
+            .resource_mut::<Messages<SelectPartyMember>>()
+            .write(SelectPartyMember { party_index: 0 });
+        app.update();
+
+        {
+            let nav = app.world().resource::<InnNavigationState>();
+            assert_eq!(nav.selected_party_index, Some(0));
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<InnSwapCharacters>>()
+            .write(InnSwapCharacters {
+                party_index: 0,
+                roster_index: 1,
+            });
+        app.update();
+
+        let global = app.world().resource::<GlobalState>();
+        assert_eq!(global.0.party.members.len(), 1);
+        assert_eq!(global.0.party.members[0].name, "InnMage");
+        assert_eq!(global.0.roster.characters[0].name, "PartyHero");
+        assert_eq!(global.0.roster.characters[1].name, "InnMage");
+    }
+
+    #[test]
+    fn test_mouse_dismiss_then_recruit() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        app.add_message::<InnRecruitCharacter>();
+        app.add_message::<InnDismissCharacter>();
+        app.add_message::<InnSwapCharacters>();
+        app.add_message::<ExitInn>();
+        app.add_message::<SelectPartyMember>();
+        app.add_message::<SelectRosterMember>();
+        app.init_resource::<InnNavigationState>();
+
+        app.add_systems(Update, inn_action_system);
+
+        let mut game = GameState::new();
+        let inn_id = "test_inn".to_string();
+
+        let party_a = Character::new(
+            "PartyA".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let party_b = Character::new(
+            "PartyB".to_string(),
+            "elf".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        let roster_c = Character::new(
+            "RosterC".to_string(),
+            "dwarf".to_string(),
+            "robber".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        game.roster
+            .add_character(party_a.clone(), CharacterLocation::InParty)
+            .unwrap();
+        game.roster
+            .add_character(party_b.clone(), CharacterLocation::InParty)
+            .unwrap();
+        game.roster
+            .add_character(roster_c.clone(), CharacterLocation::AtInn(inn_id.clone()))
+            .unwrap();
+
+        game.party.add_member(party_a).unwrap();
+        game.party.add_member(party_b).unwrap();
+
+        game.mode = GameMode::InnManagement(InnManagementState {
+            current_inn_id: inn_id,
+            selected_party_slot: None,
+            selected_roster_slot: None,
+        });
+
+        app.insert_resource(GlobalState(game));
+
+        app.world_mut()
+            .resource_mut::<Messages<InnDismissCharacter>>()
+            .write(InnDismissCharacter { party_index: 0 });
+        app.update();
+
+        {
+            let global = app.world().resource::<GlobalState>();
+            assert_eq!(global.0.party.members.len(), 1);
+            assert_eq!(global.0.party.members[0].name, "PartyB");
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<InnRecruitCharacter>>()
+            .write(InnRecruitCharacter { roster_index: 2 });
+        app.update();
+
+        let global = app.world().resource::<GlobalState>();
+        assert_eq!(global.0.party.members.len(), 2);
+        assert_eq!(global.0.party.members[0].name, "PartyB");
+        assert_eq!(global.0.party.members[1].name, "RosterC");
+    }
+
+    #[test]
+    fn test_swap_button_visible_after_mouse_party_select() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        app.add_message::<SelectPartyMember>();
+        app.add_message::<SelectRosterMember>();
+        app.init_resource::<InnNavigationState>();
+        app.add_systems(Update, inn_selection_system);
+
+        let mut game = GameState::new();
+        game.party
+            .add_member(Character::new(
+                "PartyHero".to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            ))
+            .unwrap();
+
+        game.mode = GameMode::InnManagement(InnManagementState {
+            current_inn_id: "test_inn".to_string(),
+            selected_party_slot: None,
+            selected_roster_slot: None,
+        });
+
+        app.insert_resource(GlobalState(game));
+
+        app.world_mut()
+            .resource_mut::<Messages<SelectPartyMember>>()
+            .write(SelectPartyMember { party_index: 0 });
+        app.update();
+
+        let nav = app.world().resource::<InnNavigationState>();
+        assert_eq!(nav.selected_party_index, Some(0));
+
+        let global = app.world().resource::<GlobalState>();
+        if let GameMode::InnManagement(state) = &global.0.mode {
+            assert_eq!(state.selected_party_slot, Some(0));
+        } else {
+            panic!("Expected InnManagement mode");
+        }
     }
 
     #[test]

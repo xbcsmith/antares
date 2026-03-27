@@ -21,6 +21,7 @@ use crate::application::save_game::SaveGameManager;
 use crate::application::GameMode;
 use crate::game::components::menu::*;
 use crate::game::resources::GlobalState;
+use crate::game::systems::mouse_input;
 
 /// Path to the Antares icon, relative to the Bevy asset root (campaign directory).
 /// Bevy resolves paths relative to `BEVY_ASSET_ROOT` (the campaign dir), so the
@@ -44,6 +45,7 @@ impl Plugin for MenuPlugin {
                 menu_setup,
                 handle_menu_keyboard,
                 menu_button_interaction,
+                handle_slider_mouse,
                 update_button_colors,
                 populate_save_list,
                 apply_settings,
@@ -767,16 +769,34 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                 TextColor(Color::WHITE),
                             ));
                         });
-                    panel.spawn((
-                        Node {
-                            width: Val::Percent(95.0),
-                            height: Val::Px(8.0),
-                            margin: UiRect::vertical(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(SLIDER_TRACK_COLOR),
-                        BorderRadius::all(Val::Px(4.0)),
-                    ));
+                    panel
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(95.0),
+                                height: Val::Px(24.0),
+                                margin: UiRect::vertical(Val::Px(4.0)),
+                                justify_content: JustifyContent::FlexStart,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(SLIDER_TRACK_COLOR),
+                            BorderRadius::all(Val::Px(4.0)),
+                            SliderTrack {
+                                slider_type: VolumeSlider::Master,
+                            },
+                        ))
+                        .with_children(|track| {
+                            track.spawn((
+                                Node {
+                                    width: Val::Percent(master_vol * 100.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                BackgroundColor(SLIDER_FILL_COLOR),
+                                BorderRadius::all(Val::Px(4.0)),
+                            ));
+                        });
                     panel.spawn(SettingSlider::new(VolumeSlider::Master, master_vol));
 
                     // Music Volume
@@ -797,16 +817,34 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                 TextColor(Color::WHITE),
                             ));
                         });
-                    panel.spawn((
-                        Node {
-                            width: Val::Percent(95.0),
-                            height: Val::Px(8.0),
-                            margin: UiRect::vertical(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(SLIDER_TRACK_COLOR),
-                        BorderRadius::all(Val::Px(4.0)),
-                    ));
+                    panel
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(95.0),
+                                height: Val::Px(24.0),
+                                margin: UiRect::vertical(Val::Px(4.0)),
+                                justify_content: JustifyContent::FlexStart,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(SLIDER_TRACK_COLOR),
+                            BorderRadius::all(Val::Px(4.0)),
+                            SliderTrack {
+                                slider_type: VolumeSlider::Music,
+                            },
+                        ))
+                        .with_children(|track| {
+                            track.spawn((
+                                Node {
+                                    width: Val::Percent(music_vol * 100.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                BackgroundColor(SLIDER_FILL_COLOR),
+                                BorderRadius::all(Val::Px(4.0)),
+                            ));
+                        });
                     panel.spawn(SettingSlider::new(VolumeSlider::Music, music_vol));
 
                     // SFX Volume
@@ -827,16 +865,34 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                 TextColor(Color::WHITE),
                             ));
                         });
-                    panel.spawn((
-                        Node {
-                            width: Val::Percent(95.0),
-                            height: Val::Px(8.0),
-                            margin: UiRect::vertical(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(SLIDER_TRACK_COLOR),
-                        BorderRadius::all(Val::Px(4.0)),
-                    ));
+                    panel
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(95.0),
+                                height: Val::Px(24.0),
+                                margin: UiRect::vertical(Val::Px(4.0)),
+                                justify_content: JustifyContent::FlexStart,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(SLIDER_TRACK_COLOR),
+                            BorderRadius::all(Val::Px(4.0)),
+                            SliderTrack {
+                                slider_type: VolumeSlider::Sfx,
+                            },
+                        ))
+                        .with_children(|track| {
+                            track.spawn((
+                                Node {
+                                    width: Val::Percent(sfx_vol * 100.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                BackgroundColor(SLIDER_FILL_COLOR),
+                                BorderRadius::all(Val::Px(4.0)),
+                            ));
+                        });
                     panel.spawn(SettingSlider::new(VolumeSlider::Sfx, sfx_vol));
 
                     // Ambient Volume
@@ -857,16 +913,34 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                 TextColor(Color::WHITE),
                             ));
                         });
-                    panel.spawn((
-                        Node {
-                            width: Val::Percent(95.0),
-                            height: Val::Px(8.0),
-                            margin: UiRect::vertical(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(SLIDER_TRACK_COLOR),
-                        BorderRadius::all(Val::Px(4.0)),
-                    ));
+                    panel
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(95.0),
+                                height: Val::Px(24.0),
+                                margin: UiRect::vertical(Val::Px(4.0)),
+                                justify_content: JustifyContent::FlexStart,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(SLIDER_TRACK_COLOR),
+                            BorderRadius::all(Val::Px(4.0)),
+                            SliderTrack {
+                                slider_type: VolumeSlider::Ambient,
+                            },
+                        ))
+                        .with_children(|track| {
+                            track.spawn((
+                                Node {
+                                    width: Val::Percent(ambient_vol * 100.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                BackgroundColor(SLIDER_FILL_COLOR),
+                                BorderRadius::all(Val::Px(4.0)),
+                            ));
+                        });
                     panel.spawn(SettingSlider::new(VolumeSlider::Ambient, ambient_vol));
 
                     // Graphics Settings Section
@@ -1304,12 +1378,19 @@ fn menu_cleanup(
 
 /// Handle button interactions
 fn menu_button_interaction(
-    mut interaction_query: Query<(&Interaction, &MenuButton), Changed<Interaction>>,
+    mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
+    mut interaction_query: Query<(&Interaction, Ref<Interaction>, &MenuButton), With<Button>>,
     mut global_state: ResMut<GlobalState>,
     save_manager: Res<SaveGameManager>,
 ) {
-    for (interaction, button) in interaction_query.iter_mut() {
-        if *interaction == Interaction::Pressed {
+    let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
+
+    for (interaction, interaction_ref, button) in interaction_query.iter_mut() {
+        if mouse_input::is_activated(
+            interaction,
+            interaction_ref.is_changed(),
+            mouse_just_pressed,
+        ) {
             // Call the unified handler using dereferenced resources so the same logic
             // is used for both mouse and keyboard-driven actions.
             handle_button_press(button, &mut global_state, &save_manager);
@@ -1540,6 +1621,109 @@ fn delete_game_operation(global_state: &mut GlobalState, save_manager: &SaveGame
     }
 }
 
+fn update_slider_resource_value(
+    global_state: &mut GlobalState,
+    slider_type: VolumeSlider,
+    value: f32,
+) {
+    let clamped = value.clamp(0.0, 1.0);
+    match slider_type {
+        VolumeSlider::Master => {
+            global_state.0.config.audio.master_volume = clamped;
+        }
+        VolumeSlider::Music => {
+            global_state.0.config.audio.music_volume = clamped;
+        }
+        VolumeSlider::Sfx => {
+            global_state.0.config.audio.sfx_volume = clamped;
+        }
+        VolumeSlider::Ambient => {
+            global_state.0.config.audio.ambient_volume = clamped;
+        }
+    }
+}
+
+fn slider_value_from_cursor(
+    cursor_position: Vec2,
+    node: &Node,
+    transform: &GlobalTransform,
+) -> f32 {
+    let width = match node.width {
+        Val::Px(width) => width,
+        Val::Percent(percent) => percent,
+        _ => return 0.0,
+    };
+
+    if width <= 0.0 {
+        return 0.0;
+    }
+
+    let center = transform.translation().truncate();
+    let left = center.x - (width * 0.5);
+    ((cursor_position.x - left) / width).clamp(0.0, 1.0)
+}
+
+/// Handle mouse input for settings sliders.
+///
+/// This supports both click-to-set and hover+drag while the left mouse button is held.
+#[allow(clippy::type_complexity)]
+fn handle_slider_mouse(
+    mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
+    primary_window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut slider_query: Query<&mut SettingSlider>,
+    track_query: Query<
+        (
+            &Interaction,
+            Ref<Interaction>,
+            &SliderTrack,
+            &Node,
+            &GlobalTransform,
+        ),
+        With<Button>,
+    >,
+    mut global_state: ResMut<GlobalState>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Menu(ref m) if m.current_submenu == MenuType::Settings)
+    {
+        return;
+    }
+
+    let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
+    let mouse_pressed = mouse_buttons
+        .as_deref()
+        .is_some_and(|buttons| buttons.pressed(MouseButton::Left));
+
+    let Ok(window) = primary_window.single() else {
+        return;
+    };
+
+    let Some(cursor_position) = window.cursor_position() else {
+        return;
+    };
+
+    for (interaction, interaction_ref, track, node, transform) in track_query.iter() {
+        let activated = mouse_input::is_activated(
+            interaction,
+            interaction_ref.is_changed(),
+            mouse_just_pressed,
+        );
+        let dragged = mouse_pressed && *interaction == Interaction::Hovered;
+
+        if !activated && !dragged {
+            continue;
+        }
+
+        let value = slider_value_from_cursor(cursor_position, node, transform);
+        update_slider_resource_value(&mut global_state, track.slider_type, value);
+
+        for mut slider in slider_query.iter_mut() {
+            if slider.slider_type == track.slider_type {
+                slider.current_value = value;
+            }
+        }
+    }
+}
+
 /// Apply settings changes from sliders to GameConfig
 fn apply_settings(
     slider_query: Query<&SettingSlider, Changed<SettingSlider>>,
@@ -1695,6 +1879,26 @@ fn handle_menu_keyboard(
 mod tests {
     use super::*;
     use crate::application::GameState;
+    use bevy::window::PrimaryWindow;
+
+    fn setup_menu_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(GlobalState(GameState::new()));
+        app.insert_resource(
+            SaveGameManager::new(tempfile::TempDir::new().unwrap().path()).unwrap(),
+        );
+        app.add_systems(Update, (menu_button_interaction, handle_slider_mouse));
+        app
+    }
+
+    fn set_menu_mode(app: &mut App, submenu: MenuType) {
+        let mut global_state = app.world_mut().resource_mut::<GlobalState>();
+        global_state.0.enter_menu();
+        if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
+            menu_state.set_submenu(submenu);
+        }
+    }
 
     #[test]
     fn test_menu_button_variants() {
@@ -2014,5 +2218,157 @@ mod tests {
 
         // After a successful load the game mode should be Exploration
         assert!(matches!(gs.0.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_mouse_click_resume_button() {
+        let mut app = setup_menu_test_app();
+        set_menu_mode(&mut app, MenuType::Main);
+
+        app.world_mut()
+            .spawn((Button, Interaction::Pressed, MenuButton::Resume));
+
+        app.update();
+
+        let global_state = app.world().resource::<GlobalState>();
+        assert!(!matches!(global_state.0.mode, GameMode::Menu(_)));
+    }
+
+    #[test]
+    fn test_mouse_hovered_click_save_button() {
+        let mut app = setup_menu_test_app();
+        set_menu_mode(&mut app, MenuType::Main);
+
+        let mut mouse_buttons = ButtonInput::<MouseButton>::default();
+        mouse_buttons.press(MouseButton::Left);
+        app.insert_resource(mouse_buttons);
+
+        app.world_mut()
+            .spawn((Button, Interaction::Hovered, MenuButton::SaveGame));
+
+        app.update();
+
+        let global_state = app.world().resource::<GlobalState>();
+        if let GameMode::Menu(menu_state) = &global_state.0.mode {
+            assert_eq!(menu_state.current_submenu, MenuType::SaveLoad);
+        } else {
+            panic!("Expected menu mode");
+        }
+    }
+
+    #[test]
+    fn test_mouse_hover_does_not_dispatch_menu() {
+        let mut app = setup_menu_test_app();
+        set_menu_mode(&mut app, MenuType::Main);
+
+        app.world_mut()
+            .spawn((Button, Interaction::Hovered, MenuButton::SaveGame));
+
+        app.update();
+
+        let global_state = app.world().resource::<GlobalState>();
+        if let GameMode::Menu(menu_state) = &global_state.0.mode {
+            assert_eq!(menu_state.current_submenu, MenuType::Main);
+        } else {
+            panic!("Expected menu mode");
+        }
+    }
+
+    #[test]
+    fn test_slider_mouse_click_sets_value() {
+        let mut app = setup_menu_test_app();
+        set_menu_mode(&mut app, MenuType::Settings);
+
+        let mut window = Window::default();
+        window.set_cursor_position(Some(Vec2::new(400.0, 300.0)));
+        app.world_mut().spawn((window, PrimaryWindow));
+
+        app.world_mut()
+            .spawn(SettingSlider::new(VolumeSlider::Master, 0.0));
+        app.world_mut().spawn((
+            Button,
+            Interaction::Pressed,
+            SliderTrack {
+                slider_type: VolumeSlider::Master,
+            },
+            Node {
+                width: Val::Px(200.0),
+                height: Val::Px(24.0),
+                ..default()
+            },
+            GlobalTransform::from_xyz(400.0, 300.0, 0.0),
+        ));
+
+        app.update();
+
+        let global_state = app.world().resource::<GlobalState>();
+        assert!((global_state.0.config.audio.master_volume - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_slider_drag_updates_value() {
+        let mut app = setup_menu_test_app();
+        set_menu_mode(&mut app, MenuType::Settings);
+
+        let mut mouse_buttons = ButtonInput::<MouseButton>::default();
+        mouse_buttons.press(MouseButton::Left);
+        app.insert_resource(mouse_buttons);
+
+        let mut window = Window::default();
+        window.set_cursor_position(Some(Vec2::new(350.0, 300.0)));
+        let window_entity = app.world_mut().spawn((window, PrimaryWindow)).id();
+
+        app.world_mut()
+            .spawn(SettingSlider::new(VolumeSlider::Music, 0.0));
+        let track_entity = app
+            .world_mut()
+            .spawn((
+                Button,
+                Interaction::Hovered,
+                SliderTrack {
+                    slider_type: VolumeSlider::Music,
+                },
+                Node {
+                    width: Val::Px(200.0),
+                    height: Val::Px(24.0),
+                    ..default()
+                },
+                GlobalTransform::from_xyz(400.0, 300.0, 0.0),
+            ))
+            .id();
+
+        app.update();
+
+        let first_value = app
+            .world()
+            .resource::<GlobalState>()
+            .0
+            .config
+            .audio
+            .music_volume;
+
+        {
+            let world = app.world_mut();
+            let mut entity = world.entity_mut(window_entity);
+            let mut window = entity.get_mut::<Window>().unwrap();
+            window.set_cursor_position(Some(Vec2::new(450.0, 300.0)));
+        }
+        {
+            let world = app.world_mut();
+            let mut entity = world.entity_mut(track_entity);
+            let mut interaction = entity.get_mut::<Interaction>().unwrap();
+            *interaction = Interaction::Hovered;
+        }
+
+        app.update();
+
+        let second_value = app
+            .world()
+            .resource::<GlobalState>()
+            .0
+            .config
+            .audio
+            .music_volume;
+        assert!(second_value > first_value);
     }
 }

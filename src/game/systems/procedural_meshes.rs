@@ -4291,7 +4291,7 @@ pub fn spawn_furniture(
                 rotation_y,
             );
             // Attach interaction components so map-loaded doors can be queried
-            // and interacted with through handle_input (Phase 3).
+            // and interacted with through the split exploration input flow.
             let rotation_radians = rotation_y.unwrap_or(0.0_f32).to_radians();
             let door_state = {
                 let mut ds = DoorState::new(flags.locked, rotation_radians);

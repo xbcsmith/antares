@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Input System Module
@@ -33,21 +33,42 @@
 //! # }
 //! ```
 
-use crate::application::dialogue::RecruitmentContext;
-use crate::domain::types::Position;
-use crate::domain::world::{MapEvent, WallType};
-use crate::game::components::dialogue::NpcDialogue;
 use crate::game::components::furniture::DoorState;
 use crate::game::components::FurnitureEntity;
 use crate::game::resources::{GlobalState, LockInteractionPending};
-use crate::game::systems::dialogue::{PendingRecruitmentContext, StartDialogue};
+use crate::game::systems::dialogue::PendingRecruitmentContext;
 use crate::game::systems::events::MapEventTriggered;
 use crate::game::systems::map::{NpcMarker, TileCoord};
 #[cfg(test)]
 use crate::game::systems::rest::InitiateRestEvent;
+use crate::game::systems::ui::GameLog;
 use crate::sdk::game_config::ControlsConfig;
 use bevy::prelude::*;
-use std::collections::HashMap;
+use bevy::window::PrimaryWindow;
+
+mod exploration_interact;
+mod exploration_movement;
+mod frame_input;
+mod global_toggles;
+mod helpers;
+mod keymap;
+mod menu_toggle;
+mod mode_guards;
+mod world_click;
+
+pub use exploration_interact::handle_exploration_interact;
+pub use exploration_movement::{
+    handle_exploration_movement, is_movement_attempt, movement_blocked_by_cooldown,
+};
+pub use frame_input::{decode_frame_input, FrameInputIntent};
+pub use global_toggles::handle_global_mode_toggles;
+pub use helpers::get_adjacent_positions;
+pub use keymap::{parse_key_code, GameAction, KeyMap};
+pub use menu_toggle::toggle_menu_state;
+pub use mode_guards::{
+    input_blocked_for_mode, interaction_blocked_for_mode, movement_blocked_for_mode,
+};
+pub use world_click::{is_cursor_in_center_third, mouse_center_interact_pressed};
 
 /// Input plugin with config-driven key mappings
 ///
@@ -87,11 +108,19 @@ impl Plugin for InputPlugin {
             key_map,
         });
 
-        // Phase 2 (locks): register LockInteractionPending so handle_input can
-        // signal Phase 3's UI when the player interacts with a locked door.
+        // Register lock-interaction state so the split exploration interaction
+        // system can signal lock UI when the player interacts with a locked
+        // door or container.
         app.init_resource::<LockInteractionPending>();
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
     }
 }
 
@@ -107,1379 +136,140 @@ pub struct InputConfigResource {
     pub key_map: KeyMap,
 }
 
-/// Game actions that can be triggered by input
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum GameAction {
-    /// Move forward in current facing direction
-    MoveForward,
-
-    /// Move backward (opposite of facing direction)
-    MoveBack,
-
-    /// Turn left (rotate counterclockwise)
-    TurnLeft,
-
-    /// Turn right (rotate clockwise)
-    TurnRight,
-
-    /// Interact with objects (open doors, talk to NPCs)
-    Interact,
-
-    /// Open menu
-    Menu,
-
-    /// Open or close the inventory screen
-    Inventory,
-
-    /// Begin a party rest sequence
-    Rest,
-
-    /// Open or close the full-screen automap overlay
-    Automap,
-}
-
-/// Key mapping structure for efficient input lookups
+/// Handles top-of-frame global toggle input before exploration-specific systems.
 ///
-/// Maps `KeyCode` to `GameAction` for fast input processing.
-#[derive(Debug, Clone)]
-pub struct KeyMap {
-    /// Map from KeyCode to GameAction
-    bindings: HashMap<KeyCode, GameAction>,
-}
-
-impl KeyMap {
-    /// Create a KeyMap from ControlsConfig
-    ///
-    /// Translates string key names to Bevy KeyCode and builds the lookup map.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Controls configuration with key binding strings
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::game::systems::input::KeyMap;
-    /// use antares::sdk::game_config::ControlsConfig;
-    ///
-    /// let config = ControlsConfig::default();
-    /// let key_map = KeyMap::from_controls_config(&config);
-    /// ```
-    pub fn from_controls_config(config: &ControlsConfig) -> Self {
-        let mut bindings = HashMap::new();
-
-        // Map move_forward keys
-        for key_str in &config.move_forward {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::MoveForward);
-            } else {
-                warn!("Invalid key code in move_forward: {}", key_str);
-            }
-        }
-
-        // Map move_back keys
-        for key_str in &config.move_back {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::MoveBack);
-            } else {
-                warn!("Invalid key code in move_back: {}", key_str);
-            }
-        }
-
-        // Map turn_left keys
-        for key_str in &config.turn_left {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::TurnLeft);
-            } else {
-                warn!("Invalid key code in turn_left: {}", key_str);
-            }
-        }
-
-        // Map turn_right keys
-        for key_str in &config.turn_right {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::TurnRight);
-            } else {
-                warn!("Invalid key code in turn_right: {}", key_str);
-            }
-        }
-
-        // Map interact keys
-        for key_str in &config.interact {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::Interact);
-            } else {
-                warn!("Invalid key code in interact: {}", key_str);
-            }
-        }
-
-        // Map menu keys
-        for key_str in &config.menu {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::Menu);
-            } else {
-                warn!("Invalid key code in menu: {}", key_str);
-            }
-        }
-
-        // Map inventory keys
-        for key_str in &config.inventory {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::Inventory);
-            } else {
-                warn!("Invalid key code in inventory: {}", key_str);
-            }
-        }
-
-        // Map rest keys
-        for key_str in &config.rest {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::Rest);
-            } else {
-                warn!("Invalid key code in rest: {}", key_str);
-            }
-        }
-
-        // Map automap keys
-        for key_str in &config.automap {
-            if let Some(key_code) = parse_key_code(key_str) {
-                bindings.insert(key_code, GameAction::Automap);
-            } else {
-                warn!("Invalid key code in automap: {}", key_str);
-            }
-        }
-
-        Self { bindings }
-    }
-
-    /// Get the action bound to a specific key code
-    ///
-    /// # Arguments
-    ///
-    /// * `key_code` - The key code to look up
-    ///
-    /// # Returns
-    ///
-    /// Returns `Some(GameAction)` if the key is bound, `None` otherwise
-    pub fn get_action(&self, key_code: KeyCode) -> Option<GameAction> {
-        self.bindings.get(&key_code).copied()
-    }
-
-    /// Check if any of the keys for an action are currently pressed
-    ///
-    /// # Arguments
-    ///
-    /// * `action` - The game action to check
-    /// * `keyboard_input` - Bevy keyboard input state
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if any key bound to the action is pressed
-    pub fn is_action_pressed(
-        &self,
-        action: GameAction,
-        keyboard_input: &ButtonInput<KeyCode>,
-    ) -> bool {
-        self.bindings.iter().any(|(key_code, bound_action)| {
-            *bound_action == action && keyboard_input.pressed(*key_code)
-        })
-    }
-
-    /// Check if any of the keys for an action were just pressed this frame
-    ///
-    /// # Arguments
-    ///
-    /// * `action` - The game action to check
-    /// * `keyboard_input` - Bevy keyboard input state
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if any key bound to the action was just pressed
-    pub fn is_action_just_pressed(
-        &self,
-        action: GameAction,
-        keyboard_input: &ButtonInput<KeyCode>,
-    ) -> bool {
-        self.bindings.iter().any(|(key_code, bound_action)| {
-            *bound_action == action && keyboard_input.just_pressed(*key_code)
-        })
-    }
-}
-
-/// Parse a key code string into Bevy's KeyCode enum
-///
-/// Supports common key names and aliases for compatibility.
-///
-/// # Arguments
-///
-/// * `key_str` - String representation of the key (e.g., "W", "ArrowUp", "Space")
-///
-/// # Returns
-///
-/// Returns `Some(KeyCode)` if the string is recognized, `None` otherwise
-///
-/// # Examples
-///
-/// ```
-/// use antares::game::systems::input::parse_key_code;
-/// use bevy::prelude::KeyCode;
-///
-/// assert_eq!(parse_key_code("W"), Some(KeyCode::KeyW));
-/// assert_eq!(parse_key_code("ArrowUp"), Some(KeyCode::ArrowUp));
-/// assert_eq!(parse_key_code("Space"), Some(KeyCode::Space));
-/// assert_eq!(parse_key_code("Invalid"), None);
-/// ```
-pub fn parse_key_code(key_str: &str) -> Option<KeyCode> {
-    match key_str {
-        // Letter keys
-        "A" => Some(KeyCode::KeyA),
-        "B" => Some(KeyCode::KeyB),
-        "C" => Some(KeyCode::KeyC),
-        "D" => Some(KeyCode::KeyD),
-        "E" => Some(KeyCode::KeyE),
-        "F" => Some(KeyCode::KeyF),
-        "G" => Some(KeyCode::KeyG),
-        "H" => Some(KeyCode::KeyH),
-        "I" => Some(KeyCode::KeyI),
-        "J" => Some(KeyCode::KeyJ),
-        "K" => Some(KeyCode::KeyK),
-        "L" => Some(KeyCode::KeyL),
-        "M" => Some(KeyCode::KeyM),
-        "N" => Some(KeyCode::KeyN),
-        "O" => Some(KeyCode::KeyO),
-        "P" => Some(KeyCode::KeyP),
-        "Q" => Some(KeyCode::KeyQ),
-        "R" => Some(KeyCode::KeyR),
-        "S" => Some(KeyCode::KeyS),
-        "T" => Some(KeyCode::KeyT),
-        "U" => Some(KeyCode::KeyU),
-        "V" => Some(KeyCode::KeyV),
-        "W" => Some(KeyCode::KeyW),
-        "X" => Some(KeyCode::KeyX),
-        "Y" => Some(KeyCode::KeyY),
-        "Z" => Some(KeyCode::KeyZ),
-
-        // Arrow keys
-        "ArrowUp" | "Up" => Some(KeyCode::ArrowUp),
-        "ArrowDown" | "Down" => Some(KeyCode::ArrowDown),
-        "ArrowLeft" | "Left" => Some(KeyCode::ArrowLeft),
-        "ArrowRight" | "Right" => Some(KeyCode::ArrowRight),
-
-        // Special keys
-        "Space" | "Spacebar" => Some(KeyCode::Space),
-        "Enter" | "Return" => Some(KeyCode::Enter),
-        "Escape" | "Esc" => Some(KeyCode::Escape),
-        "Tab" => Some(KeyCode::Tab),
-        "Backspace" => Some(KeyCode::Backspace),
-
-        // Number keys
-        "0" | "Digit0" => Some(KeyCode::Digit0),
-        "1" | "Digit1" => Some(KeyCode::Digit1),
-        "2" | "Digit2" => Some(KeyCode::Digit2),
-        "3" | "Digit3" => Some(KeyCode::Digit3),
-        "4" | "Digit4" => Some(KeyCode::Digit4),
-        "5" | "Digit5" => Some(KeyCode::Digit5),
-        "6" | "Digit6" => Some(KeyCode::Digit6),
-        "7" | "Digit7" => Some(KeyCode::Digit7),
-        "8" | "Digit8" => Some(KeyCode::Digit8),
-        "9" | "Digit9" => Some(KeyCode::Digit9),
-
-        // Function keys
-        "F1" => Some(KeyCode::F1),
-        "F2" => Some(KeyCode::F2),
-        "F3" => Some(KeyCode::F3),
-        "F4" => Some(KeyCode::F4),
-        "F5" => Some(KeyCode::F5),
-        "F6" => Some(KeyCode::F6),
-        "F7" => Some(KeyCode::F7),
-        "F8" => Some(KeyCode::F8),
-        "F9" => Some(KeyCode::F9),
-        "F10" => Some(KeyCode::F10),
-        "F11" => Some(KeyCode::F11),
-        "F12" => Some(KeyCode::F12),
-
-        // Modifier keys
-        "Shift" | "ShiftLeft" => Some(KeyCode::ShiftLeft),
-        "ShiftRight" => Some(KeyCode::ShiftRight),
-        "Control" | "Ctrl" | "ControlLeft" => Some(KeyCode::ControlLeft),
-        "ControlRight" | "CtrlRight" => Some(KeyCode::ControlRight),
-        "Alt" | "AltLeft" => Some(KeyCode::AltLeft),
-        "AltRight" => Some(KeyCode::AltRight),
-
-        _ => {
-            // Try lowercase version
-            let lowercase = key_str.to_lowercase();
-            if lowercase != key_str {
-                return parse_key_code(&lowercase);
-            }
-            None
-        }
-    }
-}
-
-/// Toggle the in-game menu: open it if not open, or close it and return to the previous mode if open.
-///
-/// This helper intentionally does not consider movement cooldown so it can be called
-/// from input handlers that must ensure the menu key always works.
-///
-/// # Arguments
-///
-/// * `game_state` - Mutable reference to the current `GameState`
-fn toggle_menu_state(game_state: &mut crate::application::GameState) {
-    use crate::application::menu::MenuState;
-    match &game_state.mode {
-        crate::application::GameMode::Menu(menu_state) => {
-            let resume_mode = menu_state.get_resume_mode();
-            info!("Closing menu, resuming to: {:?}", resume_mode);
-            game_state.mode = resume_mode;
-        }
-        current_mode => {
-            info!("Opening menu from: {:?}", current_mode);
-            let menu_state = MenuState::new(current_mode.clone());
-            game_state.mode = crate::application::GameMode::Menu(menu_state);
-        }
-    }
-}
-
-/// Handle keyboard input and translate to game actions
-///
-/// This system processes keyboard input using the configured key mappings,
-/// applies movement cooldown, and updates game state accordingly.
-#[allow(clippy::too_many_arguments)]
-fn handle_input(
-    mut commands: Commands,
+/// This system decodes the current frame input and applies only the global mode
+/// toggles (menu, automap, inventory, and rest). Later input systems run after
+/// this one so the established priority order remains explicit in scheduling.
+fn handle_global_input_toggles(
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    input_config: Res<InputConfigResource>,
+    mut global_state: ResMut<GlobalState>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    game_content: Option<Res<crate::application::resources::GameContent>>,
+) {
+    let frame_input = decode_frame_input(
+        &input_config.key_map,
+        &keyboard_input,
+        &mouse_buttons,
+        primary_window.single().ok(),
+    );
+
+    let _frame_consumed =
+        handle_global_mode_toggles(&mut global_state.0, frame_input, game_content.as_deref());
+}
+
+/// Handles exploration interaction input after global toggles have run.
+///
+/// This system preserves the existing interaction-before-movement ordering while
+/// delegating the actual exploration interaction behavior to the extracted
+/// interaction module.
+#[allow(clippy::too_many_arguments)]
+fn handle_exploration_input_interact(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
     input_config: Res<InputConfigResource>,
     mut global_state: ResMut<GlobalState>,
     mut map_event_messages: MessageWriter<MapEventTriggered>,
-    mut dialogue_writer: MessageWriter<StartDialogue>,
     mut recruitment_context: ResMut<PendingRecruitmentContext>,
-
-    time: Res<Time>,
-    mut last_move_time: Local<f32>,
-    victory_roots: Query<Entity, With<crate::game::systems::combat::VictorySummaryRoot>>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
-    dialogue_query: Query<&NpcDialogue>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
     game_content: Option<Res<crate::application::resources::GameContent>>,
-    // Query for furniture door entities — provides open/locked state and
-    // allows toggling the door transform without a full map respawn.
     mut door_entity_query: Query<(
         &mut FurnitureEntity,
         &mut DoorState,
         &mut Transform,
         &TileCoord,
     )>,
-    // Optional game log for player-visible feedback messages (e.g. "Door is locked.")
-    mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
-    // Phase 2 (locks): resource that signals Phase 3's UI a locked-door
-    // interaction is waiting for the player to choose pick-lock or bash.
-    // Wrapped in Option<> so that test apps that do not register InputPlugin
-    // (and therefore may not have the resource) still compile and run.
-    mut lock_pending: Option<ResMut<LockInteractionPending>>,
+    mut game_log: ResMut<GameLog>,
+    mut lock_pending: ResMut<LockInteractionPending>,
+) {
+    let frame_input = decode_frame_input(
+        &input_config.key_map,
+        &keyboard_input,
+        &mouse_buttons,
+        primary_window.single().ok(),
+    );
+    let game_state = &mut global_state.0;
+
+    if input_blocked_for_mode(&game_state.mode) {
+        return;
+    }
+
+    if interaction_blocked_for_mode(&game_state.mode) || !frame_input.is_interact_attempt() {
+        return;
+    }
+
+    let _interaction_handled = handle_exploration_interact(
+        game_state,
+        &mut map_event_messages,
+        &mut recruitment_context,
+        &npc_query,
+        game_content.as_deref(),
+        &mut door_entity_query,
+        &mut game_log,
+        &mut lock_pending,
+    );
+}
+
+/// Handles exploration movement and turning after interaction has had a chance
+/// to consume the frame.
+#[allow(clippy::too_many_arguments)]
+fn handle_exploration_input_movement(
+    mut commands: Commands,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    input_config: Res<InputConfigResource>,
+    mut global_state: ResMut<GlobalState>,
+    time: Res<Time>,
+    mut last_move_time: Local<f32>,
+    victory_roots: Query<Entity, With<crate::game::systems::combat::VictorySummaryRoot>>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    game_content: Option<Res<crate::application::resources::GameContent>>,
+    door_entity_query: Query<(
+        &mut FurnitureEntity,
+        &mut DoorState,
+        &mut Transform,
+        &TileCoord,
+    )>,
+    mut game_log: ResMut<GameLog>,
 ) {
     let current_time = time.elapsed_secs();
     let cooldown = input_config.controls.movement_cooldown;
-
-    // Check for automap toggle ("M" key by default) before menu handling so
-    // automap mode can consume Escape to close back to exploration.
-    if input_config
-        .key_map
-        .is_action_just_pressed(GameAction::Automap, &keyboard_input)
-    {
-        let game_state = &mut global_state.0;
-        match game_state.mode {
-            crate::application::GameMode::Exploration => {
-                game_state.mode = crate::application::GameMode::Automap;
-                info!("Automap opened: new_mode = {:?}", game_state.mode);
-            }
-            crate::application::GameMode::Automap => {
-                game_state.mode = crate::application::GameMode::Exploration;
-                info!(
-                    "Automap closed via automap key: new_mode = {:?}",
-                    game_state.mode
-                );
-            }
-            _ => {}
-        }
-        return; // Exit early after automap toggle
-    }
-
-    // Check for menu toggle (ESC key) first — it should always take priority and
-    // must not be blocked by movement cooldown.
-    if input_config
-        .key_map
-        .is_action_just_pressed(GameAction::Menu, &keyboard_input)
-    {
-        let game_state = &mut global_state.0;
-        if matches!(game_state.mode, crate::application::GameMode::Automap) {
-            game_state.mode = crate::application::GameMode::Exploration;
-            info!(
-                "Automap closed via menu key: new_mode = {:?}",
-                game_state.mode
-            );
-        } else {
-            toggle_menu_state(game_state);
-            info!("Menu toggled: new_mode = {:?}", game_state.mode);
-        }
-        return; // Exit early after menu toggle
-    }
-
-    // Check for inventory toggle ("I" key) — same priority as menu toggle.
-    if input_config
-        .key_map
-        .is_action_just_pressed(GameAction::Inventory, &keyboard_input)
-    {
-        let game_state = &mut global_state.0;
-
-        // Capture the npc_id from dialogue state before any mutable borrow.
-        let dialogue_npc_id: Option<String> =
-            if let crate::application::GameMode::Dialogue(ref ds) = game_state.mode {
-                ds.speaker_npc_id.clone()
-            } else {
-                None
-            };
-
-        match &game_state.mode {
-            crate::application::GameMode::Inventory(inv_state) => {
-                // Close inventory: restore previous mode
-                let resume = inv_state.get_resume_mode();
-                info!("Inventory closed: restored mode = {:?}", resume);
-                game_state.mode = resume;
-            }
-            crate::application::GameMode::Dialogue(_) => {
-                // In dialogue: only open merchant inventory when the NPC is a merchant.
-                if let Some(npc_id) = dialogue_npc_id {
-                    if let Some(content) = game_content.as_deref() {
-                        if let Some(npc_def) = content.db().npcs.get_npc(&npc_id) {
-                            if npc_def.is_merchant {
-                                game_state.ensure_npc_runtime_initialized(content.db());
-                                let npc_name = npc_def.name.clone();
-                                info!(
-                                    "I key in Dialogue: opening merchant inventory for '{}'",
-                                    npc_id
-                                );
-                                game_state.enter_merchant_inventory(npc_id, npc_name);
-                            } else {
-                                // Non-merchant NPC: silently ignore the I key press.
-                                info!(
-                                    "I key in Dialogue: NPC '{}' is not a merchant, ignoring",
-                                    npc_id
-                                );
-                            }
-                        }
-                    }
-                }
-                // Whether we opened the merchant inventory or not, consume the
-                // key press and return so it doesn't fall through to other branches.
-            }
-            crate::application::GameMode::Menu(_) | crate::application::GameMode::Combat(_) => {
-                // Do not open inventory from menu or combat mode
-            }
-            _ => {
-                game_state.enter_inventory();
-                info!("Inventory opened: mode = {:?}", game_state.mode);
-            }
-        }
-        return; // Exit early after inventory toggle
-    }
-
-    // Check for rest action ("R" key) — opens the rest-duration menu only
-    // during Exploration mode.  All other modes silently ignore the key press.
-    if input_config
-        .key_map
-        .is_action_just_pressed(GameAction::Rest, &keyboard_input)
-    {
-        let game_state = &mut global_state.0;
-        if matches!(game_state.mode, crate::application::GameMode::Exploration) {
-            info!("Rest key pressed: opening rest menu");
-            game_state.enter_rest_menu();
-        } else {
-            info!(
-                "Rest key pressed but mode is {:?} — ignoring",
-                game_state.mode
-            );
-        }
-        return; // Consume the key press regardless of mode
-    }
-
-    // Throttle movement input using cooldown. Only block when an actual movement
-    // action is being attempted.
-    let is_movement_attempt = input_config
-        .key_map
-        .is_action_pressed(GameAction::MoveForward, &keyboard_input)
-        || input_config
-            .key_map
-            .is_action_pressed(GameAction::MoveBack, &keyboard_input)
-        || input_config
-            .key_map
-            .is_action_pressed(GameAction::TurnLeft, &keyboard_input)
-        || input_config
-            .key_map
-            .is_action_pressed(GameAction::TurnRight, &keyboard_input);
-
-    if is_movement_attempt && (current_time - *last_move_time < cooldown) {
-        // Movement attempted but still within cooldown window - ignore movement input.
-        return;
-    }
-
-    // ALLOW input processing in Dialogue mode to enable "Move to Cancel"
-    // But block Interaction actions (doors, etc.) if in Dialogue.
-    // BLOCK all movement/interaction input when in Menu mode (menu system handles its own input)
-
+    let frame_input = decode_frame_input(
+        &input_config.key_map,
+        &keyboard_input,
+        &mouse_buttons,
+        primary_window.single().ok(),
+    );
     let game_state = &mut global_state.0;
 
-    // Menu toggle handled above before movement cooldown checks.
+    if input_blocked_for_mode(&game_state.mode) {
+        return;
+    }
 
-    // Block all movement/interaction input when in Menu, Inventory, or Automap mode.
-    // Each mode's own system handles its own input processing.
-    if matches!(
-        game_state.mode,
-        crate::application::GameMode::Menu(_)
-            | crate::application::GameMode::Inventory(_)
-            | crate::application::GameMode::Automap
+    if movement_blocked_by_cooldown(frame_input, current_time, *last_move_time, cooldown) {
+        return;
+    }
+
+    if frame_input.is_interact_attempt() && !interaction_blocked_for_mode(&game_state.mode) {
+        return;
+    }
+
+    if handle_exploration_movement(
+        &mut commands,
+        frame_input,
+        game_state,
+        game_content.as_deref(),
+        &door_entity_query,
+        &mut game_log,
+        current_time,
+        &mut last_move_time,
+        &victory_roots,
     ) {
-        return;
-    }
-
-    // Block all movement/interaction input when in Combat mode.
-    // Combat action input is handled exclusively by combat_input_system.
-    if matches!(game_state.mode, crate::application::GameMode::Combat(_)) {
-        return;
-    }
-
-    // Block all movement/interaction input when resting or in the rest menu.
-    // The rest orchestration system drives the rest sequence; the player
-    // cannot walk away mid-rest.
-    if matches!(
-        game_state.mode,
-        crate::application::GameMode::Resting(_) | crate::application::GameMode::RestMenu
-    ) {
-        return;
-    }
-
-    let world = &mut game_state.world;
-    let mut moved = false;
-
-    // Interact - check for doors, NPCs, signs, teleports
-    //
-    // NOTE: We intentionally use "pressed" (not "just pressed") so interaction
-    // behaves consistently with the existing movement model and door behavior,
-    // and so headless tests can exercise interaction without depending on
-    // Bevy's per-frame input edge detection.
-    // Only allow Interaction if NOT in Dialogue mode
-    if !matches!(game_state.mode, crate::application::GameMode::Dialogue(_))
-        && input_config
-            .key_map
-            .is_action_pressed(GameAction::Interact, &keyboard_input)
-    {
-        let party_position = world.party_position;
-        let adjacent_tiles = get_adjacent_positions(party_position);
-
-        // Door interaction - check if there's a door in front of the party
-        let target = world.position_ahead();
-
-        // ── Phase 3: Furniture door interaction ───────────────────────────
-        // Check for a furniture-based door entity at the tile ahead.
-        // Using a local flag to avoid holding query borrows across the `return`.
-        {
-            let mut furniture_door_handled = false;
-            for (mut furniture_entity, mut door_state, mut door_transform, tile_coord) in
-                door_entity_query.iter_mut()
-            {
-                if tile_coord.0 != target {
-                    continue;
-                }
-                furniture_door_handled = true;
-
-                if door_state.is_locked {
-                    // Check if any party member carries the required key.
-                    let can_unlock = door_state.key_item_id.is_some_and(|key_id| {
-                        game_state.party.members.iter().any(|member| {
-                            member
-                                .inventory
-                                .items
-                                .iter()
-                                .any(|slot| slot.item_id == key_id)
-                        })
-                    });
-
-                    if can_unlock {
-                        // Unlock and open in one action.
-                        door_state.is_locked = false;
-                        door_state.is_open = true;
-                        furniture_entity.blocking = false;
-                        door_transform.rotation = Quat::from_rotation_y(
-                            door_state.base_rotation_y + std::f32::consts::FRAC_PI_2,
-                        );
-                        if let Some(map) = world.get_current_map_mut() {
-                            if let Some(tile) = map.get_tile_mut(tile_coord.0) {
-                                tile.blocked = false;
-                            }
-                        }
-                        info!("Unlocked and opened furniture door at {:?}", target);
-                    } else {
-                        let msg = "The door is locked.".to_string();
-                        info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
-                    }
-                } else {
-                    // Toggle open ↔ closed.
-                    door_state.is_open = !door_state.is_open;
-                    furniture_entity.blocking = !door_state.is_open;
-
-                    let angle = if door_state.is_open {
-                        door_state.base_rotation_y + std::f32::consts::FRAC_PI_2
-                    } else {
-                        door_state.base_rotation_y
-                    };
-                    door_transform.rotation = Quat::from_rotation_y(angle);
-
-                    // Sync tile blocked state so movement checks are accurate.
-                    if let Some(map) = world.get_current_map_mut() {
-                        if let Some(tile) = map.get_tile_mut(tile_coord.0) {
-                            tile.blocked = !door_state.is_open;
-                        }
-                    }
-
-                    info!(
-                        "{} furniture door at {:?}",
-                        if door_state.is_open {
-                            "Opened"
-                        } else {
-                            "Closed"
-                        },
-                        target
-                    );
-                }
-                break;
-            }
-
-            if furniture_door_handled {
-                return; // Door handled; don't fall through to other checks
-            }
-        }
-
-        // ── Phase 2: Tile-based LockedDoor (MapEvent) interaction ────────────
-        //
-        // Check whether the tile directly ahead carries a `MapEvent::LockedDoor`.
-        // This is separate from the furniture-entity door system above: it uses
-        // the map's event table and `lock_states` HashMap rather than Bevy ECS
-        // components.
-        //
-        // Evaluation order (mirrors `try_unlock` semantics):
-        //   1. If the map event at `target` is `LockedDoor` and the lock is
-        //      already open, open the tile and return early.
-        //   2. If locked and the party carries the required key: consume it,
-        //      unlock the tile, log success, return early.
-        //   3. If locked but no matching key in the party: log the locked
-        //      message, populate `LockInteractionPending` for Phase 3's UI,
-        //      and return early.
-        {
-            // Step A: read locked-door event info (immutable borrow of world).
-            let locked_door_info: Option<(String, Option<crate::domain::types::ItemId>)> = world
-                .get_current_map()
-                .and_then(|m| m.get_event(target))
-                .and_then(|e| {
-                    if let MapEvent::LockedDoor {
-                        lock_id,
-                        key_item_id,
-                        ..
-                    } = e
-                    {
-                        Some((lock_id.clone(), *key_item_id))
-                    } else {
-                        None
-                    }
-                });
-
-            if let Some((lock_id, key_item_id)) = locked_door_info {
-                // Step B: read lock status (immutable).
-                let is_locked: bool = world
-                    .get_current_map()
-                    .and_then(|m| m.lock_states.get(&lock_id))
-                    .map(|ls| ls.is_locked)
-                    .unwrap_or_else(|| {
-                        // lock_states entry missing → init_lock_states was not
-                        // called yet for this map. Treat as locked and warn.
-                        warn!(
-                            "LockedDoor lock_id '{}' has no lock_state entry; \
-                             was init_lock_states() called on map load?",
-                            lock_id
-                        );
-                        true
-                    });
-
-                if !is_locked {
-                    // Already unlocked from a previous interaction. Open the
-                    // tile (WallType::Door → None) so the party can walk through.
-                    if let Some(map) = world.get_current_map_mut() {
-                        if let Some(tile) = map.get_tile_mut(target) {
-                            tile.wall_type = WallType::None;
-                            tile.blocked = false;
-                        }
-                    }
-                    info!("Previously unlocked door at {:?} opened", target);
-                    return;
-                }
-
-                // Step C: search party inventory for the required key (immutable).
-                // `game_state.party` and `world` (= `game_state.world`) are
-                // disjoint fields of `GameState`, so the borrow checker accepts
-                // both mutable borrows simultaneously.
-                let key_found: Option<(usize, usize)> = key_item_id.and_then(|kid| {
-                    game_state
-                        .party
-                        .members
-                        .iter()
-                        .enumerate()
-                        .find_map(|(char_idx, ch)| {
-                            ch.inventory
-                                .items
-                                .iter()
-                                .position(|slot| slot.item_id == kid)
-                                .map(|slot_idx| (char_idx, slot_idx))
-                        })
-                });
-
-                match (key_item_id, key_found) {
-                    (Some(kid), Some((char_idx, slot_idx))) => {
-                        // ── Key found: consume it, unlock, open the door ──────
-                        game_state.party.members[char_idx]
-                            .inventory
-                            .items
-                            .remove(slot_idx);
-
-                        if let Some(map) = world.get_current_map_mut() {
-                            if let Some(ls) = map.lock_states.get_mut(&lock_id) {
-                                ls.unlock();
-                            }
-                            if let Some(tile) = map.get_tile_mut(target) {
-                                tile.wall_type = WallType::None;
-                                tile.blocked = false;
-                            }
-                            map.remove_event(target);
-                        }
-
-                        let key_name = game_content
-                            .as_deref()
-                            .and_then(|gc| gc.db().items.get_item(kid))
-                            .map(|item| item.name.clone())
-                            .unwrap_or_else(|| format!("key {}", kid));
-                        let msg = format!("You unlock the door with the {}.", key_name);
-                        info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
-                        return;
-                    }
-                    (Some(_), None) => {
-                        // ── Key required but not in party ─────────────────────
-                        let msg = "The door is locked. You need a key.".to_string();
-                        info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
-                        let can_lockpick = game_content
-                            .as_deref()
-                            .map(|gc| {
-                                game_state.party.members.iter().any(|member| {
-                                    gc.db()
-                                        .classes
-                                        .get_class(&member.class_id)
-                                        .map(|cls| cls.has_ability("pick_lock"))
-                                        .unwrap_or(false)
-                                })
-                            })
-                            .unwrap_or(false);
-                        if let Some(ref mut pending) = lock_pending {
-                            pending.lock_id = Some(lock_id);
-                            pending.position = Some(target);
-                            pending.can_lockpick = can_lockpick;
-                        }
-                        return;
-                    }
-                    (None, _) => {
-                        // ── No key required: must pick lock or bash ───────────
-                        let msg = "The door is locked.".to_string();
-                        info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
-                        let can_lockpick = game_content
-                            .as_deref()
-                            .map(|gc| {
-                                game_state.party.members.iter().any(|member| {
-                                    gc.db()
-                                        .classes
-                                        .get_class(&member.class_id)
-                                        .map(|cls| cls.has_ability("pick_lock"))
-                                        .unwrap_or(false)
-                                })
-                            })
-                            .unwrap_or(false);
-                        if let Some(ref mut pending) = lock_pending {
-                            pending.lock_id = Some(lock_id);
-                            pending.position = Some(target);
-                            pending.can_lockpick = can_lockpick;
-                        }
-                        return;
-                    }
-                }
-            }
-        }
-        // ── End Phase 2 locked-door block ─────────────────────────────────────
-
-        // ── Phase 3: Tile-based LockedContainer (MapEvent) interaction ─────────
-        //
-        // When the tile directly ahead carries a `MapEvent::LockedContainer`,
-        // follow the same key-check logic as the LockedDoor path above.
-        //
-        // On success (key found or already unlocked), fire a
-        // `MapEventTriggered` for the replacement `Container` event so that
-        // `handle_events` enters `ContainerInventory` mode — this avoids any
-        // borrow-checker conflict with `world = &mut game_state.world`.
-        {
-            // Step A: read locked-container event info (immutable).
-            let locked_container_info: Option<(
-                String,
-                String,
-                Option<crate::domain::types::ItemId>,
-            )> = world
-                .get_current_map()
-                .and_then(|m| m.get_event(target))
-                .and_then(|e| {
-                    if let MapEvent::LockedContainer {
-                        lock_id,
-                        name,
-                        key_item_id,
-                        ..
-                    } = e
-                    {
-                        Some((lock_id.clone(), name.clone(), *key_item_id))
-                    } else {
-                        None
-                    }
-                });
-
-            if let Some((lock_id, container_name, key_item_id)) = locked_container_info {
-                // Step B: check lock status (immutable).
-                let is_locked: bool = world
-                    .get_current_map()
-                    .and_then(|m| m.lock_states.get(&lock_id))
-                    .map(|ls| ls.is_locked)
-                    .unwrap_or_else(|| {
-                        warn!(
-                            "LockedContainer lock_id '{}' has no lock_state entry; \
-                             was init_lock_states() called on map load?",
-                            lock_id
-                        );
-                        true
-                    });
-
-                if !is_locked {
-                    // Already unlocked — replace with Container event and fire
-                    // MapEventTriggered so handle_events enters container mode.
-                    let id = lock_id.clone();
-                    let name = container_name.clone();
-                    if let Some(map) = world.get_current_map_mut() {
-                        map.add_event(
-                            target,
-                            MapEvent::Container {
-                                id: id.clone(),
-                                name: name.clone(),
-                                description: String::new(),
-                                items: vec![],
-                            },
-                        );
-                    }
-                    map_event_messages.write(MapEventTriggered {
-                        event: MapEvent::Container {
-                            id,
-                            name,
-                            description: String::new(),
-                            items: vec![],
-                        },
-                        position: target,
-                    });
-                    info!("Opening previously unlocked container at {:?}", target);
-                    return;
-                }
-
-                // Step C: search party inventory for the required key (immutable).
-                let key_found: Option<(usize, usize)> = key_item_id.and_then(|kid| {
-                    game_state
-                        .party
-                        .members
-                        .iter()
-                        .enumerate()
-                        .find_map(|(char_idx, ch)| {
-                            ch.inventory
-                                .items
-                                .iter()
-                                .position(|slot| slot.item_id == kid)
-                                .map(|slot_idx| (char_idx, slot_idx))
-                        })
-                });
-
-                match (key_item_id, key_found) {
-                    (Some(kid), Some((char_idx, slot_idx))) => {
-                        // ── Key found: consume it, unlock, open the container ──
-                        game_state.party.members[char_idx]
-                            .inventory
-                            .items
-                            .remove(slot_idx);
-
-                        let id = lock_id.clone();
-                        let name = container_name.clone();
-
-                        // Mutate world — last use of `world` in this branch.
-                        if let Some(map) = world.get_current_map_mut() {
-                            if let Some(ls) = map.lock_states.get_mut(&lock_id) {
-                                ls.unlock();
-                            }
-                            // Replace LockedContainer with open Container event.
-                            map.add_event(
-                                target,
-                                MapEvent::Container {
-                                    id: id.clone(),
-                                    name: name.clone(),
-                                    description: String::new(),
-                                    items: vec![],
-                                },
-                            );
-                        }
-
-                        // Fire MapEventTriggered so handle_events enters container mode.
-                        map_event_messages.write(MapEventTriggered {
-                            event: MapEvent::Container {
-                                id,
-                                name: name.clone(),
-                                description: String::new(),
-                                items: vec![],
-                            },
-                            position: target,
-                        });
-
-                        let key_name = game_content
-                            .as_deref()
-                            .and_then(|gc| gc.db().items.get_item(kid))
-                            .map(|item| item.name.clone())
-                            .unwrap_or_else(|| format!("key {}", kid));
-                        let msg =
-                            format!("You unlock the {} with the {}.", container_name, key_name);
-                        info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
-                        return;
-                    }
-                    (Some(_), None) => {
-                        // ── Key required but not in party ─────────────────────
-                        let msg = "The container is locked. You need a key.".to_string();
-                        info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
-                        let can_lockpick = game_content
-                            .as_deref()
-                            .map(|gc| {
-                                game_state.party.members.iter().any(|member| {
-                                    gc.db()
-                                        .classes
-                                        .get_class(&member.class_id)
-                                        .map(|cls| cls.has_ability("pick_lock"))
-                                        .unwrap_or(false)
-                                })
-                            })
-                            .unwrap_or(false);
-                        if let Some(ref mut pending) = lock_pending {
-                            pending.lock_id = Some(lock_id);
-                            pending.position = Some(target);
-                            pending.can_lockpick = can_lockpick;
-                        }
-                        return;
-                    }
-                    (None, _) => {
-                        // ── No key required: must pick lock or bash ───────────
-                        let msg = "The container is locked.".to_string();
-                        info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
-                        }
-                        let can_lockpick = game_content
-                            .as_deref()
-                            .map(|gc| {
-                                game_state.party.members.iter().any(|member| {
-                                    gc.db()
-                                        .classes
-                                        .get_class(&member.class_id)
-                                        .map(|cls| cls.has_ability("pick_lock"))
-                                        .unwrap_or(false)
-                                })
-                            })
-                            .unwrap_or(false);
-                        if let Some(ref mut pending) = lock_pending {
-                            pending.lock_id = Some(lock_id);
-                            pending.position = Some(target);
-                            pending.can_lockpick = can_lockpick;
-                        }
-                        return;
-                    }
-                }
-            }
-        }
-        // ── End Phase 3 locked-container block ────────────────────────────────
-
-        // ── Tile-based WallType::Door fallback ────────────────────────────────
-        //
-        // If the tile directly ahead is a plain WallType::Door tile with no
-        // associated LockedDoor map event (handled above), open it immediately
-        // by resetting the wall type and clearing the blocked flag. This is the
-        // "existing behaviour" referenced in the Phase 2 spec for non-locked
-        // tile-based doors.
-        {
-            let has_plain_door = world
-                .get_current_map()
-                .and_then(|m| m.get_tile(target))
-                .map(|t| t.wall_type == WallType::Door)
-                .unwrap_or(false);
-
-            if has_plain_door {
-                if let Some(map) = world.get_current_map_mut() {
-                    if let Some(tile) = map.get_tile_mut(target) {
-                        tile.wall_type = WallType::None;
-                        tile.blocked = false;
-                    }
-                }
-                info!("Opened door at {:?}", target);
-                return;
-            }
-        }
-        // ── End tile-based door fallback ──────────────────────────────────────
-
-        // Snapshot current map state for adjacency checks (no mutation needed)
-        let Some(map) = world.get_current_map() else {
-            info!("No interactable object nearby");
-            return;
-        };
-
-        // Check for NPC in any adjacent tile
-        if let Some(npc) = map
-            .npc_placements
-            .iter()
-            .find(|npc| adjacent_tiles.contains(&npc.position))
-        {
-            info!(
-                "Interacting with NPC '{}' at {:?}",
-                npc.npc_id, npc.position
-            );
-            map_event_messages.write(MapEventTriggered {
-                event: MapEvent::NpcDialogue {
-                    name: npc.npc_id.clone(),
-                    description: String::new(),
-                    npc_id: npc.npc_id.clone(),
-                    time_condition: None,
-                    facing: None,
-                    proximity_facing: false,
-                    rotation_speed: None,
-                },
-                position: npc.position,
-            });
-            return;
-        }
-
-        // Support explicit encounter interaction at current tile as a fallback.
-        // This helps recover from legacy maps/positions where the party may already
-        // stand on an encounter tile.
-        if let Some(event) = map.get_event(party_position) {
-            if let MapEvent::Encounter { .. } = event {
-                info!(
-                    "Interacting with encounter at current position {:?}",
-                    party_position
-                );
-                map_event_messages.write(MapEventTriggered {
-                    event: event.clone(),
-                    position: party_position,
-                });
-                return;
-            }
-        }
-
-        // Check for a Container event at the current tile first (party may
-        // already be standing on the container tile).
-        if let Some(event) = map.get_event(party_position) {
-            if let MapEvent::Container { id, name, .. } = event {
-                info!(
-                    "Interacting with container '{}' ({}) at current position {:?}",
-                    id, name, party_position
-                );
-                map_event_messages.write(MapEventTriggered {
-                    event: event.clone(),
-                    position: party_position,
-                });
-                return;
-            }
-        }
-
-        // Check for interaction-driven map events in any adjacent tile.
-        for position in adjacent_tiles {
-            if let Some(event) = map.get_event(position) {
-                match event {
-                    MapEvent::Sign { .. }
-                    | MapEvent::Teleport { .. }
-                    | MapEvent::Encounter { .. }
-                    | MapEvent::Container { .. } => {
-                        info!("Interacting with event at {:?}", position);
-                        map_event_messages.write(MapEventTriggered {
-                            event: event.clone(),
-                            position,
-                        });
-                        return;
-                    }
-                    MapEvent::RecruitableCharacter {
-                        name,
-                        character_id,
-                        dialogue_id,
-                        ..
-                    } => {
-                        info!(
-                            "Interacting with recruitable character '{}' (ID: {}) at {:?}",
-                            name, character_id, position
-                        );
-                        // Find the NPC entity at this position
-                        let speaker_entity = npc_query
-                            .iter()
-                            .find(|(_, _, tile_coord)| tile_coord.0 == position)
-                            .map(|(entity, _, _)| entity);
-
-                        // Use specific dialogue ID if the NPC has one, otherwise fallback to 100
-                        // Use specific dialogue ID from event if available,
-                        // OR fallback to NPC component,
-                        // OR fallback to default 100
-                        let dialogue_id = dialogue_id
-                            .or_else(|| {
-                                speaker_entity
-                                    .and_then(|entity| dialogue_query.get(entity).ok())
-                                    .map(|npc_dlg| npc_dlg.dialogue_id)
-                            })
-                            .unwrap_or(100);
-
-                        // Set recruitment context so the dialogue system knows who to recruit
-                        recruitment_context.0 = Some(RecruitmentContext {
-                            character_id: character_id.clone(),
-                            event_position: position,
-                        });
-
-                        dialogue_writer.write(StartDialogue {
-                            dialogue_id,
-                            speaker_entity,
-                            fallback_position: Some(position),
-                        });
-                        return;
-                    }
-                    _ => continue,
-                }
-            }
-        }
-
-        // No interactable found
-        info!("No interactable object nearby");
-    }
-    // Move forward
-    else if input_config
-        .key_map
-        .is_action_pressed(GameAction::MoveForward, &keyboard_input)
-    {
-        let target = game_state.world.position_ahead();
-        let facing = game_state.world.party_facing;
-
-        // Phase 3: deny movement into a locked furniture door, surfacing
-        // MovementError::DoorLocked semantics at the input layer.
-        let locked_door_ahead = door_entity_query
-            .iter()
-            .any(|(_, ds, _, tc)| tc.0 == target && ds.is_locked && !ds.is_open);
-
-        if locked_door_ahead {
-            let msg = "The door is locked.".to_string();
-            info!("{}", msg);
-            if let Some(ref mut log) = game_log {
-                log.add(msg);
-            }
-        } else if let Some(content) = game_content.as_deref() {
-            match game_state.move_party_and_handle_events(facing, content.db()) {
-                Ok(()) => moved = true,
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::DoorLocked(_, _),
-                )) => {
-                    let msg = "The door is locked.".to_string();
-                    info!("{}", msg);
-                    if let Some(ref mut log) = game_log {
-                        log.add(msg);
-                    }
-                }
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::Blocked(_, _),
-                )) => {}
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::OutOfBounds(_, _),
-                )) => {}
-                Err(err) => {
-                    warn!("move forward failed: {}", err);
-                }
-            }
-        } else if let Some(map) = game_state.world.get_current_map() {
-            if !map.is_blocked(target) {
-                game_state.world.set_party_position(target);
-                moved = true;
-            }
-        }
-    }
-    // Move backward
-    else if input_config
-        .key_map
-        .is_action_pressed(GameAction::MoveBack, &keyboard_input)
-    {
-        // Route backward movement through the same world movement path so
-        // fog-of-war reveal and tile events stay in sync with position updates.
-        let back_facing = game_state.world.party_facing.turn_left().turn_left();
-
-        if let Some(content) = game_content.as_deref() {
-            match game_state.move_party_and_handle_events(back_facing, content.db()) {
-                Ok(()) => moved = true,
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::DoorLocked(_, _),
-                )) => {
-                    let msg = "The door is locked.".to_string();
-                    info!("{}", msg);
-                    if let Some(ref mut log) = game_log {
-                        log.add(msg);
-                    }
-                }
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::Blocked(_, _),
-                )) => {}
-                Err(crate::application::MoveHandleError::Movement(
-                    crate::domain::world::MovementError::OutOfBounds(_, _),
-                )) => {}
-                Err(err) => {
-                    warn!("move backward failed: {}", err);
-                }
-            }
-        } else {
-            let target = back_facing.forward(game_state.world.party_position);
-            if let Some(map) = game_state.world.get_current_map() {
-                if !map.is_blocked(target) {
-                    game_state.world.set_party_position(target);
-                    moved = true;
-                }
-            }
-        }
-    }
-    // Turn left
-    else if input_config
-        .key_map
-        .is_action_pressed(GameAction::TurnLeft, &keyboard_input)
-    {
-        game_state.world.turn_left();
-        if matches!(game_state.mode, crate::application::GameMode::Exploration) {
-            let party_position = game_state.world.party_position;
-            crate::domain::world::mark_visible_area(
-                &mut game_state.world,
-                party_position,
-                crate::domain::world::VISIBILITY_RADIUS,
-            );
-        }
-        moved = true;
-    }
-    // Turn right
-    else if input_config
-        .key_map
-        .is_action_pressed(GameAction::TurnRight, &keyboard_input)
-    {
-        game_state.world.turn_right();
-        if matches!(game_state.mode, crate::application::GameMode::Exploration) {
-            let party_position = game_state.world.party_position;
-            crate::domain::world::mark_visible_area(
-                &mut game_state.world,
-                party_position,
-                crate::domain::world::VISIBILITY_RADIUS,
-            );
-        }
-        moved = true;
-    }
-
-    if moved {
-        *last_move_time = current_time;
-
-        // If we moved while in Dialogue mode, cancel the dialogue
-        if matches!(game_state.mode, crate::application::GameMode::Dialogue(_)) {
-            info!("Movement detected during dialogue - cancelling dialogue");
-            // Switch back to exploration mode
-            game_state.mode = crate::application::GameMode::Exploration;
-        }
-
-        // Dismiss post-combat victory overlay once normal movement controls are
-        // used again in exploration flow.
-        if moved {
-            for entity in victory_roots.iter() {
-                commands.entity(entity).despawn();
-            }
-        }
-
-        // TODO: Check for events at new position (Phase 4)
-    }
-}
-
-/// Returns all 8 adjacent positions around a given position
-///
-/// Returns tiles in clockwise order starting from North:
-/// N, NE, E, SE, S, SW, W, NW
-///
-/// # Arguments
-///
-/// * `position` - The center position
-///
-/// # Returns
-///
-/// Array of 8 `Position` values representing adjacent tiles
-fn get_adjacent_positions(position: Position) -> [Position; 8] {
-    [
-        Position::new(position.x, position.y - 1),     // North
-        Position::new(position.x + 1, position.y - 1), // NorthEast
-        Position::new(position.x + 1, position.y),     // East
-        Position::new(position.x + 1, position.y + 1), // SouthEast
-        Position::new(position.x, position.y + 1),     // South
-        Position::new(position.x - 1, position.y + 1), // SouthWest
-        Position::new(position.x - 1, position.y),     // West
-        Position::new(position.x - 1, position.y - 1), // NorthWest
-    ]
-}
-
-#[cfg(test)]
-mod adjacent_tile_tests {
-    use super::*;
-
-    #[test]
-    fn test_adjacent_positions_count() {
-        let center = Position::new(5, 5);
-        let adjacent = get_adjacent_positions(center);
-        assert_eq!(adjacent.len(), 8);
-    }
-
-    #[test]
-    fn test_adjacent_positions_north() {
-        let center = Position::new(5, 5);
-        let adjacent = get_adjacent_positions(center);
-        assert_eq!(adjacent[0], Position::new(5, 4)); // North
-    }
-
-    #[test]
-    fn test_adjacent_positions_east() {
-        let center = Position::new(5, 5);
-        let adjacent = get_adjacent_positions(center);
-        assert_eq!(adjacent[2], Position::new(6, 5)); // East
+        // Future follow-up: evaluate whether any move-triggered event check
+        // should be separated further from movement orchestration.
     }
 }
 
@@ -1491,10 +281,10 @@ mod dialogue_inventory_tests {
     use crate::sdk::database::ContentDatabase;
     use bevy::prelude::{App, ButtonInput, KeyCode, Time, Update};
 
-    /// Helper: build a minimal Bevy app for I-key-in-dialogue tests.
+    /// Helper: build a minimal Bevy app for dialogue inventory-toggle tests.
     ///
     /// Inserts a `GameContent` resource populated with the given `ContentDatabase`
-    /// so the `handle_input` system can resolve NPC definitions.
+    /// so the split input systems can resolve NPC definitions.
     fn build_dialogue_input_app(
         db: ContentDatabase,
         initial_mode: crate::application::GameMode,
@@ -1510,13 +300,22 @@ mod dialogue_inventory_tests {
         let mut gs = crate::application::GameState::new();
         gs.mode = initial_mode;
         app.insert_resource(GlobalState(gs));
+        app.insert_resource(ButtonInput::<MouseButton>::default());
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
         app.insert_resource(GameContent::new(db));
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<crate::game::systems::ui::GameLog>();
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
         app
     }
 
@@ -1544,7 +343,7 @@ mod dialogue_inventory_tests {
     /// Pressing `I` while in `GameMode::Dialogue` with a merchant NPC must
     /// transition the game mode to `GameMode::MerchantInventory`.
     #[test]
-    fn test_handle_input_i_in_dialogue_with_merchant_opens_merchant_inventory() {
+    fn test_split_input_i_in_dialogue_with_merchant_opens_merchant_inventory() {
         let db = merchant_db();
         let initial_mode =
             crate::application::GameMode::Dialogue(dialogue_state_for("merchant_tom"));
@@ -1570,7 +369,7 @@ mod dialogue_inventory_tests {
     /// Pressing `I` while in `GameMode::Dialogue` with a non-merchant NPC must
     /// leave the mode unchanged (still `Dialogue`).
     #[test]
-    fn test_handle_input_i_in_dialogue_with_non_merchant_does_not_open_inventory() {
+    fn test_split_input_i_in_dialogue_with_non_merchant_does_not_open_inventory() {
         let db = non_merchant_db();
         let initial_mode = crate::application::GameMode::Dialogue(dialogue_state_for("elder_bob"));
         let mut app = build_dialogue_input_app(db, initial_mode);
@@ -1592,7 +391,7 @@ mod dialogue_inventory_tests {
     /// Pressing `I` while in `GameMode::Dialogue` with `npc_id: None` must
     /// do nothing — mode stays `Dialogue`.
     #[test]
-    fn test_handle_input_i_in_dialogue_with_no_npc_id_does_nothing() {
+    fn test_split_input_i_in_dialogue_with_no_npc_id_does_nothing() {
         let db = ContentDatabase::new();
         // DialogueState with speaker_npc_id = None
         let dialogue_state = crate::application::dialogue::DialogueState::start(1, 1, None, None);
@@ -1617,249 +416,6 @@ mod dialogue_inventory_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_key_map_rest_action() {
-        let config = ControlsConfig::default();
-        let key_map = KeyMap::from_controls_config(&config);
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyR),
-            Some(GameAction::Rest),
-            "KeyCode::KeyR must map to GameAction::Rest with default config"
-        );
-    }
-
-    #[test]
-    fn test_custom_rest_key() {
-        let config = ControlsConfig {
-            rest: vec!["F5".to_string()],
-            ..Default::default()
-        };
-        let key_map = KeyMap::from_controls_config(&config);
-        assert_eq!(
-            key_map.get_action(KeyCode::F5),
-            Some(GameAction::Rest),
-            "F5 must map to GameAction::Rest when configured as rest key"
-        );
-        // Default R key must not be mapped when overridden
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyR),
-            None,
-            "KeyR must not be mapped when rest is overridden to F5"
-        );
-    }
-
-    #[test]
-    fn test_key_map_inventory_action() {
-        let config = ControlsConfig::default();
-        let key_map = KeyMap::from_controls_config(&config);
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyI),
-            Some(GameAction::Inventory),
-            "KeyCode::KeyI must map to GameAction::Inventory with default config"
-        );
-    }
-
-    #[test]
-    fn test_parse_key_code_letters() {
-        assert_eq!(parse_key_code("W"), Some(KeyCode::KeyW));
-        assert_eq!(parse_key_code("A"), Some(KeyCode::KeyA));
-        assert_eq!(parse_key_code("S"), Some(KeyCode::KeyS));
-        assert_eq!(parse_key_code("D"), Some(KeyCode::KeyD));
-    }
-
-    #[test]
-    fn test_parse_key_code_arrows() {
-        assert_eq!(parse_key_code("ArrowUp"), Some(KeyCode::ArrowUp));
-        assert_eq!(parse_key_code("ArrowDown"), Some(KeyCode::ArrowDown));
-        assert_eq!(parse_key_code("ArrowLeft"), Some(KeyCode::ArrowLeft));
-        assert_eq!(parse_key_code("ArrowRight"), Some(KeyCode::ArrowRight));
-    }
-
-    #[test]
-    fn test_parse_key_code_arrow_aliases() {
-        assert_eq!(parse_key_code("Up"), Some(KeyCode::ArrowUp));
-        assert_eq!(parse_key_code("Down"), Some(KeyCode::ArrowDown));
-        assert_eq!(parse_key_code("Left"), Some(KeyCode::ArrowLeft));
-        assert_eq!(parse_key_code("Right"), Some(KeyCode::ArrowRight));
-    }
-
-    #[test]
-    fn test_parse_key_code_special() {
-        assert_eq!(parse_key_code("Space"), Some(KeyCode::Space));
-        assert_eq!(parse_key_code("Spacebar"), Some(KeyCode::Space));
-        assert_eq!(parse_key_code("Escape"), Some(KeyCode::Escape));
-        assert_eq!(parse_key_code("Esc"), Some(KeyCode::Escape));
-        assert_eq!(parse_key_code("Enter"), Some(KeyCode::Enter));
-    }
-
-    #[test]
-    fn test_toggle_menu_state_from_exploration_and_back() {
-        // Start in Exploration mode
-        let mut state = crate::application::GameState::new();
-        assert!(matches!(
-            state.mode,
-            crate::application::GameMode::Exploration
-        ));
-
-        // Toggle to Menu
-        toggle_menu_state(&mut state);
-        assert!(matches!(state.mode, crate::application::GameMode::Menu(_)));
-
-        // Toggle back to Exploration
-        toggle_menu_state(&mut state);
-        assert!(matches!(
-            state.mode,
-            crate::application::GameMode::Exploration
-        ));
-    }
-
-    #[test]
-    fn test_toggle_menu_state_preserves_previous_mode() {
-        // Ensure the MenuState records the previous mode correctly
-        let mut state = crate::application::GameState::new();
-        toggle_menu_state(&mut state);
-
-        if let crate::application::GameMode::Menu(menu_state) = &state.mode {
-            assert!(matches!(
-                menu_state.get_resume_mode(),
-                crate::application::GameMode::Exploration
-            ));
-        } else {
-            panic!("Expected to be in Menu mode after toggle");
-        }
-    }
-
-    #[test]
-    fn test_parse_key_code_invalid() {
-        assert_eq!(parse_key_code("InvalidKey"), None);
-        assert_eq!(parse_key_code(""), None);
-    }
-
-    #[test]
-    fn test_key_map_from_default_config() {
-        let config = ControlsConfig::default();
-        let key_map = KeyMap::from_controls_config(&config);
-
-        // Check that default keys are mapped correctly
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyW),
-            Some(GameAction::MoveForward)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::ArrowUp),
-            Some(GameAction::MoveForward)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyS),
-            Some(GameAction::MoveBack)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::ArrowDown),
-            Some(GameAction::MoveBack)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyA),
-            Some(GameAction::TurnLeft)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::ArrowLeft),
-            Some(GameAction::TurnLeft)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyD),
-            Some(GameAction::TurnRight)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::ArrowRight),
-            Some(GameAction::TurnRight)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::Space),
-            Some(GameAction::Interact)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyE),
-            Some(GameAction::Interact)
-        );
-        assert_eq!(key_map.get_action(KeyCode::Escape), Some(GameAction::Menu));
-    }
-
-    #[test]
-    fn test_key_map_custom_config() {
-        let config = ControlsConfig {
-            move_forward: vec!["I".to_string()],
-            move_back: vec!["K".to_string()],
-            turn_left: vec!["J".to_string()],
-            turn_right: vec!["L".to_string()],
-            interact: vec!["U".to_string()],
-            menu: vec!["P".to_string()],
-            inventory: vec!["F".to_string()],
-            rest: vec!["G".to_string()],
-            automap: vec!["M".to_string()],
-            movement_cooldown: 0.1,
-        };
-
-        let key_map = KeyMap::from_controls_config(&config);
-
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyI),
-            Some(GameAction::MoveForward)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyK),
-            Some(GameAction::MoveBack)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyJ),
-            Some(GameAction::TurnLeft)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyL),
-            Some(GameAction::TurnRight)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyU),
-            Some(GameAction::Interact)
-        );
-        assert_eq!(key_map.get_action(KeyCode::KeyP), Some(GameAction::Menu));
-
-        // Old defaults should not be mapped
-        assert_eq!(key_map.get_action(KeyCode::KeyW), None);
-        assert_eq!(key_map.get_action(KeyCode::Space), None);
-    }
-
-    #[test]
-    fn test_key_map_multiple_keys_per_action() {
-        let config = ControlsConfig {
-            move_forward: vec!["W".to_string(), "ArrowUp".to_string(), "I".to_string()],
-            move_back: vec!["S".to_string()],
-            turn_left: vec!["A".to_string()],
-            turn_right: vec!["D".to_string()],
-            interact: vec!["Space".to_string()],
-            menu: vec!["Escape".to_string()],
-            inventory: vec!["F".to_string()],
-            rest: vec!["R".to_string()],
-            automap: vec!["M".to_string()],
-            movement_cooldown: 0.2,
-        };
-
-        let key_map = KeyMap::from_controls_config(&config);
-
-        // All three keys should map to MoveForward
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyW),
-            Some(GameAction::MoveForward)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::ArrowUp),
-            Some(GameAction::MoveForward)
-        );
-        assert_eq!(
-            key_map.get_action(KeyCode::KeyI),
-            Some(GameAction::MoveForward)
-        );
-    }
 
     #[test]
     fn test_controls_config_default_cooldown() {
@@ -1907,7 +463,7 @@ mod integration_tests {
     use bevy::prelude::{App, ButtonInput, KeyCode, Time, Update};
 
     /// Helper: build a minimal Bevy `App` wired up with all resources and
-    /// message channels that `handle_input` requires.
+    /// message channels that the split input systems require.
     fn build_input_app() -> App {
         let mut app = App::new();
         app.insert_resource(ButtonInput::<KeyCode>::default());
@@ -1918,12 +474,21 @@ mod integration_tests {
             key_map: km,
         });
         app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.insert_resource(ButtonInput::<MouseButton>::default());
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<crate::game::systems::ui::GameLog>();
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
         app
     }
 
@@ -1934,8 +499,9 @@ mod integration_tests {
         // Build a minimal app and register the input system under test.
         let mut app = App::new();
 
-        // Insert required resources: button input, config, global state, and time.
+        // Insert required resources: keyboard/mouse input, config, global state, and time.
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig::default();
         let km = KeyMap::from_controls_config(&cfg);
@@ -1947,15 +513,22 @@ mod integration_tests {
         app.insert_resource(GlobalState(crate::application::GameState::new()));
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<crate::game::systems::ui::GameLog>();
 
-        // Register message channels the input system depends on so MessageWriter<T>
-        // parameters are initialized when running the system in tests.
+        // Register message channels the input system depends on.
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
-        // Add the handle_input system (the system under test)
-        app.add_systems(Update, handle_input);
+        // Add the split input systems under test
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Press Escape - should open the menu
         {
@@ -1989,6 +562,7 @@ mod integration_tests {
 
         // Basic resources the input system expects
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
         let cfg = ControlsConfig::default();
         app.insert_resource(InputConfigResource {
             controls: cfg.clone(),
@@ -1997,14 +571,22 @@ mod integration_tests {
         app.insert_resource(GlobalState(crate::application::GameState::new()));
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<crate::game::systems::ui::GameLog>();
 
         // Register messages used by input system
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
-        // Add just the input system (we want to simulate input frames)
-        app.add_systems(Update, handle_input);
+        // Add the split input systems so frames process input in explicit order
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Frame 1: press MoveForward
         {
@@ -2033,6 +615,7 @@ mod integration_tests {
 
         // Basic resources the input system expects
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
         let cfg = ControlsConfig::default();
         app.insert_resource(InputConfigResource {
             controls: cfg.clone(),
@@ -2041,16 +624,26 @@ mod integration_tests {
         app.insert_resource(GlobalState(crate::application::GameState::new()));
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<LockInteractionPending>();
+        app.init_resource::<crate::game::systems::ui::GameLog>();
 
         // Register messages used by input system
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
-        // Add the input system so frames process input
-        app.add_systems(Update, handle_input);
+        // Add the split input systems so frames process input in explicit order
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
-        // Single frame: press MoveForward and Menu at the same time
+        // Single frame: press MoveForward and Menu at the same time.
+        // With the split systems, global toggles run first and consume the
+        // frame, so one update is sufficient to verify priority.
         {
             let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
             btn.press(KeyCode::ArrowUp);
@@ -2065,7 +658,7 @@ mod integration_tests {
     /// Pressing `KeyCode::KeyI` in `GameMode::Exploration` must transition the
     /// mode to `GameMode::Inventory(_)`.
     #[test]
-    fn test_handle_input_i_opens_inventory() {
+    fn test_split_input_i_opens_inventory() {
         let mut app = build_input_app();
 
         // Press "I" – should open inventory
@@ -2079,6 +672,106 @@ mod integration_tests {
         assert!(
             matches!(gs.0.mode, crate::application::GameMode::Inventory(_)),
             "pressing I in Exploration must open the inventory"
+        );
+    }
+
+    #[test]
+    fn test_world_click_npc_triggers_dialogue() {
+        let mut app = build_input_app();
+
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let party_pos = crate::domain::types::Position::new(5, 5);
+        let npc_pos = crate::domain::types::Position::new(5, 4);
+        map.npc_placements.push(crate::domain::world::NpcPlacement {
+            npc_id: "test_npc".to_string(),
+            position: npc_pos,
+            facing: None,
+            dialogue_override: None,
+        });
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.world.add_map(map);
+            gs.0.world.set_current_map(1);
+            gs.0.world.set_party_position(party_pos);
+            gs.0.world.party_facing = crate::domain::types::Direction::North;
+            gs.0.mode = crate::application::GameMode::Exploration;
+        }
+
+        let mut window = Window::default();
+        window.resolution.set_physical_resolution(900, 600);
+        window.set_cursor_position(Some(Vec2::new(450.0, 300.0)));
+        app.world_mut().spawn((window, PrimaryWindow));
+
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Left);
+        app.insert_resource(mouse);
+
+        app.update();
+
+        let events = app.world().resource::<Messages<MapEventTriggered>>();
+        let mut reader = events.get_cursor();
+        let triggered_events: Vec<_> = reader.read(events).collect();
+
+        assert_eq!(
+            triggered_events.len(),
+            1,
+            "Expected exactly one interaction event"
+        );
+        match &triggered_events[0].event {
+            crate::domain::world::MapEvent::NpcDialogue { npc_id, .. } => {
+                assert_eq!(npc_id, "test_npc");
+            }
+            other => panic!("Expected NpcDialogue event, got {:?}", other),
+        }
+        assert_eq!(triggered_events[0].position, npc_pos);
+    }
+
+    #[test]
+    fn test_world_click_blocked_outside_exploration_mode() {
+        let mut app = build_input_app();
+
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let party_pos = crate::domain::types::Position::new(5, 5);
+        let npc_pos = crate::domain::types::Position::new(5, 4);
+        map.npc_placements.push(crate::domain::world::NpcPlacement {
+            npc_id: "test_npc".to_string(),
+            position: npc_pos,
+            facing: None,
+            dialogue_override: None,
+        });
+
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.world.add_map(map);
+            gs.0.world.set_current_map(1);
+            gs.0.world.set_party_position(party_pos);
+            gs.0.world.party_facing = crate::domain::types::Direction::North;
+            gs.0.mode = crate::application::GameMode::Menu(
+                crate::application::menu::MenuState::new(crate::application::GameMode::Exploration),
+            );
+        }
+
+        let mut window = Window::default();
+        window.resolution.set_physical_resolution(900, 600);
+        window.set_cursor_position(Some(Vec2::new(450.0, 300.0)));
+        app.world_mut().spawn((window, PrimaryWindow));
+
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Left);
+        app.insert_resource(mouse);
+
+        app.update();
+
+        let events = app.world().resource::<Messages<MapEventTriggered>>();
+        let mut reader = events.get_cursor();
+        let triggered_events: Vec<_> = reader.read(events).collect();
+
+        assert!(
+            triggered_events.is_empty(),
+            "Mouse world click must not trigger outside Exploration mode"
         );
     }
 
@@ -2143,7 +836,7 @@ mod integration_tests {
     /// Pressing `KeyCode::KeyI` while already in `GameMode::Inventory` must
     /// restore the previous mode (toggle off).
     #[test]
-    fn test_handle_input_i_closes_inventory() {
+    fn test_split_input_i_closes_inventory() {
         let mut app = build_input_app();
 
         // Frame 1: open inventory
@@ -2182,7 +875,7 @@ mod integration_tests {
     /// This test manually sets the game mode to `Menu` without using the
     /// keyboard so that no stale `just_pressed` state leaks between frames.
     #[test]
-    fn test_handle_input_i_ignored_in_menu_mode() {
+    fn test_split_input_i_ignored_in_menu_mode() {
         let mut app = build_input_app();
 
         // Place the game state directly into Menu mode without pressing ESC,
@@ -2220,7 +913,7 @@ mod integration_tests {
     /// menu (`GameMode::RestMenu`).  No `InitiateRestEvent` is fired at this
     /// point — that happens when the player selects a duration from the menu.
     #[test]
-    fn test_handle_input_r_in_exploration_fires_initiate_rest_event() {
+    fn test_split_input_r_in_exploration_fires_initiate_rest_event() {
         let mut app = build_input_app();
 
         // Confirm we start in Exploration mode.
@@ -2262,7 +955,7 @@ mod integration_tests {
     /// Pressing `R` while in `GameMode::Menu` must NOT open the rest menu
     /// and must NOT fire `InitiateRestEvent`.
     #[test]
-    fn test_handle_input_r_ignored_in_menu_mode() {
+    fn test_split_input_r_ignored_in_menu_mode() {
         let mut app = build_input_app();
 
         // Put game state into Menu mode directly.
@@ -2300,7 +993,7 @@ mod integration_tests {
     /// Pressing `R` while in `GameMode::Inventory` must NOT open the rest menu
     /// and must NOT fire `InitiateRestEvent`.
     #[test]
-    fn test_handle_input_r_ignored_in_inventory_mode() {
+    fn test_split_input_r_ignored_in_inventory_mode() {
         let mut app = build_input_app();
 
         // Open inventory first (without pressing I, to avoid stale key state).
@@ -2338,7 +1031,7 @@ mod integration_tests {
     /// Pressing `R` while in `GameMode::Combat` must NOT open the rest menu
     /// and must NOT fire `InitiateRestEvent`.
     #[test]
-    fn test_handle_input_r_ignored_in_combat_mode() {
+    fn test_split_input_r_ignored_in_combat_mode() {
         let mut app = build_input_app();
 
         // Enter combat mode directly.
@@ -2384,7 +1077,7 @@ mod integration_tests {
     /// Pressing `R` in Exploration opens RestMenu.  Pressing `R` again while
     /// in RestMenu must be ignored (R only acts in Exploration mode).
     #[test]
-    fn test_handle_input_r_in_exploration_two_frames_two_events() {
+    fn test_split_input_r_in_exploration_two_frames_two_events() {
         let mut app = build_input_app();
 
         // Frame 1: press R in Exploration — opens RestMenu.
@@ -2440,18 +1133,17 @@ mod interaction_tests {
     #[test]
     fn test_npc_interaction_adjacent_positions() {
         // Arrange
-        let center = Position::new(5, 5);
+        let center = crate::domain::types::Position::new(5, 5);
         let adjacent = get_adjacent_positions(center);
 
-        // Assert - verify all 8 positions are adjacent
-        assert!(adjacent.contains(&Position::new(5, 4))); // North
-        assert!(adjacent.contains(&Position::new(6, 4))); // NorthEast
-        assert!(adjacent.contains(&Position::new(6, 5))); // East
-        assert!(adjacent.contains(&Position::new(6, 6))); // SouthEast
-        assert!(adjacent.contains(&Position::new(5, 6))); // South
-        assert!(adjacent.contains(&Position::new(4, 6))); // SouthWest
-        assert!(adjacent.contains(&Position::new(4, 5))); // West
-        assert!(adjacent.contains(&Position::new(4, 4))); // NorthWest
+        assert!(adjacent.contains(&crate::domain::types::Position::new(5, 4))); // North
+        assert!(adjacent.contains(&crate::domain::types::Position::new(6, 4))); // NorthEast
+        assert!(adjacent.contains(&crate::domain::types::Position::new(6, 5))); // East
+        assert!(adjacent.contains(&crate::domain::types::Position::new(6, 6))); // SouthEast
+        assert!(adjacent.contains(&crate::domain::types::Position::new(5, 6))); // South
+        assert!(adjacent.contains(&crate::domain::types::Position::new(4, 6))); // SouthWest
+        assert!(adjacent.contains(&crate::domain::types::Position::new(4, 5))); // West
+        assert!(adjacent.contains(&crate::domain::types::Position::new(4, 4))); // NorthWest
     }
 
     /// Test that sign interaction detects signs in adjacent positions.
@@ -2462,10 +1154,10 @@ mod interaction_tests {
         let mut map =
             crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
 
-        let sign_pos = Position::new(5, 4);
+        let sign_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             sign_pos,
-            MapEvent::Sign {
+            crate::domain::world::MapEvent::Sign {
                 name: "TestSign".to_string(),
                 description: "This is a test sign".to_string(),
                 text: "You found it!".to_string(),
@@ -2479,7 +1171,10 @@ mod interaction_tests {
 
         // Assert
         assert!(event.is_some());
-        assert!(matches!(event, Some(MapEvent::Sign { .. })));
+        assert!(matches!(
+            event,
+            Some(crate::domain::world::MapEvent::Sign { .. })
+        ));
     }
 
     /// Test that teleport events are properly stored and retrievable.
@@ -2490,13 +1185,13 @@ mod interaction_tests {
         let mut map =
             crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
 
-        let teleport_pos = Position::new(5, 4);
+        let teleport_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             teleport_pos,
-            MapEvent::Teleport {
+            crate::domain::world::MapEvent::Teleport {
                 name: "TestPortal".to_string(),
                 description: "Portal to destination".to_string(),
-                destination: Position::new(2, 2),
+                destination: crate::domain::types::Position::new(2, 2),
                 map_id: 1,
             },
         );
@@ -2506,7 +1201,10 @@ mod interaction_tests {
 
         // Assert
         assert!(event.is_some());
-        assert!(matches!(event, Some(MapEvent::Teleport { .. })));
+        assert!(matches!(
+            event,
+            Some(crate::domain::world::MapEvent::Teleport { .. })
+        ));
     }
 
     /// Test that NPC placements are properly stored and retrievable.
@@ -2517,7 +1215,7 @@ mod interaction_tests {
         let mut map =
             crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
 
-        let npc_pos = Position::new(5, 4);
+        let npc_pos = crate::domain::types::Position::new(5, 4);
         map.npc_placements
             .push(crate::domain::world::NpcPlacement::new("test_npc", npc_pos));
 
@@ -2541,10 +1239,10 @@ mod interaction_tests {
         let mut map =
             crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
 
-        let recruit_pos = Position::new(5, 4);
+        let recruit_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             recruit_pos,
-            MapEvent::RecruitableCharacter {
+            crate::domain::world::MapEvent::RecruitableCharacter {
                 name: "TestRecruit".to_string(),
                 description: "A recruitable character".to_string(),
                 character_id: "hero_01".to_string(),
@@ -2559,9 +1257,14 @@ mod interaction_tests {
 
         // Assert
         assert!(event.is_some());
-        assert!(matches!(event, Some(MapEvent::RecruitableCharacter { .. })));
-        if let Some(MapEvent::RecruitableCharacter {
-            character_id, name, ..
+        assert!(matches!(
+            event,
+            Some(crate::domain::world::MapEvent::RecruitableCharacter { .. })
+        ));
+        if let Some(crate::domain::world::MapEvent::RecruitableCharacter {
+            character_id,
+            name,
+            ..
         }) = event
         {
             assert_eq!(character_id, "hero_01");
@@ -2577,10 +1280,10 @@ mod interaction_tests {
         let mut map =
             crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
 
-        let encounter_pos = Position::new(5, 4);
+        let encounter_pos = crate::domain::types::Position::new(5, 4);
         map.add_event(
             encounter_pos,
-            MapEvent::Encounter {
+            crate::domain::world::MapEvent::Encounter {
                 name: "Skeleton".to_string(),
                 description: "A rattling skeleton".to_string(),
                 monster_group: vec![1],
@@ -2597,13 +1300,16 @@ mod interaction_tests {
 
         // Assert
         assert!(event.is_some());
-        assert!(matches!(event, Some(MapEvent::Encounter { .. })));
+        assert!(matches!(
+            event,
+            Some(crate::domain::world::MapEvent::Encounter { .. })
+        ));
     }
 }
 
-/// T1-8: Verify that `handle_input` silently ignores all movement input when
-/// `GameMode::Combat` is active.  The party position must remain unchanged after
-/// pressing the forward-movement key.
+/// T1-8: Verify that the split input systems silently ignore all movement input
+/// when `GameMode::Combat` is active. The party position must remain unchanged
+/// after pressing the forward-movement key.
 #[cfg(test)]
 mod inventory_guard_tests {
     use super::*;
@@ -2616,6 +1322,7 @@ mod inventory_guard_tests {
         let mut app = App::new();
 
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig {
             movement_cooldown: 0.0,
@@ -2635,12 +1342,22 @@ mod inventory_guard_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<crate::game::systems::ui::GameLog>();
+        app.init_resource::<LockInteractionPending>();
 
+        // Register message channels that the split input systems depend on.
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
-        app.add_systems(Update, handle_input);
+        // Register the split systems under test.
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Press MoveForward (W key per default config).
         {
@@ -2662,6 +1379,7 @@ mod inventory_guard_tests {
         let mut app = App::new();
 
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig {
             movement_cooldown: 0.0,
@@ -2680,12 +1398,20 @@ mod inventory_guard_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<crate::game::systems::ui::GameLog>();
+        app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Press TurnLeft (A key per default config).
         {
@@ -2711,8 +1437,9 @@ mod combat_guard_tests {
     fn test_movement_blocked_in_combat_mode() {
         let mut app = App::new();
 
-        // Minimal resources required by handle_input.
+        // Minimal resources required by the split input systems.
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig::default();
         let key_map = KeyMap::from_controls_config(&cfg);
@@ -2731,21 +1458,28 @@ mod combat_guard_tests {
             crate::domain::character::Alignment::Good,
         );
         gs.party.add_member(hero).unwrap();
-        // enter_combat sets GameMode::Combat so the guard in handle_input fires.
+        // enter_combat sets GameMode::Combat so the split movement/input guards fire.
         gs.enter_combat();
         let original_position = gs.world.party_position;
 
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<crate::game::systems::ui::GameLog>();
+        app.init_resource::<LockInteractionPending>();
 
-        // Register message channels that handle_input depends on.
+        // Register message channels that the split input systems depend on.
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
-        // Register the system under test.
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Press MoveForward (W key per default config).
         {
@@ -2766,6 +1500,7 @@ mod combat_guard_tests {
         let mut app = App::new();
 
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig {
             movement_cooldown: 0.0,
@@ -2786,16 +1521,24 @@ mod combat_guard_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<crate::game::systems::ui::GameLog>();
+        app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         // Spawn a victory overlay marker to verify cleanup behavior.
         app.world_mut()
             .spawn(crate::game::systems::combat::VictorySummaryRoot);
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
 
         // Turn left (movement control) to trigger post-combat overlay dismissal.
         {
@@ -2837,6 +1580,7 @@ mod door_interaction_tests {
         let mut app = App::new();
 
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         // Zero cooldown so input fires on the first update.
         let cfg = ControlsConfig {
@@ -2853,24 +1597,37 @@ mod door_interaction_tests {
         let map = Map::new(1, "DoorTestMap".to_string(), "Test".to_string(), 10, 10);
         gs.world.add_map(map);
         gs.world.set_current_map(1);
-        gs.world.set_party_position(Position::new(5, 5));
+        gs.world
+            .set_party_position(crate::domain::types::Position::new(5, 5));
         // Default party_facing is North → position_ahead() == (5, 4).
 
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.init_resource::<crate::game::systems::ui::GameLog>();
+        app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
         app
     }
 
     /// Spawn a furniture door entity at `position` with the given locked state.
     /// Returns the spawned entity ID.
-    fn spawn_door_entity(app: &mut App, position: Position, is_locked: bool) -> Entity {
+    fn spawn_door_entity(
+        app: &mut App,
+        position: crate::domain::types::Position,
+        is_locked: bool,
+    ) -> Entity {
         app.world_mut()
             .spawn((
                 FurnitureEntity::new(crate::domain::world::FurnitureType::Door, !is_locked),
@@ -2925,7 +1682,7 @@ mod door_interaction_tests {
         let mut app = build_door_test_app();
 
         // Door directly north of the party (= position_ahead when facing North).
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         let door_entity = spawn_door_entity(&mut app, door_pos, false);
 
         {
@@ -2950,7 +1707,7 @@ mod door_interaction_tests {
     #[test]
     fn test_furniture_door_closes_on_second_interact() {
         let mut app = build_door_test_app();
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         let door_entity = spawn_door_entity(&mut app, door_pos, false);
         let key = interact_key();
 
@@ -2980,7 +1737,7 @@ mod door_interaction_tests {
     #[test]
     fn test_locked_furniture_door_stays_closed_without_key() {
         let mut app = build_door_test_app();
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         let door_entity = spawn_door_entity(&mut app, door_pos, true); // locked
 
         {
@@ -3018,7 +1775,7 @@ mod door_interaction_tests {
         }
 
         // Locked door that requires KEY_ITEM.
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         let mut door_state = DoorState::new(true, 0.0);
         door_state.key_item_id = Some(KEY_ITEM);
         let door_entity = app
@@ -3049,7 +1806,7 @@ mod door_interaction_tests {
     #[test]
     fn test_furniture_door_open_unblocks_tile() {
         let mut app = build_door_test_app();
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
 
         // Pre-block the tile to simulate an initially-closed door.
         {
@@ -3086,7 +1843,7 @@ mod door_interaction_tests {
     #[test]
     fn test_furniture_door_close_reblocks_tile() {
         let mut app = build_door_test_app();
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
 
         // Spawn a door that starts open.
         let mut open_state = DoorState::new(false, 0.0);
@@ -3145,7 +1902,7 @@ mod door_interaction_tests {
         let mut app = build_door_test_app();
 
         // Door to the east — party faces North so this is off to the side.
-        let door_pos = Position::new(6, 5);
+        let door_pos = crate::domain::types::Position::new(6, 5);
         let door_entity = spawn_door_entity(&mut app, door_pos, false);
 
         {
@@ -3167,7 +1924,7 @@ mod door_interaction_tests {
     fn test_locked_furniture_door_blocks_forward_movement() {
         let mut app = build_door_test_app();
 
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         // Spawn a locked, closed door with no key — permanently blocks movement.
         app.world_mut().spawn((
             FurnitureEntity::new(crate::domain::world::FurnitureType::Door, true),
@@ -3200,7 +1957,7 @@ mod door_interaction_tests {
     fn test_open_furniture_door_allows_forward_movement() {
         let mut app = build_door_test_app();
 
-        let door_pos = Position::new(5, 4);
+        let door_pos = crate::domain::types::Position::new(5, 4);
         let mut open_state = DoorState::new(false, 0.0);
         open_state.is_open = true;
         app.world_mut().spawn((
@@ -3254,13 +2011,14 @@ mod locked_container_map_event_tests {
     const CONTAINER_KEY_ID: crate::domain::types::ItemId = 55;
     const CONTAINER_LOCK_ID: &str = "test_container_lock";
 
-    fn container_pos() -> Position {
-        Position::new(5, 4)
+    fn container_pos() -> crate::domain::types::Position {
+        crate::domain::types::Position::new(5, 4)
     }
 
     fn build_locked_container_app() -> App {
         let mut app = App::new();
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig {
             movement_cooldown: 0.0,
@@ -3282,7 +2040,8 @@ mod locked_container_map_event_tests {
         );
         gs.world.add_map(map);
         gs.world.set_current_map(1);
-        gs.world.set_party_position(Position::new(5, 5));
+        gs.world
+            .set_party_position(crate::domain::types::Position::new(5, 5));
 
         let hero = Character::new(
             "Test Hero".to_string(),
@@ -3300,10 +2059,16 @@ mod locked_container_map_event_tests {
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
         app.add_message::<MapEventTriggered>();
-        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
         app
     }
 
@@ -3436,8 +2201,8 @@ mod locked_door_map_event_tests {
     const LOCK_ID: &str = "test_door_lock";
 
     /// Position of the locked door (position_ahead from party at (5,5) facing North).
-    fn door_pos() -> Position {
-        Position::new(5, 4)
+    fn door_pos() -> crate::domain::types::Position {
+        crate::domain::types::Position::new(5, 4)
     }
 
     /// Build a minimal Bevy app for locked-door interaction tests.
@@ -3451,11 +2216,12 @@ mod locked_door_map_event_tests {
     /// - `LockInteractionPending` (Phase 2 resource)
     /// - `GameLog` (for log message assertions)
     /// - `PendingRecruitmentContext`
-    /// - Messages: `MapEventTriggered`, `StartDialogue`, `InitiateRestEvent`
+    /// - Messages: `MapEventTriggered`, `InitiateRestEvent`
     fn build_locked_door_app() -> App {
         let mut app = App::new();
 
         app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(ButtonInput::<MouseButton>::default());
 
         let cfg = ControlsConfig {
             movement_cooldown: 0.0,
@@ -3478,7 +2244,8 @@ mod locked_door_map_event_tests {
         );
         gs.world.add_map(map);
         gs.world.set_current_map(1);
-        gs.world.set_party_position(Position::new(5, 5));
+        gs.world
+            .set_party_position(crate::domain::types::Position::new(5, 5));
 
         // Add a default party member so inventory operations work.
         let hero = Character::new(
@@ -3497,10 +2264,16 @@ mod locked_door_map_event_tests {
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
         app.add_message::<MapEventTriggered>();
-        app.add_message::<StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
-        app.add_systems(Update, handle_input);
+        app.add_systems(
+            Update,
+            (
+                handle_global_input_toggles,
+                handle_exploration_input_interact.after(handle_global_input_toggles),
+                handle_exploration_input_movement.after(handle_exploration_input_interact),
+            ),
+        );
         app
     }
 

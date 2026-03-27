@@ -260,10 +260,10 @@ pub struct UnequipItemAction {
 
 /// Represents an action that the player has requested via the inventory UI.
 ///
-/// `render_character_panel` returns `Option<PanelAction>` instead of writing
-/// messages directly so that the render helper stays free of `MessageWriter`
-/// generics.  The calling system (`inventory_ui_system`) matches on the
-/// returned value and writes the appropriate message.
+/// `render_character_panel` returns a [`CharacterPanelResult`] instead of
+/// writing messages directly so that the render helper stays free of
+/// `MessageWriter` generics and can also report mouse-click slot selection
+/// back to `inventory_ui_system`.
 ///
 /// # Examples
 ///
@@ -410,6 +410,18 @@ impl InventoryNavigationState {
     fn reset(&mut self) {
         *self = InventoryNavigationState::default();
     }
+}
+
+/// Combined result returned from `render_character_panel`.
+///
+/// This lets the egui renderer report both a clicked slot selection and an
+/// optional action-button click back to `inventory_ui_system`.
+#[derive(Debug, PartialEq, Eq)]
+pub struct CharacterPanelResult {
+    /// Action button click, if any.
+    pub action: Option<PanelAction>,
+    /// Inventory slot index clicked in the painter-driven grid, if any.
+    pub clicked_slot: Option<usize>,
 }
 
 // ===== Helpers =====
@@ -669,10 +681,9 @@ fn inventory_input_system(
     // ── Phase: SlotNavigation ──────────────────────────────────────────────
 
     // NOTE: The configured inventory toggle key ("I" by default) is intentionally
-    // NOT handled here.  `handle_input` (InputPlugin) owns the open/close toggle
-    // for that key.  Duplicating it here would cause the inventory to open and
-    // close in the same frame because both systems run in Update with no ordering
-    // guarantee between them.
+    // NOT handled here. The split input systems owned by `InputPlugin` handle the
+    // open/close toggle for that key before inventory UI input runs. Duplicating
+    // it here would cause the inventory to open and close in the same frame.
 
     // Esc in slot mode — close inventory
     if keyboard.just_pressed(KeyCode::Escape) {
@@ -952,9 +963,9 @@ fn inventory_input_system(
 #[allow(clippy::too_many_arguments)]
 fn inventory_ui_system(
     mut contexts: EguiContexts,
-    global_state: Res<GlobalState>,
+    mut global_state: ResMut<GlobalState>,
     game_content: Option<Res<GameContent>>,
-    nav_state: Res<InventoryNavigationState>,
+    mut nav_state: ResMut<InventoryNavigationState>,
     mut drop_writer: MessageWriter<DropItemAction>,
     mut transfer_writer: MessageWriter<TransferItemAction>,
     mut use_writer: MessageWriter<UseItemExplorationAction>,
@@ -988,6 +999,7 @@ fn inventory_ui_system(
         .collect();
 
     let mut pending_action: Option<PanelAction> = None;
+    let mut clicked_slot_update: Option<(usize, usize, bool)> = None;
 
     egui::CentralPanel::default().show(ctx, |ui| {
         // ── Top bar: title + close hint ──────────────────────────────────
@@ -1092,7 +1104,7 @@ fn inventory_ui_system(
 
                     // push_id mandatory per sdk/AGENTS.md
                     ui.push_id(format!("inv_panel_{}", party_index), |ui| {
-                        let action = render_character_panel(
+                        let panel_result = render_character_panel(
                             ui,
                             party_index,
                             is_focused,
@@ -1104,8 +1116,18 @@ fn inventory_ui_system(
                             &panel_names,
                             panel_equip_slot,
                         );
-                        if action.is_some() {
-                            pending_action = action;
+                        if let Some(action) = panel_result.action {
+                            pending_action = Some(action);
+                        }
+                        if let Some(slot_idx) = panel_result.clicked_slot {
+                            let has_item = global_state
+                                .0
+                                .party
+                                .members
+                                .get(party_index)
+                                .map(|ch| slot_idx < ch.inventory.items.len())
+                                .unwrap_or(false);
+                            clicked_slot_update = Some((party_index, slot_idx, has_item));
                         }
                     });
                 }
@@ -1115,6 +1137,26 @@ fn inventory_ui_system(
             }
         }
     });
+
+    if let Some((party_index, slot_idx, has_item)) = clicked_slot_update {
+        if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+            inv_state.focused_index = party_index;
+            inv_state.selected_slot = Some(slot_idx);
+        }
+
+        nav_state.selected_slot_index = Some(slot_idx);
+        nav_state.focus_on_panel = open_panels
+            .iter()
+            .position(|&pi| pi == party_index)
+            .unwrap_or(nav_state.focus_on_panel);
+        nav_state.focused_action_index = 0;
+        nav_state.phase = if has_item {
+            NavigationPhase::ActionNavigation
+        } else {
+            NavigationPhase::SlotNavigation
+        };
+        nav_state.selected_equip_slot = None;
+    }
 
     if let Some(action) = pending_action {
         match action {
@@ -1192,8 +1234,9 @@ fn inventory_ui_system(
 ///
 /// # Returns
 ///
-/// `Some(PanelAction)` when the player clicked an action button (Drop, Give,
-/// Equip, or Unequip); `None` otherwise.
+/// A [`CharacterPanelResult`] containing:
+/// - `action`: an action-button click (Drop, Give, Equip, or Unequip)
+/// - `clicked_slot`: a slot-grid click detected from the painter-driven grid
 #[allow(clippy::too_many_arguments)]
 fn render_character_panel(
     ui: &mut egui::Ui,
@@ -1206,14 +1249,18 @@ fn render_character_panel(
     game_content: Option<&GameContent>,
     panel_names: &[(usize, String)],
     selected_equip_slot: Option<EquipmentSlot>,
-) -> Option<PanelAction> {
+) -> CharacterPanelResult {
     if party_index >= global_state.0.party.members.len() {
-        return None;
+        return CharacterPanelResult {
+            action: None,
+            clicked_slot: None,
+        };
     }
 
     let character = &global_state.0.party.members[party_index];
     let items = &character.inventory.items;
     let mut panel_action: Option<PanelAction> = None;
+    let mut clicked_slot: Option<usize> = None;
 
     // How much vertical space do the action strips need?
     let has_equip_action = selected_equip_slot.is_some();
@@ -1443,6 +1490,8 @@ fn render_character_panel(
             );
         }
 
+        let cell_response = ui.allocate_rect(cell_rect, egui::Sense::click());
+
         // Item silhouette
         if slot_idx < items.len() {
             let item_type = game_content
@@ -1455,6 +1504,10 @@ fn render_character_panel(
                 item_type,
                 ITEM_SILHOUETTE_COLOR,
             );
+        }
+
+        if cell_response.clicked() {
+            clicked_slot = Some(slot_idx);
         }
     }
 
@@ -1620,7 +1673,10 @@ fn render_character_panel(
         }
     }
 
-    panel_action
+    CharacterPanelResult {
+        action: panel_action,
+        clicked_slot,
+    }
 }
 
 /// Public wrapper around [`paint_item_silhouette`] for use by sibling UI
@@ -2572,7 +2628,7 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_character_panel(
+                let result = render_character_panel(
                     ui,
                     0,                        // party_index
                     true,                     // is_focused
@@ -2584,6 +2640,8 @@ mod tests {
                     &[],  // no open panels for transfer buttons
                     None, // no equipment strip selection
                 );
+                assert!(result.action.is_none());
+                assert!(result.clicked_slot.is_none());
             });
         });
         // No panic = test passes
@@ -2629,7 +2687,7 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_character_panel(
+                let result = render_character_panel(
                     ui,
                     0,                        // party_index
                     false,                    // not focused
@@ -2641,6 +2699,7 @@ mod tests {
                     &[],  // no open panels for transfer buttons
                     None, // no equipment strip selection
                 );
+                assert!(result.clicked_slot.is_none());
             });
         });
         // No panic = test passes
@@ -2660,7 +2719,7 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_character_panel(
+                let result = render_character_panel(
                     ui,
                     0, // out-of-bounds
                     true,
@@ -2670,8 +2729,10 @@ mod tests {
                     &global_state,
                     None,
                     &[],
-                    None, // no equipment strip selection
+                    None,
                 );
+                assert!(result.action.is_none());
+                assert!(result.clicked_slot.is_none());
             });
         });
         // No panic = test passes
@@ -3300,8 +3361,8 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                // No simulated click occurs in headless context; return value is None.
-                let action = render_character_panel(
+                // No simulated click occurs in headless context; return value carries no action.
+                let result = render_character_panel(
                     ui,
                     0,                        // party_index
                     true,                     // is_focused
@@ -3311,9 +3372,10 @@ mod tests {
                     &global_state,
                     None,
                     &panel_names,
-                    None, // no equipment strip selection
+                    None,
                 );
-                assert!(action.is_none(), "no button clicked, should return None");
+                assert!(result.action.is_none());
+                assert!(result.clicked_slot.is_none());
             });
         });
     }
@@ -3357,7 +3419,7 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let action = render_character_panel(
+                let result = render_character_panel(
                     ui,
                     0,
                     true,
@@ -3367,9 +3429,10 @@ mod tests {
                     &global_state,
                     None,
                     &panel_names,
-                    None, // no equipment strip selection
+                    None,
                 );
-                assert!(action.is_none());
+                assert!(result.action.is_none());
+                assert!(result.clicked_slot.is_none());
             });
         });
     }
@@ -3413,7 +3476,7 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let action = render_character_panel(
+                let result = render_character_panel(
                     ui,
                     0,
                     true,
@@ -3423,9 +3486,10 @@ mod tests {
                     &global_state,
                     None,
                     &panel_names,
-                    None, // no equipment strip selection
+                    None,
                 );
-                assert!(action.is_none());
+                assert!(result.action.is_none());
+                assert!(result.clicked_slot.is_none());
             });
         });
     }
@@ -5379,7 +5443,7 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_character_panel(
+                let result = render_character_panel(
                     ui,
                     0,
                     true,
@@ -5389,8 +5453,10 @@ mod tests {
                     &global_state,
                     Some(&game_content),
                     &[],
-                    Some(EquipmentSlot::Weapon), // equipment strip cell focused
+                    Some(EquipmentSlot::Weapon),
                 );
+                assert!(result.action.is_none());
+                assert!(result.clicked_slot.is_none());
             });
         });
         // No panic = the equipped item name was rendered in the strip

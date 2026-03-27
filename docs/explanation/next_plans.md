@@ -79,7 +79,7 @@ We need to implement an automap and mini map in the game engine. The automap sho
 
 Write a plan with a phased approach to implementing an automap and mini map in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Automap and Mini Map Implementation Plan](./automap_and_mini_map_implementation_plan.md)
+✅ COMPLETED - [Automap and Mini Map Implementation Plan](./automap_and_mini_map_implementation_plan.md)
 
 ### Unconcious Characters and Dead Characters
 
