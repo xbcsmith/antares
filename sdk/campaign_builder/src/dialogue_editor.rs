@@ -146,7 +146,7 @@ pub enum DialogueEditorMode {
     Editing,
 }
 
-/// Result of ensuring merchant dialogue compliance for an NPC.
+/// Result of applying merchant dialogue lifecycle work for an NPC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MerchantDialogueUpdate {
     /// No changes were needed because the NPC is not a merchant.
@@ -163,6 +163,16 @@ pub enum MerchantDialogueUpdate {
     /// SDK-managed merchant branch.
     AugmentedExisting {
         /// The dialogue identifier that was augmented.
+        dialogue_id: DialogueId,
+    },
+    /// SDK-managed merchant content was removed from the assigned dialogue.
+    RemovedMerchantContent {
+        /// The dialogue identifier that was cleaned up.
+        dialogue_id: DialogueId,
+    },
+    /// No merchant content was present to remove from the assigned dialogue.
+    NoMerchantContentToRemove {
+        /// The dialogue identifier that was inspected.
         dialogue_id: DialogueId,
     },
 }
@@ -1278,6 +1288,48 @@ impl DialogueEditorState {
         self.has_unsaved_changes = true;
 
         Ok(MerchantDialogueUpdate::CreatedNew { dialogue_id })
+    }
+
+    /// Removes SDK-managed merchant content from the assigned dialogue for an
+    /// NPC that is no longer a merchant.
+    ///
+    /// This cleanup is intentionally non-destructive:
+    ///
+    /// - only SDK-managed merchant nodes and choices are removed
+    /// - unrelated authored dialogue content remains intact
+    /// - the dialogue asset itself is retained
+    /// - the NPC's `dialogue_id` is not cleared automatically
+    ///
+    /// Returns a status describing what action was taken.
+    pub fn remove_merchant_dialogue_for_npc(
+        &mut self,
+        npc: &NpcDefinition,
+    ) -> Result<MerchantDialogueUpdate, String> {
+        if npc.is_merchant {
+            return Ok(MerchantDialogueUpdate::Unchanged);
+        }
+
+        let Some(dialogue_id) = npc.dialogue_id else {
+            return Ok(MerchantDialogueUpdate::Unchanged);
+        };
+
+        let dialogue = self
+            .dialogues
+            .iter_mut()
+            .find(|dialogue| dialogue.id == dialogue_id)
+            .ok_or_else(|| {
+                format!(
+                    "Assigned dialogue {} for non-merchant '{}' was not found",
+                    dialogue_id, npc.id
+                )
+            })?;
+
+        if dialogue.remove_sdk_managed_merchant_content() {
+            self.has_unsaved_changes = true;
+            Ok(MerchantDialogueUpdate::RemovedMerchantContent { dialogue_id })
+        } else {
+            Ok(MerchantDialogueUpdate::NoMerchantContentToRemove { dialogue_id })
+        }
     }
 
     /// Finds the next available node ID for the currently selected dialogue.

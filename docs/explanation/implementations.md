@@ -1,5 +1,155 @@
 # Implementations
 
+## Phase 3: Merchant Disablement and Non-Destructive Removal (Complete)
+
+### Overview
+
+Phase 3 implements the reverse merchant dialogue lifecycle in the Campaign
+Builder so merchant-specific SDK-managed dialogue content can be removed when an
+NPC is no longer marked as a merchant.
+
+The goal of this phase is to ensure merchant disablement is non-destructive:
+merchant-only SDK content is removed, while authored non-merchant dialogue
+content remains intact and editable.
+
+### Problem Statement
+
+After Phase 2, the SDK could automatically create and repair merchant dialogue
+for merchant NPCs, but it still lacked the reverse lifecycle for safely turning
+merchant behavior off.
+
+That left several gaps:
+
+- unchecking `is_merchant` did not remove SDK-managed merchant dialogue content
+- merchant disablement could leave stale `OpenMerchant` paths in assigned
+  dialogue trees
+- there was no NPC-editor workflow for explicitly removing merchant branches
+- the UI did not clearly communicate that merchant cleanup should preserve
+  unrelated dialogue content
+- repeated cleanup behavior needed to be idempotent and safe for both augmented
+  custom dialogue and generated merchant template dialogue assets
+
+Phase 3 closes those gaps by wiring merchant removal into the same NPC editing
+lifecycle used for merchant enablement, while preserving the dialogue asset
+itself.
+
+### Files Changed
+
+| File                                          | Change                                                                       |
+| --------------------------------------------- | ---------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/dialogue_editor.rs` | Added merchant lifecycle removal support for assigned dialogue cleanup       |
+| `sdk/campaign_builder/src/npc_editor.rs`      | Added merchant disable cleanup flow, removal UI, status messaging, and tests |
+| `docs/explanation/implementations.md`         | Added this Phase 3 implementation summary                                    |
+
+---
+
+### 3.1 — Merchant Removal Now Uses the Same SDK Lifecycle Surface
+
+Phase 3 extends the merchant lifecycle support in the dialogue editor with
+reverse cleanup behavior for non-merchant NPCs.
+
+The added dialogue-side support includes:
+
+- `DialogueEditorState::remove_merchant_dialogue_for_npc(...)`
+- new `MerchantDialogueUpdate` outcomes for:
+  - `RemovedMerchantContent`
+  - `NoMerchantContentToRemove`
+
+This cleanup path operates only on SDK-managed merchant content identified by
+Phase 1 metadata and delegates actual branch removal to the existing
+non-destructive domain helper:
+
+- `DialogueTree::remove_sdk_managed_merchant_content(...)`
+
+That keeps merchant disablement deterministic and consistent with the original
+merchant augmentation contract.
+
+### 3.2 — NPC Merchant Disablement Is Now Integrated Into Toggle and Save Flow
+
+The NPC editor now performs merchant cleanup when an NPC stops being a merchant.
+
+That integration now occurs in both key lifecycle points:
+
+- immediately when `is_merchant` is unchecked in the editor
+- again on save when the NPC remains non-merchant
+
+This mirrors the Phase 2 enablement workflow and ensures the editor can repair
+or clean up merchant dialogue state before persisting the NPC definition.
+
+The cleanup behavior is intentionally conservative:
+
+- the assigned dialogue asset is not deleted
+- `dialogue_id` is not cleared automatically
+- only SDK-managed merchant choices and merchant nodes are removed
+- authored non-merchant dialogue content remains intact
+
+### 3.3 — Campaign Builder UI Now Explains Removal Consequences
+
+Phase 3 also updates the NPC editor UI so merchant disablement is visible and
+understandable during authoring.
+
+The UI now includes:
+
+- a removal-focused message explaining that merchant branch/action cleanup
+  affects SDK-managed merchant content only
+- an explicit `Remove merchant branch` action
+- immediate status updates after merchant removal work completes
+
+This makes the disablement workflow clear to authors and reduces the risk that
+merchant cleanup will be mistaken for destructive dialogue deletion.
+
+### 3.4 — Merchant Removal Preserves Authored Dialogue Content
+
+The most important behavioral result of Phase 3 is that merchant disablement is
+non-destructive.
+
+The implementation now ensures:
+
+- augmented custom dialogue loses only the SDK-managed merchant branch
+- authored root choices and authored child nodes remain intact
+- generated merchant template dialogue assets remain present as dialogue assets
+  after cleanup
+- repeated removal operations are safe no-ops once SDK-managed merchant content
+  has already been removed
+
+This matches the planned policy that the dialogue tree itself remains intact even
+after merchant-specific SDK content is removed.
+
+### 3.5 — Focused Tests Cover Removal, Preservation, and Idempotence
+
+Phase 3 adds Campaign Builder-focused tests for the reverse lifecycle:
+
+- removing merchant content from augmented custom dialogue preserves authored
+  choices and nodes
+- removing merchant content from a generated merchant template leaves a valid,
+  non-crashing dialogue asset state
+- repeated removal operations are idempotent
+- merchant removal against dialogue with no SDK-managed merchant content is a
+  no-op
+
+These tests use in-memory fixtures and keep the merchant disablement workflow
+stable and deterministic.
+
+### 3.6 — Deliverables Completed
+
+- [x] Merchant disable removes SDK-managed merchant content only
+- [x] Merchant disable preserves unrelated dialogue content
+- [x] Merchant disable flow integrated into NPC editor save/toggle lifecycle
+- [x] Removal behavior is idempotent and test-covered
+
+### 3.7 — Outcome
+
+After Phase 3, turning off `is_merchant` no longer leaves stale merchant
+dialogue content behind and does not destroy authored non-merchant dialogue.
+
+The key outcome is safe reverse lifecycle behavior:
+
+- SDK-managed merchant dialogue content can be removed reliably
+- authored dialogue content remains preserved
+- cleanup is integrated into normal NPC editing flow
+- repeated cleanup remains safe and idempotent
+- post-removal dialogue assets remain intact and editable
+
 ## Phase 2: SDK Merchant Template Generation and Dialogue Augmentation (Complete)
 
 ### Overview
