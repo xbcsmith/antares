@@ -510,66 +510,61 @@ pub fn try_interact_npc_or_recruitable(
         return true;
     }
 
-    if let Some(MapEvent::RecruitableCharacter {
-        name, character_id, ..
-    }) = map.get_event(party_position)
-    {
-        info!(
-            "Interacting with recruitable character '{}' (ID: {}) at current position {:?}",
-            name, character_id, party_position
-        );
-        recruitment_context.0 = Some(RecruitmentContext {
-            character_id: character_id.clone(),
-            event_position: party_position,
-        });
+    if let Some(MapEvent::RecruitableCharacter { .. }) = map.get_event(party_position) {
+        let event = map
+            .get_event(party_position)
+            .expect("Recruitable character event must still exist at current position")
+            .clone();
+
+        if let MapEvent::RecruitableCharacter {
+            name, character_id, ..
+        } = &event
+        {
+            info!(
+                "Interacting with recruitable character '{}' (ID: {}) at current position {:?}",
+                name, character_id, party_position
+            );
+            recruitment_context.0 = Some(RecruitmentContext {
+                character_id: character_id.clone(),
+                event_position: party_position,
+            });
+        }
 
         map_event_messages.write(MapEventTriggered {
-            event: MapEvent::NpcDialogue {
-                name: name.clone(),
-                description: String::new(),
-                npc_id: character_id.clone(),
-                time_condition: None,
-                facing: None,
-                proximity_facing: false,
-                rotation_speed: None,
-            },
+            event,
             position: party_position,
         });
         return true;
     }
 
     for position in adjacent_tiles {
-        if let Some(MapEvent::RecruitableCharacter {
-            name, character_id, ..
-        }) = map.get_event(position)
-        {
-            info!(
-                "Interacting with recruitable character '{}' (ID: {}) at {:?}",
-                name, character_id, position
-            );
+        if let Some(MapEvent::RecruitableCharacter { .. }) = map.get_event(position) {
+            let event = map
+                .get_event(position)
+                .expect("Recruitable character event must still exist at adjacent position")
+                .clone();
 
-            let _speaker_entity = npc_query
-                .iter()
-                .find(|(_, _, tile_coord)| tile_coord.0 == position)
-                .map(|(entity, _, _)| entity);
+            if let MapEvent::RecruitableCharacter {
+                name, character_id, ..
+            } = &event
+            {
+                info!(
+                    "Interacting with recruitable character '{}' (ID: {}) at {:?}",
+                    name, character_id, position
+                );
 
-            recruitment_context.0 = Some(RecruitmentContext {
-                character_id: character_id.clone(),
-                event_position: position,
-            });
+                let _speaker_entity = npc_query
+                    .iter()
+                    .find(|(_, _, tile_coord)| tile_coord.0 == position)
+                    .map(|(entity, _, _)| entity);
 
-            map_event_messages.write(MapEventTriggered {
-                event: MapEvent::NpcDialogue {
-                    name: name.clone(),
-                    description: String::new(),
-                    npc_id: character_id.clone(),
-                    time_condition: None,
-                    facing: None,
-                    proximity_facing: false,
-                    rotation_speed: None,
-                },
-                position,
-            });
+                recruitment_context.0 = Some(RecruitmentContext {
+                    character_id: character_id.clone(),
+                    event_position: position,
+                });
+            }
+
+            map_event_messages.write(MapEventTriggered { event, position });
             return true;
         }
     }

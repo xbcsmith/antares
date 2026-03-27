@@ -87,15 +87,41 @@ pub fn handle_global_mode_toggles(
     }
 
     if frame_input.menu_toggle {
-        if matches!(game_state.mode, GameMode::Automap) {
-            game_state.mode = GameMode::Exploration;
-            bevy::prelude::info!(
-                "Automap closed via menu key: new_mode = {:?}",
-                game_state.mode
-            );
-        } else {
-            toggle_menu_state(game_state);
-            bevy::prelude::info!("Menu toggled: new_mode = {:?}", game_state.mode);
+        match &game_state.mode {
+            GameMode::Automap => {
+                game_state.mode = GameMode::Exploration;
+                bevy::prelude::info!(
+                    "Automap closed via menu key: new_mode = {:?}",
+                    game_state.mode
+                );
+            }
+            GameMode::MerchantInventory(merchant_state) => {
+                let resume = merchant_state.get_resume_mode();
+                bevy::prelude::info!(
+                    "Merchant inventory closed via menu key: restored mode = {:?}",
+                    resume
+                );
+                game_state.mode = resume;
+            }
+            GameMode::ContainerInventory(container_state) => {
+                let resume = container_state.get_resume_mode();
+                bevy::prelude::info!(
+                    "Container inventory closed via menu key: restored mode = {:?}",
+                    resume
+                );
+                game_state.mode = resume;
+            }
+            GameMode::TempleService(_) => {
+                game_state.mode = GameMode::Exploration;
+                bevy::prelude::info!(
+                    "Temple service closed via menu key: new_mode = {:?}",
+                    game_state.mode
+                );
+            }
+            _ => {
+                toggle_menu_state(game_state);
+                bevy::prelude::info!("Menu toggled: new_mode = {:?}", game_state.mode);
+            }
         }
         return true;
     }
@@ -264,6 +290,115 @@ mod tests {
 
         assert!(consumed);
         assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_escape_closes_merchant_inventory_to_dialogue() {
+        let mut state = GameState::new();
+        state.mode = GameMode::MerchantInventory(
+            crate::application::merchant_inventory_state::MerchantInventoryState::new(
+                "merchant_tom".to_string(),
+                "Tom the Merchant".to_string(),
+                0,
+                GameMode::Dialogue(dialogue_state_for("merchant_tom")),
+            ),
+        );
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Dialogue(_)));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_escape_closes_merchant_inventory_not_menu() {
+        let mut state = GameState::new();
+        state.mode = GameMode::MerchantInventory(
+            crate::application::merchant_inventory_state::MerchantInventoryState::new(
+                "merchant_tom".to_string(),
+                "Tom the Merchant".to_string(),
+                0,
+                GameMode::Dialogue(dialogue_state_for("merchant_tom")),
+            ),
+        );
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(
+            !matches!(state.mode, GameMode::Menu(_)),
+            "Escape in MerchantInventory must close the merchant screen instead of opening the game menu"
+        );
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_escape_closes_container_inventory_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::ContainerInventory(
+            crate::application::container_inventory_state::ContainerInventoryState::new(
+                "crate_01".to_string(),
+                "Wooden Crate".to_string(),
+                vec![],
+                0,
+                GameMode::Exploration,
+            ),
+        );
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_escape_closes_container_inventory_not_menu() {
+        let mut state = GameState::new();
+        state.mode = GameMode::ContainerInventory(
+            crate::application::container_inventory_state::ContainerInventoryState::new(
+                "crate_01".to_string(),
+                "Wooden Crate".to_string(),
+                vec![],
+                0,
+                GameMode::Exploration,
+            ),
+        );
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(
+            !matches!(state.mode, GameMode::Menu(_)),
+            "Escape in ContainerInventory must close the container screen instead of opening the game menu"
+        );
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_escape_closes_temple_service_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::TempleService(crate::application::TempleServiceState::new(
+            "temple_priest".to_string(),
+        ));
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_escape_closes_temple_service_not_menu() {
+        let mut state = GameState::new();
+        state.mode = GameMode::TempleService(crate::application::TempleServiceState::new(
+            "temple_priest".to_string(),
+        ));
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(
+            !matches!(state.mode, GameMode::Menu(_)),
+            "Escape in TempleService must close the temple screen instead of opening the game menu"
+        );
     }
 
     #[test]

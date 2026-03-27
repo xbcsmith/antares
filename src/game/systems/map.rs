@@ -61,6 +61,17 @@ pub struct RecruitableVisualMarker {
     pub character_id: String,
 }
 
+/// Message requesting immediate despawn of a recruitable visual at a specific map tile.
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct DespawnRecruitableVisual {
+    /// Map ID containing the recruitable visual.
+    pub map_id: types::MapId,
+    /// Tile position of the recruitable visual to remove.
+    pub position: types::Position,
+    /// Character ID of the recruitable visual to remove.
+    pub character_id: String,
+}
+
 /// Component tagging an entity as a visual marker for a map encounter.
 ///
 /// Despawned by `cleanup_encounter_visuals` when the backing `MapEvent::Encounter`
@@ -138,6 +149,7 @@ impl Plugin for MapManagerPlugin {
     fn build(&self, app: &mut App) {
         // Register the map change message and the handler + spawn systems
         app.add_message::<MapChangeEvent>()
+            .add_message::<DespawnRecruitableVisual>()
             // Phase 3: register SetFacing message and proximity/facing systems
             .add_plugins(crate::game::systems::facing::FacingPlugin)
             // Phase 2 (locks): seed lock_states for every map present at startup.
@@ -151,6 +163,7 @@ impl Plugin for MapManagerPlugin {
                 (
                     map_change_handler,
                     spawn_map_markers,
+                    handle_despawn_recruitable_visual,
                     cleanup_recruitable_visuals,
                     cleanup_encounter_visuals,
                     cleanup_locked_door_markers,
@@ -183,6 +196,27 @@ fn cleanup_encounter_visuals(
         );
         if !event_present {
             commands.entity(entity).despawn();
+        }
+    }
+}
+
+/// Handles explicit recruitable-visual despawn requests triggered by gameplay systems.
+///
+/// This provides an immediate despawn path when a recruitable joins the party,
+/// while `cleanup_recruitable_visuals` remains as a fallback safety net.
+fn handle_despawn_recruitable_visual(
+    mut commands: Commands,
+    mut ev_reader: MessageReader<DespawnRecruitableVisual>,
+    query: Query<(Entity, &MapEntity, &TileCoord, &RecruitableVisualMarker)>,
+) {
+    for ev in ev_reader.read() {
+        for (entity, map_entity, tile_coord, marker) in query.iter() {
+            if map_entity.0 == ev.map_id
+                && tile_coord.0 == ev.position
+                && marker.character_id == ev.character_id
+            {
+                commands.entity(entity).despawn();
+            }
         }
     }
 }
@@ -2637,6 +2671,61 @@ mod tests {
         let mut query = world_ref.query::<&RecruitableVisualMarker>();
         let results: Vec<_> = query.iter(&*world_ref).collect();
         assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_explicit_recruitable_visual_despawn_message_removes_matching_visual() {
+        use crate::domain::types::Position;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DespawnRecruitableVisual>();
+        app.add_systems(Update, handle_despawn_recruitable_visual);
+
+        let recruitable_pos = Position::new(4, 4);
+        let other_pos = Position::new(6, 6);
+
+        app.world_mut().spawn((
+            MapEntity(1),
+            TileCoord(recruitable_pos),
+            RecruitableVisualMarker {
+                character_id: "whisper".to_string(),
+            },
+        ));
+
+        app.world_mut().spawn((
+            MapEntity(1),
+            TileCoord(other_pos),
+            RecruitableVisualMarker {
+                character_id: "old_gareth".to_string(),
+            },
+        ));
+
+        {
+            let mut messages = app
+                .world_mut()
+                .resource_mut::<Messages<DespawnRecruitableVisual>>();
+            messages.write(DespawnRecruitableVisual {
+                map_id: 1,
+                position: recruitable_pos,
+                character_id: "whisper".to_string(),
+            });
+        }
+
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&RecruitableVisualMarker, &TileCoord, &MapEntity)>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+
+        assert_eq!(
+            results.len(),
+            1,
+            "Exactly one non-target recruitable visual should remain after explicit despawn",
+        );
+        assert_eq!(results[0].0.character_id, "old_gareth");
+        assert_eq!(results[0].1 .0, other_pos);
+        assert_eq!(results[0].2 .0, 1);
     }
 
     /// T4-E4: Spawn an `EncounterVisualMarker` entity, remove the backing event,
