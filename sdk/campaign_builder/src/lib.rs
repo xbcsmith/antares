@@ -5070,11 +5070,65 @@ impl eframe::App for CampaignBuilderApp {
                     self.unsaved_changes = true;
                 }
 
+                let npc_dialogue_ids_before: Vec<_> =
+                    self.dialogues.iter().map(|dialogue| dialogue.id).collect();
+                let npc_available_dialogue_ids_after: Vec<_> = self
+                    .npc_editor_state
+                    .available_dialogues
+                    .iter()
+                    .map(|dialogue| dialogue.id)
+                    .collect();
+
                 // Forward any status message produced inside show() (e.g. Reload result)
                 // to the app's global status bar.  The NPC editor returns bool rather than
                 // a status string, so it uses pending_status as a side-channel.
                 if let Some(status) = self.npc_editor_state.pending_status.take() {
                     self.status_message = status;
+                }
+
+                if npc_available_dialogue_ids_after != npc_dialogue_ids_before
+                    || self.dialogues.len() != self.npc_editor_state.available_dialogues.len()
+                {
+                    self.dialogues = self.npc_editor_state.available_dialogues.clone();
+
+                    if let Some(dir) = &self.campaign_dir {
+                        let dialogue_path = dir.join(&self.campaign.dialogue_file);
+                        match self.save_dialogues_to_file(&dialogue_path) {
+                            Ok(()) => {
+                                self.unsaved_changes = true;
+                                self.status_message = format!(
+                                    "Saved {} dialogues after merchant dialogue update",
+                                    self.dialogues.len()
+                                );
+                            }
+                            Err(error) => {
+                                self.status_message = format!(
+                                    "Merchant dialogue updated in memory, but failed to persist dialogues: {}",
+                                    error
+                                );
+                            }
+                        }
+                    } else {
+                        self.unsaved_changes = true;
+                    }
+                }
+
+                if let Some(dialogue_id) = self.npc_editor_state.requested_open_dialogue.take() {
+                    if let Some(dialogue_idx) =
+                        self.dialogues.iter().position(|dialogue| dialogue.id == dialogue_id)
+                    {
+                        self.active_tab = EditorTab::Dialogues;
+                        self.dialogue_editor_state.selected_dialogue = Some(dialogue_idx);
+                        self.dialogue_editor_state.start_edit_dialogue(dialogue_idx);
+                        self.status_message =
+                            format!("Opening assigned dialogue {} from NPC editor", dialogue_id);
+                        ui.ctx().request_repaint();
+                    } else {
+                        self.status_message = format!(
+                            "Assigned dialogue {} could not be opened because it was not found",
+                            dialogue_id
+                        );
+                    }
                 }
 
                 // If the NPC editor requested cross-tab navigation to edit a stock template,
@@ -8657,6 +8711,7 @@ mod tests {
             damage: None,
             duration: 0,
             saving_throw: false,
+            resurrect_hp: None,
             applied_conditions: vec!["bless".to_string()],
         });
 
@@ -8673,6 +8728,7 @@ mod tests {
             damage: Some(DiceRoll::new(3, 6, 0)),
             duration: 0,
             saving_throw: false,
+            resurrect_hp: None,
             applied_conditions: vec!["burn".to_string()],
         });
 

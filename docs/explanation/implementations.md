@@ -1,5 +1,191 @@
 # Implementations
 
+## Phase 2: SDK Merchant Template Generation and Dialogue Augmentation (Complete)
+
+### Overview
+
+Phase 2 wires the merchant dialogue foundation from Phase 1 into the Campaign
+Builder so merchant-capable NPCs can be brought into a compliant state
+automatically.
+
+The primary goal of this phase is to make merchant dialogue creation and repair
+part of the SDK authoring workflow instead of a manual content-maintenance task.
+
+### Problem Statement
+
+After Phase 1, the domain layer could already:
+
+- detect whether a dialogue explicitly opened a merchant for a specific NPC
+- generate a standard merchant template tree
+- augment an existing dialogue with a standard merchant branch
+- distinguish SDK-managed merchant dialogue content from authored content
+
+But the SDK still lacked the editor-side behavior required to use that
+foundation in practice.
+
+That left several workflow gaps:
+
+- checking `is_merchant` on an NPC with no dialogue still required manual
+  dialogue authoring
+- existing custom dialogue assigned to a merchant NPC could remain invalid if it
+  did not contain `OpenMerchant`
+- repeated merchant repairs risked duplicating merchant content unless the SDK
+  enforced idempotent behavior through the editor workflow
+- the Campaign Builder UI did not expose merchant dialogue health, repair
+  status, or quick maintenance actions
+- NPC-side saves did not automatically ensure that related dialogue content was
+  also updated and persisted
+
+Phase 2 closes those gaps by connecting merchant dialogue generation,
+augmentation, UI status, and persistence to the NPC editor lifecycle.
+
+### Files Changed
+
+| File                                          | Change                                                                                  |
+| --------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/dialogue_editor.rs` | Added merchant dialogue compliance helpers for NPC-driven generation and augmentation   |
+| `sdk/campaign_builder/src/npc_editor.rs`      | Added merchant dialogue status, auto-repair, maintenance actions, and focused tests     |
+| `sdk/campaign_builder/src/lib.rs`             | Synced NPC editor merchant dialogue changes back into app dialogue state and navigation |
+| `docs/explanation/implementations.md`         | Added this Phase 2 implementation summary                                               |
+
+---
+
+### 2.1 — Merchant Dialogue Generation Is Now Built Into the SDK
+
+Phase 2 introduces an editor-facing merchant dialogue enforcement helper in the
+Campaign Builder dialogue editor layer:
+
+- `DialogueEditorState::ensure_merchant_dialogue_for_npc(...)`
+- `MerchantDialogueUpdate`
+
+This helper performs the planned Phase 2 behavior directly against the loaded
+dialogue collection:
+
+- if `NpcDefinition::is_merchant == true` and `dialogue_id == None`, allocate a
+  new `DialogueId`, create a standard merchant template tree, append it to the
+  loaded dialogue set, and assign that ID back to the NPC
+- if `NpcDefinition::is_merchant == true` and `dialogue_id != None`, inspect the
+  assigned dialogue tree and augment it only when the tree does not already
+  contain an explicit `DialogueAction::OpenMerchant { npc_id }`
+
+This keeps merchant template generation deterministic and moves the logic into a
+reusable SDK surface rather than scattering it across UI event handlers.
+
+### 2.2 — NPC Editing Lifecycle Now Enforces Merchant Dialogue Compliance
+
+The NPC editor now actively treats `is_merchant` and `dialogue_id` as linked
+authoring data instead of unrelated fields.
+
+The new NPC editor flow includes:
+
+- auto-apply merchant dialogue creation or repair when `is_merchant` is toggled
+  from false to true
+- auto-apply merchant dialogue compliance again during save, so invalid merchant
+  dialogue drift is repaired before the NPC definition is persisted
+- synchronize generated or augmented dialogues back into the NPC editor’s loaded
+  dialogue collection
+- preserve idempotence so repeated edits do not duplicate the SDK-managed branch
+
+That means a merchant NPC can now be moved toward a valid authoring state from
+inside the NPC editor without forcing the user to switch tabs and hand-author
+dialogue first.
+
+### 2.3 — Campaign Builder UI Now Surfaces Merchant Dialogue State
+
+Phase 2 also adds explicit merchant dialogue status reporting to the NPC editor
+UI.
+
+The editor now surfaces merchant dialogue state through status labels and
+maintenance controls corresponding to the planned authoring workflow:
+
+- `No dialogue assigned`
+- `Merchant dialogue valid`
+- `Merchant dialogue missing OpenMerchant`
+- `SDK-managed merchant branch present`
+
+It also exposes one-click maintenance actions for merchant dialogue lifecycle
+work:
+
+- `Create merchant dialogue`
+- `Repair merchant dialogue`
+- `Open assigned dialogue`
+
+This gives authors direct feedback about merchant dialogue health and a fast path
+to create, repair, or inspect the assigned dialogue without destructive edits to
+unrelated conversation content.
+
+### 2.4 — Dialogue Persistence and Cross-Tab Workflow Were Integrated
+
+The implementation does more than mutate editor-local state.
+
+When the NPC editor creates or repairs merchant dialogue content, the Campaign
+Builder app now:
+
+- synchronizes the updated dialogue collection back into the application-level
+  `self.dialogues`
+- persists the modified dialogue file alongside NPC changes
+- marks the campaign as having unsaved changes when appropriate
+- supports cross-tab navigation to the assigned dialogue in the Dialogues tab
+
+This closes the loop between NPC-side merchant enablement and actual dialogue
+data persistence, which is required for the Phase 2 deliverables to be complete.
+
+### 2.5 — Existing Authored Dialogue Remains Non-Destructive
+
+Phase 2 continues the non-destructive model established in Phase 1.
+
+The SDK now augments existing dialogue only when merchant-opening content is
+missing for the specific merchant NPC being edited. If the assigned dialogue is
+already valid, no additional merchant branch is inserted.
+
+That preserves authored dialogue flow while still allowing the SDK to repair the
+merchant-specific contract automatically.
+
+The resulting behavior is:
+
+- valid existing custom dialogue is preserved
+- invalid existing dialogue is augmented rather than replaced
+- newly created merchant dialogue uses the standard SDK template
+- repeated repair operations remain idempotent
+
+### 2.6 — Campaign Builder Tests Cover Generation, Repair, and Idempotence
+
+Focused NPC-editor tests were added to verify the new Phase 2 workflow:
+
+- checking merchant enablement with no dialogue creates and assigns a new
+  merchant dialogue
+- checking merchant enablement with an existing non-merchant dialogue augments
+  the assigned tree
+- repeated merchant repair does not duplicate SDK-managed merchant nodes or
+  choices
+- saving after merchant auto-generation preserves the NPC `dialogue_id`
+- merchant dialogue status reporting identifies missing `OpenMerchant`
+
+These tests use in-memory editor fixtures and do not depend on live campaign
+content, keeping the Phase 2 behavior stable and deterministic.
+
+### 2.7 — Deliverables Completed
+
+- [x] Built-in standard merchant dialogue template implemented
+- [x] Merchant auto-generation for NPCs with no dialogue implemented
+- [x] Merchant dialogue augmentation for existing dialogues implemented
+- [x] NPC editor wiring for merchant enablement implemented
+- [x] Campaign Builder UI exposes merchant dialogue status and repair actions
+- [x] SDK tests cover generation, augmentation, and idempotence
+
+### 2.8 — Outcome
+
+After Phase 2, the Campaign Builder can now automatically create or repair
+merchant dialogue as part of NPC authoring.
+
+The key outcome is workflow automation:
+
+- newly marked merchant NPCs can be brought into a valid state automatically
+- merchant dialogue generation and repair are idempotent
+- existing custom dialogue content is preserved
+- dialogue creation, repair, persistence, and navigation are now connected
+  through the SDK authoring flow
+
 ## Phase 1: Merchant Dialogue Policy and Metadata Foundation (Complete)
 
 ### Overview

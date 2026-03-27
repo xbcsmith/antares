@@ -284,9 +284,8 @@ impl DialogueTree {
             root_node_id,
             format!("Welcome. Take a look at what {} has for sale.", npc_name),
         );
-        root.add_choice(DialogueChoice::new(
-            "Show me your wares.",
-            Some(merchant_node_id),
+        root.add_choice(DialogueChoice::sdk_managed_merchant_choice(
+            merchant_node_id,
         ));
         root.add_choice(DialogueChoice::new(goodbye_text, None));
 

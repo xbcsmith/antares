@@ -50,6 +50,7 @@
 //! - Standard UI components: EditorToolbar, TwoColumnLayout
 
 use crate::creature_assets::CreatureAssetManager;
+use crate::dialogue_editor::{DialogueEditorState, MerchantDialogueUpdate};
 use crate::ui_helpers::{
     autocomplete_creature_selector, autocomplete_portrait_selector,
     autocomplete_sprite_sheet_selector, extract_portrait_candidates,
@@ -177,6 +178,16 @@ pub struct NpcEditorState {
     /// `show()` call and forwards it to `CampaignBuilderApp::status_message`.
     #[serde(skip)]
     pub pending_status: Option<String>,
+
+    /// Dialogue editor state used to create and repair merchant dialogue
+    /// assignments from inside the NPC editor.
+    #[serde(skip)]
+    pub merchant_dialogue_editor: DialogueEditorState,
+
+    /// Optional dialogue ID that the user requested to open from the merchant
+    /// dialogue status controls.
+    #[serde(skip)]
+    pub requested_open_dialogue: Option<DialogueId>,
 }
 
 /// NPC editor mode
@@ -269,6 +280,8 @@ impl Default for NpcEditorState {
             available_stock_templates: Vec::new(),
             requested_template_edit: None,
             pending_status: None,
+            merchant_dialogue_editor: DialogueEditorState::default(),
+            requested_open_dialogue: None,
         }
     }
 }
@@ -339,6 +352,8 @@ impl NpcEditorState {
         // Update available references
         self.available_dialogues = dialogues.to_vec();
         self.available_quests = quests.to_vec();
+        self.merchant_dialogue_editor
+            .load_dialogues(dialogues.to_vec());
 
         let mut needs_save = false;
 
@@ -722,6 +737,13 @@ impl NpcEditorState {
                         .unwrap_or("(none)"),
                 );
                 ui.end_row();
+
+                if npc.is_merchant {
+                    ui.label("Merchant Dialogue:");
+                    let (status_label, _) = self.merchant_dialogue_status_for_definition(npc);
+                    ui.label(status_label);
+                    ui.end_row();
+                }
 
                 ui.label("Quests:");
                 if npc.quest_ids.is_empty() {
@@ -1115,9 +1137,92 @@ impl NpcEditorState {
                         );
                     });
 
+                    let was_merchant = self.edit_buffer.is_merchant;
                     ui.checkbox(&mut self.edit_buffer.is_merchant, "🏪 Is Merchant");
 
+                    if self.edit_buffer.is_merchant && !was_merchant {
+                        match self.auto_apply_merchant_dialogue_to_edit_buffer() {
+                            Ok(message) => {
+                                self.pending_status = Some(message);
+                                needs_save = true;
+                            }
+                            Err(error) => {
+                                self.validation_errors.push(error.clone());
+                                self.pending_status = Some(error);
+                            }
+                        }
+                    }
+
                     if self.edit_buffer.is_merchant {
+                        let (status_label, sdk_managed) =
+                            self.merchant_dialogue_status_for_buffer();
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            let badge_color = if status_label == "Merchant dialogue valid" {
+                                egui::Color32::from_rgb(80, 200, 120)
+                            } else if status_label == "SDK-managed merchant branch present" {
+                                egui::Color32::from_rgb(100, 200, 180)
+                            } else if status_label == "Merchant dialogue missing OpenMerchant" {
+                                egui::Color32::from_rgb(255, 180, 0)
+                            } else {
+                                egui::Color32::from_rgb(220, 120, 120)
+                            };
+
+                            ui.label(
+                                egui::RichText::new(status_label)
+                                    .color(badge_color)
+                                    .strong(),
+                            );
+
+                            if sdk_managed {
+                                ui.small("(SDK managed)");
+                            }
+                        });
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Create merchant dialogue").clicked() {
+                                match self.create_or_repair_merchant_dialogue_for_buffer() {
+                                    Ok(message) => {
+                                        self.pending_status = Some(message);
+                                        needs_save = true;
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
+                                }
+                            }
+
+                            if ui.button("Repair merchant dialogue").clicked() {
+                                match self.create_or_repair_merchant_dialogue_for_buffer() {
+                                    Ok(message) => {
+                                        self.pending_status = Some(message);
+                                        needs_save = true;
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
+                                }
+                            }
+
+                            let open_enabled = !self.edit_buffer.dialogue_id.trim().is_empty();
+                            if ui
+                                .add_enabled(open_enabled, egui::Button::new("Open assigned dialogue"))
+                                .clicked()
+                            {
+                                if let Ok(dialogue_id) =
+                                    self.edit_buffer.dialogue_id.parse::<DialogueId>()
+                                {
+                                    self.requested_open_dialogue = Some(dialogue_id);
+                                    self.pending_status = Some(format!(
+                                        "Open assigned dialogue {} from the Dialogues tab",
+                                        dialogue_id
+                                    ));
+                                }
+                            }
+                        });
+
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             ui.label("Stock Template:");
@@ -1193,6 +1298,20 @@ impl NpcEditorState {
 
                     if ui.button("💾 Save").clicked() {
                         self.validate_edit_buffer();
+                        if self.validation_errors.is_empty() {
+                            match self.auto_apply_merchant_dialogue_to_edit_buffer() {
+                                Ok(message) => {
+                                    if !message.is_empty() {
+                                        self.pending_status = Some(message);
+                                    }
+                                }
+                                Err(error) => {
+                                    self.validation_errors.push(error.clone());
+                                    self.pending_status = Some(error);
+                                }
+                            }
+                        }
+
                         if self.validation_errors.is_empty() {
                             if self.save_npc() {
                                 needs_save = true;
@@ -1716,6 +1835,169 @@ impl NpcEditorState {
         id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     }
 
+    fn merchant_dialogue_status_for_definition(&self, npc: &NpcDefinition) -> (&'static str, bool) {
+        if !npc.is_merchant {
+            return ("Not a merchant", false);
+        }
+
+        let Some(dialogue_id) = npc.dialogue_id else {
+            return ("No dialogue assigned", false);
+        };
+
+        let Some(dialogue) = self
+            .available_dialogues
+            .iter()
+            .find(|dialogue| dialogue.id == dialogue_id)
+        else {
+            return ("No dialogue assigned", false);
+        };
+
+        if dialogue.contains_open_merchant_for_npc(&npc.id) {
+            if dialogue.has_sdk_managed_merchant_content() {
+                ("SDK-managed merchant branch present", true)
+            } else {
+                ("Merchant dialogue valid", false)
+            }
+        } else {
+            ("Merchant dialogue missing OpenMerchant", false)
+        }
+    }
+
+    fn merchant_dialogue_status_for_buffer(&self) -> (&'static str, bool) {
+        let npc = NpcDefinition {
+            id: self.edit_buffer.id.clone(),
+            name: self.edit_buffer.name.clone(),
+            description: self.edit_buffer.description.clone(),
+            portrait_id: self.edit_buffer.portrait_id.clone(),
+            dialogue_id: if self.edit_buffer.dialogue_id.trim().is_empty() {
+                None
+            } else {
+                self.edit_buffer.dialogue_id.parse::<DialogueId>().ok()
+            },
+            creature_id: if self.edit_buffer.creature_id.is_empty() {
+                None
+            } else {
+                self.edit_buffer.creature_id.parse::<CreatureId>().ok()
+            },
+            sprite: None,
+            quest_ids: self
+                .edit_buffer
+                .quest_ids
+                .iter()
+                .filter_map(|s| s.parse::<QuestId>().ok())
+                .collect(),
+            faction: if self.edit_buffer.faction.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.faction.clone())
+            },
+            is_merchant: self.edit_buffer.is_merchant,
+            is_innkeeper: self.edit_buffer.is_innkeeper,
+            is_priest: false,
+            stock_template: if self.edit_buffer.stock_template.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.stock_template.clone())
+            },
+            service_catalog: None,
+            economy: None,
+        };
+
+        self.merchant_dialogue_status_for_definition(&npc)
+    }
+
+    fn create_or_repair_merchant_dialogue_for_buffer(&mut self) -> Result<String, String> {
+        if !self.edit_buffer.is_merchant {
+            return Ok(String::new());
+        }
+
+        let mut npc = NpcDefinition {
+            id: self.edit_buffer.id.clone(),
+            name: self.edit_buffer.name.clone(),
+            description: self.edit_buffer.description.clone(),
+            portrait_id: self.edit_buffer.portrait_id.clone(),
+            dialogue_id: if self.edit_buffer.dialogue_id.trim().is_empty() {
+                None
+            } else {
+                Some(
+                    self.edit_buffer
+                        .dialogue_id
+                        .parse::<DialogueId>()
+                        .map_err(|_| {
+                            "Dialogue ID must be numeric before merchant repair".to_string()
+                        })?,
+                )
+            },
+            creature_id: if self.edit_buffer.creature_id.is_empty() {
+                None
+            } else {
+                self.edit_buffer.creature_id.parse::<CreatureId>().ok()
+            },
+            sprite: None,
+            quest_ids: self
+                .edit_buffer
+                .quest_ids
+                .iter()
+                .filter_map(|s| s.parse::<QuestId>().ok())
+                .collect(),
+            faction: if self.edit_buffer.faction.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.faction.clone())
+            },
+            is_merchant: self.edit_buffer.is_merchant,
+            is_innkeeper: self.edit_buffer.is_innkeeper,
+            is_priest: false,
+            stock_template: if self.edit_buffer.stock_template.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.stock_template.clone())
+            },
+            service_catalog: None,
+            economy: None,
+        };
+
+        let update = self
+            .merchant_dialogue_editor
+            .ensure_merchant_dialogue_for_npc(&mut npc)?;
+
+        self.available_dialogues = self.merchant_dialogue_editor.dialogues.clone();
+        self.edit_buffer.dialogue_id = npc.dialogue_id.map(|id| id.to_string()).unwrap_or_default();
+        self.has_unsaved_changes = true;
+
+        let message = match update {
+            MerchantDialogueUpdate::Unchanged => String::new(),
+            MerchantDialogueUpdate::AlreadyValid => {
+                format!("Merchant dialogue already valid for '{}'", npc.id)
+            }
+            MerchantDialogueUpdate::CreatedNew { dialogue_id } => {
+                format!("Created merchant dialogue {} for '{}'", dialogue_id, npc.id)
+            }
+            MerchantDialogueUpdate::AugmentedExisting { dialogue_id } => format!(
+                "Repaired merchant dialogue {} for '{}'",
+                dialogue_id, npc.id
+            ),
+        };
+
+        Ok(message)
+    }
+
+    fn auto_apply_merchant_dialogue_to_edit_buffer(&mut self) -> Result<String, String> {
+        let (status_label, _) = self.merchant_dialogue_status_for_buffer();
+        if !self.edit_buffer.is_merchant {
+            return Ok(String::new());
+        }
+
+        if matches!(
+            status_label,
+            "No dialogue assigned" | "Merchant dialogue missing OpenMerchant"
+        ) {
+            return self.create_or_repair_merchant_dialogue_for_buffer();
+        }
+
+        Ok(String::new())
+    }
+
     fn save_npc(&mut self) -> bool {
         self.validate_edit_buffer();
         if !self.validation_errors.is_empty() {
@@ -1793,6 +2075,11 @@ impl NpcEditorState {
             }
             _ => false,
         };
+
+        if saved {
+            self.merchant_dialogue_editor
+                .load_dialogues(self.available_dialogues.clone());
+        }
 
         // If saved, attempt immediate persistence when we have campaign dir & filename
         if saved {
@@ -1973,6 +2260,7 @@ fn show_portrait_placeholder(ui: &mut egui::Ui, size: egui::Vec2) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antares::domain::dialogue::{DialogueChoice, DialogueNode};
 
     #[test]
     fn test_npc_editor_state_new() {
@@ -2093,6 +2381,167 @@ mod tests {
             "assets/sprites/actors/test.png"
         );
         assert_eq!(state.edit_buffer.sprite_index, "5");
+    }
+
+    #[test]
+    fn test_save_npc_generates_merchant_dialogue_when_missing() {
+        let mut state = NpcEditorState::new();
+        state.available_dialogues = Vec::new();
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "merchant_alma".to_string();
+        state.edit_buffer.name = "Alma".to_string();
+        state.edit_buffer.description = "Merchant".to_string();
+        state.edit_buffer.portrait_id = "alma".to_string();
+        state.edit_buffer.is_merchant = true;
+
+        let message = state
+            .auto_apply_merchant_dialogue_to_edit_buffer()
+            .expect("merchant dialogue generation should succeed");
+
+        assert!(message.contains("Created merchant dialogue"));
+        assert_eq!(state.edit_buffer.dialogue_id, "1");
+        assert_eq!(state.available_dialogues.len(), 1);
+        assert_eq!(state.merchant_dialogue_editor.dialogues.len(), 1);
+
+        let dialogue = &state.available_dialogues[0];
+        assert_eq!(dialogue.id, 1);
+        assert!(dialogue.contains_open_merchant_for_npc("merchant_alma"));
+        assert!(dialogue.has_sdk_managed_merchant_content());
+
+        let saved = state.save_npc();
+        assert!(saved);
+        assert_eq!(state.npcs.len(), 1);
+        assert_eq!(state.npcs[0].dialogue_id, Some(1));
+        assert_eq!(state.npcs[0].id, "merchant_alma");
+    }
+
+    #[test]
+    fn test_save_npc_augments_existing_dialogue_for_merchant() {
+        let mut state = NpcEditorState::new();
+        let mut dialogue = DialogueTree::new(7, "Existing Dialogue", 1);
+        dialogue.add_node(DialogueNode::new(1, "Welcome traveler."));
+        state.available_dialogues = vec![dialogue.clone()];
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "merchant_borin".to_string();
+        state.edit_buffer.name = "Borin".to_string();
+        state.edit_buffer.description = "Merchant".to_string();
+        state.edit_buffer.portrait_id = "borin".to_string();
+        state.edit_buffer.is_merchant = true;
+        state.edit_buffer.dialogue_id = "7".to_string();
+
+        let message = state
+            .auto_apply_merchant_dialogue_to_edit_buffer()
+            .expect("merchant dialogue repair should succeed");
+
+        assert!(message.contains("Repaired merchant dialogue 7"));
+        assert_eq!(state.available_dialogues.len(), 1);
+
+        let updated = state
+            .available_dialogues
+            .iter()
+            .find(|dialogue| dialogue.id == 7)
+            .expect("updated dialogue should exist");
+        assert!(updated.contains_open_merchant_for_npc("merchant_borin"));
+
+        let root = updated
+            .get_node(updated.root_node)
+            .expect("root node should exist");
+        let merchant_choices = root
+            .choices
+            .iter()
+            .filter(|choice| choice.is_sdk_managed_merchant_choice())
+            .count();
+        assert_eq!(merchant_choices, 1);
+
+        let saved = state.save_npc();
+        assert!(saved);
+        assert_eq!(state.npcs[0].dialogue_id, Some(7));
+    }
+
+    #[test]
+    fn test_save_npc_merchant_dialogue_generation_is_idempotent() {
+        let mut state = NpcEditorState::new();
+        let mut dialogue = DialogueTree::new(9, "Custom Merchant Dialogue", 1);
+        let mut root = DialogueNode::new(1, "Need something?");
+        root.add_choice(DialogueChoice::new("Maybe later.", None));
+        dialogue.add_node(root);
+
+        state.available_dialogues = vec![dialogue];
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "merchant_cora".to_string();
+        state.edit_buffer.name = "Cora".to_string();
+        state.edit_buffer.description = "Merchant".to_string();
+        state.edit_buffer.portrait_id = "cora".to_string();
+        state.edit_buffer.is_merchant = true;
+        state.edit_buffer.dialogue_id = "9".to_string();
+
+        let first_message = state
+            .auto_apply_merchant_dialogue_to_edit_buffer()
+            .expect("first merchant repair should succeed");
+        let second_message = state
+            .auto_apply_merchant_dialogue_to_edit_buffer()
+            .expect("second merchant repair should be idempotent");
+
+        assert!(first_message.contains("Repaired merchant dialogue 9"));
+        assert_eq!(
+            second_message,
+            "Merchant dialogue already valid for 'merchant_cora'"
+        );
+
+        let updated = state
+            .available_dialogues
+            .iter()
+            .find(|dialogue| dialogue.id == 9)
+            .expect("dialogue should exist");
+        let root = updated
+            .get_node(updated.root_node)
+            .expect("root node should exist");
+        let merchant_choices = root
+            .choices
+            .iter()
+            .filter(|choice| choice.is_sdk_managed_merchant_choice())
+            .count();
+        assert_eq!(merchant_choices, 1);
+
+        let merchant_nodes = updated
+            .nodes
+            .values()
+            .filter(|node| node.has_sdk_managed_merchant_content())
+            .count();
+        assert_eq!(merchant_nodes, 1);
+    }
+
+    #[test]
+    fn test_merchant_dialogue_status_for_buffer_reports_missing_open_merchant() {
+        let mut state = NpcEditorState::new();
+        let mut dialogue = DialogueTree::new(12, "Non Merchant", 1);
+        dialogue.add_node(DialogueNode::new(1, "Hello."));
+        state.available_dialogues = vec![dialogue];
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        state.edit_buffer.id = "merchant_dain".to_string();
+        state.edit_buffer.name = "Dain".to_string();
+        state.edit_buffer.portrait_id = "dain".to_string();
+        state.edit_buffer.is_merchant = true;
+        state.edit_buffer.dialogue_id = "12".to_string();
+
+        let (status, sdk_managed) = state.merchant_dialogue_status_for_buffer();
+        assert_eq!(status, "Merchant dialogue missing OpenMerchant");
+        assert!(!sdk_managed);
     }
 
     #[test]
