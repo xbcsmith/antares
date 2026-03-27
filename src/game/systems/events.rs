@@ -123,9 +123,9 @@ fn check_for_events(
                     }
                     // Phase 2 (locks): LockedDoor and LockedContainer tiles are
                     // blocked so the party cannot physically stand on them. Skip
-                    // auto-triggering here; interaction is driven by the E-key
-                    // path in `handle_input` (or explicit MapEventTriggered in
-                    // tests).
+                    // auto-triggering here; interaction is driven by the split
+                    // exploration-interaction input path (or explicit
+                    // `MapEventTriggered` in tests).
                     MapEvent::LockedDoor { .. } | MapEvent::LockedContainer { .. } => {
                         info!(
                             "Party at {:?} is on a LockedDoor/LockedContainer event; \
@@ -692,10 +692,11 @@ fn handle_events(
             }
 
             // Phase 2 (locks): handle a LockedDoor event triggered via
-            // MapEventTriggered (e.g. from programmatic tests or a future
+            // `MapEventTriggered` (e.g. from programmatic tests or a future
             // game-world trigger system). The primary player path goes through
-            // `handle_input`, but this arm handles the same logic for the
-            // message-triggered path so both paths are consistent.
+            // the split exploration-interaction input flow, but this arm
+            // handles the same logic for the message-triggered path so both
+            // paths are consistent.
             MapEvent::LockedDoor {
                 name,
                 lock_id,
@@ -1633,13 +1634,12 @@ mod tests {
     fn test_recruitable_character_triggers_dialogue_bubble_using_fallback_position() {
         use crate::application::resources::GameContent;
         use crate::domain::dialogue::{DialogueNode, DialogueTree};
-        use crate::domain::types::Position;
         use crate::game::components::dialogue::ActiveDialogueUI;
         use crate::game::resources::GlobalState;
-        use crate::sdk::ContentDatabase;
-        use bevy::prelude::*;
+        use crate::sdk::database::ContentDatabase;
+        use bevy::prelude::{App, ButtonInput, KeyCode};
 
-        // Arrange - create app and initialize resources/plugins
+        // Arrange
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_message::<MapChangeEvent>();
@@ -1709,6 +1709,118 @@ mod tests {
         );
 
         // Panel presence is sufficient for this refactor-focused test
+    }
+
+    #[test]
+    fn test_recruitable_character_event_starts_dialogue_without_npc_lookup_error() {
+        use crate::application::resources::GameContent;
+        use crate::domain::dialogue::{DialogueNode, DialogueTree};
+        use crate::game::resources::GlobalState;
+        use crate::game::systems::dialogue::PendingRecruitmentContext;
+        use crate::game::systems::ui::GameLog;
+        use crate::sdk::database::ContentDatabase;
+        use bevy::prelude::{App, ButtonInput, KeyCode};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(EventPlugin);
+        app.add_plugins(crate::game::systems::dialogue::DialoguePlugin);
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        let event_pos = Position::new(7, 15);
+        let recruitable_event = MapEvent::RecruitableCharacter {
+            character_id: "whisper".to_string(),
+            name: "Whisper".to_string(),
+            description: "A nimble elf watches from the shadows near the alley.".to_string(),
+            dialogue_id: Some(102u16),
+            time_condition: None,
+            facing: None,
+        };
+
+        let mut map = Map::new(
+            1,
+            "Recruitable Test".to_string(),
+            "Desc".to_string(),
+            20,
+            20,
+        );
+        map.add_event(event_pos, recruitable_event.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+
+        let mut tree = DialogueTree::new(102, "Whisper Recruitment".to_string(), 1);
+        let node = DialogueNode::new(1, "Hello there. My name is Whisper. Can I join your party?");
+        tree.add_node(node);
+
+        let mut db = ContentDatabase::new();
+        db.dialogues.add_dialogue(tree);
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(PendingRecruitmentContext(Some(
+            crate::application::dialogue::RecruitmentContext {
+                character_id: "whisper".to_string(),
+                event_position: event_pos,
+            },
+        )));
+        app.insert_resource(GameLog::default());
+
+        {
+            let mut messages = app
+                .world_mut()
+                .resource_mut::<Messages<MapEventTriggered>>();
+            messages.write(MapEventTriggered {
+                event: recruitable_event,
+                position: event_pos,
+            });
+        }
+
+        app.update();
+        app.update();
+
+        let global_state = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(
+                global_state.0.mode,
+                crate::application::GameMode::Dialogue(_)
+            ),
+            "Recruitable character event should enter Dialogue mode"
+        );
+
+        if let crate::application::GameMode::Dialogue(dialogue_state) = &global_state.0.mode {
+            assert_eq!(
+                dialogue_state.active_tree_id,
+                Some(102),
+                "Recruitable interaction should start the recruitable dialogue tree"
+            );
+            assert_eq!(
+                dialogue_state.speaker_npc_id,
+                None,
+                "Recruitable interactions without NPC entities must not coerce character_id into speaker_npc_id"
+            );
+            assert_eq!(
+                dialogue_state.recruitment_context,
+                Some(crate::application::dialogue::RecruitmentContext {
+                    character_id: "whisper".to_string(),
+                    event_position: event_pos,
+                }),
+                "Recruitment context should be preserved for recruitable dialogue"
+            );
+        }
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            !log.entries()
+                .iter()
+                .any(|entry: &String| entry.contains("Error: NPC 'whisper' not found in database")),
+            "Recruitable interactions must not go through NPC database lookup with character_id"
+        );
     }
 
     #[test]
@@ -2145,8 +2257,9 @@ mod tests {
 /// `MapEventTriggered` message sets `LockInteractionPending`.
 ///
 /// These tests exercise the `handle_events` match arm for `LockedDoor` that
-/// was added in Phase 2. The primary player path goes through `handle_input`,
-/// but `handle_events` must handle the same logic for programmatic tests and
+/// was added in Phase 2. The primary player path goes through the split
+/// exploration-interaction input flow, but `handle_events` must handle the same
+/// logic for programmatic tests and
 /// future game-world trigger systems.
 #[cfg(test)]
 mod locked_door_event_tests {

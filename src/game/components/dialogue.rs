@@ -184,6 +184,14 @@ pub struct DialogueSpeakerText;
 #[derive(Component, Debug)]
 pub struct DialogueContentText;
 
+/// Marks the clickable dialogue panel used for mouse-based advance input.
+///
+/// Attach this to the Bevy UI node that should respond to left-click dialogue
+/// advancement. Systems can combine it with `Button` / `Interaction` to detect
+/// panel clicks using the shared mouse activation helper.
+#[derive(Component, Debug)]
+pub struct DialogueAdvancePanel;
+
 /// Marks the choice button list container
 ///
 /// This component identifies the container holding all dialogue choice buttons
@@ -344,6 +352,11 @@ mod tests {
         // Constants are compile-time verified through type definitions
         let _ = CHOICE_BUTTON_HEIGHT;
         let _ = CHOICE_BUTTON_SPACING;
+    }
+
+    #[test]
+    fn test_dialogue_advance_panel_marker_compiles() {
+        let _panel = DialogueAdvancePanel;
     }
 
     #[test]

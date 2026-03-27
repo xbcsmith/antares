@@ -153,13 +153,20 @@ pub struct TakeItemAction {
 /// ```
 /// use antares::game::systems::container_inventory_ui::SelectContainerSlotAction;
 ///
-/// let action = SelectContainerSlotAction { slot_index: 1 };
+/// let action = SelectContainerSlotAction {
+///     slot_index: 1,
+///     has_item: true,
+/// };
 /// assert_eq!(action.slot_index, 1);
+/// assert!(action.has_item);
 /// ```
 #[derive(Message)]
 pub struct SelectContainerSlotAction {
     /// Index into `ContainerInventoryState::items` that was clicked.
     pub slot_index: usize,
+    /// Whether the clicked row currently contains an item and should enter
+    /// action-navigation immediately.
+    pub has_item: bool,
 }
 
 /// Emitted when the player mouse-clicks a character inventory cell in the
@@ -173,13 +180,20 @@ pub struct SelectContainerSlotAction {
 /// ```
 /// use antares::game::systems::container_inventory_ui::SelectContainerCharacterSlotAction;
 ///
-/// let action = SelectContainerCharacterSlotAction { slot_index: 3 };
+/// let action = SelectContainerCharacterSlotAction {
+///     slot_index: 3,
+///     has_item: true,
+/// };
 /// assert_eq!(action.slot_index, 3);
+/// assert!(action.has_item);
 /// ```
 #[derive(Message)]
 pub struct SelectContainerCharacterSlotAction {
     /// Inventory slot index that was clicked.
     pub slot_index: usize,
+    /// Whether the clicked slot currently contains an item and should enter
+    /// action-navigation immediately.
+    pub has_item: bool,
 }
 
 /// Emitted when the player confirms taking all items from the container.
@@ -680,9 +694,13 @@ fn container_inventory_ui_system(
                                 character_slot_index: action.slot_index,
                             });
                         }
-                        CharacterStashPanelResult::SelectSlot(slot_idx) => {
+                        CharacterStashPanelResult::SelectSlot {
+                            slot_index,
+                            has_item,
+                        } => {
                             select_char_writer.write(SelectContainerCharacterSlotAction {
-                                slot_index: *slot_idx,
+                                slot_index: *slot_index,
+                                has_item: *has_item,
                             });
                         }
                     }
@@ -717,9 +735,11 @@ fn container_inventory_ui_system(
                             character_index: char_idx,
                         });
                     }
-                    ContainerPanelResult::SelectSlot(slot_idx) => {
-                        select_container_writer
-                            .write(SelectContainerSlotAction { slot_index: slot_idx });
+                    ContainerPanelResult::SelectSlot(slot_idx, has_item) => {
+                        select_container_writer.write(SelectContainerSlotAction {
+                            slot_index: slot_idx,
+                            has_item,
+                        });
                     }
                     ContainerPanelResult::None => {}
                 }
@@ -743,8 +763,9 @@ struct StashActionInner {
 enum CharacterStashPanelResult {
     /// Player clicked the Stash button — execute a stash action.
     Stash(StashActionInner),
-    /// Player clicked an inventory cell — update the selection to this slot.
-    SelectSlot(usize),
+    /// Player clicked an inventory cell — update the selection to this slot
+    /// and indicate whether it contains an item.
+    SelectSlot { slot_index: usize, has_item: bool },
 }
 
 /// Write the updated container item list back to the corresponding
@@ -1004,9 +1025,12 @@ fn render_character_stash_panel(
                 );
             }
 
-            // Mouse click → select this slot (only for occupied cells)
-            if cell_response.clicked() && slot_idx < items.len() {
-                result = Some(CharacterStashPanelResult::SelectSlot(slot_idx));
+            // Mouse click → select this slot and report whether it contains an item
+            if cell_response.clicked() {
+                result = Some(CharacterStashPanelResult::SelectSlot {
+                    slot_index: slot_idx,
+                    has_item: slot_idx < items.len(),
+                });
             }
         });
     }
@@ -1074,8 +1098,9 @@ enum ContainerPanelResult {
         slot_index: usize,
     },
     TakeAll,
-    /// Player clicked a container row to set it as the active selection.
-    SelectSlot(usize),
+    /// Player clicked a container row to set it as the active selection and
+    /// report whether it contains an item.
+    SelectSlot(usize, bool),
     None,
 }
 
@@ -1225,9 +1250,10 @@ fn render_container_items_panel(
                         CONTAINER_ITEM_COLOR,
                     );
 
-                    // Mouse click on a container row → select it
+                    // Mouse click on a container row → select it and enter
+                    // action mode immediately when it has content
                     if row_response.clicked() {
-                        result = ContainerPanelResult::SelectSlot(i);
+                        result = ContainerPanelResult::SelectSlot(i, true);
                     }
                 });
             }
@@ -1410,12 +1436,12 @@ fn container_inventory_action_system(
 
     // ── Mouse slot-selection events ───────────────────────────────────────
     // Container row click: switch focus to container panel and set selection.
-    let select_container_events: Vec<usize> = select_container_reader
+    let select_container_events: Vec<(usize, bool)> = select_container_reader
         .read()
-        .map(|e| e.slot_index)
+        .map(|e| (e.slot_index, e.has_item))
         .collect();
 
-    for slot_index in select_container_events {
+    for (slot_index, has_item) in select_container_events {
         if let GameMode::ContainerInventory(ref mut cs) = global_state.0.mode {
             cs.focus = ContainerFocus::Right;
             cs.container_selected_slot = Some(slot_index);
@@ -1423,13 +1449,20 @@ fn container_inventory_action_system(
         }
         nav_state.selected_slot_index = Some(slot_index);
         nav_state.focused_action_index = 0;
-        nav_state.phase = NavigationPhase::SlotNavigation;
+        nav_state.phase = if has_item {
+            NavigationPhase::ActionNavigation
+        } else {
+            NavigationPhase::SlotNavigation
+        };
     }
 
     // Character cell click: switch focus to character panel and set selection.
-    let select_char_events: Vec<usize> = select_char_reader.read().map(|e| e.slot_index).collect();
+    let select_char_events: Vec<(usize, bool)> = select_char_reader
+        .read()
+        .map(|e| (e.slot_index, e.has_item))
+        .collect();
 
-    for slot_index in select_char_events {
+    for (slot_index, has_item) in select_char_events {
         if let GameMode::ContainerInventory(ref mut cs) = global_state.0.mode {
             cs.focus = ContainerFocus::Left;
             cs.character_selected_slot = Some(slot_index);
@@ -1437,7 +1470,11 @@ fn container_inventory_action_system(
         }
         nav_state.selected_slot_index = Some(slot_index);
         nav_state.focused_action_index = 0;
-        nav_state.phase = NavigationPhase::SlotNavigation;
+        nav_state.phase = if has_item {
+            NavigationPhase::ActionNavigation
+        } else {
+            NavigationPhase::SlotNavigation
+        };
     }
 
     // ── Take events ───────────────────────────────────────────────────────
@@ -2044,14 +2081,22 @@ mod tests {
 
     #[test]
     fn test_select_container_slot_action_fields() {
-        let action = SelectContainerSlotAction { slot_index: 2 };
+        let action = SelectContainerSlotAction {
+            slot_index: 2,
+            has_item: true,
+        };
         assert_eq!(action.slot_index, 2);
+        assert!(action.has_item);
     }
 
     #[test]
     fn test_select_container_character_slot_action_fields() {
-        let action = SelectContainerCharacterSlotAction { slot_index: 5 };
+        let action = SelectContainerCharacterSlotAction {
+            slot_index: 5,
+            has_item: true,
+        };
         assert_eq!(action.slot_index, 5);
+        assert!(action.has_item);
     }
 
     /// Verifies that the selection-handler logic for `SelectContainerSlotAction`

@@ -26,7 +26,9 @@ use bevy::prelude::*;
 use crate::application::dialogue::{DialogueState, RecruitmentContext};
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
+use crate::game::components::dialogue::DialoguePanelRoot;
 use crate::game::resources::GlobalState;
+use crate::game::systems::mouse_input;
 
 use crate::domain::dialogue::{DialogueAction, DialogueCondition, DialogueId};
 
@@ -123,12 +125,29 @@ impl Plugin for DialoguePlugin {
 /// * `advance_writer` - Message writer for AdvanceDialogue messages
 fn dialogue_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
+    dialogue_panel_query: Query<(&Interaction, Ref<Interaction>), With<DialoguePanelRoot>>,
     global_state: Res<GlobalState>,
     mut advance_writer: MessageWriter<AdvanceDialogue>,
 ) {
-    if matches!(global_state.0.mode, GameMode::Dialogue(_))
-        && (keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::KeyE))
-    {
+    if !matches!(global_state.0.mode, GameMode::Dialogue(_)) {
+        return;
+    }
+
+    let keyboard_advance =
+        keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::KeyE);
+    let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
+    let mouse_advance = dialogue_panel_query
+        .iter()
+        .any(|(interaction, interaction_ref)| {
+            mouse_input::is_activated(
+                interaction,
+                interaction_ref.is_changed(),
+                mouse_just_pressed,
+            )
+        });
+
+    if keyboard_advance || mouse_advance {
         advance_writer.write(AdvanceDialogue);
     }
 }
@@ -151,6 +170,9 @@ fn handle_start_dialogue(
     // toward the party and emit a SetFacing event.
     tile_coord_query: Query<&crate::game::systems::map::TileCoord>,
     mut facing_writer: Option<MessageWriter<crate::game::systems::facing::SetFacing>>,
+    mut despawn_recruitable_visuals: Option<
+        MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
+    >,
 ) {
     for ev in ev_reader.read() {
         let db = content.db();
@@ -242,6 +264,7 @@ fn handle_start_dialogue(
                             dlg_state.as_ref(),
                             quest_system.as_mut().map(|r| r.as_mut()),
                             game_log.as_mut().map(|r| r.as_mut()),
+                            &mut despawn_recruitable_visuals.as_mut(),
                         );
                     }
                     if let Some(ref mut log) = game_log {
@@ -309,6 +332,9 @@ fn handle_select_choice(
     content: Res<GameContent>,
     mut quest_system: Option<ResMut<crate::application::quests::QuestSystem>>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
+    mut despawn_recruitable_visuals: Option<
+        MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
+    >,
 ) {
     for ev in ev_reader.read() {
         // --- Read-only phase: inspect mode and capture identifiers ---
@@ -378,6 +404,7 @@ fn handle_select_choice(
                             dlg_state.as_ref(),
                             quest_system.as_mut().map(|r| r.as_mut()),
                             game_log.as_mut().map(|r| r.as_mut()),
+                            &mut despawn_recruitable_visuals.as_mut(),
                         );
                     }
 
@@ -447,6 +474,7 @@ fn handle_select_choice(
                                     dlg_state.as_ref(),
                                     quest_system.as_mut().map(|r| r.as_mut()),
                                     game_log.as_mut().map(|r| r.as_mut()),
+                                    &mut despawn_recruitable_visuals.as_mut(),
                                 );
                             }
 
@@ -652,6 +680,9 @@ fn execute_recruit_to_party(
     db: &crate::sdk::database::ContentDatabase,
     dialogue_state: Option<&crate::application::dialogue::DialogueState>,
     game_log: &mut Option<&mut crate::game::systems::ui::GameLog>,
+    despawn_recruitable_visuals: &mut Option<
+        &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
+    >,
 ) {
     match game_state.recruit_from_map(character_id, db) {
         Ok(crate::application::RecruitResult::AddedToParty) => {
@@ -668,6 +699,7 @@ fn execute_recruit_to_party(
             if let Some(dlg_state) = dialogue_state {
                 if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
                     if let Some(current_map) = game_state.world.get_current_map_mut() {
+                        let current_map_id = current_map.id;
                         if let Some(_removed_event) =
                             current_map.remove_event(recruitment_ctx.event_position)
                         {
@@ -675,6 +707,13 @@ fn execute_recruit_to_party(
                                 "Removed recruitment event at {:?}",
                                 recruitment_ctx.event_position
                             );
+                            if let Some(writer) = despawn_recruitable_visuals.as_deref_mut() {
+                                writer.write(crate::game::systems::map::DespawnRecruitableVisual {
+                                    map_id: current_map_id,
+                                    position: recruitment_ctx.event_position,
+                                    character_id: character_id.to_string(),
+                                });
+                            }
                         } else {
                             warn!(
                                 "No event found at recruitment position {:?}",
@@ -709,6 +748,7 @@ fn execute_recruit_to_party(
             if let Some(dlg_state) = dialogue_state {
                 if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
                     if let Some(current_map) = game_state.world.get_current_map_mut() {
+                        let current_map_id = current_map.id;
                         if let Some(_removed_event) =
                             current_map.remove_event(recruitment_ctx.event_position)
                         {
@@ -716,6 +756,13 @@ fn execute_recruit_to_party(
                                 "Removed recruitment event at {:?}",
                                 recruitment_ctx.event_position
                             );
+                            if let Some(writer) = despawn_recruitable_visuals.as_deref_mut() {
+                                writer.write(crate::game::systems::map::DespawnRecruitableVisual {
+                                    map_id: current_map_id,
+                                    position: recruitment_ctx.event_position,
+                                    character_id: character_id.to_string(),
+                                });
+                            }
                         }
                     }
                 }
@@ -772,8 +819,11 @@ fn execute_action(
     game_state: &mut crate::application::GameState,
     db: &crate::sdk::database::ContentDatabase,
     dialogue_state: Option<&crate::application::dialogue::DialogueState>,
-    mut quest_system: Option<&mut crate::application::quests::QuestSystem>,
+    quest_system: Option<&mut crate::application::quests::QuestSystem>,
     mut game_log: Option<&mut crate::game::systems::ui::GameLog>,
+    despawn_recruitable_visuals: &mut Option<
+        &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
+    >,
 ) {
     match action {
         DialogueAction::StartQuest { quest_id } => {
@@ -888,6 +938,7 @@ fn execute_action(
                         db,
                         dialogue_state,
                         &mut game_log,
+                        despawn_recruitable_visuals,
                     );
                 } else {
                     warn!(
@@ -919,7 +970,14 @@ fn execute_action(
                 "Executing RecruitToParty action for character '{}'",
                 character_id
             );
-            execute_recruit_to_party(character_id, game_state, db, dialogue_state, &mut game_log);
+            execute_recruit_to_party(
+                character_id,
+                game_state,
+                db,
+                dialogue_state,
+                &mut game_log,
+                despawn_recruitable_visuals,
+            );
         }
         DialogueAction::RecruitToInn {
             character_id,
@@ -1633,7 +1691,16 @@ mod tests {
             // Execute root node actions
             if let Some(node) = tree.get_node(root) {
                 for action in &node.actions {
-                    execute_action(action, &mut gs.0, &db, None, None, None);
+                    let mut despawn_recruitable_visuals = None;
+                    execute_action(
+                        action,
+                        &mut gs.0,
+                        &db,
+                        None,
+                        None,
+                        None,
+                        &mut despawn_recruitable_visuals,
+                    );
                 }
             }
         } else {
@@ -1753,7 +1820,16 @@ mod tests {
                 if let Some(node) = tree.get_node(root) {
                     if let Some(choice) = node.choices.first() {
                         for action in &choice.actions {
-                            execute_action(action, &mut gs.0, &db, None, None, None);
+                            let mut despawn_recruitable_visuals = None;
+                            execute_action(
+                                action,
+                                &mut gs.0,
+                                &db,
+                                None,
+                                None,
+                                None,
+                                &mut despawn_recruitable_visuals,
+                            );
                         }
                     }
                 }
@@ -1804,6 +1880,72 @@ mod tests {
 
         // Verify we're in exploration mode
         assert!(matches!(global_state.0.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_mouse_click_advances_dialogue() {
+        use crate::application::dialogue::DialogueState;
+        use crate::domain::types::Position;
+        use crate::game::components::dialogue::DialoguePanelRoot;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<AdvanceDialogue>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.add_systems(Update, dialogue_input_system);
+
+        {
+            let mut global_state = app.world_mut().resource_mut::<GlobalState>();
+            let dialogue_state = DialogueState::start_simple(
+                "Hello".to_string(),
+                "Speaker".to_string(),
+                None,
+                Some(Position::new(1, 1)),
+            );
+            global_state.0.mode = GameMode::Dialogue(dialogue_state);
+        }
+
+        app.world_mut()
+            .spawn((Button, Interaction::Pressed, DialoguePanelRoot));
+
+        app.update();
+
+        let reader = app.world_mut().resource_mut::<Messages<AdvanceDialogue>>();
+        assert_eq!(reader.len(), 1);
+    }
+
+    #[test]
+    fn test_mouse_hover_dialogue_panel_does_not_advance() {
+        use crate::application::dialogue::DialogueState;
+        use crate::domain::types::Position;
+        use crate::game::components::dialogue::DialoguePanelRoot;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<AdvanceDialogue>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.add_systems(Update, dialogue_input_system);
+
+        {
+            let mut global_state = app.world_mut().resource_mut::<GlobalState>();
+            let dialogue_state = DialogueState::start_simple(
+                "Hello".to_string(),
+                "Speaker".to_string(),
+                None,
+                Some(Position::new(1, 1)),
+            );
+            global_state.0.mode = GameMode::Dialogue(dialogue_state);
+        }
+
+        app.world_mut()
+            .spawn((Button, Interaction::Hovered, DialoguePanelRoot));
+
+        app.update();
+
+        let reader = app.world_mut().resource_mut::<Messages<AdvanceDialogue>>();
+        assert_eq!(reader.len(), 0);
     }
 
     #[test]
@@ -1892,6 +2034,7 @@ mod tests {
         db.characters.add_character(char_def).unwrap();
 
         // Act
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::RecruitToParty {
                 character_id: "test_knight".to_string(),
@@ -1901,6 +2044,7 @@ mod tests {
             None,
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert
@@ -1968,6 +2112,7 @@ mod tests {
         db.characters.add_character(char_def).unwrap();
 
         // Act
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::RecruitToParty {
                 character_id: "test_mage".to_string(),
@@ -1977,6 +2122,7 @@ mod tests {
             None,
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert - party still at max, character sent to inn
@@ -2023,6 +2169,7 @@ mod tests {
         let _ = game_state.recruit_from_map("test_knight", &db);
 
         // Act - attempt second recruitment
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::RecruitToParty {
                 character_id: "test_knight".to_string(),
@@ -2032,6 +2179,7 @@ mod tests {
             None,
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert - party size unchanged
@@ -2046,6 +2194,7 @@ mod tests {
         let db = crate::sdk::database::ContentDatabase::new(); // Empty database
 
         // Act
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::RecruitToParty {
                 character_id: "nonexistent".to_string(),
@@ -2055,6 +2204,7 @@ mod tests {
             None,
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert - no changes to party
@@ -2105,6 +2255,7 @@ mod tests {
         db.npcs.add_npc(innkeeper_def).unwrap();
 
         // Act
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::RecruitToInn {
                 character_id: "test_mage".to_string(),
@@ -2115,6 +2266,7 @@ mod tests {
             None,
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert
@@ -2169,6 +2321,7 @@ mod tests {
         db.npcs.add_npc(innkeeper_def).unwrap();
 
         // First recruitment
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::RecruitToInn {
                 character_id: "test_mage".to_string(),
@@ -2179,9 +2332,11 @@ mod tests {
             None,
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Act - second recruitment attempt
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::RecruitToInn {
                 character_id: "test_mage".to_string(),
@@ -2192,6 +2347,7 @@ mod tests {
             None,
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert
@@ -2235,6 +2391,7 @@ mod tests {
         // No innkeeper in database
 
         // Act
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::RecruitToInn {
                 character_id: "test_mage".to_string(),
@@ -2245,6 +2402,7 @@ mod tests {
             None,
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert - should fail because innkeeper doesn't exist
@@ -2259,6 +2417,7 @@ mod tests {
         let db = crate::sdk::database::ContentDatabase::new();
 
         // Act
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::OpenInnManagement {
                 innkeeper_id: "cozy_inn".to_string(),
@@ -2268,6 +2427,7 @@ mod tests {
             None,
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert - mode is InnManagement and inn id is set
@@ -2304,6 +2464,7 @@ mod tests {
         );
 
         // Act: execute the trigger event action that should open inn management
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &crate::domain::dialogue::DialogueAction::TriggerEvent {
                 event_name: "open_inn_party_management".to_string(),
@@ -2313,6 +2474,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert: we transitioned into InnManagement for the expected innkeeper
@@ -2372,6 +2534,7 @@ mod tests {
         });
 
         // Act
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &crate::domain::dialogue::DialogueAction::TriggerEvent {
                 event_name: "recruit_character_to_party".to_string(),
@@ -2381,6 +2544,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert
@@ -2407,6 +2571,7 @@ mod tests {
         });
 
         // Act
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &crate::domain::dialogue::DialogueAction::TriggerEvent {
                 event_name: "recruit_character_to_party".to_string(),
@@ -2416,6 +2581,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert
@@ -2561,6 +2727,7 @@ mod tests {
         let mut log = crate::game::systems::ui::GameLog::new();
 
         // Act
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::OpenInnManagement {
                 innkeeper_id: "cozy_inn".to_string(),
@@ -2570,6 +2737,7 @@ mod tests {
             None,
             None,
             Some(&mut log),
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert - message logged
@@ -2702,6 +2870,7 @@ mod tests {
         game_state.mode = crate::application::GameMode::Dialogue(merchant_dialogue_state());
 
         // Act: buy item 1 (costs 10 gold) for character 0
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::BuyItem {
                 item_id: 1,
@@ -2712,6 +2881,7 @@ mod tests {
             Some(&merchant_dialogue_state()),
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert: gold decreased and item is in inventory
@@ -2736,6 +2906,7 @@ mod tests {
         let mut game_state = make_game_state_with_merchant(5); // only 5 gold, item costs 10
 
         // Act: attempt to buy item 1 with insufficient gold
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::BuyItem {
                 item_id: 1,
@@ -2746,6 +2917,7 @@ mod tests {
             Some(&merchant_dialogue_state()),
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert: gold unchanged and inventory empty
@@ -2806,6 +2978,7 @@ mod tests {
         );
 
         // Act: consume heal_all service for whole party
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::ConsumeService {
                 service_id: "heal_all".to_string(),
@@ -2816,6 +2989,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert: HP restored and gold deducted
@@ -2873,6 +3047,7 @@ mod tests {
         );
 
         // Act: attempt heal_all with no gold
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::ConsumeService {
                 service_id: "heal_all".to_string(),
@@ -2883,6 +3058,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert: HP unchanged and gold unchanged
@@ -2921,6 +3097,7 @@ mod tests {
         game_state.mode = crate::application::GameMode::Dialogue(merchant_dialogue_state());
 
         // Act
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::OpenMerchant {
                 npc_id: "merchant_tom".to_string(),
@@ -2930,6 +3107,7 @@ mod tests {
             Some(&merchant_dialogue_state()),
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert: mode must be MerchantInventory
@@ -2953,6 +3131,7 @@ mod tests {
         let mode_before = std::mem::discriminant(&game_state.mode);
 
         // Act: must not panic
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::OpenMerchant {
                 npc_id: "ghost_npc".to_string(),
@@ -2962,6 +3141,7 @@ mod tests {
             None,
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert: game mode is unchanged (no transition on unknown NPC)
@@ -3031,6 +3211,7 @@ mod tests {
         let dlg_state = merchant_dialogue_state();
 
         // Act
+        let mut despawn_recruitable_visuals = None;
         execute_action(
             &DialogueAction::SellItem {
                 item_id: 1,
@@ -3041,6 +3222,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            &mut despawn_recruitable_visuals,
         );
 
         // Assert: item removed from inventory and gold increased
