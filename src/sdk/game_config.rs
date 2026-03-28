@@ -15,6 +15,8 @@
 //! - `AudioConfig`: Volume levels and audio enable/disable
 //! - `ControlsConfig`: Key bindings and input settings
 //! - `CameraConfig`: Camera mode, FOV, clipping planes, lighting
+//! - `GameLogConfig`: In-game log panel visibility, toggle key, sizing, opacity,
+//!   and default category filters
 //!
 //! # Usage
 //!
@@ -78,6 +80,16 @@
 //!         light_range: 60.0,
 //!         shadows_enabled: true,
 //!     ),
+//!     game_log: (
+//!         max_entries: 200,
+//!         visible_by_default: true,
+//!         toggle_key: "L",
+//!         show_timestamps: false,
+//!         panel_width_px: 300.0,
+//!         panel_height_px: 200.0,
+//!         panel_opacity: 0.88,
+//!         default_enabled_categories: ["Combat", "Dialogue", "Item", "Exploration", "System"],
+//!     ),
 //! )
 //! ```
 
@@ -115,6 +127,7 @@ pub enum ConfigError {
 /// assert_eq!(config.graphics.resolution, (1280, 720));
 /// assert_eq!(config.audio.master_volume, 0.8);
 /// assert_eq!(config.rest.full_rest_hours, 12);
+/// assert_eq!(config.game_log.max_entries, 200);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GameConfig {
@@ -133,6 +146,10 @@ pub struct GameConfig {
     /// Rest system configuration
     #[serde(default)]
     pub rest: RestConfig,
+
+    /// Game log panel configuration
+    #[serde(default)]
+    pub game_log: GameLogConfig,
 }
 
 impl GameConfig {
@@ -205,6 +222,126 @@ impl GameConfig {
         self.controls.validate()?;
         self.camera.validate()?;
         self.rest.validate()?;
+        self.game_log.validate()?;
+        Ok(())
+    }
+}
+
+/// Game log panel configuration
+///
+/// Controls runtime behavior of the in-game game log panel, including buffer
+/// sizing, default visibility, toggle key binding, panel geometry, opacity, and
+/// which categories are enabled by default.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::game_config::GameLogConfig;
+///
+/// let cfg = GameLogConfig::default();
+/// assert_eq!(cfg.max_entries, 200);
+/// assert_eq!(cfg.toggle_key, "L");
+/// assert!(cfg.visible_by_default);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GameLogConfig {
+    /// Maximum number of entries retained in the log ring buffer.
+    pub max_entries: usize,
+
+    /// Whether the game log panel is visible when a game starts.
+    pub visible_by_default: bool,
+
+    /// Toggle key used to show or hide the game log panel.
+    pub toggle_key: String,
+
+    /// Whether timestamps should be shown alongside log entries.
+    pub show_timestamps: bool,
+
+    /// Panel width in pixels.
+    pub panel_width_px: f32,
+
+    /// Panel height in pixels.
+    pub panel_height_px: f32,
+
+    /// Panel background opacity in the range `0.0..=1.0`.
+    pub panel_opacity: f32,
+
+    /// Category names enabled by default in the filter bar.
+    pub default_enabled_categories: Vec<String>,
+}
+
+impl Default for GameLogConfig {
+    fn default() -> Self {
+        Self {
+            max_entries: 200,
+            visible_by_default: true,
+            toggle_key: "L".to_string(),
+            show_timestamps: false,
+            panel_width_px: 300.0,
+            panel_height_px: 200.0,
+            panel_opacity: 0.88,
+            default_enabled_categories: vec![
+                "Combat".to_string(),
+                "Dialogue".to_string(),
+                "Item".to_string(),
+                "Exploration".to_string(),
+                "System".to_string(),
+            ],
+        }
+    }
+}
+
+impl GameLogConfig {
+    /// Validate the game log configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError::ValidationError` if:
+    /// - `max_entries` is zero
+    /// - `toggle_key` is empty
+    /// - `panel_width_px` or `panel_height_px` are non-positive
+    /// - `panel_opacity` is outside `0.0..=1.0`
+    /// - `default_enabled_categories` is empty
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.max_entries == 0 {
+            return Err(ConfigError::ValidationError(
+                "game_log.max_entries must be at least 1".to_string(),
+            ));
+        }
+
+        if self.toggle_key.trim().is_empty() {
+            return Err(ConfigError::ValidationError(
+                "game_log.toggle_key must not be empty".to_string(),
+            ));
+        }
+
+        if self.panel_width_px <= 0.0 {
+            return Err(ConfigError::ValidationError(format!(
+                "game_log.panel_width_px must be positive, got {}",
+                self.panel_width_px
+            )));
+        }
+
+        if self.panel_height_px <= 0.0 {
+            return Err(ConfigError::ValidationError(format!(
+                "game_log.panel_height_px must be positive, got {}",
+                self.panel_height_px
+            )));
+        }
+
+        if !(0.0..=1.0).contains(&self.panel_opacity) {
+            return Err(ConfigError::ValidationError(format!(
+                "game_log.panel_opacity must be in range 0.0-1.0, got {}",
+                self.panel_opacity
+            )));
+        }
+
+        if self.default_enabled_categories.is_empty() {
+            return Err(ConfigError::ValidationError(
+                "game_log.default_enabled_categories must not be empty".to_string(),
+            ));
+        }
+
         Ok(())
     }
 }
@@ -736,6 +873,76 @@ mod tests {
     }
 
     #[test]
+    fn test_game_log_config_default_values() {
+        let cfg = GameLogConfig::default();
+        assert_eq!(cfg.max_entries, 200);
+        assert!(cfg.visible_by_default);
+        assert_eq!(cfg.toggle_key, "L");
+        assert!(!cfg.show_timestamps);
+        assert!((cfg.panel_width_px - 300.0).abs() < f32::EPSILON);
+        assert!((cfg.panel_height_px - 200.0).abs() < f32::EPSILON);
+        assert!((cfg.panel_opacity - 0.88).abs() < f32::EPSILON);
+        assert_eq!(
+            cfg.default_enabled_categories,
+            vec![
+                "Combat".to_string(),
+                "Dialogue".to_string(),
+                "Item".to_string(),
+                "Exploration".to_string(),
+                "System".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_game_log_config_validates() {
+        let mut config = GameConfig::default();
+        config.game_log.max_entries = 0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_game_log_config_round_trip() {
+        let original = GameLogConfig::default();
+        let ron_string = ron::to_string(&original).expect("serialization must succeed");
+        let deserialized: GameLogConfig =
+            ron::from_str(&ron_string).expect("deserialization must succeed");
+        assert_eq!(deserialized, original);
+    }
+
+    #[test]
+    fn test_game_log_config_validation_success() {
+        assert!(GameLogConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn test_game_log_config_validation_empty_toggle_key_fails() {
+        let config = GameLogConfig {
+            toggle_key: String::new(),
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_game_log_config_validation_invalid_panel_opacity_fails() {
+        let config = GameLogConfig {
+            panel_opacity: 1.5,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_game_log_config_validation_empty_default_categories_fails() {
+        let config = GameLogConfig {
+            default_enabled_categories: vec![],
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
     fn test_game_config_validates_rest_block() {
         let mut config = GameConfig::default();
         config.rest.full_rest_hours = 0; // invalid
@@ -781,6 +988,17 @@ mod tests {
                 light_intensity: 2000000.0,
                 light_range: 60.0,
                 shadows_enabled: true,
+            ),
+            game_log: GameLogConfig(
+                max_entries: 200,
+                visible_by_default: true,
+                toggle_key: "L",
+                show_timestamps: false,
+                panel_width_px: 300.0,
+                panel_height_px: 200.0,
+                panel_opacity: 0.88,
+
+                default_enabled_categories: ["Combat", "Dialogue", "Item", "Exploration", "System"],
             ),
         )"#;
         let config: GameConfig =
@@ -837,6 +1055,25 @@ mod tests {
         assert_eq!(config.controls.menu, vec!["Escape"]);
         assert_eq!(config.controls.automap, vec!["M"]);
         assert_eq!(config.controls.movement_cooldown, 0.2);
+
+        // Verify game log defaults
+        assert_eq!(config.game_log.max_entries, 200);
+        assert!(config.game_log.visible_by_default);
+        assert_eq!(config.game_log.toggle_key, "L");
+        assert!(!config.game_log.show_timestamps);
+        assert!((config.game_log.panel_width_px - 300.0).abs() < f32::EPSILON);
+        assert!((config.game_log.panel_height_px - 200.0).abs() < f32::EPSILON);
+        assert!((config.game_log.panel_opacity - 0.88).abs() < f32::EPSILON);
+        assert_eq!(
+            config.game_log.default_enabled_categories,
+            vec![
+                "Combat".to_string(),
+                "Dialogue".to_string(),
+                "Item".to_string(),
+                "Exploration".to_string(),
+                "System".to_string(),
+            ]
+        );
     }
 
     #[test]

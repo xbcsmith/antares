@@ -4,10 +4,13 @@
 use crate::application::GameMode;
 use crate::game::resources::GlobalState;
 use crate::game::systems::hud::{HUD_BOTTOM_GAP, HUD_PANEL_HEIGHT};
+use crate::sdk::game_config::GameLogConfig;
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use bevy::ui::widget::Text;
-use bevy::ui::{AlignItems, FlexDirection, Overflow, PositionType, ScrollPosition, Val};
+use bevy::ui::{
+    AlignItems, FlexDirection, Interaction, Overflow, PositionType, ScrollPosition, Val,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -31,6 +34,7 @@ impl Plugin for UiPlugin {
                 (
                     consume_game_log_events,
                     toggle_game_log_panel,
+                    handle_log_filter_buttons,
                     sync_game_log_panel_visibility,
                     sync_game_log_ui,
                     auto_scroll_game_log_viewport,
@@ -93,6 +97,17 @@ pub struct GameLogLineItem {
     pub index: usize,
 }
 
+/// Marker for a game log filter button.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct LogFilterButton {
+    pub category: LogCategory,
+    pub active: bool,
+}
+
+/// Marker for the header text that displays the filtered entry count.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GameLogEntryCountText;
+
 impl LogCategory {
     /// Returns all log categories in display order.
     pub fn all() -> [Self; 5] {
@@ -113,6 +128,29 @@ impl LogCategory {
             Self::Item => Color::srgb(0.40, 0.78, 0.40),
             Self::Exploration => Color::srgb(0.55, 0.75, 0.95),
             Self::System => Color::srgb(0.70, 0.70, 0.70),
+        }
+    }
+
+    /// Returns the abbreviated label shown in the filter bar.
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Combat => "CMB",
+            Self::Dialogue => "DLG",
+            Self::Item => "ITM",
+            Self::Exploration => "EXP",
+            Self::System => "SYS",
+        }
+    }
+
+    /// Parses a category name from configuration.
+    pub fn from_config_name(name: &str) -> Option<Self> {
+        match name {
+            "Combat" => Some(Self::Combat),
+            "Dialogue" => Some(Self::Dialogue),
+            "Item" => Some(Self::Item),
+            "Exploration" => Some(Self::Exploration),
+            "System" => Some(Self::System),
+            _ => None,
         }
     }
 }
@@ -179,6 +217,7 @@ pub struct GameLog {
     pub messages: Vec<String>,
     pub filter: HashSet<LogCategory>,
     pub sequence_counter: u64,
+    pub max_entries: usize,
 }
 
 impl Default for GameLog {
@@ -192,11 +231,37 @@ impl GameLog {
 
     /// Create a new empty game log with all categories enabled.
     pub fn new() -> Self {
+        let config = GameLogConfig::default();
         Self {
             entries: Vec::new(),
             messages: Vec::new(),
-            filter: LogCategory::all().into_iter().collect(),
+            filter: config
+                .default_enabled_categories
+                .iter()
+                .filter_map(|name| LogCategory::from_config_name(name))
+                .collect(),
             sequence_counter: 0,
+            max_entries: config.max_entries,
+        }
+    }
+
+    /// Apply game log configuration to the resource.
+    pub fn apply_config(&mut self, config: &GameLogConfig) {
+        self.max_entries = config.max_entries;
+        self.filter = config
+            .default_enabled_categories
+            .iter()
+            .filter_map(|name| LogCategory::from_config_name(name))
+            .collect();
+
+        if self.filter.is_empty() {
+            self.filter = LogCategory::all().into_iter().collect();
+        }
+
+        if self.entries.len() > self.max_entries {
+            let overflow = self.entries.len() - self.max_entries;
+            self.entries.drain(0..overflow);
+            self.messages.drain(0..overflow);
         }
     }
 
@@ -207,8 +272,8 @@ impl GameLog {
         self.entries.push(entry);
         self.messages.push(text);
 
-        if self.entries.len() > Self::MAX_LOG_ENTRIES {
-            let overflow = self.entries.len() - Self::MAX_LOG_ENTRIES;
+        if self.entries.len() > self.max_entries {
+            let overflow = self.entries.len() - self.max_entries;
             self.entries.drain(0..overflow);
             self.messages.drain(0..overflow);
         }
@@ -262,7 +327,25 @@ impl GameLog {
     }
 }
 
-fn setup_game_log_panel(mut commands: Commands) {
+fn setup_game_log_panel(
+    mut commands: Commands,
+    mut game_log: ResMut<GameLog>,
+    global_state: Option<Res<GlobalState>>,
+) {
+    let owned_config = global_state
+        .as_ref()
+        .map(|state| state.0.config.game_log.clone())
+        .unwrap_or_default();
+    game_log.apply_config(&owned_config);
+
+    let filter: HashSet<LogCategory> = owned_config
+        .default_enabled_categories
+        .iter()
+        .filter_map(|name| LogCategory::from_config_name(name))
+        .collect();
+
+    let panel_background = Color::srgba(0.06, 0.09, 0.13, owned_config.panel_opacity);
+
     commands
         .spawn((
             Node {
@@ -272,16 +355,20 @@ fn setup_game_log_panel(mut commands: Commands) {
                     (Val::Px(hud_height), Val::Px(hud_gap)) => Val::Px(hud_height + hud_gap + 8.0),
                     _ => Val::Px(102.0),
                 },
-                width: Val::Px(GAME_LOG_PANEL_WIDTH),
-                height: Val::Px(GAME_LOG_PANEL_HEIGHT),
+                width: Val::Px(owned_config.panel_width_px),
+                height: Val::Px(owned_config.panel_height_px),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Stretch,
                 padding: UiRect::all(Val::Px(8.0)),
                 row_gap: Val::Px(6.0),
                 ..default()
             },
-            BackgroundColor(GAME_LOG_PANEL_BACKGROUND),
-            Visibility::Visible,
+            BackgroundColor(panel_background),
+            if owned_config.visible_by_default {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            },
             GameLogPanelRoot,
         ))
         .with_children(|panel| {
@@ -304,13 +391,69 @@ fn setup_game_log_panel(mut commands: Commands) {
                         },
                         TextColor(Color::WHITE),
                     ));
+
+                    header
+                        .spawn((
+                            Node {
+                                flex_direction: FlexDirection::Row,
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(4.0),
+                                ..default()
+                            },
+                            Name::new("GameLogFilterBar"),
+                        ))
+                        .with_children(|filter_bar| {
+                            for category in LogCategory::all() {
+                                let active = filter.contains(&category);
+                                let button_color = category.default_color().to_srgba();
+                                filter_bar
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            width: Val::Px(32.0),
+                                            height: Val::Px(20.0),
+                                            justify_content: JustifyContent::Center,
+                                            align_items: AlignItems::Center,
+                                            ..default()
+                                        },
+                                        BackgroundColor(if active {
+                                            Color::srgba(
+                                                button_color.red,
+                                                button_color.green,
+                                                button_color.blue,
+                                                1.0,
+                                            )
+                                        } else {
+                                            Color::srgba(
+                                                button_color.red,
+                                                button_color.green,
+                                                button_color.blue,
+                                                0.3,
+                                            )
+                                        }),
+                                        LogFilterButton { category, active },
+                                    ))
+                                    .with_children(|button| {
+                                        button.spawn((
+                                            Text::new(category.short_label()),
+                                            TextFont {
+                                                font_size: 10.0,
+                                                ..default()
+                                            },
+                                            TextColor(Color::WHITE),
+                                        ));
+                                    });
+                            }
+                        });
+
                     header.spawn((
-                        Text::new("Filters (Phase 4)"),
+                        Text::new("0 entries"),
                         TextFont {
                             font_size: 11.0,
                             ..default()
                         },
                         TextColor(Color::srgb(0.70, 0.70, 0.70)),
+                        GameLogEntryCountText,
                     ));
                 });
 
@@ -357,7 +500,12 @@ fn toggle_game_log_panel(
         return;
     };
 
-    if keyboard.just_pressed(GAME_LOG_TOGGLE_KEY) {
+    let toggle_key = global_state
+        .as_ref()
+        .and_then(|state| parse_toggle_key(&state.0.config.game_log.toggle_key))
+        .unwrap_or(GAME_LOG_TOGGLE_KEY);
+
+    if keyboard.just_pressed(toggle_key) {
         ui_state.visible = !ui_state.visible;
     }
 }
@@ -393,6 +541,7 @@ fn sync_game_log_ui(
     mut ui_state: ResMut<GameLogUiState>,
     global_state: Option<Res<GlobalState>>,
     line_list_query: Query<(Entity, Option<&Children>), With<GameLogLineList>>,
+    mut entry_count_query: Query<&mut Text, With<GameLogEntryCountText>>,
 ) {
     if let Some(global_state) = global_state.as_ref() {
         if matches!(global_state.0.mode, GameMode::Combat(_)) {
@@ -422,6 +571,10 @@ fn sync_game_log_ui(
     }
 
     let filtered = game_log.filtered_entries();
+    for mut entry_count in &mut entry_count_query {
+        **entry_count = format!("{} entries", filtered.len());
+    }
+
     if filtered.is_empty() {
         return;
     }
@@ -463,6 +616,62 @@ fn auto_scroll_game_log_viewport(
     }
 
     ui_state.needs_scroll_to_bottom = false;
+}
+
+fn handle_log_filter_buttons(
+    mut interaction_query: Query<
+        (&Interaction, &mut LogFilterButton, &mut BackgroundColor),
+        Changed<Interaction>,
+    >,
+    mut game_log: ResMut<GameLog>,
+    mut ui_state: ResMut<GameLogUiState>,
+) {
+    for (interaction, mut button, mut background) in &mut interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        if game_log.filter.contains(&button.category) {
+            game_log.filter.remove(&button.category);
+            button.active = false;
+        } else {
+            game_log.filter.insert(button.category);
+            button.active = true;
+        }
+
+        let color = button.category.default_color().to_srgba();
+        *background = BackgroundColor(if button.active {
+            Color::srgba(color.red, color.green, color.blue, 1.0)
+        } else {
+            Color::srgba(color.red, color.green, color.blue, 0.3)
+        });
+
+        ui_state.needs_scroll_to_bottom = true;
+    }
+}
+
+fn parse_toggle_key(key: &str) -> Option<KeyCode> {
+    match key {
+        "L" => Some(KeyCode::KeyL),
+        "I" => Some(KeyCode::KeyI),
+        "M" => Some(KeyCode::KeyM),
+        "R" => Some(KeyCode::KeyR),
+        "Escape" => Some(KeyCode::Escape),
+        "Tab" => Some(KeyCode::Tab),
+        "F1" => Some(KeyCode::F1),
+        "F2" => Some(KeyCode::F2),
+        "F3" => Some(KeyCode::F3),
+        "F4" => Some(KeyCode::F4),
+        "F5" => Some(KeyCode::F5),
+        "F6" => Some(KeyCode::F6),
+        "F7" => Some(KeyCode::F7),
+        "F8" => Some(KeyCode::F8),
+        "F9" => Some(KeyCode::F9),
+        "F10" => Some(KeyCode::F10),
+        "F11" => Some(KeyCode::F11),
+        "F12" => Some(KeyCode::F12),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -623,6 +832,40 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_button_toggles_category() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.add_plugins(UiPlugin);
+
+        app.update();
+
+        let button_entity = {
+            let mut query = app
+                .world_mut()
+                .query_filtered::<(Entity, &LogFilterButton), With<Button>>();
+            query
+                .iter(app.world())
+                .find(|(_, button)| button.category == LogCategory::Combat)
+                .map(|(entity, _)| entity)
+                .expect("combat filter button should exist")
+        };
+
+        app.world_mut()
+            .entity_mut(button_entity)
+            .insert(Interaction::Pressed);
+
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            !log.filter.contains(&LogCategory::Combat),
+            "combat category should be removed from the filter after button press"
+        );
+    }
+
+    #[test]
     fn test_game_log_panel_visibility_toggle() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
@@ -684,5 +927,34 @@ mod tests {
             .get::<Text>(child)
             .expect("spawned log line should have Text");
         assert_eq!(text.as_str(), "hello");
+    }
+
+    #[test]
+    fn test_panel_opacity_from_config() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+
+        let mut state = crate::application::GameState::new();
+        state.config.game_log.panel_opacity = 0.5;
+        app.insert_resource(GlobalState(state));
+
+        app.add_plugins(UiPlugin);
+        app.update();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&BackgroundColor, With<GameLogPanelRoot>>();
+        let background = query
+            .iter(app.world())
+            .next()
+            .expect("panel background should exist");
+
+        let alpha = background.0.to_srgba().alpha;
+        assert!(
+            (alpha - 0.5).abs() < 0.01,
+            "expected panel opacity close to 0.5, got {}",
+            alpha
+        );
     }
 }
