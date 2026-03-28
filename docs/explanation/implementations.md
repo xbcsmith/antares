@@ -1,5 +1,181 @@
 # Implementations
 
+## Phase 4: Validation, Repair, and Data Integrity Enforcement (Complete)
+
+### Overview
+
+Phase 4 adds merchant-dialogue-specific validation and repair flows to the
+Campaign Builder so invalid merchant dialogue states can be detected anywhere in
+loaded campaign content and repaired from the editor workflow.
+
+The goal of this phase is to make merchant dialogue correctness obvious and
+actionable: invalid states are surfaced in validation, reflected in editor
+status, and repairable through direct SDK workflows.
+
+### Problem Statement
+
+After Phase 3, the SDK could create merchant dialogue, augment existing
+dialogue, and remove SDK-managed merchant content non-destructively when
+merchant behavior was disabled.
+
+However, merchant dialogue correctness still was not enforced at the campaign
+validation level.
+
+That left several gaps:
+
+- merchant NPCs with no `dialogue_id` were not consistently surfaced in global
+  validation
+- merchant NPCs with missing dialogue trees or missing explicit
+  `OpenMerchant { npc_id }` paths could remain undetected outside local edit
+  flows
+- merchant NPCs using dialogue that opened the wrong merchant target were not
+  clearly identified as a repairable validation problem
+- non-merchant NPCs referencing dialogue with stale SDK-managed merchant content
+  were not surfaced as campaign integrity issues
+- the validation panel did not provide a merchant-specific repair path or direct
+  jump-to-edit workflow
+- the NPC editor list and status surfaces did not clearly distinguish valid
+  merchant dialogue from broken merchant dialogue states
+
+Phase 4 closes those gaps by adding merchant validation rules, repair actions,
+clearer NPC status surfacing, and validation-driven navigation.
+
+### Files Changed
+
+| File                                     | Change                                                                                 |
+| ---------------------------------------- | -------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/npc_editor.rs` | Added merchant dialogue validation states, repair mapping, list badges, and helpers    |
+| `sdk/campaign_builder/src/lib.rs`        | Added campaign-wide merchant dialogue validation rules, repair action, and jump-to-NPC |
+| `docs/explanation/implementations.md`    | Added this Phase 4 implementation summary                                              |
+
+---
+
+### 4.1 — Merchant Dialogue Validation Rules Are Now Campaign-Wide
+
+Phase 4 adds explicit merchant dialogue validation rules to the Campaign
+Builder’s campaign validation flow.
+
+The new validation checks now report:
+
+- merchant NPC with no `dialogue_id`
+- merchant NPC referencing a missing dialogue tree
+- merchant NPC whose assigned dialogue is missing explicit `OpenMerchant`
+- merchant NPC whose assigned dialogue opens the wrong `npc_id`
+- non-merchant NPC whose assigned dialogue still contains SDK-managed merchant
+  content
+
+These checks are integrated into the existing campaign validation pipeline so
+merchant dialogue correctness is now part of normal campaign integrity
+validation rather than a hidden editor-only concern.
+
+### 4.2 — Validation Can Now Trigger Merchant Repairs
+
+Phase 4 also adds repair integration for merchant dialogue issues.
+
+The Campaign Builder now supports a validation-panel repair flow that can:
+
+- generate a missing merchant dialogue
+- augment an assigned dialogue with a merchant branch
+- remove stale SDK-managed merchant content from non-merchant NPC dialogue
+- rebind a wrong `OpenMerchant` target by cleaning stale merchant content and
+  re-applying the correct merchant branch
+
+This repair path reuses the NPC editor’s merchant lifecycle helpers rather than
+creating a second repair implementation, which keeps the behavior consistent
+with earlier phases.
+
+### 4.3 — NPC Editor Now Surfaces Merchant Validity More Clearly
+
+The NPC editor now exposes merchant dialogue health more explicitly through
+validation-aware status surfaces.
+
+Phase 4 adds:
+
+- merchant dialogue validation state classification
+- repair-action mapping based on validation outcome
+- richer merchant badges in the NPC list
+- clearer distinction between:
+  - valid merchant dialogue
+  - missing dialogue
+  - missing dialogue tree
+  - wrong merchant target
+  - missing `OpenMerchant`
+  - stale SDK-managed merchant content on non-merchants
+
+This makes merchant dialogue correctness visible even before authors open the
+validation tab.
+
+### 4.4 — Validation Panel Entries Now Support Jump-to-Edit Workflow
+
+Merchant validation results in the validation panel now support direct navigation
+back to the affected NPC.
+
+When a merchant-related NPC validation message references a known NPC, the
+validation panel can route the author back into the NPC editor for that record.
+
+This closes an important workflow gap in the plan:
+
+- validation detects the issue
+- the author can jump directly to the NPC
+- the NPC editor exposes the relevant merchant repair action
+- the repair can be applied without manual content hunting
+
+### 4.5 — Merchant Repair Outcomes Are Now Mapped to Validation State
+
+Phase 4 formalizes the relationship between validation and repair.
+
+The NPC editor now maps merchant dialogue states to specific repair actions such
+as:
+
+- create new merchant dialogue
+- repair existing assigned dialogue
+- replace missing dialogue assignment by generating a new one
+- remove stale SDK-managed merchant content
+- rebind wrong merchant targets
+
+This ensures merchant dialogue issues are not only detectable, but also
+repairable through the least-destructive available path.
+
+### 4.6 — Tests Cover Detection and Repair of Merchant Validation Cases
+
+Phase 4 extends test coverage to include validation and repair behavior for the
+required merchant cases.
+
+The covered cases include:
+
+- merchant with missing dialogue
+- merchant with missing dialogue tree
+- merchant with wrong `OpenMerchant.npc_id`
+- non-merchant with leftover SDK-managed merchant content
+- repair flow generating a missing merchant dialogue
+- repair flow rebinding a wrong merchant target
+- repair flow removing stale merchant content from a non-merchant dialogue
+
+This keeps the validation and repair contract deterministic and protects the
+Campaign Builder against regressions in merchant dialogue integrity behavior.
+
+### 4.7 — Deliverables Completed
+
+- [x] Merchant dialogue validation rules implemented
+- [x] Merchant repair actions implemented
+- [x] Editor status surfaces merchant validity clearly
+- [x] Validation tests cover missing, invalid, and stale merchant dialogue states
+
+### 4.8 — Outcome
+
+After Phase 4, merchant dialogue correctness is no longer implicit or easy to
+miss.
+
+The key outcome is validation-backed integrity enforcement:
+
+- invalid merchant dialogue states are always detectable
+- repair actions can bring merchant NPCs back into compliance automatically
+- merchant dialogue health is visible in both the NPC editor and validation
+  panel
+- authors can navigate directly from validation results to the affected NPC
+- merchant dialogue correctness is now an explicit, repairable campaign-quality
+  concern
+
 ## Phase 3: Merchant Disablement and Non-Destructive Removal (Complete)
 
 ### Overview
