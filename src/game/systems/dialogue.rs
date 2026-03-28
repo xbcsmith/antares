@@ -264,6 +264,7 @@ fn handle_start_dialogue(
                             dlg_state.as_ref(),
                             quest_system.as_mut().map(|r| r.as_mut()),
                             game_log.as_mut().map(|r| r.as_mut()),
+                            None,
                             &mut despawn_recruitable_visuals.as_mut(),
                         );
                     }
@@ -344,6 +345,7 @@ fn handle_select_choice(
     content: Res<GameContent>,
     mut quest_system: Option<ResMut<crate::application::quests::QuestSystem>>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
+    mut game_log_writer: Option<MessageWriter<crate::game::systems::ui::GameLogEvent>>,
     mut despawn_recruitable_visuals: Option<
         MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
     >,
@@ -416,6 +418,7 @@ fn handle_select_choice(
                             dlg_state.as_ref(),
                             quest_system.as_mut().map(|r| r.as_mut()),
                             game_log.as_mut().map(|r| r.as_mut()),
+                            game_log_writer.as_mut(),
                             &mut despawn_recruitable_visuals.as_mut(),
                         );
                     }
@@ -492,6 +495,7 @@ fn handle_select_choice(
                                     dlg_state.as_ref(),
                                     quest_system.as_mut().map(|r| r.as_mut()),
                                     game_log.as_mut().map(|r| r.as_mut()),
+                                    game_log_writer.as_mut(),
                                     &mut despawn_recruitable_visuals.as_mut(),
                                 );
                             }
@@ -832,6 +836,7 @@ fn execute_recruit_to_party(
 /// - `SetFlag` / `ChangeReputation` / `TriggerEvent` → not fully implemented
 /// - `GrantExperience` → grants XP to first party member
 #[allow(unused_mut)]
+#[allow(clippy::too_many_arguments)]
 fn execute_action(
     action: &DialogueAction,
     game_state: &mut crate::application::GameState,
@@ -839,6 +844,7 @@ fn execute_action(
     dialogue_state: Option<&crate::application::dialogue::DialogueState>,
     quest_system: Option<&mut crate::application::quests::QuestSystem>,
     mut game_log: Option<&mut crate::game::systems::ui::GameLog>,
+    mut game_log_writer: Option<&mut MessageWriter<crate::game::systems::ui::GameLogEvent>>,
     despawn_recruitable_visuals: &mut Option<
         &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
     >,
@@ -1229,7 +1235,7 @@ fn execute_action(
                         "Bought item {} (charges={}) for character {}",
                         item_id, slot.charges, character_id
                     );
-                    if let Some(ref mut log) = game_log {
+                    if let Some(ref mut writer) = game_log_writer {
                         let item_name = db
                             .items
                             .get_item(*item_id)
@@ -1240,14 +1246,20 @@ fn execute_action(
                             .get_item(*item_id)
                             .map(|item| item.base_cost)
                             .unwrap_or(0);
-                        log.add_item(format!("Bought {} for {} gold.", item_name, cost));
+                        writer.write(crate::game::systems::ui::GameLogEvent {
+                            text: format!("Bought {} for {} gold.", item_name, cost),
+                            category: crate::game::systems::ui::LogCategory::Item,
+                        });
                     }
                 }
                 Err(e) => {
                     // On failure nothing was mutated: no commit needed
                     warn!("BuyItem failed: {}", e);
-                    if let Some(ref mut log) = game_log {
-                        log.add_system(format!("Cannot buy item: {}", e));
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(crate::game::systems::ui::GameLogEvent {
+                            text: format!("Cannot buy item: {}", e),
+                            category: crate::game::systems::ui::LogCategory::System,
+                        });
                     }
                 }
             }
@@ -1367,19 +1379,25 @@ fn execute_action(
                     // Commit mutated NPC runtime state
                     game_state.npc_runtime.insert(npc_runtime_clone);
                     info!("Sold item {} for {} gold", item_id, price);
-                    if let Some(ref mut log) = game_log {
+                    if let Some(ref mut writer) = game_log_writer {
                         let item_name = db
                             .items
                             .get_item(*item_id)
                             .map(|item| item.name.clone())
                             .unwrap_or_else(|| format!("item {}", item_id));
-                        log.add_item(format!("Sold {} for {} gold.", item_name, price));
+                        writer.write(crate::game::systems::ui::GameLogEvent {
+                            text: format!("Sold {} for {} gold.", item_name, price),
+                            category: crate::game::systems::ui::LogCategory::Item,
+                        });
                     }
                 }
                 Err(e) => {
                     warn!("SellItem failed: {}", e);
-                    if let Some(ref mut log) = game_log {
-                        log.add_system(format!("Cannot sell item: {}", e));
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(crate::game::systems::ui::GameLogEvent {
+                            text: format!("Cannot sell item: {}", e),
+                            category: crate::game::systems::ui::LogCategory::System,
+                        });
                     }
                 }
             }
@@ -1736,6 +1754,7 @@ mod tests {
                         None,
                         None,
                         None,
+                        None,
                         &mut despawn_recruitable_visuals,
                     );
                 }
@@ -1862,6 +1881,7 @@ mod tests {
                                 action,
                                 &mut gs.0,
                                 &db,
+                                None,
                                 None,
                                 None,
                                 None,
@@ -2081,6 +2101,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2159,6 +2180,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2216,6 +2238,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2238,6 +2261,7 @@ mod tests {
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
             None,
@@ -2300,6 +2324,7 @@ mod tests {
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
             None,
@@ -2369,6 +2394,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2381,6 +2407,7 @@ mod tests {
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
             None,
@@ -2439,6 +2466,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2461,6 +2489,7 @@ mod tests {
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
             None,
@@ -2509,6 +2538,7 @@ mod tests {
             &mut game_state,
             &db,
             Some(&dlg_state),
+            None,
             None,
             None,
             &mut despawn_recruitable_visuals,
@@ -2581,6 +2611,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2616,6 +2647,7 @@ mod tests {
             &mut game_state,
             &db,
             Some(&dlg_state),
+            None,
             None,
             None,
             &mut despawn_recruitable_visuals,
@@ -2774,6 +2806,7 @@ mod tests {
             None,
             None,
             Some(&mut log),
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2918,6 +2951,7 @@ mod tests {
             Some(&merchant_dialogue_state()),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2938,28 +2972,53 @@ mod tests {
 
     #[test]
     fn test_buy_item_dialogue_action_logs_item_name_and_price() {
-        // Arrange
-        let db = make_merchant_db();
-        let mut game_state = make_game_state_with_merchant(100);
-        game_state.mode = crate::application::GameMode::Dialogue(merchant_dialogue_state());
-        let mut game_log = crate::game::systems::ui::GameLog::new();
+        use crate::domain::dialogue::{DialogueChoice, DialogueNode, DialogueTree};
+        use crate::game::systems::ui::UiPlugin;
 
-        // Act
-        let mut despawn_recruitable_visuals = None;
-        execute_action(
-            &DialogueAction::BuyItem {
-                item_id: 1,
-                target_character_id: None,
-            },
-            &mut game_state,
-            &db,
-            Some(&merchant_dialogue_state()),
-            None,
-            Some(&mut game_log),
-            &mut despawn_recruitable_visuals,
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_plugins(UiPlugin);
+        app.add_plugins(DialoguePlugin);
+
+        let mut db = make_merchant_db();
+        let mut tree = DialogueTree::new(700, "Merchant Buy", 1);
+        let mut root = DialogueNode::new(1, "Take a look at my wares.");
+        let mut choice = DialogueChoice::new("Buy sword", None);
+        choice.add_action(DialogueAction::BuyItem {
+            item_id: 1,
+            target_character_id: None,
+        });
+        root.add_choice(choice);
+        tree.add_node(root);
+        db.dialogues.add_dialogue(tree);
+
+        let mut game_state = make_game_state_with_merchant(100);
+        game_state.mode = crate::application::GameMode::Dialogue(
+            crate::application::dialogue::DialogueState::start(
+                700,
+                1,
+                None,
+                Some("merchant_tom".to_string()),
+            ),
         );
 
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+
+        // Act
+        {
+            let mut choice_msgs = app
+                .world_mut()
+                .resource_mut::<Messages<SelectDialogueChoice>>();
+            choice_msgs.write(SelectDialogueChoice { choice_index: 0 });
+        }
+
+        app.update();
+
         // Assert
+        let game_log = app.world().resource::<crate::game::systems::ui::GameLog>();
         let last_entry = game_log
             .entries()
             .last()
@@ -2987,6 +3046,7 @@ mod tests {
             &mut game_state,
             &db,
             Some(&merchant_dialogue_state()),
+            None,
             None,
             None,
             &mut despawn_recruitable_visuals,
@@ -3061,6 +3121,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -3129,6 +3190,7 @@ mod tests {
             Some(&dlg_state),
             None,
             Some(&mut game_log),
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -3198,6 +3260,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -3247,6 +3310,7 @@ mod tests {
             Some(&merchant_dialogue_state()),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -3278,6 +3342,7 @@ mod tests {
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
             None,
@@ -3362,6 +3427,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -3382,12 +3448,20 @@ mod tests {
 
     #[test]
     fn test_sell_item_dialogue_action_logs_item_name_and_price() {
+        use crate::domain::dialogue::{DialogueChoice, DialogueNode, DialogueTree};
         use crate::domain::items::{Item, ItemType, WeaponClassification, WeaponData};
         use crate::domain::types::DiceRoll;
         use crate::domain::world::npc::NpcDefinition;
         use crate::domain::world::npc_runtime::NpcRuntimeState;
+        use crate::game::systems::ui::UiPlugin;
 
         // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_plugins(UiPlugin);
+        app.add_plugins(DialoguePlugin);
+
         let mut db = ContentDatabase::new();
 
         let item1 = Item {
@@ -3417,6 +3491,17 @@ mod tests {
         let merchant = NpcDefinition::merchant("merchant_tom", "Tom", "tom.png");
         db.npcs.add_npc(merchant).unwrap();
 
+        let mut tree = DialogueTree::new(701, "Merchant Sell", 1);
+        let mut root = DialogueNode::new(1, "What are you selling?");
+        let mut choice = DialogueChoice::new("Sell dagger", None);
+        choice.add_action(DialogueAction::SellItem {
+            item_id: 1,
+            source_character_id: None,
+        });
+        root.add_choice(choice);
+        tree.add_node(root);
+        db.dialogues.add_dialogue(tree);
+
         use crate::domain::character::{Alignment, Character, Sex};
         let mut gs = crate::application::GameState::new();
         let mut hero = Character::new(
@@ -3429,29 +3514,33 @@ mod tests {
         hero.inventory.add_item(1, 0).unwrap();
         gs.party.add_member(hero).unwrap();
         gs.party.gold = 0;
+        gs.mode = crate::application::GameMode::Dialogue(
+            crate::application::dialogue::DialogueState::start(
+                701,
+                1,
+                None,
+                Some("merchant_tom".to_string()),
+            ),
+        );
 
         let npc_runtime = NpcRuntimeState::new("merchant_tom".to_string());
         gs.npc_runtime.insert(npc_runtime);
 
-        let dlg_state = merchant_dialogue_state();
-        let mut game_log = crate::game::systems::ui::GameLog::new();
+        app.insert_resource(GlobalState(gs));
+        app.insert_resource(GameContent::new(db));
 
         // Act
-        let mut despawn_recruitable_visuals = None;
-        execute_action(
-            &DialogueAction::SellItem {
-                item_id: 1,
-                source_character_id: None,
-            },
-            &mut gs,
-            &db,
-            Some(&dlg_state),
-            None,
-            Some(&mut game_log),
-            &mut despawn_recruitable_visuals,
-        );
+        {
+            let mut choice_msgs = app
+                .world_mut()
+                .resource_mut::<Messages<SelectDialogueChoice>>();
+            choice_msgs.write(SelectDialogueChoice { choice_index: 0 });
+        }
+
+        app.update();
 
         // Assert
+        let game_log = app.world().resource::<crate::game::systems::ui::GameLog>();
         let last_entry = game_log
             .entries()
             .last()

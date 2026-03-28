@@ -4,6 +4,20 @@
 
 ## SDK
 
+Analyze the @sdk codebase for refactoring opportunities use subagents to do the following:
+
+1. Find duplicate code patterns, look for places we can consolidate code and create reusable functions or components.
+2. Identify unused exports, specific "#[ignore]", and dead code "#[dead_code]", #[allow(unused_mut)], #[allow(clippy::too_many_arguments)] to see if there are any exports that can be removed or refactored to reduce clutter and improve maintainability.
+3. Review error handling consistency
+4. Look for unfinished TODOs, FIXMEs, and place holders in the codebase as well as references to Phases in the codebase that should be removed.
+5. References to Phases in the codebase that should be removed.
+
+We do not care about backwards compatability. Compile the findings into a prioritized action plan with a phased approach.
+
+Write a plan with a phased approach to cleaning up the codebase. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [SDK Codebase Cleanup Plan](./sdk_codebase_cleanup_plan.md)
+
 ## Game Engine
 
 ### Clean up
@@ -11,16 +25,16 @@
 Analyze the @src codebase for refactoring opportunities use subagents to do the following:
 
 1. Find duplicate code patterns, look for places we can consolidate code and create reusable functions or components.
-2. Identify unused exports, specific "#[ignore]", and dead code "#[dead_code]" in Rust
+2. Identify unused exports, specific "#[ignore]", and dead code "#[dead_code]", #[allow(unused_mut)], #[allow(clippy::too_many_arguments)] to see if there are any exports that can be removed or refactored to reduce clutter and improve maintainability.
 3. Review error handling consistency
-4. Check for security vulnerabilities
+4. Look for unfinished TODOs, FIXMEs, and place holders in the codebase as well as references to Phases in the codebase that should be removed.
 5. References to Phases in the codebase that should be removed.
 
-Compile the findings into a prioritized action plan with a phased approach.
+We do not care about backwards compatability. Compile the findings into a prioritized action plan with a phased approach.
 
 Write a plan with a phased approach to cleaning up the codebase. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Codebase Cleanup Plan](./codebase_cleanup_plan.md)
+✅ PLAN WRITTEN - [Game Codebase Cleanup Plan](./game_codebase_cleanup_plan.md)
 
 ### Custom Fonts
 

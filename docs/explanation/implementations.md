@@ -1,5 +1,49 @@
 # Implementations
 
+## Game LogEvent Merchant Transaction Migration (Complete)
+
+### Overview
+
+This update completes the merchant transaction portion of the game log event
+decoupling work by routing merchant buy and sell dialogue transaction logging
+through `GameLogEvent` instead of writing directly to `GameLog`.
+
+### What Changed
+
+Merchant transaction handling in `src/game/systems/dialogue.rs` now emits typed
+game log messages through `GameLogEvent` for the merchant transaction paths:
+
+- successful buy actions emit an `Item` event with:
+  `"Bought {item_name} for {cost} gold."`
+- failed buy actions emit a `System` event with:
+  `"Cannot buy item: {error}"`
+- successful sell actions emit an `Item` event with:
+  `"Sold {item_name} for {value} gold."`
+- failed sell actions emit a `System` event with:
+  `"Cannot sell item: {error}"`
+
+This keeps merchant transaction logging aligned with the broader Phase 3 design
+where gameplay systems publish typed log events and the UI layer consumes them.
+
+### Test Coverage
+
+The merchant transaction dialogue tests were updated to verify the migrated
+behavior through the event-driven path:
+
+- `test_buy_item_dialogue_action_logs_item_name_and_price`
+- `test_sell_item_dialogue_action_logs_item_name_and_price`
+
+These tests now drive the dialogue flow through an app-level setup so the
+emitted `GameLogEvent` messages are consumed into the `GameLog` resource before
+asserting the final visible entries.
+
+### Outcome
+
+Merchant buy and sell dialogue actions now follow the typed event-driven logging
+pattern instead of mutating the game log resource directly, bringing this part
+of the dialogue transaction flow in line with the planned `GameLogEvent`
+architecture.
+
 ## Game Log Phase 3 Event Coverage Alignment (Complete)
 
 ### Overview
