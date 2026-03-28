@@ -1,5 +1,54 @@
 # Implementations
 
+## Game Log Phase 3 Event Coverage Alignment (Complete)
+
+### Overview
+
+This update closes the remaining Phase 3 event-coverage gaps in the game log
+implementation by aligning exploration, dialogue, merchant, and inn-management
+event messages with the implementation plan’s intended player-facing wording.
+
+### What Changed
+
+The following event-log paths were aligned with the Phase 3 plan:
+
+- `src/game/systems/events.rs`
+
+  - NPC dialogue fallback without a dialogue tree now logs
+    `"{npc_name} speaks."` as a `Dialogue` entry instead of an exploration-only
+    fallback/debug message
+  - inn entry dialogue now logs `"{npc_name} speaks."` instead of
+    `"Speaking with {npc_name}..."`
+  - merchant interactions without a configured dialogue tree now still log the
+    planned exploration visit entry:
+    `"Visiting {merchant_name}."`
+
+- `src/game/systems/inn_ui.rs`
+  - duplicate direct recruit and dismiss dialogue log entries were removed so
+    the typed `GameLogEvent` messages remain the canonical Phase 3 output
+  - recruit actions continue to emit `"{name} joins the party."`
+  - dismiss actions continue to emit `"{name} waits at the inn."`
+
+### Tests Updated and Added
+
+Focused regression coverage now verifies the aligned Phase 3 event behavior:
+
+- `test_npc_dialogue_event_triggers_dialogue_when_npc_has_dialogue_id`
+- `test_npc_dialogue_event_logs_when_npc_has_no_dialogue_id`
+- `test_inn_recruit_writes_game_log_event`
+
+These tests confirm that:
+
+- dialogue-triggering NPC events still dispatch correctly
+- merchant fallback interactions still produce the expected visit log entry
+- inn recruitment emits the expected typed dialogue event
+
+### Outcome
+
+Phase 3 event coverage is now more closely aligned with the implementation
+plan’s intended visible messages for NPC dialogue, merchant visits, and inn
+party-management actions, while avoiding duplicate log entries in inn flows.
+
 ## Game Log Legacy Call-Site Migration (Complete)
 
 ### Overview

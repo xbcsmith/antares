@@ -604,9 +604,6 @@ fn inn_action_system(
                             category: LogCategory::Dialogue,
                         });
                     }
-                    if let Some(ref mut log) = game_log {
-                        log.add_dialogue(format!("{} recruited to party!", character.name));
-                    }
                 }
             }
             Err(e) => {
@@ -638,10 +635,6 @@ fn inn_action_system(
                             category: LogCategory::Dialogue,
                         });
                     }
-                }
-
-                if let Some(ref mut log) = game_log {
-                    log.add_dialogue("Party member dismissed to inn.".to_string());
                 }
             }
             Err(e) => {
@@ -1222,6 +1215,60 @@ mod tests {
         assert_eq!(global.0.party.members[0].name, "InnMage");
         assert_eq!(global.0.roster.characters[0].name, "PartyHero");
         assert_eq!(global.0.roster.characters[1].name, "InnMage");
+    }
+
+    #[test]
+    fn test_inn_recruit_writes_game_log_event() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        app.add_message::<InnRecruitCharacter>();
+        app.add_message::<InnDismissCharacter>();
+        app.add_message::<InnSwapCharacters>();
+        app.add_message::<ExitInn>();
+        app.add_message::<GameLogEvent>();
+        app.init_resource::<Messages<GameLogEvent>>();
+
+        app.add_systems(Update, inn_action_system);
+
+        let mut game = GameState::new();
+        let inn_id = "test_inn".to_string();
+
+        let roster_character = Character::new(
+            "RosterC".to_string(),
+            "dwarf".to_string(),
+            "robber".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        game.roster
+            .add_character(roster_character, CharacterLocation::AtInn(inn_id.clone()))
+            .unwrap();
+        game.mode = GameMode::InnManagement(InnManagementState {
+            current_inn_id: inn_id,
+            selected_party_slot: None,
+            selected_roster_slot: None,
+        });
+
+        app.insert_resource(GlobalState(game));
+
+        app.world_mut()
+            .resource_mut::<Messages<InnRecruitCharacter>>()
+            .write(InnRecruitCharacter { roster_index: 0 });
+        app.update();
+
+        let messages = app.world().resource::<Messages<GameLogEvent>>();
+        let mut reader = messages.get_cursor();
+        let logged: Vec<_> = reader.read(messages).cloned().collect();
+
+        assert!(
+            logged.iter().any(|event| {
+                event.category == LogCategory::Dialogue && event.text == "RosterC joins the party."
+            }),
+            "expected recruit action to emit a dialogue game log event, got: {:?}",
+            logged
+        );
     }
 
     #[test]

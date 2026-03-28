@@ -463,13 +463,10 @@ fn handle_events(
                             fallback_position: Some(trigger.position),
                         });
 
-                        let msg = format!(
-                            "{}: Hello, traveler! (Visual fallback triggered)",
-                            npc_def.name
-                        );
+                        let msg = format!("{} speaks.", npc_def.name);
                         println!("{}", msg);
                         if let Some(ref mut log) = game_log {
-                            log.add_exploration(msg);
+                            log.add_dialogue(msg);
                         }
                     }
                 } else {
@@ -604,7 +601,7 @@ fn handle_events(
                         });
 
                         if let Some(ref mut log) = game_log {
-                            log.add_dialogue(format!("Speaking with {}...", npc_def.name));
+                            log.add_dialogue(format!("{} speaks.", npc_def.name));
                         }
                     } else {
                         // Error: Innkeepers must have a dialogue configured
@@ -1032,10 +1029,10 @@ fn handle_event_result(
             }
         } else {
             // Merchant has no dialogue configured
-            let msg = format!("Merchant {} has no dialogue configured", npc_id);
+            let msg = format!("Visiting {}.", npc_def.name);
             info!("{}", msg);
             if let Some(ref mut log) = game_log {
-                log.add_dialogue(msg);
+                log.add_exploration(msg);
             }
 
             // Show a simple fallback bubble so the player knows someone is there
@@ -1645,19 +1642,17 @@ mod tests {
         app.update(); // First update: check_for_events writes MapEventTriggered
         app.update(); // Second update: handle_events processes MapEventTriggered
 
-        // Assert - GameLog should contain merchant-specific no-dialogue message
-        // (merchant NPCs without dialogue_id are handled by handle_event_result which
-        // logs "Merchant {npc_id} has no dialogue configured" and shows a SimpleDialogue
-        // fallback bubble - this is the new EnterMerchant path behaviour)
+        // Assert - merchant interactions should log the planned exploration entry
+        // even when the merchant falls back to a simple dialogue bubble because
+        // no dialogue_id is configured.
         let game_log = app.world().resource::<GameLog>();
         let entries = game_log.entries();
         assert!(
             entries.iter().any(|entry| {
-                entry.category == crate::game::systems::ui::LogCategory::Dialogue
-                    && entry.text.contains("test_merchant")
-                    && entry.text.contains("no dialogue configured")
+                entry.category == crate::game::systems::ui::LogCategory::Exploration
+                    && entry.text == "Visiting Town Merchant."
             }),
-            "Expected merchant no-dialogue message in game log. Actual entries: {:?}",
+            "Expected merchant visit message in game log. Actual entries: {:?}",
             entries
         );
     }
