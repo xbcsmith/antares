@@ -22,12 +22,14 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GameLog>()
+        app.add_message::<GameLogEvent>()
+            .init_resource::<GameLog>()
             .init_resource::<GameLogUiState>()
             .add_systems(Startup, setup_game_log_panel)
             .add_systems(
                 Update,
                 (
+                    consume_game_log_events,
                     toggle_game_log_panel,
                     sync_game_log_panel_visibility,
                     sync_game_log_ui,
@@ -47,6 +49,14 @@ pub enum LogCategory {
     Item,
     Exploration,
     System,
+}
+
+/// Message used by gameplay systems to append to the game log without
+/// directly mutating the [`GameLog`] resource.
+#[derive(Message, Debug, Clone)]
+pub struct GameLogEvent {
+    pub text: String,
+    pub category: LogCategory,
 }
 
 /// Runtime UI state for the game log panel.
@@ -371,6 +381,12 @@ fn sync_game_log_panel_visibility(
     }
 }
 
+fn consume_game_log_events(mut reader: MessageReader<GameLogEvent>, mut game_log: ResMut<GameLog>) {
+    for event in reader.read() {
+        game_log.add_entry(event.text.clone(), event.category);
+    }
+}
+
 fn sync_game_log_ui(
     mut commands: Commands,
     game_log: Res<GameLog>,
@@ -556,6 +572,54 @@ mod tests {
             query.iter(app.world()).next().is_some(),
             "expected GameLogPanelRoot to exist after startup"
         );
+    }
+
+    #[test]
+    fn test_map_change_logs_exploration_entry() {
+        let mut log = GameLog::new();
+        let event = GameLogEvent {
+            text: "Entered Test Map (7).".to_string(),
+            category: LogCategory::Exploration,
+        };
+
+        log.add_entry(event.text, event.category);
+
+        let entries = log.entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].category, LogCategory::Exploration);
+        assert_eq!(entries[0].text, "Entered Test Map (7).");
+    }
+
+    #[test]
+    fn test_combat_feedback_mirrors_to_game_log() {
+        let mut log = GameLog::new();
+        let event = GameLogEvent {
+            text: "Hero hits Goblin for 5 damage.".to_string(),
+            category: LogCategory::Combat,
+        };
+
+        log.add_entry(event.text, event.category);
+
+        let entries = log.entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].category, LogCategory::Combat);
+        assert_eq!(entries[0].text, "Hero hits Goblin for 5 damage.");
+    }
+
+    #[test]
+    fn test_item_pickup_logs_item_entry() {
+        let mut log = GameLog::new();
+        let event = GameLogEvent {
+            text: "Picked up Iron Sword.".to_string(),
+            category: LogCategory::Item,
+        };
+
+        log.add_entry(event.text, event.category);
+
+        let entries = log.entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].category, LogCategory::Item);
+        assert_eq!(entries[0].text, "Picked up Iron Sword.");
     }
 
     #[test]

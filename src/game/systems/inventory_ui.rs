@@ -42,7 +42,7 @@ use crate::domain::items::types::{ConsumableEffect, ItemType};
 use crate::domain::transactions::{drop_item, equip_item, unequip_item, TransactionError};
 use crate::game::resources::GlobalState;
 use crate::game::systems::item_world_events::ItemDroppedEvent;
-use crate::game::systems::ui::GameLog;
+use crate::game::systems::ui::{GameLog, GameLogEvent, LogCategory};
 
 use bevy::prelude::MessageWriter;
 use bevy::prelude::*;
@@ -1898,6 +1898,7 @@ fn inventory_action_system(
     mut global_state: ResMut<GlobalState>,
     mut nav_state: ResMut<InventoryNavigationState>,
     mut item_dropped_writer: Option<MessageWriter<ItemDroppedEvent>>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
     game_content: Option<Res<GameContent>>,
     mut game_log: Option<ResMut<GameLog>>,
 ) {
@@ -1971,6 +1972,19 @@ fn inventory_action_system(
                      onto map {} at {:?}",
                     party_index, slot_index, dropped.item_id, dropped.charges, map_id, pos
                 );
+
+                let item_name = game_content
+                    .as_deref()
+                    .and_then(|content| content.db().items.get_item(dropped.item_id))
+                    .map(|item| item.name.clone())
+                    .unwrap_or_else(|| format!("item {}", dropped.item_id));
+
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: format!("Dropped {}.", item_name),
+                        category: LogCategory::Item,
+                    });
+                }
 
                 // Fire ItemDroppedEvent so the 3-D world mesh spawns at the
                 // party's current tile position (Phase 3 visual system).
@@ -2142,6 +2156,15 @@ fn inventory_action_system(
         };
         let content_db = content.db();
 
+        let item_name = global_state.0.party.members[party_index]
+            .inventory
+            .items
+            .get(slot_index)
+            .and_then(|slot| content_db.items.get_item(slot.item_id))
+            .map(|item| item.name.clone())
+            .unwrap_or_else(|| "unknown item".to_string());
+        let character_name = global_state.0.party.members[party_index].name.clone();
+
         match equip_item(
             &mut global_state.0.party.members[party_index],
             slot_index,
@@ -2154,6 +2177,12 @@ fn inventory_action_system(
                     "Equipped item from party[{}] slot {}",
                     party_index, slot_index
                 );
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: format!("{} equipped {}.", character_name, item_name),
+                        category: LogCategory::Item,
+                    });
+                }
                 if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
                     inv_state.selected_slot = None;
                 }

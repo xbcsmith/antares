@@ -269,7 +269,13 @@ fn handle_start_dialogue(
                     }
                     if let Some(ref mut log) = game_log {
                         let speaker = tree.speaker_name.as_deref().unwrap_or("NPC");
-                        log.add_dialogue(format!("{}: {}", speaker, node.text));
+                        let concise_text: String = node.text.chars().take(80).collect();
+                        let concise_text = if node.text.chars().count() > 80 {
+                            format!("{}…", concise_text)
+                        } else {
+                            concise_text
+                        };
+                        log.add_dialogue(format!("{}: {}", speaker, concise_text));
                     }
 
                     // Update DialogueState with current node text and choices
@@ -308,7 +314,13 @@ fn handle_simple_dialogue(
 ) {
     for ev in ev_reader.read() {
         if let Some(ref mut log) = game_log {
-            log.add_dialogue(format!("{}: {}", ev.speaker_name, ev.text));
+            let concise_text: String = ev.text.chars().take(80).collect();
+            let concise_text = if ev.text.chars().count() > 80 {
+                format!("{}…", concise_text)
+            } else {
+                concise_text
+            };
+            log.add_dialogue(format!("{}: {}", ev.speaker_name, concise_text));
         }
 
         let state = DialogueState::start_simple(
@@ -459,7 +471,13 @@ fn handle_select_choice(
                         if let Some((text, actions)) = new_node_data {
                             if let Some(ref mut log) = game_log {
                                 let speaker = tree.speaker_name.as_deref().unwrap_or("NPC");
-                                log.add_dialogue(format!("{}: {}", speaker, text));
+                                let concise_text: String = text.chars().take(80).collect();
+                                let concise_text = if text.chars().count() > 80 {
+                                    format!("{}…", concise_text)
+                                } else {
+                                    concise_text
+                                };
+                                log.add_dialogue(format!("{}: {}", speaker, concise_text));
                             }
 
                             for action in actions {

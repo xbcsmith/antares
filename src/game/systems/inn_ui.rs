@@ -10,7 +10,7 @@
 use crate::application::GameMode;
 use crate::domain::character::{CharacterLocation, PARTY_MAX_SIZE};
 use crate::game::resources::GlobalState;
-use crate::game::systems::ui::GameLog;
+use crate::game::systems::ui::{GameLog, GameLogEvent, LogCategory};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -584,6 +584,7 @@ fn inn_action_system(
     mut swap_events: MessageReader<InnSwapCharacters>,
     mut exit_events: MessageReader<ExitInn>,
     mut global_state: ResMut<GlobalState>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
     mut game_log: Option<ResMut<GameLog>>,
 ) {
     // Get current inn ID before processing events (clone to avoid moving out of state)
@@ -597,6 +598,12 @@ fn inn_action_system(
         match global_state.0.recruit_character(event.roster_index) {
             Ok(_) => {
                 if let Some(character) = global_state.0.roster.characters.get(event.roster_index) {
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: format!("{} joins the party.", character.name),
+                            category: LogCategory::Dialogue,
+                        });
+                    }
                     if let Some(ref mut log) = game_log {
                         log.add_dialogue(format!("{} recruited to party!", character.name));
                     }
@@ -612,11 +619,27 @@ fn inn_action_system(
 
     // Process dismiss events
     for event in dismiss_events.read() {
+        let dismissed_name = global_state
+            .0
+            .party
+            .members
+            .get(event.party_index)
+            .map(|character| character.name.clone());
+
         match global_state
             .0
             .dismiss_character(event.party_index, current_inn_id.clone())
         {
             Ok(_) => {
+                if let Some(name) = dismissed_name {
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: format!("{} waits at the inn.", name),
+                            category: LogCategory::Dialogue,
+                        });
+                    }
+                }
+
                 if let Some(ref mut log) = game_log {
                     log.add_dialogue("Party member dismissed to inn.".to_string());
                 }

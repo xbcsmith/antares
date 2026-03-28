@@ -14,7 +14,7 @@ use crate::game::systems::furniture_rendering::{
 use crate::game::systems::item_world_events::ItemPickedUpEvent;
 use crate::game::systems::map::{EventTrigger, MapChangeEvent, NpcMarker, TileCoord};
 use crate::game::systems::procedural_meshes::ProceduralMeshCache;
-use crate::game::systems::ui::GameLog;
+use crate::game::systems::ui::{GameLog, GameLogEvent, LogCategory};
 use bevy::prelude::*;
 
 pub struct EventPlugin;
@@ -179,6 +179,7 @@ fn handle_pickup_dropped_item(
     mut requests: MessageReader<PickupDroppedItemRequest>,
     mut global_state: ResMut<GlobalState>,
     mut picked_up_writer: Option<MessageWriter<ItemPickedUpEvent>>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
     mut game_log: Option<ResMut<GameLog>>,
 ) {
     // Collect requests to avoid holding a borrow while mutating global_state.
@@ -207,13 +208,34 @@ fn handle_pickup_dropped_item(
             req.item_id,
         ) {
             Ok(slot) => {
-                let msg = format!(
+                let debug_msg = format!(
                     "Picked up item {} (charges={}) from map {} tile {:?}",
                     slot.item_id, slot.charges, req.map_id, req.position
                 );
-                info!("{}", msg);
+                info!("{}", debug_msg);
+
+                let item_name = game_state
+                    .party
+                    .members
+                    .get(req.party_index)
+                    .and_then(|character| {
+                        character.inventory.items.iter().find(|inventory_slot| {
+                            inventory_slot.item_id == slot.item_id
+                                && inventory_slot.charges == slot.charges
+                        })
+                    })
+                    .map(|_| format!("item {}", slot.item_id))
+                    .unwrap_or_else(|| format!("item {}", slot.item_id));
+
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: format!("Picked up {}.", item_name),
+                        category: LogCategory::Item,
+                    });
+                }
+
                 if let Some(ref mut log) = game_log {
-                    log.add_item(msg);
+                    log.add_item(debug_msg);
                 }
 
                 // Notify the visual system to despawn the 3-D marker.
@@ -283,7 +305,13 @@ fn handle_events(
                 map_id,
                 ..
             } => {
-                let msg = format!("Teleporting to Map {} at {:?}", map_id, destination);
+                let map_name = content
+                    .db()
+                    .maps
+                    .get_map(*map_id)
+                    .map(|map| map.name.clone())
+                    .unwrap_or_else(|| format!("Map {}", map_id));
+                let msg = format!("Entering {}...", map_name);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
                     log.add_exploration(msg);
@@ -305,25 +333,27 @@ fn handle_events(
                     fallback_position: Some(trigger.position),
                 });
 
-                let msg = format!("Sign reads: {}", text);
+                let msg = format!("{}: {}", name, text);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
                     log.add_exploration(msg);
                 }
             }
-            MapEvent::Trap { damage, effect, .. } => {
-                let msg = format!("IT'S A TRAP! Took {} damage. Effect: {:?}", damage, effect);
+            MapEvent::Trap {
+                damage, effect: _, ..
+            } => {
+                let msg = format!("Trapped! Took {} damage.", damage);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add_exploration(msg);
+                    log.add_combat(msg);
                 }
                 // TODO: Apply damage to party
             }
             MapEvent::Treasure { loot, .. } => {
-                let msg = format!("Found treasure! Loot IDs: {:?}", loot);
+                let msg = format!("Found treasure! {} item(s).", loot.len());
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add_exploration(msg);
+                    log.add_item(msg);
                 }
                 // TODO: Add to inventory
             }
@@ -332,10 +362,10 @@ fn handle_events(
                 combat_event_type,
                 ..
             } => {
-                let msg = format!("Monsters attack! Group IDs: {:?}", monster_group);
+                let msg = format!("Monsters! ({} foes)", monster_group.len());
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add_exploration(msg);
+                    log.add_combat(msg);
                 }
 
                 // Debug: print current mode before attempting to start combat
@@ -414,10 +444,10 @@ fn handle_events(
                             fallback_position: Some(trigger.position),
                         });
 
-                        let msg = format!("{} wants to talk.", npc_def.name);
+                        let msg = format!("{} speaks.", npc_def.name);
                         println!("{}", msg);
                         if let Some(ref mut log) = game_log {
-                            log.add_exploration(msg);
+                            log.add_dialogue(msg);
                         }
                     } else {
                         // Fallback: No dialogue tree, show simple dialogue bubble
@@ -454,15 +484,15 @@ fn handle_events(
             MapEvent::RecruitableCharacter {
                 character_id,
                 name,
-                description,
+                description: _,
                 dialogue_id,
                 time_condition: _,
                 facing: _,
             } => {
-                let msg = format!("{} - {}", name, description);
+                let msg = format!("Met {}.", name);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add_exploration(msg);
+                    log.add_dialogue(msg);
                 }
 
                 let current_pos = global_state.0.world.party_position;
@@ -548,10 +578,10 @@ fn handle_events(
 
             MapEvent::EnterInn {
                 name,
-                description,
+                description: _,
                 innkeeper_id,
             } => {
-                let msg = format!("{} - {}", name, description);
+                let msg = format!("Entering {}.", name);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
                     log.add_exploration(msg);
@@ -995,10 +1025,10 @@ fn handle_event_result(
                 fallback_position: Some(*trigger_position),
             });
 
-            let msg = format!("{} wants to trade.", npc_def.name);
+            let msg = format!("Visiting {}.", npc_def.name);
             println!("{}", msg);
             if let Some(ref mut log) = game_log {
-                log.add_dialogue(msg);
+                log.add_exploration(msg);
             }
         } else {
             // Merchant has no dialogue configured
