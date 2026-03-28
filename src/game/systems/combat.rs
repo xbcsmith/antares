@@ -992,6 +992,16 @@ impl Plugin for CombatPlugin {
             )
             .add_systems(
                 Update,
+                mirror_combat_feedback_to_game_log
+                    .after(collect_combat_feedback_log_lines)
+                    .after(handle_attack_action)
+                    .after(handle_ranged_attack_action)
+                    .after(handle_cast_spell_action)
+                    .after(handle_use_item_action)
+                    .after(execute_monster_turn),
+            )
+            .add_systems(
+                Update,
                 update_combat_log_typewriter.after(collect_combat_feedback_log_lines),
             )
             .add_systems(
@@ -5056,6 +5066,35 @@ fn collect_combat_feedback_log_lines(
         debug!("CombatLog: {}", plain_text);
         info!("Combat: {}", plain_text);
         combat_log_state.push_line(line);
+    }
+}
+
+/// Mirror combat feedback into the persistent game log so players can review
+/// combat events after the combat bubble is cleaned up.
+fn mirror_combat_feedback_to_game_log(
+    mut reader: MessageReader<CombatFeedbackEvent>,
+    global_state: Res<GlobalState>,
+    combat_res: Res<CombatResource>,
+    mut color_state: ResMut<CombatLogColorState>,
+    mut game_log_writer: Option<MessageWriter<crate::game::systems::ui::GameLogEvent>>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    let Some(ref mut game_log_writer) = game_log_writer else {
+        for _ in reader.read() {}
+        return;
+    };
+
+    let mut rng = rand::rng();
+    for event in reader.read() {
+        let plain_text =
+            format_combat_log_line(&combat_res, event, &mut color_state, &mut rng).plain_text();
+        game_log_writer.write(crate::game::systems::ui::GameLogEvent {
+            text: plain_text,
+            category: crate::game::systems::ui::LogCategory::Combat,
+        });
     }
 }
 

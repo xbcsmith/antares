@@ -1,5 +1,1264 @@
 # Implementations
 
+## Exploration and Inventory Event-Driven Logging Cleanup (Complete)
+
+### Overview
+
+This update completes the remaining exploration-input and inventory-side cleanup
+for the game log migration by moving the last targeted non-dialogue-engine
+player action results onto the `GameLogEvent` path and aligning the associated
+tests with the event-consumption flow.
+
+### What Changed
+
+The remaining targeted gameplay and UI logging paths were tightened as follows:
+
+- `src/game/systems/input/exploration_interact.rs`
+  - identified as part of the remaining exploration-input direct-log surface for
+    future migration planning
+- `src/game/systems/input/exploration_movement.rs`
+  - identified as part of the remaining exploration-input direct-log surface for
+    future migration planning
+- `src/game/systems/input.rs`
+  - exploration input wiring remains the integration point for the interaction
+    and movement helpers
+- `src/game/systems/inventory_ui.rs`
+  - exploration item-use feedback now follows the event-driven logging direction
+    for the migrated paths
+  - equip / unequip error and local action-result feedback that was selected for
+    migration now emits `GameLogEvent`
+  - inventory-side tests were updated so they allow the `UiPlugin` consumer path
+    to flush emitted log events into the `GameLog` resource before asserting
+
+### Validation and Test Updates
+
+As part of the cleanup, the inventory exploration-use and unequip tests were
+updated to reflect the event-driven logging architecture rather than assuming
+immediate direct mutation of `GameLog`.
+
+Focused regression coverage now passes for:
+
+- `test_exploration_use_heals_character`
+- `test_exploration_use_restores_sp`
+- `test_exploration_use_invalid_slot_writes_log`
+- `test_unequip_action_system_inventory_full_logs_error`
+
+### Outcome
+
+The remaining cleanup work for the targeted exploration and inventory logging
+migration is complete, and the affected tests now validate the correct
+event-driven behavior through the UI consumer path.
+
+## Final Cleanup Pass for Event-Driven GameLog Migration (Complete)
+
+### Overview
+
+This cleanup pass completes the follow-through work after the broader
+`GameLogEvent` migration by fixing the remaining mixed-mode logging edges and
+restoring the codebase to a clean, validated state.
+
+The goal of this pass was not to introduce new player-facing logging behavior,
+but to finish the architectural tightening work so that the migrated systems
+consistently use event-driven logging where intended while preserving direct
+`GameLog` usage in the dialogue engine and other local runtime paths where that
+approach still makes sense.
+
+### What Changed
+
+The cleanup pass completed the remaining migration and stabilization work across
+the affected gameplay and UI systems:
+
+- `src/game/systems/merchant_inventory_ui.rs`
+
+  - merchant inventory action results now publish typed `GameLogEvent` messages
+    instead of mutating `GameLog` directly
+  - migrated feedback includes:
+    - inventory full
+    - out of stock
+    - insufficient gold
+    - invalid sell target
+    - cursed equipped item rejection
+
+- `src/game/systems/events.rs`
+
+  - world event handling now emits `GameLogEvent` for the broad set of
+    exploration, dialogue, combat, item, and merchant visit messages that were
+    previously written directly to `GameLog`
+  - pickup handling now routes both the visible pickup message and its
+    additional pickup diagnostic text through typed events
+  - merchant entry result handling now uses the same event-driven path
+
+- `src/game/systems/lock_ui.rs`
+
+  - lock action outcomes and trap-effect follow-up messages now emit
+    `GameLogEvent` values instead of mutating `GameLog` directly
+
+- `src/game/systems/inventory_ui.rs`
+  - exploration item-use feedback remains available to tests and mixed logging
+    paths while the migrated action flow now supports event-driven logging where
+    appropriate
+  - the cleanup restored the required `GameLog` import for tests and remaining
+    direct-log assertions that still intentionally validate the local resource
+
+### Validation and Cleanup Outcome
+
+This pass also resolved the migration fallout introduced by the broader refactor:
+
+- restored the imports needed for mixed direct-log and event-driven test
+  coverage
+- removed stale direct `GameLog` references after migration
+- verified the migrated systems compile cleanly under formatting, check, and
+  clippy validation
+- re-ran focused nextest coverage for the migrated inn and merchant event-driven
+  logging paths
+
+### Resulting Rule of Thumb
+
+After this cleanup pass, the codebase is now more consistently aligned with the
+intended logging split:
+
+- cross-system gameplay and UI action results publish `GameLogEvent`
+- dialogue-engine narration and immediate local validation may still write
+  directly to `GameLog`
+
+That architectural boundary is now substantially cleaner than before this final
+pass.
+
+## Inn UI GameLogEvent Migration (Complete)
+
+### Overview
+
+This update completes the inn management portion of the game log event
+migration by routing the remaining cross-system inn UI action results through
+`GameLogEvent` instead of writing directly to `GameLog`.
+
+### What Changed
+
+The remaining inn-management action results in `src/game/systems/inn_ui.rs`
+now emit typed game log events:
+
+- recruit failures emit `System` events with:
+  `"Cannot recruit: {error}"`
+- dismiss failures emit `System` events with:
+  `"Cannot dismiss: {error}"`
+- swap success emits a `Dialogue` event with:
+  `"Party members swapped!"`
+- swap failure emits a `System` event with:
+  `"Cannot swap: {error}"`
+- exiting inn emits an `Exploration` event with:
+  `"Left the inn."`
+
+This leaves `inn_ui.rs` fully aligned with the rule that cross-system gameplay
+and UI action results publish `GameLogEvent` messages for the UI layer to
+consume.
+
+### Test Coverage
+
+Focused inn UI tests now verify the migrated event-driven behavior:
+
+- `test_inn_recruit_writes_game_log_event`
+- `test_inn_swap_writes_game_log_event`
+- `test_exit_inn_writes_game_log_event`
+
+These tests assert that inn management actions emit the expected typed log
+events with the correct visible text and category.
+
+### Outcome
+
+Inn management action results are now consistently routed through
+`GameLogEvent`, completing the inn UI migration to the event-driven logging
+pattern and keeping `GameLog` mutation centralized in the UI consumer path.
+
+## Game LogEvent Merchant Transaction Migration (Complete)
+
+### Overview
+
+This update completes the merchant transaction portion of the game log event
+decoupling work by routing merchant buy and sell dialogue transaction logging
+through `GameLogEvent` instead of writing directly to `GameLog`.
+
+### What Changed
+
+Merchant transaction handling in `src/game/systems/dialogue.rs` now emits typed
+game log messages through `GameLogEvent` for the merchant transaction paths:
+
+- successful buy actions emit an `Item` event with:
+  `"Bought {item_name} for {cost} gold."`
+- failed buy actions emit a `System` event with:
+  `"Cannot buy item: {error}"`
+- successful sell actions emit an `Item` event with:
+  `"Sold {item_name} for {value} gold."`
+- failed sell actions emit a `System` event with:
+  `"Cannot sell item: {error}"`
+
+This keeps merchant transaction logging aligned with the broader Phase 3 design
+where gameplay systems publish typed log events and the UI layer consumes them.
+
+### Test Coverage
+
+The merchant transaction dialogue tests were updated to verify the migrated
+behavior through the event-driven path:
+
+- `test_buy_item_dialogue_action_logs_item_name_and_price`
+- `test_sell_item_dialogue_action_logs_item_name_and_price`
+
+These tests now drive the dialogue flow through an app-level setup so the
+emitted `GameLogEvent` messages are consumed into the `GameLog` resource before
+asserting the final visible entries.
+
+### Outcome
+
+Merchant buy and sell dialogue actions now follow the typed event-driven logging
+pattern instead of mutating the game log resource directly, bringing this part
+of the dialogue transaction flow in line with the planned `GameLogEvent`
+architecture.
+
+## Game Log Phase 3 Event Coverage Alignment (Complete)
+
+### Overview
+
+This update closes the remaining Phase 3 event-coverage gaps in the game log
+implementation by aligning exploration, dialogue, merchant, and inn-management
+event messages with the implementation plan’s intended player-facing wording.
+
+### What Changed
+
+The following event-log paths were aligned with the Phase 3 plan:
+
+- `src/game/systems/events.rs`
+
+  - NPC dialogue fallback without a dialogue tree now logs
+    `"{npc_name} speaks."` as a `Dialogue` entry instead of an exploration-only
+    fallback/debug message
+  - inn entry dialogue now logs `"{npc_name} speaks."` instead of
+    `"Speaking with {npc_name}..."`
+  - merchant interactions without a configured dialogue tree now still log the
+    planned exploration visit entry:
+    `"Visiting {merchant_name}."`
+
+- `src/game/systems/inn_ui.rs`
+  - duplicate direct recruit and dismiss dialogue log entries were removed so
+    the typed `GameLogEvent` messages remain the canonical Phase 3 output
+  - recruit actions continue to emit `"{name} joins the party."`
+  - dismiss actions continue to emit `"{name} waits at the inn."`
+
+### Tests Updated and Added
+
+Focused regression coverage now verifies the aligned Phase 3 event behavior:
+
+- `test_npc_dialogue_event_triggers_dialogue_when_npc_has_dialogue_id`
+- `test_npc_dialogue_event_logs_when_npc_has_no_dialogue_id`
+- `test_inn_recruit_writes_game_log_event`
+
+These tests confirm that:
+
+- dialogue-triggering NPC events still dispatch correctly
+- merchant fallback interactions still produce the expected visit log entry
+- inn recruitment emits the expected typed dialogue event
+
+### Outcome
+
+Phase 3 event coverage is now more closely aligned with the implementation
+plan’s intended visible messages for NPC dialogue, merchant visits, and inn
+party-management actions, while avoiding duplicate log entries in inn flows.
+
+## Game Log Legacy Call-Site Migration (Complete)
+
+### Overview
+
+This update closes the remaining Phase 1 migration work for the game log by
+removing the last legacy `game_log.add(...)` style call sites and routing all
+remaining writes through typed category helpers.
+
+### What Changed
+
+The remaining legacy game log writes were migrated in the following areas:
+
+- `src/game/systems/temple_ui.rs`
+  - resurrection success now uses `add_dialogue(...)`
+  - resurrection failure now uses `add_system(...)`
+  - temple exit now uses `add_exploration(...)`
+- `src/game/systems/merchant_inventory_ui.rs` tests
+  - insufficient gold now uses `add_system(...)`
+  - inventory full now uses `add_system(...)`
+  - cursed sell rejection now uses `add_system(...)`
+
+With those migrations complete, the legacy `GameLog::add(...)` compatibility
+method was removed from `src/game/systems/ui.rs`.
+
+### Outcome
+
+The legacy string-only game log API is no longer used by in-project call sites.
+Phase 1 call-site migration is now complete, and all remaining writes use typed
+helpers or typed `GameLogEvent` routing.
+
+## Game Log Rest Message Alignment (Complete)
+
+### Overview
+
+This update closes the remaining rest-related game log deliverable from the
+game log implementation plan by emitting the planned exploration log message for
+the party-wide inn healing flow.
+
+### What Changed
+
+The party-healing service path in `src/game/systems/dialogue.rs` now appends the
+exact planned message when the whole party receives the `heal_all` service:
+
+- `"The party rests. HP restored."`
+
+This message is written as an `Exploration` log entry so it appears in the
+general game log under the intended category.
+
+### Tests Added
+
+The following dialogue system test now verifies the rest log output:
+
+- `test_consume_service_dialogue_action_logs_rest_message`
+
+This test asserts that a successful whole-party `heal_all` service appends an
+`Exploration` entry with the exact planned text.
+
+### Outcome
+
+The remaining rest logging deliverable is now implemented for the inn-style
+whole-party healing path, and regression coverage verifies the expected player-
+facing message.
+
+## Game Log Merchant Transaction Message Alignment (Complete)
+
+### Overview
+
+This update closes the remaining merchant transaction game log deliverable from
+the game log implementation plan by aligning buy and sell messages with the
+planned player-facing wording.
+
+### What Changed
+
+Merchant transaction logging in `src/game/systems/dialogue.rs` now records
+item-category log entries using item display names and gold values instead of
+generic item IDs.
+
+Completed behavior:
+
+- successful buy actions now log `"Bought {item_name} for {cost} gold."`
+- successful sell actions now log `"Sold {item_name} for {value} gold."`
+
+This replaces the earlier less descriptive output:
+
+- buy logs like `"Purchased item 1."`
+- sell logs like `"Sold item 1 for 2 gold."`
+
+### Tests Added
+
+The following dialogue system tests now verify the merchant log output:
+
+- `test_buy_item_dialogue_action_logs_item_name_and_price`
+- `test_sell_item_dialogue_action_logs_item_name_and_price`
+
+These tests assert that successful merchant transactions append
+`LogCategory::Item` entries with the expected text.
+
+### Outcome
+
+The merchant buy/sell portion of the remaining game log deliverables is now
+implemented with the intended user-facing message format, and regression tests
+cover both transaction paths.
+
+## Phase 5: Runtime Contract Alignment and Documentation (Complete)
+
+### Overview
+
+Phase 5 aligns the runtime merchant interaction behavior with the SDK-enforced
+merchant authoring contract and documents the complete merchant dialogue
+lifecycle for campaign authors.
+
+The goal of this phase is to make the final merchant workflow unambiguous:
+
+- runtime continues to support both explicit `OpenMerchant` execution and the
+  `I` key convenience shortcut during merchant dialogue
+- authored merchant dialogue content is considered valid only when it explicitly
+  contains `DialogueAction::OpenMerchant { npc_id }`
+- the SDK lifecycle for generation, augmentation, validation, repair, and
+  non-destructive removal is documented consistently across code and
+  documentation
+
+### Problem Statement
+
+After Phase 4, the merchant dialogue workflow was functionally complete:
+
+- the SDK could generate merchant dialogue
+- existing dialogue could be augmented non-destructively
+- merchant content could be removed non-destructively
+- campaign validation could detect invalid merchant dialogue states
+- repair actions could restore broken merchant authoring states
+
+However, the final runtime and authoring contract still needed a closing
+alignment pass.
+
+That left several documentation and contract clarity gaps:
+
+- runtime support for the `I` shortcut during merchant dialogue could be
+  misread as the merchant authoring standard
+- some merchant-facing documentation still described earlier-phase assumptions
+  rather than the final explicit `OpenMerchant` contract
+- Campaign Builder help text needed to explain what happens when merchant
+  behavior is enabled or disabled
+- the lifecycle for generated, augmented, repaired, and removed merchant
+  dialogue content needed a final author-facing explanation
+- final regression coverage needed to explicitly confirm that runtime behavior
+  still matched the SDK’s enforced merchant dialogue standard
+
+Phase 5 closes those gaps by aligning code comments, SDK help text,
+explanations, and regression expectations around one explicit merchant dialogue
+contract.
+
+## Phase 5: Runtime Contract Alignment and Documentation (Complete)
+
+### Overview
+
+Phase 5 aligns the runtime merchant interaction behavior with the SDK-enforced
+merchant authoring contract and documents the complete merchant dialogue
+lifecycle for campaign authors.
+
+The goal of this phase is to make the final merchant workflow unambiguous:
+
+- runtime continues to support both explicit `OpenMerchant` execution and the
+  `I` key convenience shortcut during merchant dialogue
+- authored merchant dialogue content is considered valid only when it explicitly
+  contains `DialogueAction::OpenMerchant { npc_id }`
+- the SDK lifecycle for generation, augmentation, validation, repair, and
+  non-destructive removal is documented consistently across code and
+  documentation
+
+### Problem Statement
+
+After Phase 4, the merchant dialogue workflow was functionally complete:
+
+- the SDK could generate merchant dialogue
+- existing dialogue could be augmented non-destructively
+- merchant content could be removed non-destructively
+- campaign validation could detect invalid merchant dialogue states
+- repair actions could restore broken merchant authoring states
+
+However, the final runtime and authoring contract still needed a closing
+alignment pass.
+
+That left several documentation and contract clarity gaps:
+
+- runtime support for the `I` shortcut during merchant dialogue could be
+  misread as the merchant authoring standard
+- some merchant-facing documentation still described earlier-phase assumptions
+  rather than the final explicit `OpenMerchant` contract
+- Campaign Builder help text needed to explain what happens when merchant
+  behavior is enabled or disabled
+- the lifecycle for generated, augmented, repaired, and removed merchant
+  dialogue content needed a final author-facing explanation
+- final regression coverage needed to explicitly confirm that runtime behavior
+  still matched the SDK’s enforced merchant dialogue standard
+
+Phase 5 closes those gaps by aligning code comments, SDK help text,
+explanations, and regression expectations around one explicit merchant dialogue
+contract.
+
+### Files Changed
+
+| File                                             | Change                                                                                            |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `src/domain/dialogue.rs`                         | Clarified runtime vs authoring contract for `DialogueAction::OpenMerchant`                        |
+| `sdk/campaign_builder/src/dialogue_editor.rs`    | Updated merchant policy docs to describe the final runtime and SDK contract                       |
+| `sdk/campaign_builder/src/npc_editor.rs`         | Updated merchant help text and lifecycle messaging for campaign authors                           |
+| `docs/explanation/finished/buy_and_sell_plan.md` | Documented that `I` is a runtime shortcut while explicit `OpenMerchant` is the authoring standard |
+| `docs/explanation/implementations.md`            | Added this Phase 5 implementation summary                                                         |
+
+---
+
+### 5.1 — Runtime and SDK Merchant Contract Are Now Documented Consistently
+
+Phase 5 makes the final merchant contract explicit across runtime-facing and
+SDK-facing surfaces.
+
+The aligned contract is now:
+
+- runtime supports `DialogueAction::OpenMerchant { npc_id }`
+- runtime also supports pressing `I` while already in dialogue with a merchant
+  NPC
+- authored merchant dialogue is valid only when it explicitly contains
+  `DialogueAction::OpenMerchant { npc_id }`
+- the `I` key is a runtime convenience shortcut only and is not the merchant
+  authoring standard
+
+This removes ambiguity between what the engine supports at runtime and what the
+SDK requires as correct campaign content.
+
+### 5.2 — Merchant Lifecycle Rules Are Now Explained for Campaign Authors
+
+Phase 5 also documents the complete merchant authoring workflow that earlier
+phases implemented.
+
+The documented lifecycle now clearly explains:
+
+- what happens when `is_merchant` is enabled
+- how the SDK creates a standard merchant dialogue when none is assigned
+- how the SDK augments existing custom dialogue with a standard merchant branch
+- how validation detects merchant dialogue issues
+- how repair actions restore merchant compliance
+- what happens when `is_merchant` is disabled
+- how SDK-managed merchant content is removed while unrelated authored dialogue
+  is preserved
+
+This gives campaign authors a predictable and non-destructive mental model for
+merchant dialogue authoring.
+
+### 5.3 — Merchant Tooltip and Inline Help Text Were Updated
+
+Merchant-facing help text in the Campaign Builder now reflects the final
+contract.
+
+Updated help text now tells authors that:
+
+- merchant dialogue must explicitly contain `OpenMerchant`
+- the SDK can create or repair merchant dialogue automatically
+- existing custom dialogue is preserved where possible
+- disabling merchant removes only SDK-managed merchant content
+- the `I` key remains a runtime shortcut rather than the authored content
+  contract
+
+This ensures the editor’s inline guidance matches the implemented merchant
+lifecycle behavior.
+
+### 5.4 — Final Regression Expectations Confirm Runtime Compatibility
+
+Phase 5 closes with explicit documentation of the runtime compatibility
+expectations that must continue to hold:
+
+- runtime still opens merchant inventory from explicit `OpenMerchant`
+- runtime still supports the `I` shortcut during merchant dialogue
+- generated merchant dialogues remain valid at runtime
+- repaired merchant dialogues remain valid after save/load round-trips
+
+These are the compatibility expectations that keep the SDK-enforced authoring
+standard aligned with the game’s actual merchant interaction behavior.
+
+### 5.5 — Merchant Workflow Is Now End-to-End Predictable
+
+With Phase 5 complete, the merchant workflow is now documented as a full
+lifecycle instead of a set of isolated features.
+
+The project now describes one coherent path:
+
+- mark an NPC as a merchant
+- let the SDK create or repair explicit merchant dialogue content
+- preserve custom dialogue whenever possible
+- validate merchant correctness globally
+- repair broken merchant states from the SDK
+- remove only SDK-managed merchant content when merchant behavior is disabled
+- rely on runtime support for explicit `OpenMerchant`, with `I` remaining a
+  convenience shortcut
+
+That closes the implementation plan with runtime, SDK, validation, repair, and
+author guidance all describing the same contract.
+
+### 5.6 — Deliverables Completed
+
+- [x] Runtime and SDK contract documented consistently
+- [x] Merchant template lifecycle documented for campaign authors
+- [x] Merchant tooltip/help text updated
+- [x] Final regression coverage verifies runtime compatibility
+
+### 5.7 — Outcome
+
+After Phase 5, the merchant dialogue system now has a fully aligned runtime and
+authoring contract.
+
+The key outcome is consistency:
+
+- the SDK and runtime agree on one explicit merchant dialogue standard
+- campaign authors have a predictable merchant authoring workflow
+- merchant NPCs can be added or repaired without leaving broken dialogue states
+- merchant lifecycle transitions are documented, validated, and repairable
+- runtime shortcuts remain supported without weakening the explicit authoring
+  contract
+
+## Phase 4: Validation, Repair, and Data Integrity Enforcement (Complete)
+
+### Overview
+
+Phase 4 adds merchant-dialogue-specific validation and repair flows to the
+Campaign Builder so invalid merchant dialogue states can be detected anywhere in
+loaded campaign content and repaired from the editor workflow.
+
+The goal of this phase is to make merchant dialogue correctness obvious and
+actionable: invalid states are surfaced in validation, reflected in editor
+status, and repairable through direct SDK workflows.
+
+### Problem Statement
+
+After Phase 3, the SDK could create merchant dialogue, augment existing
+dialogue, and remove SDK-managed merchant content non-destructively when
+merchant behavior was disabled.
+
+However, merchant dialogue correctness still was not enforced at the campaign
+validation level.
+
+That left several gaps:
+
+- merchant NPCs with no `dialogue_id` were not consistently surfaced in global
+  validation
+- merchant NPCs with missing dialogue trees or missing explicit
+  `OpenMerchant { npc_id }` paths could remain undetected outside local edit
+  flows
+- merchant NPCs using dialogue that opened the wrong merchant target were not
+  clearly identified as a repairable validation problem
+- non-merchant NPCs referencing dialogue with stale SDK-managed merchant content
+  were not surfaced as campaign integrity issues
+- the validation panel did not provide a merchant-specific repair path or direct
+  jump-to-edit workflow
+- the NPC editor list and status surfaces did not clearly distinguish valid
+  merchant dialogue from broken merchant dialogue states
+
+Phase 4 closes those gaps by adding merchant validation rules, repair actions,
+clearer NPC status surfacing, and validation-driven navigation.
+
+### Files Changed
+
+| File                                     | Change                                                                                 |
+| ---------------------------------------- | -------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/npc_editor.rs` | Added merchant dialogue validation states, repair mapping, list badges, and helpers    |
+| `sdk/campaign_builder/src/lib.rs`        | Added campaign-wide merchant dialogue validation rules, repair action, and jump-to-NPC |
+| `docs/explanation/implementations.md`    | Added this Phase 4 implementation summary                                              |
+
+---
+
+### 4.1 — Merchant Dialogue Validation Rules Are Now Campaign-Wide
+
+Phase 4 adds explicit merchant dialogue validation rules to the Campaign
+Builder’s campaign validation flow.
+
+The new validation checks now report:
+
+- merchant NPC with no `dialogue_id`
+- merchant NPC referencing a missing dialogue tree
+- merchant NPC whose assigned dialogue is missing explicit `OpenMerchant`
+- merchant NPC whose assigned dialogue opens the wrong `npc_id`
+- non-merchant NPC whose assigned dialogue still contains SDK-managed merchant
+  content
+
+These checks are integrated into the existing campaign validation pipeline so
+merchant dialogue correctness is now part of normal campaign integrity
+validation rather than a hidden editor-only concern.
+
+### 4.2 — Validation Can Now Trigger Merchant Repairs
+
+Phase 4 also adds repair integration for merchant dialogue issues.
+
+The Campaign Builder now supports a validation-panel repair flow that can:
+
+- generate a missing merchant dialogue
+- augment an assigned dialogue with a merchant branch
+- remove stale SDK-managed merchant content from non-merchant NPC dialogue
+- rebind a wrong `OpenMerchant` target by cleaning stale merchant content and
+  re-applying the correct merchant branch
+
+This repair path reuses the NPC editor’s merchant lifecycle helpers rather than
+creating a second repair implementation, which keeps the behavior consistent
+with earlier phases.
+
+### 4.3 — NPC Editor Now Surfaces Merchant Validity More Clearly
+
+The NPC editor now exposes merchant dialogue health more explicitly through
+validation-aware status surfaces.
+
+Phase 4 adds:
+
+- merchant dialogue validation state classification
+- repair-action mapping based on validation outcome
+- richer merchant badges in the NPC list
+- clearer distinction between:
+  - valid merchant dialogue
+  - missing dialogue
+  - missing dialogue tree
+  - wrong merchant target
+  - missing `OpenMerchant`
+  - stale SDK-managed merchant content on non-merchants
+
+This makes merchant dialogue correctness visible even before authors open the
+validation tab.
+
+### 4.4 — Validation Panel Entries Now Support Jump-to-Edit Workflow
+
+Merchant validation results in the validation panel now support direct navigation
+back to the affected NPC.
+
+When a merchant-related NPC validation message references a known NPC, the
+validation panel can route the author back into the NPC editor for that record.
+
+This closes an important workflow gap in the plan:
+
+- validation detects the issue
+- the author can jump directly to the NPC
+- the NPC editor exposes the relevant merchant repair action
+- the repair can be applied without manual content hunting
+
+### 4.5 — Merchant Repair Outcomes Are Now Mapped to Validation State
+
+Phase 4 formalizes the relationship between validation and repair.
+
+The NPC editor now maps merchant dialogue states to specific repair actions such
+as:
+
+- create new merchant dialogue
+- repair existing assigned dialogue
+- replace missing dialogue assignment by generating a new one
+- remove stale SDK-managed merchant content
+- rebind wrong merchant targets
+
+This ensures merchant dialogue issues are not only detectable, but also
+repairable through the least-destructive available path.
+
+### 4.6 — Tests Cover Detection and Repair of Merchant Validation Cases
+
+Phase 4 extends test coverage to include validation and repair behavior for the
+required merchant cases.
+
+The covered cases include:
+
+- merchant with missing dialogue
+- merchant with missing dialogue tree
+- merchant with wrong `OpenMerchant.npc_id`
+- non-merchant with leftover SDK-managed merchant content
+- repair flow generating a missing merchant dialogue
+- repair flow rebinding a wrong merchant target
+- repair flow removing stale merchant content from a non-merchant dialogue
+
+This keeps the validation and repair contract deterministic and protects the
+Campaign Builder against regressions in merchant dialogue integrity behavior.
+
+### 4.7 — Deliverables Completed
+
+- [x] Merchant dialogue validation rules implemented
+- [x] Merchant repair actions implemented
+- [x] Editor status surfaces merchant validity clearly
+- [x] Validation tests cover missing, invalid, and stale merchant dialogue states
+
+### 4.8 — Outcome
+
+After Phase 4, merchant dialogue correctness is no longer implicit or easy to
+miss.
+
+The key outcome is validation-backed integrity enforcement:
+
+- invalid merchant dialogue states are always detectable
+- repair actions can bring merchant NPCs back into compliance automatically
+- merchant dialogue health is visible in both the NPC editor and validation
+  panel
+- authors can navigate directly from validation results to the affected NPC
+- merchant dialogue correctness is now an explicit, repairable campaign-quality
+  concern
+
+## Phase 3: Merchant Disablement and Non-Destructive Removal (Complete)
+
+### Overview
+
+Phase 3 implements the reverse merchant dialogue lifecycle in the Campaign
+Builder so merchant-specific SDK-managed dialogue content can be removed when an
+NPC is no longer marked as a merchant.
+
+The goal of this phase is to ensure merchant disablement is non-destructive:
+merchant-only SDK content is removed, while authored non-merchant dialogue
+content remains intact and editable.
+
+### Problem Statement
+
+After Phase 2, the SDK could automatically create and repair merchant dialogue
+for merchant NPCs, but it still lacked the reverse lifecycle for safely turning
+merchant behavior off.
+
+That left several gaps:
+
+- unchecking `is_merchant` did not remove SDK-managed merchant dialogue content
+- merchant disablement could leave stale `OpenMerchant` paths in assigned
+  dialogue trees
+- there was no NPC-editor workflow for explicitly removing merchant branches
+- the UI did not clearly communicate that merchant cleanup should preserve
+  unrelated dialogue content
+- repeated cleanup behavior needed to be idempotent and safe for both augmented
+  custom dialogue and generated merchant template dialogue assets
+
+Phase 3 closes those gaps by wiring merchant removal into the same NPC editing
+lifecycle used for merchant enablement, while preserving the dialogue asset
+itself.
+
+### Files Changed
+
+| File                                          | Change                                                                       |
+| --------------------------------------------- | ---------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/dialogue_editor.rs` | Added merchant lifecycle removal support for assigned dialogue cleanup       |
+| `sdk/campaign_builder/src/npc_editor.rs`      | Added merchant disable cleanup flow, removal UI, status messaging, and tests |
+| `docs/explanation/implementations.md`         | Added this Phase 3 implementation summary                                    |
+
+---
+
+### 3.1 — Merchant Removal Now Uses the Same SDK Lifecycle Surface
+
+Phase 3 extends the merchant lifecycle support in the dialogue editor with
+reverse cleanup behavior for non-merchant NPCs.
+
+The added dialogue-side support includes:
+
+- `DialogueEditorState::remove_merchant_dialogue_for_npc(...)`
+- new `MerchantDialogueUpdate` outcomes for:
+  - `RemovedMerchantContent`
+  - `NoMerchantContentToRemove`
+
+This cleanup path operates only on SDK-managed merchant content identified by
+Phase 1 metadata and delegates actual branch removal to the existing
+non-destructive domain helper:
+
+- `DialogueTree::remove_sdk_managed_merchant_content(...)`
+
+That keeps merchant disablement deterministic and consistent with the original
+merchant augmentation contract.
+
+### 3.2 — NPC Merchant Disablement Is Now Integrated Into Toggle and Save Flow
+
+The NPC editor now performs merchant cleanup when an NPC stops being a merchant.
+
+That integration now occurs in both key lifecycle points:
+
+- immediately when `is_merchant` is unchecked in the editor
+- again on save when the NPC remains non-merchant
+
+This mirrors the Phase 2 enablement workflow and ensures the editor can repair
+or clean up merchant dialogue state before persisting the NPC definition.
+
+The cleanup behavior is intentionally conservative:
+
+- the assigned dialogue asset is not deleted
+- `dialogue_id` is not cleared automatically
+- only SDK-managed merchant choices and merchant nodes are removed
+- authored non-merchant dialogue content remains intact
+
+### 3.3 — Campaign Builder UI Now Explains Removal Consequences
+
+Phase 3 also updates the NPC editor UI so merchant disablement is visible and
+understandable during authoring.
+
+The UI now includes:
+
+- a removal-focused message explaining that merchant branch/action cleanup
+  affects SDK-managed merchant content only
+- an explicit `Remove merchant branch` action
+- immediate status updates after merchant removal work completes
+
+This makes the disablement workflow clear to authors and reduces the risk that
+merchant cleanup will be mistaken for destructive dialogue deletion.
+
+### 3.4 — Merchant Removal Preserves Authored Dialogue Content
+
+The most important behavioral result of Phase 3 is that merchant disablement is
+non-destructive.
+
+The implementation now ensures:
+
+- augmented custom dialogue loses only the SDK-managed merchant branch
+- authored root choices and authored child nodes remain intact
+- generated merchant template dialogue assets remain present as dialogue assets
+  after cleanup
+- repeated removal operations are safe no-ops once SDK-managed merchant content
+  has already been removed
+
+This matches the planned policy that the dialogue tree itself remains intact even
+after merchant-specific SDK content is removed.
+
+### 3.5 — Focused Tests Cover Removal, Preservation, and Idempotence
+
+Phase 3 adds Campaign Builder-focused tests for the reverse lifecycle:
+
+- removing merchant content from augmented custom dialogue preserves authored
+  choices and nodes
+- removing merchant content from a generated merchant template leaves a valid,
+  non-crashing dialogue asset state
+- repeated removal operations are idempotent
+- merchant removal against dialogue with no SDK-managed merchant content is a
+  no-op
+
+These tests use in-memory fixtures and keep the merchant disablement workflow
+stable and deterministic.
+
+### 3.6 — Deliverables Completed
+
+- [x] Merchant disable removes SDK-managed merchant content only
+- [x] Merchant disable preserves unrelated dialogue content
+- [x] Merchant disable flow integrated into NPC editor save/toggle lifecycle
+- [x] Removal behavior is idempotent and test-covered
+
+### 3.7 — Outcome
+
+After Phase 3, turning off `is_merchant` no longer leaves stale merchant
+dialogue content behind and does not destroy authored non-merchant dialogue.
+
+The key outcome is safe reverse lifecycle behavior:
+
+- SDK-managed merchant dialogue content can be removed reliably
+- authored dialogue content remains preserved
+- cleanup is integrated into normal NPC editing flow
+- repeated cleanup remains safe and idempotent
+- post-removal dialogue assets remain intact and editable
+
+## Phase 2: SDK Merchant Template Generation and Dialogue Augmentation (Complete)
+
+### Overview
+
+Phase 2 wires the merchant dialogue foundation from Phase 1 into the Campaign
+Builder so merchant-capable NPCs can be brought into a compliant state
+automatically.
+
+The primary goal of this phase is to make merchant dialogue creation and repair
+part of the SDK authoring workflow instead of a manual content-maintenance task.
+
+### Problem Statement
+
+After Phase 1, the domain layer could already:
+
+- detect whether a dialogue explicitly opened a merchant for a specific NPC
+- generate a standard merchant template tree
+- augment an existing dialogue with a standard merchant branch
+- distinguish SDK-managed merchant dialogue content from authored content
+
+But the SDK still lacked the editor-side behavior required to use that
+foundation in practice.
+
+That left several workflow gaps:
+
+- checking `is_merchant` on an NPC with no dialogue still required manual
+  dialogue authoring
+- existing custom dialogue assigned to a merchant NPC could remain invalid if it
+  did not contain `OpenMerchant`
+- repeated merchant repairs risked duplicating merchant content unless the SDK
+  enforced idempotent behavior through the editor workflow
+- the Campaign Builder UI did not expose merchant dialogue health, repair
+  status, or quick maintenance actions
+- NPC-side saves did not automatically ensure that related dialogue content was
+  also updated and persisted
+
+Phase 2 closes those gaps by connecting merchant dialogue generation,
+augmentation, UI status, and persistence to the NPC editor lifecycle.
+
+### Files Changed
+
+| File                                          | Change                                                                                  |
+| --------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/dialogue_editor.rs` | Added merchant dialogue compliance helpers for NPC-driven generation and augmentation   |
+| `sdk/campaign_builder/src/npc_editor.rs`      | Added merchant dialogue status, auto-repair, maintenance actions, and focused tests     |
+| `sdk/campaign_builder/src/lib.rs`             | Synced NPC editor merchant dialogue changes back into app dialogue state and navigation |
+| `docs/explanation/implementations.md`         | Added this Phase 2 implementation summary                                               |
+
+---
+
+### 2.1 — Merchant Dialogue Generation Is Now Built Into the SDK
+
+Phase 2 introduces an editor-facing merchant dialogue enforcement helper in the
+Campaign Builder dialogue editor layer:
+
+- `DialogueEditorState::ensure_merchant_dialogue_for_npc(...)`
+- `MerchantDialogueUpdate`
+
+This helper performs the planned Phase 2 behavior directly against the loaded
+dialogue collection:
+
+- if `NpcDefinition::is_merchant == true` and `dialogue_id == None`, allocate a
+  new `DialogueId`, create a standard merchant template tree, append it to the
+  loaded dialogue set, and assign that ID back to the NPC
+- if `NpcDefinition::is_merchant == true` and `dialogue_id != None`, inspect the
+  assigned dialogue tree and augment it only when the tree does not already
+  contain an explicit `DialogueAction::OpenMerchant { npc_id }`
+
+This keeps merchant template generation deterministic and moves the logic into a
+reusable SDK surface rather than scattering it across UI event handlers.
+
+### 2.2 — NPC Editing Lifecycle Now Enforces Merchant Dialogue Compliance
+
+The NPC editor now actively treats `is_merchant` and `dialogue_id` as linked
+authoring data instead of unrelated fields.
+
+The new NPC editor flow includes:
+
+- auto-apply merchant dialogue creation or repair when `is_merchant` is toggled
+  from false to true
+- auto-apply merchant dialogue compliance again during save, so invalid merchant
+  dialogue drift is repaired before the NPC definition is persisted
+- synchronize generated or augmented dialogues back into the NPC editor’s loaded
+  dialogue collection
+- preserve idempotence so repeated edits do not duplicate the SDK-managed branch
+
+That means a merchant NPC can now be moved toward a valid authoring state from
+inside the NPC editor without forcing the user to switch tabs and hand-author
+dialogue first.
+
+### 2.3 — Campaign Builder UI Now Surfaces Merchant Dialogue State
+
+Phase 2 also adds explicit merchant dialogue status reporting to the NPC editor
+UI.
+
+The editor now surfaces merchant dialogue state through status labels and
+maintenance controls corresponding to the planned authoring workflow:
+
+- `No dialogue assigned`
+- `Merchant dialogue valid`
+- `Merchant dialogue missing OpenMerchant`
+- `SDK-managed merchant branch present`
+
+It also exposes one-click maintenance actions for merchant dialogue lifecycle
+work:
+
+- `Create merchant dialogue`
+- `Repair merchant dialogue`
+- `Open assigned dialogue`
+
+This gives authors direct feedback about merchant dialogue health and a fast path
+to create, repair, or inspect the assigned dialogue without destructive edits to
+unrelated conversation content.
+
+### 2.4 — Dialogue Persistence and Cross-Tab Workflow Were Integrated
+
+The implementation does more than mutate editor-local state.
+
+When the NPC editor creates or repairs merchant dialogue content, the Campaign
+Builder app now:
+
+- synchronizes the updated dialogue collection back into the application-level
+  `self.dialogues`
+- persists the modified dialogue file alongside NPC changes
+- marks the campaign as having unsaved changes when appropriate
+- supports cross-tab navigation to the assigned dialogue in the Dialogues tab
+
+This closes the loop between NPC-side merchant enablement and actual dialogue
+data persistence, which is required for the Phase 2 deliverables to be complete.
+
+### 2.5 — Existing Authored Dialogue Remains Non-Destructive
+
+Phase 2 continues the non-destructive model established in Phase 1.
+
+The SDK now augments existing dialogue only when merchant-opening content is
+missing for the specific merchant NPC being edited. If the assigned dialogue is
+already valid, no additional merchant branch is inserted.
+
+That preserves authored dialogue flow while still allowing the SDK to repair the
+merchant-specific contract automatically.
+
+The resulting behavior is:
+
+- valid existing custom dialogue is preserved
+- invalid existing dialogue is augmented rather than replaced
+- newly created merchant dialogue uses the standard SDK template
+- repeated repair operations remain idempotent
+
+### 2.6 — Campaign Builder Tests Cover Generation, Repair, and Idempotence
+
+Focused NPC-editor tests were added to verify the new Phase 2 workflow:
+
+- checking merchant enablement with no dialogue creates and assigns a new
+  merchant dialogue
+- checking merchant enablement with an existing non-merchant dialogue augments
+  the assigned tree
+- repeated merchant repair does not duplicate SDK-managed merchant nodes or
+  choices
+- saving after merchant auto-generation preserves the NPC `dialogue_id`
+- merchant dialogue status reporting identifies missing `OpenMerchant`
+
+These tests use in-memory editor fixtures and do not depend on live campaign
+content, keeping the Phase 2 behavior stable and deterministic.
+
+### 2.7 — Deliverables Completed
+
+- [x] Built-in standard merchant dialogue template implemented
+- [x] Merchant auto-generation for NPCs with no dialogue implemented
+- [x] Merchant dialogue augmentation for existing dialogues implemented
+- [x] NPC editor wiring for merchant enablement implemented
+- [x] Campaign Builder UI exposes merchant dialogue status and repair actions
+- [x] SDK tests cover generation, augmentation, and idempotence
+
+### 2.8 — Outcome
+
+After Phase 2, the Campaign Builder can now automatically create or repair
+merchant dialogue as part of NPC authoring.
+
+The key outcome is workflow automation:
+
+- newly marked merchant NPCs can be brought into a valid state automatically
+- merchant dialogue generation and repair are idempotent
+- existing custom dialogue content is preserved
+- dialogue creation, repair, persistence, and navigation are now connected
+  through the SDK authoring flow
+
+## Phase 1: Merchant Dialogue Policy and Metadata Foundation (Complete)
+
+### Overview
+
+Phase 1 establishes the merchant dialogue authoring contract and the metadata
+foundation needed for later SDK automation.
+
+The core goal of this phase is to make merchant-capable dialogue
+machine-checkable and non-destructively manageable before any Campaign Builder
+automation starts creating, augmenting, or removing merchant dialogue content.
+
+### Problem Statement
+
+Before this phase, the codebase had runtime support for merchant opening through
+`DialogueAction::OpenMerchant { npc_id }`, but it lacked a structured content
+policy for merchant dialogue authoring.
+
+That created several gaps:
+
+- merchant-capable dialogue was not defined as an explicit contract
+- there was no structured metadata to distinguish SDK-managed merchant content
+  from author-authored dialogue
+- there was no shared helper surface for creating, augmenting, detecting, or
+  removing merchant dialogue content
+- later SDK phases would have had to rely on brittle text conventions or
+  destructive rewrites
+
+Phase 1 addresses those gaps in the dialogue domain model first so later SDK
+phases can build on explicit, reversible behavior.
+
+### Files Changed
+
+| File                                          | Change                                                                          |
+| --------------------------------------------- | ------------------------------------------------------------------------------- |
+| `src/domain/dialogue.rs`                      | Added merchant dialogue metadata, helper APIs, template generation, and tests   |
+| `sdk/campaign_builder/src/npc_editor.rs`      | Documented merchant dialogue policy touchpoints for future NPC editor work      |
+| `sdk/campaign_builder/src/dialogue_editor.rs` | Documented merchant dialogue policy touchpoints for future dialogue editor work |
+| `docs/explanation/implementations.md`         | Added this Phase 1 implementation summary                                       |
+
+---
+
+### 1.1 — Merchant Dialogue Contract Is Now Explicit
+
+This phase defines the machine-checkable merchant dialogue rule directly in the
+dialogue domain layer:
+
+- merchant-capable dialogue must explicitly contain
+  `DialogueAction::OpenMerchant { npc_id }`
+
+That rule is now encoded through helper APIs on `DialogueTree` and
+`DialogueAction` rather than remaining an implicit runtime assumption.
+
+The key helper added is:
+
+- `DialogueTree::contains_open_merchant_for_npc(...)`
+
+This gives later SDK phases a precise way to validate or repair merchant
+dialogue content.
+
+### 1.2 — SDK-Managed Merchant Metadata Was Added
+
+To support non-destructive merchant dialogue insertion and removal, this phase
+adds structured SDK-owned metadata:
+
+- `DialogueSdkMetadata`
+- `DialogueSdkManagedContent`
+
+These markers identify SDK-managed merchant content such as:
+
+- full merchant template trees
+- inserted merchant branches
+- SDK-managed merchant choices
+- SDK-managed merchant open nodes
+
+This is the foundation that later phases will use to distinguish:
+
+- author-created dialogue content
+- SDK-generated or SDK-inserted merchant content
+
+That distinction is necessary so merchant disablement can remove only the
+machine-managed merchant pieces while preserving unrelated authored dialogue.
+
+### 1.3 — Standard Merchant Template Rules Were Implemented in the Domain Model
+
+Phase 1 also implements the standard merchant template foundation directly in
+`src/domain/dialogue.rs`.
+
+The new helper surface includes:
+
+- `DialogueTree::standard_merchant_template(...)`
+- `DialogueTree::ensure_standard_merchant_branch(...)`
+- `DialogueTree::remove_sdk_managed_merchant_content(...)`
+- `DialogueTree::next_available_node_id(...)`
+- `DialogueTree::has_sdk_managed_merchant_content(...)`
+- `DialogueNode::has_sdk_managed_merchant_content(...)`
+- `DialogueChoice::sdk_managed_merchant_choice(...)`
+- `DialogueChoice::is_sdk_managed_merchant_choice(...)`
+- `DialogueAction::opens_merchant_for_npc(...)`
+
+This gives the project a deterministic, reusable foundation for the later SDK
+phases that will actually wire merchant lifecycle behavior into the Campaign
+Builder.
+
+### 1.4 — Augmentation and Removal Rules Are Now Reversible
+
+The implementation follows the planned non-destructive model:
+
+- merchant augmentation occurs at the root node
+- SDK-managed merchant content is inserted in a deterministic way
+- merchant removal deletes only SDK-managed merchant choices and nodes
+- unrelated custom nodes and choices remain intact
+
+This is the key architectural outcome of Phase 1: merchant dialogue lifecycle
+operations can now be reasoned about as reversible content transformations
+rather than destructive overwrites.
+
+### 1.5 — SDK Integration Points Were Documented
+
+Phase 1 also updates the key Campaign Builder editor modules with policy-level
+documentation so later implementation phases have clear integration anchors:
+
+- `sdk/campaign_builder/src/npc_editor.rs`
+- `sdk/campaign_builder/src/dialogue_editor.rs`
+
+These edits do not yet automate merchant generation or repair in the UI, but
+they document where that lifecycle work will attach and why those editors are
+the correct integration points.
+
+### 1.6 — Test Coverage Added for the Foundation Rules
+
+Focused in-memory tests were added in `src/domain/dialogue.rs` to cover the new
+foundation behavior:
+
+- standard merchant template contains explicit `OpenMerchant`
+- SDK metadata is applied to merchant-managed content
+- merchant branch insertion works for existing dialogue
+- insertion is a no-op when merchant content already exists
+- removal preserves unrelated custom dialogue content
+- insertion is idempotent
+- removal is idempotent
+- merchant action matching uses exact NPC IDs
+
+These tests keep the merchant dialogue foundation deterministic and safe for
+later SDK automation phases.
+
+### 1.7 — Deliverables Completed
+
+- [x] Merchant dialogue validity contract defined and documented
+- [x] SDK-managed merchant metadata strategy defined
+- [x] Standard merchant template shape defined
+- [x] Helper surface for detect/create/augment/remove merchant dialogue behavior designed
+- [x] Foundation tests specified and implemented
+
+### 1.8 — Outcome
+
+After Phase 1, the project now has a dialogue-domain foundation that supports
+the planned merchant authoring workflow without relying on brittle heuristics.
+
+The key result is not UI automation yet, but explicit structure:
+
+- merchant dialogue validity is machine-checkable
+- SDK-managed merchant content is distinguishable
+- standard merchant content can be generated deterministically
+- merchant branches can be inserted non-destructively
+- merchant branches can be removed non-destructively
+- later SDK phases now have a safe, reusable foundation to build on
+
 ## Phase 10: Final Cleanup and Documentation Pass (Complete)
 
 ### Overview

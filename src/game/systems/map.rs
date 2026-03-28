@@ -15,6 +15,7 @@ use crate::game::systems::actor::spawn_actor_sprite;
 use crate::game::systems::creature_spawning::spawn_creature;
 use crate::game::systems::furniture_rendering::resolve_furniture_fields;
 use crate::game::systems::procedural_meshes;
+use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use rand::Rng;
 
 const DEFAULT_NPC_SPRITE_PATH: &str = "sprites/placeholders/npc_placeholder.png";
@@ -474,6 +475,7 @@ fn init_map_lock_states_system(mut global_state: ResMut<GlobalState>) {
 fn map_change_handler(
     mut ev_reader: MessageReader<MapChangeEvent>,
     mut global_state: ResMut<GlobalState>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
 ) {
     for ev in ev_reader.read() {
         if global_state.0.world.get_map(ev.target_map).is_some() {
@@ -489,8 +491,10 @@ fn map_change_handler(
             // the player can interact with them.  init_lock_states is idempotent —
             // it skips entries that already exist — so previously-unlocked doors
             // keep their state after a map transition.
+            let mut entered_map_name: Option<String> = None;
             if let Some(map) = global_state.0.world.get_current_map_mut() {
                 map.init_lock_states();
+                entered_map_name = Some(map.name.clone());
             }
             // Each map transition (teleport, dungeon entrance, town portal, etc.)
             // costs time. Advance after confirming the map actually exists so that
@@ -499,6 +503,14 @@ fn map_change_handler(
                 crate::domain::resources::TIME_COST_MAP_TRANSITION_MINUTES,
                 None,
             );
+            if let (Some(map_name), Some(ref mut writer)) =
+                (entered_map_name, game_log_writer.as_mut())
+            {
+                writer.write(GameLogEvent {
+                    text: format!("Entered {} ({}).", map_name, ev.target_map),
+                    category: LogCategory::Exploration,
+                });
+            }
         } else {
             // Gracefully ignore invalid map changes
             warn!(

@@ -171,7 +171,7 @@ pub fn try_interact_furniture_door(
             } else {
                 let msg = "The door is locked.".to_string();
                 info!("{}", msg);
-                game_log.add(msg);
+                game_log.add_exploration(msg);
             }
         } else {
             door_state.is_open = !door_state.is_open;
@@ -302,18 +302,18 @@ pub fn try_interact_locked_door_event(
                 .unwrap_or_else(|| format!("key {}", kid));
             let msg = format!("You unlock the door with the {}.", key_name);
             info!("{}", msg);
-            game_log.add(msg);
+            game_log.add_exploration(msg);
         }
         (Some(_), None) => {
             let msg = "The door is locked. You need a key.".to_string();
             info!("{}", msg);
-            game_log.add(msg);
+            game_log.add_exploration(msg);
             populate_lock_pending(game_state, game_content, lock_pending, lock_id, target);
         }
         (None, _) => {
             let msg = "The door is locked.".to_string();
             info!("{}", msg);
-            game_log.add(msg);
+            game_log.add_exploration(msg);
             populate_lock_pending(game_state, game_content, lock_pending, lock_id, target);
         }
     }
@@ -451,18 +451,18 @@ pub fn try_interact_locked_container_event(
                 .unwrap_or_else(|| format!("key {}", kid));
             let msg = format!("You unlock the {} with the {}.", container_name, key_name);
             info!("{}", msg);
-            game_log.add(msg);
+            game_log.add_exploration(msg);
         }
         (Some(_), None) => {
             let msg = "The container is locked. You need a key.".to_string();
             info!("{}", msg);
-            game_log.add(msg);
+            game_log.add_exploration(msg);
             populate_lock_pending(game_state, game_content, lock_pending, lock_id, target);
         }
         (None, _) => {
             let msg = "The container is locked.".to_string();
             info!("{}", msg);
-            game_log.add(msg);
+            game_log.add_exploration(msg);
             populate_lock_pending(game_state, game_content, lock_pending, lock_id, target);
         }
     }

@@ -510,7 +510,7 @@ fn temple_action_system(
             Ok(()) => {
                 let msg = format!("{} has been restored to life!", character_name);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg.clone());
+                    log.add_dialogue(msg.clone());
                 }
                 if let GameMode::TempleService(ref mut ts) = global_state.0.mode {
                     ts.status_message = Some(msg);
@@ -520,7 +520,7 @@ fn temple_action_system(
             Err(e) => {
                 // Surface the error back in the UI status message
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("Resurrection failed: {}", e));
+                    log.add_system(format!("Resurrection failed: {}", e));
                 }
                 if let GameMode::TempleService(ref mut ts) = global_state.0.mode {
                     ts.status_message = Some(e);
@@ -533,7 +533,7 @@ fn temple_action_system(
     for _ev in exit_events.read() {
         global_state.0.mode = GameMode::Exploration;
         if let Some(ref mut log) = game_log {
-            log.add("Left the temple.".to_string());
+            log.add_exploration("Left the temple.".to_string());
         }
     }
 }

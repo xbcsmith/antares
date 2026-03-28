@@ -42,7 +42,7 @@ use crate::domain::items::types::{ConsumableEffect, ItemType};
 use crate::domain::transactions::{drop_item, equip_item, unequip_item, TransactionError};
 use crate::game::resources::GlobalState;
 use crate::game::systems::item_world_events::ItemDroppedEvent;
-use crate::game::systems::ui::GameLog;
+use crate::game::systems::ui::{GameLogEvent, LogCategory};
 
 use bevy::prelude::MessageWriter;
 use bevy::prelude::*;
@@ -1898,8 +1898,8 @@ fn inventory_action_system(
     mut global_state: ResMut<GlobalState>,
     mut nav_state: ResMut<InventoryNavigationState>,
     mut item_dropped_writer: Option<MessageWriter<ItemDroppedEvent>>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
     game_content: Option<Res<GameContent>>,
-    mut game_log: Option<ResMut<GameLog>>,
 ) {
     // Collect messages upfront so we do not hold a borrow while mutating state.
     let drop_events: Vec<(usize, usize)> = drop_reader
@@ -1971,6 +1971,19 @@ fn inventory_action_system(
                      onto map {} at {:?}",
                     party_index, slot_index, dropped.item_id, dropped.charges, map_id, pos
                 );
+
+                let item_name = game_content
+                    .as_deref()
+                    .and_then(|content| content.db().items.get_item(dropped.item_id))
+                    .map(|item| item.name.clone())
+                    .unwrap_or_else(|| format!("item {}", dropped.item_id));
+
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: format!("Dropped {}.", item_name),
+                        category: LogCategory::Item,
+                    });
+                }
 
                 // Fire ItemDroppedEvent so the 3-D world mesh spawns at the
                 // party's current tile position (Phase 3 visual system).
@@ -2134,13 +2147,25 @@ fn inventory_action_system(
         let content = match game_content.as_deref() {
             Some(gc) => gc,
             None => {
-                if let Some(ref mut log) = game_log {
-                    log.add("Cannot equip: game content not available.".to_string());
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: "Cannot equip: game content not available.".to_string(),
+                        category: LogCategory::System,
+                    });
                 }
                 continue;
             }
         };
         let content_db = content.db();
+
+        let item_name = global_state.0.party.members[party_index]
+            .inventory
+            .items
+            .get(slot_index)
+            .and_then(|slot| content_db.items.get_item(slot.item_id))
+            .map(|item| item.name.clone())
+            .unwrap_or_else(|| "unknown item".to_string());
+        let character_name = global_state.0.party.members[party_index].name.clone();
 
         match equip_item(
             &mut global_state.0.party.members[party_index],
@@ -2154,6 +2179,12 @@ fn inventory_action_system(
                     "Equipped item from party[{}] slot {}",
                     party_index, slot_index
                 );
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: format!("{} equipped {}.", character_name, item_name),
+                        category: LogCategory::Item,
+                    });
+                }
                 if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
                     inv_state.selected_slot = None;
                 }
@@ -2177,8 +2208,11 @@ fn inventory_action_system(
                     "EquipItemAction failed for party[{}] slot {}: {}",
                     party_index, slot_index, msg
                 );
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Item,
+                    });
                 }
             }
         }
@@ -2200,8 +2234,11 @@ fn inventory_action_system(
         let content = match game_content.as_deref() {
             Some(gc) => gc,
             None => {
-                if let Some(ref mut log) = game_log {
-                    log.add("Cannot unequip: game content not available.".to_string());
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: "Cannot unequip: game content not available.".to_string(),
+                        category: LogCategory::System,
+                    });
                 }
                 continue;
             }
@@ -2220,8 +2257,11 @@ fn inventory_action_system(
             Err(TransactionError::InventoryFull { .. }) => {
                 let msg = "Cannot unequip: inventory is full.".to_string();
                 warn!("UnequipItemAction: {}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Item,
+                    });
                 }
             }
             Err(e) => {
@@ -2261,7 +2301,7 @@ fn handle_use_item_action_exploration(
     mut global_state: ResMut<GlobalState>,
     mut nav_state: ResMut<InventoryNavigationState>,
     game_content: Option<Res<GameContent>>,
-    mut game_log: Option<ResMut<GameLog>>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
 ) {
     // Collect messages upfront to avoid borrow conflicts with mutable state.
     let messages: Vec<(usize, usize)> = reader
@@ -2277,8 +2317,11 @@ fn handle_use_item_action_exploration(
     let content = match game_content.as_deref() {
         Some(gc) => gc,
         None => {
-            if let Some(ref mut log) = game_log {
-                log.add("Cannot use item: game content not available.".to_string());
+            if let Some(ref mut writer) = game_log_writer {
+                writer.write(GameLogEvent {
+                    text: "Cannot use item: game content not available.".to_string(),
+                    category: LogCategory::System,
+                });
             }
             return;
         }
@@ -2288,8 +2331,11 @@ fn handle_use_item_action_exploration(
     for (party_index, slot_index) in messages {
         // Step 2: bounds-check party_index.
         if party_index >= global_state.0.party.members.len() {
-            if let Some(ref mut log) = game_log {
-                log.add("Cannot use item: invalid character.".to_string());
+            if let Some(ref mut writer) = game_log_writer {
+                writer.write(GameLogEvent {
+                    text: "Cannot use item: invalid character.".to_string(),
+                    category: LogCategory::System,
+                });
             }
             continue;
         }
@@ -2347,8 +2393,11 @@ fn handle_use_item_action_exploration(
                 }
             };
 
-            if let Some(ref mut log) = game_log {
-                log.add(msg);
+            if let Some(ref mut writer) = game_log_writer {
+                writer.write(GameLogEvent {
+                    text: msg,
+                    category: LogCategory::Item,
+                });
             }
 
             // Reset navigation state even on failure so the UI is not stuck.
@@ -2369,8 +2418,11 @@ fn handle_use_item_action_exploration(
             let slot = match character.inventory.items.get(slot_index) {
                 Some(s) => s,
                 None => {
-                    if let Some(ref mut log) = game_log {
-                        log.add("Cannot use item: no item in that slot.".to_string());
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: "Cannot use item: no item in that slot.".to_string(),
+                            category: LogCategory::System,
+                        });
                     }
                     continue;
                 }
@@ -2378,8 +2430,11 @@ fn handle_use_item_action_exploration(
             let item = match content_db.items.get_item(slot.item_id) {
                 Some(i) => i,
                 None => {
-                    if let Some(ref mut log) = game_log {
-                        log.add("Cannot use item: item data not found.".to_string());
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: "Cannot use item: item data not found.".to_string(),
+                            category: LogCategory::System,
+                        });
                     }
                     continue;
                 }
@@ -2387,8 +2442,11 @@ fn handle_use_item_action_exploration(
             let consumable = match &item.item_type {
                 ItemType::Consumable(data) => data,
                 _ => {
-                    if let Some(ref mut log) = game_log {
-                        log.add(format!("Cannot use {}: not a consumable.", item.name));
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: format!("Cannot use {}: not a consumable.", item.name),
+                            category: LogCategory::Item,
+                        });
                     }
                     continue;
                 }
@@ -2402,8 +2460,11 @@ fn handle_use_item_action_exploration(
             let charges = match character.inventory.items.get(slot_index) {
                 Some(s) => s.charges,
                 None => {
-                    if let Some(ref mut log) = game_log {
-                        log.add("Cannot use item: no item in that slot.".to_string());
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: "Cannot use item: no item in that slot.".to_string(),
+                            category: LogCategory::System,
+                        });
                     }
                     continue;
                 }
@@ -2411,8 +2472,11 @@ fn handle_use_item_action_exploration(
 
             if charges == 0 {
                 // Defensive check — validate_item_use_slot should have caught this.
-                if let Some(ref mut log) = game_log {
-                    log.add(format!("Cannot use {item_name}: no charges remaining."));
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: format!("Cannot use {item_name}: no charges remaining."),
+                        category: LogCategory::Item,
+                    });
                 }
                 continue;
             } else if charges > 1 {
@@ -2525,8 +2589,11 @@ fn handle_use_item_action_exploration(
             }
         };
 
-        if let Some(ref mut log) = game_log {
-            log.add(log_msg);
+        if let Some(ref mut writer) = game_log_writer {
+            writer.write(GameLogEvent {
+                text: log_msg,
+                category: LogCategory::Item,
+            });
         }
 
         // Step 8: reset navigation state.
@@ -2545,6 +2612,7 @@ fn handle_use_item_action_exploration(
 mod tests {
     use super::*;
     use crate::application::GameState;
+    use crate::game::systems::ui::GameLog;
 
     // ------------------------------------------------------------------
     // 3.4.1  Plugin smoke test
@@ -3870,14 +3938,15 @@ mod tests {
         content_db: crate::sdk::database::ContentDatabase,
     ) -> App {
         use crate::application::resources::GameContent;
+        use crate::game::systems::ui::UiPlugin;
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_plugins(UiPlugin);
         app.add_message::<UseItemExplorationAction>();
         app.insert_resource(GameContent::new(content_db));
         app.insert_resource(GlobalState(game_state));
         app.init_resource::<InventoryNavigationState>();
-        app.init_resource::<GameLog>();
         app.add_systems(Update, handle_use_item_action_exploration);
         app
     }
@@ -3912,6 +3981,7 @@ mod tests {
             slot_index: 0,
         });
         app.update();
+        app.update();
 
         let gs = app.world().resource::<GlobalState>();
         assert!(
@@ -3926,7 +3996,9 @@ mod tests {
 
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages.iter().any(|m| m.contains("recovered")),
+            log.entries()
+                .iter()
+                .any(|entry| entry.text.contains("recovered")),
             "GameLog should contain 'recovered'"
         );
     }
@@ -3960,6 +4032,7 @@ mod tests {
             slot_index: 0,
         });
         app.update();
+        app.update();
 
         let gs = app.world().resource::<GlobalState>();
         assert!(
@@ -3969,7 +4042,7 @@ mod tests {
 
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages.iter().any(|m| m.contains("SP")),
+            log.entries().iter().any(|entry| entry.text.contains("SP")),
             "GameLog should contain 'SP'"
         );
     }
@@ -4025,17 +4098,18 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_message::<UseItemExplorationAction>();
         app.insert_resource(GameContent::new(db));
         app.insert_resource(GlobalState(game_state));
         app.init_resource::<InventoryNavigationState>();
-        app.init_resource::<GameLog>();
         app.add_systems(Update, handle_use_item_action_exploration);
 
         app.world_mut().write_message(UseItemExplorationAction {
             party_index: 0,
             slot_index: 0,
         });
+        app.update();
         app.update();
 
         let gs = app.world().resource::<GlobalState>();
@@ -4046,9 +4120,9 @@ mod tests {
 
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages
+            log.entries()
                 .iter()
-                .any(|m| m.contains("Conditions cleared")),
+                .any(|entry| entry.text.contains("Conditions cleared")),
             "GameLog should contain 'Conditions cleared'"
         );
     }
@@ -4106,17 +4180,18 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_message::<UseItemExplorationAction>();
         app.insert_resource(GameContent::new(db));
         app.insert_resource(GlobalState(game_state));
         app.init_resource::<InventoryNavigationState>();
-        app.init_resource::<GameLog>();
         app.add_systems(Update, handle_use_item_action_exploration);
 
         app.world_mut().write_message(UseItemExplorationAction {
             party_index: 0,
             slot_index: 0,
         });
+        app.update();
         app.update();
 
         let gs = app.world().resource::<GlobalState>();
@@ -4179,17 +4254,18 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_message::<UseItemExplorationAction>();
         app.insert_resource(GameContent::new(db));
         app.insert_resource(GlobalState(game_state));
         app.init_resource::<InventoryNavigationState>();
-        app.init_resource::<GameLog>();
         app.add_systems(Update, handle_use_item_action_exploration);
 
         app.world_mut().write_message(UseItemExplorationAction {
             party_index: 0,
             slot_index: 0,
         });
+        app.update();
         app.update();
 
         let gs = app.world().resource::<GlobalState>();
@@ -4268,6 +4344,7 @@ mod tests {
             party_index: 0,
             slot_index: 0,
         });
+        app.update();
         app.update();
 
         let gs = app.world().resource::<GlobalState>();
@@ -4354,10 +4431,11 @@ mod tests {
             slot_index: 0,
         });
         app.update();
+        app.update();
 
         let log = app.world().resource::<GameLog>();
         assert_eq!(
-            log.messages.len(),
+            log.entries().len(),
             1,
             "exactly one GameLog entry should be written on success"
         );
@@ -4386,12 +4464,13 @@ mod tests {
             slot_index: 99, // beyond inventory
         });
         app.update();
+        app.update();
 
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages
+            log.entries()
                 .iter()
-                .any(|m| m.contains("no item in that slot")),
+                .any(|entry| entry.text.contains("no item in that slot")),
             "GameLog should say 'no item in that slot'"
         );
     }
@@ -4448,11 +4527,11 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_message::<UseItemExplorationAction>();
         app.insert_resource(GameContent::new(db));
         app.insert_resource(GlobalState(game_state));
         app.init_resource::<InventoryNavigationState>();
-        app.init_resource::<GameLog>();
         app.add_systems(Update, handle_use_item_action_exploration);
 
         app.world_mut().write_message(UseItemExplorationAction {
@@ -4460,10 +4539,13 @@ mod tests {
             slot_index: 0,
         });
         app.update();
+        app.update();
 
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages.iter().any(|m| m.contains("not a consumable")),
+            log.entries()
+                .iter()
+                .any(|entry| entry.text.contains("not a consumable")),
             "GameLog should say 'not a consumable'"
         );
     }
@@ -4495,10 +4577,13 @@ mod tests {
             slot_index: 0,
         });
         app.update();
+        app.update();
 
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages.iter().any(|m| m.contains("no charges")),
+            log.entries()
+                .iter()
+                .any(|entry| entry.text.contains("no charges")),
             "GameLog should say 'no charges'"
         );
     }
@@ -4555,17 +4640,18 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_message::<UseItemExplorationAction>();
         app.insert_resource(GameContent::new(db));
         app.insert_resource(GlobalState(game_state));
         app.init_resource::<InventoryNavigationState>();
-        app.init_resource::<GameLog>();
         app.add_systems(Update, handle_use_item_action_exploration);
 
         app.world_mut().write_message(UseItemExplorationAction {
             party_index: 0,
             slot_index: 0,
         });
+        app.update();
         app.update();
 
         let gs = app.world().resource::<GlobalState>();
@@ -4576,7 +4662,9 @@ mod tests {
 
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages.iter().any(|m| m.contains("Exploration Tonic")),
+            log.entries()
+                .iter()
+                .any(|entry| entry.text.contains("Exploration Tonic")),
             "GameLog should contain the item name"
         );
     }
@@ -4595,10 +4683,13 @@ mod tests {
             slot_index: 0,
         });
         app.update();
+        app.update();
 
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages.iter().any(|m| m.contains("invalid character")),
+            log.entries()
+                .iter()
+                .any(|entry| entry.text.contains("invalid character")),
             "GameLog should say 'invalid character'"
         );
     }
@@ -5339,6 +5430,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_message::<DropItemAction>();
         app.add_message::<TransferItemAction>();
         app.add_message::<EquipItemAction>();
@@ -5346,13 +5438,13 @@ mod tests {
         app.insert_resource(GlobalState(game_state));
         app.insert_resource(GameContent::new(content_db));
         app.init_resource::<InventoryNavigationState>();
-        app.init_resource::<GameLog>();
         app.add_systems(Update, inventory_action_system);
 
         app.world_mut().write_message(UnequipItemAction {
             party_index: 0,
             slot: EquipmentSlot::Weapon,
         });
+        app.update();
         app.update();
 
         let gs = app.world().resource::<GlobalState>();
@@ -5364,7 +5456,9 @@ mod tests {
 
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages.iter().any(|m| m.contains("inventory is full")),
+            log.entries()
+                .iter()
+                .any(|entry| entry.text.contains("inventory is full")),
             "GameLog should contain 'inventory is full'"
         );
     }

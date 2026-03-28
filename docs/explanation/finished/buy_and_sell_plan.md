@@ -9,12 +9,23 @@ the Antares game engine.
 
 This plan covers two related but distinct interaction systems:
 
-1. **Merchant Trade** — When the player is in `GameMode::Dialogue` with a
-   merchant NPC and presses `I`, a split-screen inventory opens. The left panel
-   shows the active character's inventory with a **Sell** action button. The
-   right panel shows the merchant's stock with a **Buy** action button. Number
-   keys `1`–`6` switch the active character. `TAB` toggles panel focus. `ESC`
-   returns to dialogue.
+1. **Merchant Trade** — At runtime, the player can open merchant trade in two
+   ways:
+
+   - the **authoring-standard path**: dialogue content explicitly executes
+     `DialogueAction::OpenMerchant { npc_id }`
+   - the **runtime convenience path**: while already in
+     `GameMode::Dialogue` with a merchant NPC, pressing `I` opens the same
+     split-screen inventory
+
+   In both cases, the left panel shows the active character's inventory with a
+   **Sell** action button. The right panel shows the merchant's stock with a
+   **Buy** action button. Number keys `1`–`6` switch the active character.
+   `TAB` toggles panel focus. `ESC` returns to dialogue.
+
+   **Important contract note:** `I` is a runtime shortcut only. The content
+   authoring standard for merchant dialogue remains an explicit
+   `DialogueAction::OpenMerchant { npc_id }` path in merchant-capable dialogue.
 
 2. **Container Interaction** — When the player faces a container tile event
    (chest, barrel, hole-in-the-wall, etc.) and presses `E`, a split-screen
@@ -63,8 +74,8 @@ The following infrastructure already exists and **must not be re-implemented**:
 | Container items persist after partial take (map event state written back on close)                                    | Phase 3 |
 | Container empty state: panel shows "Empty" text when container has no items                                           | Phase 3 |
 | Mouse click support for Buy, Sell, Take, Take All, Stash action buttons                                               | Phase 4 |
-| Tutorial merchant dialogue node wires `OpenMerchant` action to open shop                                              | Phase 5 |
-| `data/test_campaign` merchant dialogue mirrors tutorial wiring                                                        | Phase 5 |
+| Merchant runtime and SDK authoring contract documented consistently                                                   | Phase 5 |
+| Merchant lifecycle and repair workflow documented for authors                                                         | Phase 5 |
 | `docs/explanation/implementations.md` updated                                                                         | Phase 5 |
 | Merchant stock replenished to template quantities each in-game day                                                    | Phase 6 |
 | Sold-out items reappear at dawn after the player rests or advances time past midnight                                 | Phase 6 |
@@ -95,6 +106,8 @@ Before writing any code, re-read the following architecture sections:
 - [ ] RON format for all new data files (never JSON or YAML for game data)
 - [ ] `///` doc comments on every new public function, struct, enum
 - [ ] All test data uses `data/test_campaign`, never `campaigns/tutorial`
+- [ ] Merchant-capable dialogue content uses explicit `DialogueAction::OpenMerchant { npc_id }`
+- [ ] `I` key behavior is treated as a runtime shortcut, not a replacement for explicit merchant authoring
 - [ ] `cargo fmt --all` → no output
 - [ ] `cargo check --all-targets --all-features` → 0 errors
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings` → 0 warnings
@@ -672,11 +685,13 @@ are fired correctly.
 
 ---
 
-## Phase 5: Tutorial Data Wiring, Save Persistence, and Documentation
+## Phase 5: Runtime Contract Alignment and Documentation
 
-**Goal:** The tutorial campaign merchant NPC dialogue nodes wire the
-`OpenMerchant` action correctly. Bought/sold stock changes survive a save/load
-cycle. Documentation is updated.
+**Goal:** Runtime merchant behavior and SDK merchant authoring rules are aligned
+and documented consistently. Merchant-capable dialogue content must explicitly
+use `OpenMerchant`, while the `I` key remains a runtime convenience shortcut.
+Documentation for merchant lifecycle, validation, repair, and preservation
+behavior is updated for campaign authors.
 
 ### 5.1 Wire `OpenMerchant` in Tutorial Merchant Dialogues
 
@@ -742,12 +757,10 @@ Add a new section summarising the buy/sell implementation:
 
 ### 5.6 Deliverables
 
-- [ ] `campaigns/tutorial/data/dialogues.ron` — `OpenMerchant` action wired
-      for both tutorial merchants
-- [ ] `data/test_campaign/data/dialogues.ron` — `OpenMerchant` action wired
-      for test merchant
-- [ ] `src/application/save_game.rs` — stock persistence test added/verified
-- [ ] `docs/explanation/implementations.md` — updated with buy/sell summary
+- [x] Runtime and SDK contract documented consistently
+- [x] Merchant template lifecycle documented for campaign authors
+- [x] Merchant tooltip/help text updated
+- [x] Final regression coverage verifies runtime compatibility
 - [ ] All four quality gates pass
 
 ### 5.7 Success Criteria

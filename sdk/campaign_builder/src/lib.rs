@@ -90,7 +90,7 @@ use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
 use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
 use antares::domain::conditions::ConditionDefinition;
-use antares::domain::dialogue::{DialogueTree, NodeId};
+use antares::domain::dialogue::{DialogueAction, DialogueTree, NodeId};
 use antares::domain::items::types::{
     AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
     ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Item,
@@ -1207,7 +1207,199 @@ impl CampaignBuilderApp {
                 }
             }
         }
+
+        errors.extend(self.validate_merchant_dialogue_rules());
         errors
+    }
+
+    /// Validate merchant dialogue contract consistency across NPCs and dialogues.
+    ///
+    /// Rules checked:
+    /// - merchant NPC with no dialogue_id
+    /// - merchant NPC with missing dialogue tree
+    /// - merchant NPC whose dialogue is missing explicit OpenMerchant
+    /// - merchant NPC whose assigned OpenMerchant targets the wrong npc_id
+    /// - non-merchant NPC whose assigned dialogue still contains SDK-managed merchant content
+    fn validate_merchant_dialogue_rules(&self) -> Vec<validation::ValidationResult> {
+        let mut results = Vec::new();
+
+        for npc in &self.npc_editor_state.npcs {
+            let assigned_dialogue = npc.dialogue_id.and_then(|dialogue_id| {
+                self.dialogues
+                    .iter()
+                    .find(|dialogue| dialogue.id == dialogue_id)
+            });
+
+            if npc.is_merchant {
+                let Some(dialogue_id) = npc.dialogue_id else {
+                    results.push(
+                        validation::ValidationResult::error(
+                            validation::ValidationCategory::NPCs,
+                            format!("Merchant NPC '{}' has no dialogue assigned", npc.id),
+                        )
+                        .with_file_path(&self.campaign.npcs_file),
+                    );
+                    continue;
+                };
+
+                let Some(dialogue) = assigned_dialogue else {
+                    results.push(
+                        validation::ValidationResult::error(
+                            validation::ValidationCategory::NPCs,
+                            format!(
+                                "Merchant NPC '{}' references missing dialogue {}",
+                                npc.id, dialogue_id
+                            ),
+                        )
+                        .with_file_path(&self.campaign.npcs_file),
+                    );
+                    continue;
+                };
+
+                if dialogue.contains_open_merchant_for_npc(&npc.id) {
+                    continue;
+                }
+
+                let opens_other_merchant = dialogue.nodes.values().any(|node| {
+                    node.actions.iter().any(|action| {
+                        matches!(
+                            action,
+                            DialogueAction::OpenMerchant { npc_id } if npc_id != &npc.id
+                        )
+                    }) || node.choices.iter().any(|choice| {
+                        choice.actions.iter().any(|action| {
+                            matches!(
+                                action,
+                                DialogueAction::OpenMerchant { npc_id } if npc_id != &npc.id
+                            )
+                        })
+                    })
+                });
+
+                if opens_other_merchant {
+                    results.push(
+                        validation::ValidationResult::error(
+                            validation::ValidationCategory::NPCs,
+                            format!(
+                                "Merchant NPC '{}' uses dialogue {} that opens the wrong merchant target",
+                                npc.id, dialogue.id
+                            ),
+                        )
+                        .with_file_path(&self.campaign.dialogue_file),
+                    );
+                } else {
+                    results.push(
+                        validation::ValidationResult::error(
+                            validation::ValidationCategory::NPCs,
+                            format!(
+                                "Merchant NPC '{}' uses dialogue {} that is missing explicit OpenMerchant",
+                                npc.id, dialogue.id
+                            ),
+                        )
+                        .with_file_path(&self.campaign.dialogue_file),
+                    );
+                }
+            } else if let Some(dialogue) = assigned_dialogue {
+                if dialogue.has_sdk_managed_merchant_content() {
+                    results.push(
+                        validation::ValidationResult::warning(
+                            validation::ValidationCategory::NPCs,
+                            format!(
+                                "Non-merchant NPC '{}' still references dialogue {} with SDK-managed merchant content",
+                                npc.id, dialogue.id
+                            ),
+                        )
+                        .with_file_path(&self.campaign.dialogue_file),
+                    );
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Applies merchant dialogue repairs across loaded NPC and dialogue content.
+    ///
+    /// Returns a summary validation result describing the number of repairs applied.
+    fn repair_merchant_dialogue_validation_issues(&mut self) -> validation::ValidationResult {
+        self.npc_editor_state.available_dialogues = self.dialogues.clone();
+        self.npc_editor_state
+            .merchant_dialogue_editor
+            .load_dialogues(self.dialogues.clone());
+
+        let mut repaired_count = 0usize;
+
+        for npc_index in 0..self.npc_editor_state.npcs.len() {
+            let npc = self.npc_editor_state.npcs[npc_index].clone();
+
+            self.npc_editor_state.edit_buffer.id = npc.id.clone();
+            self.npc_editor_state.edit_buffer.name = npc.name.clone();
+            self.npc_editor_state.edit_buffer.description = npc.description.clone();
+            self.npc_editor_state.edit_buffer.portrait_id = npc.portrait_id.clone();
+            self.npc_editor_state.edit_buffer.dialogue_id =
+                npc.dialogue_id.map(|id| id.to_string()).unwrap_or_default();
+            self.npc_editor_state.edit_buffer.quest_ids =
+                npc.quest_ids.iter().map(|id| id.to_string()).collect();
+            self.npc_editor_state.edit_buffer.faction = npc.faction.clone().unwrap_or_default();
+            self.npc_editor_state.edit_buffer.is_merchant = npc.is_merchant;
+            self.npc_editor_state.edit_buffer.is_innkeeper = npc.is_innkeeper;
+            self.npc_editor_state.edit_buffer.creature_id =
+                npc.creature_id.map(|id| id.to_string()).unwrap_or_default();
+            self.npc_editor_state.edit_buffer.sprite_sheet = npc
+                .sprite
+                .as_ref()
+                .map(|sprite| sprite.sheet_path.clone())
+                .unwrap_or_default();
+            self.npc_editor_state.edit_buffer.sprite_index = npc
+                .sprite
+                .as_ref()
+                .map(|sprite| sprite.sprite_index.to_string())
+                .unwrap_or_default();
+            self.npc_editor_state.edit_buffer.stock_template =
+                npc.stock_template.clone().unwrap_or_default();
+
+            let needs_repair = self
+                .npc_editor_state
+                .merchant_dialogue_repair_action_for_buffer()
+                .is_some();
+
+            if !needs_repair {
+                continue;
+            }
+
+            if let Ok(message) = self.npc_editor_state.repair_merchant_dialogue_for_buffer() {
+                if !message.is_empty() {
+                    repaired_count += 1;
+                }
+            }
+
+            if let Ok(repaired_npc) = self
+                .npc_editor_state
+                .build_npc_from_edit_buffer(self.npc_editor_state.edit_buffer.is_merchant)
+            {
+                self.npc_editor_state.npcs[npc_index] = repaired_npc;
+            }
+        }
+
+        self.dialogues = self.npc_editor_state.available_dialogues.clone();
+        self.dialogue_editor_state
+            .load_dialogues(self.dialogues.clone());
+
+        if repaired_count > 0 {
+            self.unsaved_changes = true;
+            validation::ValidationResult::info(
+                validation::ValidationCategory::NPCs,
+                format!(
+                    "Applied merchant dialogue repairs to {} NPC(s); save NPCs and dialogues to persist changes",
+                    repaired_count
+                ),
+            )
+        } else {
+            validation::ValidationResult::passed(
+                validation::ValidationCategory::NPCs,
+                "No merchant dialogue repairs were needed",
+            )
+        }
     }
 
     /// Validate stock template item ID references against the loaded item list.
@@ -4779,6 +4971,9 @@ impl eframe::App for CampaignBuilderApp {
             });
         });
 
+        self.handle_maps_open_npc_request();
+        self.handle_validation_open_npc_request();
+
         // Central panel with editor content
         egui::CentralPanel::default().show(ctx, |ui| match self.active_tab {
             EditorTab::Metadata => self.show_metadata_editor(ui),
@@ -5070,11 +5265,65 @@ impl eframe::App for CampaignBuilderApp {
                     self.unsaved_changes = true;
                 }
 
+                let npc_dialogue_ids_before: Vec<_> =
+                    self.dialogues.iter().map(|dialogue| dialogue.id).collect();
+                let npc_available_dialogue_ids_after: Vec<_> = self
+                    .npc_editor_state
+                    .available_dialogues
+                    .iter()
+                    .map(|dialogue| dialogue.id)
+                    .collect();
+
                 // Forward any status message produced inside show() (e.g. Reload result)
                 // to the app's global status bar.  The NPC editor returns bool rather than
                 // a status string, so it uses pending_status as a side-channel.
                 if let Some(status) = self.npc_editor_state.pending_status.take() {
                     self.status_message = status;
+                }
+
+                if npc_available_dialogue_ids_after != npc_dialogue_ids_before
+                    || self.dialogues.len() != self.npc_editor_state.available_dialogues.len()
+                {
+                    self.dialogues = self.npc_editor_state.available_dialogues.clone();
+
+                    if let Some(dir) = &self.campaign_dir {
+                        let dialogue_path = dir.join(&self.campaign.dialogue_file);
+                        match self.save_dialogues_to_file(&dialogue_path) {
+                            Ok(()) => {
+                                self.unsaved_changes = true;
+                                self.status_message = format!(
+                                    "Saved {} dialogues after merchant dialogue update",
+                                    self.dialogues.len()
+                                );
+                            }
+                            Err(error) => {
+                                self.status_message = format!(
+                                    "Merchant dialogue updated in memory, but failed to persist dialogues: {}",
+                                    error
+                                );
+                            }
+                        }
+                    } else {
+                        self.unsaved_changes = true;
+                    }
+                }
+
+                if let Some(dialogue_id) = self.npc_editor_state.requested_open_dialogue.take() {
+                    if let Some(dialogue_idx) =
+                        self.dialogues.iter().position(|dialogue| dialogue.id == dialogue_id)
+                    {
+                        self.active_tab = EditorTab::Dialogues;
+                        self.dialogue_editor_state.selected_dialogue = Some(dialogue_idx);
+                        self.dialogue_editor_state.start_edit_dialogue(dialogue_idx);
+                        self.status_message =
+                            format!("Opening assigned dialogue {} from NPC editor", dialogue_id);
+                        ui.ctx().request_repaint();
+                    } else {
+                        self.status_message = format!(
+                            "Assigned dialogue {} could not be opened because it was not found",
+                            dialogue_id
+                        );
+                    }
                 }
 
                 // If the NPC editor requested cross-tab navigation to edit a stock template,
@@ -5549,6 +5798,12 @@ impl CampaignBuilderApp {
         ui.horizontal(|ui| {
             ui.heading("✅ Campaign Validation");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("🛠 Repair Merchant Dialogue").clicked() {
+                    let repair_result = self.repair_merchant_dialogue_validation_issues();
+                    self.status_message = repair_result.message.clone();
+                    self.validation_errors.push(repair_result);
+                    self.validate_campaign();
+                }
                 if ui.button("🔄 Re-validate").clicked() {
                     self.validate_campaign();
                 }
@@ -5705,7 +5960,38 @@ impl CampaignBuilderApp {
                                 ui_helpers::show_validation_severity_icon(ui, result.severity);
 
                                 // Fourth column: Message
-                                ui.label(&result.message);
+                                let clicked_jump = if result.category
+                                    == validation::ValidationCategory::NPCs
+                                {
+                                    let maybe_npc = self
+                                        .npc_editor_state
+                                        .npcs
+                                        .iter()
+                                        .find(|npc| {
+                                            result.message.contains(&format!("'{}'", npc.id))
+                                        })
+                                        .map(|npc| npc.id.clone());
+
+                                    if let Some(npc_id) = maybe_npc {
+                                        if ui.link(&result.message).clicked() {
+                                            self.npc_editor_state.requested_open_npc = Some(npc_id);
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        ui.label(&result.message);
+                                        false
+                                    }
+                                } else {
+                                    ui.label(&result.message);
+                                    false
+                                };
+
+                                if clicked_jump {
+                                    self.status_message =
+                                        "Opening NPC editor from validation result".to_string();
+                                }
 
                                 ui.end_row();
                             }
@@ -5777,6 +6063,28 @@ impl CampaignBuilderApp {
         self.validation_filter = ValidationFilter::All;
         self.validation_focus_asset = None;
         self.status_message = "Validation filters reset".to_string();
+    }
+
+    /// Handle a request emitted by merchant validation workflows to open the NPC
+    /// editor for a specific NPC ID.
+    fn handle_validation_open_npc_request(&mut self) {
+        if let Some(requested_id) = self.npc_editor_state.requested_open_npc.take() {
+            if let Some(idx) = self
+                .npc_editor_state
+                .npcs
+                .iter()
+                .position(|npc| npc.id == requested_id)
+            {
+                self.active_tab = EditorTab::NPCs;
+                self.npc_editor_state.start_edit_npc(idx);
+                self.status_message = format!("Opening NPC editor for '{}'", requested_id);
+            } else {
+                self.status_message = format!(
+                    "Validation requested NPC '{}', but it was not found",
+                    requested_id
+                );
+            }
+        }
     }
 
     fn focus_asset(&mut self, path: PathBuf) {
@@ -6396,8 +6704,337 @@ mod tests {
 
         // Should not switch tabs and should clear the request with an informative message
         assert_eq!(app.active_tab, EditorTab::Metadata);
-        assert!(app.status_message.contains("not found"));
         assert!(app.maps_editor_state.requested_open_npc.is_none());
+        assert!(app.status_message.contains("missing_npc"));
+    }
+
+    #[test]
+    fn test_handle_validation_open_npc_request_success() {
+        let mut app = CampaignBuilderApp::default();
+        app.active_tab = EditorTab::Validation;
+        app.npc_editor_state
+            .npcs
+            .push(antares::domain::world::npc::NpcDefinition {
+                id: "merchant_tom".to_string(),
+                name: "Tom".to_string(),
+                description: String::new(),
+                portrait_id: "tom".to_string(),
+                dialogue_id: None,
+                creature_id: None,
+                sprite: None,
+                quest_ids: Vec::new(),
+                faction: None,
+                is_merchant: true,
+                is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
+            });
+        app.npc_editor_state.requested_open_npc = Some("merchant_tom".to_string());
+
+        app.handle_validation_open_npc_request();
+
+        assert_eq!(app.active_tab, EditorTab::NPCs);
+        assert_eq!(app.npc_editor_state.selected_npc, Some(0));
+        assert_eq!(app.npc_editor_state.mode, npc_editor::NpcEditorMode::Edit);
+        assert!(app.status_message.contains("merchant_tom"));
+    }
+
+    #[test]
+    fn test_handle_validation_open_npc_request_not_found() {
+        let mut app = CampaignBuilderApp::default();
+        app.npc_editor_state.requested_open_npc = Some("missing_merchant".to_string());
+
+        app.handle_validation_open_npc_request();
+
+        assert_eq!(app.active_tab, EditorTab::Metadata);
+        assert!(app.status_message.contains("missing_merchant"));
+    }
+
+    #[test]
+    fn test_validate_merchant_dialogue_rules_reports_missing_dialogue() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.npcs_file = "data/npcs.ron".to_string();
+
+        app.npc_editor_state
+            .npcs
+            .push(antares::domain::world::npc::NpcDefinition {
+                id: "merchant_no_dialogue".to_string(),
+                name: "No Dialogue".to_string(),
+                description: String::new(),
+                portrait_id: "merchant".to_string(),
+                dialogue_id: None,
+                creature_id: None,
+                sprite: None,
+                quest_ids: Vec::new(),
+                faction: None,
+                is_merchant: true,
+                is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
+            });
+
+        let results = app.validate_merchant_dialogue_rules();
+
+        assert!(results.iter().any(|result| {
+            result.message.contains("merchant_no_dialogue")
+                && result.message.contains("has no dialogue assigned")
+                && result.severity == validation::ValidationSeverity::Error
+        }));
+    }
+
+    #[test]
+    fn test_validate_merchant_dialogue_rules_reports_missing_dialogue_tree() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.npcs_file = "data/npcs.ron".to_string();
+
+        app.npc_editor_state
+            .npcs
+            .push(antares::domain::world::npc::NpcDefinition {
+                id: "merchant_missing_tree".to_string(),
+                name: "Missing Tree".to_string(),
+                description: String::new(),
+                portrait_id: "merchant".to_string(),
+                dialogue_id: Some(77),
+                creature_id: None,
+                sprite: None,
+                quest_ids: Vec::new(),
+                faction: None,
+                is_merchant: true,
+                is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
+            });
+
+        let results = app.validate_merchant_dialogue_rules();
+
+        assert!(results.iter().any(|result| {
+            result.message.contains("merchant_missing_tree")
+                && result.message.contains("references missing dialogue 77")
+                && result.severity == validation::ValidationSeverity::Error
+        }));
+    }
+
+    #[test]
+    fn test_validate_merchant_dialogue_rules_reports_wrong_open_merchant_target() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.dialogue_file = "data/dialogue.ron".to_string();
+
+        let mut dialogue = DialogueTree::new(5, "Wrong Merchant".to_string(), 1);
+        let mut root = antares::domain::dialogue::DialogueNode::new(1, "Welcome.");
+        let mut choice = antares::domain::dialogue::DialogueChoice::new("Shop", Some(2));
+        choice.add_action(DialogueAction::OpenMerchant {
+            npc_id: "other_merchant".to_string(),
+        });
+        root.add_choice(choice);
+        dialogue.add_node(root);
+        dialogue.add_node(antares::domain::dialogue::DialogueNode::new(2, "Shop node"));
+        app.dialogues.push(dialogue);
+
+        app.npc_editor_state
+            .npcs
+            .push(antares::domain::world::npc::NpcDefinition {
+                id: "merchant_wrong_target".to_string(),
+                name: "Wrong Target".to_string(),
+                description: String::new(),
+                portrait_id: "merchant".to_string(),
+                dialogue_id: Some(5),
+                creature_id: None,
+                sprite: None,
+                quest_ids: Vec::new(),
+                faction: None,
+                is_merchant: true,
+                is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
+            });
+
+        let results = app.validate_merchant_dialogue_rules();
+
+        assert!(results.iter().any(|result| {
+            result.message.contains("merchant_wrong_target")
+                && result.message.contains("wrong merchant target")
+                && result.severity == validation::ValidationSeverity::Error
+        }));
+    }
+
+    #[test]
+    fn test_validate_merchant_dialogue_rules_reports_stale_sdk_content_for_non_merchant() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.dialogue_file = "data/dialogue.ron".to_string();
+
+        let dialogue =
+            DialogueTree::standard_merchant_template(9, "merchant_stale", "Stale Merchant");
+        app.dialogues.push(dialogue);
+
+        app.npc_editor_state
+            .npcs
+            .push(antares::domain::world::npc::NpcDefinition {
+                id: "merchant_stale".to_string(),
+                name: "Stale Merchant".to_string(),
+                description: String::new(),
+                portrait_id: "merchant".to_string(),
+                dialogue_id: Some(9),
+                creature_id: None,
+                sprite: None,
+                quest_ids: Vec::new(),
+                faction: None,
+                is_merchant: false,
+                is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
+            });
+
+        let results = app.validate_merchant_dialogue_rules();
+
+        assert!(results.iter().any(|result| {
+            result.message.contains("merchant_stale")
+                && result.message.contains("SDK-managed merchant content")
+                && result.severity == validation::ValidationSeverity::Warning
+        }));
+    }
+
+    #[test]
+    fn test_repair_merchant_dialogue_validation_issues_creates_missing_dialogue() {
+        let mut app = CampaignBuilderApp::default();
+
+        app.npc_editor_state
+            .npcs
+            .push(antares::domain::world::npc::NpcDefinition {
+                id: "merchant_repair_create".to_string(),
+                name: "Create Merchant".to_string(),
+                description: String::new(),
+                portrait_id: "merchant".to_string(),
+                dialogue_id: None,
+                creature_id: None,
+                sprite: None,
+                quest_ids: Vec::new(),
+                faction: None,
+                is_merchant: true,
+                is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
+            });
+
+        let result = app.repair_merchant_dialogue_validation_issues();
+
+        assert!(result.message.contains("Applied merchant dialogue repairs"));
+        assert_eq!(app.dialogues.len(), 1);
+        assert_eq!(app.npc_editor_state.npcs[0].dialogue_id, Some(1));
+        assert!(app.dialogues[0].contains_open_merchant_for_npc("merchant_repair_create"));
+    }
+
+    #[test]
+    fn test_repair_merchant_dialogue_validation_issues_rebinds_wrong_target() {
+        let mut app = CampaignBuilderApp::default();
+
+        let mut dialogue = DialogueTree::new(13, "Wrong Target".to_string(), 1);
+        let mut root = antares::domain::dialogue::DialogueNode::new(1, "Welcome.");
+        let mut choice = antares::domain::dialogue::DialogueChoice::new("Shop", Some(2));
+        choice.add_action(DialogueAction::OpenMerchant {
+            npc_id: "other_target".to_string(),
+        });
+        root.add_choice(choice);
+        dialogue.add_node(root);
+        dialogue.add_node(antares::domain::dialogue::DialogueNode::new(2, "Shop node"));
+        app.dialogues.push(dialogue);
+
+        app.npc_editor_state
+            .npcs
+            .push(antares::domain::world::npc::NpcDefinition {
+                id: "merchant_rebind".to_string(),
+                name: "Rebind Merchant".to_string(),
+                description: String::new(),
+                portrait_id: "merchant".to_string(),
+                dialogue_id: Some(13),
+                creature_id: None,
+                sprite: None,
+                quest_ids: Vec::new(),
+                faction: None,
+                is_merchant: true,
+                is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
+            });
+
+        let result = app.repair_merchant_dialogue_validation_issues();
+
+        assert!(result.message.contains("Applied merchant dialogue repairs"));
+        let repaired = app
+            .dialogues
+            .iter()
+            .find(|dialogue| dialogue.id == 13)
+            .expect("repaired dialogue should exist");
+        assert!(repaired.contains_open_merchant_for_npc("merchant_rebind"));
+        assert!(!repaired.nodes.values().any(|node| {
+            node.actions.iter().any(|action| {
+                matches!(
+                    action,
+                    DialogueAction::OpenMerchant { npc_id } if npc_id == "other_target"
+                )
+            }) || node.choices.iter().any(|choice| {
+                choice.actions.iter().any(|action| {
+                    matches!(
+                        action,
+                        DialogueAction::OpenMerchant { npc_id } if npc_id == "other_target"
+                    )
+                })
+            })
+        }));
+    }
+
+    #[test]
+    fn test_repair_merchant_dialogue_validation_issues_removes_stale_non_merchant_content() {
+        let mut app = CampaignBuilderApp::default();
+
+        let dialogue =
+            DialogueTree::standard_merchant_template(17, "merchant_stale_cleanup", "Cleanup");
+        app.dialogues.push(dialogue);
+
+        app.npc_editor_state
+            .npcs
+            .push(antares::domain::world::npc::NpcDefinition {
+                id: "merchant_stale_cleanup".to_string(),
+                name: "Cleanup".to_string(),
+                description: String::new(),
+                portrait_id: "merchant".to_string(),
+                dialogue_id: Some(17),
+                creature_id: None,
+                sprite: None,
+                quest_ids: Vec::new(),
+                faction: None,
+                is_merchant: false,
+                is_innkeeper: false,
+                is_priest: false,
+                stock_template: None,
+                service_catalog: None,
+                economy: None,
+            });
+
+        let result = app.repair_merchant_dialogue_validation_issues();
+
+        assert!(result.message.contains("Applied merchant dialogue repairs"));
+        let repaired = app
+            .dialogues
+            .iter()
+            .find(|dialogue| dialogue.id == 17)
+            .expect("cleaned dialogue should exist");
+        assert!(!repaired.has_sdk_managed_merchant_content());
+        assert!(!repaired.contains_open_merchant_for_npc("merchant_stale_cleanup"));
+        assert!(repaired.get_node(repaired.root_node).is_some());
     }
 
     #[test]
@@ -8657,6 +9294,7 @@ mod tests {
             damage: None,
             duration: 0,
             saving_throw: false,
+            resurrect_hp: None,
             applied_conditions: vec!["bless".to_string()],
         });
 
@@ -8673,6 +9311,7 @@ mod tests {
             damage: Some(DiceRoll::new(3, 6, 0)),
             duration: 0,
             saving_throw: false,
+            resurrect_hp: None,
             applied_conditions: vec!["burn".to_string()],
         });
 

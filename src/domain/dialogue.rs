@@ -14,7 +14,7 @@
 use crate::domain::quest::QuestId;
 use crate::domain::types::ItemId;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Dialogue identifier
 pub type DialogueId = u16;
@@ -27,6 +27,11 @@ pub type NodeId = u16;
 /// Represents a complete conversation tree with multiple nodes and branching paths.
 /// Each dialogue tree starts at a root node and branches based on player choices
 /// and game conditions.
+///
+/// Merchant dialogue policy is encoded through [`DialogueTree::contains_open_merchant_for_npc`]
+/// and the SDK-owned metadata stored in [`DialogueSdkMetadata`]. A merchant-capable
+/// dialogue must explicitly contain a [`DialogueAction::OpenMerchant`] action for the
+/// merchant NPC rather than relying on implicit runtime shortcuts.
 ///
 /// # Examples
 ///
@@ -61,6 +66,14 @@ pub struct DialogueTree {
 
     /// Quest ID this dialogue is associated with (optional)
     pub associated_quest: Option<QuestId>,
+
+    /// SDK-owned metadata used to track generated or injected dialogue content.
+    ///
+    /// This metadata lets the Campaign Builder distinguish SDK-managed merchant
+    /// dialogue content from author-created dialogue content so that merchant
+    /// augmentation and removal can be performed non-destructively.
+    #[serde(default)]
+    pub sdk_metadata: DialogueSdkMetadata,
 }
 
 impl DialogueTree {
@@ -86,6 +99,7 @@ impl DialogueTree {
             speaker_name: None,
             repeatable: true,
             associated_quest: None,
+            sdk_metadata: DialogueSdkMetadata::default(),
         }
     }
 
@@ -142,6 +156,296 @@ impl DialogueTree {
 
         Ok(())
     }
+
+    /// Returns `true` when any node or choice in this tree contains an
+    /// explicit [`DialogueAction::OpenMerchant`] action for `npc_id`.
+    ///
+    /// This is the machine-checkable contract for merchant-capable dialogue.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueAction, DialogueChoice, DialogueNode, DialogueTree};
+    ///
+    /// let mut tree = DialogueTree::new(7, "Merchant".to_string(), 1);
+    /// let mut root = DialogueNode::new(1, "Welcome.");
+    /// let mut choice = DialogueChoice::new("Show me your wares.", Some(2));
+    /// choice.add_action(DialogueAction::OpenMerchant {
+    ///     npc_id: "merchant_tom".to_string(),
+    /// });
+    /// root.add_choice(choice);
+    /// tree.add_node(root);
+    ///
+    /// assert!(tree.contains_open_merchant_for_npc("merchant_tom"));
+    /// assert!(!tree.contains_open_merchant_for_npc("innkeeper_anna"));
+    /// ```
+    pub fn contains_open_merchant_for_npc(&self, npc_id: &str) -> bool {
+        self.nodes.values().any(|node| {
+            node.actions
+                .iter()
+                .any(|action| action.opens_merchant_for_npc(npc_id))
+                || node.choices.iter().any(|choice| {
+                    choice
+                        .actions
+                        .iter()
+                        .any(|action| action.opens_merchant_for_npc(npc_id))
+                })
+        })
+    }
+
+    /// Returns `true` when this tree contains SDK-managed merchant content.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueSdkManagedContent, DialogueTree};
+    ///
+    /// let mut tree = DialogueTree::new(1, "Merchant".to_string(), 1);
+    /// assert!(!tree.has_sdk_managed_merchant_content());
+    ///
+    /// tree.sdk_metadata
+    ///     .managed_content
+    ///     .insert(DialogueSdkManagedContent::MerchantTemplateTree);
+    ///
+    /// assert!(tree.has_sdk_managed_merchant_content());
+    /// ```
+    pub fn has_sdk_managed_merchant_content(&self) -> bool {
+        self.sdk_metadata.has_merchant_content()
+            || self
+                .nodes
+                .values()
+                .any(DialogueNode::has_sdk_managed_merchant_content)
+    }
+
+    /// Returns the next available node ID for adding SDK-managed nodes to this tree.
+    ///
+    /// Returns `1` when the tree has no nodes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueNode, DialogueTree};
+    ///
+    /// let mut tree = DialogueTree::new(1, "Merchant".to_string(), 1);
+    /// assert_eq!(tree.next_available_node_id(), 1);
+    ///
+    /// tree.add_node(DialogueNode::new(1, "Hello"));
+    /// tree.add_node(DialogueNode::new(4, "Shop"));
+    ///
+    /// assert_eq!(tree.next_available_node_id(), 5);
+    /// ```
+    pub fn next_available_node_id(&self) -> NodeId {
+        self.nodes
+            .keys()
+            .copied()
+            .max()
+            .map(|max_id| max_id.saturating_add(1))
+            .unwrap_or(1)
+    }
+
+    /// Creates a built-in standard merchant dialogue template tree for `npc_id`.
+    ///
+    /// The generated template:
+    ///
+    /// - marks the tree as SDK-managed merchant content
+    /// - creates a root greeting node
+    /// - adds a root choice `"Show me your wares."`
+    /// - routes that choice to a generated merchant action node
+    /// - includes a goodbye choice that ends the dialogue
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::DialogueTree;
+    ///
+    /// let tree = DialogueTree::standard_merchant_template(
+    ///     10,
+    ///     "merchant_tom",
+    ///     "Tom the Merchant",
+    /// );
+    ///
+    /// assert!(tree.contains_open_merchant_for_npc("merchant_tom"));
+    /// assert!(tree.has_sdk_managed_merchant_content());
+    /// ```
+    pub fn standard_merchant_template(id: DialogueId, npc_id: &str, npc_name: &str) -> Self {
+        let root_node_id: NodeId = 1;
+        let merchant_node_id: NodeId = 2;
+        let goodbye_text = "Farewell.";
+
+        let mut tree =
+            DialogueTree::new(id, format!("{} Merchant Dialogue", npc_name), root_node_id);
+        tree.speaker_name = Some(npc_name.to_string());
+        tree.repeatable = true;
+        tree.sdk_metadata
+            .managed_content
+            .insert(DialogueSdkManagedContent::MerchantTemplateTree);
+
+        let mut root = DialogueNode::new(
+            root_node_id,
+            format!("Welcome. Take a look at what {} has for sale.", npc_name),
+        );
+        root.add_choice(DialogueChoice::sdk_managed_merchant_choice(
+            merchant_node_id,
+        ));
+        root.add_choice(DialogueChoice::new(goodbye_text, None));
+
+        let mut merchant_node = DialogueNode::new(
+            merchant_node_id,
+            format!("Of course. Here is what {} is offering.", npc_name),
+        );
+        merchant_node
+            .sdk_metadata
+            .managed_content
+            .insert(DialogueSdkManagedContent::MerchantOpenNode);
+        merchant_node.add_action(DialogueAction::OpenMerchant {
+            npc_id: npc_id.to_string(),
+        });
+        merchant_node.is_terminal = true;
+
+        tree.add_node(root);
+        tree.add_node(merchant_node);
+        tree
+    }
+
+    /// Inserts the standard merchant branch into the root node when the tree
+    /// does not already contain an explicit merchant-opening path for `npc_id`.
+    ///
+    /// Returns `true` when the tree was modified and `false` when the tree
+    /// already satisfied the merchant dialogue contract.
+    ///
+    /// The inserted branch is SDK-managed and can be removed later without
+    /// affecting unrelated dialogue content.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueNode, DialogueTree};
+    ///
+    /// let mut tree = DialogueTree::new(20, "Custom Dialogue".to_string(), 1);
+    /// tree.add_node(DialogueNode::new(1, "Hello there."));
+    ///
+    /// let changed = tree.ensure_standard_merchant_branch("merchant_tom", "Tom the Merchant");
+    ///
+    /// assert!(changed);
+    /// assert!(tree.contains_open_merchant_for_npc("merchant_tom"));
+    /// ```
+    pub fn ensure_standard_merchant_branch(&mut self, npc_id: &str, npc_name: &str) -> bool {
+        if self.contains_open_merchant_for_npc(npc_id) {
+            return false;
+        }
+
+        let merchant_node_id = self.next_available_node_id();
+        let root_node_id = self.root_node;
+
+        let Some(root) = self.nodes.get_mut(&root_node_id) else {
+            return false;
+        };
+
+        let merchant_choice = DialogueChoice::sdk_managed_merchant_choice(merchant_node_id);
+        root.choices.push(merchant_choice);
+
+        let mut merchant_node = DialogueNode::new(
+            merchant_node_id,
+            format!("Of course. Here is what {} is offering.", npc_name),
+        );
+        merchant_node
+            .sdk_metadata
+            .managed_content
+            .insert(DialogueSdkManagedContent::MerchantOpenNode);
+        merchant_node.add_action(DialogueAction::OpenMerchant {
+            npc_id: npc_id.to_string(),
+        });
+        merchant_node.is_terminal = true;
+
+        self.nodes.insert(merchant_node_id, merchant_node);
+        self.sdk_metadata
+            .managed_content
+            .insert(DialogueSdkManagedContent::MerchantBranchInsertion);
+
+        true
+    }
+
+    /// Removes SDK-managed merchant dialogue content from this tree.
+    ///
+    /// Returns `true` when any merchant content was removed and `false` when
+    /// the tree was unchanged.
+    ///
+    /// Removal is intentionally conservative:
+    ///
+    /// - SDK-managed merchant nodes are removed entirely
+    /// - root or custom nodes are retained
+    /// - only SDK-managed merchant choices are removed from retained nodes
+    /// - all non-merchant custom content remains intact
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::DialogueTree;
+    ///
+    /// let mut tree = DialogueTree::standard_merchant_template(
+    ///     30,
+    ///     "merchant_tom",
+    ///     "Tom the Merchant",
+    /// );
+    ///
+    /// assert!(tree.remove_sdk_managed_merchant_content());
+    /// assert!(!tree.contains_open_merchant_for_npc("merchant_tom"));
+    /// ```
+    pub fn remove_sdk_managed_merchant_content(&mut self) -> bool {
+        let removable_nodes: Vec<NodeId> = self
+            .nodes
+            .iter()
+            .filter_map(|(node_id, node)| {
+                node.sdk_metadata
+                    .managed_content
+                    .contains(&DialogueSdkManagedContent::MerchantOpenNode)
+                    .then_some(*node_id)
+            })
+            .collect();
+
+        let mut changed = false;
+
+        for node_id in removable_nodes {
+            if self.nodes.remove(&node_id).is_some() {
+                changed = true;
+            }
+        }
+
+        for node in self.nodes.values_mut() {
+            let original_choice_count = node.choices.len();
+            node.choices
+                .retain(|choice| !choice.is_sdk_managed_merchant_choice());
+            if node.choices.len() != original_choice_count {
+                changed = true;
+            }
+
+            if node
+                .sdk_metadata
+                .managed_content
+                .remove(&DialogueSdkManagedContent::MerchantOpenNode)
+            {
+                changed = true;
+            }
+        }
+
+        if self
+            .sdk_metadata
+            .managed_content
+            .remove(&DialogueSdkManagedContent::MerchantTemplateTree)
+        {
+            changed = true;
+        }
+
+        if self
+            .sdk_metadata
+            .managed_content
+            .remove(&DialogueSdkManagedContent::MerchantBranchInsertion)
+        {
+            changed = true;
+        }
+
+        changed
+    }
 }
 
 /// Dialogue node
@@ -182,6 +486,10 @@ pub struct DialogueNode {
 
     /// Whether this node ends the dialogue
     pub is_terminal: bool,
+
+    /// SDK-owned metadata used to identify machine-managed node content.
+    #[serde(default)]
+    pub sdk_metadata: DialogueSdkMetadata,
 }
 
 impl DialogueNode {
@@ -206,6 +514,7 @@ impl DialogueNode {
             conditions: Vec::new(),
             actions: Vec::new(),
             is_terminal: false,
+            sdk_metadata: DialogueSdkMetadata::default(),
         }
     }
 
@@ -232,6 +541,30 @@ impl DialogueNode {
     /// Returns the number of choices
     pub fn choice_count(&self) -> usize {
         self.choices.len()
+    }
+
+    /// Returns `true` when this node contains SDK-managed merchant content.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueNode, DialogueSdkManagedContent};
+    ///
+    /// let mut node = DialogueNode::new(1, "Shop");
+    /// assert!(!node.has_sdk_managed_merchant_content());
+    ///
+    /// node.sdk_metadata
+    ///     .managed_content
+    ///     .insert(DialogueSdkManagedContent::MerchantOpenNode);
+    ///
+    /// assert!(node.has_sdk_managed_merchant_content());
+    /// ```
+    pub fn has_sdk_managed_merchant_content(&self) -> bool {
+        self.sdk_metadata.has_merchant_content()
+            || self
+                .choices
+                .iter()
+                .any(DialogueChoice::is_sdk_managed_merchant_choice)
     }
 }
 
@@ -267,6 +600,10 @@ pub struct DialogueChoice {
 
     /// Whether this choice ends the dialogue
     pub ends_dialogue: bool,
+
+    /// SDK-owned metadata used to identify machine-managed choice content.
+    #[serde(default)]
+    pub sdk_metadata: DialogueSdkMetadata,
 }
 
 impl DialogueChoice {
@@ -289,6 +626,7 @@ impl DialogueChoice {
             conditions: Vec::new(),
             actions: Vec::new(),
             ends_dialogue: target_node.is_none(),
+            sdk_metadata: DialogueSdkMetadata::default(),
         }
     }
 
@@ -300,6 +638,46 @@ impl DialogueChoice {
     /// Adds an action to this choice
     pub fn add_action(&mut self, action: DialogueAction) {
         self.actions.push(action);
+    }
+
+    /// Creates the standard SDK-managed merchant choice that opens the merchant branch.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueChoice, DialogueSdkManagedContent};
+    ///
+    /// let choice = DialogueChoice::sdk_managed_merchant_choice(2);
+    ///
+    /// assert_eq!(choice.target_node, Some(2));
+    /// assert!(choice
+    ///     .sdk_metadata
+    ///     .managed_content
+    ///     .contains(&DialogueSdkManagedContent::MerchantChoice));
+    /// ```
+    pub fn sdk_managed_merchant_choice(target_node: NodeId) -> Self {
+        let mut choice = Self::new("Show me your wares.", Some(target_node));
+        choice
+            .sdk_metadata
+            .managed_content
+            .insert(DialogueSdkManagedContent::MerchantChoice);
+        choice
+    }
+
+    /// Returns `true` when this choice is SDK-managed merchant content.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::DialogueChoice;
+    ///
+    /// let choice = DialogueChoice::sdk_managed_merchant_choice(3);
+    /// assert!(choice.is_sdk_managed_merchant_choice());
+    /// ```
+    pub fn is_sdk_managed_merchant_choice(&self) -> bool {
+        self.sdk_metadata
+            .managed_content
+            .contains(&DialogueSdkManagedContent::MerchantChoice)
     }
 }
 
@@ -379,6 +757,89 @@ impl DialogueCondition {
     }
 }
 
+/// SDK-owned metadata used to track generated or inserted dialogue content.
+///
+/// Merchant dialogue generation and augmentation must be reversible without
+/// deleting unrelated authored dialogue content. This metadata marks which
+/// dialogue structures are managed by the SDK so later phases can remove or
+/// repair only the machine-managed merchant portions.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::dialogue::{DialogueSdkManagedContent, DialogueSdkMetadata};
+///
+/// let mut metadata = DialogueSdkMetadata::default();
+/// metadata
+///     .managed_content
+///     .insert(DialogueSdkManagedContent::MerchantTemplateTree);
+///
+/// assert!(metadata.has_merchant_content());
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DialogueSdkMetadata {
+    /// Set of SDK-managed content markers attached to a dialogue structure.
+    #[serde(default)]
+    pub managed_content: BTreeSet<DialogueSdkManagedContent>,
+}
+impl DialogueSdkMetadata {
+    /// Returns `true` when any merchant-related SDK marker is present.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueSdkManagedContent, DialogueSdkMetadata};
+    ///
+    /// let mut metadata = DialogueSdkMetadata::default();
+    /// assert!(!metadata.has_merchant_content());
+    ///
+    /// metadata
+    ///     .managed_content
+    ///     .insert(DialogueSdkManagedContent::MerchantChoice);
+    ///
+    /// assert!(metadata.has_merchant_content());
+    /// ```
+    pub fn has_merchant_content(&self) -> bool {
+        self.managed_content
+            .iter()
+            .any(|marker| marker.is_merchant_marker())
+    }
+}
+
+/// Marker describing which SDK-managed content is attached to a dialogue structure.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::dialogue::DialogueSdkManagedContent;
+///
+/// assert!(DialogueSdkManagedContent::MerchantChoice.is_merchant_marker());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum DialogueSdkManagedContent {
+    /// Entire dialogue tree was generated from the built-in merchant template.
+    MerchantTemplateTree,
+    /// Existing dialogue tree was augmented with an SDK-managed merchant branch.
+    MerchantBranchInsertion,
+    /// Choice was inserted by the SDK to route into a merchant branch.
+    MerchantChoice,
+    /// Node was inserted by the SDK to execute `OpenMerchant`.
+    MerchantOpenNode,
+}
+
+impl DialogueSdkManagedContent {
+    /// Returns `true` for merchant-related SDK markers.
+    pub fn is_merchant_marker(&self) -> bool {
+        matches!(
+            *self,
+            DialogueSdkManagedContent::MerchantTemplateTree
+                | DialogueSdkManagedContent::MerchantBranchInsertion
+                | DialogueSdkManagedContent::MerchantChoice
+                | DialogueSdkManagedContent::MerchantOpenNode
+        )
+    }
+}
+
 /// Dialogue action
 ///
 /// Represents actions that are performed when a dialogue node is shown or
@@ -454,8 +915,16 @@ pub enum DialogueAction {
     /// Open the merchant shop UI for an NPC
     ///
     /// Transitions the game into the shop interaction mode for the specified
-    /// merchant NPC. The shop UI is implemented in a later phase; this action
-    /// currently logs a placeholder message and returns without state change.
+    /// merchant NPC.
+    ///
+    /// Runtime contract:
+    /// - executing this action must open the merchant inventory for `npc_id`
+    ///
+    /// Authoring contract:
+    /// - merchant-capable dialogue must explicitly contain this action for the
+    ///   merchant NPC
+    /// - the `I` key during dialogue remains only a runtime convenience shortcut,
+    ///   not the content-authoring standard
     OpenMerchant {
         /// NpcId of the merchant whose shop should be opened
         npc_id: String,
@@ -474,6 +943,27 @@ pub enum DialogueAction {
 }
 
 impl DialogueAction {
+    /// Returns `true` when this action explicitly opens the merchant UI for `npc_id`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::DialogueAction;
+    ///
+    /// let action = DialogueAction::OpenMerchant {
+    ///     npc_id: "merchant_tom".to_string(),
+    /// };
+    ///
+    /// assert!(action.opens_merchant_for_npc("merchant_tom"));
+    /// assert!(!action.opens_merchant_for_npc("merchant_sue"));
+    /// ```
+    pub fn opens_merchant_for_npc(&self, npc_id: &str) -> bool {
+        matches!(
+            self,
+            DialogueAction::OpenMerchant { npc_id: action_npc_id } if action_npc_id == npc_id
+        )
+    }
+
     /// Returns a human-readable description of the action
     pub fn description(&self) -> String {
         match self {
@@ -561,6 +1051,144 @@ mod tests {
         assert_eq!(dialogue.root_node, 1);
         assert!(dialogue.repeatable);
         assert_eq!(dialogue.node_count(), 0);
+        assert!(dialogue.sdk_metadata.managed_content.is_empty());
+    }
+
+    #[test]
+    fn test_dialogue_choice_creation_sets_empty_sdk_metadata() {
+        let choice = DialogueChoice::new("Tell me more", Some(5));
+        assert!(choice.sdk_metadata.managed_content.is_empty());
+    }
+
+    #[test]
+    fn test_standard_merchant_template_contains_open_merchant_and_metadata() {
+        let tree = DialogueTree::standard_merchant_template(10, "merchant_tom", "Tom the Merchant");
+
+        assert!(tree.contains_open_merchant_for_npc("merchant_tom"));
+        assert!(tree.has_sdk_managed_merchant_content());
+        assert!(tree
+            .sdk_metadata
+            .managed_content
+            .contains(&DialogueSdkManagedContent::MerchantTemplateTree));
+        assert_eq!(tree.root_node, 1);
+        assert_eq!(tree.node_count(), 2);
+
+        let root = tree.get_node(1).expect("root node should exist");
+        assert_eq!(root.choice_count(), 2);
+        assert!(root
+            .choices
+            .iter()
+            .any(DialogueChoice::is_sdk_managed_merchant_choice));
+
+        let merchant_node = tree.get_node(2).expect("merchant node should exist");
+        assert!(merchant_node
+            .sdk_metadata
+            .managed_content
+            .contains(&DialogueSdkManagedContent::MerchantOpenNode));
+    }
+
+    #[test]
+    fn test_ensure_standard_merchant_branch_inserts_one_branch_for_existing_dialogue() {
+        let mut tree = DialogueTree::new(20, "Custom".to_string(), 1);
+        tree.add_node(DialogueNode::new(1, "Hello there."));
+
+        let changed = tree.ensure_standard_merchant_branch("merchant_tom", "Tom the Merchant");
+
+        assert!(changed);
+        assert!(tree.contains_open_merchant_for_npc("merchant_tom"));
+        assert!(tree.has_sdk_managed_merchant_content());
+        assert!(tree
+            .sdk_metadata
+            .managed_content
+            .contains(&DialogueSdkManagedContent::MerchantBranchInsertion));
+
+        let root = tree.get_node(1).expect("root node should exist");
+        assert_eq!(root.choice_count(), 1);
+        assert!(root.choices[0].is_sdk_managed_merchant_choice());
+
+        let merchant_node_id = root.choices[0]
+            .target_node
+            .expect("merchant choice should target merchant node");
+        let merchant_node = tree
+            .get_node(merchant_node_id)
+            .expect("merchant node should exist");
+        assert!(merchant_node
+            .actions
+            .iter()
+            .any(|action| action.opens_merchant_for_npc("merchant_tom")));
+    }
+
+    #[test]
+    fn test_ensure_standard_merchant_branch_is_noop_when_open_merchant_exists() {
+        let mut tree = DialogueTree::new(21, "Custom".to_string(), 1);
+        let mut root = DialogueNode::new(1, "Hello there.");
+        let mut choice = DialogueChoice::new("Trade", Some(2));
+        choice.add_action(DialogueAction::OpenMerchant {
+            npc_id: "merchant_tom".to_string(),
+        });
+        root.add_choice(choice);
+        tree.add_node(root);
+
+        let changed = tree.ensure_standard_merchant_branch("merchant_tom", "Tom the Merchant");
+
+        assert!(!changed);
+        assert_eq!(tree.node_count(), 1);
+        let root = tree.get_node(1).expect("root node should exist");
+        assert_eq!(root.choice_count(), 1);
+    }
+
+    #[test]
+    fn test_remove_sdk_managed_merchant_content_preserves_custom_nodes_and_choices() {
+        let mut tree = DialogueTree::new(30, "Custom".to_string(), 1);
+        let mut root = DialogueNode::new(1, "Hello there.");
+        root.add_choice(DialogueChoice::new("Tell me more.", Some(3)));
+        tree.add_node(root);
+        tree.add_node(DialogueNode::new(3, "Here is more information."));
+
+        let changed = tree.ensure_standard_merchant_branch("merchant_tom", "Tom the Merchant");
+        assert!(changed);
+
+        let removed = tree.remove_sdk_managed_merchant_content();
+
+        assert!(removed);
+        assert!(!tree.contains_open_merchant_for_npc("merchant_tom"));
+        assert!(!tree.has_sdk_managed_merchant_content());
+
+        let root = tree.get_node(1).expect("root node should still exist");
+        assert_eq!(root.choice_count(), 1);
+        assert_eq!(root.choices[0].text, "Tell me more.");
+        assert!(tree.get_node(3).is_some(), "custom node should remain");
+    }
+
+    #[test]
+    fn test_remove_sdk_managed_merchant_content_is_idempotent() {
+        let mut tree =
+            DialogueTree::standard_merchant_template(40, "merchant_tom", "Tom the Merchant");
+
+        assert!(tree.remove_sdk_managed_merchant_content());
+        assert!(!tree.remove_sdk_managed_merchant_content());
+    }
+
+    #[test]
+    fn test_ensure_standard_merchant_branch_is_idempotent() {
+        let mut tree = DialogueTree::new(41, "Custom".to_string(), 1);
+        tree.add_node(DialogueNode::new(1, "Hello there."));
+
+        assert!(tree.ensure_standard_merchant_branch("merchant_tom", "Tom the Merchant"));
+        assert!(!tree.ensure_standard_merchant_branch("merchant_tom", "Tom the Merchant"));
+
+        let root = tree.get_node(1).expect("root node should exist");
+        assert_eq!(root.choice_count(), 1);
+    }
+
+    #[test]
+    fn test_dialogue_action_opens_merchant_for_npc_matches_exact_id() {
+        let action = DialogueAction::OpenMerchant {
+            npc_id: "merchant_tom".to_string(),
+        };
+
+        assert!(action.opens_merchant_for_npc("merchant_tom"));
+        assert!(!action.opens_merchant_for_npc("merchant_sue"));
     }
 
     #[test]
