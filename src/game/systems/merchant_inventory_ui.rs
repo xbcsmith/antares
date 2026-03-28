@@ -1948,7 +1948,7 @@ mod tests {
             if global.0.party.gold < price {
                 let have = global.0.party.gold;
                 let need = price;
-                log.add(format!(
+                log.add_system(format!(
                     "Not enough gold. Need {} gp, have {} gp.",
                     need, have
                 ));
@@ -2011,7 +2011,7 @@ mod tests {
         // Replicate the inventory-full check from merchant_inventory_action_system
         let character_index = 0_usize;
         if global.0.party.members[character_index].inventory.is_full() {
-            log.add("Inventory is full. Drop an item to make room.".to_string());
+            log.add_system("Inventory is full. Drop an item to make room.".to_string());
         }
 
         let entries = log.entries();
@@ -2074,7 +2074,7 @@ mod tests {
         assert!(is_equipped, "Item must be equipped for this test");
 
         if is_cursed_simulated && is_equipped {
-            log.add("That item is cursed and cannot be removed or sold.".to_string());
+            log.add_system("That item is cursed and cannot be removed or sold.".to_string());
         }
 
         // The item must still be in inventory (not removed)

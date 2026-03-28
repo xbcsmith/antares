@@ -1,5 +1,35 @@
 # Implementations
 
+## Game Log Legacy Call-Site Migration (Complete)
+
+### Overview
+
+This update closes the remaining Phase 1 migration work for the game log by
+removing the last legacy `game_log.add(...)` style call sites and routing all
+remaining writes through typed category helpers.
+
+### What Changed
+
+The remaining legacy game log writes were migrated in the following areas:
+
+- `src/game/systems/temple_ui.rs`
+  - resurrection success now uses `add_dialogue(...)`
+  - resurrection failure now uses `add_system(...)`
+  - temple exit now uses `add_exploration(...)`
+- `src/game/systems/merchant_inventory_ui.rs` tests
+  - insufficient gold now uses `add_system(...)`
+  - inventory full now uses `add_system(...)`
+  - cursed sell rejection now uses `add_system(...)`
+
+With those migrations complete, the legacy `GameLog::add(...)` compatibility
+method was removed from `src/game/systems/ui.rs`.
+
+### Outcome
+
+The legacy string-only game log API is no longer used by in-project call sites.
+Phase 1 call-site migration is now complete, and all remaining writes use typed
+helpers or typed `GameLogEvent` routing.
+
 ## Game Log Rest Message Alignment (Complete)
 
 ### Overview

@@ -279,15 +279,6 @@ impl GameLog {
         }
     }
 
-    /// Add a system entry to the game log using the legacy compatibility API.
-    ///
-    /// This preserves existing call sites that still use the pre-Phase-1
-    /// string-only interface while routing them through the typed log-entry
-    /// storage.
-    pub fn add(&mut self, text: String) {
-        self.add_system(text);
-    }
-
     /// Add a combat entry to the game log.
     pub fn add_combat(&mut self, text: String) {
         self.add_entry(text, LogCategory::Combat);
