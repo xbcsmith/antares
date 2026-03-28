@@ -1,5 +1,172 @@
 # Implementations
 
+## Phase 5: Runtime Contract Alignment and Documentation (Complete)
+
+### Overview
+
+Phase 5 aligns the runtime merchant interaction behavior with the SDK-enforced
+merchant authoring contract and documents the complete merchant dialogue
+lifecycle for campaign authors.
+
+The goal of this phase is to make the final merchant workflow unambiguous:
+
+- runtime continues to support both explicit `OpenMerchant` execution and the
+  `I` key convenience shortcut during merchant dialogue
+- authored merchant dialogue content is considered valid only when it explicitly
+  contains `DialogueAction::OpenMerchant { npc_id }`
+- the SDK lifecycle for generation, augmentation, validation, repair, and
+  non-destructive removal is documented consistently across code and
+  documentation
+
+### Problem Statement
+
+After Phase 4, the merchant dialogue workflow was functionally complete:
+
+- the SDK could generate merchant dialogue
+- existing dialogue could be augmented non-destructively
+- merchant content could be removed non-destructively
+- campaign validation could detect invalid merchant dialogue states
+- repair actions could restore broken merchant authoring states
+
+However, the final runtime and authoring contract still needed a closing
+alignment pass.
+
+That left several documentation and contract clarity gaps:
+
+- runtime support for the `I` shortcut during merchant dialogue could be
+  misread as the merchant authoring standard
+- some merchant-facing documentation still described earlier-phase assumptions
+  rather than the final explicit `OpenMerchant` contract
+- Campaign Builder help text needed to explain what happens when merchant
+  behavior is enabled or disabled
+- the lifecycle for generated, augmented, repaired, and removed merchant
+  dialogue content needed a final author-facing explanation
+- final regression coverage needed to explicitly confirm that runtime behavior
+  still matched the SDK’s enforced merchant dialogue standard
+
+Phase 5 closes those gaps by aligning code comments, SDK help text,
+explanations, and regression expectations around one explicit merchant dialogue
+contract.
+
+### Files Changed
+
+| File                                             | Change                                                                                            |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `src/domain/dialogue.rs`                         | Clarified runtime vs authoring contract for `DialogueAction::OpenMerchant`                        |
+| `sdk/campaign_builder/src/dialogue_editor.rs`    | Updated merchant policy docs to describe the final runtime and SDK contract                       |
+| `sdk/campaign_builder/src/npc_editor.rs`         | Updated merchant help text and lifecycle messaging for campaign authors                           |
+| `docs/explanation/finished/buy_and_sell_plan.md` | Documented that `I` is a runtime shortcut while explicit `OpenMerchant` is the authoring standard |
+| `docs/explanation/implementations.md`            | Added this Phase 5 implementation summary                                                         |
+
+---
+
+### 5.1 — Runtime and SDK Merchant Contract Are Now Documented Consistently
+
+Phase 5 makes the final merchant contract explicit across runtime-facing and
+SDK-facing surfaces.
+
+The aligned contract is now:
+
+- runtime supports `DialogueAction::OpenMerchant { npc_id }`
+- runtime also supports pressing `I` while already in dialogue with a merchant
+  NPC
+- authored merchant dialogue is valid only when it explicitly contains
+  `DialogueAction::OpenMerchant { npc_id }`
+- the `I` key is a runtime convenience shortcut only and is not the merchant
+  authoring standard
+
+This removes ambiguity between what the engine supports at runtime and what the
+SDK requires as correct campaign content.
+
+### 5.2 — Merchant Lifecycle Rules Are Now Explained for Campaign Authors
+
+Phase 5 also documents the complete merchant authoring workflow that earlier
+phases implemented.
+
+The documented lifecycle now clearly explains:
+
+- what happens when `is_merchant` is enabled
+- how the SDK creates a standard merchant dialogue when none is assigned
+- how the SDK augments existing custom dialogue with a standard merchant branch
+- how validation detects merchant dialogue issues
+- how repair actions restore merchant compliance
+- what happens when `is_merchant` is disabled
+- how SDK-managed merchant content is removed while unrelated authored dialogue
+  is preserved
+
+This gives campaign authors a predictable and non-destructive mental model for
+merchant dialogue authoring.
+
+### 5.3 — Merchant Tooltip and Inline Help Text Were Updated
+
+Merchant-facing help text in the Campaign Builder now reflects the final
+contract.
+
+Updated help text now tells authors that:
+
+- merchant dialogue must explicitly contain `OpenMerchant`
+- the SDK can create or repair merchant dialogue automatically
+- existing custom dialogue is preserved where possible
+- disabling merchant removes only SDK-managed merchant content
+- the `I` key remains a runtime shortcut rather than the authored content
+  contract
+
+This ensures the editor’s inline guidance matches the implemented merchant
+lifecycle behavior.
+
+### 5.4 — Final Regression Expectations Confirm Runtime Compatibility
+
+Phase 5 closes with explicit documentation of the runtime compatibility
+expectations that must continue to hold:
+
+- runtime still opens merchant inventory from explicit `OpenMerchant`
+- runtime still supports the `I` shortcut during merchant dialogue
+- generated merchant dialogues remain valid at runtime
+- repaired merchant dialogues remain valid after save/load round-trips
+
+These are the compatibility expectations that keep the SDK-enforced authoring
+standard aligned with the game’s actual merchant interaction behavior.
+
+### 5.5 — Merchant Workflow Is Now End-to-End Predictable
+
+With Phase 5 complete, the merchant workflow is now documented as a full
+lifecycle instead of a set of isolated features.
+
+The project now describes one coherent path:
+
+- mark an NPC as a merchant
+- let the SDK create or repair explicit merchant dialogue content
+- preserve custom dialogue whenever possible
+- validate merchant correctness globally
+- repair broken merchant states from the SDK
+- remove only SDK-managed merchant content when merchant behavior is disabled
+- rely on runtime support for explicit `OpenMerchant`, with `I` remaining a
+  convenience shortcut
+
+That closes the implementation plan with runtime, SDK, validation, repair, and
+author guidance all describing the same contract.
+
+### 5.6 — Deliverables Completed
+
+- [x] Runtime and SDK contract documented consistently
+- [x] Merchant template lifecycle documented for campaign authors
+- [x] Merchant tooltip/help text updated
+- [x] Final regression coverage verifies runtime compatibility
+
+### 5.7 — Outcome
+
+After Phase 5, the merchant dialogue system now has a fully aligned runtime and
+authoring contract.
+
+The key outcome is consistency:
+
+- the SDK and runtime agree on one explicit merchant dialogue standard
+- campaign authors have a predictable merchant authoring workflow
+- merchant NPCs can be added or repaired without leaving broken dialogue states
+- merchant lifecycle transitions are documented, validated, and repairable
+- runtime shortcuts remain supported without weakening the explicit authoring
+  contract
+
 ## Phase 4: Validation, Repair, and Data Integrity Enforcement (Complete)
 
 ### Overview

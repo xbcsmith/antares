@@ -21,25 +21,32 @@
 //!
 //! # Merchant Dialogue Policy
 //!
-//! Phase 1 of the merchant dialogue template plan establishes the authoring
-//! contract that merchant NPCs must have dialogue with an explicit
-//! `DialogueAction::OpenMerchant { npc_id }` path. The SDK-facing policy
-//! touchpoints in this editor are:
+//! The final merchant dialogue contract is split into two layers:
 //!
-//! - `NpcDefinition::is_merchant` and `NpcDefinition::dialogue_id` must be
-//!   treated as linked authoring data, not independent fields
+//! Authoring contract:
+//!
+//! - merchant-capable dialogue must explicitly contain
+//!   `DialogueAction::OpenMerchant { npc_id }` for the merchant NPC
+//! - `NpcDefinition::is_merchant` and `NpcDefinition::dialogue_id` are linked
+//!   authoring data and must not be treated as unrelated fields
 //! - SDK-managed merchant dialogue content must remain distinguishable from
-//!   author-authored dialogue content so later phases can insert and remove
-//!   merchant branches non-destructively
-//! - enabling merchant behavior for an NPC will eventually require either
-//!   generating a standard merchant dialogue tree or augmenting the assigned
-//!   tree with a standard merchant branch
-//! - disabling merchant behavior for an NPC must eventually remove only
-//!   SDK-managed merchant dialogue content, leaving the rest of the assigned
-//!   dialogue intact
+//!   author-authored dialogue content so merchant generation, augmentation,
+//!   validation, repair, and removal remain non-destructive
 //!
-//! Phase 1 does not yet automate those lifecycle changes in this editor, but
-//! this module is one of the primary integration points for that later work.
+//! Runtime contract:
+//!
+//! - executing `DialogueAction::OpenMerchant { npc_id }` opens the merchant
+//!   inventory for that NPC
+//! - pressing `I` while already in dialogue with a merchant NPC remains a
+//!   runtime convenience shortcut only
+//! - the `I` shortcut is not the content-authoring standard and does not replace
+//!   the requirement for explicit `OpenMerchant` in merchant dialogue content
+//!
+//! This editor is a primary policy touchpoint because it owns the merchant-role
+//! toggle, the assigned dialogue reference, the merchant status/help text, and
+//! the loaded dialogue collection used to create, augment, validate, repair,
+//! and remove SDK-managed merchant content while preserving unrelated custom
+//! dialogue where possible.
 //!
 //! # Architecture
 //!
@@ -1160,7 +1167,7 @@ impl NpcEditorState {
 
                     if !self.edit_buffer.is_merchant {
                         ui.small(
-                            "Merchant branch/action will be removed from SDK-managed content only; non-merchant dialogue content remains intact.",
+                            "Disabling merchant removes only SDK-managed merchant branch/action content. The assigned dialogue asset remains in place and unrelated non-merchant dialogue content is preserved.",
                         );
                     }
 
@@ -1223,6 +1230,10 @@ impl NpcEditorState {
                             }
                         }
                     });
+
+                    ui.small(
+                        "SDK workflow: enabling merchant creates or repairs dialogue automatically, existing custom dialogue is augmented instead of replaced when possible, validation can repair broken merchant states later, and disabling merchant removes only SDK-managed merchant content.",
+                    );
 
                     if self.edit_buffer.is_merchant {
                         ui.add_space(4.0);
@@ -2753,7 +2764,7 @@ fn show_npc_preview(
             if npc.is_merchant {
                 ui.label(egui::RichText::new("🏪 Merchant").color(egui::Color32::GOLD));
                 ui.small(
-                    "Merchant policy: assigned dialogue must explicitly contain an OpenMerchant action.",
+                    "Merchant authoring standard: assigned dialogue must explicitly contain OpenMerchant. The I key during dialogue is only a runtime shortcut; the SDK will generate or repair merchant dialogue automatically and preserve custom dialogue where possible.",
                 );
             }
             if npc.is_innkeeper {
@@ -3349,6 +3360,179 @@ mod tests {
         assert_eq!(
             updated.get_node(1).expect("root node").choices[0].text,
             "Farewell."
+        );
+    }
+
+    #[test]
+    fn test_generated_merchant_dialogue_roundtrip_remains_runtime_valid() {
+        let mut state = NpcEditorState::new();
+        state.available_dialogues = Vec::new();
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "merchant_roundtrip".to_string();
+        state.edit_buffer.name = "Roundtrip Merchant".to_string();
+        state.edit_buffer.description = "Generated merchant dialogue".to_string();
+        state.edit_buffer.portrait_id = "merchant_roundtrip".to_string();
+        state.edit_buffer.is_merchant = true;
+
+        let message = state
+            .auto_apply_merchant_dialogue_to_edit_buffer()
+            .expect("merchant dialogue generation should succeed");
+        assert!(message.contains("Created merchant dialogue"));
+
+        let npc = state
+            .build_npc_from_edit_buffer(true)
+            .expect("edit buffer should produce a merchant npc");
+        let dialogue = state
+            .available_dialogues
+            .iter()
+            .find(|dialogue| dialogue.id == npc.dialogue_id.expect("generated dialogue id"))
+            .expect("generated dialogue should exist");
+
+        assert!(
+            dialogue.contains_open_merchant_for_npc(&npc.id),
+            "generated merchant dialogue must contain explicit OpenMerchant for runtime compatibility"
+        );
+        assert!(
+            dialogue.validate().is_ok(),
+            "generated merchant dialogue should remain structurally valid"
+        );
+
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let dialogues_path = temp_dir.path().join("dialogues.ron");
+        let npcs_path = temp_dir.path().join("npcs.ron");
+
+        state
+            .merchant_dialogue_editor
+            .save_to_file(&dialogues_path)
+            .expect("save generated dialogues");
+        state.save_to_file(&npcs_path).expect("save npcs");
+
+        let mut reloaded_dialogues = DialogueEditorState::new();
+        reloaded_dialogues
+            .load_from_file(&dialogues_path)
+            .expect("reload generated dialogues");
+
+        let reloaded_npcs_contents =
+            std::fs::read_to_string(&npcs_path).expect("read saved npcs file");
+        let reloaded_npcs: Vec<NpcDefinition> =
+            ron::from_str(&reloaded_npcs_contents).expect("parse saved npcs");
+
+        let reloaded_npc = reloaded_npcs
+            .iter()
+            .find(|npc| npc.id == "merchant_roundtrip")
+            .expect("reloaded merchant npc should exist");
+        let reloaded_dialogue = reloaded_dialogues
+            .dialogues
+            .iter()
+            .find(|dialogue| dialogue.id == reloaded_npc.dialogue_id.expect("dialogue id"))
+            .expect("reloaded merchant dialogue should exist");
+
+        assert!(
+            reloaded_dialogue.contains_open_merchant_for_npc(&reloaded_npc.id),
+            "save/load roundtrip must preserve explicit OpenMerchant for generated merchant dialogue"
+        );
+        assert!(
+            reloaded_dialogue.validate().is_ok(),
+            "reloaded generated merchant dialogue should remain valid"
+        );
+    }
+
+    #[test]
+    fn test_repaired_merchant_dialogue_roundtrip_remains_runtime_valid() {
+        let mut state = NpcEditorState::new();
+        let mut dialogue = DialogueTree::new(24, "Repairable Merchant Dialogue", 1);
+        let mut root = DialogueNode::new(1, "Welcome back.");
+        root.add_choice(DialogueChoice::new("Tell me about the town.", Some(3)));
+        dialogue.add_node(root);
+        dialogue.add_node(DialogueNode::new(3, "The market is busy today."));
+        state.available_dialogues = vec![dialogue];
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "merchant_repaired_roundtrip".to_string();
+        state.edit_buffer.name = "Repaired Merchant".to_string();
+        state.edit_buffer.description = "Merchant with repaired dialogue".to_string();
+        state.edit_buffer.portrait_id = "merchant_repaired_roundtrip".to_string();
+        state.edit_buffer.dialogue_id = "24".to_string();
+        state.edit_buffer.is_merchant = true;
+
+        let repair_message = state
+            .repair_merchant_dialogue_for_buffer()
+            .expect("merchant dialogue repair should succeed");
+        assert!(
+            repair_message.contains("Repaired merchant dialogue 24"),
+            "repair should augment the assigned dialogue"
+        );
+
+        let npc = state
+            .build_npc_from_edit_buffer(true)
+            .expect("edit buffer should produce repaired merchant npc");
+        let repaired_dialogue = state
+            .available_dialogues
+            .iter()
+            .find(|dialogue| dialogue.id == 24)
+            .expect("repaired dialogue should exist");
+
+        assert!(
+            repaired_dialogue.contains_open_merchant_for_npc(&npc.id),
+            "repaired merchant dialogue must contain explicit OpenMerchant for runtime compatibility"
+        );
+        assert!(
+            repaired_dialogue.validate().is_ok(),
+            "repaired merchant dialogue should remain structurally valid"
+        );
+        assert!(
+            repaired_dialogue.get_node(3).is_some(),
+            "repair must preserve unrelated authored dialogue nodes"
+        );
+
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let dialogues_path = temp_dir.path().join("dialogues.ron");
+        let npcs_path = temp_dir.path().join("npcs.ron");
+
+        state
+            .merchant_dialogue_editor
+            .save_to_file(&dialogues_path)
+            .expect("save repaired dialogues");
+        state.save_to_file(&npcs_path).expect("save npcs");
+
+        let mut reloaded_dialogues = DialogueEditorState::new();
+        reloaded_dialogues
+            .load_from_file(&dialogues_path)
+            .expect("reload repaired dialogues");
+
+        let reloaded_npcs_contents =
+            std::fs::read_to_string(&npcs_path).expect("read saved npcs file");
+        let reloaded_npcs: Vec<NpcDefinition> =
+            ron::from_str(&reloaded_npcs_contents).expect("parse saved npcs");
+
+        let reloaded_npc = reloaded_npcs
+            .iter()
+            .find(|npc| npc.id == "merchant_repaired_roundtrip")
+            .expect("reloaded repaired merchant npc should exist");
+        let reloaded_dialogue = reloaded_dialogues
+            .dialogues
+            .iter()
+            .find(|dialogue| dialogue.id == 24)
+            .expect("reloaded repaired dialogue should exist");
+
+        assert!(
+            reloaded_dialogue.contains_open_merchant_for_npc(&reloaded_npc.id),
+            "save/load roundtrip must preserve explicit OpenMerchant for repaired merchant dialogue"
+        );
+        assert!(
+            reloaded_dialogue.validate().is_ok(),
+            "reloaded repaired merchant dialogue should remain valid"
+        );
+        assert!(
+            reloaded_dialogue.get_node(3).is_some(),
+            "reloaded repaired dialogue must preserve authored non-merchant content"
         );
     }
 

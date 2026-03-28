@@ -21,19 +21,30 @@
 //!
 //! # Merchant Dialogue Policy
 //!
-//! Phase 1 of the merchant dialogue template plan establishes the dialogue-side
-//! authoring contract for merchant NPCs.
+//! The final merchant dialogue contract is split into two layers:
 //!
-//! Merchant-capable dialogue must:
+//! Authoring contract:
 //!
-//! - explicitly contain `DialogueAction::OpenMerchant { npc_id }`
-//! - remain distinguishable when merchant content was generated or inserted by
-//!   the SDK
-//! - support later non-destructive removal of SDK-managed merchant content
+//! - merchant-capable dialogue must explicitly contain
+//!   `DialogueAction::OpenMerchant { npc_id }`
+//! - SDK-managed merchant content must remain distinguishable from
+//!   author-authored dialogue content
+//! - merchant generation, augmentation, validation, repair, and removal must be
+//!   non-destructive to unrelated custom dialogue content
 //!
-//! This editor is a primary policy touchpoint because later phases will use it
-//! to inspect, display, and preserve SDK-managed merchant branches inside
-//! otherwise custom dialogue trees.
+//! Runtime contract:
+//!
+//! - executing `DialogueAction::OpenMerchant { npc_id }` must open the merchant
+//!   inventory for that NPC
+//! - pressing `I` while already in dialogue with a merchant NPC remains a
+//!   runtime convenience shortcut only
+//! - the `I` shortcut is not the content-authoring standard and does not replace
+//!   the requirement for explicit `OpenMerchant` in merchant dialogue content
+//!
+//! This editor is a primary policy touchpoint because it owns the loaded
+//! dialogue trees used to inspect, generate, augment, validate, repair, and
+//! preserve SDK-managed merchant branches inside otherwise custom dialogue
+//! trees.
 
 use crate::ui_helpers::{
     autocomplete_item_selector, autocomplete_quest_selector, show_standard_list_item,
@@ -54,9 +65,10 @@ use std::path::PathBuf;
 
 /// Editor state for dialogue tree editing.
 ///
-/// Merchant dialogue lifecycle work integrates here in later phases because the
-/// editor owns the loaded dialogue trees that must be inspected for explicit
-/// `OpenMerchant` support and for SDK-managed merchant metadata.
+/// Merchant dialogue lifecycle work integrates here because the editor owns the
+/// loaded dialogue trees that must be inspected for explicit `OpenMerchant`
+/// support, SDK-managed merchant metadata, validation state, repair actions,
+/// and non-destructive merchant lifecycle transitions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DialogueEditorState {
     /// All dialogue trees being edited
@@ -179,9 +191,9 @@ pub enum MerchantDialogueUpdate {
 
 /// Buffer for dialogue tree form fields.
 ///
-/// Merchant dialogue policy later uses the edited tree identity and display
-/// metadata as the stable anchor for SDK-generated merchant templates and
-/// SDK-inserted merchant branches.
+/// Merchant dialogue policy uses the edited tree identity and display metadata
+/// as the stable anchor for SDK-generated merchant templates and SDK-inserted
+/// merchant branches while preserving authored dialogue content where possible.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DialogueEditBuffer {
     pub id: String,

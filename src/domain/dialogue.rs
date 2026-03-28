@@ -915,8 +915,16 @@ pub enum DialogueAction {
     /// Open the merchant shop UI for an NPC
     ///
     /// Transitions the game into the shop interaction mode for the specified
-    /// merchant NPC. The shop UI is implemented in a later phase; this action
-    /// currently logs a placeholder message and returns without state change.
+    /// merchant NPC.
+    ///
+    /// Runtime contract:
+    /// - executing this action must open the merchant inventory for `npc_id`
+    ///
+    /// Authoring contract:
+    /// - merchant-capable dialogue must explicitly contain this action for the
+    ///   merchant NPC
+    /// - the `I` key during dialogue remains only a runtime convenience shortcut,
+    ///   not the content-authoring standard
     OpenMerchant {
         /// NpcId of the merchant whose shop should be opened
         npc_id: String,
