@@ -1147,7 +1147,6 @@ mod container_event_tests {
     use crate::domain::character::InventorySlot;
     use crate::domain::types::Position;
     use crate::domain::world::Map;
-    use crate::game::systems::ui::GameLog;
 
     fn make_slot(item_id: u8) -> InventorySlot {
         InventorySlot {
@@ -1169,9 +1168,9 @@ mod container_event_tests {
         app.add_message::<MapChangeEvent>();
         app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_plugins(EventPlugin);
         app.insert_resource(GlobalState(game_state));
-        app.insert_resource(GameLog::new());
         // Minimal content DB — containers don't need NPC lookups
         app.insert_resource(crate::application::resources::GameContent::new(
             crate::sdk::database::ContentDatabase::new(),
@@ -1674,6 +1673,7 @@ mod tests {
         app.add_message::<MapChangeEvent>();
         app.add_message::<StartDialogue>();
         app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_plugins(EventPlugin);
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
@@ -1719,11 +1719,11 @@ mod tests {
 
         app.insert_resource(GlobalState(game_state));
         app.insert_resource(GameContent::new(db));
-        app.insert_resource(GameLog::new());
 
         // Act
         app.update(); // First update: check_for_events writes MapEventTriggered
         app.update(); // Second update: handle_events processes MapEventTriggered
+        app.update(); // Third update: UiPlugin consumes GameLogEvent into GameLog
 
         // Assert - merchant interactions should log the planned exploration entry
         // even when the merchant falls back to a simple dialogue bubble because
@@ -1944,6 +1944,7 @@ mod tests {
         app.add_message::<MapChangeEvent>();
         app.add_message::<StartDialogue>();
         app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_plugins(EventPlugin);
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
@@ -1970,20 +1971,20 @@ mod tests {
 
         app.insert_resource(GlobalState(game_state));
         app.insert_resource(GameContent::new(db));
-        app.insert_resource(GameLog::new());
 
         // Act
         app.update(); // First update: check_for_events writes MapEventTriggered
         app.update(); // Second update: handle_events processes MapEventTriggered
+        app.update(); // Third update: UiPlugin consumes GameLogEvent into GameLog
 
-        // Assert - GameLog should contain error message
+        // Assert - GameLog should contain the error
         let game_log = app.world().resource::<GameLog>();
         let entries = game_log.entries();
         assert!(
-            entries
-                .iter()
-                .any(|e| e.contains("Error") && e.contains("nonexistent_npc")),
-            "Expected error message in game log. Actual entries: {:?}",
+            entries.iter().any(|entry| entry
+                .text
+                .contains("Error: NPC 'nonexistent_npc' not found in database")),
+            "Expected NPC-not-found message in game log. Actual entries: {:?}",
             entries
         );
     }
@@ -1999,6 +2000,7 @@ mod tests {
         app.add_message::<MapChangeEvent>();
         app.add_message::<StartDialogue>();
         app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_plugins(EventPlugin);
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
@@ -2048,11 +2050,11 @@ mod tests {
 
         app.insert_resource(GlobalState(game_state));
         app.insert_resource(GameContent::new(db));
-        app.insert_resource(GameLog::new());
 
         // Act
         app.update(); // First update: check_for_events writes MapEventTriggered
         app.update(); // Second update: handle_events processes MapEventTriggered and should write StartDialogue
+        app.update(); // Third update: UiPlugin consumes GameLogEvent into GameLog
 
         // Assert - StartDialogue message should be sent
         let dialogue_messages = app.world().resource::<Messages<StartDialogue>>();
@@ -2061,14 +2063,12 @@ mod tests {
         assert_eq!(messages.len(), 1, "Expected StartDialogue message");
         assert_eq!(messages[0].dialogue_id, 1u16);
 
-        // Assert - GameLog should contain 'Speaking with' message
+        // Assert - GameLog should contain the current innkeeper dialogue message
         let game_log = app.world().resource::<GameLog>();
         let entries = game_log.entries();
         assert!(
-            entries
-                .iter()
-                .any(|e| e.contains("Speaking with Cozy Innkeeper")),
-            "Expected 'Speaking with' message in game log. Actual entries: {:?}",
+            entries.iter().any(|e| e.text == "Cozy Innkeeper speaks."),
+            "Expected 'Cozy Innkeeper speaks.' message in game log. Actual entries: {:?}",
             entries
         );
     }
@@ -2152,7 +2152,6 @@ mod tests {
         use crate::domain::dialogue::{DialogueAction, DialogueChoice, DialogueNode, DialogueTree};
         use crate::domain::world::NpcDefinition;
         use crate::game::systems::dialogue::SelectDialogueChoice;
-        use crate::game::systems::ui::GameLog;
 
         // Arrange - Set up app with Event and Dialogue plugins
         let mut app = App::new();
@@ -2161,6 +2160,7 @@ mod tests {
         app.add_message::<StartDialogue>();
         app.add_message::<SelectDialogueChoice>();
         app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_plugins(EventPlugin);
         app.add_plugins(crate::game::systems::dialogue::DialoguePlugin);
 
@@ -2219,7 +2219,6 @@ mod tests {
 
         app.insert_resource(GlobalState(game_state));
         app.insert_resource(GameContent::new(db));
-        app.insert_resource(GameLog::new());
         app.init_resource::<crate::game::components::dialogue::ActiveDialogueUI>();
         app.insert_resource(ButtonInput::<KeyCode>::default());
 
@@ -2451,7 +2450,7 @@ mod locked_door_event_tests {
             crate::sdk::database::ContentDatabase::new(),
         ));
         app.init_resource::<LockInteractionPending>();
-        app.init_resource::<GameLog>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
 
         // Register handle_events (the system under test).
         app.add_systems(Update, handle_events);
@@ -2530,6 +2529,7 @@ mod locked_door_event_tests {
 
         fire_locked_door_event(&mut app);
         app.update();
+        app.update();
 
         // Lock state must be unlocked.
         let gs = app.world().resource::<GlobalState>();
@@ -2565,11 +2565,11 @@ mod locked_door_event_tests {
         // Game log must contain a success message.
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages
+            log.entries()
                 .iter()
-                .any(|m| m.starts_with("You unlock the door with the")),
+                .any(|entry| entry.text.starts_with("You unlock the door with the")),
             "Game log must contain unlock success message; got: {:?}",
-            log.messages
+            log.entries()
         );
     }
 
@@ -2613,6 +2613,7 @@ mod locked_door_event_tests {
         }
 
         app.update();
+        app.update();
 
         // LockInteractionPending must be set.
         let pending = app.world().resource::<LockInteractionPending>();
@@ -2625,9 +2626,11 @@ mod locked_door_event_tests {
         // Game log must say "The door is locked."
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages.iter().any(|m| m == "The door is locked."),
+            log.entries()
+                .iter()
+                .any(|entry| entry.text == "The door is locked."),
             "Game log must contain 'The door is locked.' for no-key lock; got: {:?}",
-            log.messages
+            log.entries()
         );
     }
 }
