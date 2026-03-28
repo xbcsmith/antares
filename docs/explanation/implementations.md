@@ -1,5 +1,129 @@
 # Implementations
 
+## Exploration and Inventory Event-Driven Logging Cleanup (Complete)
+
+### Overview
+
+This update completes the remaining exploration-input and inventory-side cleanup
+for the game log migration by moving the last targeted non-dialogue-engine
+player action results onto the `GameLogEvent` path and aligning the associated
+tests with the event-consumption flow.
+
+### What Changed
+
+The remaining targeted gameplay and UI logging paths were tightened as follows:
+
+- `src/game/systems/input/exploration_interact.rs`
+  - identified as part of the remaining exploration-input direct-log surface for
+    future migration planning
+- `src/game/systems/input/exploration_movement.rs`
+  - identified as part of the remaining exploration-input direct-log surface for
+    future migration planning
+- `src/game/systems/input.rs`
+  - exploration input wiring remains the integration point for the interaction
+    and movement helpers
+- `src/game/systems/inventory_ui.rs`
+  - exploration item-use feedback now follows the event-driven logging direction
+    for the migrated paths
+  - equip / unequip error and local action-result feedback that was selected for
+    migration now emits `GameLogEvent`
+  - inventory-side tests were updated so they allow the `UiPlugin` consumer path
+    to flush emitted log events into the `GameLog` resource before asserting
+
+### Validation and Test Updates
+
+As part of the cleanup, the inventory exploration-use and unequip tests were
+updated to reflect the event-driven logging architecture rather than assuming
+immediate direct mutation of `GameLog`.
+
+Focused regression coverage now passes for:
+
+- `test_exploration_use_heals_character`
+- `test_exploration_use_restores_sp`
+- `test_exploration_use_invalid_slot_writes_log`
+- `test_unequip_action_system_inventory_full_logs_error`
+
+### Outcome
+
+The remaining cleanup work for the targeted exploration and inventory logging
+migration is complete, and the affected tests now validate the correct
+event-driven behavior through the UI consumer path.
+
+## Final Cleanup Pass for Event-Driven GameLog Migration (Complete)
+
+### Overview
+
+This cleanup pass completes the follow-through work after the broader
+`GameLogEvent` migration by fixing the remaining mixed-mode logging edges and
+restoring the codebase to a clean, validated state.
+
+The goal of this pass was not to introduce new player-facing logging behavior,
+but to finish the architectural tightening work so that the migrated systems
+consistently use event-driven logging where intended while preserving direct
+`GameLog` usage in the dialogue engine and other local runtime paths where that
+approach still makes sense.
+
+### What Changed
+
+The cleanup pass completed the remaining migration and stabilization work across
+the affected gameplay and UI systems:
+
+- `src/game/systems/merchant_inventory_ui.rs`
+
+  - merchant inventory action results now publish typed `GameLogEvent` messages
+    instead of mutating `GameLog` directly
+  - migrated feedback includes:
+    - inventory full
+    - out of stock
+    - insufficient gold
+    - invalid sell target
+    - cursed equipped item rejection
+
+- `src/game/systems/events.rs`
+
+  - world event handling now emits `GameLogEvent` for the broad set of
+    exploration, dialogue, combat, item, and merchant visit messages that were
+    previously written directly to `GameLog`
+  - pickup handling now routes both the visible pickup message and its
+    additional pickup diagnostic text through typed events
+  - merchant entry result handling now uses the same event-driven path
+
+- `src/game/systems/lock_ui.rs`
+
+  - lock action outcomes and trap-effect follow-up messages now emit
+    `GameLogEvent` values instead of mutating `GameLog` directly
+
+- `src/game/systems/inventory_ui.rs`
+  - exploration item-use feedback remains available to tests and mixed logging
+    paths while the migrated action flow now supports event-driven logging where
+    appropriate
+  - the cleanup restored the required `GameLog` import for tests and remaining
+    direct-log assertions that still intentionally validate the local resource
+
+### Validation and Cleanup Outcome
+
+This pass also resolved the migration fallout introduced by the broader refactor:
+
+- restored the imports needed for mixed direct-log and event-driven test
+  coverage
+- removed stale direct `GameLog` references after migration
+- verified the migrated systems compile cleanly under formatting, check, and
+  clippy validation
+- re-ran focused nextest coverage for the migrated inn and merchant event-driven
+  logging paths
+
+### Resulting Rule of Thumb
+
+After this cleanup pass, the codebase is now more consistently aligned with the
+intended logging split:
+
+- cross-system gameplay and UI action results publish `GameLogEvent`
+- dialogue-engine narration and immediate local validation may still write
+  directly to `GameLog`
+
+That architectural boundary is now substantially cleaner than before this final
+pass.
+
 ## Inn UI GameLogEvent Migration (Complete)
 
 ### Overview

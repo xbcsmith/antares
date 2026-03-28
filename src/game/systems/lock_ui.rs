@@ -24,7 +24,7 @@ use crate::domain::types::Position;
 use crate::domain::world::lock::{try_bash, try_lockpick, LockState, UnlockOutcome};
 use crate::domain::world::MapEvent;
 use crate::game::resources::{GlobalState, LockInteractionPending};
-use crate::game::systems::ui::GameLog;
+use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -296,7 +296,7 @@ fn lock_action_system(
     mut reader: MessageReader<LockActionChosen>,
     mut global_state: ResMut<GlobalState>,
     game_content: Option<Res<GameContent>>,
-    mut game_log: Option<ResMut<GameLog>>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
     mut lock_pending: ResMut<LockInteractionPending>,
 ) {
     for msg in reader.read() {
@@ -383,14 +383,20 @@ fn lock_action_system(
             UnlockOutcome::LockpickSuccess { .. } => {
                 let msg = format!("{} picks the lock!", char_name);
                 info!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add_exploration(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Exploration,
+                    });
                 }
                 let extra = apply_success(lock_id, *position, &event_kind, &mut global_state.0);
                 for m in extra {
                     info!("{}", m);
-                    if let Some(ref mut log) = game_log {
-                        log.add_system(m);
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: m,
+                            category: LogCategory::System,
+                        });
                     }
                 }
             }
@@ -402,14 +408,20 @@ fn lock_action_system(
                     EventKind::Door => format!("{} smashes the door open!", char_name),
                 };
                 info!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add_exploration(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Exploration,
+                    });
                 }
                 let extra = apply_success(lock_id, *position, &event_kind, &mut global_state.0);
                 for m in extra {
                     info!("{}", m);
-                    if let Some(ref mut log) = game_log {
-                        log.add_system(m);
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: m,
+                            category: LogCategory::System,
+                        });
                     }
                 }
             }
@@ -425,8 +437,11 @@ fn lock_action_system(
                     )
                 };
                 info!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add_exploration(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Exploration,
+                    });
                 }
             }
             UnlockOutcome::BashFailed {
@@ -437,15 +452,21 @@ fn lock_action_system(
                     new_trap_chance
                 );
                 info!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add_exploration(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Exploration,
+                    });
                 }
             }
             UnlockOutcome::TrapTriggered { damage, effect } => {
                 let msg = format!("A trap fires! The party takes {} damage!", damage);
                 info!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add_exploration(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Exploration,
+                    });
                 }
                 // Apply damage to every living party member.
                 for member in global_state.0.party.members.iter_mut() {
@@ -455,8 +476,11 @@ fn lock_action_system(
                 let effect_messages = apply_trap_effects(effect.as_deref(), &mut global_state.0);
                 for effect_msg in effect_messages {
                     info!("{}", effect_msg);
-                    if let Some(ref mut log) = game_log {
-                        log.add_system(effect_msg);
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: effect_msg,
+                            category: LogCategory::System,
+                        });
                     }
                 }
             }
