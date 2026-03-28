@@ -215,6 +215,50 @@ GameConfig(
         // a shorter rest duration via the UI.
         allow_partial_rest: false,
     ),
+
+    // ========================================================================
+    // Game Log Configuration
+    // ========================================================================
+    game_log: GameLogConfig(
+        // Maximum number of entries retained in the in-game log ring buffer
+        // Must be at least 1
+        max_entries: 200,
+
+        // Whether the game log panel starts visible
+        // true = visible on startup
+        // false = hidden until toggled
+        visible_by_default: true,
+
+        // Keyboard key used to toggle the game log panel
+        // Uses Bevy KeyCode names, e.g. "L", "F10", "Tab"
+        toggle_key: "L",
+
+        // Whether to show timestamps alongside log entries
+        // Reserved for future presentation work
+        show_timestamps: false,
+
+        // Width of the game log panel in pixels
+        // Must be > 0
+        panel_width_px: 300.0,
+
+        // Height of the game log panel in pixels
+        // Must be > 0
+        panel_height_px: 200.0,
+
+        // Background opacity of the game log panel
+        // Range: 0.0 (fully transparent) to 1.0 (fully opaque)
+        panel_opacity: 0.88,
+
+        // Log categories enabled by default in the filter bar
+        // Valid values: "Combat", "Dialogue", "Item", "Exploration", "System"
+        default_enabled_categories: [
+            "Combat",
+            "Dialogue",
+            "Item",
+            "Exploration",
+            "System",
+        ],
+    ),
 )
 
 // ============================================================================

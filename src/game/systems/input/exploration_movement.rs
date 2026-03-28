@@ -284,7 +284,7 @@ fn refresh_visibility_if_exploring(game_state: &mut GameState) {
 fn log_locked_door(game_log: &mut GameLog) {
     let msg = "The door is locked.".to_string();
     info!("{}", msg);
-    game_log.add(msg);
+    game_log.add_exploration(msg);
 }
 
 #[cfg(test)]

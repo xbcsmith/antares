@@ -1,21 +1,48 @@
 # Next Plans
 
+merchant_inventory_ui.rs` — high confidence, good fit
+2. `events.rs` — medium confidence, broader churn
+3. `inventory_ui.rs` exploration item use / `lock_ui.rs` / input systems — lower priority unless you want to push the rule much further
+the main remaining non-dialogue-engine direct-log areas:
+- `input/exploration_interact.rs`
+- `input/exploration_movement.rs`
+- `input.rs` wiring around those helpers
+- parts of `inventory_ui.rs` if you want stricter consistency
 ## Generic
 
 ## SDK
+
+Analyze the @sdk codebase for refactoring opportunities use subagents to do the following:
+
+1. Find duplicate code patterns, look for places we can consolidate code and create reusable functions or components.
+2. Identify unused exports, specific "#[ignore]", and dead code "#[dead_code]", #[allow(unused_mut)], #[allow(clippy::too_many_arguments)] to see if there are any exports that can be removed or refactored to reduce clutter and improve maintainability.
+3. Review error handling consistency
+4. Look for unfinished TODOs, FIXMEs, and place holders in the codebase as well as references to Phases in the codebase that should be removed.
+5. References to Phases in the codebase that should be removed.
+
+We do not care about backwards compatability. Compile the findings into a prioritized action plan with a phased approach.
+
+Write a plan with a phased approach to cleaning up the codebase. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [SDK Codebase Cleanup Plan](./sdk_codebase_cleanup_plan.md)
 
 ## Game Engine
 
 ### Clean up
 
-Analyze this codebase for refactoring opportunities:
+Analyze the @src codebase for refactoring opportunities use subagents to do the following:
 
-1. Find duplicate code patterns
-2. Identify unused exports and dead code
+1. Find duplicate code patterns, look for places we can consolidate code and create reusable functions or components.
+2. Identify unused exports, specific "#[ignore]", and dead code "#[dead_code]", #[allow(unused_mut)], #[allow(clippy::too_many_arguments)] to see if there are any exports that can be removed or refactored to reduce clutter and improve maintainability.
 3. Review error handling consistency
-4. Check for security vulnerabilities
+4. Look for unfinished TODOs, FIXMEs, and place holders in the codebase as well as references to Phases in the codebase that should be removed.
+5. References to Phases in the codebase that should be removed.
 
-Compile the findings into a prioritized action plan with a phased approach.
+We do not care about backwards compatability. Compile the findings into a prioritized action plan with a phased approach.
+
+Write a plan with a phased approach to cleaning up the codebase. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Game Codebase Cleanup Plan](./game_codebase_cleanup_plan.md)
 
 ### Custom Fonts
 
@@ -63,7 +90,7 @@ Work required:
 
 Write a plan with a phased approach to implementing game-wide mouse input support in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Game Wide Mouse Input Support](./game_wide_mouse_input_support_plan.md)
+✅ COMPLETED - [Game Wide Mouse Input Support](./game_wide_mouse_input_support_plan.md)
 
 ### Game Log
 
@@ -99,17 +126,19 @@ We need to add a tray icon for the game like the ones we added for the SDK.
 
 ### Notes
 
+Game Log is in the line of vision. It should be in the upper left corner of the screen. The log view in the game should also be toggled by clicking on Game Log in the Log Window. Did we not implement a separate full screen log view? If not, we should. The game log should be scrollable and have a filter to show only certain types of events (e.g. combat events, dialogue events, item events, etc).
+
+Recruitable Character Mesh should disapear as soon as they are recruited. Currently they remain in the world until the party steps on that tile a second time.
+
 Month Year Date in Game Engine View looks horrible.
 
 Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? The trees on Map 1 look no different than before.
 You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same.
 Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
 
-Time does not advance when the party moves. The clock only ever increments the hour when resting. Time should advance every time the party moves a tile (the minutes should advance). Time should advance when the party travels between maps.
+Time does not advance when the party moves. The clock only ever increments the hour when resting. Time should advance every time the party moves a tile it should be 30 seconds. Time should advance when the party travels between maps. Combat time should advance 10-seconds per turn. We should make "combat turns" and "movement turns" length configurable in the game config. The default should be 30 seconds for movement turns and 10 seconds for combat turns. Traveling through portals shoulbd be instant.
 
 Navigating the locked item menu doesn't work like expected. Once a character is seslected the arrow keys move the party instead of moving the selected values. ESC always brings up the game menu when it should ESC the dialog/menu/inventory screen without bringing up the main menu
-
-Mini Map follows the party but does not update with images of the actual map. The party indicator runs out of the box after the party moves a few tile. Same problem with the actual map exists. I went and visited the merchant and got no updates. Datetime has disappeared. The datetime is supposed to be show as well as the compass. See examples of the minimap @screenshots/minimap_blank.png and the full map blank @screenshots/full_map_blank.png
 
 All the doors are facing the wrong way
 

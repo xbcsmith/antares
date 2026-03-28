@@ -10,7 +10,7 @@
 use crate::application::GameMode;
 use crate::domain::character::{CharacterLocation, PARTY_MAX_SIZE};
 use crate::game::resources::GlobalState;
-use crate::game::systems::ui::GameLog;
+use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -584,7 +584,7 @@ fn inn_action_system(
     mut swap_events: MessageReader<InnSwapCharacters>,
     mut exit_events: MessageReader<ExitInn>,
     mut global_state: ResMut<GlobalState>,
-    mut game_log: Option<ResMut<GameLog>>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
 ) {
     // Get current inn ID before processing events (clone to avoid moving out of state)
     let current_inn_id = match &global_state.0.mode {
@@ -597,14 +597,20 @@ fn inn_action_system(
         match global_state.0.recruit_character(event.roster_index) {
             Ok(_) => {
                 if let Some(character) = global_state.0.roster.characters.get(event.roster_index) {
-                    if let Some(ref mut log) = game_log {
-                        log.add(format!("{} recruited to party!", character.name));
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: format!("{} joins the party.", character.name),
+                            category: LogCategory::Dialogue,
+                        });
                     }
                 }
             }
             Err(e) => {
-                if let Some(ref mut log) = game_log {
-                    log.add(format!("Cannot recruit: {}", e));
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: format!("Cannot recruit: {}", e),
+                        category: LogCategory::System,
+                    });
                 }
             }
         }
@@ -612,18 +618,33 @@ fn inn_action_system(
 
     // Process dismiss events
     for event in dismiss_events.read() {
+        let dismissed_name = global_state
+            .0
+            .party
+            .members
+            .get(event.party_index)
+            .map(|character| character.name.clone());
+
         match global_state
             .0
             .dismiss_character(event.party_index, current_inn_id.clone())
         {
             Ok(_) => {
-                if let Some(ref mut log) = game_log {
-                    log.add("Party member dismissed to inn.".to_string());
+                if let Some(name) = dismissed_name {
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: format!("{} waits at the inn.", name),
+                            category: LogCategory::Dialogue,
+                        });
+                    }
                 }
             }
             Err(e) => {
-                if let Some(ref mut log) = game_log {
-                    log.add(format!("Cannot dismiss: {}", e));
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: format!("Cannot dismiss: {}", e),
+                        category: LogCategory::System,
+                    });
                 }
             }
         }
@@ -636,13 +657,19 @@ fn inn_action_system(
             .swap_party_member(event.party_index, event.roster_index)
         {
             Ok(_) => {
-                if let Some(ref mut log) = game_log {
-                    log.add("Party members swapped!".to_string());
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: "Party members swapped!".to_string(),
+                        category: LogCategory::Dialogue,
+                    });
                 }
             }
             Err(e) => {
-                if let Some(ref mut log) = game_log {
-                    log.add(format!("Cannot swap: {}", e));
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: format!("Cannot swap: {}", e),
+                        category: LogCategory::System,
+                    });
                 }
             }
         }
@@ -651,8 +678,11 @@ fn inn_action_system(
     // Process exit events
     for _event in exit_events.read() {
         global_state.0.mode = GameMode::Exploration;
-        if let Some(ref mut log) = game_log {
-            log.add("Left the inn.".to_string());
+        if let Some(ref mut writer) = game_log_writer {
+            writer.write(GameLogEvent {
+                text: "Left the inn.".to_string(),
+                category: LogCategory::Exploration,
+            });
         }
     }
 }
@@ -1199,6 +1229,170 @@ mod tests {
         assert_eq!(global.0.party.members[0].name, "InnMage");
         assert_eq!(global.0.roster.characters[0].name, "PartyHero");
         assert_eq!(global.0.roster.characters[1].name, "InnMage");
+    }
+
+    #[test]
+    fn test_inn_recruit_writes_game_log_event() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        app.add_message::<InnRecruitCharacter>();
+        app.add_message::<InnDismissCharacter>();
+        app.add_message::<InnSwapCharacters>();
+        app.add_message::<ExitInn>();
+        app.add_message::<GameLogEvent>();
+        app.init_resource::<Messages<GameLogEvent>>();
+
+        app.add_systems(Update, inn_action_system);
+
+        let mut game = GameState::new();
+        let inn_id = "test_inn".to_string();
+
+        let roster_character = Character::new(
+            "RosterC".to_string(),
+            "dwarf".to_string(),
+            "robber".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        game.roster
+            .add_character(roster_character, CharacterLocation::AtInn(inn_id.clone()))
+            .unwrap();
+        game.mode = GameMode::InnManagement(InnManagementState {
+            current_inn_id: inn_id,
+            selected_party_slot: None,
+            selected_roster_slot: None,
+        });
+
+        app.insert_resource(GlobalState(game));
+
+        app.world_mut()
+            .resource_mut::<Messages<InnRecruitCharacter>>()
+            .write(InnRecruitCharacter { roster_index: 0 });
+        app.update();
+
+        let messages = app.world().resource::<Messages<GameLogEvent>>();
+        let mut reader = messages.get_cursor();
+        let logged: Vec<_> = reader.read(messages).cloned().collect();
+
+        assert!(
+            logged.iter().any(|event| {
+                event.category == LogCategory::Dialogue && event.text == "RosterC joins the party."
+            }),
+            "expected recruit action to emit a dialogue game log event, got: {:?}",
+            logged
+        );
+    }
+
+    #[test]
+    fn test_inn_swap_writes_game_log_event() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        app.add_message::<InnRecruitCharacter>();
+        app.add_message::<InnDismissCharacter>();
+        app.add_message::<InnSwapCharacters>();
+        app.add_message::<ExitInn>();
+        app.add_message::<GameLogEvent>();
+        app.init_resource::<Messages<GameLogEvent>>();
+
+        app.add_systems(Update, inn_action_system);
+
+        let mut game = GameState::new();
+        let inn_id = "test_inn".to_string();
+
+        let party_character = Character::new(
+            "PartyA".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let roster_character = Character::new(
+            "RosterB".to_string(),
+            "elf".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+
+        game.roster
+            .add_character(party_character.clone(), CharacterLocation::InParty)
+            .unwrap();
+        game.party.add_member(party_character).unwrap();
+        game.roster
+            .add_character(roster_character, CharacterLocation::AtInn(inn_id.clone()))
+            .unwrap();
+
+        game.mode = GameMode::InnManagement(InnManagementState {
+            current_inn_id: inn_id,
+            selected_party_slot: None,
+            selected_roster_slot: None,
+        });
+
+        app.insert_resource(GlobalState(game));
+
+        app.world_mut()
+            .resource_mut::<Messages<InnSwapCharacters>>()
+            .write(InnSwapCharacters {
+                party_index: 0,
+                roster_index: 1,
+            });
+        app.update();
+
+        let messages = app.world().resource::<Messages<GameLogEvent>>();
+        let mut reader = messages.get_cursor();
+        let logged: Vec<_> = reader.read(messages).cloned().collect();
+
+        assert!(
+            logged.iter().any(|event| {
+                event.category == LogCategory::Dialogue && event.text == "Party members swapped!"
+            }),
+            "expected swap action to emit a dialogue game log event, got: {:?}",
+            logged
+        );
+    }
+
+    #[test]
+    fn test_exit_inn_writes_game_log_event() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        app.add_message::<InnRecruitCharacter>();
+        app.add_message::<InnDismissCharacter>();
+        app.add_message::<InnSwapCharacters>();
+        app.add_message::<ExitInn>();
+        app.add_message::<GameLogEvent>();
+        app.init_resource::<Messages<GameLogEvent>>();
+
+        app.add_systems(Update, inn_action_system);
+
+        let mut game = GameState::new();
+        game.mode = GameMode::InnManagement(InnManagementState {
+            current_inn_id: "test_inn".to_string(),
+            selected_party_slot: None,
+            selected_roster_slot: None,
+        });
+
+        app.insert_resource(GlobalState(game));
+
+        app.world_mut()
+            .resource_mut::<Messages<ExitInn>>()
+            .write(ExitInn);
+        app.update();
+
+        let messages = app.world().resource::<Messages<GameLogEvent>>();
+        let mut reader = messages.get_cursor();
+        let logged: Vec<_> = reader.read(messages).cloned().collect();
+
+        assert!(
+            logged.iter().any(|event| {
+                event.category == LogCategory::Exploration && event.text == "Left the inn."
+            }),
+            "expected exit action to emit an exploration game log event, got: {:?}",
+            logged
+        );
     }
 
     #[test]

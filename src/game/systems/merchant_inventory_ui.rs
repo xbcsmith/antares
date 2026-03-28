@@ -50,7 +50,7 @@ use crate::domain::character::Inventory;
 use crate::domain::types::ItemId;
 use crate::game::resources::GlobalState;
 use crate::game::systems::inventory_ui::NavigationPhase;
-use crate::game::systems::ui::GameLog;
+use crate::game::systems::ui::{GameLogEvent, LogCategory};
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -1236,7 +1236,7 @@ fn merchant_inventory_action_system(
     mut global_state: ResMut<GlobalState>,
     mut nav_state: ResMut<MerchantNavState>,
     game_content: Option<Res<GameContent>>,
-    mut game_log: Option<ResMut<GameLog>>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
 ) {
     let buy_events: Vec<(String, usize, usize)> = buy_reader
         .read()
@@ -1334,8 +1334,11 @@ fn merchant_inventory_action_system(
                 "BuyItemAction: character[{}] inventory is full; cannot buy",
                 character_index
             );
-            if let Some(ref mut log) = game_log {
-                log.add("Inventory is full. Drop an item to make room.".to_string());
+            if let Some(ref mut writer) = game_log_writer {
+                writer.write(GameLogEvent {
+                    text: "Inventory is full. Drop an item to make room.".to_string(),
+                    category: LogCategory::System,
+                });
             }
             continue;
         }
@@ -1367,8 +1370,11 @@ fn merchant_inventory_action_system(
                             "BuyItemAction: NPC {} stock entry {} is out of stock",
                             npc_id, stock_index
                         );
-                        if let Some(ref mut log) = game_log {
-                            log.add("The merchant is out of stock for that item.".to_string());
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: "The merchant is out of stock for that item.".to_string(),
+                                category: LogCategory::Item,
+                            });
                         }
                         continue;
                     }
@@ -1395,11 +1401,11 @@ fn merchant_inventory_action_system(
                 "BuyItemAction: not enough gold (have {}, need {})",
                 have, need
             );
-            if let Some(ref mut log) = game_log {
-                log.add(format!(
-                    "Not enough gold. Need {} gp, have {} gp.",
-                    need, have
-                ));
+            if let Some(ref mut writer) = game_log_writer {
+                writer.write(GameLogEvent {
+                    text: format!("Not enough gold. Need {} gp, have {} gp.", need, have),
+                    category: LogCategory::System,
+                });
             }
             continue;
         }
@@ -1431,8 +1437,11 @@ fn merchant_inventory_action_system(
                     "BuyItemAction: add_item failed for party[{}]: {:?}; gold refunded",
                     character_index, err
                 );
-                if let Some(ref mut log) = game_log {
-                    log.add("Inventory is full. Drop an item to make room.".to_string());
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: "Inventory is full. Drop an item to make room.".to_string(),
+                        category: LogCategory::System,
+                    });
                 }
             }
         }
@@ -1462,8 +1471,11 @@ fn merchant_inventory_action_system(
                 "SellItemAction: slot_index {} out of bounds (inventory size {}) for party[{}]",
                 slot_index, inv_len, character_index
             );
-            if let Some(ref mut log) = game_log {
-                log.add("You do not have that item.".to_string());
+            if let Some(ref mut writer) = game_log_writer {
+                writer.write(GameLogEvent {
+                    text: "You do not have that item.".to_string(),
+                    category: LogCategory::Item,
+                });
             }
             continue;
         }
@@ -1490,8 +1502,11 @@ fn merchant_inventory_action_system(
                         "SellItemAction: item_id={} is cursed and equipped; rejecting sell for party[{}]",
                         item_id, character_index
                     );
-                    if let Some(ref mut log) = game_log {
-                        log.add("That item is cursed and cannot be removed or sold.".to_string());
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: "That item is cursed and cannot be removed or sold.".to_string(),
+                            category: LogCategory::Item,
+                        });
                     }
                     continue;
                 }
@@ -1946,7 +1961,7 @@ mod tests {
             if global.0.party.gold < price {
                 let have = global.0.party.gold;
                 let need = price;
-                log.add(format!(
+                log.add_system(format!(
                     "Not enough gold. Need {} gp, have {} gp.",
                     need, have
                 ));
@@ -2009,7 +2024,7 @@ mod tests {
         // Replicate the inventory-full check from merchant_inventory_action_system
         let character_index = 0_usize;
         if global.0.party.members[character_index].inventory.is_full() {
-            log.add("Inventory is full. Drop an item to make room.".to_string());
+            log.add_system("Inventory is full. Drop an item to make room.".to_string());
         }
 
         let entries = log.entries();
@@ -2072,7 +2087,7 @@ mod tests {
         assert!(is_equipped, "Item must be equipped for this test");
 
         if is_cursed_simulated && is_equipped {
-            log.add("That item is cursed and cannot be removed or sold.".to_string());
+            log.add_system("That item is cursed and cannot be removed or sold.".to_string());
         }
 
         // The item must still be in inventory (not removed)

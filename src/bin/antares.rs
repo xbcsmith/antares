@@ -376,6 +376,7 @@ mod tests {
                 controls: ControlsConfig::default(),
                 camera: CameraConfig::default(),
                 rest: Default::default(),
+                game_log: Default::default(),
             },
         }
     }

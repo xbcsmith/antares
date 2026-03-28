@@ -188,7 +188,7 @@ fn handle_start_dialogue(
                     );
                     info!("{}", error_msg);
                     if let Some(ref mut log) = game_log {
-                        log.add(error_msg);
+                        log.add_system(error_msg);
                     }
                     return;
                 }
@@ -201,7 +201,7 @@ fn handle_start_dialogue(
                         format!("Dialogue {} has invalid root node {}", ev.dialogue_id, root);
                     info!("{}", error_msg);
                     if let Some(ref mut log) = game_log {
-                        log.add(error_msg);
+                        log.add_system(error_msg);
                     }
                     return;
                 }
@@ -264,12 +264,19 @@ fn handle_start_dialogue(
                             dlg_state.as_ref(),
                             quest_system.as_mut().map(|r| r.as_mut()),
                             game_log.as_mut().map(|r| r.as_mut()),
+                            None,
                             &mut despawn_recruitable_visuals.as_mut(),
                         );
                     }
                     if let Some(ref mut log) = game_log {
                         let speaker = tree.speaker_name.as_deref().unwrap_or("NPC");
-                        log.add(format!("{}: {}", speaker, node.text));
+                        let concise_text: String = node.text.chars().take(80).collect();
+                        let concise_text = if node.text.chars().count() > 80 {
+                            format!("{}…", concise_text)
+                        } else {
+                            concise_text
+                        };
+                        log.add_dialogue(format!("{}: {}", speaker, concise_text));
                     }
 
                     // Update DialogueState with current node text and choices
@@ -292,7 +299,7 @@ fn handle_start_dialogue(
                 );
                 info!("{}", error_msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(error_msg);
+                    log.add_system(error_msg);
                 }
                 // Do not enter Dialogue mode - stay in current mode
             }
@@ -308,7 +315,13 @@ fn handle_simple_dialogue(
 ) {
     for ev in ev_reader.read() {
         if let Some(ref mut log) = game_log {
-            log.add(format!("{}: {}", ev.speaker_name, ev.text));
+            let concise_text: String = ev.text.chars().take(80).collect();
+            let concise_text = if ev.text.chars().count() > 80 {
+                format!("{}…", concise_text)
+            } else {
+                concise_text
+            };
+            log.add_dialogue(format!("{}: {}", ev.speaker_name, concise_text));
         }
 
         let state = DialogueState::start_simple(
@@ -332,6 +345,7 @@ fn handle_select_choice(
     content: Res<GameContent>,
     mut quest_system: Option<ResMut<crate::application::quests::QuestSystem>>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
+    mut game_log_writer: Option<MessageWriter<crate::game::systems::ui::GameLogEvent>>,
     mut despawn_recruitable_visuals: Option<
         MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
     >,
@@ -371,7 +385,7 @@ fn handle_select_choice(
                     );
                     info!("{}", error_msg);
                     if let Some(ref mut log) = game_log {
-                        log.add(error_msg);
+                        log.add_system(error_msg);
                     }
                     continue;
                 }
@@ -404,6 +418,7 @@ fn handle_select_choice(
                             dlg_state.as_ref(),
                             quest_system.as_mut().map(|r| r.as_mut()),
                             game_log.as_mut().map(|r| r.as_mut()),
+                            game_log_writer.as_mut(),
                             &mut despawn_recruitable_visuals.as_mut(),
                         );
                     }
@@ -433,8 +448,8 @@ fn handle_select_choice(
                                 );
                                 info!("{}", error_msg);
                                 if let Some(ref mut log) = game_log {
-                                    log.add(error_msg);
-                                    log.add("Dialogue ended unexpectedly.".to_string());
+                                    log.add_system(error_msg);
+                                    log.add_system("Dialogue ended unexpectedly.".to_string());
                                 }
                                 // End dialogue gracefully
                                 global_state.0.return_to_exploration();
@@ -459,7 +474,13 @@ fn handle_select_choice(
                         if let Some((text, actions)) = new_node_data {
                             if let Some(ref mut log) = game_log {
                                 let speaker = tree.speaker_name.as_deref().unwrap_or("NPC");
-                                log.add(format!("{}: {}", speaker, text));
+                                let concise_text: String = text.chars().take(80).collect();
+                                let concise_text = if text.chars().count() > 80 {
+                                    format!("{}…", concise_text)
+                                } else {
+                                    concise_text
+                                };
+                                log.add_dialogue(format!("{}: {}", speaker, concise_text));
                             }
 
                             for action in actions {
@@ -474,6 +495,7 @@ fn handle_select_choice(
                                     dlg_state.as_ref(),
                                     quest_system.as_mut().map(|r| r.as_mut()),
                                     game_log.as_mut().map(|r| r.as_mut()),
+                                    game_log_writer.as_mut(),
                                     &mut despawn_recruitable_visuals.as_mut(),
                                 );
                             }
@@ -499,7 +521,7 @@ fn handle_select_choice(
             let error_msg = format!("Active dialogue tree {} not found in database", tree_id);
             info!("{}", error_msg);
             if let Some(ref mut log) = game_log {
-                log.add(error_msg);
+                log.add_system(error_msg);
             }
             // If the dialogue tree is missing, we should end dialogue
             if let GameMode::Dialogue(_) = global_state.0.mode {
@@ -689,9 +711,9 @@ fn execute_recruit_to_party(
             info!("Successfully recruited '{}' to active party", character_id);
             if let Some(log) = game_log.as_deref_mut() {
                 if let Some(char_def) = db.characters.get_character(character_id) {
-                    log.add(format!("{} joins the party!", char_def.name));
+                    log.add_dialogue(format!("{} joins the party!", char_def.name));
                 } else {
-                    log.add(format!("{} joins the party!", character_id));
+                    log.add_dialogue(format!("{} joins the party!", character_id));
                 }
             }
 
@@ -735,12 +757,12 @@ fn execute_recruit_to_party(
             info!("Party full - sent '{}' to inn '{}'", character_id, inn_id);
             if let Some(log) = game_log.as_deref_mut() {
                 if let Some(char_def) = db.characters.get_character(character_id) {
-                    log.add(format!(
+                    log.add_dialogue(format!(
                         "Party is full! {} will wait at the inn.",
                         char_def.name
                     ));
                 } else {
-                    log.add(format!("Party is full! {} sent to inn.", character_id));
+                    log.add_dialogue(format!("Party is full! {} sent to inn.", character_id));
                 }
             }
 
@@ -774,31 +796,31 @@ fn execute_recruit_to_party(
         Err(crate::application::RecruitmentError::AlreadyEncountered(id)) => {
             warn!("Cannot recruit '{}': already encountered", id);
             if let Some(log) = game_log.as_deref_mut() {
-                log.add(format!("{} has already joined your adventure.", id));
+                log.add_dialogue(format!("{} has already joined your adventure.", id));
             }
         }
         Err(crate::application::RecruitmentError::CharacterNotFound(id)) => {
             error!("Character definition '{}' not found in database", id);
             if let Some(log) = game_log.as_deref_mut() {
-                log.add(format!("Error: Character '{}' not found.", id));
+                log.add_system(format!("Error: Character '{}' not found.", id));
             }
         }
         Err(crate::application::RecruitmentError::CharacterDefinition(err)) => {
             error!("Character definition error for '{}': {}", character_id, err);
             if let Some(log) = game_log.as_deref_mut() {
-                log.add(format!("Error loading character: {}", err));
+                log.add_system(format!("Error loading character: {}", err));
             }
         }
         Err(crate::application::RecruitmentError::CharacterError(err)) => {
             error!("Character operation error for '{}': {}", character_id, err);
             if let Some(log) = game_log.as_deref_mut() {
-                log.add(format!("Error: {}", err));
+                log.add_system(format!("Error: {}", err));
             }
         }
         Err(crate::application::RecruitmentError::PartyManager(err)) => {
             error!("Party management error for '{}': {}", character_id, err);
             if let Some(log) = game_log.as_deref_mut() {
-                log.add(format!("Error: {}", err));
+                log.add_system(format!("Error: {}", err));
             }
         }
     }
@@ -814,6 +836,7 @@ fn execute_recruit_to_party(
 /// - `SetFlag` / `ChangeReputation` / `TriggerEvent` → not fully implemented
 /// - `GrantExperience` → grants XP to first party member
 #[allow(unused_mut)]
+#[allow(clippy::too_many_arguments)]
 fn execute_action(
     action: &DialogueAction,
     game_state: &mut crate::application::GameState,
@@ -821,6 +844,7 @@ fn execute_action(
     dialogue_state: Option<&crate::application::dialogue::DialogueState>,
     quest_system: Option<&mut crate::application::quests::QuestSystem>,
     mut game_log: Option<&mut crate::game::systems::ui::GameLog>,
+    mut game_log_writer: Option<&mut MessageWriter<crate::game::systems::ui::GameLogEvent>>,
     despawn_recruitable_visuals: &mut Option<
         &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
     >,
@@ -831,7 +855,7 @@ fn execute_action(
                 if let Err(err) = qs.start_quest(*quest_id, game_state, db) {
                     println!("Failed to start quest {}: {}", quest_id, err);
                 } else if let Some(ref mut log) = game_log {
-                    log.add(format!("Quest {} started", quest_id));
+                    log.add_dialogue(format!("Quest {} started", quest_id));
                 }
             } else {
                 println!("Warning: StartQuest requested but no QuestSystem present");
@@ -916,7 +940,7 @@ fn execute_action(
                     });
 
                     if let Some(ref mut log) = game_log {
-                        log.add("Opening party management...".to_string());
+                        log.add_system("Opening party management...".to_string());
                     }
                 } else {
                     warn!("TriggerEvent 'open_inn_party_management' called but no speaker_npc_id available in DialogueState");
@@ -946,7 +970,7 @@ fn execute_action(
                         event_name
                     );
                     if let Some(log) = game_log.as_deref_mut() {
-                        log.add(
+                        log.add_system(
                             "Error: Could not resolve recruitable character for this dialogue."
                                 .to_string(),
                         );
@@ -957,7 +981,7 @@ fn execute_action(
             // Generic event logging (kept for visibility/audit)
             info!("Dialogue triggered event: {}", event_name);
             if let Some(ref mut log) = game_log {
-                log.add(format!("Event triggered: {}", event_name));
+                log.add_system(format!("Event triggered: {}", event_name));
             }
         }
         DialogueAction::GrantExperience { amount } => {
@@ -996,7 +1020,7 @@ fn execute_action(
             if game_state.encountered_characters.contains(character_id) {
                 warn!("Cannot recruit '{}': already encountered", character_id);
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("{} has already been recruited.", character_id));
+                    log.add_system(format!("{} has already been recruited.", character_id));
                 }
                 return;
             }
@@ -1005,7 +1029,7 @@ fn execute_action(
             if db.npcs.get_npc(innkeeper_id).is_none() {
                 error!("Innkeeper '{}' not found in database", innkeeper_id);
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("Error: Innkeeper '{}' not found.", innkeeper_id));
+                    log.add_system(format!("Error: Innkeeper '{}' not found.", innkeeper_id));
                 }
                 return;
             }
@@ -1019,7 +1043,7 @@ fn execute_action(
                         character_id
                     );
                     if let Some(ref mut log) = game_log {
-                        log.add(format!("Error: Character '{}' not found.", character_id));
+                        log.add_system(format!("Error: Character '{}' not found.", character_id));
                     }
                     return;
                 }
@@ -1031,7 +1055,7 @@ fn execute_action(
                 Err(e) => {
                     error!("Failed to instantiate character '{}': {}", character_id, e);
                     if let Some(ref mut log) = game_log {
-                        log.add(format!("Error creating character: {}", e));
+                        log.add_system(format!("Error creating character: {}", e));
                     }
                     return;
                 }
@@ -1042,7 +1066,7 @@ fn execute_action(
             if let Err(e) = game_state.roster.add_character(character, location) {
                 error!("Failed to add character to roster: {}", e);
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("Error: {}", e));
+                    log.add_system(format!("Error: {}", e));
                 }
                 return;
             }
@@ -1058,7 +1082,7 @@ fn execute_action(
                 character_id, innkeeper_id
             );
             if let Some(ref mut log) = game_log {
-                log.add(format!("{} will wait at the inn.", char_def.name));
+                log.add_dialogue(format!("{} will wait at the inn.", char_def.name));
             }
 
             // Remove recruitment event from map
@@ -1084,7 +1108,7 @@ fn execute_action(
             info!("Opening inn party management for inn '{}'", innkeeper_id);
 
             if let Some(ref mut log) = game_log {
-                log.add("Opening party management...".to_string());
+                log.add_system("Opening party management...".to_string());
             }
 
             game_state.mode = GameMode::InnManagement(InnManagementState {
@@ -1211,15 +1235,31 @@ fn execute_action(
                         "Bought item {} (charges={}) for character {}",
                         item_id, slot.charges, character_id
                     );
-                    if let Some(ref mut log) = game_log {
-                        log.add(format!("Purchased item {}.", item_id));
+                    if let Some(ref mut writer) = game_log_writer {
+                        let item_name = db
+                            .items
+                            .get_item(*item_id)
+                            .map(|item| item.name.clone())
+                            .unwrap_or_else(|| format!("item {}", item_id));
+                        let cost = db
+                            .items
+                            .get_item(*item_id)
+                            .map(|item| item.base_cost)
+                            .unwrap_or(0);
+                        writer.write(crate::game::systems::ui::GameLogEvent {
+                            text: format!("Bought {} for {} gold.", item_name, cost),
+                            category: crate::game::systems::ui::LogCategory::Item,
+                        });
                     }
                 }
                 Err(e) => {
                     // On failure nothing was mutated: no commit needed
                     warn!("BuyItem failed: {}", e);
-                    if let Some(ref mut log) = game_log {
-                        log.add(format!("Cannot buy item: {}", e));
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(crate::game::systems::ui::GameLogEvent {
+                            text: format!("Cannot buy item: {}", e),
+                            category: crate::game::systems::ui::LogCategory::System,
+                        });
                     }
                 }
             }
@@ -1339,14 +1379,25 @@ fn execute_action(
                     // Commit mutated NPC runtime state
                     game_state.npc_runtime.insert(npc_runtime_clone);
                     info!("Sold item {} for {} gold", item_id, price);
-                    if let Some(ref mut log) = game_log {
-                        log.add(format!("Sold item {} for {} gold.", item_id, price));
+                    if let Some(ref mut writer) = game_log_writer {
+                        let item_name = db
+                            .items
+                            .get_item(*item_id)
+                            .map(|item| item.name.clone())
+                            .unwrap_or_else(|| format!("item {}", item_id));
+                        writer.write(crate::game::systems::ui::GameLogEvent {
+                            text: format!("Sold {} for {} gold.", item_name, price),
+                            category: crate::game::systems::ui::LogCategory::Item,
+                        });
                     }
                 }
                 Err(e) => {
                     warn!("SellItem failed: {}", e);
-                    if let Some(ref mut log) = game_log {
-                        log.add(format!("Cannot sell item: {}", e));
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(crate::game::systems::ui::GameLogEvent {
+                            text: format!("Cannot sell item: {}", e),
+                            category: crate::game::systems::ui::LogCategory::System,
+                        });
                     }
                 }
             }
@@ -1373,7 +1424,7 @@ fn execute_action(
                     npc_id
                 );
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("'{}' is not a merchant.", npc_name));
+                    log.add_system(format!("'{}' is not a merchant.", npc_name));
                 }
                 return;
             }
@@ -1484,7 +1535,7 @@ fn execute_action(
                     game_state.party.gold, service_cost.0
                 );
                 if let Some(ref mut log) = game_log {
-                    log.add(format!(
+                    log.add_system(format!(
                         "Not enough gold for service '{}' (need {} gold).",
                         service_id, service_cost.0
                     ));
@@ -1498,7 +1549,7 @@ fn execute_action(
                     game_state.party.gems, service_cost.1
                 );
                 if let Some(ref mut log) = game_log {
-                    log.add(format!(
+                    log.add_system(format!(
                         "Not enough gems for service '{}' (need {} gems).",
                         service_id, service_cost.1
                     ));
@@ -1532,11 +1583,15 @@ fn execute_action(
                 affected.len()
             );
             if let Some(ref mut log) = game_log {
-                log.add(format!(
-                    "Service '{}' applied to {} character(s).",
-                    service_id,
-                    affected.len()
-                ));
+                if service_id == "heal_all" && target_character_ids.is_empty() {
+                    log.add_exploration("The party rests. HP restored.".to_string());
+                } else {
+                    log.add_system(format!(
+                        "Service '{}' applied to {} character(s).",
+                        service_id,
+                        affected.len()
+                    ));
+                }
             }
         }
     }
@@ -1699,6 +1754,7 @@ mod tests {
                         None,
                         None,
                         None,
+                        None,
                         &mut despawn_recruitable_visuals,
                     );
                 }
@@ -1825,6 +1881,7 @@ mod tests {
                                 action,
                                 &mut gs.0,
                                 &db,
+                                None,
                                 None,
                                 None,
                                 None,
@@ -2044,6 +2101,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2122,6 +2180,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2179,6 +2238,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2201,6 +2261,7 @@ mod tests {
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
             None,
@@ -2263,6 +2324,7 @@ mod tests {
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
             None,
@@ -2332,6 +2394,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2344,6 +2407,7 @@ mod tests {
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
             None,
@@ -2402,6 +2466,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2424,6 +2489,7 @@ mod tests {
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
             None,
@@ -2472,6 +2538,7 @@ mod tests {
             &mut game_state,
             &db,
             Some(&dlg_state),
+            None,
             None,
             None,
             &mut despawn_recruitable_visuals,
@@ -2544,6 +2611,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2579,6 +2647,7 @@ mod tests {
             &mut game_state,
             &db,
             Some(&dlg_state),
+            None,
             None,
             None,
             &mut despawn_recruitable_visuals,
@@ -2737,6 +2806,7 @@ mod tests {
             None,
             None,
             Some(&mut log),
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2881,6 +2951,7 @@ mod tests {
             Some(&merchant_dialogue_state()),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -2900,6 +2971,66 @@ mod tests {
     }
 
     #[test]
+    fn test_buy_item_dialogue_action_logs_item_name_and_price() {
+        use crate::domain::dialogue::{DialogueChoice, DialogueNode, DialogueTree};
+        use crate::game::systems::ui::UiPlugin;
+
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_plugins(UiPlugin);
+        app.add_plugins(DialoguePlugin);
+
+        let mut db = make_merchant_db();
+        let mut tree = DialogueTree::new(700, "Merchant Buy", 1);
+        let mut root = DialogueNode::new(1, "Take a look at my wares.");
+        let mut choice = DialogueChoice::new("Buy sword", None);
+        choice.add_action(DialogueAction::BuyItem {
+            item_id: 1,
+            target_character_id: None,
+        });
+        root.add_choice(choice);
+        tree.add_node(root);
+        db.dialogues.add_dialogue(tree);
+
+        let mut game_state = make_game_state_with_merchant(100);
+        game_state.mode = crate::application::GameMode::Dialogue(
+            crate::application::dialogue::DialogueState::start(
+                700,
+                1,
+                None,
+                Some("merchant_tom".to_string()),
+            ),
+        );
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+
+        // Act
+        {
+            let mut choice_msgs = app
+                .world_mut()
+                .resource_mut::<Messages<SelectDialogueChoice>>();
+            choice_msgs.write(SelectDialogueChoice { choice_index: 0 });
+        }
+
+        app.update();
+
+        // Assert
+        let game_log = app.world().resource::<crate::game::systems::ui::GameLog>();
+        let last_entry = game_log
+            .entries()
+            .last()
+            .expect("buying an item should append a game log entry");
+        assert_eq!(
+            last_entry.category,
+            crate::game::systems::ui::LogCategory::Item
+        );
+        assert_eq!(last_entry.text, "Bought Iron Sword for 10 gold.");
+    }
+
+    #[test]
     fn test_buy_item_dialogue_action_insufficient_gold_no_mutation() {
         // Arrange
         let db = make_merchant_db();
@@ -2915,6 +3046,7 @@ mod tests {
             &mut game_state,
             &db,
             Some(&merchant_dialogue_state()),
+            None,
             None,
             None,
             &mut despawn_recruitable_visuals,
@@ -2989,6 +3121,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -3001,6 +3134,75 @@ mod tests {
             game_state.party.gold, 50,
             "Party should have paid 50 gold for heal_all service"
         );
+    }
+
+    #[test]
+    fn test_consume_service_dialogue_action_logs_rest_message() {
+        use crate::domain::inventory::{ServiceCatalog, ServiceEntry};
+        use crate::domain::world::npc::NpcDefinition;
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        let mut db = ContentDatabase::new();
+        let mut priest = NpcDefinition::priest("priest_anna", "Anna", "anna.png");
+        let mut catalog = ServiceCatalog::new();
+        catalog.services.push(ServiceEntry::new(
+            "heal_all".to_string(),
+            50,
+            "Heal all party members".to_string(),
+        ));
+        priest.service_catalog = Some(catalog);
+        db.npcs.add_npc(priest).unwrap();
+
+        let mut game_state = crate::application::GameState::new();
+
+        use crate::domain::character::{Alignment, Character, Sex};
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp.base = 30;
+        hero.hp.current = 5;
+        game_state.party.add_member(hero).unwrap();
+        game_state.party.gold = 100;
+
+        let priest_runtime = NpcRuntimeState::new("priest_anna".to_string());
+        game_state.npc_runtime.insert(priest_runtime);
+
+        let dlg_state = crate::application::dialogue::DialogueState::start(
+            1,
+            1,
+            None,
+            Some("priest_anna".to_string()),
+        );
+        let mut game_log = crate::game::systems::ui::GameLog::new();
+
+        let mut despawn_recruitable_visuals = None;
+        execute_action(
+            &DialogueAction::ConsumeService {
+                service_id: "heal_all".to_string(),
+                target_character_ids: vec![],
+            },
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            Some(&mut game_log),
+            None,
+            &mut despawn_recruitable_visuals,
+        );
+
+        let last_entry = game_log
+            .entries()
+            .last()
+            .expect("heal_all should append a game log entry");
+        assert_eq!(
+            last_entry.category,
+            crate::game::systems::ui::LogCategory::Exploration
+        );
+        assert_eq!(last_entry.text, "The party rests. HP restored.");
     }
 
     #[test]
@@ -3058,6 +3260,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -3107,6 +3310,7 @@ mod tests {
             Some(&merchant_dialogue_state()),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -3138,6 +3342,7 @@ mod tests {
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
             None,
@@ -3222,6 +3427,7 @@ mod tests {
             Some(&dlg_state),
             None,
             None,
+            None,
             &mut despawn_recruitable_visuals,
         );
 
@@ -3234,10 +3440,116 @@ mod tests {
                 .all(|s| s.item_id != 1),
             "Item 1 should be removed from inventory after selling"
         );
-        assert!(
-            gs.party.gold > 0,
-            "Party gold should increase after selling an item"
+        assert_eq!(
+            gs.party.gold, 2,
+            "Party gold should increase by the domain sale value for the item"
         );
+    }
+
+    #[test]
+    fn test_sell_item_dialogue_action_logs_item_name_and_price() {
+        use crate::domain::dialogue::{DialogueChoice, DialogueNode, DialogueTree};
+        use crate::domain::items::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::DiceRoll;
+        use crate::domain::world::npc::NpcDefinition;
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+        use crate::game::systems::ui::UiPlugin;
+
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_plugins(UiPlugin);
+        app.add_plugins(DialoguePlugin);
+
+        let mut db = ContentDatabase::new();
+
+        let item1 = Item {
+            id: 1,
+            name: "Old Dagger".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 4, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::Simple,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(item1).unwrap();
+
+        let merchant = NpcDefinition::merchant("merchant_tom", "Tom", "tom.png");
+        db.npcs.add_npc(merchant).unwrap();
+
+        let mut tree = DialogueTree::new(701, "Merchant Sell", 1);
+        let mut root = DialogueNode::new(1, "What are you selling?");
+        let mut choice = DialogueChoice::new("Sell dagger", None);
+        choice.add_action(DialogueAction::SellItem {
+            item_id: 1,
+            source_character_id: None,
+        });
+        root.add_choice(choice);
+        tree.add_node(root);
+        db.dialogues.add_dialogue(tree);
+
+        use crate::domain::character::{Alignment, Character, Sex};
+        let mut gs = crate::application::GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.inventory.add_item(1, 0).unwrap();
+        gs.party.add_member(hero).unwrap();
+        gs.party.gold = 0;
+        gs.mode = crate::application::GameMode::Dialogue(
+            crate::application::dialogue::DialogueState::start(
+                701,
+                1,
+                None,
+                Some("merchant_tom".to_string()),
+            ),
+        );
+
+        let npc_runtime = NpcRuntimeState::new("merchant_tom".to_string());
+        gs.npc_runtime.insert(npc_runtime);
+
+        app.insert_resource(GlobalState(gs));
+        app.insert_resource(GameContent::new(db));
+
+        // Act
+        {
+            let mut choice_msgs = app
+                .world_mut()
+                .resource_mut::<Messages<SelectDialogueChoice>>();
+            choice_msgs.write(SelectDialogueChoice { choice_index: 0 });
+        }
+
+        app.update();
+
+        // Assert
+        let game_log = app.world().resource::<crate::game::systems::ui::GameLog>();
+        let last_entry = game_log
+            .entries()
+            .last()
+            .expect("selling an item should append a game log entry");
+        assert_eq!(
+            last_entry.category,
+            crate::game::systems::ui::LogCategory::Item
+        );
+        assert_eq!(last_entry.text, "Sold Old Dagger for 2 gold.");
     }
 
     // ─── Phase 3: Dialogue → SetFacing integration tests ─────────────────────

@@ -18,6 +18,33 @@
 //! - Condition and action configuration
 //! - Dialogue tree validation and preview
 //! - Import/export RON support
+//!
+//! # Merchant Dialogue Policy
+//!
+//! The final merchant dialogue contract is split into two layers:
+//!
+//! Authoring contract:
+//!
+//! - merchant-capable dialogue must explicitly contain
+//!   `DialogueAction::OpenMerchant { npc_id }`
+//! - SDK-managed merchant content must remain distinguishable from
+//!   author-authored dialogue content
+//! - merchant generation, augmentation, validation, repair, and removal must be
+//!   non-destructive to unrelated custom dialogue content
+//!
+//! Runtime contract:
+//!
+//! - executing `DialogueAction::OpenMerchant { npc_id }` must open the merchant
+//!   inventory for that NPC
+//! - pressing `I` while already in dialogue with a merchant NPC remains a
+//!   runtime convenience shortcut only
+//! - the `I` shortcut is not the content-authoring standard and does not replace
+//!   the requirement for explicit `OpenMerchant` in merchant dialogue content
+//!
+//! This editor is a primary policy touchpoint because it owns the loaded
+//! dialogue trees used to inspect, generate, augment, validate, repair, and
+//! preserve SDK-managed merchant branches inside otherwise custom dialogue
+//! trees.
 
 use crate::ui_helpers::{
     autocomplete_item_selector, autocomplete_quest_selector, show_standard_list_item,
@@ -31,11 +58,17 @@ use antares::domain::dialogue::{
 use antares::domain::items::types::Item;
 use antares::domain::quest::{Quest, QuestId};
 use antares::domain::types::ItemId;
+use antares::domain::world::npc::NpcDefinition;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Editor state for dialogue tree editing
+/// Editor state for dialogue tree editing.
+///
+/// Merchant dialogue lifecycle work integrates here because the editor owns the
+/// loaded dialogue trees that must be inspected for explicit `OpenMerchant`
+/// support, SDK-managed merchant metadata, validation state, repair actions,
+/// and non-destructive merchant lifecycle transitions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DialogueEditorState {
     /// All dialogue trees being edited
@@ -125,7 +158,42 @@ pub enum DialogueEditorMode {
     Editing,
 }
 
-/// Buffer for dialogue tree form fields
+/// Result of applying merchant dialogue lifecycle work for an NPC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MerchantDialogueUpdate {
+    /// No changes were needed because the NPC is not a merchant.
+    Unchanged,
+    /// No changes were needed because the assigned dialogue already contains
+    /// explicit merchant-opening content for the NPC.
+    AlreadyValid,
+    /// A new merchant dialogue template was created and assigned.
+    CreatedNew {
+        /// The newly allocated dialogue identifier.
+        dialogue_id: DialogueId,
+    },
+    /// An existing assigned dialogue was augmented with the standard
+    /// SDK-managed merchant branch.
+    AugmentedExisting {
+        /// The dialogue identifier that was augmented.
+        dialogue_id: DialogueId,
+    },
+    /// SDK-managed merchant content was removed from the assigned dialogue.
+    RemovedMerchantContent {
+        /// The dialogue identifier that was cleaned up.
+        dialogue_id: DialogueId,
+    },
+    /// No merchant content was present to remove from the assigned dialogue.
+    NoMerchantContentToRemove {
+        /// The dialogue identifier that was inspected.
+        dialogue_id: DialogueId,
+    },
+}
+
+/// Buffer for dialogue tree form fields.
+///
+/// Merchant dialogue policy uses the edited tree identity and display metadata
+/// as the stable anchor for SDK-generated merchant templates and SDK-inserted
+/// merchant branches while preserving authored dialogue content where possible.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DialogueEditBuffer {
     pub id: String,
@@ -1178,6 +1246,104 @@ impl DialogueEditorState {
             .saturating_add(1)
     }
 
+    /// Ensures a merchant NPC has a compliant dialogue assignment.
+    ///
+    /// If the merchant has no assigned dialogue, this creates a new standard
+    /// merchant template tree, appends it to the editor's loaded dialogue
+    /// collection, and assigns the new dialogue ID to the NPC.
+    ///
+    /// If the merchant already has an assigned dialogue, the editor loads that
+    /// tree and augments it with the standard SDK-managed merchant branch when
+    /// the dialogue does not already contain an explicit
+    /// `DialogueAction::OpenMerchant { npc_id }` path for this NPC.
+    ///
+    /// Returns a status describing what action was taken.
+    pub fn ensure_merchant_dialogue_for_npc(
+        &mut self,
+        npc: &mut NpcDefinition,
+    ) -> Result<MerchantDialogueUpdate, String> {
+        if !npc.is_merchant {
+            return Ok(MerchantDialogueUpdate::Unchanged);
+        }
+
+        if let Some(dialogue_id) = npc.dialogue_id {
+            let dialogue = self
+                .dialogues
+                .iter_mut()
+                .find(|dialogue| dialogue.id == dialogue_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Assigned dialogue {} for merchant '{}' was not found",
+                        dialogue_id, npc.id
+                    )
+                })?;
+
+            if dialogue.contains_open_merchant_for_npc(&npc.id) {
+                return Ok(MerchantDialogueUpdate::AlreadyValid);
+            }
+
+            if dialogue.ensure_standard_merchant_branch(&npc.id, &npc.name) {
+                self.has_unsaved_changes = true;
+                return Ok(MerchantDialogueUpdate::AugmentedExisting { dialogue_id });
+            }
+
+            return Err(format!(
+                "Assigned dialogue {} for merchant '{}' could not be augmented",
+                dialogue_id, npc.id
+            ));
+        }
+
+        let dialogue_id = self.next_available_dialogue_id();
+        let dialogue = DialogueTree::standard_merchant_template(dialogue_id, &npc.id, &npc.name);
+        self.dialogues.push(dialogue);
+        npc.dialogue_id = Some(dialogue_id);
+        self.has_unsaved_changes = true;
+
+        Ok(MerchantDialogueUpdate::CreatedNew { dialogue_id })
+    }
+
+    /// Removes SDK-managed merchant content from the assigned dialogue for an
+    /// NPC that is no longer a merchant.
+    ///
+    /// This cleanup is intentionally non-destructive:
+    ///
+    /// - only SDK-managed merchant nodes and choices are removed
+    /// - unrelated authored dialogue content remains intact
+    /// - the dialogue asset itself is retained
+    /// - the NPC's `dialogue_id` is not cleared automatically
+    ///
+    /// Returns a status describing what action was taken.
+    pub fn remove_merchant_dialogue_for_npc(
+        &mut self,
+        npc: &NpcDefinition,
+    ) -> Result<MerchantDialogueUpdate, String> {
+        if npc.is_merchant {
+            return Ok(MerchantDialogueUpdate::Unchanged);
+        }
+
+        let Some(dialogue_id) = npc.dialogue_id else {
+            return Ok(MerchantDialogueUpdate::Unchanged);
+        };
+
+        let dialogue = self
+            .dialogues
+            .iter_mut()
+            .find(|dialogue| dialogue.id == dialogue_id)
+            .ok_or_else(|| {
+                format!(
+                    "Assigned dialogue {} for non-merchant '{}' was not found",
+                    dialogue_id, npc.id
+                )
+            })?;
+
+        if dialogue.remove_sdk_managed_merchant_content() {
+            self.has_unsaved_changes = true;
+            Ok(MerchantDialogueUpdate::RemovedMerchantContent { dialogue_id })
+        } else {
+            Ok(MerchantDialogueUpdate::NoMerchantContentToRemove { dialogue_id })
+        }
+    }
+
     /// Finds the next available node ID for the currently selected dialogue.
     ///
     /// Returns the maximum node ID in the selected dialogue plus 1, or 1 if no nodes exist.
@@ -1672,6 +1838,7 @@ impl DialogueEditorState {
                 ItemAction::Edit => {
                     self.start_edit_dialogue(action_idx);
                 }
+
                 ItemAction::Delete => {
                     self.delete_dialogue(action_idx);
                     *dialogues = self.dialogues.clone();
@@ -2306,6 +2473,7 @@ impl DialogueEditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antares::domain::world::npc::NpcDefinition;
 
     #[test]
     fn test_dialogue_editor_state_creation() {

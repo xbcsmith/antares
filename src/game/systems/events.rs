@@ -14,7 +14,7 @@ use crate::game::systems::furniture_rendering::{
 use crate::game::systems::item_world_events::ItemPickedUpEvent;
 use crate::game::systems::map::{EventTrigger, MapChangeEvent, NpcMarker, TileCoord};
 use crate::game::systems::procedural_meshes::ProceduralMeshCache;
-use crate::game::systems::ui::GameLog;
+use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use bevy::prelude::*;
 
 pub struct EventPlugin;
@@ -179,7 +179,7 @@ fn handle_pickup_dropped_item(
     mut requests: MessageReader<PickupDroppedItemRequest>,
     mut global_state: ResMut<GlobalState>,
     mut picked_up_writer: Option<MessageWriter<ItemPickedUpEvent>>,
-    mut game_log: Option<ResMut<GameLog>>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
 ) {
     // Collect requests to avoid holding a borrow while mutating global_state.
     let requests: Vec<PickupDroppedItemRequest> = requests.read().cloned().collect();
@@ -207,13 +207,34 @@ fn handle_pickup_dropped_item(
             req.item_id,
         ) {
             Ok(slot) => {
-                let msg = format!(
+                let debug_msg = format!(
                     "Picked up item {} (charges={}) from map {} tile {:?}",
                     slot.item_id, slot.charges, req.map_id, req.position
                 );
-                info!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                info!("{}", debug_msg);
+
+                let item_name = game_state
+                    .party
+                    .members
+                    .get(req.party_index)
+                    .and_then(|character| {
+                        character.inventory.items.iter().find(|inventory_slot| {
+                            inventory_slot.item_id == slot.item_id
+                                && inventory_slot.charges == slot.charges
+                        })
+                    })
+                    .map(|_| format!("item {}", slot.item_id))
+                    .unwrap_or_else(|| format!("item {}", slot.item_id));
+
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: format!("Picked up {}.", item_name),
+                        category: LogCategory::Item,
+                    });
+                    writer.write(GameLogEvent {
+                        text: debug_msg,
+                        category: LogCategory::Item,
+                    });
                 }
 
                 // Notify the visual system to despawn the 3-D marker.
@@ -245,8 +266,8 @@ fn handle_events(
     mut dialogue_writer: MessageWriter<StartDialogue>,
     mut simple_dialogue_writer: MessageWriter<SimpleDialogue>,
     mut combat_started_writer: Option<MessageWriter<crate::game::systems::combat::CombatStarted>>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
     content: Res<GameContent>,
-    mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
     mut global_state: ResMut<GlobalState>,
     mut commands: Option<Commands>,
     mut materials: Option<ResMut<Assets<StandardMaterial>>>,
@@ -283,10 +304,19 @@ fn handle_events(
                 map_id,
                 ..
             } => {
-                let msg = format!("Teleporting to Map {} at {:?}", map_id, destination);
+                let map_name = content
+                    .db()
+                    .maps
+                    .get_map(*map_id)
+                    .map(|map| map.name.clone())
+                    .unwrap_or_else(|| format!("Map {}", map_id));
+                let msg = format!("Entering {}...", map_name);
                 println!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Exploration,
+                    });
                 }
 
                 // Emit a MapChangeEvent so the MapManagerPlugin can handle the
@@ -305,25 +335,36 @@ fn handle_events(
                     fallback_position: Some(trigger.position),
                 });
 
-                let msg = format!("Sign reads: {}", text);
+                let msg = format!("{}: {}", name, text);
                 println!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Exploration,
+                    });
                 }
             }
-            MapEvent::Trap { damage, effect, .. } => {
-                let msg = format!("IT'S A TRAP! Took {} damage. Effect: {:?}", damage, effect);
+            MapEvent::Trap {
+                damage, effect: _, ..
+            } => {
+                let msg = format!("Trapped! Took {} damage.", damage);
                 println!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Combat,
+                    });
                 }
                 // TODO: Apply damage to party
             }
             MapEvent::Treasure { loot, .. } => {
-                let msg = format!("Found treasure! Loot IDs: {:?}", loot);
+                let msg = format!("Found treasure! {} item(s).", loot.len());
                 println!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Item,
+                    });
                 }
                 // TODO: Add to inventory
             }
@@ -332,10 +373,13 @@ fn handle_events(
                 combat_event_type,
                 ..
             } => {
-                let msg = format!("Monsters attack! Group IDs: {:?}", monster_group);
+                let msg = format!("Monsters! ({} foes)", monster_group.len());
                 println!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Combat,
+                    });
                 }
 
                 // Debug: print current mode before attempting to start combat
@@ -363,8 +407,11 @@ fn handle_events(
                     }
                     Err(e) => {
                         error!("Failed to start encounter: {}", e);
-                        if let Some(ref mut log) = game_log {
-                            log.add(format!("Failed to start encounter: {}", e));
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: format!("Failed to start encounter: {}", e),
+                                category: LogCategory::System,
+                            });
                         }
                     }
                 }
@@ -386,7 +433,7 @@ fn handle_events(
                             &content,
                             &mut dialogue_writer,
                             &mut simple_dialogue_writer,
-                            &mut game_log,
+                            &mut game_log_writer,
                             &npc_query,
                             &trigger.position,
                         );
@@ -414,10 +461,13 @@ fn handle_events(
                             fallback_position: Some(trigger.position),
                         });
 
-                        let msg = format!("{} wants to talk.", npc_def.name);
+                        let msg = format!("{} speaks.", npc_def.name);
                         println!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: msg,
+                                category: LogCategory::Dialogue,
+                            });
                         }
                     } else {
                         // Fallback: No dialogue tree, show simple dialogue bubble
@@ -433,36 +483,42 @@ fn handle_events(
                             fallback_position: Some(trigger.position),
                         });
 
-                        let msg = format!(
-                            "{}: Hello, traveler! (Visual fallback triggered)",
-                            npc_def.name
-                        );
+                        let msg = format!("{} speaks.", npc_def.name);
                         println!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: msg,
+                                category: LogCategory::Dialogue,
+                            });
                         }
                     }
                 } else {
                     // NPC not found in database - log error
                     let msg = format!("Error: NPC '{}' not found in database", npc_id);
                     println!("{}", msg);
-                    if let Some(ref mut log) = game_log {
-                        log.add(msg);
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: msg,
+                            category: LogCategory::Exploration,
+                        });
                     }
                 }
             }
             MapEvent::RecruitableCharacter {
                 character_id,
                 name,
-                description,
+                description: _,
                 dialogue_id,
                 time_condition: _,
                 facing: _,
             } => {
-                let msg = format!("{} - {}", name, description);
+                let msg = format!("Met {}.", name);
                 println!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Dialogue,
+                    });
                 }
 
                 let current_pos = global_state.0.world.party_position;
@@ -548,13 +604,16 @@ fn handle_events(
 
             MapEvent::EnterInn {
                 name,
-                description,
+                description: _,
                 innkeeper_id,
             } => {
-                let msg = format!("{} - {}", name, description);
+                let msg = format!("Entering {}.", name);
                 println!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Exploration,
+                    });
                 }
 
                 // Find innkeeper NPC and trigger dialogue if available
@@ -573,25 +632,34 @@ fn handle_events(
                             fallback_position: Some(trigger.position),
                         });
 
-                        if let Some(ref mut log) = game_log {
-                            log.add(format!("Speaking with {}...", npc_def.name));
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: format!("{} speaks.", npc_def.name),
+                                category: LogCategory::Dialogue,
+                            });
                         }
                     } else {
                         // Error: Innkeepers must have a dialogue configured
                         error!("Innkeeper '{}' has no dialogue_id. All innkeepers must have dialogue configured.", innkeeper_id);
-                        if let Some(ref mut log) = game_log {
-                            log.add(format!(
-                                "Error: Innkeeper '{}' is not properly configured",
-                                npc_def.name
-                            ));
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: format!(
+                                    "Error: Innkeeper '{}' is not properly configured",
+                                    npc_def.name
+                                ),
+                                category: LogCategory::System,
+                            });
                         }
                     }
                 } else {
                     // NPC definition not found
                     let err = format!("Error: Innkeeper '{}' not found in database", innkeeper_id);
                     println!("{}", err);
-                    if let Some(ref mut log) = game_log {
-                        log.add(err);
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: err,
+                            category: LogCategory::System,
+                        });
                     }
                 }
             }
@@ -608,8 +676,11 @@ fn handle_events(
             } => {
                 let msg = format!("Furniture placed: {}", name);
                 println!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Exploration,
+                    });
                 }
 
                 // Only spawn furniture if we have the necessary resources (full game context)
@@ -662,8 +733,11 @@ fn handle_events(
             } => {
                 let msg = format!("Opening container: {} - {}", name, description);
                 info!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Exploration,
+                    });
                 }
 
                 // Enter ContainerInventory mode with the current item contents.
@@ -686,8 +760,11 @@ fn handle_events(
                 // pickup action (Phase 3+).  We log it here for diagnostics.
                 let msg = format!("Stepped on dropped item: {} (id={})", name, item_id);
                 info!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category: LogCategory::Exploration,
+                    });
                 }
             }
 
@@ -728,8 +805,11 @@ fn handle_events(
                             tile.blocked = false;
                         }
                     }
-                    if let Some(ref mut log) = game_log {
-                        log.add("You open the door.".to_string());
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: "You open the door.".to_string(),
+                            category: LogCategory::Exploration,
+                        });
                     }
                     return;
                 }
@@ -779,16 +859,22 @@ fn handle_events(
                             .unwrap_or_else(|| format!("key {}", kid));
                         let msg = format!("You unlock the door with the {}.", key_name);
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: msg,
+                                category: LogCategory::Exploration,
+                            });
                         }
                     }
                     (Some(_), None) => {
                         // Key required but not in party.
                         let msg = "The door is locked. You need a key.".to_string();
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: msg,
+                                category: LogCategory::Exploration,
+                            });
                         }
                         let can_lockpick = global_state.0.party.members.iter().any(|member| {
                             content
@@ -808,8 +894,11 @@ fn handle_events(
                         // No key needed; party must pick lock or bash.
                         let msg = "The door is locked.".to_string();
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: msg,
+                                category: LogCategory::Exploration,
+                            });
                         }
                         let can_lockpick = global_state.0.party.members.iter().any(|member| {
                             content
@@ -846,8 +935,11 @@ fn handle_events(
                     .unwrap_or(true);
 
                 if !is_locked {
-                    if let Some(ref mut log) = game_log {
-                        log.add("The container is open.".to_string());
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: "The container is open.".to_string(),
+                            category: LogCategory::Exploration,
+                        });
                     }
                     return;
                 }
@@ -889,15 +981,21 @@ fn handle_events(
                             .unwrap_or_else(|| format!("key {}", kid));
                         let msg = format!("You unlock the container with the {}.", key_name);
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: msg,
+                                category: LogCategory::Exploration,
+                            });
                         }
                     }
                     (Some(_), None) => {
                         let msg = "The container is locked. You need a key.".to_string();
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: msg,
+                                category: LogCategory::Exploration,
+                            });
                         }
                         let can_lockpick = global_state.0.party.members.iter().any(|member| {
                             content
@@ -916,8 +1014,11 @@ fn handle_events(
                     (None, _) => {
                         let msg = "The container is locked.".to_string();
                         info!("{}", msg);
-                        if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: msg,
+                                category: LogCategory::Exploration,
+                            });
                         }
                         let can_lockpick = global_state.0.party.members.iter().any(|member| {
                             content
@@ -964,7 +1065,7 @@ fn handle_event_result(
     content: &GameContent,
     dialogue_writer: &mut MessageWriter<StartDialogue>,
     simple_dialogue_writer: &mut MessageWriter<SimpleDialogue>,
-    game_log: &mut Option<ResMut<crate::game::systems::ui::GameLog>>,
+    game_log_writer: &mut Option<MessageWriter<GameLogEvent>>,
     npc_query: &Query<(Entity, &NpcMarker, &TileCoord)>,
     trigger_position: &crate::domain::types::Position,
 ) {
@@ -995,17 +1096,23 @@ fn handle_event_result(
                 fallback_position: Some(*trigger_position),
             });
 
-            let msg = format!("{} wants to trade.", npc_def.name);
+            let msg = format!("Visiting {}.", npc_def.name);
             println!("{}", msg);
-            if let Some(ref mut log) = game_log {
-                log.add(msg);
+            if let Some(ref mut writer) = game_log_writer {
+                writer.write(GameLogEvent {
+                    text: msg,
+                    category: LogCategory::Exploration,
+                });
             }
         } else {
             // Merchant has no dialogue configured
-            let msg = format!("Merchant {} has no dialogue configured", npc_id);
+            let msg = format!("Visiting {}.", npc_def.name);
             info!("{}", msg);
-            if let Some(ref mut log) = game_log {
-                log.add(msg);
+            if let Some(ref mut writer) = game_log_writer {
+                writer.write(GameLogEvent {
+                    text: msg,
+                    category: LogCategory::Exploration,
+                });
             }
 
             // Show a simple fallback bubble so the player knows someone is there
@@ -1024,8 +1131,11 @@ fn handle_event_result(
     } else {
         let msg = format!("Error: Merchant NPC '{}' not found in database", npc_id);
         println!("{}", msg);
-        if let Some(ref mut log) = game_log {
-            log.add(msg);
+        if let Some(ref mut writer) = game_log_writer {
+            writer.write(GameLogEvent {
+                text: msg,
+                category: LogCategory::Exploration,
+            });
         }
     }
 }
@@ -1037,7 +1147,6 @@ mod container_event_tests {
     use crate::domain::character::InventorySlot;
     use crate::domain::types::Position;
     use crate::domain::world::Map;
-    use crate::game::systems::ui::GameLog;
 
     fn make_slot(item_id: u8) -> InventorySlot {
         InventorySlot {
@@ -1059,9 +1168,9 @@ mod container_event_tests {
         app.add_message::<MapChangeEvent>();
         app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_plugins(EventPlugin);
         app.insert_resource(GlobalState(game_state));
-        app.insert_resource(GameLog::new());
         // Minimal content DB — containers don't need NPC lookups
         app.insert_resource(crate::application::resources::GameContent::new(
             crate::sdk::database::ContentDatabase::new(),
@@ -1564,6 +1673,7 @@ mod tests {
         app.add_message::<MapChangeEvent>();
         app.add_message::<StartDialogue>();
         app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_plugins(EventPlugin);
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
@@ -1609,23 +1719,23 @@ mod tests {
 
         app.insert_resource(GlobalState(game_state));
         app.insert_resource(GameContent::new(db));
-        app.insert_resource(GameLog::new());
 
         // Act
         app.update(); // First update: check_for_events writes MapEventTriggered
         app.update(); // Second update: handle_events processes MapEventTriggered
+        app.update(); // Third update: UiPlugin consumes GameLogEvent into GameLog
 
-        // Assert - GameLog should contain merchant-specific no-dialogue message
-        // (merchant NPCs without dialogue_id are handled by handle_event_result which
-        // logs "Merchant {npc_id} has no dialogue configured" and shows a SimpleDialogue
-        // fallback bubble - this is the new EnterMerchant path behaviour)
+        // Assert - merchant interactions should log the planned exploration entry
+        // even when the merchant falls back to a simple dialogue bubble because
+        // no dialogue_id is configured.
         let game_log = app.world().resource::<GameLog>();
         let entries = game_log.entries();
         assert!(
-            entries
-                .iter()
-                .any(|e| e.contains("test_merchant") && e.contains("no dialogue configured")),
-            "Expected merchant no-dialogue message in game log. Actual entries: {:?}",
+            entries.iter().any(|entry| {
+                entry.category == crate::game::systems::ui::LogCategory::Exploration
+                    && entry.text == "Visiting Town Merchant."
+            }),
+            "Expected merchant visit message in game log. Actual entries: {:?}",
             entries
         );
     }
@@ -1816,9 +1926,9 @@ mod tests {
 
         let log = app.world().resource::<GameLog>();
         assert!(
-            !log.entries()
-                .iter()
-                .any(|entry: &String| entry.contains("Error: NPC 'whisper' not found in database")),
+            !log.entries().iter().any(|entry| entry
+                .text
+                .contains("Error: NPC 'whisper' not found in database")),
             "Recruitable interactions must not go through NPC database lookup with character_id"
         );
     }
@@ -1834,6 +1944,7 @@ mod tests {
         app.add_message::<MapChangeEvent>();
         app.add_message::<StartDialogue>();
         app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_plugins(EventPlugin);
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
@@ -1860,20 +1971,20 @@ mod tests {
 
         app.insert_resource(GlobalState(game_state));
         app.insert_resource(GameContent::new(db));
-        app.insert_resource(GameLog::new());
 
         // Act
         app.update(); // First update: check_for_events writes MapEventTriggered
         app.update(); // Second update: handle_events processes MapEventTriggered
+        app.update(); // Third update: UiPlugin consumes GameLogEvent into GameLog
 
-        // Assert - GameLog should contain error message
+        // Assert - GameLog should contain the error
         let game_log = app.world().resource::<GameLog>();
         let entries = game_log.entries();
         assert!(
-            entries
-                .iter()
-                .any(|e| e.contains("Error") && e.contains("nonexistent_npc")),
-            "Expected error message in game log. Actual entries: {:?}",
+            entries.iter().any(|entry| entry
+                .text
+                .contains("Error: NPC 'nonexistent_npc' not found in database")),
+            "Expected NPC-not-found message in game log. Actual entries: {:?}",
             entries
         );
     }
@@ -1889,6 +2000,7 @@ mod tests {
         app.add_message::<MapChangeEvent>();
         app.add_message::<StartDialogue>();
         app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_plugins(EventPlugin);
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
@@ -1938,11 +2050,11 @@ mod tests {
 
         app.insert_resource(GlobalState(game_state));
         app.insert_resource(GameContent::new(db));
-        app.insert_resource(GameLog::new());
 
         // Act
         app.update(); // First update: check_for_events writes MapEventTriggered
         app.update(); // Second update: handle_events processes MapEventTriggered and should write StartDialogue
+        app.update(); // Third update: UiPlugin consumes GameLogEvent into GameLog
 
         // Assert - StartDialogue message should be sent
         let dialogue_messages = app.world().resource::<Messages<StartDialogue>>();
@@ -1951,14 +2063,12 @@ mod tests {
         assert_eq!(messages.len(), 1, "Expected StartDialogue message");
         assert_eq!(messages[0].dialogue_id, 1u16);
 
-        // Assert - GameLog should contain 'Speaking with' message
+        // Assert - GameLog should contain the current innkeeper dialogue message
         let game_log = app.world().resource::<GameLog>();
         let entries = game_log.entries();
         assert!(
-            entries
-                .iter()
-                .any(|e| e.contains("Speaking with Cozy Innkeeper")),
-            "Expected 'Speaking with' message in game log. Actual entries: {:?}",
+            entries.iter().any(|e| e.text == "Cozy Innkeeper speaks."),
+            "Expected 'Cozy Innkeeper speaks.' message in game log. Actual entries: {:?}",
             entries
         );
     }
@@ -2042,7 +2152,6 @@ mod tests {
         use crate::domain::dialogue::{DialogueAction, DialogueChoice, DialogueNode, DialogueTree};
         use crate::domain::world::NpcDefinition;
         use crate::game::systems::dialogue::SelectDialogueChoice;
-        use crate::game::systems::ui::GameLog;
 
         // Arrange - Set up app with Event and Dialogue plugins
         let mut app = App::new();
@@ -2051,6 +2160,7 @@ mod tests {
         app.add_message::<StartDialogue>();
         app.add_message::<SelectDialogueChoice>();
         app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
         app.add_plugins(EventPlugin);
         app.add_plugins(crate::game::systems::dialogue::DialoguePlugin);
 
@@ -2109,7 +2219,6 @@ mod tests {
 
         app.insert_resource(GlobalState(game_state));
         app.insert_resource(GameContent::new(db));
-        app.insert_resource(GameLog::new());
         app.init_resource::<crate::game::components::dialogue::ActiveDialogueUI>();
         app.insert_resource(ButtonInput::<KeyCode>::default());
 
@@ -2341,7 +2450,7 @@ mod locked_door_event_tests {
             crate::sdk::database::ContentDatabase::new(),
         ));
         app.init_resource::<LockInteractionPending>();
-        app.init_resource::<GameLog>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
 
         // Register handle_events (the system under test).
         app.add_systems(Update, handle_events);
@@ -2420,6 +2529,7 @@ mod locked_door_event_tests {
 
         fire_locked_door_event(&mut app);
         app.update();
+        app.update();
 
         // Lock state must be unlocked.
         let gs = app.world().resource::<GlobalState>();
@@ -2455,11 +2565,11 @@ mod locked_door_event_tests {
         // Game log must contain a success message.
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages
+            log.entries()
                 .iter()
-                .any(|m| m.starts_with("You unlock the door with the")),
+                .any(|entry| entry.text.starts_with("You unlock the door with the")),
             "Game log must contain unlock success message; got: {:?}",
-            log.messages
+            log.entries()
         );
     }
 
@@ -2503,6 +2613,7 @@ mod locked_door_event_tests {
         }
 
         app.update();
+        app.update();
 
         // LockInteractionPending must be set.
         let pending = app.world().resource::<LockInteractionPending>();
@@ -2515,9 +2626,11 @@ mod locked_door_event_tests {
         // Game log must say "The door is locked."
         let log = app.world().resource::<GameLog>();
         assert!(
-            log.messages.iter().any(|m| m == "The door is locked."),
+            log.entries()
+                .iter()
+                .any(|entry| entry.text == "The door is locked."),
             "Game log must contain 'The door is locked.' for no-key lock; got: {:?}",
-            log.messages
+            log.entries()
         );
     }
 }

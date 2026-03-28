@@ -232,7 +232,7 @@ pub fn check_speaker_exists(
                     speaker_entity
                 );
                 if let Some(ref mut log) = game_log {
-                    log.add("Speaker left the conversation.".to_string());
+                    log.add_dialogue("Speaker left the conversation.".to_string());
                 }
                 global_state.0.return_to_exploration();
             }

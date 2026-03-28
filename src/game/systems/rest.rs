@@ -925,7 +925,7 @@ pub fn handle_rest_complete(
 
                 // Write interruption notice to the game log (UI notification).
                 if let Some(ref mut log_res) = game_log {
-                    log_res.add("Rest interrupted! Enemies attack!".to_string());
+                    log_res.add_combat("Rest interrupted! Enemies attack!".to_string());
                 }
 
                 if let Some(ref content_res) = content {
@@ -964,7 +964,9 @@ pub fn handle_rest_complete(
 
             // Write completion notice to the game log (UI notification).
             if let Some(ref mut log_res) = game_log {
-                log_res.add("The party rests for the night and awakens refreshed.".to_string());
+                log_res.add_exploration(
+                    "The party rests for the night and awakens refreshed.".to_string(),
+                );
             }
         }
     }
