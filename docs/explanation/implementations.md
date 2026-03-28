@@ -1,5 +1,50 @@
 # Implementations
 
+## Inn UI GameLogEvent Migration (Complete)
+
+### Overview
+
+This update completes the inn management portion of the game log event
+migration by routing the remaining cross-system inn UI action results through
+`GameLogEvent` instead of writing directly to `GameLog`.
+
+### What Changed
+
+The remaining inn-management action results in `src/game/systems/inn_ui.rs`
+now emit typed game log events:
+
+- recruit failures emit `System` events with:
+  `"Cannot recruit: {error}"`
+- dismiss failures emit `System` events with:
+  `"Cannot dismiss: {error}"`
+- swap success emits a `Dialogue` event with:
+  `"Party members swapped!"`
+- swap failure emits a `System` event with:
+  `"Cannot swap: {error}"`
+- exiting inn emits an `Exploration` event with:
+  `"Left the inn."`
+
+This leaves `inn_ui.rs` fully aligned with the rule that cross-system gameplay
+and UI action results publish `GameLogEvent` messages for the UI layer to
+consume.
+
+### Test Coverage
+
+Focused inn UI tests now verify the migrated event-driven behavior:
+
+- `test_inn_recruit_writes_game_log_event`
+- `test_inn_swap_writes_game_log_event`
+- `test_exit_inn_writes_game_log_event`
+
+These tests assert that inn management actions emit the expected typed log
+events with the correct visible text and category.
+
+### Outcome
+
+Inn management action results are now consistently routed through
+`GameLogEvent`, completing the inn UI migration to the event-driven logging
+pattern and keeping `GameLog` mutation centralized in the UI consumer path.
+
 ## Game LogEvent Merchant Transaction Migration (Complete)
 
 ### Overview
