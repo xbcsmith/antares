@@ -1,5 +1,126 @@
 # Implementations
 
+## Game Log Rest Message Alignment (Complete)
+
+### Overview
+
+This update closes the remaining rest-related game log deliverable from the
+game log implementation plan by emitting the planned exploration log message for
+the party-wide inn healing flow.
+
+### What Changed
+
+The party-healing service path in `src/game/systems/dialogue.rs` now appends the
+exact planned message when the whole party receives the `heal_all` service:
+
+- `"The party rests. HP restored."`
+
+This message is written as an `Exploration` log entry so it appears in the
+general game log under the intended category.
+
+### Tests Added
+
+The following dialogue system test now verifies the rest log output:
+
+- `test_consume_service_dialogue_action_logs_rest_message`
+
+This test asserts that a successful whole-party `heal_all` service appends an
+`Exploration` entry with the exact planned text.
+
+### Outcome
+
+The remaining rest logging deliverable is now implemented for the inn-style
+whole-party healing path, and regression coverage verifies the expected player-
+facing message.
+
+## Game Log Merchant Transaction Message Alignment (Complete)
+
+### Overview
+
+This update closes the remaining merchant transaction game log deliverable from
+the game log implementation plan by aligning buy and sell messages with the
+planned player-facing wording.
+
+### What Changed
+
+Merchant transaction logging in `src/game/systems/dialogue.rs` now records
+item-category log entries using item display names and gold values instead of
+generic item IDs.
+
+Completed behavior:
+
+- successful buy actions now log `"Bought {item_name} for {cost} gold."`
+- successful sell actions now log `"Sold {item_name} for {value} gold."`
+
+This replaces the earlier less descriptive output:
+
+- buy logs like `"Purchased item 1."`
+- sell logs like `"Sold item 1 for 2 gold."`
+
+### Tests Added
+
+The following dialogue system tests now verify the merchant log output:
+
+- `test_buy_item_dialogue_action_logs_item_name_and_price`
+- `test_sell_item_dialogue_action_logs_item_name_and_price`
+
+These tests assert that successful merchant transactions append
+`LogCategory::Item` entries with the expected text.
+
+### Outcome
+
+The merchant buy/sell portion of the remaining game log deliverables is now
+implemented with the intended user-facing message format, and regression tests
+cover both transaction paths.
+
+## Phase 5: Runtime Contract Alignment and Documentation (Complete)
+
+### Overview
+
+Phase 5 aligns the runtime merchant interaction behavior with the SDK-enforced
+merchant authoring contract and documents the complete merchant dialogue
+lifecycle for campaign authors.
+
+The goal of this phase is to make the final merchant workflow unambiguous:
+
+- runtime continues to support both explicit `OpenMerchant` execution and the
+  `I` key convenience shortcut during merchant dialogue
+- authored merchant dialogue content is considered valid only when it explicitly
+  contains `DialogueAction::OpenMerchant { npc_id }`
+- the SDK lifecycle for generation, augmentation, validation, repair, and
+  non-destructive removal is documented consistently across code and
+  documentation
+
+### Problem Statement
+
+After Phase 4, the merchant dialogue workflow was functionally complete:
+
+- the SDK could generate merchant dialogue
+- existing dialogue could be augmented non-destructively
+- merchant content could be removed non-destructively
+- campaign validation could detect invalid merchant dialogue states
+- repair actions could restore broken merchant authoring states
+
+However, the final runtime and authoring contract still needed a closing
+alignment pass.
+
+That left several documentation and contract clarity gaps:
+
+- runtime support for the `I` shortcut during merchant dialogue could be
+  misread as the merchant authoring standard
+- some merchant-facing documentation still described earlier-phase assumptions
+  rather than the final explicit `OpenMerchant` contract
+- Campaign Builder help text needed to explain what happens when merchant
+  behavior is enabled or disabled
+- the lifecycle for generated, augmented, repaired, and removed merchant
+  dialogue content needed a final author-facing explanation
+- final regression coverage needed to explicitly confirm that runtime behavior
+  still matched the SDK’s enforced merchant dialogue standard
+
+Phase 5 closes those gaps by aligning code comments, SDK help text,
+explanations, and regression expectations around one explicit merchant dialogue
+contract.
+
 ## Phase 5: Runtime Contract Alignment and Documentation (Complete)
 
 ### Overview

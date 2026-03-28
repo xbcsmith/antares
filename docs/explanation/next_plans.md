@@ -8,12 +8,13 @@
 
 ### Clean up
 
-Analyze this codebase for refactoring opportunities:
+Analyze this codebase for refactoring opportunities use subagents to do the following:
 
-1. Find duplicate code patterns
-2. Identify unused exports and dead code
+1. Find duplicate code patterns, look for places we can consolidate code and create reusable functions or components.
+2. Identify unused exports, specific "#[ignore]", and dead code "#[dead_code]" in Rust
 3. Review error handling consistency
 4. Check for security vulnerabilities
+5. References to Phases in the codebase that should be removed.
 
 Compile the findings into a prioritized action plan with a phased approach.
 

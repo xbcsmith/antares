@@ -1230,7 +1230,17 @@ fn execute_action(
                         item_id, slot.charges, character_id
                     );
                     if let Some(ref mut log) = game_log {
-                        log.add_item(format!("Purchased item {}.", item_id));
+                        let item_name = db
+                            .items
+                            .get_item(*item_id)
+                            .map(|item| item.name.clone())
+                            .unwrap_or_else(|| format!("item {}", item_id));
+                        let cost = db
+                            .items
+                            .get_item(*item_id)
+                            .map(|item| item.base_cost)
+                            .unwrap_or(0);
+                        log.add_item(format!("Bought {} for {} gold.", item_name, cost));
                     }
                 }
                 Err(e) => {
@@ -1358,7 +1368,12 @@ fn execute_action(
                     game_state.npc_runtime.insert(npc_runtime_clone);
                     info!("Sold item {} for {} gold", item_id, price);
                     if let Some(ref mut log) = game_log {
-                        log.add_item(format!("Sold item {} for {} gold.", item_id, price));
+                        let item_name = db
+                            .items
+                            .get_item(*item_id)
+                            .map(|item| item.name.clone())
+                            .unwrap_or_else(|| format!("item {}", item_id));
+                        log.add_item(format!("Sold {} for {} gold.", item_name, price));
                     }
                 }
                 Err(e) => {
@@ -1550,11 +1565,15 @@ fn execute_action(
                 affected.len()
             );
             if let Some(ref mut log) = game_log {
-                log.add_system(format!(
-                    "Service '{}' applied to {} character(s).",
-                    service_id,
-                    affected.len()
-                ));
+                if service_id == "heal_all" && target_character_ids.is_empty() {
+                    log.add_exploration("The party rests. HP restored.".to_string());
+                } else {
+                    log.add_system(format!(
+                        "Service '{}' applied to {} character(s).",
+                        service_id,
+                        affected.len()
+                    ));
+                }
             }
         }
     }
@@ -2918,6 +2937,41 @@ mod tests {
     }
 
     #[test]
+    fn test_buy_item_dialogue_action_logs_item_name_and_price() {
+        // Arrange
+        let db = make_merchant_db();
+        let mut game_state = make_game_state_with_merchant(100);
+        game_state.mode = crate::application::GameMode::Dialogue(merchant_dialogue_state());
+        let mut game_log = crate::game::systems::ui::GameLog::new();
+
+        // Act
+        let mut despawn_recruitable_visuals = None;
+        execute_action(
+            &DialogueAction::BuyItem {
+                item_id: 1,
+                target_character_id: None,
+            },
+            &mut game_state,
+            &db,
+            Some(&merchant_dialogue_state()),
+            None,
+            Some(&mut game_log),
+            &mut despawn_recruitable_visuals,
+        );
+
+        // Assert
+        let last_entry = game_log
+            .entries()
+            .last()
+            .expect("buying an item should append a game log entry");
+        assert_eq!(
+            last_entry.category,
+            crate::game::systems::ui::LogCategory::Item
+        );
+        assert_eq!(last_entry.text, "Bought Iron Sword for 10 gold.");
+    }
+
+    #[test]
     fn test_buy_item_dialogue_action_insufficient_gold_no_mutation() {
         // Arrange
         let db = make_merchant_db();
@@ -3019,6 +3073,74 @@ mod tests {
             game_state.party.gold, 50,
             "Party should have paid 50 gold for heal_all service"
         );
+    }
+
+    #[test]
+    fn test_consume_service_dialogue_action_logs_rest_message() {
+        use crate::domain::inventory::{ServiceCatalog, ServiceEntry};
+        use crate::domain::world::npc::NpcDefinition;
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        let mut db = ContentDatabase::new();
+        let mut priest = NpcDefinition::priest("priest_anna", "Anna", "anna.png");
+        let mut catalog = ServiceCatalog::new();
+        catalog.services.push(ServiceEntry::new(
+            "heal_all".to_string(),
+            50,
+            "Heal all party members".to_string(),
+        ));
+        priest.service_catalog = Some(catalog);
+        db.npcs.add_npc(priest).unwrap();
+
+        let mut game_state = crate::application::GameState::new();
+
+        use crate::domain::character::{Alignment, Character, Sex};
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp.base = 30;
+        hero.hp.current = 5;
+        game_state.party.add_member(hero).unwrap();
+        game_state.party.gold = 100;
+
+        let priest_runtime = NpcRuntimeState::new("priest_anna".to_string());
+        game_state.npc_runtime.insert(priest_runtime);
+
+        let dlg_state = crate::application::dialogue::DialogueState::start(
+            1,
+            1,
+            None,
+            Some("priest_anna".to_string()),
+        );
+        let mut game_log = crate::game::systems::ui::GameLog::new();
+
+        let mut despawn_recruitable_visuals = None;
+        execute_action(
+            &DialogueAction::ConsumeService {
+                service_id: "heal_all".to_string(),
+                target_character_ids: vec![],
+            },
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            Some(&mut game_log),
+            &mut despawn_recruitable_visuals,
+        );
+
+        let last_entry = game_log
+            .entries()
+            .last()
+            .expect("heal_all should append a game log entry");
+        assert_eq!(
+            last_entry.category,
+            crate::game::systems::ui::LogCategory::Exploration
+        );
+        assert_eq!(last_entry.text, "The party rests. HP restored.");
     }
 
     #[test]
@@ -3252,10 +3374,93 @@ mod tests {
                 .all(|s| s.item_id != 1),
             "Item 1 should be removed from inventory after selling"
         );
-        assert!(
-            gs.party.gold > 0,
-            "Party gold should increase after selling an item"
+        assert_eq!(
+            gs.party.gold, 2,
+            "Party gold should increase by the domain sale value for the item"
         );
+    }
+
+    #[test]
+    fn test_sell_item_dialogue_action_logs_item_name_and_price() {
+        use crate::domain::items::{Item, ItemType, WeaponClassification, WeaponData};
+        use crate::domain::types::DiceRoll;
+        use crate::domain::world::npc::NpcDefinition;
+        use crate::domain::world::npc_runtime::NpcRuntimeState;
+
+        // Arrange
+        let mut db = ContentDatabase::new();
+
+        let item1 = Item {
+            id: 1,
+            name: "Old Dagger".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 4, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::Simple,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(item1).unwrap();
+
+        let merchant = NpcDefinition::merchant("merchant_tom", "Tom", "tom.png");
+        db.npcs.add_npc(merchant).unwrap();
+
+        use crate::domain::character::{Alignment, Character, Sex};
+        let mut gs = crate::application::GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.inventory.add_item(1, 0).unwrap();
+        gs.party.add_member(hero).unwrap();
+        gs.party.gold = 0;
+
+        let npc_runtime = NpcRuntimeState::new("merchant_tom".to_string());
+        gs.npc_runtime.insert(npc_runtime);
+
+        let dlg_state = merchant_dialogue_state();
+        let mut game_log = crate::game::systems::ui::GameLog::new();
+
+        // Act
+        let mut despawn_recruitable_visuals = None;
+        execute_action(
+            &DialogueAction::SellItem {
+                item_id: 1,
+                source_character_id: None,
+            },
+            &mut gs,
+            &db,
+            Some(&dlg_state),
+            None,
+            Some(&mut game_log),
+            &mut despawn_recruitable_visuals,
+        );
+
+        // Assert
+        let last_entry = game_log
+            .entries()
+            .last()
+            .expect("selling an item should append a game log entry");
+        assert_eq!(
+            last_entry.category,
+            crate::game::systems::ui::LogCategory::Item
+        );
+        assert_eq!(last_entry.text, "Sold Old Dagger for 2 gold.");
     }
 
     // ─── Phase 3: Dialogue → SetFacing integration tests ─────────────────────
