@@ -213,7 +213,7 @@ fn handle_pickup_dropped_item(
                 );
                 info!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_item(msg);
                 }
 
                 // Notify the visual system to despawn the 3-D marker.
@@ -286,7 +286,7 @@ fn handle_events(
                 let msg = format!("Teleporting to Map {} at {:?}", map_id, destination);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
 
                 // Emit a MapChangeEvent so the MapManagerPlugin can handle the
@@ -308,14 +308,14 @@ fn handle_events(
                 let msg = format!("Sign reads: {}", text);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
             }
             MapEvent::Trap { damage, effect, .. } => {
                 let msg = format!("IT'S A TRAP! Took {} damage. Effect: {:?}", damage, effect);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
                 // TODO: Apply damage to party
             }
@@ -323,7 +323,7 @@ fn handle_events(
                 let msg = format!("Found treasure! Loot IDs: {:?}", loot);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
                 // TODO: Add to inventory
             }
@@ -335,7 +335,7 @@ fn handle_events(
                 let msg = format!("Monsters attack! Group IDs: {:?}", monster_group);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
 
                 // Debug: print current mode before attempting to start combat
@@ -364,7 +364,7 @@ fn handle_events(
                     Err(e) => {
                         error!("Failed to start encounter: {}", e);
                         if let Some(ref mut log) = game_log {
-                            log.add(format!("Failed to start encounter: {}", e));
+                            log.add_system(format!("Failed to start encounter: {}", e));
                         }
                     }
                 }
@@ -417,7 +417,7 @@ fn handle_events(
                         let msg = format!("{} wants to talk.", npc_def.name);
                         println!("{}", msg);
                         if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                            log.add_exploration(msg);
                         }
                     } else {
                         // Fallback: No dialogue tree, show simple dialogue bubble
@@ -439,7 +439,7 @@ fn handle_events(
                         );
                         println!("{}", msg);
                         if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                            log.add_exploration(msg);
                         }
                     }
                 } else {
@@ -447,7 +447,7 @@ fn handle_events(
                     let msg = format!("Error: NPC '{}' not found in database", npc_id);
                     println!("{}", msg);
                     if let Some(ref mut log) = game_log {
-                        log.add(msg);
+                        log.add_exploration(msg);
                     }
                 }
             }
@@ -462,7 +462,7 @@ fn handle_events(
                 let msg = format!("{} - {}", name, description);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
 
                 let current_pos = global_state.0.world.party_position;
@@ -554,7 +554,7 @@ fn handle_events(
                 let msg = format!("{} - {}", name, description);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
 
                 // Find innkeeper NPC and trigger dialogue if available
@@ -574,13 +574,13 @@ fn handle_events(
                         });
 
                         if let Some(ref mut log) = game_log {
-                            log.add(format!("Speaking with {}...", npc_def.name));
+                            log.add_dialogue(format!("Speaking with {}...", npc_def.name));
                         }
                     } else {
                         // Error: Innkeepers must have a dialogue configured
                         error!("Innkeeper '{}' has no dialogue_id. All innkeepers must have dialogue configured.", innkeeper_id);
                         if let Some(ref mut log) = game_log {
-                            log.add(format!(
+                            log.add_system(format!(
                                 "Error: Innkeeper '{}' is not properly configured",
                                 npc_def.name
                             ));
@@ -591,7 +591,7 @@ fn handle_events(
                     let err = format!("Error: Innkeeper '{}' not found in database", innkeeper_id);
                     println!("{}", err);
                     if let Some(ref mut log) = game_log {
-                        log.add(err);
+                        log.add_system(err);
                     }
                 }
             }
@@ -609,7 +609,7 @@ fn handle_events(
                 let msg = format!("Furniture placed: {}", name);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
 
                 // Only spawn furniture if we have the necessary resources (full game context)
@@ -663,7 +663,7 @@ fn handle_events(
                 let msg = format!("Opening container: {} - {}", name, description);
                 info!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
 
                 // Enter ContainerInventory mode with the current item contents.
@@ -687,7 +687,7 @@ fn handle_events(
                 let msg = format!("Stepped on dropped item: {} (id={})", name, item_id);
                 info!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
             }
 
@@ -729,7 +729,7 @@ fn handle_events(
                         }
                     }
                     if let Some(ref mut log) = game_log {
-                        log.add("You open the door.".to_string());
+                        log.add_exploration("You open the door.".to_string());
                     }
                     return;
                 }
@@ -780,7 +780,7 @@ fn handle_events(
                         let msg = format!("You unlock the door with the {}.", key_name);
                         info!("{}", msg);
                         if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                            log.add_exploration(msg);
                         }
                     }
                     (Some(_), None) => {
@@ -788,7 +788,7 @@ fn handle_events(
                         let msg = "The door is locked. You need a key.".to_string();
                         info!("{}", msg);
                         if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                            log.add_exploration(msg);
                         }
                         let can_lockpick = global_state.0.party.members.iter().any(|member| {
                             content
@@ -809,7 +809,7 @@ fn handle_events(
                         let msg = "The door is locked.".to_string();
                         info!("{}", msg);
                         if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                            log.add_exploration(msg);
                         }
                         let can_lockpick = global_state.0.party.members.iter().any(|member| {
                             content
@@ -847,7 +847,7 @@ fn handle_events(
 
                 if !is_locked {
                     if let Some(ref mut log) = game_log {
-                        log.add("The container is open.".to_string());
+                        log.add_exploration("The container is open.".to_string());
                     }
                     return;
                 }
@@ -890,14 +890,14 @@ fn handle_events(
                         let msg = format!("You unlock the container with the {}.", key_name);
                         info!("{}", msg);
                         if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                            log.add_exploration(msg);
                         }
                     }
                     (Some(_), None) => {
                         let msg = "The container is locked. You need a key.".to_string();
                         info!("{}", msg);
                         if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                            log.add_exploration(msg);
                         }
                         let can_lockpick = global_state.0.party.members.iter().any(|member| {
                             content
@@ -917,7 +917,7 @@ fn handle_events(
                         let msg = "The container is locked.".to_string();
                         info!("{}", msg);
                         if let Some(ref mut log) = game_log {
-                            log.add(msg);
+                            log.add_exploration(msg);
                         }
                         let can_lockpick = global_state.0.party.members.iter().any(|member| {
                             content
@@ -998,14 +998,14 @@ fn handle_event_result(
             let msg = format!("{} wants to trade.", npc_def.name);
             println!("{}", msg);
             if let Some(ref mut log) = game_log {
-                log.add(msg);
+                log.add_dialogue(msg);
             }
         } else {
             // Merchant has no dialogue configured
             let msg = format!("Merchant {} has no dialogue configured", npc_id);
             info!("{}", msg);
             if let Some(ref mut log) = game_log {
-                log.add(msg);
+                log.add_dialogue(msg);
             }
 
             // Show a simple fallback bubble so the player knows someone is there
@@ -1025,7 +1025,7 @@ fn handle_event_result(
         let msg = format!("Error: Merchant NPC '{}' not found in database", npc_id);
         println!("{}", msg);
         if let Some(ref mut log) = game_log {
-            log.add(msg);
+            log.add_exploration(msg);
         }
     }
 }
@@ -1622,9 +1622,11 @@ mod tests {
         let game_log = app.world().resource::<GameLog>();
         let entries = game_log.entries();
         assert!(
-            entries
-                .iter()
-                .any(|e| e.contains("test_merchant") && e.contains("no dialogue configured")),
+            entries.iter().any(|entry| {
+                entry.category == crate::game::systems::ui::LogCategory::Dialogue
+                    && entry.text.contains("test_merchant")
+                    && entry.text.contains("no dialogue configured")
+            }),
             "Expected merchant no-dialogue message in game log. Actual entries: {:?}",
             entries
         );
@@ -1816,9 +1818,9 @@ mod tests {
 
         let log = app.world().resource::<GameLog>();
         assert!(
-            !log.entries()
-                .iter()
-                .any(|entry: &String| entry.contains("Error: NPC 'whisper' not found in database")),
+            !log.entries().iter().any(|entry| entry
+                .text
+                .contains("Error: NPC 'whisper' not found in database")),
             "Recruitable interactions must not go through NPC database lookup with character_id"
         );
     }

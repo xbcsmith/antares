@@ -1335,7 +1335,7 @@ fn merchant_inventory_action_system(
                 character_index
             );
             if let Some(ref mut log) = game_log {
-                log.add("Inventory is full. Drop an item to make room.".to_string());
+                log.add_system("Inventory is full. Drop an item to make room.".to_string());
             }
             continue;
         }
@@ -1368,7 +1368,7 @@ fn merchant_inventory_action_system(
                             npc_id, stock_index
                         );
                         if let Some(ref mut log) = game_log {
-                            log.add("The merchant is out of stock for that item.".to_string());
+                            log.add_item("The merchant is out of stock for that item.".to_string());
                         }
                         continue;
                     }
@@ -1396,7 +1396,7 @@ fn merchant_inventory_action_system(
                 have, need
             );
             if let Some(ref mut log) = game_log {
-                log.add(format!(
+                log.add_system(format!(
                     "Not enough gold. Need {} gp, have {} gp.",
                     need, have
                 ));
@@ -1432,7 +1432,7 @@ fn merchant_inventory_action_system(
                     character_index, err
                 );
                 if let Some(ref mut log) = game_log {
-                    log.add("Inventory is full. Drop an item to make room.".to_string());
+                    log.add_system("Inventory is full. Drop an item to make room.".to_string());
                 }
             }
         }
@@ -1463,7 +1463,7 @@ fn merchant_inventory_action_system(
                 slot_index, inv_len, character_index
             );
             if let Some(ref mut log) = game_log {
-                log.add("You do not have that item.".to_string());
+                log.add_item("You do not have that item.".to_string());
             }
             continue;
         }
@@ -1491,7 +1491,9 @@ fn merchant_inventory_action_system(
                         item_id, character_index
                     );
                     if let Some(ref mut log) = game_log {
-                        log.add("That item is cursed and cannot be removed or sold.".to_string());
+                        log.add_item(
+                            "That item is cursed and cannot be removed or sold.".to_string(),
+                        );
                     }
                     continue;
                 }

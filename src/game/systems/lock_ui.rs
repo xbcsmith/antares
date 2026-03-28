@@ -384,13 +384,13 @@ fn lock_action_system(
                 let msg = format!("{} picks the lock!", char_name);
                 info!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
                 let extra = apply_success(lock_id, *position, &event_kind, &mut global_state.0);
                 for m in extra {
                     info!("{}", m);
                     if let Some(ref mut log) = game_log {
-                        log.add(m);
+                        log.add_system(m);
                     }
                 }
             }
@@ -403,13 +403,13 @@ fn lock_action_system(
                 };
                 info!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
                 let extra = apply_success(lock_id, *position, &event_kind, &mut global_state.0);
                 for m in extra {
                     info!("{}", m);
                     if let Some(ref mut log) = game_log {
-                        log.add(m);
+                        log.add_system(m);
                     }
                 }
             }
@@ -426,7 +426,7 @@ fn lock_action_system(
                 };
                 info!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
             }
             UnlockOutcome::BashFailed {
@@ -438,14 +438,14 @@ fn lock_action_system(
                 );
                 info!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
             }
             UnlockOutcome::TrapTriggered { damage, effect } => {
                 let msg = format!("A trap fires! The party takes {} damage!", damage);
                 info!("{}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_exploration(msg);
                 }
                 // Apply damage to every living party member.
                 for member in global_state.0.party.members.iter_mut() {
@@ -456,7 +456,7 @@ fn lock_action_system(
                 for effect_msg in effect_messages {
                     info!("{}", effect_msg);
                     if let Some(ref mut log) = game_log {
-                        log.add(effect_msg);
+                        log.add_system(effect_msg);
                     }
                 }
             }

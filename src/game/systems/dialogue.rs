@@ -188,7 +188,7 @@ fn handle_start_dialogue(
                     );
                     info!("{}", error_msg);
                     if let Some(ref mut log) = game_log {
-                        log.add(error_msg);
+                        log.add_system(error_msg);
                     }
                     return;
                 }
@@ -201,7 +201,7 @@ fn handle_start_dialogue(
                         format!("Dialogue {} has invalid root node {}", ev.dialogue_id, root);
                     info!("{}", error_msg);
                     if let Some(ref mut log) = game_log {
-                        log.add(error_msg);
+                        log.add_system(error_msg);
                     }
                     return;
                 }
@@ -269,7 +269,7 @@ fn handle_start_dialogue(
                     }
                     if let Some(ref mut log) = game_log {
                         let speaker = tree.speaker_name.as_deref().unwrap_or("NPC");
-                        log.add(format!("{}: {}", speaker, node.text));
+                        log.add_dialogue(format!("{}: {}", speaker, node.text));
                     }
 
                     // Update DialogueState with current node text and choices
@@ -292,7 +292,7 @@ fn handle_start_dialogue(
                 );
                 info!("{}", error_msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(error_msg);
+                    log.add_system(error_msg);
                 }
                 // Do not enter Dialogue mode - stay in current mode
             }
@@ -308,7 +308,7 @@ fn handle_simple_dialogue(
 ) {
     for ev in ev_reader.read() {
         if let Some(ref mut log) = game_log {
-            log.add(format!("{}: {}", ev.speaker_name, ev.text));
+            log.add_dialogue(format!("{}: {}", ev.speaker_name, ev.text));
         }
 
         let state = DialogueState::start_simple(
@@ -371,7 +371,7 @@ fn handle_select_choice(
                     );
                     info!("{}", error_msg);
                     if let Some(ref mut log) = game_log {
-                        log.add(error_msg);
+                        log.add_system(error_msg);
                     }
                     continue;
                 }
@@ -433,8 +433,8 @@ fn handle_select_choice(
                                 );
                                 info!("{}", error_msg);
                                 if let Some(ref mut log) = game_log {
-                                    log.add(error_msg);
-                                    log.add("Dialogue ended unexpectedly.".to_string());
+                                    log.add_system(error_msg);
+                                    log.add_system("Dialogue ended unexpectedly.".to_string());
                                 }
                                 // End dialogue gracefully
                                 global_state.0.return_to_exploration();
@@ -459,7 +459,7 @@ fn handle_select_choice(
                         if let Some((text, actions)) = new_node_data {
                             if let Some(ref mut log) = game_log {
                                 let speaker = tree.speaker_name.as_deref().unwrap_or("NPC");
-                                log.add(format!("{}: {}", speaker, text));
+                                log.add_dialogue(format!("{}: {}", speaker, text));
                             }
 
                             for action in actions {
@@ -499,7 +499,7 @@ fn handle_select_choice(
             let error_msg = format!("Active dialogue tree {} not found in database", tree_id);
             info!("{}", error_msg);
             if let Some(ref mut log) = game_log {
-                log.add(error_msg);
+                log.add_system(error_msg);
             }
             // If the dialogue tree is missing, we should end dialogue
             if let GameMode::Dialogue(_) = global_state.0.mode {
@@ -689,9 +689,9 @@ fn execute_recruit_to_party(
             info!("Successfully recruited '{}' to active party", character_id);
             if let Some(log) = game_log.as_deref_mut() {
                 if let Some(char_def) = db.characters.get_character(character_id) {
-                    log.add(format!("{} joins the party!", char_def.name));
+                    log.add_dialogue(format!("{} joins the party!", char_def.name));
                 } else {
-                    log.add(format!("{} joins the party!", character_id));
+                    log.add_dialogue(format!("{} joins the party!", character_id));
                 }
             }
 
@@ -735,12 +735,12 @@ fn execute_recruit_to_party(
             info!("Party full - sent '{}' to inn '{}'", character_id, inn_id);
             if let Some(log) = game_log.as_deref_mut() {
                 if let Some(char_def) = db.characters.get_character(character_id) {
-                    log.add(format!(
+                    log.add_dialogue(format!(
                         "Party is full! {} will wait at the inn.",
                         char_def.name
                     ));
                 } else {
-                    log.add(format!("Party is full! {} sent to inn.", character_id));
+                    log.add_dialogue(format!("Party is full! {} sent to inn.", character_id));
                 }
             }
 
@@ -774,31 +774,31 @@ fn execute_recruit_to_party(
         Err(crate::application::RecruitmentError::AlreadyEncountered(id)) => {
             warn!("Cannot recruit '{}': already encountered", id);
             if let Some(log) = game_log.as_deref_mut() {
-                log.add(format!("{} has already joined your adventure.", id));
+                log.add_dialogue(format!("{} has already joined your adventure.", id));
             }
         }
         Err(crate::application::RecruitmentError::CharacterNotFound(id)) => {
             error!("Character definition '{}' not found in database", id);
             if let Some(log) = game_log.as_deref_mut() {
-                log.add(format!("Error: Character '{}' not found.", id));
+                log.add_system(format!("Error: Character '{}' not found.", id));
             }
         }
         Err(crate::application::RecruitmentError::CharacterDefinition(err)) => {
             error!("Character definition error for '{}': {}", character_id, err);
             if let Some(log) = game_log.as_deref_mut() {
-                log.add(format!("Error loading character: {}", err));
+                log.add_system(format!("Error loading character: {}", err));
             }
         }
         Err(crate::application::RecruitmentError::CharacterError(err)) => {
             error!("Character operation error for '{}': {}", character_id, err);
             if let Some(log) = game_log.as_deref_mut() {
-                log.add(format!("Error: {}", err));
+                log.add_system(format!("Error: {}", err));
             }
         }
         Err(crate::application::RecruitmentError::PartyManager(err)) => {
             error!("Party management error for '{}': {}", character_id, err);
             if let Some(log) = game_log.as_deref_mut() {
-                log.add(format!("Error: {}", err));
+                log.add_system(format!("Error: {}", err));
             }
         }
     }
@@ -831,7 +831,7 @@ fn execute_action(
                 if let Err(err) = qs.start_quest(*quest_id, game_state, db) {
                     println!("Failed to start quest {}: {}", quest_id, err);
                 } else if let Some(ref mut log) = game_log {
-                    log.add(format!("Quest {} started", quest_id));
+                    log.add_dialogue(format!("Quest {} started", quest_id));
                 }
             } else {
                 println!("Warning: StartQuest requested but no QuestSystem present");
@@ -916,7 +916,7 @@ fn execute_action(
                     });
 
                     if let Some(ref mut log) = game_log {
-                        log.add("Opening party management...".to_string());
+                        log.add_system("Opening party management...".to_string());
                     }
                 } else {
                     warn!("TriggerEvent 'open_inn_party_management' called but no speaker_npc_id available in DialogueState");
@@ -946,7 +946,7 @@ fn execute_action(
                         event_name
                     );
                     if let Some(log) = game_log.as_deref_mut() {
-                        log.add(
+                        log.add_system(
                             "Error: Could not resolve recruitable character for this dialogue."
                                 .to_string(),
                         );
@@ -957,7 +957,7 @@ fn execute_action(
             // Generic event logging (kept for visibility/audit)
             info!("Dialogue triggered event: {}", event_name);
             if let Some(ref mut log) = game_log {
-                log.add(format!("Event triggered: {}", event_name));
+                log.add_system(format!("Event triggered: {}", event_name));
             }
         }
         DialogueAction::GrantExperience { amount } => {
@@ -996,7 +996,7 @@ fn execute_action(
             if game_state.encountered_characters.contains(character_id) {
                 warn!("Cannot recruit '{}': already encountered", character_id);
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("{} has already been recruited.", character_id));
+                    log.add_system(format!("{} has already been recruited.", character_id));
                 }
                 return;
             }
@@ -1005,7 +1005,7 @@ fn execute_action(
             if db.npcs.get_npc(innkeeper_id).is_none() {
                 error!("Innkeeper '{}' not found in database", innkeeper_id);
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("Error: Innkeeper '{}' not found.", innkeeper_id));
+                    log.add_system(format!("Error: Innkeeper '{}' not found.", innkeeper_id));
                 }
                 return;
             }
@@ -1019,7 +1019,7 @@ fn execute_action(
                         character_id
                     );
                     if let Some(ref mut log) = game_log {
-                        log.add(format!("Error: Character '{}' not found.", character_id));
+                        log.add_system(format!("Error: Character '{}' not found.", character_id));
                     }
                     return;
                 }
@@ -1031,7 +1031,7 @@ fn execute_action(
                 Err(e) => {
                     error!("Failed to instantiate character '{}': {}", character_id, e);
                     if let Some(ref mut log) = game_log {
-                        log.add(format!("Error creating character: {}", e));
+                        log.add_system(format!("Error creating character: {}", e));
                     }
                     return;
                 }
@@ -1042,7 +1042,7 @@ fn execute_action(
             if let Err(e) = game_state.roster.add_character(character, location) {
                 error!("Failed to add character to roster: {}", e);
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("Error: {}", e));
+                    log.add_system(format!("Error: {}", e));
                 }
                 return;
             }
@@ -1058,7 +1058,7 @@ fn execute_action(
                 character_id, innkeeper_id
             );
             if let Some(ref mut log) = game_log {
-                log.add(format!("{} will wait at the inn.", char_def.name));
+                log.add_dialogue(format!("{} will wait at the inn.", char_def.name));
             }
 
             // Remove recruitment event from map
@@ -1084,7 +1084,7 @@ fn execute_action(
             info!("Opening inn party management for inn '{}'", innkeeper_id);
 
             if let Some(ref mut log) = game_log {
-                log.add("Opening party management...".to_string());
+                log.add_system("Opening party management...".to_string());
             }
 
             game_state.mode = GameMode::InnManagement(InnManagementState {
@@ -1212,14 +1212,14 @@ fn execute_action(
                         item_id, slot.charges, character_id
                     );
                     if let Some(ref mut log) = game_log {
-                        log.add(format!("Purchased item {}.", item_id));
+                        log.add_item(format!("Purchased item {}.", item_id));
                     }
                 }
                 Err(e) => {
                     // On failure nothing was mutated: no commit needed
                     warn!("BuyItem failed: {}", e);
                     if let Some(ref mut log) = game_log {
-                        log.add(format!("Cannot buy item: {}", e));
+                        log.add_system(format!("Cannot buy item: {}", e));
                     }
                 }
             }
@@ -1340,13 +1340,13 @@ fn execute_action(
                     game_state.npc_runtime.insert(npc_runtime_clone);
                     info!("Sold item {} for {} gold", item_id, price);
                     if let Some(ref mut log) = game_log {
-                        log.add(format!("Sold item {} for {} gold.", item_id, price));
+                        log.add_item(format!("Sold item {} for {} gold.", item_id, price));
                     }
                 }
                 Err(e) => {
                     warn!("SellItem failed: {}", e);
                     if let Some(ref mut log) = game_log {
-                        log.add(format!("Cannot sell item: {}", e));
+                        log.add_system(format!("Cannot sell item: {}", e));
                     }
                 }
             }
@@ -1373,7 +1373,7 @@ fn execute_action(
                     npc_id
                 );
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("'{}' is not a merchant.", npc_name));
+                    log.add_system(format!("'{}' is not a merchant.", npc_name));
                 }
                 return;
             }
@@ -1484,7 +1484,7 @@ fn execute_action(
                     game_state.party.gold, service_cost.0
                 );
                 if let Some(ref mut log) = game_log {
-                    log.add(format!(
+                    log.add_system(format!(
                         "Not enough gold for service '{}' (need {} gold).",
                         service_id, service_cost.0
                     ));
@@ -1498,7 +1498,7 @@ fn execute_action(
                     game_state.party.gems, service_cost.1
                 );
                 if let Some(ref mut log) = game_log {
-                    log.add(format!(
+                    log.add_system(format!(
                         "Not enough gems for service '{}' (need {} gems).",
                         service_id, service_cost.1
                     ));
@@ -1532,7 +1532,7 @@ fn execute_action(
                 affected.len()
             );
             if let Some(ref mut log) = game_log {
-                log.add(format!(
+                log.add_system(format!(
                     "Service '{}' applied to {} character(s).",
                     service_id,
                     affected.len()

@@ -598,13 +598,13 @@ fn inn_action_system(
             Ok(_) => {
                 if let Some(character) = global_state.0.roster.characters.get(event.roster_index) {
                     if let Some(ref mut log) = game_log {
-                        log.add(format!("{} recruited to party!", character.name));
+                        log.add_dialogue(format!("{} recruited to party!", character.name));
                     }
                 }
             }
             Err(e) => {
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("Cannot recruit: {}", e));
+                    log.add_system(format!("Cannot recruit: {}", e));
                 }
             }
         }
@@ -618,12 +618,12 @@ fn inn_action_system(
         {
             Ok(_) => {
                 if let Some(ref mut log) = game_log {
-                    log.add("Party member dismissed to inn.".to_string());
+                    log.add_dialogue("Party member dismissed to inn.".to_string());
                 }
             }
             Err(e) => {
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("Cannot dismiss: {}", e));
+                    log.add_system(format!("Cannot dismiss: {}", e));
                 }
             }
         }
@@ -637,12 +637,12 @@ fn inn_action_system(
         {
             Ok(_) => {
                 if let Some(ref mut log) = game_log {
-                    log.add("Party members swapped!".to_string());
+                    log.add_dialogue("Party members swapped!".to_string());
                 }
             }
             Err(e) => {
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("Cannot swap: {}", e));
+                    log.add_system(format!("Cannot swap: {}", e));
                 }
             }
         }
@@ -652,7 +652,7 @@ fn inn_action_system(
     for _event in exit_events.read() {
         global_state.0.mode = GameMode::Exploration;
         if let Some(ref mut log) = game_log {
-            log.add("Left the inn.".to_string());
+            log.add_exploration("Left the inn.".to_string());
         }
     }
 }

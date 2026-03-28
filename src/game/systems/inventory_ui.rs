@@ -2135,7 +2135,7 @@ fn inventory_action_system(
             Some(gc) => gc,
             None => {
                 if let Some(ref mut log) = game_log {
-                    log.add("Cannot equip: game content not available.".to_string());
+                    log.add_system("Cannot equip: game content not available.".to_string());
                 }
                 continue;
             }
@@ -2178,7 +2178,7 @@ fn inventory_action_system(
                     party_index, slot_index, msg
                 );
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_item(msg);
                 }
             }
         }
@@ -2201,7 +2201,7 @@ fn inventory_action_system(
             Some(gc) => gc,
             None => {
                 if let Some(ref mut log) = game_log {
-                    log.add("Cannot unequip: game content not available.".to_string());
+                    log.add_system("Cannot unequip: game content not available.".to_string());
                 }
                 continue;
             }
@@ -2221,7 +2221,7 @@ fn inventory_action_system(
                 let msg = "Cannot unequip: inventory is full.".to_string();
                 warn!("UnequipItemAction: {}", msg);
                 if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                    log.add_item(msg);
                 }
             }
             Err(e) => {
@@ -2278,7 +2278,7 @@ fn handle_use_item_action_exploration(
         Some(gc) => gc,
         None => {
             if let Some(ref mut log) = game_log {
-                log.add("Cannot use item: game content not available.".to_string());
+                log.add_system("Cannot use item: game content not available.".to_string());
             }
             return;
         }
@@ -2289,7 +2289,7 @@ fn handle_use_item_action_exploration(
         // Step 2: bounds-check party_index.
         if party_index >= global_state.0.party.members.len() {
             if let Some(ref mut log) = game_log {
-                log.add("Cannot use item: invalid character.".to_string());
+                log.add_system("Cannot use item: invalid character.".to_string());
             }
             continue;
         }
@@ -2348,7 +2348,7 @@ fn handle_use_item_action_exploration(
             };
 
             if let Some(ref mut log) = game_log {
-                log.add(msg);
+                log.add_item(msg);
             }
 
             // Reset navigation state even on failure so the UI is not stuck.
@@ -2370,7 +2370,7 @@ fn handle_use_item_action_exploration(
                 Some(s) => s,
                 None => {
                     if let Some(ref mut log) = game_log {
-                        log.add("Cannot use item: no item in that slot.".to_string());
+                        log.add_system("Cannot use item: no item in that slot.".to_string());
                     }
                     continue;
                 }
@@ -2379,7 +2379,7 @@ fn handle_use_item_action_exploration(
                 Some(i) => i,
                 None => {
                     if let Some(ref mut log) = game_log {
-                        log.add("Cannot use item: item data not found.".to_string());
+                        log.add_system("Cannot use item: item data not found.".to_string());
                     }
                     continue;
                 }
@@ -2388,7 +2388,7 @@ fn handle_use_item_action_exploration(
                 ItemType::Consumable(data) => data,
                 _ => {
                     if let Some(ref mut log) = game_log {
-                        log.add(format!("Cannot use {}: not a consumable.", item.name));
+                        log.add_item(format!("Cannot use {}: not a consumable.", item.name));
                     }
                     continue;
                 }
@@ -2403,7 +2403,7 @@ fn handle_use_item_action_exploration(
                 Some(s) => s.charges,
                 None => {
                     if let Some(ref mut log) = game_log {
-                        log.add("Cannot use item: no item in that slot.".to_string());
+                        log.add_system("Cannot use item: no item in that slot.".to_string());
                     }
                     continue;
                 }
@@ -2412,7 +2412,7 @@ fn handle_use_item_action_exploration(
             if charges == 0 {
                 // Defensive check — validate_item_use_slot should have caught this.
                 if let Some(ref mut log) = game_log {
-                    log.add(format!("Cannot use {item_name}: no charges remaining."));
+                    log.add_item(format!("Cannot use {item_name}: no charges remaining."));
                 }
                 continue;
             } else if charges > 1 {
@@ -2526,7 +2526,7 @@ fn handle_use_item_action_exploration(
         };
 
         if let Some(ref mut log) = game_log {
-            log.add(log_msg);
+            log.add_item(log_msg);
         }
 
         // Step 8: reset navigation state.
