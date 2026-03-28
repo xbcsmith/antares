@@ -1,15 +1,39 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::application::GameMode;
+use crate::game::resources::GlobalState;
+use crate::game::systems::hud::{HUD_BOTTOM_GAP, HUD_PANEL_HEIGHT};
+use bevy::input::ButtonInput;
 use bevy::prelude::*;
+use bevy::ui::widget::Text;
+use bevy::ui::{AlignItems, FlexDirection, Overflow, PositionType, ScrollPosition, Val};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+
+pub const GAME_LOG_PANEL_WIDTH: f32 = 300.0;
+pub const GAME_LOG_PANEL_HEIGHT: f32 = 200.0;
+pub const GAME_LOG_VISIBLE_LINES: usize = 12;
+pub const GAME_LOG_PANEL_BACKGROUND: Color = Color::srgba(0.06, 0.09, 0.13, 0.88);
+pub const GAME_LOG_VIEWPORT_BACKGROUND: Color = Color::srgba(0.03, 0.05, 0.08, 0.35);
+pub const GAME_LOG_TOGGLE_KEY: KeyCode = KeyCode::KeyL;
 
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GameLog>();
+        app.init_resource::<GameLog>()
+            .init_resource::<GameLogUiState>()
+            .add_systems(Startup, setup_game_log_panel)
+            .add_systems(
+                Update,
+                (
+                    toggle_game_log_panel,
+                    sync_game_log_panel_visibility,
+                    sync_game_log_ui,
+                    auto_scroll_game_log_viewport,
+                ),
+            );
     }
 }
 
@@ -23,6 +47,40 @@ pub enum LogCategory {
     Item,
     Exploration,
     System,
+}
+
+/// Runtime UI state for the game log panel.
+#[derive(Resource, Debug, Clone)]
+pub struct GameLogUiState {
+    pub visible: bool,
+    pub needs_scroll_to_bottom: bool,
+}
+
+impl Default for GameLogUiState {
+    fn default() -> Self {
+        Self {
+            visible: true,
+            needs_scroll_to_bottom: false,
+        }
+    }
+}
+
+/// Root marker for the game log panel.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GameLogPanelRoot;
+
+/// Marker for the scrollable viewport inside the game log panel.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GameLogScrollViewport;
+
+/// Marker for the line-list container inside the game log panel.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GameLogLineList;
+
+/// Marker for an individual rendered game log line.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GameLogLineItem {
+    pub index: usize,
 }
 
 impl LogCategory {
@@ -194,6 +252,203 @@ impl GameLog {
     }
 }
 
+fn setup_game_log_panel(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(8.0),
+                bottom: match (HUD_PANEL_HEIGHT, HUD_BOTTOM_GAP) {
+                    (Val::Px(hud_height), Val::Px(hud_gap)) => Val::Px(hud_height + hud_gap + 8.0),
+                    _ => Val::Px(102.0),
+                },
+                width: Val::Px(GAME_LOG_PANEL_WIDTH),
+                height: Val::Px(GAME_LOG_PANEL_HEIGHT),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Stretch,
+                padding: UiRect::all(Val::Px(8.0)),
+                row_gap: Val::Px(6.0),
+                ..default()
+            },
+            BackgroundColor(GAME_LOG_PANEL_BACKGROUND),
+            Visibility::Visible,
+            GameLogPanelRoot,
+        ))
+        .with_children(|panel| {
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    Name::new("GameLogHeader"),
+                ))
+                .with_children(|header| {
+                    header.spawn((
+                        Text::new("Game Log"),
+                        TextFont {
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                    header.spawn((
+                        Text::new("Filters (Phase 4)"),
+                        TextFont {
+                            font_size: 11.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.70, 0.70, 0.70)),
+                    ));
+                });
+
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_grow: 1.0,
+                        overflow: Overflow::scroll_y(),
+                        padding: UiRect::all(Val::Px(4.0)),
+                        ..default()
+                    },
+                    BackgroundColor(GAME_LOG_VIEWPORT_BACKGROUND),
+                    ScrollPosition::default(),
+                    GameLogScrollViewport,
+                ))
+                .with_children(|viewport| {
+                    viewport.spawn((
+                        Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(4.0),
+                            ..default()
+                        },
+                        GameLogLineList,
+                    ));
+                });
+        });
+}
+
+fn toggle_game_log_panel(
+    keyboard: Option<Res<ButtonInput<KeyCode>>>,
+    global_state: Option<Res<GlobalState>>,
+    mut ui_state: ResMut<GameLogUiState>,
+) {
+    if global_state
+        .as_ref()
+        .is_some_and(|state| matches!(state.0.mode, GameMode::Combat(_)))
+    {
+        return;
+    }
+
+    let Some(keyboard) = keyboard else {
+        return;
+    };
+
+    if keyboard.just_pressed(GAME_LOG_TOGGLE_KEY) {
+        ui_state.visible = !ui_state.visible;
+    }
+}
+
+fn sync_game_log_panel_visibility(
+    global_state: Option<Res<GlobalState>>,
+    ui_state: Res<GameLogUiState>,
+    mut panel_query: Query<&mut Visibility, With<GameLogPanelRoot>>,
+) {
+    let in_combat = global_state
+        .as_ref()
+        .is_some_and(|state| matches!(state.0.mode, GameMode::Combat(_)));
+    let should_show = ui_state.visible && !in_combat;
+
+    for mut visibility in &mut panel_query {
+        *visibility = if should_show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+fn sync_game_log_ui(
+    mut commands: Commands,
+    game_log: Res<GameLog>,
+    mut ui_state: ResMut<GameLogUiState>,
+    global_state: Option<Res<GlobalState>>,
+    line_list_query: Query<(Entity, Option<&Children>), With<GameLogLineList>>,
+) {
+    if let Some(global_state) = global_state.as_ref() {
+        if matches!(global_state.0.mode, GameMode::Combat(_)) {
+            return;
+        }
+
+        if !matches!(
+            global_state.0.mode,
+            GameMode::Exploration | GameMode::Dialogue(_) | GameMode::Menu(_)
+        ) {
+            return;
+        }
+    }
+
+    if !game_log.is_changed() && !ui_state.is_changed() {
+        return;
+    }
+
+    let Ok((line_list_entity, children)) = line_list_query.single() else {
+        return;
+    };
+
+    if let Some(children) = children {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
+    }
+
+    let filtered = game_log.filtered_entries();
+    if filtered.is_empty() {
+        return;
+    }
+
+    let start = filtered.len().saturating_sub(GAME_LOG_VISIBLE_LINES);
+    let visible_entries = &filtered[start..];
+
+    commands.entity(line_list_entity).with_children(|list| {
+        for (render_idx, entry) in visible_entries.iter().enumerate() {
+            list.spawn((
+                Text::new(entry.text.clone()),
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(entry.color),
+                GameLogLineItem {
+                    index: start + render_idx,
+                },
+            ));
+        }
+    });
+
+    if game_log.is_changed() {
+        ui_state.needs_scroll_to_bottom = true;
+    }
+}
+
+fn auto_scroll_game_log_viewport(
+    mut ui_state: ResMut<GameLogUiState>,
+    mut viewport_query: Query<&mut ScrollPosition, With<GameLogScrollViewport>>,
+) {
+    if !ui_state.needs_scroll_to_bottom {
+        return;
+    }
+
+    for mut scroll in &mut viewport_query {
+        scroll.0.y = f32::MAX;
+    }
+
+    ui_state.needs_scroll_to_bottom = false;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +539,86 @@ mod tests {
 
         assert!(log.entries[2].sequence > log.entries[1].sequence);
         assert!(log.entries[1].sequence > log.entries[0].sequence);
+    }
+
+    #[test]
+    fn test_game_log_panel_spawns_on_startup() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(UiPlugin);
+
+        app.update();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<Entity, With<GameLogPanelRoot>>();
+        assert!(
+            query.iter(app.world()).next().is_some(),
+            "expected GameLogPanelRoot to exist after startup"
+        );
+    }
+
+    #[test]
+    fn test_game_log_panel_visibility_toggle() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.add_plugins(UiPlugin);
+
+        app.update();
+
+        app.world_mut().resource_mut::<GameLogUiState>().visible = false;
+        app.update();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<GameLogPanelRoot>>();
+        let visibility = query
+            .iter(app.world())
+            .next()
+            .expect("panel visibility should exist");
+        assert!(matches!(visibility, Visibility::Hidden));
+    }
+
+    #[test]
+    fn test_game_log_sync_shows_filtered_entries() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.add_plugins(UiPlugin);
+
+        app.update();
+
+        {
+            let mut log = app.world_mut().resource_mut::<GameLog>();
+            log.filter.remove(&LogCategory::Combat);
+            log.add_combat("attack".to_string());
+            log.add_dialogue("hello".to_string());
+        }
+
+        app.update();
+
+        let mut line_list_query = app
+            .world_mut()
+            .query_filtered::<(&Children, Entity), With<GameLogLineList>>();
+        let (children, _line_list_entity) = line_list_query
+            .iter(app.world())
+            .next()
+            .expect("line list should exist");
+
+        assert_eq!(
+            children.len(),
+            1,
+            "only one filtered line should be spawned"
+        );
+
+        let child = children[0];
+        let text = app
+            .world()
+            .get::<Text>(child)
+            .expect("spawned log line should have Text");
+        assert_eq!(text.as_str(), "hello");
     }
 }
