@@ -138,7 +138,7 @@ impl GameData {
             .validate()
             .map_err(|e| CampaignError::ValidationFailed(format!("Item mesh validation: {}", e)))?;
 
-        // Furniture database has no external references to validate in Phase 1;
+        // Furniture database has no external references to validate;
         // an empty database is always valid.
 
         // Validate furniture mesh database

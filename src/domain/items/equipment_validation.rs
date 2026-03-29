@@ -10,7 +10,7 @@
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
-//! See `docs/explanation/engine_sdk_support_plan.md` Phase 6 for implementation details.
+//! See `docs/explanation/engine_sdk_support_plan.md` for implementation details.
 
 use crate::domain::character::{Character, Equipment, EquipmentSlot, AC_DEFAULT, AC_MAX, AC_MIN};
 use crate::domain::classes::ClassDatabase;
@@ -897,7 +897,7 @@ mod tests {
         assert!(matches!(result, Err(EquipError::InvalidClass(_))));
     }
 
-    // ===== Phase 1: ArmorClassification Expansion Tests =====
+    // ===== ArmorClassification Expansion Tests =====
 
     #[test]
     fn test_armor_classification_helmet_variant_exists() {
@@ -1073,7 +1073,7 @@ mod tests {
         assert!(result.unwrap());
     }
 
-    // ===== Phase 2: calculate_armor_class Tests =====
+    // ===== calculate_armor_class Tests =====
 
     fn make_armor_item(id: ItemId, ac_bonus: u8, classification: ArmorClassification) -> Item {
         Item {

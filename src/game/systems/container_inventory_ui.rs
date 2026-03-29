@@ -25,7 +25,7 @@
 //!
 //! ## Keyboard Navigation (two-phase model)
 //!
-//! ### Phase 1 — Slot Navigation
+//! ### Slot Navigation
 //!
 //! | Key              | Effect                                                         |
 //! |------------------|----------------------------------------------------------------|
@@ -35,7 +35,7 @@
 //! | `Enter`          | Enter **Action Navigation** for the highlighted slot           |
 //! | `Esc`            | Close container inventory; return to previous mode             |
 //!
-//! ### Phase 2 — Action Navigation
+//! ### Action Navigation
 //!
 //! | Key     | Effect                                                               |
 //! |---------|----------------------------------------------------------------------|

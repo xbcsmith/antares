@@ -576,7 +576,7 @@ mod tests {
         let db = MonsterDatabase::load_from_file(monsters_path)
             .expect("Failed to load tutorial monsters");
 
-        // Expected monster-to-creature mappings from Phase 2 plan
+        // Expected monster-to-creature mappings
         // Monster IDs match Creature IDs for direct visual mapping
         let expected_mappings = [
             (1, Some(1)),   // Goblin -> Goblin

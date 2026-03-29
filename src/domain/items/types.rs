@@ -1075,7 +1075,7 @@ mod tests {
         assert_eq!(cursed.to_string(), "Cursed Mace (Cursed)");
     }
 
-    // ===== Phase 3: Item::required_proficiency Tests =====
+    // ===== Item::required_proficiency Tests =====
 
     #[test]
     fn test_weapon_required_proficiency_simple() {
@@ -1295,7 +1295,7 @@ mod tests {
         assert_eq!(shield.required_proficiency(), Some("shield".to_string()));
     }
 
-    // ===== Phase 5: Item::required_proficiency — Helmet and Boots =====
+    // ===== Item::required_proficiency — Helmet and Boots =====
 
     #[test]
     fn test_armor_required_proficiency_helmet() {
@@ -1562,7 +1562,7 @@ mod tests {
         assert_eq!(quest_item.required_proficiency(), None);
     }
 
-    // ===== Phase 3: Item::can_use_alignment Tests =====
+    // ===== Item::can_use_alignment Tests =====
 
     #[test]
     fn test_alignment_restriction_none() {
@@ -1776,7 +1776,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 1: duration_minutes / normalize_duration tests =====
+    // ===== duration_minutes / normalize_duration tests =====
 
     #[test]
     fn test_consumable_data_duration_defaults_none_in_ron() {

@@ -14,7 +14,7 @@ use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-/// Inn mouse/keyboard parity audit (Phase 5)
+/// Inn mouse/keyboard parity audit
 ///
 /// Current mouse parity status against `inn_input_system`:
 /// - Select party member: mouse card click emits `SelectPartyMember` and
@@ -32,7 +32,7 @@ use bevy_egui::{egui, EguiContexts};
 ///
 /// Conclusion:
 /// Mouse and keyboard selection state are already synchronized through
-/// `inn_selection_system`, so the Phase 5 work here is to preserve that parity
+/// `inn_selection_system`, so the work here is to preserve that parity
 /// explicitly and lock it in with regression tests.
 pub struct InnUiPlugin;
 

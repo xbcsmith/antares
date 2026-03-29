@@ -826,7 +826,7 @@ impl GameState {
         // Load campaign content (propagates CampaignError::DatabaseError or others)
         let content_db = campaign.load_content()?;
 
-        // Basic Phase 1 validation: ensure core content groups are present
+        // Basic validation: ensure core content groups are present
         if content_db.classes.all_classes().count() == 0 {
             return Err(CampaignError::DatabaseError(
                 "Classes database is empty".to_string(),
@@ -871,7 +871,7 @@ impl GameState {
             campaign_config: CampaignConfig::default(),
         };
 
-        // Phase 2: Initialize roster from content database (premade characters)
+        // Initialize roster from content database (premade characters)
         state.initialize_roster(&content_db).map_err(|e| {
             CampaignError::DatabaseError(format!("Roster initialization failed: {}", e))
         })?;
@@ -1331,7 +1331,7 @@ impl GameState {
                 .map_err(MoveHandleError::CombatInit)?;
 
                 // Enter combat with prepared combat state
-                // Phase 1: store the type; Phase 2+ will act on it.
+                // store the type
                 let _ = encounter_group.combat_event_type;
                 self.mode = GameMode::Combat(cs);
 
@@ -1361,7 +1361,7 @@ impl GameState {
                 )
                 .map_err(MoveHandleError::CombatInit)?;
 
-                // Phase 1: store the type; Phase 2+ will act on it.
+                // store the type
                 let _ = combat_event_type;
 
                 // Enter combat with prepared combat state
@@ -1749,7 +1749,7 @@ impl GameState {
         // Tick active spell durations and per-character timed stat boosts
         for _ in 0..minutes {
             self.active_spells.tick();
-            // Phase 2: tick per-character timed stat boosts
+            // tick per-character timed stat boosts
             for member in &mut self.party.members {
                 member.tick_timed_stat_boosts_minute();
             }
@@ -1996,7 +1996,7 @@ mod tests {
         assert_eq!(state.time.minute, 5);
     }
 
-    // ===== Phase 2: TimedStatBoost wiring tests =====
+    // ===== TimedStatBoost wiring tests =====
 
     #[test]
     fn test_advance_time_ticks_timed_stat_boosts() {
@@ -2842,7 +2842,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 2: Party Management Integration Tests =====
+    // ===== Party Management Integration Tests =====
 
     #[test]
     fn test_game_state_recruit_character() {
@@ -3150,7 +3150,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 5: Persistence & Save Game Integration Tests =====
+    // ===== Persistence & Save Game Integration Tests =====
 
     #[test]
     fn test_full_save_load_cycle_with_recruitment() {
@@ -3621,7 +3621,7 @@ mod tests {
         assert_eq!(in_party_indices.len(), state.party.size());
     }
 
-    // ===== Phase 5: NPC Runtime Initialization Tests =====
+    // ===== NPC Runtime Initialization Tests =====
 
     /// Helper that builds a minimal `ContentDatabase` with one merchant NPC and a
     /// matching stock template.  Used by the `ensure_npc_runtime_initialized` tests.
@@ -3733,7 +3733,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 1: Time Advancement Hook Tests =====
+    // ===== Time Advancement Hook Tests =====
 
     /// Helper: build a minimal world with a single passable 20×20 map, party at (10,10).
     fn build_world_with_map() -> crate::domain::world::World {
@@ -4029,7 +4029,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 4: ActiveSpells::effective_resistance tests =====
+    // ===== ActiveSpells::effective_resistance tests =====
 
     #[test]
     fn test_effective_resistance_zero_when_no_protection() {
@@ -4063,7 +4063,7 @@ mod tests {
         // Each of the eight ResistanceType variants must return ACTIVE_PROTECTION_BONUS
         // when its mapped ActiveSpells field is non-zero.
         //
-        // Mapping (mirrors Phase 3 / apply_consumable_effect_exploration):
+        // Mapping (mirrors apply_consumable_effect_exploration):
         //   Fire        → fire_protection
         //   Cold        → cold_protection
         //   Electricity → electricity_protection
@@ -4122,7 +4122,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 5: End-to-end timed potion / active-spell expiry tests =====
+    // ===== End-to-end timed potion / active-spell expiry tests =====
 
     /// Simulates applying a 60-minute fire-resistance potion directly on
     /// `active_spells` (the same write `apply_consumable_effect_exploration`

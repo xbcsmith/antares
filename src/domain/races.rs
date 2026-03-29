@@ -10,7 +10,7 @@
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
-//! See `docs/explanation/hardcoded_removal_implementation_plan.md` Phase 4.
+//! See `docs/explanation/hardcoded_removal_implementation_plan.md` for implementation details.
 
 use crate::domain::proficiency::ProficiencyDatabase;
 use serde::{Deserialize, Serialize};

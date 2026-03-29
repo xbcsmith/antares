@@ -10,7 +10,7 @@
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
-//! See `docs/explanation/sdk_implementation_plan.md` Phase 1 for implementation details.
+//! See `docs/explanation/sdk_implementation_plan.md` for implementation details.
 
 use crate::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
 use crate::domain::types::{DiceRoll, ItemId};

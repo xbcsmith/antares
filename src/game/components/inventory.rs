@@ -10,7 +10,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.3 for character and party
 //! specifications, and `docs/explanation/ecs_inventory_view_implementation_plan.md`
-//! Phase 1 for the design rationale behind these types.
+//! for the design rationale behind these types.
 
 use crate::domain::character::PARTY_MAX_SIZE;
 use bevy::prelude::*;

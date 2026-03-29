@@ -9,7 +9,7 @@
 //!
 //! # Architecture Reference
 //!
-//! See `docs/explanation/sdk_and_campaign_architecture.md` Phase 5 for dialogue specifications.
+//! See `docs/explanation/sdk_and_campaign_architecture.md` for dialogue specifications.
 
 use crate::domain::quest::QuestId;
 use crate::domain::types::ItemId;

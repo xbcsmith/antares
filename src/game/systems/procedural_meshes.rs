@@ -1092,7 +1092,7 @@ pub fn spawn_tree(
         .map(super::advanced_trees::TerrainVisualConfig::from)
         .unwrap_or_default();
 
-    // Phase 1: Generate branch graph for the tree type
+    // Generate branch graph for the tree type
     let tree_type_resolved = tree_type.unwrap_or(super::advanced_trees::TreeType::Oak);
     let branch_graph = super::advanced_trees::generate_branch_graph(tree_type_resolved);
 
@@ -1173,7 +1173,7 @@ pub fn spawn_tree(
         .id();
     commands.entity(parent).add_child(tree_structure);
 
-    // Phase 3: Spawn foliage clusters at leaf branch endpoints using plane quads
+    // Spawn foliage clusters at leaf branch endpoints using plane quads
     spawn_foliage_clusters(
         commands,
         materials,
@@ -2770,7 +2770,7 @@ pub fn spawn_arch(
     parent
 }
 
-// ==================== Phase 5: Performance & Polish ====================
+// ==================== Performance & Polish ====================
 
 /// Calculate the mesh complexity level for LOD selection
 ///
@@ -2807,11 +2807,11 @@ pub fn calculate_lod_level(vertex_count: usize) -> crate::domain::world::DetailL
 ///
 /// Simplified mesh handle
 pub fn create_simplified_mesh(mesh: &Mesh, reduction_ratio: f32) -> Mesh {
-    // For Phase 5, implement basic vertex reduction by sampling
+    // Implement basic vertex reduction by sampling
     // In a full implementation, this would use proper mesh decimation
     let reduction_ratio = reduction_ratio.clamp(0.0, 0.9);
 
-    // Return the same mesh for now - full LOD implementation deferred to Phase 6
+    // Return the same mesh for now - full LOD implementation deferred
     // This is a placeholder that maintains the mesh exactly
     if reduction_ratio == 0.0 {
         mesh.clone()
@@ -3047,7 +3047,7 @@ mod tests {
         assert!(cache.tree_trunk.is_none(), "Cache should start empty");
     }
 
-    // ==================== Phase 2: Shrub & Grass Tests ====================
+    // ==================== Shrub & Grass Tests ====================
 
     /// Tests that cache properly stores shrub stem meshes
     #[test]
@@ -3483,7 +3483,7 @@ mod tests {
         assert!(cache.structure_railing_bar.is_none());
     }
 
-    // ==================== Phase 2: Door Frame Tests ====================
+    // ==================== Door Frame Tests ====================
 
     /// Tests door frame constants are valid and sensible
     #[test]
@@ -3760,7 +3760,7 @@ mod tests {
         );
     }
 
-    // ==================== Phase 5: Performance & Polish Tests ====================
+    // ==================== Performance & Polish Tests ====================
 
     /// Tests DetailLevel from_distance for full quality
     #[test]
@@ -3992,7 +3992,7 @@ mod tests {
         // Test passes if Clone trait is implemented
     }
 
-    // ==================== Phase 3: Tree Material Cache Tests ====================
+    // ==================== Tree Material Cache Tests ====================
 
     /// Tests that foliage_texture_path returns a non-empty .png path for all TreeType variants
     #[test]

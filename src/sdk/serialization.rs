@@ -8,7 +8,7 @@
 //!
 //! # Architecture Reference
 //!
-//! See `docs/explanation/sdk_implementation_plan.md` Phase 3.4 for specifications.
+//! See `docs/explanation/sdk_implementation_plan.md` for specifications.
 //!
 //! # Examples
 //!

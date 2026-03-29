@@ -1791,7 +1791,7 @@ mod tests {
         )
     }
 
-    // ===== Phase 2: TimedStatBoost tests =====
+    // ===== TimedStatBoost tests =====
 
     #[test]
     fn test_timed_stat_boosts_defaults_empty_on_new_character() {
@@ -1946,8 +1946,8 @@ mod tests {
     #[test]
     fn test_timed_stat_boost_serde_default_deserializes() {
         // Serialise a character to RON, then strip the timed_stat_boosts field
-        // to simulate a save file created before Phase 2 (the field did not
-        // exist yet).  #[serde(default)] must cause it to deserialise as an
+        // to simulate a save file created before timed_stat_boosts existed
+        // (the field did not exist yet).  #[serde(default)] must cause it to deserialise as an
         // empty Vec rather than returning an error.
         let hero = make_hero();
         let serialized = ron::to_string(&hero).expect("serialization must succeed");

@@ -166,7 +166,7 @@ fn handle_start_dialogue(
     mut quest_system: Option<ResMut<crate::application::quests::QuestSystem>>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
     npc_query: Query<&crate::game::systems::map::NpcMarker>,
-    // Phase 3: query TileCoord on the speaker entity so we can compute facing
+    // Query TileCoord on the speaker entity so we can compute facing
     // toward the party and emit a SetFacing event.
     tile_coord_query: Query<&crate::game::systems::map::TileCoord>,
     mut facing_writer: Option<MessageWriter<crate::game::systems::facing::SetFacing>>,
@@ -224,7 +224,7 @@ fn handle_start_dialogue(
 
                 global_state.0.mode = GameMode::Dialogue(new_state);
 
-                // Phase 3: if the speaker entity has a TileCoord, determine the
+                // If the speaker entity has a TileCoord, determine the
                 // 4-direction from the speaker toward the party and emit SetFacing
                 // so the NPC turns to face the player at the start of dialogue.
                 if let Some(ref mut writer) = facing_writer {
@@ -2820,7 +2820,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 3: Transaction Dialogue Integration Tests =====
+    // ===== Transaction Dialogue Integration Tests =====
 
     /// Build a minimal ContentDatabase containing one merchant NPC ("merchant_tom")
     /// with item 1 in stock (qty 3, price 10) and item 2 in stock (qty 2, price 20).
@@ -3551,7 +3551,7 @@ mod tests {
         assert_eq!(last_entry.text, "Sold Old Dagger for 2 gold.");
     }
 
-    // ─── Phase 3: Dialogue → SetFacing integration tests ─────────────────────
+    // ─── Dialogue → SetFacing integration tests ──────────────────────────────
 
     /// `test_dialogue_start_emits_set_facing` – starting a dialogue with a speaker
     /// whose entity has a `TileCoord` must cause the NPC to face the party.

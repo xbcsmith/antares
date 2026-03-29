@@ -11,7 +11,7 @@
 //! # Architecture Reference
 //!
 //! See the furniture RON implementation plan in
-//! `docs/explanation/furniture_as_ron_implementation_plan.md` Phase 1.
+//! `docs/explanation/furniture_as_ron_implementation_plan.md` for implementation details.
 //!
 //! # Examples
 //!

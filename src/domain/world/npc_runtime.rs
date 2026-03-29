@@ -21,8 +21,8 @@
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 4.9 (Campaign System) and the
-//! inventory system implementation plan Phase 2 for complete specifications.
-//! Phase 6 adds daily restock and magic-item rotation driven by `GameState::advance_time`.
+//! inventory system implementation plan for complete specifications.
+//! Daily restock and magic-item rotation are driven by `GameState::advance_time`.
 
 use crate::domain::inventory::{MerchantStock, StockEntry};
 use crate::domain::types::ItemId;
@@ -178,9 +178,9 @@ impl MerchantStockTemplate {
 /// This holds all data about an NPC that can change during play:
 /// - Current merchant stock (quantities decrease as items are purchased)
 /// - Services consumed this session (for future per-session limits)
-/// - Restock tracking fields added in Phase 6 (all `#[serde(default)]` so
-///   pre-Phase-6 saves load correctly; the sentinel value `0` causes an
-///   immediate restock on the first `tick_restock` call).
+/// - Restock tracking fields (all `#[serde(default)]` so older saves load
+///   correctly; the sentinel value `0` causes an immediate restock on the
+///   first `tick_restock` call).
 ///
 /// `NpcRuntimeState` is serialised into save data so that stock levels,
 /// consumed services, and restock timestamps persist across save/load cycles.

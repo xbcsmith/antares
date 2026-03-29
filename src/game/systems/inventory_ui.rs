@@ -9,7 +9,7 @@
 //!
 //! ## Keyboard Navigation (two-phase model)
 //!
-//! ### Phase 1 — Slot Navigation
+//! ### Slot Navigation
 //!
 //! | Key              | Effect                                                                        |
 //! |------------------|-------------------------------------------------------------------------------|
@@ -20,7 +20,7 @@
 //! | `U`              | Use the highlighted consumable directly (bypasses Action Navigation)          |
 //! | `Esc` / `I`      | Close the inventory and resume the previous game mode                         |
 //!
-//! ### Phase 2 — Action Navigation
+//! ### Action Navigation
 //!
 //! | Key         | Effect                                                             |
 //! |-------------|--------------------------------------------------------------------|
@@ -1986,7 +1986,7 @@ fn inventory_action_system(
                 }
 
                 // Fire ItemDroppedEvent so the 3-D world mesh spawns at the
-                // party's current tile position (Phase 3 visual system).
+                // party's current tile position (visual system).
                 if let Some(ref mut writer) = item_dropped_writer {
                     writer.write(ItemDroppedEvent {
                         item_id: dropped.item_id,
@@ -2980,7 +2980,7 @@ mod tests {
     // 4.4.1  Drop removes item and clears selected_slot
     // ------------------------------------------------------------------
 
-    /// Full Phase 4 test: a `DropItemAction` removes the item from inventory
+    /// Full test: a `DropItemAction` removes the item from inventory
     /// and sets `selected_slot` to `None`.
     #[test]
     fn test_drop_item_action_removes_from_inventory() {
@@ -3865,7 +3865,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Phase 3: handle_use_item_action_exploration tests
+    // handle_use_item_action_exploration tests
     // ------------------------------------------------------------------
 
     /// Helper to build a minimal ContentDatabase with a single healing potion.
@@ -4695,7 +4695,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Phase 2: build_action_list with consumable/non-consumable
+    // build_action_list with consumable/non-consumable
     // ------------------------------------------------------------------
 
     /// `build_action_list` for a slot containing a consumable returns `Use` as
@@ -4941,7 +4941,7 @@ mod tests {
     }
 
     // ====================================================================
-    // Phase 4: Equip / Unequip tests
+    // Equip / Unequip tests
     // ====================================================================
 
     // ------------------------------------------------------------------

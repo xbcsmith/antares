@@ -25,7 +25,7 @@
 //! # Architecture Reference
 //!
 //! See `docs/explanation/unified_creature_asset_binding_implementation_plan.md`
-//! Phase 3 for the design rationale.
+//! for the design rationale.
 
 use crate::domain::character_definition::CharacterDefinition;
 use crate::domain::combat::database::MonsterDefinition;

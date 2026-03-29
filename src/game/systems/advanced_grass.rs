@@ -39,7 +39,7 @@ const GRASS_BLADE_TEXTURE: &str = "assets/textures/grass/grass_blade.png";
 /// silhouette without sorting artefacts.
 const GRASS_ALPHA_CUTOFF: f32 = 0.3;
 
-// ==================== Phase 2: Grass Rendering Components ====================
+// ==================== Grass Rendering Components ====================
 
 /// Component marking a grass cluster (parent entity containing multiple blades)
 ///
@@ -141,7 +141,7 @@ impl Default for GrassRenderConfig {
     }
 }
 
-// ==================== Phase 4: Instance Batching ====================
+// ==================== Instance Batching ====================
 
 /// Resource controlling grass instance batching behavior
 ///
@@ -203,7 +203,7 @@ pub struct GrassInstanceBatch {
     pub instances: Vec<world::InstanceData>,
 }
 
-// ==================== Phase 3: Blade Configuration ====================
+// ==================== Blade Configuration ====================
 
 /// Configuration for individual grass blade appearance
 ///
@@ -681,7 +681,7 @@ pub fn spawn_grass(
     parent
 }
 
-// ==================== Phase 2: Grass Performance Systems ====================
+// ==================== Grass Performance Systems ====================
 
 /// System that culls grass clusters beyond the configured distance
 ///
@@ -874,7 +874,7 @@ pub fn build_grass_instance_batches_system(
     }
 }
 
-// ==================== Phase 4: Optional Chunking ====================
+// ==================== Optional Chunking ====================
 
 /// Component that marks a merged grass chunk entity
 #[derive(Component, Clone, Copy, Debug)]
@@ -1738,7 +1738,7 @@ mod tests {
         assert!(cluster_count > 0);
     }
 
-    // ── Phase 2 tests ─────────────────────────────────────────────────────────
+    // ── Grass rendering tests ─────────────────────────────────────────────────
 
     /// `GRASS_BLADE_TEXTURE` must start with `"textures/grass/"` and end with
     /// `".png"`, confirming it points to the correct asset directory and format.

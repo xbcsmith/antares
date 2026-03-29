@@ -177,7 +177,7 @@ impl LogEntry {
     /// Compatibility helper that forwards to the underlying entry text.
     ///
     /// This preserves existing tests and transitional code that still treat
-    /// log entries like string values during the Phase 1 migration.
+    /// log entries like string values.
     pub fn contains(&self, pattern: &str) -> bool {
         self.text.contains(pattern)
     }

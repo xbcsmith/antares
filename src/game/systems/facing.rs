@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Runtime facing-change systems (Phase 3 & 4)
+//! Runtime facing-change systems
 //!
 //! This module provides the ECS infrastructure for changing an entity's facing
 //! direction at runtime.  Four mechanisms are implemented:
@@ -11,7 +11,7 @@
 //! 2. **`handle_set_facing` system** – reads `SetFacing` messages and either
 //!    snaps the entity's `Transform` rotation instantly (`instant: true`) or
 //!    inserts a `RotatingToFacing` component for frame-by-frame interpolation
-//!    (`instant: false`, Phase 4).
+//!    (`instant: false`).
 //! 3. **`face_toward_player_on_proximity` system** – entities carrying a
 //!    `ProximityFacing` marker component automatically emit `SetFacing` events
 //!    when the party enters `trigger_distance` tiles.
@@ -45,7 +45,7 @@ use crate::game::systems::map::TileCoord;
 ///
 /// - `instant: true`  → snap the rotation in the current frame.
 /// - `instant: false` → insert a [`RotatingToFacing`] component so the entity
-///   rotates smoothly at `speed_deg_per_sec` degrees per second (Phase 4).
+///   rotates smoothly at `speed_deg_per_sec` degrees per second.
 ///   The speed is taken from the `ProximityFacing` component when the message
 ///   originates from the proximity system; callers that construct `SetFacing`
 ///   directly and want smooth rotation should insert `RotatingToFacing`
@@ -72,7 +72,7 @@ pub struct SetFacing {
     pub entity: Entity,
     /// The new cardinal direction to face.
     pub direction: Direction,
-    /// `true` → snap immediately; `false` → smooth rotation (Phase 4, uses
+    /// `true` → snap immediately; `false` → smooth rotation (uses
     /// the speed stored in [`ProximityFacing`] if present, otherwise 360 °/s).
     pub instant: bool,
 }
@@ -158,7 +158,7 @@ const ROTATION_COMPLETE_THRESHOLD_RAD: f32 = 0.01;
 
 // ─── Plugin ───────────────────────────────────────────────────────────────────
 
-/// Bevy plugin that registers the `SetFacing` message and all Phase 3/4 systems.
+/// Bevy plugin that registers the `SetFacing` message and all facing systems.
 ///
 /// Already included by `MapManagerPlugin`.  Add it explicitly only when using the
 /// facing systems in isolation (e.g., integration tests).
@@ -585,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_facing_non_instant_snaps_in_phase3_without_proximity() {
+    fn test_set_facing_non_instant_snaps_without_proximity() {
         // When instant == false, handle_set_facing inserts RotatingToFacing.
         // We verify that writing SetFacing { instant: false } results in either
         // a RotatingToFacing component being inserted, or the facing already
@@ -693,7 +693,7 @@ mod tests {
         );
     }
 
-    // ─── RotatingToFacing (Phase 4) tests ────────────────────────────────────
+    // ─── RotatingToFacing tests ──────────────────────────────────────────────
 
     #[test]
     fn test_rotating_to_facing_approaches_target() {
@@ -906,7 +906,7 @@ mod tests {
         assert_eq!(DEFAULT_ROTATION_SPEED_DEG_PER_SEC, 360.0);
     }
 
-    // ─── ProximityFacing (Phase 4 fields) tests ──────────────────────────────
+    // ─── ProximityFacing fields tests ────────────────────────────────────────
 
     #[test]
     fn test_proximity_facing_stores_trigger_distance() {

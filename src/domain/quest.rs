@@ -9,7 +9,7 @@
 //!
 //! # Architecture Reference
 //!
-//! See `docs/explanation/sdk_and_campaign_architecture.md` Phase 5 for quest specifications.
+//! See `docs/explanation/sdk_and_campaign_architecture.md` for quest specifications.
 
 use crate::domain::types::{ItemId, MapId, MonsterId, Position};
 use serde::{Deserialize, Serialize};

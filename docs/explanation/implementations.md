@@ -337,3 +337,78 @@ Cleanup Plan and Game Feature Completion Plan:
 Plan written to `docs/explanation/sdk_codebase_cleanup_plan.md` and
 `docs/explanation/next_plans.md` updated to reference it. No code changes
 were made — this is a planning artifact only.
+
+## Phase 2: Strip Phase References (Complete)
+
+### Overview
+
+Removed all development-phase language (`Phase 1:`, `Phase 2:`, etc.) from
+source code, tests, data files, benchmarks, and root documentation. This was
+a mechanical find-and-replace effort with **zero behavioral changes**. The
+algorithmic `Phase A:` / `Phase B:` comments in `item_usage.rs` and the
+`lobe_phase` math variable in `generate_terrain_textures.rs` were correctly
+preserved.
+
+### 2.1 — Renamed Test Data IDs and Test Functions
+
+| File                                 | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/facing.rs`         | `test_set_facing_non_instant_snaps_in_phase3_without_proximity` → `test_set_facing_non_instant_snaps_without_proximity`                                                                                                                                                                                                                                                                                                                                 |
+| `src/application/save_game.rs`       | `phase5_buy_test` → `buy_sell_test`, `phase5_container_test` → `container_test`, `merchant_phase6` → `merchant_restock`, `phase6_restock_roundtrip` → `restock_roundtrip`                                                                                                                                                                                                                                                                               |
+| `src/domain/character_definition.rs` | `test_phase3_weapon` → `test_starting_weapon`, `Phase3 Knight` → `Starting Equipment Knight`, `test_phase3_unequip` → `test_starting_unequip`, `test_phase3_ac` → `test_starting_armor_ac`, `test_phase3_no_eq` → `test_no_starting_equipment`, `test_phase3_invalid_eq` → `test_invalid_starting_equipment`, `test_phase5_helmet` → `test_helmet_equip`, `test_phase5_boots` → `test_boots_equip` (plus corresponding `name` and `description` fields) |
+
+### 2.2 — Stripped Phase Prefixes from Production Comments
+
+~200+ inline comments across 60+ source files had `Phase N:` prefixes removed
+while preserving the descriptive text. Examples:
+
+- `// Phase 2: select handicap based on combat event type.` → `// Select handicap based on combat event type.`
+- `// Phase 3: set Animating before the domain call` → `// Set Animating before the domain call`
+- `/// See ... Phase 5 for dialogue specifications.` → `/// See ... for dialogue specifications.`
+- `// Phase 4: Boss monsters never flee` → `// Boss monsters never flee`
+
+Key files with many changes: `combat.rs` (~67 refs), `map.rs` (~28 refs),
+`item_mesh.rs` (~20 refs), `application/mod.rs` (~13 refs).
+
+### 2.3 — Stripped Phase Prefixes from Test Section Headers
+
+~40 `// ===== Phase N: ... =====` section headers in test modules were
+replaced with descriptive topic-only headers. Examples:
+
+- `// ===== Phase 2: Normal and Ambush Combat Tests =====` → `// ===== Normal and Ambush Combat Tests =====`
+- `// ===== Phase 3: Player Action System Tests =====` → `// ===== Player Action System Tests =====`
+- `// ===== Phase 5: Performance & Polish Tests =====` → `// ===== Performance & Polish Tests =====`
+
+### 2.4 — Cleaned Data Files and Root Documentation
+
+| File                                              | Change                                                                                          |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `data/classes.ron`                                | Removed `Phase 1` spec reference                                                                |
+| `data/examples/character_definition_formats.ron`  | Removed `(Phases 1 & 2)`                                                                        |
+| `data/npc_stock_templates.ron`                    | Removed `Phase 2 of the food system migration`                                                  |
+| `data/test_campaign/data/npc_stock_templates.ron` | Removed all Phase 3/6 references (~10 comments)                                                 |
+| `README.md`                                       | Replaced phase-based roadmap with feature-based list; removed `(Phase 6 - Latest)` from heading |
+| `assets/sprites/README.md`                        | Removed `Phase 4` reference                                                                     |
+| `benches/grass_instancing.rs`                     | Removed `(Phase 4)`                                                                             |
+| `benches/grass_rendering.rs`                      | Removed `(Phase 2)`                                                                             |
+| `benches/sprite_rendering.rs`                     | Removed `(Phase 3)`                                                                             |
+
+### Deliverables Checklist
+
+- [x] ~20 test data IDs/names/descriptions renamed
+- [x] 1 test function name renamed
+- [x] ~200+ production comments cleaned across 60+ files
+- [x] ~40 test section headers cleaned
+- [x] Data files and root docs cleaned
+- [x] Benchmark module docs cleaned
+
+### Success Criteria
+
+- `grep -rn "Phase [0-9]" src/ benches/ data/` returns **zero hits** (excluding
+  `item_usage.rs` algorithmic `Phase A`/`Phase B`).
+- `grep -rn "phase[0-9]" src/` returns **zero hits**.
+- All quality gates pass:
+  - `cargo fmt --all` — ✅ no output
+  - `cargo check --all-targets --all-features` — ✅ Finished, 0 errors
+  - `cargo clippy --all-targets --all-features -- -D warnings` — ✅ 0 warnings
+  - `cargo nextest run --all-features` — ✅ 3,944 passed, 0 failed, 8 skipped

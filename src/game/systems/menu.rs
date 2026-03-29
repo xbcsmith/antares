@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Menu plugin and system implementations for Phase 4-6: Menu UI Rendering, Save/Load, and Settings Integration
+//! Menu plugin and system implementations: Menu UI Rendering, Save/Load, and Settings Integration
 //!
 //! This module implements the complete menu UI system with:
 //! - UI spawning based on current submenu (Main/SaveLoad/Settings)
@@ -9,7 +9,7 @@
 //! - Dynamic button color updates based on selection
 //! - Save/Load menu with scrollable save list
 //! - Save and load game operations
-//! - Settings menu with volume sliders (Phase 6)
+//! - Settings menu with volume sliders
 //! - Proper cleanup when exiting menu mode
 
 use bevy::ecs::world::World;
@@ -674,7 +674,7 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
     );
 }
 
-/// Spawn the settings menu UI with audio sliders and graphics settings (Phase 6)
+/// Spawn the settings menu UI with audio sliders and graphics settings
 fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application::GameState) {
     commands
         .spawn((
@@ -1950,7 +1950,7 @@ mod tests {
     }
 
     // ========================================================================
-    // Phase 6: Settings Menu Integration Tests
+    // Settings Menu Integration Tests
     // ========================================================================
 
     #[test]

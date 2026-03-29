@@ -136,7 +136,7 @@ impl DroppedItemRegistry {
 ///
 /// This resource is populated by `handle_input` when the player presses `E`
 /// in front of a locked door that cannot be opened with a key from the party
-/// inventory. Phase 3's lock UI reads this resource to display the pick-lock
+/// inventory. The lock UI reads this resource to display the pick-lock
 /// or bash choice prompt.
 ///
 /// Clear `lock_id` to `None` when the choice has been resolved or cancelled.
@@ -163,7 +163,7 @@ pub struct LockInteractionPending {
     pub position: Option<Position>,
     /// Whether at least one party member has the `pick_lock` special ability.
     ///
-    /// Phase 3 uses this flag to enable or disable the "Pick Lock" option in
+    /// This flag enables or disables the "Pick Lock" option in
     /// the choice UI.
     pub can_lockpick: bool,
 }

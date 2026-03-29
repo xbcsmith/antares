@@ -23,7 +23,7 @@
 //!
 //! # RON Format Migration (AttributePair)
 //!
-//! As of Phase 1 migration, `base_stats` uses `Stats` (with `AttributePair` fields) and
+//! As of the AttributePair migration, `base_stats` uses `Stats` (with `AttributePair` fields) and
 //! `hp_override` uses `AttributePair16`. Both support backward-compatible deserialization:
 //!
 //! **Simple format (recommended for most cases):**
@@ -3228,7 +3228,7 @@ mod tests {
         // Verify HP was calculated (should be > 0)
         assert!(character.hp.base > 0);
 
-        // Phase 3: two-pass equip — starting equipment items land in equipment slots,
+        // two-pass equip — starting equipment items land in equipment slots,
         // not in inventory. Total inventory = starting_items[50] + 15 food rations.
         assert_eq!(character.inventory.items.len(), 16);
         assert_eq!(character.inventory.items[0].item_id, 50);
@@ -3248,7 +3248,7 @@ mod tests {
             "armor should be in equipment slot, not inventory"
         );
 
-        // Phase 3: AC is calculated from equipment after equipping.
+        // AC is calculated from equipment after equipping.
         // Leather Armor (item 20) grants ac_bonus 2, so AC = AC_DEFAULT(10) + 2 = 12.
         assert_eq!(
             character.ac.current, 12,
@@ -3256,7 +3256,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 3 Tests: Starting Equipment in Inventory =====
+    // ===== Starting Equipment in Slots Tests =====
 
     #[test]
     fn test_instantiate_starting_weapon_in_equipment_slot() {
@@ -3271,8 +3271,8 @@ mod tests {
 
         // Knight with Long Sword (item 4, MartialMelee — knight has martial_melee)
         let definition = CharacterDefinition {
-            id: "test_phase3_weapon".to_string(),
-            name: "Phase3 Knight".to_string(),
+            id: "test_starting_weapon".to_string(),
+            name: "Starting Equipment Knight".to_string(),
             race_id: "human".to_string(),
             class_id: "knight".to_string(),
             sex: Sex::Male,
@@ -3288,7 +3288,7 @@ mod tests {
                 weapon: Some(4), // Long Sword
                 ..Default::default()
             },
-            description: "Phase 3 weapon test".to_string(),
+            description: "weapon equip test".to_string(),
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -3333,8 +3333,8 @@ mod tests {
             .expect("Failed to load items");
 
         let definition = CharacterDefinition {
-            id: "test_phase3_unequip".to_string(),
-            name: "Phase3 Unequip".to_string(),
+            id: "test_starting_unequip".to_string(),
+            name: "Starting Equipment Unequip".to_string(),
             race_id: "human".to_string(),
             class_id: "knight".to_string(),
             sex: Sex::Male,
@@ -3350,7 +3350,7 @@ mod tests {
                 weapon: Some(4), // Long Sword
                 ..Default::default()
             },
-            description: "Phase 3 unequip test".to_string(),
+            description: "unequip test".to_string(),
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -3394,8 +3394,8 @@ mod tests {
             .expect("Failed to load items");
 
         let definition = CharacterDefinition {
-            id: "test_phase3_ac".to_string(),
-            name: "Phase3 AC".to_string(),
+            id: "test_starting_armor_ac".to_string(),
+            name: "Starting Armor AC".to_string(),
             race_id: "human".to_string(),
             class_id: "knight".to_string(),
             sex: Sex::Male,
@@ -3411,7 +3411,7 @@ mod tests {
                 armor: Some(20), // Leather Armor (Light, ac_bonus: 2)
                 ..Default::default()
             },
-            description: "Phase 3 AC test".to_string(),
+            description: "AC test".to_string(),
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -3439,8 +3439,8 @@ mod tests {
             .expect("Failed to load items");
 
         let definition = CharacterDefinition {
-            id: "test_phase3_no_eq".to_string(),
-            name: "Phase3 NoEquip".to_string(),
+            id: "test_no_starting_equipment".to_string(),
+            name: "No Starting Equipment".to_string(),
             race_id: "human".to_string(),
             class_id: "knight".to_string(),
             sex: Sex::Male,
@@ -3453,7 +3453,7 @@ mod tests {
             starting_food: 0,
             starting_items: vec![],
             starting_equipment: StartingEquipment::new(), // empty
-            description: "Phase 3 no-equipment test".to_string(),
+            description: "no-equipment test".to_string(),
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -3488,8 +3488,8 @@ mod tests {
             .expect("Failed to load items");
 
         let definition = CharacterDefinition {
-            id: "test_phase3_invalid_eq".to_string(),
-            name: "Phase3 InvalidEq".to_string(),
+            id: "test_invalid_starting_equipment".to_string(),
+            name: "Invalid Starting Equipment".to_string(),
             race_id: "human".to_string(),
             class_id: "sorcerer".to_string(),
             sex: Sex::Female,
@@ -3505,7 +3505,7 @@ mod tests {
                 weapon: Some(3), // Short Sword (MartialMelee) — sorcerer cannot use
                 ..Default::default()
             },
-            description: "Phase 3 invalid-equip test".to_string(),
+            description: "invalid-equip test".to_string(),
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -4166,7 +4166,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 5: instantiate — Helmet and Boots in starting_equipment =====
+    // ===== Helmet and Boots Starting Equipment Tests =====
 
     #[test]
     fn test_instantiate_starting_helmet_in_equipment_slot() {
@@ -4182,8 +4182,8 @@ mod tests {
             .expect("Failed to load items");
 
         let definition = CharacterDefinition {
-            id: "test_phase5_helmet".to_string(),
-            name: "Phase5 Helmet".to_string(),
+            id: "test_helmet_equip".to_string(),
+            name: "Starting Helmet".to_string(),
             race_id: "human".to_string(),
             class_id: "knight".to_string(),
             sex: Sex::Male,
@@ -4199,7 +4199,7 @@ mod tests {
                 helmet: Some(25), // Iron Helmet (Helmet classification, ac_bonus: 1)
                 ..Default::default()
             },
-            description: "Phase 5 helmet test".to_string(),
+            description: "helmet equip test".to_string(),
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
@@ -4244,8 +4244,8 @@ mod tests {
             .expect("Failed to load items");
 
         let definition = CharacterDefinition {
-            id: "test_phase5_boots".to_string(),
-            name: "Phase5 Boots".to_string(),
+            id: "test_boots_equip".to_string(),
+            name: "Starting Boots".to_string(),
             race_id: "human".to_string(),
             class_id: "knight".to_string(),
             sex: Sex::Male,
@@ -4261,7 +4261,7 @@ mod tests {
                 boots: Some(26), // Leather Boots (Boots classification, ac_bonus: 1)
                 ..Default::default()
             },
-            description: "Phase 5 boots test".to_string(),
+            description: "boots equip test".to_string(),
             is_premade: false,
             starts_in_party: false,
             creature_id: None,

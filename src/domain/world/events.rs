@@ -964,7 +964,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 1: CombatEventType threading tests =====
+    // ===== CombatEventType threading tests =====
 
     #[test]
     fn test_combat_event_type_default_is_normal() {

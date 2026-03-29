@@ -21,7 +21,7 @@
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 4.3 (Character/Party) and the
-//! inventory system implementation plan Phase 2 for complete specifications.
+//! inventory system implementation plan for complete specifications.
 
 use crate::domain::character::{Character, InventorySlot};
 use crate::domain::character::{EquipmentSlot, Party};
@@ -2136,7 +2136,7 @@ mod tests {
         assert!(err.to_string().contains("7"));
     }
 
-    // ===== Phase 2: equip_item Tests =====
+    // ===== equip_item Tests =====
 
     #[test]
     fn test_equip_item_weapon_moves_from_inventory_to_slot() {
@@ -2326,7 +2326,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 2: unequip_item Tests =====
+    // ===== unequip_item Tests =====
 
     #[test]
     fn test_unequip_item_moves_to_inventory() {

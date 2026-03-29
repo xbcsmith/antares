@@ -151,9 +151,9 @@ impl Plugin for MapManagerPlugin {
         // Register the map change message and the handler + spawn systems
         app.add_message::<MapChangeEvent>()
             .add_message::<DespawnRecruitableVisual>()
-            // Phase 3: register SetFacing message and proximity/facing systems
+            // Register SetFacing message and proximity/facing systems
             .add_plugins(crate::game::systems::facing::FacingPlugin)
-            // Phase 2 (locks): seed lock_states for every map present at startup.
+            // Seed lock_states for every map present at startup.
             // This runs once before the first frame so that the split
             // exploration-interaction input flow can find lock entries immediately.
             .add_systems(Startup, init_map_lock_states_system)
@@ -293,7 +293,7 @@ impl Plugin for MapRenderingPlugin {
         // registry on startup so metadata is available before map spawn runs.
         app.init_resource::<SpriteAssets>()
             .init_resource::<crate::game::resources::GrassQualitySettings>()
-            .init_resource::<super::advanced_grass::GrassRenderConfig>() // Phase 2: Add grass render config
+            .init_resource::<super::advanced_grass::GrassRenderConfig>() // Add grass render config
             .init_resource::<super::advanced_grass::GrassInstanceConfig>()
             .add_systems(
                 Startup,
@@ -309,12 +309,12 @@ impl Plugin for MapRenderingPlugin {
             .add_systems(
                 Update,
                 (
-                    // Phase 2: Grass performance systems for culling and LOD
+                    // Grass performance systems for culling and LOD
                     super::advanced_grass::grass_distance_culling_system,
                     super::advanced_grass::grass_lod_system,
-                    // Phase 4: Instance batching for diagnostics
+                    // Instance batching for diagnostics
                     super::advanced_grass::build_grass_instance_batches_system,
-                    // Phase 4: Advanced grass chunking + culling systems
+                    // Advanced grass chunking + culling systems
                     super::advanced_grass::build_grass_chunks_system,
                     super::advanced_grass::grass_chunk_culling_system,
                 ),
@@ -486,7 +486,7 @@ fn map_change_handler(
                 ev.target_pos,
                 crate::domain::world::VISIBILITY_RADIUS,
             );
-            // Phase 2 (locks): seed lock_states for the newly active map so that
+            // Seed lock_states for the newly active map so that
             // any LockedDoor / LockedContainer events on it are registered before
             // the player can interact with them.  init_lock_states is idempotent —
             // it skips entries that already exist — so previously-unlocked doors
@@ -1128,10 +1128,10 @@ fn spawn_map(
             }
         }
 
-        // Spawn NPC visual markers (Phase 2: NPC Visual Representation)
+        // Spawn NPC visual markers (NPC Visual Representation)
         let resolved_npcs = map.resolve_npcs(&content.0.npcs);
 
-        // Phase 2: Build a facing-override map from NpcDialogue events so that
+        // Build a facing-override map from NpcDialogue events so that
         // an event-level `facing` field can override the NpcPlacement.facing for
         // the same NPC.  Only entries where `facing` is `Some` are stored.
         let npc_dialogue_facing: std::collections::HashMap<
@@ -1149,9 +1149,9 @@ fn spawn_map(
             })
             .collect();
 
-        // Phase 3/4: Build a proximity-facing map from NpcDialogue events so that
+        // Build a proximity-facing map from NpcDialogue events so that
         // entities with `proximity_facing: true` get a `ProximityFacing` component,
-        // carrying the optional `rotation_speed` for Phase 4 smooth rotation.
+        // carrying the optional `rotation_speed` for smooth rotation.
         let npc_dialogue_proximity: std::collections::HashMap<String, Option<f32>> = map
             .events
             .values()
@@ -1194,7 +1194,7 @@ fn spawn_map(
                         ),
                         None,
                         None,
-                        // Phase 2: event-level NpcDialogue.facing overrides NpcPlacement.facing
+                        // Event-level NpcDialogue.facing overrides NpcPlacement.facing
                         npc_dialogue_facing
                             .get(&resolved_npc.npc_id)
                             .copied()
@@ -1214,7 +1214,7 @@ fn spawn_map(
                         Visibility::default(),
                     ));
 
-                    // Phase 3/4: insert ProximityFacing when the NpcDialogue event
+                    // Insert ProximityFacing when the NpcDialogue event
                     // has proximity_facing: true for this NPC.
                     if let Some(rotation_speed) = npc_dialogue_proximity.get(&resolved_npc.npc_id) {
                         commands.entity(entity).insert(
@@ -1256,7 +1256,7 @@ fn spawn_map(
                 ActorType::Npc,
             );
 
-            // Phase 2: apply facing rotation to the sprite fallback entity and
+            // Apply facing rotation to the sprite fallback entity and
             // attach FacingComponent so runtime systems can query/change it.
             {
                 use crate::domain::types::Direction;
@@ -1289,7 +1289,7 @@ fn spawn_map(
                 Visibility::default(),
             ));
 
-            // Phase 3/4: insert ProximityFacing on the sprite-fallback entity too.
+            // Insert ProximityFacing on the sprite-fallback entity too.
             if let Some(rotation_speed) = npc_dialogue_proximity.get(&resolved_npc.npc_id) {
                 commands
                     .entity(entity)
@@ -1318,7 +1318,7 @@ fn spawn_map(
                         map.id,
                         procedural_cache,
                         rotation_y,
-                        *facing, // Phase 2: cardinal facing from map event
+                        *facing, // cardinal facing from map event
                     );
                 }
                 world::MapEvent::Teleport { name, .. } => {
@@ -1404,7 +1404,7 @@ fn spawn_map(
                                 ),
                                 None,
                                 None,
-                                *facing, // Phase 2: wire Encounter.facing
+                                *facing, // wire Encounter.facing
                             );
 
                             commands.entity(entity).insert((
@@ -1421,7 +1421,7 @@ fn spawn_map(
                                 Visibility::default(),
                             ));
 
-                            // Phase 3/4: insert ProximityFacing when the event flag is set,
+                            // Insert ProximityFacing when the event flag is set,
                             // forwarding rotation_speed for smooth rotation support.
                             if *proximity_facing {
                                 commands.entity(entity).insert(
@@ -1469,7 +1469,7 @@ fn spawn_map(
                                 ),
                                 None,
                                 None,
-                                *facing, // Phase 2: wire RecruitableCharacter.facing
+                                *facing, // wire RecruitableCharacter.facing
                             );
 
                             commands.entity(entity).insert((
@@ -1661,7 +1661,7 @@ pub fn spawn_tile_sprite(
     map_id: types::MapId,
 ) -> Entity {
     // Get or load material for sprite sheet (caches per sheet path)
-    // Phase 6: Pass material properties if defined
+    // Pass material properties if defined
     let material = sprite_assets.get_or_load_material(
         &sprite_ref.sheet_path,
         asset_server,
@@ -2930,7 +2930,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 2: Static Map-Time Facing tests =====
+    // ===== Static Map-Time Facing tests =====
 
     /// Helper: build a minimal single-mesh CreatureDefinition with the given id.
     fn make_creature_def(
@@ -3469,7 +3469,7 @@ mod tests {
         assert_eq!(rv_results[0].1 .0, rc_pos);
     }
 
-    // ===== Phase 3: Runtime Facing Change System tests =====
+    // ===== Runtime Facing Change System tests =====
 
     /// `test_proximity_facing_inserted_on_encounter_with_flag` – when
     /// `MapEvent::Encounter` has `proximity_facing: true`, the spawned entity
@@ -3520,7 +3520,7 @@ mod tests {
                 monster_group: vec![50],
                 time_condition: None,
                 facing: Some(Direction::South),
-                proximity_facing: true, // Phase 3: enable proximity tracking
+                proximity_facing: true, // enable proximity tracking
                 rotation_speed: None,
                 combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
@@ -3653,7 +3653,7 @@ mod tests {
                 npc_id: "npc_prox_test".to_string(),
                 time_condition: None,
                 facing: None,
-                proximity_facing: true, // Phase 3: insert ProximityFacing
+                proximity_facing: true, // insert ProximityFacing
                 rotation_speed: None,
             },
         );
@@ -3922,7 +3922,7 @@ mod tests {
                 time_condition: None,
                 facing: Some(Direction::South),
                 proximity_facing: true,
-                rotation_speed: Some(90.0), // Phase 4: smooth rotation
+                rotation_speed: Some(90.0), // smooth rotation
                 combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
             },
         );
@@ -3985,7 +3985,7 @@ mod tests {
                 time_condition: None,
                 facing: None,
                 proximity_facing: true,
-                rotation_speed: Some(180.0), // Phase 4: smooth rotation
+                rotation_speed: Some(180.0), // smooth rotation
             },
         );
 
@@ -4010,7 +4010,7 @@ mod tests {
         assert_eq!(results[0].1.npc_id, "npc_smooth_test");
     }
 
-    /// Phase 1: A map transition via `MapChangeEvent` must advance the in-game
+    /// A map transition via `MapChangeEvent` must advance the in-game
     /// clock by exactly `TIME_COST_MAP_TRANSITION_MINUTES`.
     ///
     /// Strategy: build a minimal Bevy app with `MapManagerPlugin`, wire up two
@@ -4110,7 +4110,7 @@ mod tests {
         );
     }
 
-    /// Phase 1: An invalid MapChangeEvent (targeting a non-existent map) must
+    /// An invalid MapChangeEvent (targeting a non-existent map) must
     /// NOT advance the in-game clock.
     ///
     /// The handler gracefully ignores unknown map ids, so no time should pass.

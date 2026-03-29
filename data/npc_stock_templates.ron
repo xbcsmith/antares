@@ -51,7 +51,7 @@
     // ===== General Store Basic =====
     // Everyday consumables and supplies for traveling adventurers.
     // Food Rations and Trail Rations are stocked so the party can always
-    // acquire food for resting after Phase 2 of the food system migration.
+    // acquire food for resting.
     // Higher quantities reflect common demand.
     (
         id: "general_store_basic",

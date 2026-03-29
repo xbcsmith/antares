@@ -174,7 +174,7 @@ pub struct SpriteReference {
     #[serde(default)]
     pub animation: Option<SpriteAnimation>,
 
-    /// Material property overrides for this sprite (Phase 6)
+    /// Material property overrides for this sprite
     /// Allows per-sprite customization of emissive color, alpha, metallic, roughness
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material_properties: Option<SpriteMaterialProperties>,
@@ -218,7 +218,7 @@ fn default_animation_looping() -> bool {
     true
 }
 
-// ===== Phase 6: Advanced Sprite Features =====
+// ===== Advanced Sprite Features =====
 
 /// Material property overrides for sprites
 ///
@@ -261,7 +261,7 @@ pub struct SpriteMaterialProperties {
 
 /// Sprite layer depth for layering multiple sprites per tile
 ///
-/// Used for sprite layering system (Phase 6) to order sprites
+/// Used for sprite layering system to order sprites
 /// in Z-order without requiring separate Z coordinates.
 ///
 /// # Examples
@@ -370,7 +370,7 @@ pub enum SpriteSelectionRule {
     },
 }
 
-/// Configuration for individual grass blade appearance (Phase 3)
+/// Configuration for individual grass blade appearance
 ///
 /// Controls the visual properties of grass blades spawned on a tile.
 /// All multipliers are clamped to safe ranges during conversion.
@@ -472,12 +472,12 @@ pub struct TileVisualMetadata {
     #[serde(default)]
     pub sprite: Option<SpriteReference>,
 
-    /// Multiple sprite layers for complex visuals (Phase 6)
+    /// Multiple sprite layers for complex visuals
     /// Allows stacking sprites (background, midground, foreground)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sprite_layers: Vec<LayeredSprite>,
 
-    /// Procedural sprite selection rule (Phase 6)
+    /// Procedural sprite selection rule
     /// If set, overrides the fixed `sprite` field
     /// Useful for random variation or autotiling
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -507,7 +507,7 @@ pub struct TileVisualMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snow_coverage: Option<f32>,
 
-    /// Grass blade configuration for customized appearance (Phase 3)
+    /// Grass blade configuration for customized appearance
     /// Controls blade dimensions, curvature, tilt, and color variation
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grass_blade_config: Option<GrassBladeConfig>,
@@ -1674,7 +1674,7 @@ impl Default for RailingConfig {
     }
 }
 
-// ===== Performance & Polish Types (Phase 5) =====
+// ===== Performance & Polish Types =====
 
 /// Level of detail for procedurally generated objects
 ///
@@ -2041,7 +2041,7 @@ pub enum MapEvent {
         ///
         /// When `Some(speed)` and `proximity_facing` is `true`, the spawned entity
         /// will rotate smoothly toward the party at `speed` degrees per second
-        /// (Phase 4 smooth rotation). When `None` (the default), rotation snaps
+        /// (smooth rotation). When `None` (the default), rotation snaps
         /// instantly. Existing RON files without this field remain valid thanks to
         /// `#[serde(default)]`.
         #[serde(default)]
@@ -2148,7 +2148,7 @@ pub enum MapEvent {
         ///
         /// When `Some(speed)` and `proximity_facing` is `true`, the spawned NPC
         /// will rotate smoothly toward the party at `speed` degrees per second
-        /// (Phase 4 smooth rotation). When `None` (the default), rotation snaps
+        /// (smooth rotation). When `None` (the default), rotation snaps
         /// instantly. Existing RON files without this field remain valid thanks to
         /// `#[serde(default)]`.
         #[serde(default)]
@@ -5036,7 +5036,7 @@ mod tests {
         assert_eq!(metadata.sprite, None);
     }
 
-    // ===== Phase 6: Advanced Features Tests =====
+    // ===== Advanced Features Tests =====
 
     #[test]
     fn test_sprite_layer_ordering() {

@@ -1260,7 +1260,7 @@ mod tests {
         assert!(is_item_compatible_with_race(&item_tags, &incompatible_tags));
     }
 
-    // ===== Phase 2: Combined proficiency and tag tests =====
+    // ===== Combined proficiency and tag tests =====
 
     /// Helper function to simulate checking if a character can use an item
     /// This combines proficiency checking (class OR race) with tag compatibility

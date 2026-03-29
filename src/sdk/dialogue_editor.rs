@@ -11,7 +11,7 @@
 //!
 //! # Architecture Reference
 //!
-//! See `docs/explanation/sdk_and_campaign_architecture.md` Phase 5 for specifications.
+//! See `docs/explanation/sdk_and_campaign_architecture.md` for specifications.
 //!
 //! # Examples
 //!

@@ -196,7 +196,7 @@ warnings`, `cargo nextest run`.
 
 Remove all development-phase language from source code, tests, data files, and
 root documentation. This is a mechanical find-and-replace effort with no
-behavioral changes.
+behavioral changes. Use the file_edit tool and go file by file CAREFULLY to ensure consistent renaming and avoid missing any references.
 
 #### 2.1 Rename Test Data IDs and Test Functions
 

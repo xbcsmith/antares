@@ -100,7 +100,7 @@ const DROP_ROTATION_FULL_CIRCLE: f32 = std::f32::consts::TAU; // 360°
 const TILE_CENTER_OFFSET: f32 = 0.5;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Deterministic rotation helper (Phase 4.2)
+// Deterministic rotation helper
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Computes a deterministic Y-axis rotation (radians) for a dropped item.
@@ -238,7 +238,7 @@ impl Plugin for ItemWorldPlugin {
         app.add_message::<ItemDroppedEvent>()
             .add_message::<ItemPickedUpEvent>()
             .init_resource::<DroppedItemRegistry>()
-            // Phase 3.5: register map-unload registry cleanup via the visuals plugin.
+            // Register map-unload registry cleanup via the visuals plugin.
             .add_plugins(crate::game::systems::dropped_item_visuals::DroppedItemVisualsPlugin)
             .add_systems(
                 Update,
@@ -269,7 +269,7 @@ impl Plugin for ItemWorldPlugin {
 /// 6. Inserts a [`MapEntity`] and [`TileCoord`] component for map cleanup.
 /// 7. Registers the entity in [`DroppedItemRegistry`].
 ///
-/// # Phase 4.2 — Deterministic Y rotation
+/// # Deterministic Y rotation
 ///
 /// The Y-axis rotation is derived from
 /// [`deterministic_drop_rotation`] using `map_id`, `tile_x`, `tile_y`, and
@@ -305,7 +305,7 @@ pub fn spawn_dropped_item_system(
             continue;
         };
 
-        // Compute per-drop charge fraction for the gem indicator (Phase 4.3).
+        // Compute per-drop charge fraction for the gem indicator.
         let charges_fraction = if item.max_charges > 0 {
             Some(ev.charges as f32 / item.max_charges as f32)
         } else {
@@ -370,7 +370,7 @@ pub fn spawn_dropped_item_system(
             }
         }
 
-        // Phase 4.2 — Deterministic Y-axis rotation derived from tile coords.
+        // Deterministic Y-axis rotation derived from tile coords.
         // Used as the initial facing direction; Billboard keeps the item facing
         // the camera every frame so this only affects the starting orientation.
         let jitter_y = deterministic_drop_rotation(ev.map_id, ev.tile_x, ev.tile_y, ev.item_id);
@@ -568,7 +568,7 @@ pub fn load_map_dropped_items_system(
 
     // ── Source 2: runtime-dropped items stored in map.dropped_items ───────
     //
-    // Phase 3.2 addition: items placed in the world by the party at runtime
+    // Items placed in the world by the party at runtime
     // (via `drop_item()`) are stored in `Map::dropped_items`.  Emit an event
     // for each so that `spawn_dropped_item_system` spawns their visual markers,
     // giving dropped items persistent visuals that survive save/load.
