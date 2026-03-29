@@ -49,6 +49,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::domain::database_common::load_ron_entries;
 use crate::domain::types::{FurnitureId, FurnitureMeshId};
 use crate::domain::visual::creature_database::{CreatureDatabase, CreatureDatabaseError};
 use crate::domain::world::types::{
@@ -499,12 +500,14 @@ impl FurnitureDatabase {
     /// assert!(db.get_by_id(1).is_some());
     /// ```
     pub fn load_from_string(ron_data: &str) -> Result<Self, FurnitureDatabaseError> {
-        let definitions: Vec<FurnitureDefinition> = ron::from_str(ron_data)?;
-        let mut db = Self::new();
-        for def in definitions {
-            db.add(def)?;
-        }
-        Ok(db)
+        Ok(Self {
+            items: load_ron_entries(
+                ron_data,
+                |d: &FurnitureDefinition| d.id,
+                FurnitureDatabaseError::DuplicateId,
+                Into::into,
+            )?,
+        })
     }
 
     /// Adds a definition to the database

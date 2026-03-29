@@ -89,7 +89,7 @@ pub enum CampaignError {
 /// assert!(game_data.furniture.is_empty());
 /// assert!(game_data.furniture_meshes.is_empty());
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GameData {
     /// Creature visual database
     pub creatures: CreatureDatabase,
@@ -147,12 +147,6 @@ impl GameData {
         })?;
 
         Ok(())
-    }
-}
-
-impl Default for GameData {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

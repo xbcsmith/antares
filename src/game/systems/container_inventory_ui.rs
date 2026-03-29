@@ -50,37 +50,19 @@ use crate::domain::character::{Inventory, InventorySlot};
 use crate::domain::world::MapEvent;
 
 use crate::game::resources::GlobalState;
-use crate::game::systems::inventory_ui::NavigationPhase;
+use crate::game::systems::inventory_ui_common::{
+    NavigationPhase, ACTION_FOCUSED_COLOR, FOCUSED_BORDER_COLOR, GRID_LINE_COLOR, HEADER_BG_COLOR,
+    PANEL_ACTION_H, PANEL_BG_COLOR, PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, SLOT_COLS,
+    UNFOCUSED_BORDER_COLOR,
+};
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-// ===== Layout constants =====
+// ===== Layout constants (file-local) =====
 
-/// Height of each panel header bar.
-const PANEL_HEADER_H: f32 = 36.0;
-/// Height of the action button strip at the bottom of each panel.
-const PANEL_ACTION_H: f32 = 48.0;
-/// Number of slot columns in the character inventory grid.
-const SLOT_COLS: usize = 8;
 /// Height of each item row in the container panel.
 const CONTAINER_ROW_H: f32 = 28.0;
-
-/// Faint grid-line colour.
-const GRID_LINE_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(60, 60, 60, 255);
-/// Panel body background.
-const PANEL_BG_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(18, 18, 18, 255);
-/// Header background.
-const HEADER_BG_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(35, 35, 35, 255);
-/// Slot / row selection highlight.
-const SELECT_HIGHLIGHT_COLOR: egui::Color32 = egui::Color32::YELLOW;
-/// Focused panel border.
-const FOCUSED_BORDER_COLOR: egui::Color32 = egui::Color32::YELLOW;
-/// Unfocused panel border.
-const UNFOCUSED_BORDER_COLOR: egui::Color32 =
-    egui::Color32::from_rgba_premultiplied(80, 80, 80, 255);
-/// Keyboard-focused action button highlight.
-const ACTION_FOCUSED_COLOR: egui::Color32 = egui::Color32::YELLOW;
 /// Colour for item names in the container list.
 const CONTAINER_ITEM_COLOR: egui::Color32 =
     egui::Color32::from_rgba_premultiplied(200, 235, 200, 255);
@@ -324,7 +306,7 @@ pub fn build_container_action_list(
 ///
 /// ```
 /// use antares::game::systems::container_inventory_ui::ContainerNavState;
-/// use antares::game::systems::inventory_ui::NavigationPhase;
+/// use antares::game::systems::inventory_ui_common::NavigationPhase;
 ///
 /// let state = ContainerNavState::default();
 /// assert_eq!(state.selected_slot_index, None);
@@ -1679,7 +1661,7 @@ mod tests {
     use crate::domain::character::InventorySlot;
     use crate::domain::types::Position;
     use crate::domain::world::{Map, MapEvent};
-    use crate::game::systems::inventory_ui::NavigationPhase;
+    use crate::game::systems::inventory_ui_common::NavigationPhase;
 
     fn make_slot(item_id: u8) -> InventorySlot {
         InventorySlot {

@@ -21,9 +21,11 @@ use crate::domain::conditions::ActiveCondition;
 use crate::domain::types::{Direction, Position};
 use crate::game::components::inventory::{CharacterEntity, PartyEntities};
 use crate::game::resources::GlobalState;
-use bevy::asset::RenderAssetUsages;
+use crate::game::systems::ui_helpers::{
+    create_blank_rgba_image, text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE,
+};
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::render::render_resource::Extent3d;
 use std::collections::HashMap;
 use tracing::{debug, warn};
 
@@ -367,18 +369,7 @@ fn setup_party_entities(mut commands: Commands) {
 /// * `images` - Asset storage for image creation
 fn initialize_mini_map_image(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let size = mini_map_image_size();
-    let image = Image::new_fill(
-        Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        &vec![0; (size * size * 4) as usize],
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::all(),
-    );
-    let handle = images.add(image);
+    let handle = images.add(create_blank_rgba_image(size));
     commands.insert_resource(MiniMapImage { handle });
 }
 
@@ -393,19 +384,7 @@ fn initialize_mini_map_image(mut commands: Commands, mut images: ResMut<Assets<I
 /// * `commands` - Bevy command buffer used to insert the resource
 /// * `images` - Asset storage for image creation
 fn initialize_automap_image(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    let size = AUTOMAP_MAX_IMAGE_SIZE_PX;
-    let image = Image::new_fill(
-        Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        &vec![0; (size * size * 4) as usize],
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::all(),
-    );
-    let handle = images.add(image);
+    let handle = images.add(create_blank_rgba_image(AUTOMAP_MAX_IMAGE_SIZE_PX));
     commands.insert_resource(AutomapImage { handle });
 }
 
@@ -1073,54 +1052,30 @@ fn setup_automap(mut commands: Commands, automap_image: Res<AutomapImage>) {
                             ));
                             row.spawn((
                                 Text::new(label),
-                                TextFont {
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(LABEL_FONT_SIZE, Color::WHITE),
                             ));
                         });
                 }
 
                 legend.spawn((
                     Text::new("Gray: Explored floor"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                 ));
                 legend.spawn((
                     Text::new("Dark red: Wall"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                 ));
                 legend.spawn((
                     Text::new("Tan: Door"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                 ));
                 legend.spawn((
                     Text::new("Blue: Water"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                 ));
                 legend.spawn((
                     Text::new("Green: Forest / grass"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                 ));
             });
 
@@ -1132,11 +1087,7 @@ fn setup_automap(mut commands: Commands, automap_image: Res<AutomapImage>) {
                     ..default()
                 },
                 Text::new("M / Esc — close map"),
-                TextFont {
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
+                text_style(BODY_FONT_SIZE, Color::WHITE),
             ));
         });
 }
@@ -3181,18 +3132,7 @@ mod minimap_tests {
         {
             let mut images = app.world_mut().resource_mut::<Assets<Image>>();
             let size = mini_map_image_size();
-            let image = Image::new_fill(
-                Extent3d {
-                    width: size,
-                    height: size,
-                    depth_or_array_layers: 1,
-                },
-                TextureDimension::D2,
-                &vec![0; (size * size * 4) as usize],
-                TextureFormat::Rgba8UnormSrgb,
-                RenderAssetUsages::all(),
-            );
-            let handle = images.add(image);
+            let handle = images.add(create_blank_rgba_image(size));
             app.world_mut().insert_resource(MiniMapImage { handle });
         }
         app
@@ -3362,20 +3302,9 @@ mod minimap_tests {
         app.init_resource::<Assets<Image>>();
 
         let size = mini_map_image_size();
-        let image = Image::new_fill(
-            Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            TextureDimension::D2,
-            &vec![0; (size * size * 4) as usize],
-            TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::all(),
-        );
         let handle = {
             let mut images = app.world_mut().resource_mut::<Assets<Image>>();
-            images.add(image)
+            images.add(create_blank_rgba_image(size))
         };
         app.world_mut().insert_resource(MiniMapImage { handle });
 
@@ -3468,19 +3397,7 @@ mod automap_tests {
         app.init_resource::<Assets<Image>>();
         {
             let mut images = app.world_mut().resource_mut::<Assets<Image>>();
-            let size = AUTOMAP_MAX_IMAGE_SIZE_PX;
-            let image = Image::new_fill(
-                Extent3d {
-                    width: size,
-                    height: size,
-                    depth_or_array_layers: 1,
-                },
-                TextureDimension::D2,
-                &vec![0; (size * size * 4) as usize],
-                TextureFormat::Rgba8UnormSrgb,
-                RenderAssetUsages::all(),
-            );
-            let handle = images.add(image);
+            let handle = images.add(create_blank_rgba_image(AUTOMAP_MAX_IMAGE_SIZE_PX));
             app.world_mut().insert_resource(AutomapImage { handle });
         }
 

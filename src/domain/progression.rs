@@ -402,17 +402,11 @@ pub fn experience_for_level(level: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Alignment, Sex};
+    use crate::test_helpers::factories::test_character_with_class;
     use rand::rng;
 
     fn create_test_character(class_id: &str) -> Character {
-        Character::new(
-            "Test".to_string(),
-            "human".to_string(),
-            class_id.to_string(),
-            Sex::Male,
-            Alignment::Good,
-        )
+        test_character_with_class("Test", class_id)
     }
 
     #[test]

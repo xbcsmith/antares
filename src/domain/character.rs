@@ -138,7 +138,7 @@ pub const ATTRIBUTE_MODIFIER_MAX: i16 = 255;
 /// attr.reset();
 /// assert_eq!(attr.current, 10);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct AttributePair {
     /// Permanent base value
     pub base: u8,
@@ -234,7 +234,7 @@ impl<'de> serde::Deserialize<'de> for AttributePair {
 /// hp.modify(-20);
 /// assert_eq!(hp.current, 30);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct AttributePair16 {
     /// Permanent base value
     pub base: u16,
@@ -361,7 +361,7 @@ impl Stats {
 // ===== Resistances =====
 
 /// Resistances to various damage types and effects
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Resistances {
     /// Generic magic resistance
     pub magic: AttributePair,
@@ -406,12 +406,6 @@ impl Resistances {
         self.fear.reset();
         self.poison.reset();
         self.psychic.reset();
-    }
-}
-
-impl Default for Resistances {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -481,7 +475,7 @@ pub enum CharacterLocation {
 /// assert!(condition.has(Condition::POISONED));
 /// assert!(!condition.is_fine());
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Condition(u8);
 
 impl Condition {
@@ -569,12 +563,6 @@ impl Condition {
     }
 }
 
-impl Default for Condition {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ===== Inventory =====
 
 /// Inventory slot with item ID and charges
@@ -596,7 +584,7 @@ pub struct InventorySlot {
 /// assert!(inventory.has_space());
 /// assert!(!inventory.is_full());
 /// ```
-#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Component, Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Inventory {
     pub items: Vec<InventorySlot>,
 }
@@ -641,12 +629,6 @@ impl Inventory {
     }
 }
 
-impl Default for Inventory {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ===== Equipment =====
 
 /// Equipped items in specific slots
@@ -659,7 +641,7 @@ impl Default for Inventory {
 /// let mut equipment = Equipment::new();
 /// assert_eq!(equipment.equipped_count(), 0);
 /// ```
-#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Component, Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Equipment {
     pub weapon: Option<ItemId>,
     pub armor: Option<ItemId>,
@@ -752,12 +734,6 @@ impl Equipment {
             self.accessory2,
         ]
         .contains(&Some(item_id))
-    }
-}
-
-impl Default for Equipment {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -864,7 +840,7 @@ impl EquipmentSlot {
 // ===== SpellBook =====
 
 /// Character's known spells organized by school and level
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SpellBook {
     /// Cleric spells by level (1-7)
     pub cleric_spells: [Vec<SpellId>; 7],
@@ -1030,16 +1006,10 @@ impl SpellBook {
     }
 }
 
-impl Default for SpellBook {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ===== QuestFlags =====
 
 /// Per-character quest and event tracking
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct QuestFlags {
     /// Indexed flags for game events
     pub flags: Vec<bool>,
@@ -1062,12 +1032,6 @@ impl QuestFlags {
     /// Gets a flag by index
     pub fn get_flag(&self, index: usize) -> bool {
         self.flags.get(index).copied().unwrap_or(false)
-    }
-}
-
-impl Default for QuestFlags {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -1599,7 +1563,7 @@ impl Default for Party {
 // ===== Roster =====
 
 /// Character roster (character pool)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Roster {
     /// Up to 18 characters total
     pub characters: Vec<Character>,
@@ -1766,12 +1730,6 @@ impl Roster {
                 }
             })
             .collect()
-    }
-}
-
-impl Default for Roster {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

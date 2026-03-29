@@ -10,6 +10,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 7.1-7.2 for data file specifications.
 
+use crate::domain::database_common::{load_ron_entries, load_ron_file};
 use crate::domain::magic::types::{Spell, SpellSchool};
 use crate::domain::types::SpellId;
 use serde::{Deserialize, Serialize};
@@ -59,7 +60,7 @@ pub enum SpellDatabaseError {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SpellDatabase {
     /// All spells indexed by ID
     spells: HashMap<SpellId, Spell>,
@@ -110,8 +111,15 @@ impl SpellDatabase {
     /// # }
     /// ```
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, SpellDatabaseError> {
-        let contents = std::fs::read_to_string(path)?;
-        Self::load_from_string(&contents)
+        Ok(Self {
+            spells: load_ron_file(
+                path,
+                |s: &Spell| s.id,
+                SpellDatabaseError::DuplicateId,
+                Into::into,
+                Into::into,
+            )?,
+        })
     }
 
     /// Load spell database from a RON string
@@ -129,17 +137,14 @@ impl SpellDatabase {
     /// Returns `SpellDatabaseError::ParseError` if RON parsing fails
     /// Returns `SpellDatabaseError::DuplicateId` if duplicate spell IDs found
     pub fn load_from_string(ron_data: &str) -> Result<Self, SpellDatabaseError> {
-        let spells: Vec<Spell> = ron::from_str(ron_data)?;
-        let mut db = Self::new();
-
-        for spell in spells {
-            if db.spells.contains_key(&spell.id) {
-                return Err(SpellDatabaseError::DuplicateId(spell.id));
-            }
-            db.spells.insert(spell.id, spell);
-        }
-
-        Ok(db)
+        Ok(Self {
+            spells: load_ron_entries(
+                ron_data,
+                |s: &Spell| s.id,
+                SpellDatabaseError::DuplicateId,
+                Into::into,
+            )?,
+        })
     }
 
     /// Add a spell to the database
@@ -253,12 +258,6 @@ impl SpellDatabase {
     /// Check if database is empty
     pub fn is_empty(&self) -> bool {
         self.spells.is_empty()
-    }
-}
-
-impl Default for SpellDatabase {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

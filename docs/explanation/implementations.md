@@ -412,3 +412,440 @@ replaced with descriptive topic-only headers. Examples:
   - `cargo check --all-targets --all-features` — ✅ Finished, 0 errors
   - `cargo clippy --all-targets --all-features -- -D warnings` — ✅ 0 warnings
   - `cargo nextest run --all-features` — ✅ 3,944 passed, 0 failed, 8 skipped
+
+## CLI Editor Shared Module Extraction (Complete)
+
+### Overview
+
+Extracted duplicated constants and helper functions from three CLI editor
+binaries (`item_editor.rs`, `class_editor.rs`, `race_editor.rs`) into a new
+shared module `src/bin/editor_common.rs`. This eliminates code duplication
+while preserving identical behavior and full test coverage.
+
+### What Was Extracted
+
+The following items were duplicated across two or three editor binaries:
+
+| Item                                      | Previously In                       | Now In             |
+| ----------------------------------------- | ----------------------------------- | ------------------ |
+| `STANDARD_PROFICIENCY_IDS` (constant)     | `class_editor.rs`, `race_editor.rs` | `editor_common.rs` |
+| `STANDARD_ITEM_TAGS` (constant)           | `item_editor.rs`, `race_editor.rs`  | `editor_common.rs` |
+| `truncate()` (function)                   | `class_editor.rs`, `race_editor.rs` | `editor_common.rs` |
+| `filter_valid_proficiencies()` (function) | `class_editor.rs`, `race_editor.rs` | `editor_common.rs` |
+| `filter_valid_tags()` (function)          | `item_editor.rs`, `race_editor.rs`  | `editor_common.rs` |
+
+### How Sharing Works
+
+Since each file in `src/bin/` compiles as its own independent crate, standard
+`mod` imports don't work. Instead, each binary includes the shared module via
+the `#[path]` attribute:
+
+```rust
+#[path = "editor_common.rs"]
+mod editor_common;
+use editor_common::{filter_valid_proficiencies, truncate};
+```
+
+A module-level `#![allow(dead_code)]` in `editor_common.rs` suppresses warnings
+for items that a particular binary doesn't import (each binary uses a different
+subset of the shared module).
+
+### What Each Binary Imports
+
+- **`class_editor.rs`**: `filter_valid_proficiencies`, `truncate`
+- **`race_editor.rs`**: `STANDARD_PROFICIENCY_IDS`, `STANDARD_ITEM_TAGS`,
+  `truncate`, `filter_valid_proficiencies`, `filter_valid_tags`
+- **`item_editor.rs`**: `STANDARD_ITEM_TAGS`, `filter_valid_tags`
+
+### New File
+
+- `src/bin/editor_common.rs` — shared module with SPDX header, `///` doc
+  comments on all public items, and its own `#[cfg(test)]` test suite
+  (9 tests covering all functions and constants).
+
+### Quality Gates
+
+- `cargo fmt --all` — ✅ no output
+- `cargo check --bin class_editor --bin race_editor --bin item_editor` — ✅ 0 errors, 0 warnings
+- `cargo clippy --bin class_editor --bin race_editor --bin item_editor -- -D warnings` — ✅ 0 warnings
+- `cargo nextest run --bin class_editor --bin race_editor --bin item_editor` — ✅ 57 passed, 0 failed, 0 skipped
+
+## Inventory UI Shared Module Extraction (Complete)
+
+### Overview
+
+Extracted duplicated constants and the `NavigationPhase` enum from three
+inventory UI files into a single shared module, eliminating copy-paste
+duplication and ensuring visual consistency across all inventory-related
+screens.
+
+**Problem**: The following three files contained identical definitions of 10
+layout/colour constants and shared the same `NavigationPhase` enum (defined in
+`inventory_ui.rs`, re-imported by the other two):
+
+- `src/game/systems/inventory_ui.rs`
+- `src/game/systems/merchant_inventory_ui.rs`
+- `src/game/systems/container_inventory_ui.rs`
+
+### What Was Extracted
+
+New file: `src/game/systems/inventory_ui_common.rs`
+
+**10 shared constants** (all `pub(crate)`):
+
+| Constant                 | Type            | Value                             |
+| ------------------------ | --------------- | --------------------------------- |
+| `PANEL_HEADER_H`         | `f32`           | `36.0`                            |
+| `PANEL_ACTION_H`         | `f32`           | `48.0`                            |
+| `SLOT_COLS`              | `usize`         | `8`                               |
+| `GRID_LINE_COLOR`        | `egui::Color32` | `(60, 60, 60, 255)` premultiplied |
+| `PANEL_BG_COLOR`         | `egui::Color32` | `(18, 18, 18, 255)` premultiplied |
+| `HEADER_BG_COLOR`        | `egui::Color32` | `(35, 35, 35, 255)` premultiplied |
+| `SELECT_HIGHLIGHT_COLOR` | `egui::Color32` | `YELLOW`                          |
+| `FOCUSED_BORDER_COLOR`   | `egui::Color32` | `YELLOW`                          |
+| `UNFOCUSED_BORDER_COLOR` | `egui::Color32` | `(80, 80, 80, 255)` premultiplied |
+| `ACTION_FOCUSED_COLOR`   | `egui::Color32` | `YELLOW`                          |
+
+**1 shared enum**: `NavigationPhase` (`SlotNavigation`, `ActionNavigation`)
+
+### What Stayed File-Local
+
+Each file retains constants unique to its screen:
+
+- **`inventory_ui.rs`**: `EQUIP_STRIP_H`, `ITEM_SILHOUETTE_COLOR`
+- **`merchant_inventory_ui.rs`**: `STOCK_ROW_H`, `STOCK_ITEM_COLOR`, `STOCK_EMPTY_COLOR`, `BUY_COLOR`, `SELL_COLOR`
+- **`container_inventory_ui.rs`**: `CONTAINER_ROW_H`, `CONTAINER_ITEM_COLOR`, `TAKE_COLOR`, `STASH_COLOR`
+
+### How Sharing Works
+
+- `inventory_ui_common.rs` is registered as `pub mod inventory_ui_common` in
+  `src/game/systems/mod.rs`.
+- Each consumer imports the shared constants and `NavigationPhase` via
+  `use super::inventory_ui_common::{ ... }` (or the equivalent `crate::` path).
+- `inventory_ui.rs` adds `pub use super::inventory_ui_common::NavigationPhase`
+  so that existing external imports
+  (`use antares::game::systems::inventory_ui::NavigationPhase`) continue to
+  resolve without changes — preserving backward compatibility for integration
+  tests and doc-tests.
+- Doc-test import paths on `MerchantNavState` and `ContainerNavState` were
+  updated to point at `inventory_ui_common::NavigationPhase`.
+
+### Quality Gates
+
+- `cargo fmt --all` — ✅ no output
+- `cargo check --lib --all-features` — ✅ 0 errors
+- `cargo clippy --lib --all-features -- -D warnings` — ✅ 0 warnings
+- `cargo nextest run --lib --all-features` (inventory/merchant/container tests) — ✅ 168 passed, 0 failed
+- `cargo test --doc --all-features` (NavigationPhase, MerchantNavState, ContainerNavState, InventoryNavigationState) — ✅ 4 passed, 0 failed
+
+## Shared Test Character Factory Module (Complete)
+
+### Overview
+
+Consolidated duplicate `create_test_character()` helper functions that were
+copy-pasted across 9+ test modules into a single shared module at
+`src/test_helpers.rs`. This eliminates ~100 lines of duplicated code and
+establishes a single source of truth for test character construction.
+
+### Problem
+
+Many test modules defined their own nearly-identical factory functions for
+creating `Character` instances. These included:
+
+- `src/application/save_game.rs` — `fn create_test_character(name: &str)`
+- `src/domain/combat/engine.rs` — `fn create_test_character(name: &str, speed: u8)`
+- `src/domain/magic/casting.rs` — `fn create_test_character(class_id: &str, level: u32, sp: u16, gems: u32)`
+- `src/domain/party_manager.rs` — `fn create_test_character(name: &str, race_id: &str, class_id: &str)`
+- `src/domain/progression.rs` — `fn create_test_character(class_id: &str)`
+- `tests/combat_integration.rs`, `tests/innkeeper_party_management_integration_test.rs`, `tests/recruitment_integration_test.rs`
+
+All followed the same pattern: call `Character::new(...)` with `Sex::Male`,
+`Alignment::Good`, and usually `"human"` race / `"knight"` class defaults.
+
+### What Was Created
+
+**New file**: `src/test_helpers.rs`
+
+A `#[cfg(test)]`-gated module containing a `factories` submodule with four
+public factory functions:
+
+| Function                         | Signature                                                  | Purpose                                    |
+| -------------------------------- | ---------------------------------------------------------- | ------------------------------------------ |
+| `test_character`                 | `(name: &str) -> Character`                                | Basic character with human/knight defaults |
+| `test_character_with_class`      | `(name: &str, class_id: &str) -> Character`                | Character with a specific class            |
+| `test_character_with_race_class` | `(name: &str, race_id: &str, class_id: &str) -> Character` | Character with specific race and class     |
+| `test_dead_character`            | `(name: &str) -> Character`                                | Character with `hp.current = 0`            |
+
+All functions include full `///` doc comments with argument descriptions and
+usage examples.
+
+### What Was Updated
+
+**Modules that fully adopted shared factories** (local factory removed):
+
+| File                           | Old factory                                      | Replaced with                                             |
+| ------------------------------ | ------------------------------------------------ | --------------------------------------------------------- |
+| `src/application/save_game.rs` | `create_test_character(name)`                    | `test_helpers::factories::test_character`                 |
+| `src/domain/party_manager.rs`  | `create_test_character(name, race_id, class_id)` | `test_helpers::factories::test_character_with_race_class` |
+
+**Modules that delegate to shared factories** (local wrapper kept):
+
+| File                        | Old factory                       | Now delegates to                              |
+| --------------------------- | --------------------------------- | --------------------------------------------- |
+| `src/domain/progression.rs` | `create_test_character(class_id)` | `test_character_with_class("Test", class_id)` |
+
+The local wrapper was kept because the original factory hardcoded the name
+`"Test"` and accepted only `class_id`, so all existing call sites
+(`create_test_character("knight")`) continue to work without modification.
+
+**Modules left unchanged** (specialized factories with extra setup):
+
+| File                                                   | Reason                                                    |
+| ------------------------------------------------------ | --------------------------------------------------------- |
+| `src/domain/combat/engine.rs`                          | Sets `stats.speed.current` after construction             |
+| `src/domain/magic/casting.rs`                          | Sets `level`, `sp.current`, and `gems` after construction |
+| `tests/combat_integration.rs`                          | Sets `hp.current` and `hp.base` after construction        |
+| `tests/innkeeper_party_management_integration_test.rs` | Integration test, not in `src/`                           |
+| `tests/recruitment_integration_test.rs`                | Integration test, not in `src/`                           |
+
+These specialized factories could adopt delegation in a future pass.
+
+**Module registration**: Added `#[cfg(test)] pub mod test_helpers;` to
+`src/lib.rs`.
+
+**Unused import cleanup**: Removed the now-unused `Character` import from
+`save_game.rs` tests, and removed `Alignment`/`Sex` imports from
+`party_manager.rs` and `progression.rs` tests (now encapsulated in the shared
+factories).
+
+### Quality Gates
+
+- `cargo fmt --all` — ✅ no output
+- `cargo check --all-targets --all-features` — ✅ 0 errors, 0 warnings
+- `cargo clippy --all-targets --all-features -- -D warnings` — ✅ 0 warnings
+- `cargo nextest run --all-features` — ✅ 3979 passed, 0 failed, 8 skipped
+
+## UI Helpers Shared Module Extraction (Complete)
+
+### Overview
+
+Created `src/game/systems/ui_helpers.rs` to consolidate duplicated Bevy UI
+text-styling and image-creation patterns found across combat, HUD, menu, and
+game-log systems. This extraction follows Phase 3, Section 3.5 of the cleanup
+plan.
+
+### Problem
+
+Two categories of boilerplate were repeated heavily across multiple system files:
+
+1. **Text style tuples** — The exact pattern
+   `TextFont { font_size: X, ..default() }, TextColor(Color::WHITE)` appeared
+   23+ times across four files, with two dominant combinations:
+
+   - `font_size: 16.0` + `Color::WHITE` — **13 occurrences** (combat 3,
+     menu 9, hud 1)
+   - `font_size: 14.0` + `Color::WHITE` — **10 occurrences** (combat 3,
+     hud 6, ui 1)
+
+2. **Blank RGBA image creation** — `initialize_mini_map_image` and
+   `initialize_automap_image` in `hud.rs` contained identical 10-line
+   `Image::new_fill(…)` blocks differing only in the size parameter and
+   resource type.
+
+### What Was Extracted
+
+**New file: `src/game/systems/ui_helpers.rs`**
+
+| Item                            | Kind                         | Purpose                                                                     |
+| ------------------------------- | ---------------------------- | --------------------------------------------------------------------------- |
+| `BODY_FONT_SIZE`                | `const f32 = 16.0`           | Semantic name for the most common body-text size                            |
+| `LABEL_FONT_SIZE`               | `const f32 = 14.0`           | Semantic name for label / legend text size                                  |
+| `text_style(font_size, color)`  | `fn → (TextFont, TextColor)` | Returns a bundle pair that Bevy accepts as a nested tuple inside `spawn(…)` |
+| `create_blank_rgba_image(size)` | `fn → Image`                 | Creates a square transparent RGBA8 texture for map backing images           |
+
+Seven unit tests cover value correctness, image dimensions, data length, and
+all-zeros initialization.
+
+### What Was Updated
+
+| File                         | Changes                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/mod.rs`    | Added `pub mod ui_helpers;`                                                                                                                                                                                                                                                                                                                                      |
+| `src/game/systems/hud.rs`    | Replaced 2 `Image::new_fill` blocks in `initialize_mini_map_image` / `initialize_automap_image` with `create_blank_rgba_image`; replaced 7 text-style tuples with `text_style(…)` calls; replaced 3 identical image-creation blocks in test setup functions; removed unused `RenderAssetUsages`, `TextureDimension`, `TextureFormat` imports from non-test scope |
+| `src/game/systems/combat.rs` | Replaced 6 text-style tuples (3× `LABEL_FONT_SIZE`, 3× `BODY_FONT_SIZE`)                                                                                                                                                                                                                                                                                         |
+| `src/game/systems/menu.rs`   | Replaced 9 text-style tuples (all `BODY_FONT_SIZE` + `Color::WHITE`)                                                                                                                                                                                                                                                                                             |
+| `src/game/systems/ui.rs`     | Replaced 1 text-style tuple (game-log header)                                                                                                                                                                                                                                                                                                                    |
+
+### Patterns Investigated But Not Extracted
+
+- **`font_size: 10.0` + `Color::WHITE`** — only 4 occurrences (under the 5+
+  threshold)
+- **`font_size: 12.0` + `Color::srgb(0.9, 0.9, 0.9)`** — only 3 occurrences,
+  all within `menu.rs`
+- **`font_size: 18.0` + `Color::WHITE`** — only 2 occurrences in `combat.rs`;
+  menu uses a different constant (`BUTTON_TEXT_COLOR`)
+- **Rest UI text styles** — every occurrence in `rest.rs` uses unique `srgba`
+  colors (gold, green, grey tints); no duplicates met the 5+ threshold
+
+### Quality Gates
+
+- `cargo fmt --all` — ✅ no output
+- `cargo check --all-targets --all-features` — ✅ 0 errors, 0 warnings
+- `cargo clippy --all-targets --all-features -- -D warnings` — ✅ 0 warnings
+- `cargo nextest run --all-features` — ✅ 3987 passed, 0 failed, 8 skipped
+
+## RonDatabase Helper (`database_common.rs`) (Complete)
+
+### Overview
+
+Created `src/domain/database_common.rs` — a shared module containing generic
+helpers that encapsulate the "parse RON → iterate → check duplicates → insert
+into HashMap" pattern repeated across 16 database implementations.
+
+### Problem
+
+Every database type (`ItemDatabase`, `MonsterDatabase`, `SpellDatabase`,
+`ClassDatabase`, `RaceDatabase`, `ProficiencyDatabase`, `CharacterDatabase`,
+`CreatureDatabase`, `FurnitureDatabase`, `MerchantStockTemplateDatabase`, and
+6 SDK databases) contained nearly identical `load_from_file` /
+`load_from_string` methods with the same parse-iterate-dedup-insert loop.
+
+### What Was Created
+
+`src/domain/database_common.rs` exposes two public functions:
+
+| Function                                                   | Purpose                                                                                       |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `load_ron_entries(ron_data, id_of, dup_err, parse_err)`    | Deserializes a RON string into `Vec<T>`, inserts into `HashMap<K, T>` with duplicate checking |
+| `load_ron_file(path, id_of, dup_err, read_err, parse_err)` | Reads a file then delegates to `load_ron_entries`                                             |
+
+Both are fully generic over entity type `T`, key type `K`, and error type `E`.
+Callers pass closures for ID extraction and error construction, keeping each
+database's error type untouched.
+
+### What Was Updated
+
+**Domain databases** (9 files updated):
+
+- `items/database.rs` — `ItemDatabase`: both methods → `load_ron_file` / `load_ron_entries`
+- `combat/database.rs` — `MonsterDatabase`: both methods
+- `magic/database.rs` — `SpellDatabase`: both methods
+- `classes.rs` — `ClassDatabase`: `load_from_string` only (preserves `validate()`)
+- `races.rs` — `RaceDatabase`: `load_from_string` only (preserves `validate()`)
+- `proficiency.rs` — `ProficiencyDatabase`: `load_from_string` only
+- `visual/creature_database.rs` — `CreatureDatabase`: `load_from_string` only
+- `world/furniture.rs` — `FurnitureDatabase`: `load_from_string` only
+- `world/npc_runtime.rs` — `MerchantStockTemplateDatabase`: `load_from_string` only
+
+**SDK databases** (6 types in `sdk/database.rs`):
+
+- `SpellDatabase`, `MonsterDatabase`, `QuestDatabase`, `ConditionDatabase`,
+  `DialogueDatabase`, `NpcDatabase` — all `load_from_file` methods refactored
+
+**Skipped**: `CharacterDatabase` — has per-entity `definition.validate()?`
+that does not fit the generic helper pattern.
+
+### Behavioral Improvement
+
+SDK databases now **reject duplicate IDs** at load time (returning an error)
+instead of silently overwriting. This catches data bugs earlier.
+
+### Quality Gates
+
+- `cargo fmt --all` — ✅ no output
+- `cargo check --all-targets --all-features` — ✅ 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — ✅ 0 warnings
+- `cargo nextest run --all-features` — ✅ 3987 passed, 0 failed, 8 skipped
+
+## Trivial `Default` Implementations Replaced with `#[derive(Default)]` (Complete)
+
+### Overview
+
+Replaced 17 manual `impl Default for X { fn default() -> Self { Self::new() } }`
+blocks with `#[derive(Default)]` on the struct definitions. Each `new()` method
+was verified to produce the same result as the derived `Default` (all fields
+set to their type's default: empty collections, 0, None, etc.).
+
+### What Was Changed
+
+**`src/domain/character.rs`** (9 types):
+
+| Type              | Fields                      | Why Safe                                     |
+| ----------------- | --------------------------- | -------------------------------------------- |
+| `AttributePair`   | `base: u8`, `current: u8`   | `new(0)` ≡ `{ 0, 0 }` ≡ Default              |
+| `AttributePair16` | `base: u16`, `current: u16` | Same reasoning                               |
+| `Condition`       | tuple struct `(u8)`         | `FINE = 0`, `u8::default() = 0`              |
+| `Resistances`     | 8 × `AttributePair`         | All `AttributePair::new(0)` ≡ Default        |
+| `Inventory`       | `items: Vec<InventorySlot>` | `Vec::new()` ≡ Default                       |
+| `Equipment`       | 7 × `Option<ItemId>`        | All `None` ≡ Default                         |
+| `SpellBook`       | 2 × `HashMap`               | Already used `Default::default()` in `new()` |
+| `QuestFlags`      | `flags: Vec<bool>`          | `Vec::new()` ≡ Default                       |
+| `Roster`          | 2 × `Vec`                   | `Vec::new()` ≡ Default                       |
+
+**Other domain files** (4 types):
+
+| File                          | Type               | Reason           |
+| ----------------------------- | ------------------ | ---------------- |
+| `items/database.rs`           | `ItemDatabase`     | `HashMap::new()` |
+| `combat/database.rs`          | `MonsterDatabase`  | `HashMap::new()` |
+| `magic/database.rs`           | `SpellDatabase`    | `HashMap::new()` |
+| `visual/creature_database.rs` | `CreatureDatabase` | `HashMap::new()` |
+
+**Application layer** (`application/mod.rs`, 2 types):
+
+| Type           | Reason                  |
+| -------------- | ----------------------- |
+| `ActiveSpells` | All 18 `u32` fields = 0 |
+| `QuestLog`     | 2 × `Vec::new()`        |
+
+**SDK and campaign loader** (2 types):
+
+| File                 | Type          | Reason                        |
+| -------------------- | ------------- | ----------------------------- |
+| `sdk/database.rs`    | `NpcDatabase` | `HashMap::new()`              |
+| `campaign_loader.rs` | `GameData`    | All fields now derive Default |
+
+### NOT Changed (Intentionally Skipped)
+
+- **`Party`** — `position_index: [true, true, true, false, false, false]` ≠ `[false; 6]`
+- **`GameState`** — `time: GameTime::new(1, 6, 0)` differs from Default
+
+All `new()` methods were preserved as named constructors.
+
+### Quality Gates
+
+- `cargo fmt --all` — ✅ no output
+- `cargo check --all-targets --all-features` — ✅ 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — ✅ 0 warnings
+- `cargo nextest run --all-features` — ✅ 3987 passed, 0 failed, 8 skipped
+
+## Phase 3: Consolidate Duplicate Code — Summary (Complete)
+
+All six sub-tasks from the cleanup plan have been completed:
+
+| Sub-task                   | Deliverable                                                           | Status |
+| -------------------------- | --------------------------------------------------------------------- | ------ |
+| 3.1 RonDatabase helper     | `src/domain/database_common.rs`; 15 database implementations migrated | ✅     |
+| 3.2 CLI editor base        | `src/bin/editor_common.rs`; 3 editors refactored                      | ✅     |
+| 3.3 Inventory UI common    | `src/game/systems/inventory_ui_common.rs`; 3 UIs refactored           | ✅     |
+| 3.4 Test character factory | `src/test_helpers.rs`; 3 test modules consolidated                    | ✅     |
+| 3.5 UI helper functions    | `src/game/systems/ui_helpers.rs`; 25 call sites updated               | ✅     |
+| 3.6 Trivial Default impls  | 17 types switched to `#[derive(Default)]`                             | ✅     |
+
+### Final Quality Gates
+
+- `cargo fmt --all` — ✅ no output (all files formatted)
+- `cargo check --all-targets --all-features` — ✅ 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — ✅ 0 warnings
+- `cargo nextest run --all-features` — ✅ 3987 passed, 0 failed, 8 skipped
+
+### Architecture Compliance
+
+- [x] No architectural deviations from `architecture.md`
+- [x] Module placement follows Section 3.2 (domain, application, game, sdk)
+- [x] Type aliases used consistently
+- [x] Constants extracted, not hardcoded
+- [x] RON format used for data files
+- [x] All new modules have SPDX headers
+- [x] All public items documented with `///` doc comments
+- [x] No test references `campaigns/tutorial`

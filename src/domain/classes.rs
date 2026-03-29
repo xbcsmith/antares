@@ -12,6 +12,7 @@
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
 //! See `docs/explanation/sdk_implementation_plan.md` for implementation details.
 
+use crate::domain::database_common::load_ron_entries;
 use crate::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
 use crate::domain::types::{DiceRoll, ItemId};
 use serde::{Deserialize, Serialize};
@@ -400,17 +401,13 @@ impl ClassDatabase {
     /// assert!(db.get_class("knight").is_some());
     /// ```
     pub fn load_from_string(data: &str) -> Result<Self, ClassError> {
-        let classes: Vec<ClassDefinition> = ron::from_str(data)
-            .map_err(|e| ClassError::ParseError(format!("RON parse error: {}", e)))?;
-
-        let mut db = Self::new();
-        for class_def in classes {
-            if db.classes.contains_key(&class_def.id) {
-                return Err(ClassError::DuplicateId(class_def.id.clone()));
-            }
-            db.classes.insert(class_def.id.clone(), class_def);
-        }
-
+        let classes = load_ron_entries(
+            data,
+            |c: &ClassDefinition| c.id.clone(),
+            ClassError::DuplicateId,
+            |e| ClassError::ParseError(format!("RON parse error: {}", e)),
+        )?;
+        let db = Self { classes };
         db.validate()?;
         Ok(db)
     }

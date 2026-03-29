@@ -30,6 +30,10 @@
 //! - Input validation
 //! - Pretty-printed RON output
 
+#[path = "editor_common.rs"]
+mod editor_common;
+use editor_common::{filter_valid_tags, STANDARD_ITEM_TAGS};
+
 use antares::domain::items::{
     AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
     ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Item,
@@ -40,16 +44,6 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
-
-/// Standard item tags used for race restrictions and item properties
-const STANDARD_ITEM_TAGS: &[&str] = &[
-    "large_weapon",
-    "two_handed",
-    "heavy_armor",
-    "elven_crafted",
-    "dwarven_crafted",
-    "requires_strength",
-];
 
 /// Main application state
 struct ItemEditor {
@@ -1350,14 +1344,7 @@ impl ItemEditor {
     }
 }
 
-/// Filters tags to include only standard item tags
-fn filter_valid_tags(candidates: &[String]) -> Vec<String> {
-    candidates
-        .iter()
-        .filter(|t| STANDARD_ITEM_TAGS.contains(&t.as_str()))
-        .cloned()
-        .collect()
-}
+// `filter_valid_tags` and `STANDARD_ITEM_TAGS` are imported from `editor_common`.
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

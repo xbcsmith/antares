@@ -34,6 +34,7 @@ use crate::domain::character_definition::CharacterDatabase;
 use crate::domain::classes::ClassDatabase;
 use crate::domain::combat::monster::Monster;
 use crate::domain::conditions::{ConditionDefinition, ConditionId};
+use crate::domain::database_common::load_ron_entries;
 use crate::domain::dialogue::{DialogueId, DialogueTree};
 use crate::domain::items::ItemDatabase;
 use crate::domain::magic::types::Spell;
@@ -179,16 +180,14 @@ impl SpellDatabase {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| DatabaseError::SpellLoadError(format!("Failed to read file: {}", e)))?;
 
-        let spells: Vec<Spell> = ron::from_str(&contents)
-            .map_err(|e| DatabaseError::SpellLoadError(format!("Failed to parse RON: {}", e)))?;
+        let spells = load_ron_entries(
+            &contents,
+            |s: &Spell| s.id,
+            |id| DatabaseError::SpellLoadError(format!("Duplicate spell ID: {}", id)),
+            |e| DatabaseError::SpellLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut spell_map = HashMap::new();
-        for spell in spells {
-            spell_map.insert(spell.id, spell);
-        }
-
-        Ok(Self { spells: spell_map })
+        Ok(Self { spells })
     }
 
     /// Gets a spell by ID
@@ -289,18 +288,14 @@ impl MonsterDatabase {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| DatabaseError::MonsterLoadError(format!("Failed to read file: {}", e)))?;
 
-        let monsters: Vec<Monster> = ron::from_str(&contents)
-            .map_err(|e| DatabaseError::MonsterLoadError(format!("Failed to parse RON: {}", e)))?;
+        let monsters = load_ron_entries(
+            &contents,
+            |m: &Monster| m.id,
+            |id| DatabaseError::MonsterLoadError(format!("Duplicate monster ID: {}", id)),
+            |e| DatabaseError::MonsterLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut monster_map = HashMap::new();
-        for monster in monsters {
-            monster_map.insert(monster.id, monster);
-        }
-
-        Ok(Self {
-            monsters: monster_map,
-        })
+        Ok(Self { monsters })
     }
 
     /// Gets a monster by ID
@@ -499,16 +494,14 @@ impl QuestDatabase {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| DatabaseError::QuestLoadError(format!("Failed to read file: {}", e)))?;
 
-        let quests: Vec<Quest> = ron::from_str(&contents)
-            .map_err(|e| DatabaseError::QuestLoadError(format!("Failed to parse RON: {}", e)))?;
+        let quests = load_ron_entries(
+            &contents,
+            |q: &Quest| q.id,
+            |id| DatabaseError::QuestLoadError(format!("Duplicate quest ID: {}", id)),
+            |e| DatabaseError::QuestLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut quest_map = HashMap::new();
-        for quest in quests {
-            quest_map.insert(quest.id, quest);
-        }
-
-        Ok(Self { quests: quest_map })
+        Ok(Self { quests })
     }
 
     /// Gets a quest by ID
@@ -682,19 +675,14 @@ impl ConditionDatabase {
             DatabaseError::ConditionLoadError(format!("Failed to read file: {}", e))
         })?;
 
-        let conditions: Vec<ConditionDefinition> = ron::from_str(&contents).map_err(|e| {
-            DatabaseError::ConditionLoadError(format!("Failed to parse RON: {}", e))
-        })?;
+        let conditions = load_ron_entries(
+            &contents,
+            |c: &ConditionDefinition| c.id.clone(),
+            |id| DatabaseError::ConditionLoadError(format!("Duplicate condition ID: {}", id)),
+            |e| DatabaseError::ConditionLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut condition_map = HashMap::new();
-        for condition in conditions {
-            condition_map.insert(condition.id.clone(), condition);
-        }
-
-        Ok(Self {
-            conditions: condition_map,
-        })
+        Ok(Self { conditions })
     }
 
     /// Gets a condition by ID
@@ -784,18 +772,14 @@ impl DialogueDatabase {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| DatabaseError::DialogueLoadError(format!("Failed to read file: {}", e)))?;
 
-        let dialogues: Vec<DialogueTree> = ron::from_str(&contents)
-            .map_err(|e| DatabaseError::DialogueLoadError(format!("Failed to parse RON: {}", e)))?;
+        let dialogues = load_ron_entries(
+            &contents,
+            |d: &DialogueTree| d.id,
+            |id| DatabaseError::DialogueLoadError(format!("Duplicate dialogue ID: {}", id)),
+            |e| DatabaseError::DialogueLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut dialogue_map = HashMap::new();
-        for dialogue in dialogues {
-            dialogue_map.insert(dialogue.id, dialogue);
-        }
-
-        Ok(Self {
-            dialogues: dialogue_map,
-        })
+        Ok(Self { dialogues })
     }
 
     /// Gets a dialogue by ID
@@ -875,7 +859,7 @@ impl DialogueDatabase {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NpcDatabase {
     npcs: HashMap<crate::domain::world::NpcId, crate::domain::world::NpcDefinition>,
 }
@@ -937,16 +921,14 @@ impl NpcDatabase {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| DatabaseError::NpcLoadError(format!("Failed to read file: {}", e)))?;
 
-        let npcs: Vec<crate::domain::world::NpcDefinition> = ron::from_str(&contents)
-            .map_err(|e| DatabaseError::NpcLoadError(format!("Failed to parse RON: {}", e)))?;
+        let npcs = load_ron_entries(
+            &contents,
+            |n: &crate::domain::world::NpcDefinition| n.id.clone(),
+            |id| DatabaseError::NpcLoadError(format!("Duplicate NPC ID: {}", id)),
+            |e| DatabaseError::NpcLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut npc_map = HashMap::new();
-        for npc in npcs {
-            npc_map.insert(npc.id.clone(), npc);
-        }
-
-        Ok(Self { npcs: npc_map })
+        Ok(Self { npcs })
     }
 
     /// Gets an NPC by ID
@@ -1017,12 +999,6 @@ impl NpcDatabase {
                 }
             })
             .collect()
-    }
-}
-
-impl Default for NpcDatabase {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

@@ -12,6 +12,7 @@
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
 //! See `docs/explanation/hardcoded_removal_implementation_plan.md` for implementation details.
 
+use crate::domain::database_common::load_ron_entries;
 use crate::domain::proficiency::ProficiencyDatabase;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -524,17 +525,14 @@ impl RaceDatabase {
     /// assert!(db.get_race("human").is_some());
     /// ```
     pub fn load_from_string(data: &str) -> Result<Self, RaceError> {
-        let races: Vec<RaceDefinition> = ron::from_str(data)
-            .map_err(|e| RaceError::ParseError(format!("RON parse error: {}", e)))?;
+        let races = load_ron_entries(
+            data,
+            |r: &RaceDefinition| r.id.clone(),
+            RaceError::DuplicateId,
+            |e| RaceError::ParseError(format!("RON parse error: {}", e)),
+        )?;
 
-        let mut db = Self::new();
-        for race_def in races {
-            if db.races.contains_key(&race_def.id) {
-                return Err(RaceError::DuplicateId(race_def.id.clone()));
-            }
-            db.races.insert(race_def.id.clone(), race_def);
-        }
-
+        let db = Self { races };
         db.validate()?;
         Ok(db)
     }

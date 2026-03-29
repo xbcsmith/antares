@@ -46,6 +46,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::domain::database_common::load_ron_entries;
 use crate::domain::types::CreatureId;
 use crate::domain::visual::CreatureDefinition;
 
@@ -86,7 +87,7 @@ pub enum CreatureDatabaseError {
 /// assert_eq!(db.count(), 0);
 /// assert!(db.is_empty());
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreatureDatabase {
     creatures: HashMap<CreatureId, CreatureDefinition>,
 }
@@ -305,7 +306,13 @@ impl CreatureDatabase {
     /// assert_eq!(creatures.len(), 1);
     /// ```
     pub fn load_from_string(data: &str) -> Result<Vec<CreatureDefinition>, CreatureDatabaseError> {
-        ron::from_str(data).map_err(|e| CreatureDatabaseError::ParseError(e.to_string()))
+        let map = load_ron_entries(
+            data,
+            |c: &CreatureDefinition| c.id,
+            CreatureDatabaseError::DuplicateId,
+            |e| CreatureDatabaseError::ParseError(e.to_string()),
+        )?;
+        Ok(map.into_values().collect())
     }
 
     /// Loads creature registry and resolves all file references eagerly
@@ -473,12 +480,6 @@ impl CreatureDatabase {
                 .map_err(|e| CreatureDatabaseError::ValidationError(creature.id, e))?;
         }
         Ok(())
-    }
-}
-
-impl Default for CreatureDatabase {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

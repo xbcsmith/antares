@@ -72,6 +72,7 @@ use crate::game::systems::combat_visual::{
     hide_indicator_during_animation, spawn_turn_indicator, update_turn_indicator,
 };
 use crate::game::systems::map::EncounterVisualMarker;
+use crate::game::systems::ui_helpers::{text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE};
 
 /// Message emitted when combat has started.
 ///
@@ -1510,11 +1511,7 @@ fn setup_combat_ui(
                                     // Enemy name
                                     card.spawn((
                                         Text::new(monster.name.clone()),
-                                        TextFont {
-                                            font_size: 14.0,
-                                            ..default()
-                                        },
-                                        TextColor(Color::WHITE),
+                                        text_style(LABEL_FONT_SIZE, Color::WHITE),
                                         EnemyNameText {
                                             participant_index: idx,
                                         },
@@ -1689,11 +1686,7 @@ fn setup_combat_ui(
                 .with_children(|turn_panel| {
                     turn_panel.spawn((
                         Text::new("Turn Order: "),
-                        TextFont {
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
+                        text_style(BODY_FONT_SIZE, Color::WHITE),
                         TurnOrderText,
                     ));
                 });
@@ -1759,11 +1752,7 @@ fn setup_combat_ui(
                             .with_children(|button| {
                                 button.spawn((
                                     Text::new(label),
-                                    TextFont {
-                                        font_size: 14.0,
-                                        ..default()
-                                    },
-                                    TextColor(Color::WHITE),
+                                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                                 ));
                             });
                     }
@@ -1791,11 +1780,7 @@ fn setup_combat_ui(
                             .with_children(|button| {
                                 button.spawn((
                                     Text::new("Ranged"),
-                                    TextFont {
-                                        font_size: 14.0,
-                                        ..default()
-                                    },
-                                    TextColor(Color::WHITE),
+                                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                                 ));
                             });
                     }
@@ -4695,11 +4680,7 @@ fn handle_combat_victory(
                             summary.total_gems,
                             summary.items
                         )),
-                        TextFont {
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
+                        text_style(BODY_FONT_SIZE, Color::WHITE),
                     ));
                 });
 
@@ -4761,11 +4742,7 @@ fn handle_combat_defeat(
             .with_children(|parent| {
                 parent.spawn((
                     Text::new("You have been defeated. Returning to menu...".to_string()),
-                    TextFont {
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(BODY_FONT_SIZE, Color::WHITE),
                 ));
             });
 

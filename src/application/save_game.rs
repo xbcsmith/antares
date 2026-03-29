@@ -406,21 +406,10 @@ impl SaveGameManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Character, CharacterLocation};
+    use crate::domain::character::CharacterLocation;
     use crate::domain::types::InnkeeperId;
+    use crate::test_helpers::factories::test_character;
     use tempfile::TempDir;
-
-    // Helper to create a test character
-    fn create_test_character(name: &str) -> Character {
-        use crate::domain::character::{Alignment, Sex};
-        Character::new(
-            name.to_string(),
-            "human".to_string(),
-            "knight".to_string(),
-            Sex::Male,
-            Alignment::Good,
-        )
-    }
 
     #[test]
     fn test_save_game_new() {
@@ -608,9 +597,9 @@ mod tests {
         let mut game_state = GameState::new();
 
         // Add 3 characters to party
-        let char1 = create_test_character("Knight");
-        let char2 = create_test_character("Archer");
-        let char3 = create_test_character("Cleric");
+        let char1 = test_character("Knight");
+        let char2 = test_character("Archer");
+        let char3 = test_character("Cleric");
 
         game_state
             .roster
@@ -666,9 +655,9 @@ mod tests {
         let mut game_state = GameState::new();
 
         // Add characters at different inns
-        let char1 = create_test_character("InnChar1");
-        let char2 = create_test_character("InnChar2");
-        let char3 = create_test_character("InnChar3");
+        let char1 = test_character("InnChar1");
+        let char2 = test_character("InnChar2");
+        let char3 = test_character("InnChar3");
 
         let inn1: InnkeeperId = "tutorial_innkeeper_town".to_string();
         let inn2: InnkeeperId = "tutorial_innkeeper_town2".to_string();
@@ -721,7 +710,7 @@ mod tests {
         let mut game_state = GameState::new();
 
         // Add a single character located at an inn so the save contains AtInn(...)
-        let char1 = create_test_character("FormatChar");
+        let char1 = test_character("FormatChar");
         let inn = "tutorial_innkeeper_town".to_string();
         game_state
             .roster
@@ -779,7 +768,7 @@ mod tests {
         let mut game_state = GameState::new();
         game_state
             .roster
-            .add_character(create_test_character("OldChar"), CharacterLocation::InParty)
+            .add_character(test_character("OldChar"), CharacterLocation::InParty)
             .unwrap();
 
         // Save normally
@@ -829,7 +818,7 @@ mod tests {
         let mut game_state = GameState::new();
 
         // Simulate recruiting a character
-        let recruited = create_test_character("RecruitedNPC");
+        let recruited = test_character("RecruitedNPC");
         game_state
             .roster
             .add_character(recruited, CharacterLocation::InParty)
@@ -874,38 +863,29 @@ mod tests {
         // Mix of party members, inn characters, and map characters
         game_state
             .roster
-            .add_character(
-                create_test_character("PartyMember1"),
-                CharacterLocation::InParty,
-            )
+            .add_character(test_character("PartyMember1"), CharacterLocation::InParty)
+            .unwrap();
+        game_state
+            .roster
+            .add_character(test_character("PartyMember2"), CharacterLocation::InParty)
             .unwrap();
         game_state
             .roster
             .add_character(
-                create_test_character("PartyMember2"),
-                CharacterLocation::InParty,
-            )
-            .unwrap();
-        game_state
-            .roster
-            .add_character(
-                create_test_character("InnChar1"),
+                test_character("InnChar1"),
                 CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
             )
             .unwrap();
         game_state
             .roster
             .add_character(
-                create_test_character("InnChar2"),
+                test_character("InnChar2"),
                 CharacterLocation::AtInn("tutorial_innkeeper_town2".to_string()),
             )
             .unwrap();
         game_state
             .roster
-            .add_character(
-                create_test_character("MapChar"),
-                CharacterLocation::OnMap(5),
-            )
+            .add_character(test_character("MapChar"), CharacterLocation::OnMap(5))
             .unwrap();
 
         // Add party members to party
@@ -984,7 +964,7 @@ mod tests {
 
             game_state
                 .roster
-                .add_character(create_test_character(&char_name), location)
+                .add_character(test_character(&char_name), location)
                 .unwrap();
         }
 
@@ -1058,7 +1038,7 @@ mod tests {
             };
             game_state
                 .roster
-                .add_character(create_test_character(&format!("Char{}", i)), location)
+                .add_character(test_character(&format!("Char{}", i)), location)
                 .unwrap();
         }
 
@@ -1214,7 +1194,7 @@ mod tests {
         state
             .roster
             .add_character(
-                create_test_character("LegacyChar"),
+                test_character("LegacyChar"),
                 crate::domain::character::CharacterLocation::InParty,
             )
             .unwrap();

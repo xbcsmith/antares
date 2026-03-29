@@ -24,6 +24,7 @@
 //! inventory system implementation plan for complete specifications.
 //! Daily restock and magic-item rotation are driven by `GameState::advance_time`.
 
+use crate::domain::database_common::load_ron_entries;
 use crate::domain::inventory::{MerchantStock, StockEntry};
 use crate::domain::types::ItemId;
 use crate::domain::world::npc::{NpcDefinition, NpcId};
@@ -961,15 +962,14 @@ impl MerchantStockTemplateDatabase {
     /// assert_eq!(db.len(), 1);
     /// ```
     pub fn load_from_string(ron_data: &str) -> Result<Self, MerchantStockTemplateDatabaseError> {
-        let templates: Vec<MerchantStockTemplate> = ron::from_str(ron_data)?;
-        let mut db = Self::new();
-        for template in templates {
-            if db.templates.contains_key(&template.id) {
-                return Err(MerchantStockTemplateDatabaseError::DuplicateId(template.id));
-            }
-            db.templates.insert(template.id.clone(), template);
-        }
-        Ok(db)
+        Ok(Self {
+            templates: load_ron_entries(
+                ron_data,
+                |t: &MerchantStockTemplate| t.id.clone(),
+                MerchantStockTemplateDatabaseError::DuplicateId,
+                Into::into,
+            )?,
+        })
     }
 
     /// Returns the number of templates in the database

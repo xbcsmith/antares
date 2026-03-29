@@ -27,26 +27,15 @@
 //! - Input validation
 //! - Pretty-printed RON output
 
+#[path = "editor_common.rs"]
+mod editor_common;
+use editor_common::{filter_valid_proficiencies, truncate};
+
 use antares::domain::classes::{ClassDatabase, ClassDefinition, SpellSchool, SpellStat};
 use antares::domain::types::DiceRoll;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
-
-/// Standard proficiency IDs recognized by the system
-const STANDARD_PROFICIENCY_IDS: &[&str] = &[
-    "simple_weapon",
-    "martial_melee",
-    "martial_ranged",
-    "blunt_weapon",
-    "unarmed",
-    "light_armor",
-    "medium_armor",
-    "heavy_armor",
-    "shield",
-    "arcane_item",
-    "divine_item",
-];
 
 /// Main application state
 struct ClassEditor {
@@ -622,51 +611,8 @@ impl ClassEditor {
 }
 
 // ===== Helper Functions =====
-
-/// Truncates a string to a maximum length
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
-}
-
-// NOTE: `parse_multistring_input` is a helper used only in unit tests.
-// It has been moved into the `#[cfg(test)] mod tests` module below so it is only
-// compiled during test builds and won't trigger dead-code warnings in release builds.
-
-/// Filter valid proficiencies from a list of candidate strings.
-///
-/// This function is a pure helper that checks whether each provided string
-/// exists in the `STANDARD_PROFICIENCY_IDS` set and returns the subset that
-/// are valid proficiency IDs.
-///
-/// # Arguments
-///
-/// * `candidates` - Slice of candidate proficiency strings.
-///
-/// # Returns
-///
-/// A `Vec<String>` containing only the valid proficiencies.
-///
-/// # Examples
-///
-/// ```
-/// let candidates = vec![
-///     "simple_weapon".to_string(),
-///     "invalid_tag".to_string(),
-/// ];
-/// let filtered = filter_valid_proficiencies(&candidates);
-/// assert_eq!(filtered, vec!["simple_weapon".to_string()]);
-/// ```
-fn filter_valid_proficiencies(candidates: &[String]) -> Vec<String> {
-    candidates
-        .iter()
-        .filter(|p| STANDARD_PROFICIENCY_IDS.contains(&p.as_str()))
-        .cloned()
-        .collect()
-}
+// `truncate`, `filter_valid_proficiencies`, and `STANDARD_PROFICIENCY_IDS`
+// are imported from `editor_common`.
 
 // ===== Main Entry Point =====
 

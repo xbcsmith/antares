@@ -49,38 +49,20 @@ use crate::application::GameMode;
 use crate::domain::character::Inventory;
 use crate::domain::types::ItemId;
 use crate::game::resources::GlobalState;
-use crate::game::systems::inventory_ui::NavigationPhase;
+use crate::game::systems::inventory_ui_common::{
+    NavigationPhase, ACTION_FOCUSED_COLOR, FOCUSED_BORDER_COLOR, GRID_LINE_COLOR, HEADER_BG_COLOR,
+    PANEL_ACTION_H, PANEL_BG_COLOR, PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, SLOT_COLS,
+    UNFOCUSED_BORDER_COLOR,
+};
 use crate::game::systems::ui::{GameLogEvent, LogCategory};
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-// ===== Layout constants =====
+// ===== Layout constants (file-local) =====
 
-/// Height of each panel header bar.
-const PANEL_HEADER_H: f32 = 36.0;
-/// Height of the action button strip at the bottom of each panel.
-const PANEL_ACTION_H: f32 = 48.0;
-/// Number of slot columns in the character inventory grid.
-const SLOT_COLS: usize = 8;
 /// Height of each stock entry row in the merchant panel.
 const STOCK_ROW_H: f32 = 28.0;
-
-/// Faint grid-line colour.
-const GRID_LINE_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(60, 60, 60, 255);
-/// Panel body background.
-const PANEL_BG_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(18, 18, 18, 255);
-/// Header background.
-const HEADER_BG_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(35, 35, 35, 255);
-/// Slot / row selection highlight.
-const SELECT_HIGHLIGHT_COLOR: egui::Color32 = egui::Color32::YELLOW;
-/// Focused panel border.
-const FOCUSED_BORDER_COLOR: egui::Color32 = egui::Color32::YELLOW;
-/// Unfocused panel border.
-const UNFOCUSED_BORDER_COLOR: egui::Color32 =
-    egui::Color32::from_rgba_premultiplied(80, 80, 80, 255);
-/// Keyboard-focused action button highlight.
-const ACTION_FOCUSED_COLOR: egui::Color32 = egui::Color32::YELLOW;
 /// Colour for item names in the merchant stock list.
 const STOCK_ITEM_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(200, 220, 255, 255);
 /// Colour for "out of stock" entries.
@@ -269,7 +251,7 @@ pub struct SellItemAction {
 ///
 /// ```
 /// use antares::game::systems::merchant_inventory_ui::MerchantNavState;
-/// use antares::game::systems::inventory_ui::NavigationPhase;
+/// use antares::game::systems::inventory_ui_common::NavigationPhase;
 ///
 /// let state = MerchantNavState::default();
 /// assert_eq!(state.selected_slot_index, None);

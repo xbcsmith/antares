@@ -13,6 +13,7 @@
 use crate::domain::character::Stats;
 use crate::domain::combat::monster::{LootTable, Monster, MonsterResistances};
 use crate::domain::combat::types::Attack;
+use crate::domain::database_common::{load_ron_entries, load_ron_file};
 use crate::domain::types::{CreatureId, MonsterId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -217,7 +218,7 @@ impl MonsterDefinition {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MonsterDatabase {
     /// All monsters indexed by ID
     monsters: HashMap<MonsterId, MonsterDefinition>,
@@ -268,8 +269,15 @@ impl MonsterDatabase {
     /// # }
     /// ```
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, MonsterDatabaseError> {
-        let contents = std::fs::read_to_string(path)?;
-        Self::load_from_string(&contents)
+        Ok(Self {
+            monsters: load_ron_file(
+                path,
+                |m: &MonsterDefinition| m.id,
+                MonsterDatabaseError::DuplicateId,
+                Into::into,
+                Into::into,
+            )?,
+        })
     }
 
     /// Load monster database from a RON string
@@ -287,17 +295,14 @@ impl MonsterDatabase {
     /// Returns `MonsterDatabaseError::ParseError` if RON parsing fails
     /// Returns `MonsterDatabaseError::DuplicateId` if duplicate monster IDs found
     pub fn load_from_string(ron_data: &str) -> Result<Self, MonsterDatabaseError> {
-        let monsters: Vec<MonsterDefinition> = ron::from_str(ron_data)?;
-        let mut db = Self::new();
-
-        for monster in monsters {
-            if db.monsters.contains_key(&monster.id) {
-                return Err(MonsterDatabaseError::DuplicateId(monster.id));
-            }
-            db.monsters.insert(monster.id, monster);
-        }
-
-        Ok(db)
+        Ok(Self {
+            monsters: load_ron_entries(
+                ron_data,
+                |m: &MonsterDefinition| m.id,
+                MonsterDatabaseError::DuplicateId,
+                Into::into,
+            )?,
+        })
     }
 
     /// Add a monster to the database
@@ -401,12 +406,6 @@ impl MonsterDatabase {
     /// Check if database is empty
     pub fn is_empty(&self) -> bool {
         self.monsters.is_empty()
-    }
-}
-
-impl Default for MonsterDatabase {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

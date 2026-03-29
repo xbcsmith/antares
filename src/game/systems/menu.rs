@@ -22,6 +22,7 @@ use crate::application::GameMode;
 use crate::game::components::menu::*;
 use crate::game::resources::GlobalState;
 use crate::game::systems::mouse_input;
+use crate::game::systems::ui_helpers::{text_style, BODY_FONT_SIZE};
 
 /// Path to the Antares icon, relative to the Bevy asset root (campaign directory).
 /// Bevy resolves paths relative to `BEVY_ASSET_ROOT` (the campaign dir), so the
@@ -475,11 +476,7 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                                                         "Save: {}",
                                                         save_info.filename
                                                     )),
-                                                    TextFont {
-                                                        font_size: 16.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(Color::WHITE),
+                                                    text_style(BODY_FONT_SIZE, Color::WHITE),
                                                 ));
                                             },
                                         );
@@ -762,11 +759,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("Master Volume: {:.0}%", master_vol * 100.0)),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -810,11 +803,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("Music Volume: {:.0}%", music_vol * 100.0)),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -858,11 +847,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("SFX Volume: {:.0}%", sfx_vol * 100.0)),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -906,11 +891,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("Ambient Volume: {:.0}%", ambient_vol * 100.0)),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -989,11 +970,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                     "Fullscreen: {}",
                                     if graphics.fullscreen { "ON" } else { "OFF" }
                                 )),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -1022,11 +999,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                         "OFF"
                                     }
                                 )),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -1051,11 +1024,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                     "VSync: {}",
                                     if graphics.vsync { "ON" } else { "OFF" }
                                 )),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -1077,11 +1046,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|button| {
                             button.spawn((
                                 Text::new(format!("Shadow Quality: {:?}", graphics.shadow_quality)),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 

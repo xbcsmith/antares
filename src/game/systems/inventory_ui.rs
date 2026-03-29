@@ -48,36 +48,22 @@ use bevy::prelude::MessageWriter;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-// ===== Layout constants =====
+use super::inventory_ui_common::{
+    ACTION_FOCUSED_COLOR, FOCUSED_BORDER_COLOR, GRID_LINE_COLOR, HEADER_BG_COLOR, PANEL_ACTION_H,
+    PANEL_BG_COLOR, PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, SLOT_COLS, UNFOCUSED_BORDER_COLOR,
+};
+// Re-export `NavigationPhase` so that existing `use
+// antares::game::systems::inventory_ui::NavigationPhase` paths keep working.
+pub use super::inventory_ui_common::NavigationPhase;
 
-/// Height of the character name header bar inside each panel.
-const PANEL_HEADER_H: f32 = 36.0;
-/// Height of the action button strip below the grid when a slot is selected.
-const PANEL_ACTION_H: f32 = 48.0;
+// ===== Layout constants (file-local) =====
+
 /// Height of the equipment display strip shown between the header and slot grid.
 /// Two rows of cells (weapon/armor/shield, then helmet/boots/ring/ring).
 const EQUIP_STRIP_H: f32 = 76.0;
-/// Number of slot columns in the grid inside each character panel.
-/// With MAX_ITEMS=64 and SLOT_COLS=8 the grid is 8×8.
-const SLOT_COLS: usize = 8;
-/// Grid line colour — faint white.
-const GRID_LINE_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(60, 60, 60, 255);
-/// Panel body background colour.
-const PANEL_BG_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(18, 18, 18, 255);
-/// Header background colour.
-const HEADER_BG_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(35, 35, 35, 255);
 /// Colour for item silhouettes.
 const ITEM_SILHOUETTE_COLOR: egui::Color32 =
     egui::Color32::from_rgba_premultiplied(230, 230, 230, 255);
-/// Colour for the slot/action selection highlight ring.
-const SELECT_HIGHLIGHT_COLOR: egui::Color32 = egui::Color32::YELLOW;
-/// Focused panel border colour.
-const FOCUSED_BORDER_COLOR: egui::Color32 = egui::Color32::YELLOW;
-/// Unfocused panel border colour.
-const UNFOCUSED_BORDER_COLOR: egui::Color32 =
-    egui::Color32::from_rgba_premultiplied(80, 80, 80, 255);
-/// Action button highlight colour when keyboard focus is on it.
-const ACTION_FOCUSED_COLOR: egui::Color32 = egui::Color32::YELLOW;
 
 /// Plugin for inventory management UI
 pub struct InventoryPlugin;
@@ -342,31 +328,9 @@ pub enum PanelAction {
     },
 }
 
-// ===== Navigation Phase =====
-
-/// The two phases of keyboard inventory navigation.
-///
-/// The player starts in `SlotNavigation`. Pressing Enter while a slot with an
-/// item is highlighted advances to `ActionNavigation`. Pressing Enter executes
-/// the focused action and returns to `SlotNavigation` at slot 0. Pressing Esc
-/// cancels and returns to `SlotNavigation` at the previously highlighted slot.
-///
-/// # Examples
-///
-/// ```
-/// use antares::game::systems::inventory_ui::NavigationPhase;
-///
-/// let phase = NavigationPhase::default();
-/// assert!(matches!(phase, NavigationPhase::SlotNavigation));
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum NavigationPhase {
-    /// Arrows navigate the slot grid; Enter enters action mode.
-    #[default]
-    SlotNavigation,
-    /// Left/Right arrows cycle action buttons; Enter executes; Esc cancels.
-    ActionNavigation,
-}
+// `NavigationPhase` is re-exported from `inventory_ui_common` at the top of
+// this file so that `use antares::game::systems::inventory_ui::NavigationPhase`
+// continues to resolve.
 
 // ===== Navigation State =====
 

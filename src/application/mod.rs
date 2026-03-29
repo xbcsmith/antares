@@ -392,7 +392,7 @@ impl InnManagementState {
 /// assert_eq!(spells.fire_protection, 0);
 /// assert_eq!(spells.effective_resistance(ResistanceType::Fire), 0);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ActiveSpells {
     /// Resistance to fear effects
     pub fear_protection: u8,
@@ -536,12 +536,6 @@ impl ActiveSpells {
     }
 }
 
-impl Default for ActiveSpells {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ===== Quest Log =====
 
 /// Quest objective tracking
@@ -610,7 +604,7 @@ impl Quest {
 }
 
 /// Quest log tracking
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct QuestLog {
     /// Active quests
     pub active_quests: Vec<Quest>,
@@ -638,12 +632,6 @@ impl QuestLog {
             let quest = self.active_quests.remove(pos);
             self.completed_quests.push(quest.id);
         }
-    }
-}
-
-impl Default for QuestLog {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

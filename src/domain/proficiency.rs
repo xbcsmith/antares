@@ -36,6 +36,7 @@
 //! assert!(class_profs.contains(&prof_id));
 //! ```
 
+use crate::domain::database_common::load_ron_entries;
 use crate::domain::items::{ArmorClassification, MagicItemClassification, WeaponClassification};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -318,19 +319,14 @@ impl ProficiencyDatabase {
     /// assert_eq!(db.len(), 1);
     /// ```
     pub fn load_from_string(contents: &str) -> Result<Self, ProficiencyError> {
-        let definitions: Vec<ProficiencyDefinition> =
-            ron::from_str(contents).map_err(|e| ProficiencyError::ParseError(e.to_string()))?;
+        let proficiencies = load_ron_entries(
+            contents,
+            |d: &ProficiencyDefinition| d.id.clone(),
+            ProficiencyError::DuplicateId,
+            |e| ProficiencyError::ParseError(e.to_string()),
+        )?;
 
-        let mut db = Self::new();
-
-        for def in definitions {
-            if db.proficiencies.contains_key(&def.id) {
-                return Err(ProficiencyError::DuplicateId(def.id));
-            }
-            db.proficiencies.insert(def.id.clone(), def);
-        }
-
-        Ok(db)
+        Ok(Self { proficiencies })
     }
 
     /// Gets a proficiency definition by ID

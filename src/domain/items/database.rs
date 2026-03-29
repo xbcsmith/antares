@@ -10,6 +10,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 7.1-7.2 for data file specifications.
 
+use crate::domain::database_common::{load_ron_entries, load_ron_file};
 use crate::domain::items::types::Item;
 use crate::domain::proficiency::ProficiencyDatabase;
 use crate::domain::types::ItemId;
@@ -75,7 +76,7 @@ pub enum ItemDatabaseError {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ItemDatabase {
     /// All items indexed by ID
     items: HashMap<ItemId, Item>,
@@ -126,8 +127,15 @@ impl ItemDatabase {
     /// # }
     /// ```
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ItemDatabaseError> {
-        let contents = std::fs::read_to_string(path)?;
-        Self::load_from_string(&contents)
+        Ok(Self {
+            items: load_ron_file(
+                path,
+                |i: &Item| i.id,
+                ItemDatabaseError::DuplicateId,
+                Into::into,
+                Into::into,
+            )?,
+        })
     }
 
     /// Load item database from a RON string
@@ -145,17 +153,14 @@ impl ItemDatabase {
     /// Returns `ItemDatabaseError::ParseError` if RON parsing fails
     /// Returns `ItemDatabaseError::DuplicateId` if duplicate item IDs found
     pub fn load_from_string(ron_data: &str) -> Result<Self, ItemDatabaseError> {
-        let items: Vec<Item> = ron::from_str(ron_data)?;
-        let mut db = Self::new();
-
-        for item in items {
-            if db.items.contains_key(&item.id) {
-                return Err(ItemDatabaseError::DuplicateId(item.id));
-            }
-            db.items.insert(item.id, item);
-        }
-
-        Ok(db)
+        Ok(Self {
+            items: load_ron_entries(
+                ron_data,
+                |i: &Item| i.id,
+                ItemDatabaseError::DuplicateId,
+                Into::into,
+            )?,
+        })
     }
 
     /// Add an item to the database
@@ -610,12 +615,6 @@ impl ItemMeshDatabase {
         &self,
     ) -> Result<(), crate::domain::visual::creature_database::CreatureDatabaseError> {
         self.inner.validate()
-    }
-}
-
-impl Default for ItemDatabase {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

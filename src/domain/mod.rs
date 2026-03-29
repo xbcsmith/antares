@@ -25,6 +25,7 @@ pub mod character_definition;
 pub mod classes;
 pub mod combat;
 pub mod conditions;
+pub mod database_common;
 pub mod dialogue;
 pub mod inventory;
 pub mod items;

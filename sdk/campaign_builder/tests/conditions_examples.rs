@@ -56,17 +56,39 @@ fn test_conditions_examples_parse_success() {
 
 #[test]
 fn test_conditions_examples_detect_duplicates() {
-    let parsed: Vec<ConditionDefinition> = ron::from_str(CONDITIONS_RON).unwrap();
+    // Use an inline RON string with intentional duplicates so the shared
+    // data file (data/conditions.ron) stays free of duplicates — duplicates
+    // there would now be rejected by load_ron_entries.
+    let inline_ron = r#"[
+        (
+            id: "dup1",
+            name: "Duplicate Test 1",
+            description: "First duplicate for testing duplicate detection.",
+            effects: [StatusEffect("test")],
+            default_duration: Rounds(1),
+            icon_id: None,
+        ),
+        (
+            id: "dup1",
+            name: "Duplicate Test 1 Copy",
+            description: "Second duplicate for testing duplicate detection.",
+            effects: [StatusEffect("test")],
+            default_duration: Rounds(1),
+            icon_id: None,
+        ),
+    ]"#;
+
+    let parsed: Vec<ConditionDefinition> = ron::from_str(inline_ron).unwrap();
 
     let mut counts: HashMap<String, usize> = HashMap::new();
     for c in parsed.iter() {
         *counts.entry(c.id.clone()).or_insert(0) += 1;
     }
 
-    // dup1 should be present more than once in the test data
+    // dup1 should be present more than once in the inline test data
     assert!(
         *counts.get("dup1").unwrap_or(&0) >= 2,
-        "Expected duplicate ID 'dup1' in test data"
+        "Expected duplicate ID 'dup1' in inline test data"
     );
 }
 
