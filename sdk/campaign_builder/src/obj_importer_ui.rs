@@ -1312,7 +1312,7 @@ mod tests {
 
     #[test]
     fn test_importer_state_loads_skeleton_fixture_into_loaded_mode() {
-        let path = fixture_path("examples/skeleton.obj");
+        let path = fixture_path("data/test_fixtures/skeleton.obj");
         let mut state = ObjImporterState::new();
 
         assert_eq!(state.mode, ImporterMode::Idle);
