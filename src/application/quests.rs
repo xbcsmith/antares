@@ -76,18 +76,23 @@ impl QuestSystem {
     /// 2. Adds a textual representation to `game_state.quests` (so UI shows it).
     /// 3. Inserts a fresh `QuestProgress` to this `QuestSystem`.
     ///
-    /// Returns `Err(String)` if the quest doesn't exist.
+    /// Returns `Err(ValidationError::NotFound)` if the quest doesn't exist.
     pub fn start_quest(
         &mut self,
         quest_id: DomainQuestId,
         game_state: &mut crate::application::GameState,
         content_db: &ContentDatabase,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::domain::validation::ValidationError> {
         // Lookup quest
         let quest = content_db
             .quests
             .get_quest(quest_id)
-            .ok_or_else(|| format!("Quest {} not found in content database", quest_id))?
+            .ok_or_else(|| {
+                crate::domain::validation::ValidationError::NotFound(format!(
+                    "Quest {} not found in content database",
+                    quest_id
+                ))
+            })?
             .clone();
 
         // Build an application-level Quest entry for quest log
@@ -302,7 +307,14 @@ impl QuestSystem {
                     if let Some(ch) = game_state.party.members.get_mut(0) {
                         for (item_id, qty) in items {
                             // Use single slot with charges = qty (domain Inventory supports charges)
-                            let _ = ch.inventory.add_item(*item_id, *qty as u8);
+                            if let Err(e) = ch.inventory.add_item(*item_id, *qty as u8) {
+                                tracing::warn!(
+                                    "Quest reward: failed to add item {:?} (qty {}): {}",
+                                    item_id,
+                                    qty,
+                                    e
+                                );
+                            }
                         }
                     }
                 }
@@ -313,12 +325,17 @@ impl QuestSystem {
                 QuestReward::SetFlag { flag_name, value } => {
                     // Simple global flag handling is not implemented in GameState yet.
                     // We log a message for visibility (tests don't rely on flags).
-                    println!("Quest reward sets flag '{}' = {}", flag_name, value);
+                    tracing::warn!(
+                        "Quest reward sets flag '{}' = {} (not yet persisted)",
+                        flag_name,
+                        value
+                    );
                 }
                 QuestReward::Reputation { faction, change } => {
-                    println!(
-                        "Quest reward changes reputation with {} by {}",
-                        faction, change
+                    tracing::warn!(
+                        "Quest reward changes reputation with {} by {} (not yet implemented)",
+                        faction,
+                        change
                     );
                 }
             }

@@ -2618,11 +2618,9 @@ fn select_target(
     mut attack_writer: Option<MessageWriter<AttackAction>>,
     mut ranged_writer: Option<MessageWriter<RangedAttackAction>>,
 ) {
-    if target_sel.0.is_none() {
+    let Some(attacker) = target_sel.0 else {
         return;
-    }
-
-    let attacker = target_sel.0.unwrap();
+    };
 
     let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
 
@@ -2715,7 +2713,10 @@ pub fn perform_attack_action_with_rng(
 
     // Apply damage
     if damage > 0 {
-        let _ = apply_damage(&mut combat_res.state, action.target, damage)?;
+        let died = apply_damage(&mut combat_res.state, action.target, damage)?;
+        if died {
+            tracing::debug!("Combatant {:?} was slain by damage", action.target);
+        }
     }
 
     // Apply special effect if any (map to condition by name)
@@ -2910,7 +2911,10 @@ pub fn perform_ranged_attack_action_with_rng(
 
     // Apply damage.
     if damage > 0 {
-        let _ = apply_damage(&mut combat_res.state, action.target, damage)?;
+        let died = apply_damage(&mut combat_res.state, action.target, damage)?;
+        if died {
+            tracing::debug!("Combatant {:?} was slain by damage", action.target);
+        }
     }
 
     // Apply special effect if any.
@@ -3201,14 +3205,16 @@ fn handle_attack_action(
         turn_state.0 = CombatTurnState::Animating;
 
         let mut rng = rand::rng();
-        let _ = perform_attack_action_with_rng(
+        if let Err(e) = perform_attack_action_with_rng(
             &mut combat_res,
             action,
             content_ref,
             &mut global_state,
             &mut turn_state,
             &mut rng,
-        );
+        ) {
+            tracing::warn!("Attack action failed: {}", e);
+        }
 
         // Compute post-attack HP and damage dealt
         let post_hp: u16 = match action.target {
@@ -3317,14 +3323,16 @@ fn handle_use_item_action(
         let mut rng = rand::rng();
 
         // Perform the use (domain-level). This consumes inventory charges and applies effects.
-        let _ = perform_use_item_action_with_rng(
+        if let Err(e) = perform_use_item_action_with_rng(
             &mut combat_res,
             action,
             content_ref,
             &mut global_state,
             &mut turn_state,
             &mut rng,
-        );
+        ) {
+            tracing::warn!("Use item action failed: {}", e);
+        }
 
         // Compute post-use HP/SP and differences
         let (post_hp, post_sp): (u16, u16) = match action.target {
@@ -3621,14 +3629,16 @@ fn handle_cast_spell_action(
         let mut rng = rand::rng();
 
         // Perform the cast (domain-level). This consumes SP/gems and applies effects.
-        let _ = perform_cast_action_with_rng(
+        if let Err(e) = perform_cast_action_with_rng(
             &mut combat_res,
             action,
             content_ref,
             &mut global_state,
             &mut turn_state,
             &mut rng,
-        );
+        ) {
+            tracing::warn!("Cast action failed: {}", e);
+        }
 
         // Compute post-spell HP and damage dealt
         let post_hp: u16 = match action.target {
@@ -3735,7 +3745,10 @@ pub fn perform_defend_action(
         .filter_map(|id| content.db().conditions.get_condition(id).cloned())
         .collect();
 
-    let _ = combat_res.state.advance_turn(&cond_defs);
+    let turn_effects = combat_res.state.advance_turn(&cond_defs);
+    if !turn_effects.is_empty() {
+        tracing::debug!("Turn advance effects: {:?}", turn_effects);
+    }
 
     // Update turn state
     if let Some(next) = combat_res
@@ -3765,13 +3778,15 @@ fn handle_defend_action(
     for action in reader.read() {
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
-        let _ = perform_defend_action(
+        if let Err(e) = perform_defend_action(
             &mut combat_res,
             action,
             content_ref,
             &mut global_state,
             &mut turn_state,
-        );
+        ) {
+            tracing::warn!("Defend action failed: {}", e);
+        }
     }
 }
 
@@ -3802,7 +3817,10 @@ pub fn perform_flee_action(
             .into_iter()
             .filter_map(|id| content.db().conditions.get_condition(id).cloned())
             .collect();
-        combat_res.state.advance_turn(&cond_defs);
+        let turn_effects = combat_res.state.advance_turn(&cond_defs);
+        if !turn_effects.is_empty() {
+            tracing::debug!("Turn advance effects: {:?}", turn_effects);
+        }
         if let Some(next) = combat_res
             .state
             .turn_order
@@ -3865,7 +3883,10 @@ pub fn perform_flee_action(
         .into_iter()
         .filter_map(|id| content.db().conditions.get_condition(id).cloned())
         .collect();
-    combat_res.state.advance_turn(&cond_defs);
+    let turn_effects = combat_res.state.advance_turn(&cond_defs);
+    if !turn_effects.is_empty() {
+        tracing::debug!("Turn advance effects: {:?}", turn_effects);
+    }
     if let Some(next) = combat_res
         .state
         .turn_order
@@ -3893,12 +3914,14 @@ fn handle_flee_action(
     for _ in reader.read() {
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
-        let _ = perform_flee_action(
+        if let Err(e) = perform_flee_action(
             &mut combat_res,
             content_ref,
             &mut global_state,
             &mut turn_state,
-        );
+        ) {
+            tracing::warn!("Flee action failed: {}", e);
+        }
     }
 }
 
@@ -3933,7 +3956,7 @@ fn select_monster_target(
             let (idx, _) = candidates
                 .iter()
                 .min_by_key(|(_, pc)| pc.hp.current)
-                .unwrap();
+                .expect("candidates guaranteed non-empty by is_empty guard");
             Some(CombatantId::Player(*idx))
         }
         crate::domain::combat::monster::AiBehavior::Defensive => {
@@ -3943,7 +3966,7 @@ fn select_monster_target(
                 .max_by_key(|(_, pc)| {
                     (pc.stats.might.current as i32) + (pc.stats.accuracy.current as i32)
                 })
-                .unwrap();
+                .expect("candidates guaranteed non-empty by is_empty guard");
             Some(CombatantId::Player(*idx))
         }
         crate::domain::combat::monster::AiBehavior::Random => {
@@ -4046,7 +4069,10 @@ pub fn perform_monster_turn_with_rng(
             .into_iter()
             .filter_map(|id| content.db().conditions.get_condition(id).cloned())
             .collect();
-        let _ = combat_res.state.advance_turn(&cond_defs);
+        let turn_effects = combat_res.state.advance_turn(&cond_defs);
+        if !turn_effects.is_empty() {
+            tracing::debug!("Turn advance effects: {:?}", turn_effects);
+        }
         if let Some(next) = combat_res
             .state
             .turn_order
@@ -4072,7 +4098,10 @@ pub fn perform_monster_turn_with_rng(
 
     // Apply damage (mutably modify combat state)
     if damage > 0 {
-        let _ = apply_damage(&mut combat_res.state, target, damage)?;
+        let died = apply_damage(&mut combat_res.state, target, damage)?;
+        if died {
+            tracing::debug!("Combatant {:?} was slain by damage", target);
+        }
     }
 
     // Apply special effect if any (map to condition by name)
@@ -4132,7 +4161,10 @@ pub fn perform_monster_turn_with_rng(
         .filter_map(|id| content.db().conditions.get_condition(id).cloned())
         .collect();
 
-    let _ = combat_res.state.advance_turn(&cond_defs);
+    let turn_effects = combat_res.state.advance_turn(&cond_defs);
+    if !turn_effects.is_empty() {
+        tracing::debug!("Turn advance effects: {:?}", turn_effects);
+    }
 
     // Boss encounters regenerate BOSS_REGEN_PER_ROUND HP per round
     // (in addition to the 1 HP from advance_round's base regeneration).
@@ -4220,7 +4252,10 @@ fn execute_monster_turn(
                 .filter_map(|id| content_ref.db().conditions.get_condition(id).cloned())
                 .collect();
 
-            let _ = combat_res.state.advance_turn(&cond_defs);
+            let turn_effects = combat_res.state.advance_turn(&cond_defs);
+            if !turn_effects.is_empty() {
+                tracing::debug!("Turn advance effects: {:?}", turn_effects);
+            }
 
             // After advancing, determine what the next actor is.
             if let Some(next) = combat_res
@@ -4286,7 +4321,10 @@ fn execute_monster_turn(
             // the round wraps; we pass an empty condition list here because the
             // full DoT tick already happened in perform_monster_turn_with_rng on
             // earlier turns this round).
-            let _ = combat_res.state.advance_turn(&[]);
+            let turn_effects = combat_res.state.advance_turn(&[]);
+            if !turn_effects.is_empty() {
+                tracing::debug!("Turn advance effects (skip): {:?}", turn_effects);
+            }
             turn_state.0 = match combat_res
                 .state
                 .turn_order
@@ -4530,10 +4568,17 @@ pub fn process_combat_victory_with_rng(
             }
 
             // Award experience using domain helper (respects dead checks)
-            let _ = crate::domain::progression::award_experience(
+            if let Err(e) = crate::domain::progression::award_experience(
                 &mut global_state.0.party.members[party_idx],
                 award,
-            );
+            ) {
+                tracing::warn!(
+                    "Failed to award {} XP to party member {}: {}",
+                    award,
+                    party_idx,
+                    e
+                );
+            }
             xp_awarded.push((party_idx, award));
         }
     }
@@ -4586,7 +4631,9 @@ pub fn process_combat_victory_with_rng(
         for &party_idx in &recipients {
             if let Some(member) = global_state.0.party.members.get_mut(party_idx) {
                 if member.inventory.has_space() {
-                    let _ = member.inventory.add_item(*item_id, 0);
+                    if let Err(e) = member.inventory.add_item(*item_id, 0) {
+                        tracing::warn!("Failed to add loot item {:?}: {}", item_id, e);
+                    }
                     placed = true;
                     break;
                 }
@@ -4597,7 +4644,9 @@ pub fn process_combat_victory_with_rng(
         if !placed {
             for member in global_state.0.party.members.iter_mut() {
                 if member.is_alive() && member.inventory.has_space() {
-                    let _ = member.inventory.add_item(*item_id, 0);
+                    if let Err(e) = member.inventory.add_item(*item_id, 0) {
+                        tracing::warn!("Failed to add loot item {:?}: {}", item_id, e);
+                    }
                     break;
                 }
             }

@@ -238,7 +238,11 @@ impl Plugin for AntaresPlugin {
         if game_state.world.get_map(starting_map_id).is_some() {
             game_state.world.set_current_map(starting_map_id);
         } else {
-            panic!("Starting map {} not found in campaign", starting_map_id);
+            eprintln!(
+                "Fatal: starting map {} not found in campaign",
+                starting_map_id
+            );
+            std::process::exit(1);
         }
 
         // Set starting position

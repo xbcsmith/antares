@@ -808,7 +808,7 @@ impl DialogueDatabase {
     }
 
     /// Validates all dialogues in the database
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), crate::domain::validation::ValidationError> {
         for dialogue in self.dialogues.values() {
             dialogue.validate()?;
         }

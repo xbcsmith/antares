@@ -13,6 +13,7 @@
 
 use crate::domain::quest::QuestId;
 use crate::domain::types::ItemId;
+use crate::domain::validation::ValidationError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -134,10 +135,13 @@ impl DialogueTree {
     /// - Root node exists
     /// - All choice targets exist
     /// - No orphaned nodes (except root)
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), ValidationError> {
         // Check root node exists
         if !self.nodes.contains_key(&self.root_node) {
-            return Err(format!("Root node {} does not exist", self.root_node));
+            return Err(ValidationError::MissingReference(format!(
+                "Root node {} does not exist",
+                self.root_node
+            )));
         }
 
         // Check all choice targets exist
@@ -145,10 +149,10 @@ impl DialogueTree {
             for (idx, choice) in node.choices.iter().enumerate() {
                 if let Some(target) = choice.target_node {
                     if !self.nodes.contains_key(&target) {
-                        return Err(format!(
+                        return Err(ValidationError::MissingReference(format!(
                             "Node {} choice {} references non-existent node {}",
                             node_id, idx, target
-                        ));
+                        )));
                     }
                 }
             }
@@ -1244,7 +1248,7 @@ mod tests {
         let dialogue = DialogueTree::new(1, "Test", 1);
         let result = dialogue.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Root node"));
+        assert!(result.unwrap_err().to_string().contains("Root node"));
     }
 
     #[test]
@@ -1257,7 +1261,7 @@ mod tests {
 
         let result = dialogue.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("non-existent"));
+        assert!(result.unwrap_err().to_string().contains("non-existent"));
     }
 
     #[test]

@@ -52,6 +52,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::domain::validation::ValidationError;
 use crate::domain::visual::MeshTransform;
 
 /// Animation definition with keyframes
@@ -187,7 +188,7 @@ impl AnimationDefinition {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if valid, or `Err` with a description of the problem
+    /// Returns `Ok(())` if valid, or `Err(ValidationError)` with a description of the problem
     ///
     /// # Errors
     ///
@@ -213,33 +214,35 @@ impl AnimationDefinition {
     /// let mut bad_anim = AnimationDefinition::new("Bad", -1.0);
     /// assert!(bad_anim.validate().is_err());
     /// ```
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), ValidationError> {
         if self.duration <= 0.0 {
-            return Err(format!(
+            return Err(ValidationError::OutOfRange(format!(
                 "Animation duration must be positive, got {}",
                 self.duration
-            ));
+            )));
         }
 
         if self.name.is_empty() {
-            return Err("Animation name cannot be empty".to_string());
+            return Err(ValidationError::EmptyField(
+                "Animation name cannot be empty".to_string(),
+            ));
         }
 
         // Check keyframe times
         let mut last_time = -f32::EPSILON;
         for (i, keyframe) in self.keyframes.iter().enumerate() {
             if keyframe.time < 0.0 || keyframe.time > self.duration {
-                return Err(format!(
+                return Err(ValidationError::OutOfRange(format!(
                     "Keyframe {} time {} is outside valid range [0, {}]",
                     i, keyframe.time, self.duration
-                ));
+                )));
             }
 
             if keyframe.time < last_time {
-                return Err(format!(
+                return Err(ValidationError::Structural(format!(
                     "Keyframes must be sorted by time, but keyframe {} (time {}) comes after keyframe with time {}",
                     i, keyframe.time, last_time
-                ));
+                )));
             }
 
             last_time = keyframe.time;

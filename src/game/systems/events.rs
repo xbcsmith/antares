@@ -311,7 +311,7 @@ fn handle_events(
                     .map(|map| map.name.clone())
                     .unwrap_or_else(|| format!("Map {}", map_id));
                 let msg = format!("Entering {}...", map_name);
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -336,7 +336,7 @@ fn handle_events(
                 });
 
                 let msg = format!("{}: {}", name, text);
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -348,7 +348,7 @@ fn handle_events(
                 damage, effect: _, ..
             } => {
                 let msg = format!("Trapped! Took {} damage.", damage);
-                println!("{}", msg);
+                tracing::warn!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -359,7 +359,7 @@ fn handle_events(
             }
             MapEvent::Treasure { loot, .. } => {
                 let msg = format!("Found treasure! {} item(s).", loot.len());
-                println!("{}", msg);
+                tracing::warn!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -374,7 +374,7 @@ fn handle_events(
                 ..
             } => {
                 let msg = format!("Monsters! ({} foes)", monster_group.len());
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -462,7 +462,7 @@ fn handle_events(
                         });
 
                         let msg = format!("{} speaks.", npc_def.name);
-                        println!("{}", msg);
+                        tracing::info!("{}", msg);
                         if let Some(ref mut writer) = game_log_writer {
                             writer.write(GameLogEvent {
                                 text: msg,
@@ -484,7 +484,7 @@ fn handle_events(
                         });
 
                         let msg = format!("{} speaks.", npc_def.name);
-                        println!("{}", msg);
+                        tracing::info!("{}", msg);
                         if let Some(ref mut writer) = game_log_writer {
                             writer.write(GameLogEvent {
                                 text: msg,
@@ -495,7 +495,7 @@ fn handle_events(
                 } else {
                     // NPC not found in database - log error
                     let msg = format!("Error: NPC '{}' not found in database", npc_id);
-                    println!("{}", msg);
+                    tracing::error!("{}", msg);
                     if let Some(ref mut writer) = game_log_writer {
                         writer.write(GameLogEvent {
                             text: msg,
@@ -513,7 +513,7 @@ fn handle_events(
                 facing: _,
             } => {
                 let msg = format!("Met {}.", name);
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -608,7 +608,7 @@ fn handle_events(
                 innkeeper_id,
             } => {
                 let msg = format!("Entering {}.", name);
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -654,7 +654,7 @@ fn handle_events(
                 } else {
                     // NPC definition not found
                     let err = format!("Error: Innkeeper '{}' not found in database", innkeeper_id);
-                    println!("{}", err);
+                    tracing::error!("{}", err);
                     if let Some(ref mut writer) = game_log_writer {
                         writer.write(GameLogEvent {
                             text: err,
@@ -675,7 +675,7 @@ fn handle_events(
                 key_item_id,
             } => {
                 let msg = format!("Furniture placed: {}", name);
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -1097,7 +1097,7 @@ fn handle_event_result(
             });
 
             let msg = format!("Visiting {}.", npc_def.name);
-            println!("{}", msg);
+            tracing::info!("{}", msg);
             if let Some(ref mut writer) = game_log_writer {
                 writer.write(GameLogEvent {
                     text: msg,
@@ -1130,7 +1130,7 @@ fn handle_event_result(
         }
     } else {
         let msg = format!("Error: Merchant NPC '{}' not found in database", npc_id);
-        println!("{}", msg);
+        tracing::error!("{}", msg);
         if let Some(ref mut writer) = game_log_writer {
             writer.write(GameLogEvent {
                 text: msg,

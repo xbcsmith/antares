@@ -195,8 +195,7 @@ warnings`, `cargo nextest run`.
 ### Phase 2: Strip Phase References (Low Risk, Medium Effort)
 
 Remove all development-phase language from source code, tests, data files, and
-root documentation. This is a mechanical find-and-replace effort with no
-behavioral changes. Use the file_edit tool and go file by file CAREFULLY to ensure consistent renaming and avoid missing any references.
+root documentation. This is a mechanical find-and-replace. Use the file_edit tool to ensure consistency and go file by file CAREFULLY, renaming and avoiding missing any references.
 
 #### 2.1 Rename Test Data IDs and Test Functions
 
@@ -456,7 +455,8 @@ Affected types: `Resistances`, `Condition`, `Inventory`, `Equipment`,
 
 Address silent error drops and inconsistent error patterns in production code.
 These are correctness issues — lost quest rewards, unlogged combat failures,
-and silent damage drops.
+and silent damage drops. Use the file_edit tool to ensure consistency and go file
+by file CAREFULLY, renaming and avoiding missing any references.
 
 #### 4.1 Audit and Fix Silent Error Drops in Combat
 
@@ -563,14 +563,14 @@ to replace ~20 functions returning `Result<_, String>`:
 
 #### 4.10 Deliverables
 
-- [ ] ~20 combat `let _ =` calls replaced with error logging
-- [ ] 7 spell casting `let _ =` calls fixed
-- [ ] 3 reward distribution `let _ =` calls fixed
-- [ ] `panic!` in `antares.rs` replaced with graceful exit
-- [ ] 3 production `unwrap()` calls hardened
-- [ ] `ValidationError` enum created; ~20 functions migrated
-- [ ] `println!` placeholders replaced with `tracing`
-- [ ] 2 `only_used_in_recursion` suppressions investigated and resolved
+- [x] ~20 combat `let _ =` calls replaced with error logging
+- [x] 7 spell casting `let _ =` calls fixed
+- [x] 3 reward distribution `let _ =` calls fixed
+- [x] `panic!` in `antares.rs` replaced with graceful exit
+- [x] 3 production `unwrap()` calls hardened
+- [x] `ValidationError` enum created; ~20 functions migrated
+- [x] `println!` placeholders replaced with `tracing`
+- [x] 2 `only_used_in_recursion` suppressions investigated and resolved
 
 #### 4.11 Success Criteria
 

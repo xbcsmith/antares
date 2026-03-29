@@ -369,12 +369,12 @@ impl ItemDatabase {
         for (id, item) in &self.items {
             let descriptor = ItemMeshDescriptor::from_item(item);
             let creature_def = descriptor.to_creature_definition();
-            creature_def.validate().map_err(|message| {
-                ItemDatabaseError::InvalidMeshDescriptor {
+            creature_def
+                .validate()
+                .map_err(|e| ItemDatabaseError::InvalidMeshDescriptor {
                     item_id: *id,
-                    message,
-                }
-            })?;
+                    message: e.to_string(),
+                })?;
         }
         Ok(())
     }
@@ -447,12 +447,12 @@ impl ItemDatabase {
             if item.mesh_descriptor_override.is_some() {
                 let descriptor = ItemMeshDescriptor::from_item(item);
                 let creature_def = descriptor.to_creature_definition();
-                creature_def.validate().map_err(|message| {
-                    ItemDatabaseError::InvalidMeshDescriptor {
+                creature_def
+                    .validate()
+                    .map_err(|e| ItemDatabaseError::InvalidMeshDescriptor {
                         item_id: *id,
-                        message,
-                    }
-                })?;
+                        message: e.to_string(),
+                    })?;
             }
         }
         Ok(())

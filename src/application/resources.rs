@@ -13,6 +13,7 @@
 
 use crate::application::GameState;
 use crate::domain::campaign::CampaignConfig;
+use crate::domain::validation::ValidationError;
 use crate::sdk::database::ContentDatabase;
 use bevy::prelude::*;
 
@@ -51,8 +52,8 @@ impl GameContent {
     }
 }
 
-/// Returns `Ok(())` if the campaign allows resurrection, or an `Err` string
-/// when permadeath is enabled.
+/// Returns `Ok(())` if the campaign allows resurrection, or a
+/// [`ValidationError::PreconditionFailed`] when permadeath is enabled.
 ///
 /// This helper must be called by any application-layer or game-system code
 /// that is about to apply a `ConsumableEffect::Resurrect` or cast a spell
@@ -65,8 +66,8 @@ impl GameContent {
 ///
 /// # Errors
 ///
-/// Returns `Err(String)` with a human-readable message when
-/// `config.permadeath == true`.
+/// Returns [`ValidationError::PreconditionFailed`] with a human-readable
+/// message when `config.permadeath == true`.
 ///
 /// # Examples
 ///
@@ -83,9 +84,13 @@ impl GameContent {
 /// pd_config.permadeath = true;
 /// assert!(check_permadeath_allows_resurrection(&pd_config).is_err());
 /// ```
-pub fn check_permadeath_allows_resurrection(config: &CampaignConfig) -> Result<(), String> {
+pub fn check_permadeath_allows_resurrection(
+    config: &CampaignConfig,
+) -> Result<(), ValidationError> {
     if config.permadeath {
-        Err("Resurrection is not allowed in this campaign (permadeath enabled).".to_string())
+        Err(ValidationError::PreconditionFailed(
+            "Resurrection is not allowed in this campaign (permadeath enabled).".to_string(),
+        ))
     } else {
         Ok(())
     }
@@ -129,7 +134,7 @@ pub fn check_permadeath_allows_resurrection(config: &CampaignConfig) -> Result<(
 ///
 /// # Errors
 ///
-/// Returns a descriptive `String` error for any of the following:
+/// Returns a [`ValidationError`] for any of the following:
 ///
 /// | Condition                                              | Error contains         |
 /// |--------------------------------------------------------|------------------------|
@@ -189,24 +194,27 @@ pub fn perform_resurrection_service(
     npc_id: &str,
     character_index: usize,
     content: &ContentDatabase,
-) -> Result<(), String> {
+) -> Result<(), ValidationError> {
     // Step 1 & 2: Look up NPC and clone the resurrect service entry.
     // The clone releases the immutable borrow of `content` before we touch
     // the mutable `game_state` below.
     let service = {
-        let npc = content
-            .npcs
-            .get_npc(npc_id)
-            .ok_or_else(|| format!("NPC '{}' not found in content database", npc_id))?;
+        let npc = content.npcs.get_npc(npc_id).ok_or_else(|| {
+            ValidationError::NotFound(format!("NPC '{}' not found in content database", npc_id))
+        })?;
 
-        let catalog = npc
-            .service_catalog
-            .as_ref()
-            .ok_or_else(|| format!("NPC '{}' does not offer any services", npc_id))?;
+        let catalog = npc.service_catalog.as_ref().ok_or_else(|| {
+            ValidationError::NotFound(format!("NPC '{}' does not offer any services", npc_id))
+        })?;
 
         catalog
             .get_service("resurrect")
-            .ok_or_else(|| format!("NPC '{}' does not offer the 'resurrect' service", npc_id))?
+            .ok_or_else(|| {
+                ValidationError::NotFound(format!(
+                    "NPC '{}' does not offer the 'resurrect' service",
+                    npc_id
+                ))
+            })?
             .clone()
     };
 
@@ -220,30 +228,32 @@ pub fn perform_resurrection_service(
             .party
             .members
             .get(character_index)
-            .ok_or_else(|| format!("No party member at index {}", character_index))?;
+            .ok_or_else(|| {
+                ValidationError::NotFound(format!("No party member at index {}", character_index))
+            })?;
 
         if !character.conditions.is_dead() {
-            return Err(format!(
+            return Err(ValidationError::PreconditionFailed(format!(
                 "Party member '{}' at index {} is not dead",
                 character.name, character_index
-            ));
+            )));
         }
     }
 
     // Step 5: Check gold.
     if game_state.party.gold < service.cost {
-        return Err(format!(
+        return Err(ValidationError::InsufficientResources(format!(
             "Insufficient gold: resurrection costs {} gold but the party only has {}",
             service.cost, game_state.party.gold
-        ));
+        )));
     }
 
     // Step 6: Check gems.
     if game_state.party.gems < service.gem_cost {
-        return Err(format!(
+        return Err(ValidationError::InsufficientResources(format!(
             "Insufficient gems: resurrection costs {} gem(s) but the party only has {}",
             service.gem_cost, game_state.party.gems
-        ));
+        )));
     }
 
     // Step 7: Deduct resources.
@@ -369,7 +379,7 @@ mod tests {
             "resurrection must be blocked when permadeath == true"
         );
         assert!(
-            result.unwrap_err().contains("permadeath"),
+            result.unwrap_err().to_string().contains("permadeath"),
             "error message must mention permadeath"
         );
     }
@@ -416,7 +426,7 @@ mod tests {
 
         let result = perform_resurrection_service(&mut state, "temple_priest", 0, &content);
         assert!(result.is_err(), "expected Err for insufficient gold");
-        let msg = result.unwrap_err();
+        let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("Insufficient gold"),
             "error must mention 'Insufficient gold', got: {}",
@@ -440,7 +450,7 @@ mod tests {
 
         let result = perform_resurrection_service(&mut state, "temple_priest", 0, &content);
         assert!(result.is_err(), "expected Err for insufficient gems");
-        let msg = result.unwrap_err();
+        let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("Insufficient gems"),
             "error must mention 'Insufficient gems', got: {}",
@@ -463,7 +473,7 @@ mod tests {
 
         let result = perform_resurrection_service(&mut state, "temple_priest", 0, &content);
         assert!(result.is_err(), "expected Err when target is not dead");
-        let msg = result.unwrap_err();
+        let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("not dead"),
             "error must mention 'not dead', got: {}",
@@ -486,7 +496,7 @@ mod tests {
 
         let result = perform_resurrection_service(&mut state, "nonexistent_priest", 0, &content);
         assert!(result.is_err(), "expected Err for unknown NPC");
-        let msg = result.unwrap_err();
+        let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("not found"),
             "error must mention 'not found', got: {}",
@@ -508,7 +518,7 @@ mod tests {
             result.is_err(),
             "expected Err when NPC lacks resurrect service"
         );
-        let msg = result.unwrap_err();
+        let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("resurrect"),
             "error must mention 'resurrect', got: {}",
@@ -528,7 +538,7 @@ mod tests {
 
         let result = perform_resurrection_service(&mut state, "temple_priest", 0, &content);
         assert!(result.is_err(), "expected Err when permadeath is enabled");
-        let msg = result.unwrap_err();
+        let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("permadeath"),
             "error must mention 'permadeath', got: {}",

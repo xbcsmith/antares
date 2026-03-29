@@ -538,6 +538,10 @@ fn handle_select_choice(
 /// - `HasItem` sums the party's inventories
 /// - `HasGold` reads party gold
 /// - `MinLevel` checks first party member's level (simplified)
+// NOTE: `db` is intentionally kept for forward compatibility. Future condition types
+// (e.g. HasItem, CheckSkill) will need to consult the content database for validation.
+// The suppression is correct — removing `db` would require adding it back when those
+// conditions are implemented, breaking the API.
 #[allow(clippy::only_used_in_recursion)]
 fn evaluate_conditions(
     conds: &[DialogueCondition],
@@ -852,12 +856,12 @@ fn execute_action(
         DialogueAction::StartQuest { quest_id } => {
             if let Some(qs) = quest_system {
                 if let Err(err) = qs.start_quest(*quest_id, game_state, db) {
-                    println!("Failed to start quest {}: {}", quest_id, err);
+                    tracing::warn!("Failed to start quest {}: {}", quest_id, err);
                 } else if let Some(log) = game_log.as_mut() {
                     log.add_dialogue(format!("Quest {} started", quest_id));
                 }
             } else {
-                println!("Warning: StartQuest requested but no QuestSystem present");
+                tracing::warn!("StartQuest requested but no QuestSystem present");
             }
         }
         DialogueAction::CompleteQuestStage {
@@ -865,12 +869,19 @@ fn execute_action(
             stage_number,
         } => {
             // Simplified: log for visibility (detailed behavior belongs in QuestSystem)
-            println!("CompleteQuestStage {} stage {}", quest_id, stage_number);
+            tracing::info!("CompleteQuestStage {} stage {}", quest_id, stage_number);
         }
         DialogueAction::GiveItems { items } => {
             if let Some(member) = game_state.party.members.first_mut() {
                 for (item_id, qty) in items {
-                    let _ = member.inventory.add_item(*item_id, *qty as u8);
+                    if let Err(e) = member.inventory.add_item(*item_id, *qty as u8) {
+                        tracing::warn!(
+                            "Dialogue reward: failed to add item {:?} (qty {}): {}",
+                            item_id,
+                            qty,
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -905,10 +916,14 @@ fn execute_action(
             game_state.party.gold = game_state.party.gold.saturating_sub(*amount);
         }
         DialogueAction::SetFlag { flag_name, value } => {
-            println!("SetFlag '{}' = {} (not persisted)", flag_name, value);
+            tracing::warn!("SetFlag '{}' = {} (not persisted)", flag_name, value);
         }
         DialogueAction::ChangeReputation { faction, change } => {
-            println!("ChangeReputation {} by {}", faction, change);
+            tracing::warn!(
+                "ChangeReputation {} by {} (not yet implemented)",
+                faction,
+                change
+            );
         }
         DialogueAction::TriggerEvent { event_name } => {
             // Special-case handling for opening the inn party management UI via

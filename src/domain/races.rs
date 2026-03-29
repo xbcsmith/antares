@@ -14,6 +14,7 @@
 
 use crate::domain::database_common::load_ron_entries;
 use crate::domain::proficiency::ProficiencyDatabase;
+use crate::domain::validation::ValidationError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -210,13 +211,13 @@ impl Resistances {
     }
 
     /// Validates that all resistance values are in the valid range (0-100)
-    pub fn validate(&self) -> Result<(), String> {
-        let check = |name: &str, value: u8| {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        let check = |name: &str, value: u8| -> Result<(), ValidationError> {
             if value > 100 {
-                Err(format!(
+                Err(ValidationError::OutOfRange(format!(
                     "{} resistance {} exceeds maximum of 100",
                     name, value
-                ))
+                )))
             } else {
                 Ok(())
             }

@@ -155,7 +155,7 @@ impl CreatureDatabase {
         // Validate before adding
         creature
             .validate()
-            .map_err(|e| CreatureDatabaseError::ValidationError(creature.id, e))?;
+            .map_err(|e| CreatureDatabaseError::ValidationError(creature.id, e.to_string()))?;
 
         if self.creatures.contains_key(&creature.id) {
             return Err(CreatureDatabaseError::DuplicateId(creature.id));
@@ -477,7 +477,7 @@ impl CreatureDatabase {
         for creature in self.creatures.values() {
             creature
                 .validate()
-                .map_err(|e| CreatureDatabaseError::ValidationError(creature.id, e))?;
+                .map_err(|e| CreatureDatabaseError::ValidationError(creature.id, e.to_string()))?;
         }
         Ok(())
     }

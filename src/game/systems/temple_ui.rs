@@ -523,7 +523,7 @@ fn temple_action_system(
                     log.add_system(format!("Resurrection failed: {}", e));
                 }
                 if let GameMode::TempleService(ref mut ts) = global_state.0.mode {
-                    ts.status_message = Some(e);
+                    ts.status_message = Some(e.to_string());
                 }
             }
         }

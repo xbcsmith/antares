@@ -38,6 +38,7 @@ pub mod races;
 pub mod resources;
 pub mod transactions;
 pub mod types;
+pub mod validation;
 pub mod visual;
 pub mod world;
 
