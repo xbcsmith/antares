@@ -2546,11 +2546,11 @@ mod party_entity_tests {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
     // Helper to compare colors (Bevy Color may have floating point precision differences)
-    #[allow(dead_code)]
     fn colors_approx_equal(a: Color, b: Color) -> bool {
         let a_rgba = a.to_srgba();
         let b_rgba = b.to_srgba();

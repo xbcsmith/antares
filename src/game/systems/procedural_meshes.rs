@@ -767,8 +767,7 @@ const CHAIR_ARMREST_HEIGHT: f32 = 0.3;
 const THRONE_SEAT_WIDTH: f32 = 0.7;
 const THRONE_SEAT_DEPTH: f32 = 0.7;
 const THRONE_SEAT_HEIGHT: f32 = 0.08;
-#[allow(dead_code)]
-const THRONE_HEIGHT: f32 = 1.5;
+
 const THRONE_BACK_HEIGHT: f32 = 0.9;
 const THRONE_BACK_WIDTH: f32 = 0.7;
 const THRONE_ARM_HEIGHT: f32 = 0.6;
@@ -829,14 +828,6 @@ const TREE_FOLIAGE_TEXTURE_PALM: &str = "assets/textures/trees/foliage_palm.png"
 const TREE_FOLIAGE_TEXTURE_SHRUB: &str = "assets/textures/trees/foliage_shrub.png";
 /// Alpha cutoff for foliage `AlphaMode::Mask` — pixels with alpha below this are clipped.
 const TREE_FOLIAGE_ALPHA_CUTOFF: f32 = 0.35_f32;
-// Color constants for shrubs and grass (used in spawn_shrub and spawn_grass)
-// Inlined into spawn functions to maintain direct color values
-#[allow(dead_code)]
-const SHRUB_STEM_COLOR: Color = Color::srgb(0.25, 0.45, 0.15); // Dark green
-#[allow(dead_code)]
-const SHRUB_FOLIAGE_COLOR: Color = Color::srgb(0.35, 0.65, 0.25); // Medium green
-#[allow(dead_code)]
-const GRASS_BLADE_COLOR: Color = Color::srgb(0.3, 0.65, 0.2); // Grass green
 
 const PORTAL_COLOR: Color = Color::srgb(0.53, 0.29, 0.87); // Purple
 const SIGN_POST_COLOR: Color = Color::srgb(0.4, 0.3, 0.2); // Dark brown
@@ -854,53 +845,23 @@ const TORCH_FLAME_COLOR: Color = Color::srgb(1.0, 0.8, 0.2); // Yellow/orange
 const DOOR_PANEL_COLOR: Color = Color::srgb(0.55, 0.35, 0.18); // Warm wood brown
 
 // Structure dimensions - Column
-#[allow(dead_code)]
-const COLUMN_SHAFT_RADIUS: f32 = 0.3;
 const COLUMN_CAPITAL_HEIGHT: f32 = 0.2; // Additional height for capital
-#[allow(dead_code)]
-const COLUMN_CAPITAL_RADIUS: f32 = 0.35;
 const COLUMN_BASE_HEIGHT: f32 = 0.15;
 
 // Structure dimensions - Arch
 const ARCH_INNER_RADIUS: f32 = 1.0;
-#[allow(dead_code)]
-const ARCH_OUTER_RADIUS: f32 = 1.3;
-#[allow(dead_code)]
-const ARCH_THICKNESS: f32 = 0.3;
-#[allow(dead_code)]
 const ARCH_SUPPORT_WIDTH: f32 = 0.4;
-#[allow(dead_code)]
 const ARCH_SUPPORT_HEIGHT: f32 = 1.5;
 
-// Structure dimensions - Wall
-#[allow(dead_code)]
-const WALL_THICKNESS: f32 = 0.2;
-#[allow(dead_code)]
-const WALL_WINDOW_WIDTH: f32 = 0.4;
-#[allow(dead_code)]
-const WALL_WINDOW_HEIGHT: f32 = 0.3;
-
 // Structure dimensions - Door Frame
-#[allow(dead_code)]
+#[cfg(test)]
 const DOOR_FRAME_THICKNESS: f32 = 0.15;
-#[allow(dead_code)]
+#[cfg(test)]
 const DOOR_FRAME_BORDER: f32 = 0.1;
-
-// Structure dimensions - Railing
-#[allow(dead_code)]
-const RAILING_POST_RADIUS: f32 = 0.08;
-#[allow(dead_code)]
-const RAILING_BAR_RADIUS: f32 = 0.04;
-#[allow(dead_code)]
-const RAILING_BAR_HEIGHT: f32 = 0.8;
 
 // Structure colors
 const STRUCTURE_STONE_COLOR: Color = Color::srgb(0.7, 0.7, 0.7); // Light gray stone
 const STRUCTURE_MARBLE_COLOR: Color = Color::srgb(0.9, 0.9, 0.9); // White marble
-#[allow(dead_code)]
-const STRUCTURE_IRON_COLOR: Color = Color::srgb(0.3, 0.3, 0.35); // Dark iron
-#[allow(dead_code)]
-const STRUCTURE_GOLD_COLOR: Color = Color::srgb(0.8, 0.65, 0.2); // Gold trim
 
 // Tile centering offset
 /// Offset to center procedural meshes within their tile (matches camera centering)
@@ -3213,7 +3174,6 @@ mod tests {
         let _ = BENCH_HEIGHT;
         let _ = TABLE_HEIGHT;
         let _ = CHAIR_HEIGHT;
-        let _ = THRONE_HEIGHT;
         let _ = CHEST_HEIGHT;
         let _ = TORCH_HANDLE_HEIGHT;
     }
@@ -3494,20 +3454,18 @@ mod tests {
     fn test_structure_color_constants_valid() {
         let _ = STRUCTURE_STONE_COLOR;
         let _ = STRUCTURE_MARBLE_COLOR;
-        let _ = STRUCTURE_IRON_COLOR;
-        let _ = STRUCTURE_GOLD_COLOR;
     }
 
     /// Tests structure dimension constants are positive
     #[test]
     fn test_structure_dimensions_positive() {
         // Constants verified at compile time via their usage
-        let _ = COLUMN_SHAFT_RADIUS;
         let _ = COLUMN_CAPITAL_HEIGHT;
         let _ = ARCH_INNER_RADIUS;
-        let _ = ARCH_OUTER_RADIUS;
-        let _ = WALL_THICKNESS;
-        let _ = RAILING_POST_RADIUS;
+        let _ = ARCH_SUPPORT_WIDTH;
+        let _ = ARCH_SUPPORT_HEIGHT;
+        let _ = DOOR_FRAME_THICKNESS;
+        let _ = DOOR_FRAME_BORDER;
     }
 
     /// Tests cache properly stores structure component meshes
@@ -5315,10 +5273,10 @@ const ITEM_LEATHER_COLOR: Color = Color::srgb(0.40, 0.28, 0.15);
 /// Default metallic color for helmets and shields.
 const ITEM_METAL_COLOR: Color = Color::srgb(0.60, 0.60, 0.65);
 /// Default parchment color for scrolls.
-#[allow(dead_code)]
+#[cfg(test)]
 const ITEM_PARCHMENT_COLOR: Color = Color::srgb(0.85, 0.80, 0.65);
 /// Default gold color for rings.
-#[allow(dead_code)]
+#[cfg(test)]
 const ITEM_GOLD_COLOR: Color = Color::srgb(0.80, 0.65, 0.20);
 
 // ==================== Item Mesh Spawn Functions ====================

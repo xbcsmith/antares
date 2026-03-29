@@ -73,11 +73,6 @@ fn test_game_state_without_campaign() {
 
     assert!(game_state.campaign.is_none());
     assert_eq!(game_state.party.gold, 0);
-    // Phase 2: party.food is deprecated; food is now in character inventories.
-    #[allow(deprecated)]
-    {
-        assert_eq!(game_state.party.food, 0);
-    }
 }
 
 #[test]
@@ -99,12 +94,6 @@ fn test_game_state_with_campaign() {
 
     // Verify starting gold from campaign config.
     assert_eq!(game_state.party.gold, 500);
-    // Phase 2: food is tracked as IsFood inventory items, not party.food.
-    // party.food remains 0 after new_game (deprecated field).
-    #[allow(deprecated)]
-    {
-        assert_eq!(game_state.party.food, 0);
-    }
 }
 
 #[test]
@@ -119,11 +108,6 @@ fn test_campaign_starting_conditions_applied() {
 
     // Check starting gold.
     assert_eq!(game_state.party.gold, 500);
-    // Phase 2: party.food is deprecated; food is now IsFood inventory items.
-    #[allow(deprecated)]
-    {
-        assert_eq!(game_state.party.food, 0);
-    }
 
     // Game state should be in exploration mode
     assert_eq!(game_state.mode, antares::application::GameMode::Exploration);
@@ -188,11 +172,6 @@ fn test_save_and_load_campaign_game() {
 
     // Verify gold is preserved
     assert_eq!(loaded_state.party.gold, game_state.party.gold);
-    // Phase 2: party.food is deprecated; both should be 0.
-    #[allow(deprecated)]
-    {
-        assert_eq!(loaded_state.party.food, game_state.party.food);
-    }
 }
 
 #[test]
@@ -312,13 +291,6 @@ fn test_campaign_config_variations() {
     game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
 
     assert_eq!(game_state.party.gold, 50);
-    // Phase 2: starting_food is in campaign config but no longer applied to party.food;
-    // food rations are granted to character inventories during instantiation.
-    // party.food remains 0.
-    #[allow(deprecated)]
-    {
-        assert_eq!(game_state.party.food, 0);
-    }
 }
 
 #[test]
@@ -375,11 +347,6 @@ fn test_campaign_backward_compatibility() {
 
     // Both should have identical initial state
     assert_eq!(game_state_new.party.gold, game_state_old.party.gold);
-    // Phase 2: party.food is deprecated; both should be 0.
-    #[allow(deprecated)]
-    {
-        assert_eq!(game_state_new.party.food, game_state_old.party.food);
-    }
     assert_eq!(game_state_new.mode, game_state_old.mode);
 }
 
@@ -412,11 +379,6 @@ fn test_game_state_serialization_with_campaign() {
 
     // But gold should be preserved
     assert_eq!(deserialized.party.gold, game_state.party.gold);
-    // Phase 2: party.food is deprecated; both should be 0.
-    #[allow(deprecated)]
-    {
-        assert_eq!(deserialized.party.food, game_state.party.food);
-    }
 }
 
 #[test]

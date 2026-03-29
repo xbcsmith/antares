@@ -489,8 +489,6 @@ mod tests {
         let mut game_state = GameState::new();
         game_state.campaign = Some(campaign);
         // Apply starting gold from campaign config.
-        // NOTE: party.food is deprecated (Phase 2) — food is now tracked as
-        // ConsumableEffect::IsFood inventory items, not a numeric counter.
         game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
         let save = SaveGame::new(game_state);
 

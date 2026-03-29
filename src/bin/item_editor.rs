@@ -230,7 +230,6 @@ impl ItemEditor {
         // Alignment restriction
         let alignment_restriction = self.select_alignment_restriction();
 
-        #[allow(deprecated)]
         let item = Item {
             id,
             name,
@@ -1396,7 +1395,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_next_item_id_with_items() {
         let editor = ItemEditor {
             items: vec![
@@ -1514,7 +1512,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_format_classification_consumable_is_food() {
         let editor = ItemEditor {
             items: vec![],
@@ -1628,7 +1625,6 @@ mod tests {
     /// When editing a consumable and choosing effect "5" (Food), the updated
     /// item must have `is_combat_usable = false` regardless of its prior value.
     #[test]
-    #[allow(deprecated)]
     fn test_edit_consumable_is_food_clears_combat_usable() {
         // Simulate an item that was previously a healing potion (combat-usable).
         let mut item = antares::domain::items::Item {
@@ -1674,7 +1670,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_with_alignment_restriction() {
         let item = Item {
             id: 1,
@@ -1708,7 +1703,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_with_tags() {
         let item = Item {
             id: 1,
@@ -1740,7 +1734,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_cursed() {
         let item = Item {
             id: 1,
@@ -1769,7 +1762,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_with_charges() {
         let item = Item {
             id: 1,

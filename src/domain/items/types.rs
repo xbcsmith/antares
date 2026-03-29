@@ -1047,7 +1047,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_cursed_item_display() {
         let cursed = Item {
             id: 2,
@@ -1397,7 +1396,6 @@ mod tests {
 
     #[test]
     fn test_accessory_required_proficiency_divine() {
-        #[allow(deprecated)]
         let symbol = Item {
             id: 44,
             name: "Holy Symbol".to_string(),
@@ -1456,7 +1454,6 @@ mod tests {
 
     #[test]
     fn test_accessory_required_proficiency_mundane() {
-        #[allow(deprecated)]
         let ring = Item {
             id: 40,
             name: "Plain Ring".to_string(),
@@ -1513,7 +1510,6 @@ mod tests {
 
     #[test]
     fn test_ammo_no_proficiency() {
-        #[allow(deprecated)]
         let arrows = Item {
             id: 60,
             name: "Arrows".to_string(),

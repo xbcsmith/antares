@@ -666,7 +666,6 @@ mod tests {
     #[test]
     fn test_good_character_cannot_equip_evil_item() {
         // Arrange
-        #[allow(deprecated)]
         let character = Character {
             name: "Paladin".to_string(),
             race_id: "human".to_string(),
@@ -695,7 +694,6 @@ mod tests {
             worthiness: 0,
             gold: 0,
             gems: 0,
-            food: 0,
         };
 
         let mut items = ItemDatabase::new();

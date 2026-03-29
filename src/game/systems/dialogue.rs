@@ -835,7 +835,6 @@ fn execute_recruit_to_party(
 /// - `GiveGold` / `TakeGold` → modifies party gold
 /// - `SetFlag` / `ChangeReputation` / `TriggerEvent` → not fully implemented
 /// - `GrantExperience` → grants XP to first party member
-#[allow(unused_mut)]
 #[allow(clippy::too_many_arguments)]
 fn execute_action(
     action: &DialogueAction,
@@ -854,7 +853,7 @@ fn execute_action(
             if let Some(qs) = quest_system {
                 if let Err(err) = qs.start_quest(*quest_id, game_state, db) {
                     println!("Failed to start quest {}: {}", quest_id, err);
-                } else if let Some(ref mut log) = game_log {
+                } else if let Some(log) = game_log.as_mut() {
                     log.add_dialogue(format!("Quest {} started", quest_id));
                 }
             } else {
@@ -939,7 +938,7 @@ fn execute_action(
                         selected_roster_slot: None,
                     });
 
-                    if let Some(ref mut log) = game_log {
+                    if let Some(log) = game_log.as_mut() {
                         log.add_system("Opening party management...".to_string());
                     }
                 } else {
@@ -980,7 +979,7 @@ fn execute_action(
 
             // Generic event logging (kept for visibility/audit)
             info!("Dialogue triggered event: {}", event_name);
-            if let Some(ref mut log) = game_log {
+            if let Some(log) = game_log.as_mut() {
                 log.add_system(format!("Event triggered: {}", event_name));
             }
         }
@@ -1019,7 +1018,7 @@ fn execute_action(
             // 1. Verify character not already encountered
             if game_state.encountered_characters.contains(character_id) {
                 warn!("Cannot recruit '{}': already encountered", character_id);
-                if let Some(ref mut log) = game_log {
+                if let Some(log) = game_log.as_mut() {
                     log.add_system(format!("{} has already been recruited.", character_id));
                 }
                 return;
@@ -1028,7 +1027,7 @@ fn execute_action(
             // 2. Verify innkeeper exists
             if db.npcs.get_npc(innkeeper_id).is_none() {
                 error!("Innkeeper '{}' not found in database", innkeeper_id);
-                if let Some(ref mut log) = game_log {
+                if let Some(log) = game_log.as_mut() {
                     log.add_system(format!("Error: Innkeeper '{}' not found.", innkeeper_id));
                 }
                 return;
@@ -1042,7 +1041,7 @@ fn execute_action(
                         "Character definition '{}' not found in database",
                         character_id
                     );
-                    if let Some(ref mut log) = game_log {
+                    if let Some(log) = game_log.as_mut() {
                         log.add_system(format!("Error: Character '{}' not found.", character_id));
                     }
                     return;
@@ -1054,7 +1053,7 @@ fn execute_action(
                 Ok(c) => c,
                 Err(e) => {
                     error!("Failed to instantiate character '{}': {}", character_id, e);
-                    if let Some(ref mut log) = game_log {
+                    if let Some(log) = game_log.as_mut() {
                         log.add_system(format!("Error creating character: {}", e));
                     }
                     return;
@@ -1065,7 +1064,7 @@ fn execute_action(
             let location = crate::domain::character::CharacterLocation::AtInn(innkeeper_id.clone());
             if let Err(e) = game_state.roster.add_character(character, location) {
                 error!("Failed to add character to roster: {}", e);
-                if let Some(ref mut log) = game_log {
+                if let Some(log) = game_log.as_mut() {
                     log.add_system(format!("Error: {}", e));
                 }
                 return;
@@ -1081,7 +1080,7 @@ fn execute_action(
                 "Successfully recruited '{}' to inn '{}'",
                 character_id, innkeeper_id
             );
-            if let Some(ref mut log) = game_log {
+            if let Some(log) = game_log.as_mut() {
                 log.add_dialogue(format!("{} will wait at the inn.", char_def.name));
             }
 
@@ -1107,7 +1106,7 @@ fn execute_action(
 
             info!("Opening inn party management for inn '{}'", innkeeper_id);
 
-            if let Some(ref mut log) = game_log {
+            if let Some(log) = game_log.as_mut() {
                 log.add_system("Opening party management...".to_string());
             }
 
@@ -1235,7 +1234,7 @@ fn execute_action(
                         "Bought item {} (charges={}) for character {}",
                         item_id, slot.charges, character_id
                     );
-                    if let Some(ref mut writer) = game_log_writer {
+                    if let Some(writer) = game_log_writer.as_mut() {
                         let item_name = db
                             .items
                             .get_item(*item_id)
@@ -1255,7 +1254,7 @@ fn execute_action(
                 Err(e) => {
                     // On failure nothing was mutated: no commit needed
                     warn!("BuyItem failed: {}", e);
-                    if let Some(ref mut writer) = game_log_writer {
+                    if let Some(writer) = game_log_writer.as_mut() {
                         writer.write(crate::game::systems::ui::GameLogEvent {
                             text: format!("Cannot buy item: {}", e),
                             category: crate::game::systems::ui::LogCategory::System,
@@ -1379,7 +1378,7 @@ fn execute_action(
                     // Commit mutated NPC runtime state
                     game_state.npc_runtime.insert(npc_runtime_clone);
                     info!("Sold item {} for {} gold", item_id, price);
-                    if let Some(ref mut writer) = game_log_writer {
+                    if let Some(writer) = game_log_writer.as_mut() {
                         let item_name = db
                             .items
                             .get_item(*item_id)
@@ -1393,7 +1392,7 @@ fn execute_action(
                 }
                 Err(e) => {
                     warn!("SellItem failed: {}", e);
-                    if let Some(ref mut writer) = game_log_writer {
+                    if let Some(writer) = game_log_writer.as_mut() {
                         writer.write(crate::game::systems::ui::GameLogEvent {
                             text: format!("Cannot sell item: {}", e),
                             category: crate::game::systems::ui::LogCategory::System,
@@ -1423,7 +1422,7 @@ fn execute_action(
                     "OpenMerchant: NPC '{}' not found or is not a merchant; ignoring action",
                     npc_id
                 );
-                if let Some(ref mut log) = game_log {
+                if let Some(log) = game_log.as_mut() {
                     log.add_system(format!("'{}' is not a merchant.", npc_name));
                 }
                 return;
@@ -1534,7 +1533,7 @@ fn execute_action(
                     "ConsumeService: insufficient gold (have {}, need {})",
                     game_state.party.gold, service_cost.0
                 );
-                if let Some(ref mut log) = game_log {
+                if let Some(log) = game_log.as_mut() {
                     log.add_system(format!(
                         "Not enough gold for service '{}' (need {} gold).",
                         service_id, service_cost.0
@@ -1548,7 +1547,7 @@ fn execute_action(
                     "ConsumeService: insufficient gems (have {}, need {})",
                     game_state.party.gems, service_cost.1
                 );
-                if let Some(ref mut log) = game_log {
+                if let Some(log) = game_log.as_mut() {
                     log.add_system(format!(
                         "Not enough gems for service '{}' (need {} gems).",
                         service_id, service_cost.1
@@ -1582,7 +1581,7 @@ fn execute_action(
                 service_cost.1,
                 affected.len()
             );
-            if let Some(ref mut log) = game_log {
+            if let Some(log) = game_log.as_mut() {
                 if service_id == "heal_all" && target_character_ids.is_empty() {
                     log.add_exploration("The party rests. HP restored.".to_string());
                 } else {

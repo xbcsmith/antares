@@ -847,9 +847,6 @@ impl GameState {
 
         let mut party = Party::new();
         party.gold = starting_gold;
-        // NOTE: party.food is deprecated (Phase 2). Food is now tracked as
-        // ConsumableEffect::IsFood inventory items granted during character
-        // instantiation via CharacterDefinition::instantiate().
 
         // Preserve campaign-specific game configuration for state
         let campaign_config = campaign.game_config.clone();
@@ -4131,7 +4128,6 @@ mod tests {
     /// `active_spells` (the same write `apply_consumable_effect_exploration`
     /// would perform) and verifies that `advance_time(60)` fully drains it.
     #[test]
-    #[allow(deprecated)]
     fn test_timed_resistance_potion_expires_after_advance_time() {
         use crate::application::GameState;
         use crate::domain::character::{Alignment, Character, Sex};
@@ -4167,7 +4163,6 @@ mod tests {
     /// Verifies that a 30-minute Might boost applied via `apply_timed_stat_boost`
     /// is correctly expired (and the stat restored) after `advance_time(30)`.
     #[test]
-    #[allow(deprecated)]
     fn test_timed_attribute_potion_expires_after_advance_time() {
         use crate::application::GameState;
         use crate::domain::character::{Alignment, Character, Sex};
@@ -4216,7 +4211,6 @@ mod tests {
     /// expire when `rest_party` is called for a full rest (12 hours = 720 minutes),
     /// which is well beyond the 60-minute durations used here.
     #[test]
-    #[allow(deprecated)]
     fn test_timed_potion_expires_during_rest() {
         use crate::application::GameState;
         use crate::domain::character::{Alignment, Character, Sex};
@@ -4296,7 +4290,6 @@ mod tests {
     /// via `apply_consumable_effect` raises the stat permanently — no timed boost
     /// is registered, and the stat is unchanged after `advance_time(999)`.
     #[test]
-    #[allow(deprecated)]
     fn test_permanent_attribute_potion_survives_advance_time() {
         use crate::application::GameState;
         use crate::domain::character::{Alignment, Character, Sex};
@@ -4351,7 +4344,6 @@ mod tests {
     /// replaces the remaining duration (not adds to it), and the new 60-minute
     /// window ticks down independently from the original.
     #[test]
-    #[allow(deprecated)]
     fn test_second_resistance_potion_overwrites_duration() {
         use crate::application::GameState;
 

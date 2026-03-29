@@ -857,8 +857,6 @@ impl CharacterDefinition {
             worthiness: 0,
             gold: self.starting_gold,
             gems: self.starting_gems,
-            #[allow(deprecated)]
-            food: 0,
         };
 
         // Two-pass starting equipment:
@@ -3210,13 +3208,7 @@ mod tests {
         assert_eq!(character.portrait_id, "1");
         assert_eq!(character.gold, 100);
         assert_eq!(character.gems, 5);
-        // Phase 2: food is now tracked as IsFood inventory items, not character.food.
-        // The deprecated `food` field is always 0; `starting_food = 15` means 15
-        // Food Ration items (id=53) were added to the character's inventory.
-        #[allow(deprecated)]
-        {
-            assert_eq!(character.food, 0, "deprecated food field must be 0");
-        }
+        // starting_food = 15 means 15 Food Ration items (id=53) were added to the character's inventory.
         // Count food-ration inventory slots: starting_items=[50] + 15 food rations = 16 slots.
         let food_slots = character
             .inventory
@@ -3632,11 +3624,6 @@ mod tests {
             assert_eq!(character.name, char_def.name);
             assert_eq!(character.gold, char_def.starting_gold);
             assert_eq!(character.gems, char_def.starting_gems);
-            // Phase 2: deprecated food field is always 0; food rations are in inventory.
-            #[allow(deprecated)]
-            {
-                assert_eq!(character.food, 0, "deprecated food field must be 0");
-            }
             assert!(
                 character.hp.base > 0,
                 "Character '{}' should have HP > 0",

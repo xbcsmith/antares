@@ -2348,10 +2348,6 @@ fn default_furniture_scale() -> f32 {
     1.0
 }
 
-/// Default dialogue ID for recruitment events when none specified
-#[allow(dead_code)]
-pub const DEFAULT_RECRUITMENT_DIALOGUE_ID: crate::domain::dialogue::DialogueId = 1000;
-
 /// A single random encounter group entry in the encounter table.
 ///
 /// Replaces the previous raw `Vec<u8>` entries in `EncounterTable::groups`
@@ -5234,31 +5230,32 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::field_reassign_with_default)]
     fn test_tile_visual_metadata_with_sprite_layers() {
-        let mut metadata = TileVisualMetadata::default();
-        metadata.sprite_layers = vec![
-            LayeredSprite {
-                sprite: SpriteReference {
-                    sheet_path: "bg.png".to_string(),
-                    sprite_index: 0,
-                    animation: None,
-                    material_properties: None,
+        let metadata = TileVisualMetadata {
+            sprite_layers: vec![
+                LayeredSprite {
+                    sprite: SpriteReference {
+                        sheet_path: "bg.png".to_string(),
+                        sprite_index: 0,
+                        animation: None,
+                        material_properties: None,
+                    },
+                    layer: SpriteLayer::Background,
+                    offset_y: 0.0,
                 },
-                layer: SpriteLayer::Background,
-                offset_y: 0.0,
-            },
-            LayeredSprite {
-                sprite: SpriteReference {
-                    sheet_path: "fg.png".to_string(),
-                    sprite_index: 1,
-                    animation: None,
-                    material_properties: None,
+                LayeredSprite {
+                    sprite: SpriteReference {
+                        sheet_path: "fg.png".to_string(),
+                        sprite_index: 1,
+                        animation: None,
+                        material_properties: None,
+                    },
+                    layer: SpriteLayer::Foreground,
+                    offset_y: 0.2,
                 },
-                layer: SpriteLayer::Foreground,
-                offset_y: 0.2,
-            },
-        ];
+            ],
+            ..TileVisualMetadata::default()
+        };
 
         assert_eq!(metadata.sprite_layers.len(), 2);
         assert_eq!(metadata.sprite_layers[0].layer, SpriteLayer::Background);
@@ -5266,14 +5263,15 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::field_reassign_with_default)]
     fn test_tile_visual_metadata_with_sprite_rule() {
-        let mut metadata = TileVisualMetadata::default();
-        metadata.sprite_rule = Some(SpriteSelectionRule::Random {
-            sheet_path: "grass.png".to_string(),
-            sprite_indices: vec![0, 1, 2, 3],
-            seed: None,
-        });
+        let metadata = TileVisualMetadata {
+            sprite_rule: Some(SpriteSelectionRule::Random {
+                sheet_path: "grass.png".to_string(),
+                sprite_indices: vec![0, 1, 2, 3],
+                seed: None,
+            }),
+            ..TileVisualMetadata::default()
+        };
 
         assert!(metadata.sprite_rule.is_some());
     }
@@ -5341,10 +5339,11 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::field_reassign_with_default)]
     fn test_grass_density_serialization() {
-        let mut meta = TileVisualMetadata::default();
-        meta.grass_density = Some(GrassDensity::High);
+        let meta = TileVisualMetadata {
+            grass_density: Some(GrassDensity::High),
+            ..TileVisualMetadata::default()
+        };
 
         let ron = ron::to_string(&meta).unwrap();
         assert!(ron.contains("grass_density"));
@@ -5374,18 +5373,20 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::field_reassign_with_default)]
     fn test_has_terrain_overrides_returns_true_when_set() {
-        let mut meta = TileVisualMetadata::default();
-        meta.grass_density = Some(GrassDensity::Low);
+        let meta = TileVisualMetadata {
+            grass_density: Some(GrassDensity::Low),
+            ..TileVisualMetadata::default()
+        };
         assert!(meta.has_terrain_overrides());
     }
 
     #[test]
-    #[allow(clippy::field_reassign_with_default)]
     fn test_foliage_density_clamps_in_valid_range() {
-        let mut meta = TileVisualMetadata::default();
-        meta.foliage_density = Some(1.5);
+        let meta = TileVisualMetadata {
+            foliage_density: Some(1.5),
+            ..TileVisualMetadata::default()
+        };
         assert_eq!(meta.foliage_density(), 1.5);
     }
 
@@ -5458,11 +5459,12 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::field_reassign_with_default)]
     fn test_metadata_with_grass_density_serializes() {
-        let mut meta = TileVisualMetadata::default();
-        meta.height = Some(2.0);
-        meta.grass_density = Some(GrassDensity::Medium);
+        let meta = TileVisualMetadata {
+            height: Some(2.0),
+            grass_density: Some(GrassDensity::Medium),
+            ..TileVisualMetadata::default()
+        };
 
         let ron = ron::to_string(&meta).unwrap();
         let deserialized: TileVisualMetadata = ron::from_str(&ron).unwrap();
@@ -5498,78 +5500,117 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::field_reassign_with_default)]
     fn test_has_terrain_overrides_detects_grass_density() {
-        let mut meta = TileVisualMetadata::default();
-        assert!(!meta.has_terrain_overrides());
+        let meta_default = TileVisualMetadata::default();
+        assert!(!meta_default.has_terrain_overrides());
 
-        meta.grass_density = Some(GrassDensity::Medium);
-        assert!(meta.has_terrain_overrides());
+        let meta_set = TileVisualMetadata {
+            grass_density: Some(GrassDensity::Medium),
+            ..TileVisualMetadata::default()
+        };
+        assert!(meta_set.has_terrain_overrides());
     }
 
     #[test]
-    #[allow(clippy::field_reassign_with_default)]
     fn test_has_terrain_overrides_detects_tree_type() {
-        let mut meta = TileVisualMetadata::default();
-        meta.tree_type = Some(TreeType::Pine);
+        let meta = TileVisualMetadata {
+            tree_type: Some(TreeType::Pine),
+            ..TileVisualMetadata::default()
+        };
         assert!(meta.has_terrain_overrides());
     }
 
     #[test]
-    #[allow(clippy::field_reassign_with_default)]
     fn test_has_terrain_overrides_detects_all_fields() {
-        let mut meta = TileVisualMetadata::default();
+        assert!(TileVisualMetadata {
+            grass_density: Some(GrassDensity::High),
+            ..TileVisualMetadata::default()
+        }
+        .has_terrain_overrides());
 
-        meta.grass_density = Some(GrassDensity::High);
-        assert!(meta.has_terrain_overrides());
+        assert!(TileVisualMetadata {
+            rock_variant: Some(RockVariant::Jagged),
+            ..TileVisualMetadata::default()
+        }
+        .has_terrain_overrides());
 
-        meta.grass_density = None;
-        meta.rock_variant = Some(RockVariant::Jagged);
-        assert!(meta.has_terrain_overrides());
+        assert!(TileVisualMetadata {
+            foliage_density: Some(1.5),
+            ..TileVisualMetadata::default()
+        }
+        .has_terrain_overrides());
 
-        meta.rock_variant = None;
-        meta.foliage_density = Some(1.5);
-        assert!(meta.has_terrain_overrides());
-
-        meta.foliage_density = None;
-        meta.snow_coverage = Some(0.5);
-        assert!(meta.has_terrain_overrides());
+        assert!(TileVisualMetadata {
+            snow_coverage: Some(0.5),
+            ..TileVisualMetadata::default()
+        }
+        .has_terrain_overrides());
     }
 
     #[test]
-    #[allow(clippy::field_reassign_with_default)]
     fn test_foliage_density_bounds() {
-        let mut meta = TileVisualMetadata::default();
-
         // Test minimum
-        meta.foliage_density = Some(0.0);
-        assert_eq!(meta.foliage_density(), 0.0);
+        assert_eq!(
+            TileVisualMetadata {
+                foliage_density: Some(0.0),
+                ..TileVisualMetadata::default()
+            }
+            .foliage_density(),
+            0.0
+        );
 
         // Test maximum
-        meta.foliage_density = Some(2.0);
-        assert_eq!(meta.foliage_density(), 2.0);
+        assert_eq!(
+            TileVisualMetadata {
+                foliage_density: Some(2.0),
+                ..TileVisualMetadata::default()
+            }
+            .foliage_density(),
+            2.0
+        );
 
         // Test intermediate
-        meta.foliage_density = Some(1.5);
-        assert_eq!(meta.foliage_density(), 1.5);
+        assert_eq!(
+            TileVisualMetadata {
+                foliage_density: Some(1.5),
+                ..TileVisualMetadata::default()
+            }
+            .foliage_density(),
+            1.5
+        );
     }
 
     #[test]
-    #[allow(clippy::field_reassign_with_default)]
     fn test_snow_coverage_bounds() {
-        let mut meta = TileVisualMetadata::default();
-
         // Test minimum
-        meta.snow_coverage = Some(0.0);
-        assert_eq!(meta.snow_coverage(), 0.0);
+        assert_eq!(
+            TileVisualMetadata {
+                snow_coverage: Some(0.0),
+                ..TileVisualMetadata::default()
+            }
+            .snow_coverage(),
+            0.0
+        );
 
         // Test maximum
-        meta.snow_coverage = Some(1.0);
-        assert_eq!(meta.snow_coverage(), 1.0);
+        assert_eq!(
+            TileVisualMetadata {
+                snow_coverage: Some(1.0),
+                ..TileVisualMetadata::default()
+            }
+            .snow_coverage(),
+            1.0
+        );
 
         // Test intermediate
-        meta.snow_coverage = Some(0.5);
-        assert_eq!(meta.snow_coverage(), 0.5);
+        assert_eq!(
+            TileVisualMetadata {
+                snow_coverage: Some(0.5),
+                ..TileVisualMetadata::default()
+            }
+            .snow_coverage(),
+            0.5
+        );
     }
 
     // ===== DroppedItem Helper Method Tests =====

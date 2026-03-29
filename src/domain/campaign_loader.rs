@@ -20,10 +20,7 @@
 //! // let game_data = loader.load_game_data()?;
 //! ```
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-
-use serde::de::DeserializeOwned;
 
 use thiserror::Error;
 
@@ -177,8 +174,6 @@ impl Default for GameData {
 pub struct CampaignLoader {
     base_data_path: PathBuf,
     campaign_path: PathBuf,
-    #[allow(dead_code)]
-    content_cache: HashMap<String, String>,
 }
 
 impl CampaignLoader {
@@ -204,7 +199,6 @@ impl CampaignLoader {
         Self {
             base_data_path,
             campaign_path,
-            content_cache: HashMap::new(),
         }
     }
 
@@ -387,35 +381,6 @@ impl CampaignLoader {
                 ))
             },
         )
-    }
-
-    /// Loads a data file with override support
-    ///
-    /// Loads from campaign path if override exists, otherwise from base path.
-    ///
-    /// # Errors
-    ///
-    /// Returns `CampaignError` if loading or parsing fails
-    #[allow(dead_code)]
-    fn load_with_override<T>(
-        &self,
-        base_file: &str,
-        override_file: Option<&str>,
-    ) -> Result<T, CampaignError>
-    where
-        T: DeserializeOwned + Clone,
-    {
-        let file_path = if let Some(override_path) = override_file {
-            self.campaign_path.join(override_path)
-        } else {
-            self.base_data_path.join(base_file)
-        };
-
-        let contents = std::fs::read_to_string(&file_path)
-            .map_err(|e| CampaignError::ReadError(format!("{}: {}", file_path.display(), e)))?;
-
-        ron::from_str::<T>(&contents)
-            .map_err(|e| CampaignError::ParseError(format!("{}: {}", file_path.display(), e)))
     }
 
     /// Gets the campaign path

@@ -31,9 +31,7 @@
 //! # }
 //! ```
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
@@ -82,41 +80,6 @@ impl Default for CacheConfig {
             max_memory_entries: 100,
             ttl: Duration::from_secs(3600), // 1 hour
             cache_dir: PathBuf::from(".antares_cache"),
-        }
-    }
-}
-
-// ===== Cache Entry =====
-
-/// A cached entry with metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-struct CacheEntry<T> {
-    /// Cached data
-    data: T,
-
-    /// File hash at time of caching
-    file_hash: u64,
-
-    /// Timestamp when cached
-    cached_at: SystemTime,
-}
-
-impl<T> CacheEntry<T> {
-    #[allow(dead_code)]
-    fn new(data: T, file_hash: u64) -> Self {
-        Self {
-            data,
-            file_hash,
-            cached_at: SystemTime::now(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn is_expired(&self, ttl: Duration) -> bool {
-        match SystemTime::now().duration_since(self.cached_at) {
-            Ok(age) => age > ttl,
-            Err(_) => true, // Time went backwards, consider expired
         }
     }
 }
@@ -223,25 +186,6 @@ impl ContentCache {
             total_accesses: self.access_count.values().sum(),
         }
     }
-
-    /// Computes a simple hash of a file's contents
-    #[allow(dead_code)]
-    fn compute_file_hash<P: AsRef<Path>>(path: P) -> Result<u64, CacheError> {
-        let metadata = fs::metadata(path.as_ref())?;
-        let modified = metadata
-            .modified()
-            .map_err(|e| CacheError::HashError(e.to_string()))?;
-
-        // Simple hash based on size and modified time
-        let hash = metadata.len().wrapping_mul(31).wrapping_add(
-            modified
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_err(|e| CacheError::HashError(e.to_string()))?
-                .as_secs(),
-        );
-
-        Ok(hash)
-    }
 }
 
 // ===== Cache Statistics =====
@@ -337,16 +281,6 @@ pub struct ItemCacheEntry {
 
 // ===== Helper Functions =====
 
-/// Preloads commonly used content into cache
-pub fn preload_common_content(
-    _cache: &mut ContentCache,
-    _data_dir: &Path,
-) -> Result<(), CacheError> {
-    // Would preload items, monsters, spells, etc.
-    // For now, just a placeholder
-    Ok(())
-}
-
 // ===== Tests =====
 
 #[cfg(test)]
@@ -359,16 +293,6 @@ mod tests {
         assert!(config.enable_file_cache);
         assert!(config.enable_memory_cache);
         assert_eq!(config.max_memory_entries, 100);
-    }
-
-    #[test]
-    fn test_cache_entry_expiration() {
-        let entry = CacheEntry::new("data".to_string(), 12345);
-        assert!(!entry.is_expired(Duration::from_secs(3600)));
-
-        // Sleep to ensure time has passed
-        std::thread::sleep(Duration::from_millis(10));
-        assert!(entry.is_expired(Duration::from_millis(1)));
     }
 
     #[test]
@@ -431,20 +355,5 @@ mod tests {
 
         cache.cleanup();
         assert!(cache.get("test").is_none());
-    }
-
-    #[test]
-    fn test_compute_file_hash() -> Result<(), CacheError> {
-        use std::io::Write;
-        use tempfile::NamedTempFile;
-
-        let mut temp = NamedTempFile::new()?;
-        writeln!(temp, "test data")?;
-        temp.flush()?;
-
-        let hash = ContentCache::compute_file_hash(temp.path())?;
-        assert!(hash > 0);
-
-        Ok(())
     }
 }
