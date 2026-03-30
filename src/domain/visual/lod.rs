@@ -279,7 +279,7 @@ fn select_important_triangles(mesh: &MeshDefinition, target_count: usize) -> Vec
         .collect();
 
     // Sort by score (descending) and take top N
-    triangle_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    triangle_scores.sort_by(|a, b| b.1.total_cmp(&a.1));
 
     triangle_scores
         .iter()

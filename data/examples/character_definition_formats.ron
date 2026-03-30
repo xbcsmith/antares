@@ -1,7 +1,7 @@
 // character_definition_formats.ron - Example RON formats for CharacterDefinition
 //
 // This file demonstrates the different formats supported for base_stats and hp_override
-// in character definitions after the AttributePair migration (Phases 1 & 2).
+// in character definitions after the AttributePair migration.
 //
 // USE THIS FILE AS A REFERENCE when creating new character definitions.
 

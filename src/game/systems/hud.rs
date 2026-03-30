@@ -21,11 +21,53 @@ use crate::domain::conditions::ActiveCondition;
 use crate::domain::types::{Direction, Position};
 use crate::game::components::inventory::{CharacterEntity, PartyEntities};
 use crate::game::resources::GlobalState;
-use bevy::asset::RenderAssetUsages;
+use crate::game::systems::ui_helpers::{
+    create_blank_rgba_image, text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE,
+};
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::render::render_resource::Extent3d;
 use std::collections::HashMap;
 use tracing::{debug, warn};
+
+/// Query for HP text overlay entities with mutable text and color, excluding condition text.
+type HpOverlayQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static HpTextOverlay,
+        &'static mut Text,
+        &'static mut TextColor,
+    ),
+    Without<ConditionText>,
+>;
+
+/// Query for condition text entities with mutable text and color, excluding HP overlays.
+type ConditionTextQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static ConditionText,
+        &'static mut Text,
+        &'static mut TextColor,
+    ),
+    Without<HpTextOverlay>,
+>;
+
+/// Query for the clock time text entity, excluding the date text entity.
+type ClockTimeQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Text, &'static mut TextColor),
+    (With<ClockTimeText>, Without<ClockDateText>),
+>;
+
+/// Query for the clock date text entity, excluding the time text entity.
+type ClockDateQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Text, &'static mut TextColor),
+    (With<ClockDateText>, Without<ClockTimeText>),
+>;
 
 // ===== Constants =====
 
@@ -367,18 +409,7 @@ fn setup_party_entities(mut commands: Commands) {
 /// * `images` - Asset storage for image creation
 fn initialize_mini_map_image(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let size = mini_map_image_size();
-    let image = Image::new_fill(
-        Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        &vec![0; (size * size * 4) as usize],
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::all(),
-    );
-    let handle = images.add(image);
+    let handle = images.add(create_blank_rgba_image(size));
     commands.insert_resource(MiniMapImage { handle });
 }
 
@@ -393,19 +424,7 @@ fn initialize_mini_map_image(mut commands: Commands, mut images: ResMut<Assets<I
 /// * `commands` - Bevy command buffer used to insert the resource
 /// * `images` - Asset storage for image creation
 fn initialize_automap_image(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    let size = AUTOMAP_MAX_IMAGE_SIZE_PX;
-    let image = Image::new_fill(
-        Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        &vec![0; (size * size * 4) as usize],
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::all(),
-    );
-    let handle = images.add(image);
+    let handle = images.add(create_blank_rgba_image(AUTOMAP_MAX_IMAGE_SIZE_PX));
     commands.insert_resource(AutomapImage { handle });
 }
 
@@ -647,19 +666,12 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
 /// * `hp_bar_query` - Query for HP bar fill entities
 /// * `hp_overlay_query` - Query for HP text overlay entities
 /// * `condition_text_query` - Query for condition text entities
-#[allow(clippy::type_complexity)]
 fn update_hud(
     global_state: Res<GlobalState>,
     mut card_query: Query<(&CharacterCard, &mut Node), Without<HpBarFill>>,
     mut hp_bar_query: Query<(&HpBarFill, &mut Node, &mut BackgroundColor)>,
-    mut hp_overlay_query: Query<
-        (&HpTextOverlay, &mut Text, &mut TextColor),
-        Without<ConditionText>,
-    >,
-    mut condition_text_query: Query<
-        (&ConditionText, &mut Text, &mut TextColor),
-        Without<HpTextOverlay>,
-    >,
+    mut hp_overlay_query: HpOverlayQuery,
+    mut condition_text_query: ConditionTextQuery,
 ) {
     let party = &global_state.0.party;
 
@@ -938,17 +950,10 @@ fn update_compass(
 /// * `global_state` - Game state containing the `time` field
 /// * `time_query`   - Query for the [`ClockTimeText`] entity
 /// * `date_query`   - Query for the [`ClockDateText`] entity
-#[allow(clippy::type_complexity)]
 fn update_clock(
     global_state: Res<GlobalState>,
-    mut time_query: Query<
-        (&mut Text, &mut TextColor),
-        (With<ClockTimeText>, Without<ClockDateText>),
-    >,
-    mut date_query: Query<
-        (&mut Text, &mut TextColor),
-        (With<ClockDateText>, Without<ClockTimeText>),
-    >,
+    mut time_query: ClockTimeQuery,
+    mut date_query: ClockDateQuery,
 ) {
     let game_time = &global_state.0.time;
     let time_of_day = global_state.0.time_of_day();
@@ -1073,54 +1078,30 @@ fn setup_automap(mut commands: Commands, automap_image: Res<AutomapImage>) {
                             ));
                             row.spawn((
                                 Text::new(label),
-                                TextFont {
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(LABEL_FONT_SIZE, Color::WHITE),
                             ));
                         });
                 }
 
                 legend.spawn((
                     Text::new("Gray: Explored floor"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                 ));
                 legend.spawn((
                     Text::new("Dark red: Wall"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                 ));
                 legend.spawn((
                     Text::new("Tan: Door"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                 ));
                 legend.spawn((
                     Text::new("Blue: Water"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                 ));
                 legend.spawn((
                     Text::new("Green: Forest / grass"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                 ));
             });
 
@@ -1132,11 +1113,7 @@ fn setup_automap(mut commands: Commands, automap_image: Res<AutomapImage>) {
                     ..default()
                 },
                 Text::new("M / Esc — close map"),
-                TextFont {
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
+                text_style(BODY_FONT_SIZE, Color::WHITE),
             ));
         });
 }
@@ -2546,11 +2523,11 @@ mod party_entity_tests {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
     // Helper to compare colors (Bevy Color may have floating point precision differences)
-    #[allow(dead_code)]
     fn colors_approx_equal(a: Color, b: Color) -> bool {
         let a_rgba = a.to_srgba();
         let b_rgba = b.to_srgba();
@@ -3181,18 +3158,7 @@ mod minimap_tests {
         {
             let mut images = app.world_mut().resource_mut::<Assets<Image>>();
             let size = mini_map_image_size();
-            let image = Image::new_fill(
-                Extent3d {
-                    width: size,
-                    height: size,
-                    depth_or_array_layers: 1,
-                },
-                TextureDimension::D2,
-                &vec![0; (size * size * 4) as usize],
-                TextureFormat::Rgba8UnormSrgb,
-                RenderAssetUsages::all(),
-            );
-            let handle = images.add(image);
+            let handle = images.add(create_blank_rgba_image(size));
             app.world_mut().insert_resource(MiniMapImage { handle });
         }
         app
@@ -3362,20 +3328,9 @@ mod minimap_tests {
         app.init_resource::<Assets<Image>>();
 
         let size = mini_map_image_size();
-        let image = Image::new_fill(
-            Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            TextureDimension::D2,
-            &vec![0; (size * size * 4) as usize],
-            TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::all(),
-        );
         let handle = {
             let mut images = app.world_mut().resource_mut::<Assets<Image>>();
-            images.add(image)
+            images.add(create_blank_rgba_image(size))
         };
         app.world_mut().insert_resource(MiniMapImage { handle });
 
@@ -3468,19 +3423,7 @@ mod automap_tests {
         app.init_resource::<Assets<Image>>();
         {
             let mut images = app.world_mut().resource_mut::<Assets<Image>>();
-            let size = AUTOMAP_MAX_IMAGE_SIZE_PX;
-            let image = Image::new_fill(
-                Extent3d {
-                    width: size,
-                    height: size,
-                    depth_or_array_layers: 1,
-                },
-                TextureDimension::D2,
-                &vec![0; (size * size * 4) as usize],
-                TextureFormat::Rgba8UnormSrgb,
-                RenderAssetUsages::all(),
-            );
-            let handle = images.add(image);
+            let handle = images.add(create_blank_rgba_image(AUTOMAP_MAX_IMAGE_SIZE_PX));
             app.world_mut().insert_resource(AutomapImage { handle });
         }
 

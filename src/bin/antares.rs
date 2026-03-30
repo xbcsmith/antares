@@ -238,7 +238,11 @@ impl Plugin for AntaresPlugin {
         if game_state.world.get_map(starting_map_id).is_some() {
             game_state.world.set_current_map(starting_map_id);
         } else {
-            panic!("Starting map {} not found in campaign", starting_map_id);
+            eprintln!(
+                "Fatal: starting map {} not found in campaign",
+                starting_map_id
+            );
+            std::process::exit(1);
         }
 
         // Set starting position
@@ -269,19 +273,19 @@ impl Plugin for AntaresPlugin {
         app.add_plugins(antares::game::systems::recruitment_dialog::RecruitmentDialogPlugin);
         app.add_plugins(antares::game::systems::menu::MenuPlugin);
 
-        // Core combat plugin (Phase 1: Core Combat Infrastructure)
+        // Core combat plugin
         app.add_plugins(antares::game::systems::combat::CombatPlugin);
 
-        // Phase 2: Time-of-Day ambient lighting
+        // Time-of-Day ambient lighting
         app.add_plugins(antares::game::systems::time::TimeOfDayPlugin);
 
-        // Phase 3: Rest orchestration system
+        // Rest orchestration system
         app.add_plugins(antares::game::systems::rest::RestPlugin);
 
-        // Phase 2 (item meshes): Item world spawn / despawn systems
+        // Item world spawn / despawn systems
         app.add_plugins(antares::game::systems::item_world_events::ItemWorldPlugin);
 
-        // Phase 3 (locks): Lock prompt UI and lock action handler
+        // Lock prompt UI and lock action handler
         app.add_plugins(antares::game::systems::lock_ui::LockUiPlugin);
     }
 }

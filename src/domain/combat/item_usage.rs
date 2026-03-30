@@ -347,8 +347,11 @@ pub fn execute_item_use_by_slot<R: Rng>(
             // Consume one charge from the slot (or remove it)
             if slot.charges > 1 {
                 slot.charges -= 1;
-            } else {
-                let _ = pc.inventory.remove_item(inventory_index);
+            } else if pc.inventory.remove_item(inventory_index).is_none() {
+                tracing::warn!(
+                    "Consumable removal: inventory index {} was already empty",
+                    inventory_index
+                );
             }
 
             (item.name.clone(), consumable_data)

@@ -55,7 +55,7 @@ See `docs/how-to/using_game_menu.md` for complete usage guide.
 - **Custom Configuration**: Per-campaign graphics, audio, controls, and camera settings
 - **Campaign Templates**: Easy-to-copy templates for creating new campaigns
 
-### Game Configuration (Phase 6 - Latest)
+### Game Configuration
 
 Each campaign can customize game settings via `config.ron`:
 
@@ -230,8 +230,8 @@ cargo run --bin map_builder
 
 - **[Architecture](docs/reference/architecture.md)**: System design and structure
 - **[Game Config Schema](docs/explanation/game_config_schema.md)**: Configuration reference
-- **[Implementation Plan](docs/explanation/game_config_implementation_plan.md)**: Phase-by-phase development plan
-- **[Implementations](docs/explanation/implementations.md)**: Completed phase summaries
+- **[Implementation Plan](docs/explanation/game_config_implementation_plan.md)**: Development plan
+- **[Implementations](docs/explanation/implementations.md)**: Implementation summaries
 
 ## Development
 
@@ -264,15 +264,15 @@ cargo nextest run --all-features
 
 ## Roadmap
 
-### Completed Phases
+### Completed Features
 
-- ✅ Phase 1: Core Configuration Infrastructure
-- ✅ Phase 2: Camera System Integration
-- ✅ Phase 3: Input System Integration
-- ✅ Phase 4: Graphics Configuration
-- ✅ Phase 5: Audio System Foundation
-- ✅ Phase 6: Tutorial Campaign Configuration
-- ✅ Phase 7: Game Menu System (Save/Load/Settings/Resume)
+- ✅ Core Configuration Infrastructure
+- ✅ Camera System Integration
+- ✅ Input System Integration
+- ✅ Graphics Configuration
+- ✅ Audio System Foundation
+- ✅ Tutorial Campaign Configuration
+- ✅ Game Menu System (Save/Load/Settings/Resume)
 
 ### Upcoming
 

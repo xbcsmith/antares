@@ -56,6 +56,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::domain::validation::ValidationError;
 use crate::domain::visual::MeshTransform;
 
 /// Unique identifier for a bone in a skeleton
@@ -465,38 +466,40 @@ impl Skeleton {
     ///
     /// assert!(skeleton.validate().is_ok());
     /// ```
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), ValidationError> {
         // Check skeleton has bones
         if self.bones.is_empty() {
-            return Err("Skeleton has no bones".to_string());
+            return Err(ValidationError::EmptyField(
+                "Skeleton has no bones".to_string(),
+            ));
         }
 
         // Check root bone exists
         if self.root_bone >= self.bones.len() {
-            return Err(format!(
+            return Err(ValidationError::OutOfRange(format!(
                 "Root bone ID {} is out of bounds (skeleton has {} bones)",
                 self.root_bone,
                 self.bones.len()
-            ));
+            )));
         }
 
         // Check root bone has no parent
         if let Some(root) = self.get_bone(self.root_bone) {
             if root.parent.is_some() {
-                return Err(format!(
+                return Err(ValidationError::Structural(format!(
                     "Root bone '{}' (ID {}) has a parent",
                     root.name, root.id
-                ));
+                )));
             }
         }
 
         // Check all bone IDs are unique and match their index
         for (index, bone) in self.bones.iter().enumerate() {
             if bone.id != index {
-                return Err(format!(
+                return Err(ValidationError::Structural(format!(
                     "Bone '{}' has ID {} but is at index {}",
                     bone.name, bone.id, index
-                ));
+                )));
             }
         }
 
@@ -504,15 +507,18 @@ impl Skeleton {
         for bone in &self.bones {
             if let Some(parent_id) = bone.parent {
                 if parent_id >= self.bones.len() {
-                    return Err(format!(
+                    return Err(ValidationError::MissingReference(format!(
                         "Bone '{}' references non-existent parent ID {}",
                         bone.name, parent_id
-                    ));
+                    )));
                 }
 
                 // Check for self-reference
                 if parent_id == bone.id {
-                    return Err(format!("Bone '{}' has itself as parent", bone.name));
+                    return Err(ValidationError::Structural(format!(
+                        "Bone '{}' has itself as parent",
+                        bone.name
+                    )));
                 }
             }
         }
@@ -520,10 +526,10 @@ impl Skeleton {
         // Check for circular references
         for bone in &self.bones {
             if self.has_circular_reference(bone.id) {
-                return Err(format!(
+                return Err(ValidationError::Structural(format!(
                     "Bone '{}' has circular parent reference",
                     bone.name
-                ));
+                )));
             }
         }
 
@@ -767,7 +773,7 @@ mod tests {
 
         let result = skeleton.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("no bones"));
+        assert!(result.unwrap_err().to_string().contains("no bones"));
     }
 
     #[test]
@@ -784,7 +790,7 @@ mod tests {
 
         let result = skeleton.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("out of bounds"));
+        assert!(result.unwrap_err().to_string().contains("out of bounds"));
     }
 
     #[test]
@@ -801,7 +807,7 @@ mod tests {
 
         let result = skeleton.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("has a parent"));
+        assert!(result.unwrap_err().to_string().contains("has a parent"));
     }
 
     #[test]
@@ -826,7 +832,10 @@ mod tests {
 
         let result = skeleton.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("non-existent parent"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("non-existent parent"));
     }
 
     #[test]

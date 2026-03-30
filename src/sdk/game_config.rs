@@ -181,8 +181,8 @@ impl GameConfig {
     /// ```
     pub fn load_or_default(path: &Path) -> Result<Self, ConfigError> {
         if !path.exists() {
-            eprintln!(
-                "Warning: Config file not found at {:?}, using default configuration",
+            tracing::warn!(
+                "Config file not found at {:?}, using default configuration",
                 path
             );
             return Ok(Self::default());

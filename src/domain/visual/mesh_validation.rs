@@ -36,6 +36,7 @@
 /// assert!(mesh_validation::validate_mesh_definition(&valid_mesh).is_ok());
 /// ```
 use super::MeshDefinition;
+use crate::domain::validation::ValidationError;
 
 /// Validates a mesh definition for correctness
 ///
@@ -43,7 +44,7 @@ use super::MeshDefinition;
 ///
 /// # Errors
 ///
-/// Returns `Err(String)` with a descriptive message if validation fails.
+/// Returns `Err(ValidationError)` with a descriptive message if validation fails.
 ///
 /// # Examples
 ///
@@ -65,7 +66,7 @@ use super::MeshDefinition;
 ///
 /// assert!(mesh_validation::validate_mesh_definition(&mesh).is_ok());
 /// ```
-pub fn validate_mesh_definition(mesh: &MeshDefinition) -> Result<(), String> {
+pub fn validate_mesh_definition(mesh: &MeshDefinition) -> Result<(), ValidationError> {
     validate_vertices(&mesh.vertices)?;
     validate_indices(&mesh.indices, mesh.vertices.len())?;
 
@@ -101,26 +102,28 @@ pub fn validate_mesh_definition(mesh: &MeshDefinition) -> Result<(), String> {
 /// let too_few = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
 /// assert!(validate_vertices(&too_few).is_err());
 /// ```
-pub fn validate_vertices(vertices: &[[f32; 3]]) -> Result<(), String> {
+pub fn validate_vertices(vertices: &[[f32; 3]]) -> Result<(), ValidationError> {
     if vertices.is_empty() {
-        return Err("Mesh must have at least one vertex".to_string());
+        return Err(ValidationError::CountMismatch(
+            "Mesh must have at least one vertex".to_string(),
+        ));
     }
 
     if vertices.len() < 3 {
-        return Err(format!(
+        return Err(ValidationError::CountMismatch(format!(
             "Mesh must have at least 3 vertices for a triangle, got {}",
             vertices.len()
-        ));
+        )));
     }
 
     // Check for NaN or infinite values
     for (i, vertex) in vertices.iter().enumerate() {
         for (j, &coord) in vertex.iter().enumerate() {
             if !coord.is_finite() {
-                return Err(format!(
+                return Err(ValidationError::NotFinite(format!(
                     "Vertex {} coordinate {} is not finite: {}",
                     i, j, coord
-                ));
+                )));
             }
         }
     }
@@ -150,16 +153,18 @@ pub fn validate_vertices(vertices: &[[f32; 3]]) -> Result<(), String> {
 /// let bad_indices = vec![0, 1, 5]; // Index 5 out of bounds for 3 vertices
 /// assert!(validate_indices(&bad_indices, 3).is_err());
 /// ```
-pub fn validate_indices(indices: &[u32], vertex_count: usize) -> Result<(), String> {
+pub fn validate_indices(indices: &[u32], vertex_count: usize) -> Result<(), ValidationError> {
     if indices.is_empty() {
-        return Err("Mesh must have at least one triangle (3 indices)".to_string());
+        return Err(ValidationError::CountMismatch(
+            "Mesh must have at least one triangle (3 indices)".to_string(),
+        ));
     }
 
     if !indices.len().is_multiple_of(3) {
-        return Err(format!(
+        return Err(ValidationError::CountMismatch(format!(
             "Index count must be divisible by 3 (triangles), got {}",
             indices.len()
-        ));
+        )));
     }
 
     let vertex_count_u32 = vertex_count as u32;
@@ -172,30 +177,30 @@ pub fn validate_indices(indices: &[u32], vertex_count: usize) -> Result<(), Stri
 
         // Check bounds
         if i0 >= vertex_count_u32 {
-            return Err(format!(
+            return Err(ValidationError::Structural(format!(
                 "Triangle {} index 0 ({}) out of bounds (vertex count: {})",
                 tri_idx, i0, vertex_count
-            ));
+            )));
         }
         if i1 >= vertex_count_u32 {
-            return Err(format!(
+            return Err(ValidationError::Structural(format!(
                 "Triangle {} index 1 ({}) out of bounds (vertex count: {})",
                 tri_idx, i1, vertex_count
-            ));
+            )));
         }
         if i2 >= vertex_count_u32 {
-            return Err(format!(
+            return Err(ValidationError::Structural(format!(
                 "Triangle {} index 2 ({}) out of bounds (vertex count: {})",
                 tri_idx, i2, vertex_count
-            ));
+            )));
         }
 
         // Check for degenerate triangles (duplicate indices)
         if i0 == i1 || i1 == i2 || i0 == i2 {
-            return Err(format!(
+            return Err(ValidationError::Structural(format!(
                 "Triangle {} is degenerate (duplicate indices: {}, {}, {})",
                 tri_idx, i0, i1, i2
-            ));
+            )));
         }
     }
 
@@ -221,23 +226,23 @@ pub fn validate_indices(indices: &[u32], vertex_count: usize) -> Result<(), Stri
 /// let wrong_count = vec![[0.0, 0.0, 1.0]];
 /// assert!(validate_normals(&wrong_count, 3).is_err());
 /// ```
-pub fn validate_normals(normals: &[[f32; 3]], vertex_count: usize) -> Result<(), String> {
+pub fn validate_normals(normals: &[[f32; 3]], vertex_count: usize) -> Result<(), ValidationError> {
     if normals.len() != vertex_count {
-        return Err(format!(
+        return Err(ValidationError::CountMismatch(format!(
             "Normal count ({}) must match vertex count ({})",
             normals.len(),
             vertex_count
-        ));
+        )));
     }
 
     // Check for NaN or infinite values
     for (i, normal) in normals.iter().enumerate() {
         for (j, &coord) in normal.iter().enumerate() {
             if !coord.is_finite() {
-                return Err(format!(
+                return Err(ValidationError::NotFinite(format!(
                     "Normal {} coordinate {} is not finite: {}",
                     i, j, coord
-                ));
+                )));
             }
         }
     }
@@ -264,23 +269,23 @@ pub fn validate_normals(normals: &[[f32; 3]], vertex_count: usize) -> Result<(),
 /// let wrong_count = vec![[0.0, 0.0]];
 /// assert!(validate_uvs(&wrong_count, 3).is_err());
 /// ```
-pub fn validate_uvs(uvs: &[[f32; 2]], vertex_count: usize) -> Result<(), String> {
+pub fn validate_uvs(uvs: &[[f32; 2]], vertex_count: usize) -> Result<(), ValidationError> {
     if uvs.len() != vertex_count {
-        return Err(format!(
+        return Err(ValidationError::CountMismatch(format!(
             "UV count ({}) must match vertex count ({})",
             uvs.len(),
             vertex_count
-        ));
+        )));
     }
 
     // Check for NaN or infinite values
     for (i, uv) in uvs.iter().enumerate() {
         for (j, &coord) in uv.iter().enumerate() {
             if !coord.is_finite() {
-                return Err(format!(
+                return Err(ValidationError::NotFinite(format!(
                     "UV {} coordinate {} is not finite: {}",
                     i, j, coord
-                ));
+                )));
             }
         }
     }
@@ -307,22 +312,22 @@ pub fn validate_uvs(uvs: &[[f32; 2]], vertex_count: usize) -> Result<(), String>
 /// let invalid_color = [1.5, 0.0, 0.0, 1.0]; // Red > 1.0
 /// assert!(validate_color(&invalid_color).is_err());
 /// ```
-pub fn validate_color(color: &[f32; 4]) -> Result<(), String> {
+pub fn validate_color(color: &[f32; 4]) -> Result<(), ValidationError> {
     let components = ["red", "green", "blue", "alpha"];
 
     for (i, &value) in color.iter().enumerate() {
         if !value.is_finite() {
-            return Err(format!(
+            return Err(ValidationError::NotFinite(format!(
                 "Color component {} ({}) is not finite: {}",
                 components[i], i, value
-            ));
+            )));
         }
 
         if !(0.0..=1.0).contains(&value) {
-            return Err(format!(
+            return Err(ValidationError::OutOfRange(format!(
                 "Color component {} ({}) must be in range [0.0, 1.0], got {}",
                 components[i], i, value
-            ));
+            )));
         }
     }
 
@@ -360,6 +365,7 @@ mod tests {
         assert!(validate_vertices(&vertices).is_err());
         assert!(validate_vertices(&vertices)
             .unwrap_err()
+            .to_string()
             .contains("at least one vertex"));
     }
 
@@ -369,6 +375,7 @@ mod tests {
         assert!(validate_vertices(&vertices).is_err());
         assert!(validate_vertices(&vertices)
             .unwrap_err()
+            .to_string()
             .contains("at least 3 vertices"));
     }
 
@@ -384,6 +391,7 @@ mod tests {
         assert!(validate_vertices(&vertices).is_err());
         assert!(validate_vertices(&vertices)
             .unwrap_err()
+            .to_string()
             .contains("not finite"));
     }
 
@@ -399,6 +407,7 @@ mod tests {
         assert!(validate_indices(&indices, 3).is_err());
         assert!(validate_indices(&indices, 3)
             .unwrap_err()
+            .to_string()
             .contains("at least one triangle"));
     }
 
@@ -408,6 +417,7 @@ mod tests {
         assert!(validate_indices(&indices, 3).is_err());
         assert!(validate_indices(&indices, 3)
             .unwrap_err()
+            .to_string()
             .contains("divisible by 3"));
     }
 
@@ -417,6 +427,7 @@ mod tests {
         assert!(validate_indices(&indices, 3).is_err());
         assert!(validate_indices(&indices, 3)
             .unwrap_err()
+            .to_string()
             .contains("out of bounds"));
     }
 
@@ -426,6 +437,7 @@ mod tests {
         assert!(validate_indices(&indices, 3).is_err());
         assert!(validate_indices(&indices, 3)
             .unwrap_err()
+            .to_string()
             .contains("degenerate"));
     }
 
@@ -441,6 +453,7 @@ mod tests {
         assert!(validate_normals(&normals, 3).is_err());
         assert!(validate_normals(&normals, 3)
             .unwrap_err()
+            .to_string()
             .contains("must match vertex count"));
     }
 
@@ -462,6 +475,7 @@ mod tests {
         assert!(validate_uvs(&uvs, 3).is_err());
         assert!(validate_uvs(&uvs, 3)
             .unwrap_err()
+            .to_string()
             .contains("must match vertex count"));
     }
 
@@ -489,6 +503,7 @@ mod tests {
         assert!(validate_color(&color).is_err());
         assert!(validate_color(&color)
             .unwrap_err()
+            .to_string()
             .contains("must be in range"));
     }
 
@@ -502,7 +517,10 @@ mod tests {
     fn test_validate_color_nan() {
         let color = [f32::NAN, 0.0, 0.0, 1.0];
         assert!(validate_color(&color).is_err());
-        assert!(validate_color(&color).unwrap_err().contains("not finite"));
+        assert!(validate_color(&color)
+            .unwrap_err()
+            .to_string()
+            .contains("not finite"));
     }
 
     #[test]

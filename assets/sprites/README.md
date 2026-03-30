@@ -33,4 +33,4 @@ This directory contains sprite sheet textures used for billboard rendering.
 
 ## Creation
 
-Sprite images will be created in Phase 4 of sprite_support_implementation_plan.md
+Sprite images will be created as described in sprite_support_implementation_plan.md

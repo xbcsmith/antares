@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 ///     sleep: true,
 /// };
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonsterResistances {
     /// Immune to physical damage
     pub physical: bool,
@@ -98,12 +98,6 @@ impl MonsterResistances {
             fear: true,
             sleep: true,
         }
-    }
-}
-
-impl Default for MonsterResistances {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

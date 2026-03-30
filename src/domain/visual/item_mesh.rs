@@ -26,7 +26,7 @@
 //! * [`ItemMeshDescriptor::to_creature_definition_with_charges`] — variant
 //!   that accepts a `charges_fraction` to add a charge-level gem indicator.
 //!
-//! # Phase 4 additions
+//! # Additional features
 //!
 //! * Accent color is derived from `BonusAttribute` when the item has a bonus.
 //! * `is_magical()` items receive `metallic > 0.5` / `roughness < 0.3`.
@@ -37,7 +37,7 @@
 //! # Architecture reference
 //!
 //! See `docs/explanation/items_procedural_meshes_implementation_plan.md`
-//! Phase 1 and Phase 4, and `docs/reference/architecture.md` Section 4.5.
+//! and `docs/reference/architecture.md` Section 4.5.
 
 use crate::domain::items::types::{
     AccessorySlot, ArmorClassification, BonusAttribute, ConsumableEffect, Item, ItemType,
@@ -144,7 +144,7 @@ const EMISSIVE_CURSED: [f32; 3] = [0.30, 0.0, 0.35];
 const EMISSIVE_MAGIC: [f32; 3] = [0.40, 0.40, 0.60];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 4 accent colors (derived from BonusAttribute)
+// Accent colors (derived from BonusAttribute)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Orange/amber accent for fire-resistance bonus items
@@ -167,7 +167,7 @@ const COLOR_ACCENT_TEAL: [f32; 4] = [0.10, 0.75, 0.70, 1.0];
 const COLOR_ACCENT_DEEP_BLUE: [f32; 4] = [0.10, 0.20, 0.80, 1.0];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 4 charge-gem colors
+// Charge-gem colors
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Gold color for a fully-charged item gem
@@ -185,7 +185,7 @@ const EMISSIVE_CHARGE_HALF: [f32; 3] = [0.30, 0.30, 0.30];
 const EMISSIVE_CHARGE_EMPTY: [f32; 3] = [0.0, 0.0, 0.0];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 4 geometry / LOD constants
+// Geometry / LOD constants
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Shadow-quad Y offset — sits just above the floor to avoid Z-fighting
@@ -353,7 +353,7 @@ impl ItemMeshDescriptor {
     /// It inspects `item.item_type`, sub-type classification fields, tags,
     /// bonus values, and charge data to produce a complete descriptor.
     ///
-    /// **Phase 4 additions:**
+    /// **Additional mesh features:**
     /// - Accent color is derived from the item's `constant_bonus` attribute
     ///   (e.g. `ResistFire` → orange, `ResistMagic` → purple).
     /// - `is_magical()` items receive a non-zero `metallic` / low `roughness`
@@ -412,7 +412,7 @@ impl ItemMeshDescriptor {
             ItemType::Quest(_) => Self::quest_descriptor(),
         };
 
-        // ── Phase 4.1: Derive accent color from BonusAttribute ───────────────
+        // ── Derive accent color from BonusAttribute ──────────────────────────
         // Only apply when the item has not been cursed (cursed takes over
         // primary color entirely, making accent irrelevant).
         if !item.is_cursed {
@@ -421,7 +421,7 @@ impl ItemMeshDescriptor {
             }
         }
 
-        // ── Phase 4.1: Metallic / roughness driven by is_magical() ───────────
+        // ── Metallic / roughness driven by is_magical() ─────────────────────
         // We store whether the item is magical as a sentinel on the descriptor
         // so that make_material() can pick the right PBR params.  We re-use
         // the `emissive` field for the glow, but track the magical flag
@@ -472,7 +472,7 @@ impl ItemMeshDescriptor {
     }
 
     /// Maps an item's `constant_bonus` or `temporary_bonus` attribute to an
-    /// accent color, following the Phase 4.1 color table.
+    /// accent color, following the bonus-attribute color table.
     ///
     /// Returns `None` when the item has no relevant bonus (the caller will
     /// keep the auto-derived accent color unchanged).
@@ -897,7 +897,7 @@ impl ItemMeshDescriptor {
     /// [`to_creature_definition_with_charges`](Self::to_creature_definition_with_charges)
     /// with `charges_fraction: None`.
     ///
-    /// # Phase 4 additions
+    /// # Additional mesh features
     ///
     /// The returned `CreatureDefinition` now includes:
     /// - A **ground shadow quad** as the first mesh (semi-transparent dark quad
@@ -955,7 +955,7 @@ impl ItemMeshDescriptor {
     ///   - `0.5` → white (half charged)
     ///   - `0.0` → grey (depleted)
     ///
-    /// # Phase 4 mesh layout
+    /// # Mesh layout
     ///
     /// ```text
     /// meshes[0]  — ground shadow quad  (AlphaMode::Blend, alpha 0.3)
@@ -1065,7 +1065,7 @@ impl ItemMeshDescriptor {
     /// Builds the primary mesh and attaches LOD levels when the triangle count
     /// exceeds [`LOD_TRIANGLE_THRESHOLD`].
     ///
-    /// Per Phase 4.5:
+    /// Per the LOD specification:
     /// - Items with ≤ 200 triangles get no LOD (they are already simple).
     /// - Items with > 200 triangles get:
     ///   - LOD1 at [`LOD_DISTANCE_1`] (8 units) — 50 % simplified.
@@ -1084,7 +1084,7 @@ impl ItemMeshDescriptor {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Phase 4 child mesh builders
+    // Child mesh builders
     // ─────────────────────────────────────────────────────────────────────────
 
     /// Builds a flat ground shadow quad placed at Y = [`SHADOW_QUAD_Y`].
@@ -1744,7 +1744,7 @@ impl ItemMeshDescriptor {
 
     /// Builds a [`MaterialDefinition`] for this descriptor's primary surface.
     ///
-    /// # Phase 4.1 metallic / roughness rules
+    /// # Metallic / roughness rules
     ///
     /// | Condition          | `metallic`                      | `roughness` |
     /// |--------------------|---------------------------------|-------------|
@@ -1758,7 +1758,7 @@ impl ItemMeshDescriptor {
             None
         };
 
-        // Phase 4.1: magical items get shiny PBR params
+        // Magical items get shiny PBR params
         let (metallic, roughness) = if self.is_metallic_magical() {
             (MATERIAL_METALLIC_MAGICAL, MATERIAL_ROUGHNESS_MAGICAL)
         } else if matches!(
@@ -1826,7 +1826,7 @@ mod tests {
     };
     use crate::domain::types::{DiceRoll, ItemId};
 
-    // ── Phase 4 helpers ──────────────────────────────────────────────────────
+    // ── Mesh helpers ─────────────────────────────────────────────────────────
 
     fn make_item_with_bonus(id: ItemId, name: &str, attribute: BonusAttribute) -> Item {
         Item {
@@ -2547,7 +2547,7 @@ mod tests {
         );
     }
 
-    // ── Phase 4 tests ─────────────────────────────────────────────────────────
+    // ── Item mesh feature tests ───────────────────────────────────────────────
 
     // §4.6 — test_fire_resist_item_accent_orange
     /// Item with ResistFire constant_bonus must receive the orange accent color.

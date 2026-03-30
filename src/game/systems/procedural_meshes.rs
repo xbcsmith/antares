@@ -20,6 +20,7 @@ use bevy::color::LinearRgba;
 use bevy::prelude::*;
 use rand::Rng;
 use std::collections::HashMap;
+use tracing;
 
 // ==================== Mesh Caching ====================
 
@@ -45,7 +46,7 @@ use std::collections::HashMap;
 /// let handle2 = get_or_create_mesh(&mut cache, &mut meshes, ...);
 /// assert_eq!(handle1, handle2);  // Same handle reused
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ProceduralMeshCache {
     /// Cached trunk mesh handle for trees
     tree_trunk: Option<Handle<Mesh>>,
@@ -97,17 +98,14 @@ pub struct ProceduralMeshCache {
     /// Cached mesh handle for arch supports
     structure_arch_support: Option<Handle<Mesh>>,
     /// Cached mesh handle for wall segments
-    #[allow(dead_code)]
     structure_wall: Option<Handle<Mesh>>,
     /// Cached mesh handle for door frame posts (vertical sides, used by spawn_door_frame)
     structure_door_frame: Option<Handle<Mesh>>,
     /// Cached mesh handle for door frame lintel (horizontal top bar, used by spawn_door_frame)
     structure_door_frame_lintel: Option<Handle<Mesh>>,
     /// Cached mesh handle for railing posts
-    #[allow(dead_code)]
     structure_railing_post: Option<Handle<Mesh>>,
     /// Cached mesh handle for railing bars
-    #[allow(dead_code)]
     structure_railing_bar: Option<Handle<Mesh>>,
     /// Cached mesh handles for creature visuals by (CreatureId, mesh_index)
     creature_meshes: HashMap<(CreatureId, usize), Handle<Mesh>>,
@@ -155,7 +153,7 @@ impl ProceduralMeshCache {
     pub fn get_or_create_tree_mesh(
         &mut self,
         tree_type: TreeType,
-        meshes: &mut ResMut<Assets<Mesh>>,
+        meshes: &mut Assets<Mesh>,
     ) -> Handle<Mesh> {
         if let Some(handle) = self.tree_meshes.get(&tree_type) {
             handle.clone()
@@ -196,7 +194,7 @@ impl ProceduralMeshCache {
         creature_id: CreatureId,
         mesh_index: usize,
         mesh_def: &crate::domain::visual::MeshDefinition,
-        meshes: &mut ResMut<Assets<Mesh>>,
+        meshes: &mut Assets<Mesh>,
     ) -> Handle<Mesh> {
         let key = (creature_id, mesh_index);
 
@@ -251,7 +249,7 @@ impl ProceduralMeshCache {
     pub fn get_or_create_bark_material(
         &mut self,
         asset_server: &AssetServer,
-        materials: &mut ResMut<Assets<StandardMaterial>>,
+        materials: &mut Assets<StandardMaterial>,
     ) -> Handle<StandardMaterial> {
         if let Some(handle) = &self.tree_bark_material {
             handle.clone()
@@ -294,7 +292,7 @@ impl ProceduralMeshCache {
         &mut self,
         tree_type: TreeType,
         asset_server: &AssetServer,
-        materials: &mut ResMut<Assets<StandardMaterial>>,
+        materials: &mut Assets<StandardMaterial>,
     ) -> Handle<StandardMaterial> {
         if let Some(handle) = self.tree_foliage_materials.get(&tree_type) {
             handle.clone()
@@ -312,65 +310,6 @@ impl ProceduralMeshCache {
             self.tree_foliage_materials
                 .insert(tree_type, handle.clone());
             handle
-        }
-    }
-}
-
-impl Default for ProceduralMeshCache {
-    /// Creates a new empty cache with no cached meshes
-    fn default() -> Self {
-        Self {
-            tree_trunk: None,
-            tree_foliage: None,
-            tree_meshes: HashMap::new(),
-            portal_frame_horizontal: None,
-            portal_frame_vertical: None,
-            sign_post: None,
-            sign_board: None,
-            shrub_stem: None,
-            grass_blade: None,
-            furniture_bench_seat: None,
-            furniture_bench_leg: None,
-            furniture_table_top: None,
-            furniture_table_leg: None,
-            furniture_chair_seat: None,
-            furniture_chair_back: None,
-            furniture_chair_leg: None,
-            furniture_throne_seat: None,
-            furniture_throne_back: None,
-            furniture_throne_arm: None,
-            furniture_chest_body: None,
-            furniture_chest_lid: None,
-            furniture_torch_handle: None,
-            furniture_torch_flame: None,
-            furniture_door_panel: None,
-            furniture_door_brace: None,
-            furniture_door_hinge: None,
-            furniture_door_handle: None,
-            structure_column_shaft: None,
-            structure_column_capital: None,
-            structure_arch_curve: None,
-            structure_arch_support: None,
-            structure_wall: None,
-            structure_door_frame: None,
-            structure_door_frame_lintel: None,
-            structure_railing_post: None,
-            structure_railing_bar: None,
-            creature_meshes: HashMap::new(),
-            item_sword: None,
-            item_dagger: None,
-            item_blunt: None,
-            item_staff: None,
-            item_bow: None,
-            item_armor: None,
-            item_shield: None,
-            item_potion: None,
-            item_scroll: None,
-            item_ring: None,
-            item_ammo: None,
-            item_quest: None,
-            tree_bark_material: None,
-            tree_foliage_materials: HashMap::new(),
         }
     }
 }
@@ -395,7 +334,7 @@ impl ProceduralMeshCache {
     pub fn get_or_create_furniture_mesh<F>(
         &mut self,
         component: &str,
-        meshes: &mut ResMut<Assets<Mesh>>,
+        meshes: &mut Assets<Mesh>,
         creator: F,
     ) -> Handle<Mesh>
     where
@@ -420,7 +359,10 @@ impl ProceduralMeshCache {
             "door_brace" => &mut self.furniture_door_brace,
             "door_hinge" => &mut self.furniture_door_hinge,
             "door_handle" => &mut self.furniture_door_handle,
-            _ => panic!("Unknown furniture component: {}", component),
+            _ => {
+                tracing::error!("Unknown furniture component: {component}");
+                return meshes.add(creator());
+            }
         };
 
         handle.get_or_insert_with(|| meshes.add(creator())).clone()
@@ -443,7 +385,7 @@ impl ProceduralMeshCache {
     pub fn get_or_create_structure_mesh<F>(
         &mut self,
         component: &str,
-        meshes: &mut ResMut<Assets<Mesh>>,
+        meshes: &mut Assets<Mesh>,
         creator: F,
     ) -> Handle<Mesh>
     where
@@ -459,7 +401,10 @@ impl ProceduralMeshCache {
             "door_frame_lintel" => &mut self.structure_door_frame_lintel,
             "railing_post" => &mut self.structure_railing_post,
             "railing_bar" => &mut self.structure_railing_bar,
-            _ => panic!("Unknown structure component: {}", component),
+            _ => {
+                tracing::error!("Unknown structure component: {component}");
+                return meshes.add(creator());
+            }
         };
 
         handle.get_or_insert_with(|| meshes.add(creator())).clone()
@@ -535,13 +480,14 @@ impl ProceduralMeshCache {
     /// * `meshes`   - Mutable reference to Bevy's mesh asset storage.
     /// * `creator`  - Closure that generates the mesh if it is not yet cached.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `category` is not one of the recognised item category strings.
+    /// Logs a `tracing::error!` and returns an uncached mesh handle if
+    /// `category` is not one of the recognised item category strings.
     pub fn get_or_create_item_mesh<F>(
         &mut self,
         category: &str,
-        meshes: &mut ResMut<Assets<Mesh>>,
+        meshes: &mut Assets<Mesh>,
         creator: F,
     ) -> Handle<Mesh>
     where
@@ -560,7 +506,10 @@ impl ProceduralMeshCache {
             "ring" => &mut self.item_ring,
             "ammo" => &mut self.item_ammo,
             "quest" => &mut self.item_quest,
-            _ => panic!("Unknown item cache category: {}", category),
+            _ => {
+                tracing::error!("Unknown item cache category: {category}");
+                return meshes.add(creator());
+            }
         };
 
         handle.get_or_insert_with(|| meshes.add(creator())).clone()
@@ -721,6 +670,7 @@ impl ProceduralMeshCache {
 // ==================== Constants ====================
 
 // Tree dimensions (world units, 1 unit ≈ 10 feet)
+
 const TREE_FOLIAGE_RADIUS: f32 = 0.6;
 
 // Event marker dimensions
@@ -767,8 +717,7 @@ const CHAIR_ARMREST_HEIGHT: f32 = 0.3;
 const THRONE_SEAT_WIDTH: f32 = 0.7;
 const THRONE_SEAT_DEPTH: f32 = 0.7;
 const THRONE_SEAT_HEIGHT: f32 = 0.08;
-#[allow(dead_code)]
-const THRONE_HEIGHT: f32 = 1.5;
+
 const THRONE_BACK_HEIGHT: f32 = 0.9;
 const THRONE_BACK_WIDTH: f32 = 0.7;
 const THRONE_ARM_HEIGHT: f32 = 0.6;
@@ -829,14 +778,6 @@ const TREE_FOLIAGE_TEXTURE_PALM: &str = "assets/textures/trees/foliage_palm.png"
 const TREE_FOLIAGE_TEXTURE_SHRUB: &str = "assets/textures/trees/foliage_shrub.png";
 /// Alpha cutoff for foliage `AlphaMode::Mask` — pixels with alpha below this are clipped.
 const TREE_FOLIAGE_ALPHA_CUTOFF: f32 = 0.35_f32;
-// Color constants for shrubs and grass (used in spawn_shrub and spawn_grass)
-// Inlined into spawn functions to maintain direct color values
-#[allow(dead_code)]
-const SHRUB_STEM_COLOR: Color = Color::srgb(0.25, 0.45, 0.15); // Dark green
-#[allow(dead_code)]
-const SHRUB_FOLIAGE_COLOR: Color = Color::srgb(0.35, 0.65, 0.25); // Medium green
-#[allow(dead_code)]
-const GRASS_BLADE_COLOR: Color = Color::srgb(0.3, 0.65, 0.2); // Grass green
 
 const PORTAL_COLOR: Color = Color::srgb(0.53, 0.29, 0.87); // Purple
 const SIGN_POST_COLOR: Color = Color::srgb(0.4, 0.3, 0.2); // Dark brown
@@ -854,57 +795,59 @@ const TORCH_FLAME_COLOR: Color = Color::srgb(1.0, 0.8, 0.2); // Yellow/orange
 const DOOR_PANEL_COLOR: Color = Color::srgb(0.55, 0.35, 0.18); // Warm wood brown
 
 // Structure dimensions - Column
-#[allow(dead_code)]
-const COLUMN_SHAFT_RADIUS: f32 = 0.3;
 const COLUMN_CAPITAL_HEIGHT: f32 = 0.2; // Additional height for capital
-#[allow(dead_code)]
-const COLUMN_CAPITAL_RADIUS: f32 = 0.35;
 const COLUMN_BASE_HEIGHT: f32 = 0.15;
 
 // Structure dimensions - Arch
 const ARCH_INNER_RADIUS: f32 = 1.0;
-#[allow(dead_code)]
-const ARCH_OUTER_RADIUS: f32 = 1.3;
-#[allow(dead_code)]
-const ARCH_THICKNESS: f32 = 0.3;
-#[allow(dead_code)]
 const ARCH_SUPPORT_WIDTH: f32 = 0.4;
-#[allow(dead_code)]
 const ARCH_SUPPORT_HEIGHT: f32 = 1.5;
 
-// Structure dimensions - Wall
-#[allow(dead_code)]
-const WALL_THICKNESS: f32 = 0.2;
-#[allow(dead_code)]
-const WALL_WINDOW_WIDTH: f32 = 0.4;
-#[allow(dead_code)]
-const WALL_WINDOW_HEIGHT: f32 = 0.3;
-
 // Structure dimensions - Door Frame
-#[allow(dead_code)]
+#[cfg(test)]
 const DOOR_FRAME_THICKNESS: f32 = 0.15;
-#[allow(dead_code)]
+#[cfg(test)]
 const DOOR_FRAME_BORDER: f32 = 0.1;
-
-// Structure dimensions - Railing
-#[allow(dead_code)]
-const RAILING_POST_RADIUS: f32 = 0.08;
-#[allow(dead_code)]
-const RAILING_BAR_RADIUS: f32 = 0.04;
-#[allow(dead_code)]
-const RAILING_BAR_HEIGHT: f32 = 0.8;
 
 // Structure colors
 const STRUCTURE_STONE_COLOR: Color = Color::srgb(0.7, 0.7, 0.7); // Light gray stone
 const STRUCTURE_MARBLE_COLOR: Color = Color::srgb(0.9, 0.9, 0.9); // White marble
-#[allow(dead_code)]
-const STRUCTURE_IRON_COLOR: Color = Color::srgb(0.3, 0.3, 0.35); // Dark iron
-#[allow(dead_code)]
-const STRUCTURE_GOLD_COLOR: Color = Color::srgb(0.8, 0.65, 0.2); // Gold trim
 
 // Tile centering offset
 /// Offset to center procedural meshes within their tile (matches camera centering)
 const TILE_CENTER_OFFSET: f32 = 0.5;
+
+// ==================== Spawn Context ====================
+
+/// Bundles the four mutable resources that every procedural-mesh spawn
+/// function needs: ECS commands, material assets, mesh assets, and the
+/// shared mesh cache.
+///
+/// Passing a single `&mut MeshSpawnContext` instead of four separate
+/// parameters keeps function signatures under clippy's 7-argument
+/// threshold and makes call-sites less noisy.
+///
+/// # Examples
+///
+/// ```text
+/// let mut ctx = MeshSpawnContext {
+///     commands: &mut commands,
+///     materials: &mut materials,
+///     meshes: &mut meshes,
+///     cache: &mut cache,
+/// };
+/// spawn_bench(&mut ctx, position, map_id, BenchConfig::default(), None);
+/// ```
+pub struct MeshSpawnContext<'a, 'w, 's> {
+    /// Bevy [`Commands`] for spawning and mutating entities.
+    pub commands: &'a mut Commands<'w, 's>,
+    /// Asset storage for [`StandardMaterial`]s.
+    pub materials: &'a mut Assets<StandardMaterial>,
+    /// Asset storage for [`Mesh`]es.
+    pub meshes: &'a mut Assets<Mesh>,
+    /// Shared procedural-mesh cache that prevents duplicate allocations.
+    pub cache: &'a mut ProceduralMeshCache,
+}
 
 // ==================== Private Helpers ====================
 
@@ -1000,18 +943,14 @@ fn foliage_texture_path(tree_type: TreeType) -> &'static str {
 /// * `tree_type` - The tree variant — selects the correct foliage texture
 /// * `parent_entity` - Parent entity to attach foliage quads to
 /// * `cache` - Procedural mesh cache for reusing mesh and material handles
-#[allow(clippy::too_many_arguments)]
 fn spawn_foliage_clusters(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     asset_server: &AssetServer,
     graph: &super::advanced_trees::BranchGraph,
     config: &super::advanced_trees::TreeConfig,
     foliage_color: Option<Color>,
     tree_type: TreeType,
     parent_entity: Entity,
-    cache: &mut ProceduralMeshCache,
 ) {
     // Identify leaf branches (endpoints)
     let leaf_indices = super::advanced_trees::get_leaf_branches(graph);
@@ -1029,25 +968,28 @@ fn spawn_foliage_clusters(
 
     // Get or create the plane quad mesh from cache.
     // We reuse the existing tree_foliage slot — it now stores a plane quad instead of a sphere.
-    let foliage_mesh = cache.tree_foliage.clone().unwrap_or_else(|| {
-        let handle = meshes.add(
+    let foliage_mesh = ctx.cache.tree_foliage.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(
             Plane3d::default()
                 .mesh()
                 .size(foliage_size * 2.0, foliage_size * 2.0)
                 .build(),
         );
-        cache.tree_foliage = Some(handle.clone());
+        ctx.cache.tree_foliage = Some(handle.clone());
         handle
     });
 
     // Obtain the base cached foliage material for this tree type.
-    let base_material = cache.get_or_create_foliage_material(tree_type, asset_server, materials);
+    let base_material =
+        ctx.cache
+            .get_or_create_foliage_material(tree_type, asset_server, ctx.materials);
 
     // If a tint colour is supplied, clone the cached material and override base_color.
     // When there is no tint we reuse the cached handle to avoid extra allocations.
     let foliage_material = if let Some(tint) = foliage_color {
         // Clone the cached material's data and apply the tint
-        let mut mat = materials
+        let mut mat = ctx
+            .materials
             .get(&base_material)
             .cloned()
             .unwrap_or_else(|| StandardMaterial {
@@ -1058,7 +1000,7 @@ fn spawn_foliage_clusters(
                 ..default()
             });
         mat.base_color = tint;
-        materials.add(mat)
+        ctx.materials.add(mat)
     } else {
         base_material
     };
@@ -1092,7 +1034,8 @@ fn spawn_foliage_clusters(
             let position = branch.end + Vec3::new(offset_x, offset_y, offset_z);
 
             // Spawn foliage quad, rotated to face up (Plane3d is XZ, we want XY billboard)
-            let foliage = commands
+            let foliage = ctx
+                .commands
                 .spawn((
                     Mesh3d(foliage_mesh.clone()),
                     MeshMaterial3d(foliage_material.clone()),
@@ -1109,34 +1052,32 @@ fn spawn_foliage_clusters(
                 ))
                 .id();
 
-            commands.entity(parent_entity).add_child(foliage);
+            ctx.commands.entity(parent_entity).add_child(foliage);
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_tree(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     asset_server: &AssetServer,
     position: types::Position,
     map_id: types::MapId,
     visual_metadata: Option<&TileVisualMetadata>,
     tree_type: Option<super::advanced_trees::TreeType>,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     // Determine visual configuration from optional metadata
     let visual_config = visual_metadata
         .map(super::advanced_trees::TerrainVisualConfig::from)
         .unwrap_or_default();
 
-    // Phase 1: Generate branch graph for the tree type
+    // Generate branch graph for the tree type
     let tree_type_resolved = tree_type.unwrap_or(super::advanced_trees::TreeType::Oak);
     let branch_graph = super::advanced_trees::generate_branch_graph(tree_type_resolved);
 
     // Get or create advanced tree mesh from cache
-    let tree_mesh = cache.get_or_create_tree_mesh(tree_type_resolved, meshes);
+    let tree_mesh = ctx
+        .cache
+        .get_or_create_tree_mesh(tree_type_resolved, ctx.meshes);
 
     // Use the cached bark material (shared across all non-Dead tree trunks).
     // When a color_tint is present we clone the cached material and override base_color
@@ -1150,19 +1091,23 @@ pub fn spawn_tree(
             (base_rgba.blue * tint_rgba.blue).min(1.0),
             base_rgba.alpha,
         );
-        let bark_handle = cache.get_or_create_bark_material(asset_server, materials);
-        let mut mat = materials
-            .get(&bark_handle)
-            .cloned()
-            .unwrap_or_else(|| StandardMaterial {
-                base_color: TREE_TRUNK_COLOR,
-                perceptual_roughness: 0.9,
-                ..default()
-            });
+        let bark_handle = ctx
+            .cache
+            .get_or_create_bark_material(asset_server, ctx.materials);
+        let mut mat =
+            ctx.materials
+                .get(&bark_handle)
+                .cloned()
+                .unwrap_or_else(|| StandardMaterial {
+                    base_color: TREE_TRUNK_COLOR,
+                    perceptual_roughness: 0.9,
+                    ..default()
+                });
         mat.base_color = bark_color;
-        materials.add(mat)
+        ctx.materials.add(mat)
     } else {
-        cache.get_or_create_bark_material(asset_server, materials)
+        ctx.cache
+            .get_or_create_bark_material(asset_server, ctx.materials)
     };
 
     // Apply color tint to foliage if present — passed as Option<Color> to
@@ -1179,7 +1124,8 @@ pub fn spawn_tree(
     });
 
     // Spawn parent tree entity with optional rotation
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -1195,7 +1141,8 @@ pub fn spawn_tree(
         .id();
 
     // Spawn tree mesh child at origin (branch graph is based at 0,0,0)
-    let tree_structure = commands
+    let tree_structure = ctx
+        .commands
         .spawn((
             Mesh3d(tree_mesh),
             MeshMaterial3d(tree_material),
@@ -1210,20 +1157,17 @@ pub fn spawn_tree(
             bevy::light::NotShadowReceiver,
         ))
         .id();
-    commands.entity(parent).add_child(tree_structure);
+    ctx.commands.entity(parent).add_child(tree_structure);
 
-    // Phase 3: Spawn foliage clusters at leaf branch endpoints using plane quads
+    // Spawn foliage clusters at leaf branch endpoints using plane quads
     spawn_foliage_clusters(
-        commands,
-        materials,
-        meshes,
+        ctx,
         asset_server,
         &branch_graph,
         &tree_type_resolved.config(),
         foliage_color,
         tree_type_resolved,
         parent,
-        cache,
     );
 
     parent
@@ -1236,27 +1180,23 @@ pub fn spawn_tree(
 ///
 /// # Arguments
 ///
-/// * `commands` - ECS command buffer
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `visual_metadata` - Optional per-tile customization (height controls shrub size, scale affects foliage density)
-/// * `cache` - Mutable reference to mesh cache for reuse
 ///
 /// # Returns
 ///
 /// Entity ID of the shrub entity
 pub fn spawn_shrub(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     visual_metadata: Option<&TileVisualMetadata>,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
-    let shrub_mesh = cache.get_or_create_tree_mesh(TreeType::Shrub, meshes);
+    let shrub_mesh = ctx
+        .cache
+        .get_or_create_tree_mesh(TreeType::Shrub, ctx.meshes);
 
     // Get visual configuration
     let meta = TerrainVisualConfig::from(visual_metadata.unwrap_or(&TileVisualMetadata::default()));
@@ -1269,13 +1209,13 @@ pub fn spawn_shrub(
 
     // Create material that supports vertex colors (or just standard PBR)
     // The advanced tree mesh has vertex colors baked in.
-    let material = materials.add(StandardMaterial {
+    let material = ctx.materials.add(StandardMaterial {
         base_color: Color::WHITE, // Vertex colors multiply with this
         perceptual_roughness: 0.9,
         ..default()
     });
 
-    commands
+    ctx.commands
         .spawn((
             Mesh3d(shrub_mesh),
             MeshMaterial3d(material),
@@ -1308,57 +1248,54 @@ pub fn spawn_shrub(
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `event_name` - Event name for entity label
 /// * `map_id` - Map identifier for cleanup
-/// * `cache` - Mutable reference to mesh cache for reuse
 /// * `rotation_y` - Optional rotation in degrees around Y-axis (default: 0.0)
 ///
 /// # Returns
 ///
 /// Entity ID of the parent portal entity
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_portal(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     event_name: String,
     map_id: types::MapId,
-    cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
 ) -> Entity {
     // Get or create horizontal bar mesh from cache (for top/bottom bars)
-    let horizontal_bar_mesh = cache.portal_frame_horizontal.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid {
-            half_size: Vec3::new(
-                PORTAL_FRAME_WIDTH / 2.0,
-                PORTAL_FRAME_THICKNESS / 2.0,
-                PORTAL_FRAME_DEPTH / 2.0,
-            ),
+    let horizontal_bar_mesh = ctx
+        .cache
+        .portal_frame_horizontal
+        .clone()
+        .unwrap_or_else(|| {
+            let handle = ctx.meshes.add(Cuboid {
+                half_size: Vec3::new(
+                    PORTAL_FRAME_WIDTH / 2.0,
+                    PORTAL_FRAME_THICKNESS / 2.0,
+                    PORTAL_FRAME_DEPTH / 2.0,
+                ),
+            });
+            ctx.cache.portal_frame_horizontal = Some(handle.clone());
+            handle
         });
-        cache.portal_frame_horizontal = Some(handle.clone());
-        handle
-    });
 
     // Get or create vertical bar mesh from cache (for left/right bars)
-    let vertical_bar_mesh = cache.portal_frame_vertical.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid {
+    let vertical_bar_mesh = ctx.cache.portal_frame_vertical.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cuboid {
             half_size: Vec3::new(
                 PORTAL_FRAME_THICKNESS / 2.0,
                 PORTAL_FRAME_HEIGHT / 2.0,
                 PORTAL_FRAME_DEPTH / 2.0,
             ),
         });
-        cache.portal_frame_vertical = Some(handle.clone());
+        ctx.cache.portal_frame_vertical = Some(handle.clone());
         handle
     });
 
     // Create material for portal frame (shared by all bars)
-    let material = materials.add(StandardMaterial {
+    let material = ctx.materials.add(StandardMaterial {
         base_color: PORTAL_COLOR,
         perceptual_roughness: 0.3,
         emissive: LinearRgba {
@@ -1379,7 +1316,8 @@ pub fn spawn_portal(
     )
     .with_rotation(Quat::from_rotation_y(rotation_radians));
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -1392,7 +1330,8 @@ pub fn spawn_portal(
 
     // Spawn frame bars as children
     // Top bar (horizontal)
-    let top = commands
+    let top = ctx
+        .commands
         .spawn((
             Mesh3d(horizontal_bar_mesh.clone()),
             MeshMaterial3d(material.clone()),
@@ -1401,10 +1340,11 @@ pub fn spawn_portal(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(top);
+    ctx.commands.entity(parent).add_child(top);
 
     // Bottom bar (horizontal)
-    let bottom = commands
+    let bottom = ctx
+        .commands
         .spawn((
             Mesh3d(horizontal_bar_mesh),
             MeshMaterial3d(material.clone()),
@@ -1413,10 +1353,11 @@ pub fn spawn_portal(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(bottom);
+    ctx.commands.entity(parent).add_child(bottom);
 
     // Left bar (vertical)
-    let left = commands
+    let left = ctx
+        .commands
         .spawn((
             Mesh3d(vertical_bar_mesh.clone()),
             MeshMaterial3d(material.clone()),
@@ -1425,10 +1366,11 @@ pub fn spawn_portal(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(left);
+    ctx.commands.entity(parent).add_child(left);
 
     // Right bar (vertical)
-    let right = commands
+    let right = ctx
+        .commands
         .spawn((
             Mesh3d(vertical_bar_mesh),
             MeshMaterial3d(material),
@@ -1437,7 +1379,7 @@ pub fn spawn_portal(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(right);
+    ctx.commands.entity(parent).add_child(right);
 
     parent
 }
@@ -1454,13 +1396,10 @@ pub fn spawn_portal(
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `event_name` - Event name for entity label
 /// * `map_id` - Map identifier for cleanup
-/// * `cache` - Mutable reference to mesh cache for reuse
 /// * `rotation_y` - Optional tile-level rotation in degrees around Y-axis (default: 0.0).
 ///   Applied first; if `facing` is also `Some`, the cardinal facing takes precedence.
 /// * `facing` - Optional cardinal [`Direction`](crate::domain::types::Direction) the sign
@@ -1471,46 +1410,42 @@ pub fn spawn_portal(
 /// # Returns
 ///
 /// Entity ID of the parent sign entity
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_sign(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     event_name: String,
     map_id: types::MapId,
-    cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
     facing: Option<types::Direction>,
 ) -> Entity {
     // Get or create post mesh from cache
-    let post_mesh = cache.sign_post.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cylinder {
+    let post_mesh = ctx.cache.sign_post.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cylinder {
             radius: SIGN_POST_RADIUS,
             half_height: SIGN_POST_HEIGHT / 2.0,
         });
-        cache.sign_post = Some(handle.clone());
+        ctx.cache.sign_post = Some(handle.clone());
         handle
     });
-    let post_material = materials.add(StandardMaterial {
+    let post_material = ctx.materials.add(StandardMaterial {
         base_color: SIGN_POST_COLOR,
         perceptual_roughness: 0.9,
         ..default()
     });
 
     // Get or create board mesh from cache
-    let board_mesh = cache.sign_board.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid {
+    let board_mesh = ctx.cache.sign_board.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cuboid {
             half_size: Vec3::new(
                 SIGN_BOARD_WIDTH / 2.0,
                 SIGN_BOARD_HEIGHT / 2.0,
                 SIGN_BOARD_DEPTH / 2.0,
             ),
         });
-        cache.sign_board = Some(handle.clone());
+        ctx.cache.sign_board = Some(handle.clone());
         handle
     });
-    let board_material = materials.add(StandardMaterial {
+    let board_material = ctx.materials.add(StandardMaterial {
         base_color: SIGN_BOARD_COLOR,
         perceptual_roughness: 0.7,
         ..default()
@@ -1532,7 +1467,8 @@ pub fn spawn_sign(
     .with_rotation(Quat::from_rotation_y(rotation_radians));
 
     use crate::game::components::creature::FacingComponent;
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -1545,7 +1481,8 @@ pub fn spawn_sign(
         .id();
 
     // Spawn post child
-    let post = commands
+    let post = ctx
+        .commands
         .spawn((
             Mesh3d(post_mesh),
             MeshMaterial3d(post_material),
@@ -1554,10 +1491,11 @@ pub fn spawn_sign(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(post);
+    ctx.commands.entity(parent).add_child(post);
 
     // Spawn board child
-    let board = commands
+    let board = ctx
+        .commands
         .spawn((
             Mesh3d(board_mesh),
             MeshMaterial3d(board_material),
@@ -1566,7 +1504,7 @@ pub fn spawn_sign(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(board);
+    ctx.commands.entity(parent).add_child(board);
 
     parent
 }
@@ -1707,51 +1645,46 @@ impl Default for TorchConfig {
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `config` - Bench configuration (length, height, color)
-/// * `cache` - Mutable reference to mesh cache for reuse
 /// * `rotation_y` - Optional rotation in degrees around Y-axis
 ///
 /// # Returns
 ///
 /// Entity ID of the parent bench entity
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_bench(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: BenchConfig,
-    cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
 ) -> Entity {
     let color = config.color_override.unwrap_or(BENCH_COLOR);
     let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
 
     // Get or create seat mesh
-    let seat_mesh = cache.furniture_bench_seat.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(config.length, config.height, BENCH_WIDTH));
-        cache.furniture_bench_seat = Some(handle.clone());
+    let seat_mesh = ctx.cache.furniture_bench_seat.clone().unwrap_or_else(|| {
+        let handle = ctx
+            .meshes
+            .add(Cuboid::new(config.length, config.height, BENCH_WIDTH));
+        ctx.cache.furniture_bench_seat = Some(handle.clone());
         handle
     });
 
     // Get or create leg mesh
-    let leg_mesh = cache.furniture_bench_leg.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(
+    let leg_mesh = ctx.cache.furniture_bench_leg.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cuboid::new(
             BENCH_LEG_THICKNESS,
             BENCH_LEG_HEIGHT,
             BENCH_LEG_THICKNESS,
         ));
-        cache.furniture_bench_leg = Some(handle.clone());
+        ctx.cache.furniture_bench_leg = Some(handle.clone());
         handle
     });
 
-    let material = materials.add(StandardMaterial {
+    let material = ctx.materials.add(StandardMaterial {
         base_color: color,
         perceptual_roughness: 0.7,
         ..default()
@@ -1765,7 +1698,8 @@ pub fn spawn_bench(
     )
     .with_rotation(Quat::from_rotation_y(rotation_radians));
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -1777,7 +1711,8 @@ pub fn spawn_bench(
         .id();
 
     // Spawn seat
-    let seat = commands
+    let seat = ctx
+        .commands
         .spawn((
             Mesh3d(seat_mesh),
             MeshMaterial3d(material.clone()),
@@ -1786,12 +1721,13 @@ pub fn spawn_bench(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(seat);
+    ctx.commands.entity(parent).add_child(seat);
 
     // Spawn front-left leg
     let leg_offset_x = config.length / 2.0 - BENCH_LEG_THICKNESS / 2.0;
     let leg_offset_z = BENCH_WIDTH / 2.0 - BENCH_LEG_THICKNESS / 2.0;
-    let leg = commands
+    let leg = ctx
+        .commands
         .spawn((
             Mesh3d(leg_mesh.clone()),
             MeshMaterial3d(material.clone()),
@@ -1800,10 +1736,11 @@ pub fn spawn_bench(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(leg);
+    ctx.commands.entity(parent).add_child(leg);
 
     // Spawn front-right leg
-    let leg = commands
+    let leg = ctx
+        .commands
         .spawn((
             Mesh3d(leg_mesh.clone()),
             MeshMaterial3d(material.clone()),
@@ -1812,10 +1749,11 @@ pub fn spawn_bench(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(leg);
+    ctx.commands.entity(parent).add_child(leg);
 
     // Spawn back-left leg
-    let leg = commands
+    let leg = ctx
+        .commands
         .spawn((
             Mesh3d(leg_mesh.clone()),
             MeshMaterial3d(material.clone()),
@@ -1824,10 +1762,11 @@ pub fn spawn_bench(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(leg);
+    ctx.commands.entity(parent).add_child(leg);
 
     // Spawn back-right leg
-    let leg = commands
+    let leg = ctx
+        .commands
         .spawn((
             Mesh3d(leg_mesh),
             MeshMaterial3d(material),
@@ -1836,7 +1775,7 @@ pub fn spawn_bench(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(leg);
+    ctx.commands.entity(parent).add_child(leg);
 
     parent
 }
@@ -1849,51 +1788,46 @@ pub fn spawn_bench(
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `config` - Table configuration (width, depth, height, color)
-/// * `cache` - Mutable reference to mesh cache for reuse
 /// * `rotation_y` - Optional rotation in degrees around Y-axis
 ///
 /// # Returns
 ///
 /// Entity ID of the parent table entity
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_table(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: TableConfig,
-    cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
 ) -> Entity {
     let color = config.color_override.unwrap_or(TABLE_COLOR);
     let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
 
     // Get or create top mesh
-    let top_mesh = cache.furniture_table_top.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(config.width, TABLE_TOP_HEIGHT, config.depth));
-        cache.furniture_table_top = Some(handle.clone());
+    let top_mesh = ctx.cache.furniture_table_top.clone().unwrap_or_else(|| {
+        let handle = ctx
+            .meshes
+            .add(Cuboid::new(config.width, TABLE_TOP_HEIGHT, config.depth));
+        ctx.cache.furniture_table_top = Some(handle.clone());
         handle
     });
 
     // Get or create leg mesh
-    let leg_mesh = cache.furniture_table_leg.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(
+    let leg_mesh = ctx.cache.furniture_table_leg.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cuboid::new(
             TABLE_LEG_THICKNESS,
             config.height - TABLE_TOP_HEIGHT,
             TABLE_LEG_THICKNESS,
         ));
-        cache.furniture_table_leg = Some(handle.clone());
+        ctx.cache.furniture_table_leg = Some(handle.clone());
         handle
     });
 
-    let material = materials.add(StandardMaterial {
+    let material = ctx.materials.add(StandardMaterial {
         base_color: color,
         perceptual_roughness: 0.6,
         ..default()
@@ -1906,7 +1840,8 @@ pub fn spawn_table(
     )
     .with_rotation(Quat::from_rotation_y(rotation_radians));
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -1918,7 +1853,8 @@ pub fn spawn_table(
         .id();
 
     // Spawn top
-    let top = commands
+    let top = ctx
+        .commands
         .spawn((
             Mesh3d(top_mesh),
             MeshMaterial3d(material.clone()),
@@ -1927,7 +1863,7 @@ pub fn spawn_table(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(top);
+    ctx.commands.entity(parent).add_child(top);
 
     // Spawn four legs
     let leg_offset_x = config.width / 2.0 - TABLE_LEG_THICKNESS / 2.0;
@@ -1935,7 +1871,8 @@ pub fn spawn_table(
     let leg_y = (config.height - TABLE_TOP_HEIGHT) / 2.0;
 
     for (x_sign, z_sign) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
-        let leg = commands
+        let leg = ctx
+            .commands
             .spawn((
                 Mesh3d(leg_mesh.clone()),
                 MeshMaterial3d(material.clone()),
@@ -1944,7 +1881,7 @@ pub fn spawn_table(
                 Visibility::default(),
             ))
             .id();
-        commands.entity(parent).add_child(leg);
+        ctx.commands.entity(parent).add_child(leg);
     }
 
     parent
@@ -1960,60 +1897,55 @@ pub fn spawn_table(
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `config` - Chair configuration (has_armrests, back_height, color)
-/// * `cache` - Mutable reference to mesh cache for reuse
 /// * `rotation_y` - Optional rotation in degrees around Y-axis
 ///
 /// # Returns
 ///
 /// Entity ID of the parent chair entity
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_chair(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: ChairConfig,
-    cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
 ) -> Entity {
     let color = config.color_override.unwrap_or(CHAIR_COLOR);
     let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
 
     // Get or create meshes
-    let seat_mesh = cache.furniture_chair_seat.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(
+    let seat_mesh = ctx.cache.furniture_chair_seat.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cuboid::new(
             CHAIR_SEAT_WIDTH,
             CHAIR_SEAT_HEIGHT,
             CHAIR_SEAT_DEPTH,
         ));
-        cache.furniture_chair_seat = Some(handle.clone());
+        ctx.cache.furniture_chair_seat = Some(handle.clone());
         handle
     });
 
-    let back_mesh = cache.furniture_chair_back.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(CHAIR_BACK_WIDTH, config.back_height, 0.08));
-        cache.furniture_chair_back = Some(handle.clone());
+    let back_mesh = ctx.cache.furniture_chair_back.clone().unwrap_or_else(|| {
+        let handle = ctx
+            .meshes
+            .add(Cuboid::new(CHAIR_BACK_WIDTH, config.back_height, 0.08));
+        ctx.cache.furniture_chair_back = Some(handle.clone());
         handle
     });
 
-    let leg_mesh = cache.furniture_chair_leg.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(
+    let leg_mesh = ctx.cache.furniture_chair_leg.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cuboid::new(
             CHAIR_LEG_THICKNESS,
             CHAIR_HEIGHT - CHAIR_SEAT_HEIGHT,
             CHAIR_LEG_THICKNESS,
         ));
-        cache.furniture_chair_leg = Some(handle.clone());
+        ctx.cache.furniture_chair_leg = Some(handle.clone());
         handle
     });
 
-    let material = materials.add(StandardMaterial {
+    let material = ctx.materials.add(StandardMaterial {
         base_color: color,
         perceptual_roughness: 0.7,
         ..default()
@@ -2026,7 +1958,8 @@ pub fn spawn_chair(
     )
     .with_rotation(Quat::from_rotation_y(rotation_radians));
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -2038,7 +1971,8 @@ pub fn spawn_chair(
         .id();
 
     // Spawn seat
-    let seat = commands
+    let seat = ctx
+        .commands
         .spawn((
             Mesh3d(seat_mesh),
             MeshMaterial3d(material.clone()),
@@ -2047,10 +1981,11 @@ pub fn spawn_chair(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(seat);
+    ctx.commands.entity(parent).add_child(seat);
 
     // Spawn back
-    let back = commands
+    let back = ctx
+        .commands
         .spawn((
             Mesh3d(back_mesh),
             MeshMaterial3d(material.clone()),
@@ -2063,15 +1998,16 @@ pub fn spawn_chair(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(back);
+    ctx.commands.entity(parent).add_child(back);
 
     // Spawn armrests if requested
     if config.has_armrests {
         let armrest_size = Cuboid::new(0.12, CHAIR_ARMREST_HEIGHT, CHAIR_SEAT_DEPTH * 0.8);
-        let armrest_mesh = meshes.add(armrest_size);
+        let armrest_mesh = ctx.meshes.add(armrest_size);
 
         for x_sign in [1.0, -1.0] {
-            let armrest = commands
+            let armrest = ctx
+                .commands
                 .spawn((
                     Mesh3d(armrest_mesh.clone()),
                     MeshMaterial3d(material.clone()),
@@ -2084,7 +2020,7 @@ pub fn spawn_chair(
                     Visibility::default(),
                 ))
                 .id();
-            commands.entity(parent).add_child(armrest);
+            ctx.commands.entity(parent).add_child(armrest);
         }
     }
 
@@ -2094,7 +2030,8 @@ pub fn spawn_chair(
     let leg_y = (CHAIR_HEIGHT - CHAIR_SEAT_HEIGHT) / 2.0;
 
     for (x_sign, z_sign) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
-        let leg = commands
+        let leg = ctx
+            .commands
             .spawn((
                 Mesh3d(leg_mesh.clone()),
                 MeshMaterial3d(material.clone()),
@@ -2103,7 +2040,7 @@ pub fn spawn_chair(
                 Visibility::default(),
             ))
             .id();
-        commands.entity(parent).add_child(leg);
+        ctx.commands.entity(parent).add_child(leg);
     }
 
     parent
@@ -2119,27 +2056,20 @@ pub fn spawn_chair(
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `config` - Throne configuration (ornamentation_level, color)
-/// * `cache` - Mutable reference to mesh cache for reuse
 /// * `rotation_y` - Optional rotation in degrees around Y-axis
 ///
 /// # Returns
 ///
 /// Entity ID of the parent throne entity
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_throne(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: ThroneConfig,
-    cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
 ) -> Entity {
     let color = config.color_override.unwrap_or(THRONE_COLOR);
@@ -2147,40 +2077,42 @@ pub fn spawn_throne(
     let ornamentation = config.ornamentation_level.clamp(0.0, 1.0);
 
     // Get or create meshes
-    let seat_mesh = cache.furniture_throne_seat.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(
+    let seat_mesh = ctx.cache.furniture_throne_seat.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cuboid::new(
             THRONE_SEAT_WIDTH,
             THRONE_SEAT_HEIGHT,
             THRONE_SEAT_DEPTH,
         ));
-        cache.furniture_throne_seat = Some(handle.clone());
+        ctx.cache.furniture_throne_seat = Some(handle.clone());
         handle
     });
 
-    let back_mesh = cache.furniture_throne_back.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(THRONE_BACK_WIDTH, THRONE_BACK_HEIGHT, 0.12));
-        cache.furniture_throne_back = Some(handle.clone());
+    let back_mesh = ctx.cache.furniture_throne_back.clone().unwrap_or_else(|| {
+        let handle = ctx
+            .meshes
+            .add(Cuboid::new(THRONE_BACK_WIDTH, THRONE_BACK_HEIGHT, 0.12));
+        ctx.cache.furniture_throne_back = Some(handle.clone());
         handle
     });
 
-    let arm_mesh = cache.furniture_throne_arm.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(
+    let arm_mesh = ctx.cache.furniture_throne_arm.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cuboid::new(
             THRONE_ARM_WIDTH,
             THRONE_ARM_HEIGHT,
             THRONE_SEAT_DEPTH,
         ));
-        cache.furniture_throne_arm = Some(handle.clone());
+        ctx.cache.furniture_throne_arm = Some(handle.clone());
         handle
     });
 
-    let material = materials.add(StandardMaterial {
+    let material = ctx.materials.add(StandardMaterial {
         base_color: color,
         perceptual_roughness: 0.4,
         metallic: 0.5,
         ..default()
     });
 
-    let back_material = materials.add(StandardMaterial {
+    let back_material = ctx.materials.add(StandardMaterial {
         base_color: THRONE_BACKING,
         perceptual_roughness: 0.5,
         ..default()
@@ -2193,7 +2125,8 @@ pub fn spawn_throne(
     )
     .with_rotation(Quat::from_rotation_y(rotation_radians));
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -2205,7 +2138,8 @@ pub fn spawn_throne(
         .id();
 
     // Spawn seat
-    let seat = commands
+    let seat = ctx
+        .commands
         .spawn((
             Mesh3d(seat_mesh),
             MeshMaterial3d(material.clone()),
@@ -2214,10 +2148,11 @@ pub fn spawn_throne(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(seat);
+    ctx.commands.entity(parent).add_child(seat);
 
     // Spawn ornate back
-    let back = commands
+    let back = ctx
+        .commands
         .spawn((
             Mesh3d(back_mesh),
             MeshMaterial3d(back_material),
@@ -2230,11 +2165,12 @@ pub fn spawn_throne(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(back);
+    ctx.commands.entity(parent).add_child(back);
 
     // Spawn wide armrests
     for x_sign in [1.0, -1.0] {
-        let armrest = commands
+        let armrest = ctx
+            .commands
             .spawn((
                 Mesh3d(arm_mesh.clone()),
                 MeshMaterial3d(material.clone()),
@@ -2247,16 +2183,16 @@ pub fn spawn_throne(
                 Visibility::default(),
             ))
             .id();
-        commands.entity(parent).add_child(armrest);
+        ctx.commands.entity(parent).add_child(armrest);
     }
 
     // Add decorative spheres at corners if highly ornate
     if ornamentation > 0.5 {
         let ornament_radius = 0.1 * ornamentation;
-        let ornament_mesh = meshes.add(Sphere {
+        let ornament_mesh = ctx.meshes.add(Sphere {
             radius: ornament_radius,
         });
-        let ornament_material = materials.add(StandardMaterial {
+        let ornament_material = ctx.materials.add(StandardMaterial {
             base_color: color,
             perceptual_roughness: 0.3,
             metallic: 0.7,
@@ -2265,7 +2201,8 @@ pub fn spawn_throne(
 
         // Top corners of back
         for (x_sign, z_sign) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
-            let ornament = commands
+            let ornament = ctx
+                .commands
                 .spawn((
                     Mesh3d(ornament_mesh.clone()),
                     MeshMaterial3d(ornament_material.clone()),
@@ -2278,7 +2215,7 @@ pub fn spawn_throne(
                     Visibility::default(),
                 ))
                 .id();
-            commands.entity(parent).add_child(ornament);
+            ctx.commands.entity(parent).add_child(ornament);
         }
     }
 
@@ -2294,27 +2231,20 @@ pub fn spawn_throne(
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `config` - Chest configuration (size_multiplier, locked, color)
-/// * `cache` - Mutable reference to mesh cache for reuse
 /// * `rotation_y` - Optional rotation in degrees around Y-axis
 ///
 /// # Returns
 ///
 /// Entity ID of the parent chest entity
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_chest(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: ChestConfig,
-    cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
 ) -> Entity {
     let color = config.color_override.unwrap_or(CHEST_COLOR);
@@ -2324,19 +2254,23 @@ pub fn spawn_chest(
     let scaled_height = CHEST_HEIGHT * config.size_multiplier;
 
     // Get or create meshes
-    let body_mesh = cache.furniture_chest_body.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(CHEST_WIDTH, CHEST_HEIGHT, CHEST_DEPTH));
-        cache.furniture_chest_body = Some(handle.clone());
+    let body_mesh = ctx.cache.furniture_chest_body.clone().unwrap_or_else(|| {
+        let handle = ctx
+            .meshes
+            .add(Cuboid::new(CHEST_WIDTH, CHEST_HEIGHT, CHEST_DEPTH));
+        ctx.cache.furniture_chest_body = Some(handle.clone());
         handle
     });
 
-    let lid_mesh = cache.furniture_chest_lid.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(CHEST_WIDTH, CHEST_LID_HEIGHT, CHEST_DEPTH));
-        cache.furniture_chest_lid = Some(handle.clone());
+    let lid_mesh = ctx.cache.furniture_chest_lid.clone().unwrap_or_else(|| {
+        let handle = ctx
+            .meshes
+            .add(Cuboid::new(CHEST_WIDTH, CHEST_LID_HEIGHT, CHEST_DEPTH));
+        ctx.cache.furniture_chest_lid = Some(handle.clone());
         handle
     });
 
-    let material = materials.add(StandardMaterial {
+    let material = ctx.materials.add(StandardMaterial {
         base_color: color,
         perceptual_roughness: 0.8,
         ..default()
@@ -2349,7 +2283,8 @@ pub fn spawn_chest(
     )
     .with_rotation(Quat::from_rotation_y(rotation_radians));
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -2365,7 +2300,8 @@ pub fn spawn_chest(
         .id();
 
     // Spawn body
-    let body = commands
+    let body = ctx
+        .commands
         .spawn((
             Mesh3d(body_mesh),
             MeshMaterial3d(material.clone()),
@@ -2374,10 +2310,11 @@ pub fn spawn_chest(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(body);
+    ctx.commands.entity(parent).add_child(body);
 
     // Spawn lid
-    let lid = commands
+    let lid = ctx
+        .commands
         .spawn((
             Mesh3d(lid_mesh),
             MeshMaterial3d(material),
@@ -2386,7 +2323,7 @@ pub fn spawn_chest(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(lid);
+    ctx.commands.entity(parent).add_child(lid);
 
     parent
 }
@@ -2400,59 +2337,52 @@ pub fn spawn_chest(
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `config` - Torch configuration (lit, height, flame_color)
-/// * `cache` - Mutable reference to mesh cache for reuse
 /// * `rotation_y` - Optional rotation in degrees around Y-axis
 ///
 /// # Returns
 ///
 /// Entity ID of the parent torch entity
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_torch(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: TorchConfig,
-    cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
 ) -> Entity {
     let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
     let flame_color = config.flame_color.unwrap_or(TORCH_FLAME_COLOR);
 
     // Get or create meshes
-    let handle_mesh = cache.furniture_torch_handle.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cylinder {
+    let handle_mesh = ctx.cache.furniture_torch_handle.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cylinder {
             radius: TORCH_HANDLE_RADIUS,
             half_height: config.height / 2.0,
         });
-        cache.furniture_torch_handle = Some(handle.clone());
+        ctx.cache.furniture_torch_handle = Some(handle.clone());
         handle
     });
 
-    let flame_mesh = cache.furniture_torch_flame.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(
+    let flame_mesh = ctx.cache.furniture_torch_flame.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cuboid::new(
             TORCH_FLAME_WIDTH,
             TORCH_FLAME_HEIGHT,
             TORCH_FLAME_WIDTH,
         ));
-        cache.furniture_torch_flame = Some(handle.clone());
+        ctx.cache.furniture_torch_flame = Some(handle.clone());
         handle
     });
 
-    let handle_material = materials.add(StandardMaterial {
+    let handle_material = ctx.materials.add(StandardMaterial {
         base_color: TORCH_HANDLE_COLOR,
         perceptual_roughness: 0.9,
         ..default()
     });
 
-    let flame_material = materials.add(StandardMaterial {
+    let flame_material = ctx.materials.add(StandardMaterial {
         base_color: flame_color,
         emissive: if config.lit {
             // Use a brighter yellow-orange for emissive when lit
@@ -2471,7 +2401,8 @@ pub fn spawn_torch(
     )
     .with_rotation(Quat::from_rotation_y(rotation_radians));
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -2483,7 +2414,8 @@ pub fn spawn_torch(
         .id();
 
     // Spawn handle
-    let handle = commands
+    let handle = ctx
+        .commands
         .spawn((
             Mesh3d(handle_mesh),
             MeshMaterial3d(handle_material),
@@ -2492,10 +2424,11 @@ pub fn spawn_torch(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(handle);
+    ctx.commands.entity(parent).add_child(handle);
 
     // Spawn flame
-    let flame = commands
+    let flame = ctx
+        .commands
         .spawn((
             Mesh3d(flame_mesh),
             MeshMaterial3d(flame_material),
@@ -2504,7 +2437,7 @@ pub fn spawn_torch(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(flame);
+    ctx.commands.entity(parent).add_child(flame);
 
     parent
 }
@@ -2518,13 +2451,10 @@ pub fn spawn_torch(
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `config` - Column configuration (height, radius, style)
-/// * `cache` - Mutable reference to mesh cache for reuse
 ///
 /// # Returns
 ///
@@ -2533,71 +2463,72 @@ pub fn spawn_torch(
 /// # Examples
 ///
 /// ```text
-/// use antares::game::systems::procedural_meshes::spawn_column;
+/// use antares::game::systems::procedural_meshes::{spawn_column, MeshSpawnContext};
 /// use antares::domain::world::ColumnConfig;
 ///
+/// let mut ctx = MeshSpawnContext { commands: &mut commands, materials: &mut materials,
+///     meshes: &mut meshes, cache: &mut cache };
 /// let config = ColumnConfig::default();
-/// let column_entity = spawn_column(&mut commands, &mut materials, &mut meshes,
-///     position, map_id, config, &mut cache);
+/// let column_entity = spawn_column(&mut ctx, position, map_id, config);
 /// ```
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_column(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: crate::domain::world::ColumnConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     use crate::domain::world::ColumnStyle;
 
     // Get or create shaft mesh
-    let shaft_mesh = cache.structure_column_shaft.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cylinder {
+    let shaft_mesh = ctx.cache.structure_column_shaft.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cylinder {
             radius: config.radius,
             half_height: config.height / 2.0,
         });
-        cache.structure_column_shaft = Some(handle.clone());
+        ctx.cache.structure_column_shaft = Some(handle.clone());
         handle
     });
 
     // Get or create capital mesh (varies by style)
-    let capital_mesh = cache.structure_column_capital.clone().unwrap_or_else(|| {
-        let handle = meshes.add(match config.style {
-            ColumnStyle::Plain => {
-                // Simple flat top
-                Cylinder {
-                    radius: config.radius * 1.1,
-                    half_height: COLUMN_CAPITAL_HEIGHT / 2.0,
+    let capital_mesh = ctx
+        .cache
+        .structure_column_capital
+        .clone()
+        .unwrap_or_else(|| {
+            let handle = ctx.meshes.add(match config.style {
+                ColumnStyle::Plain => {
+                    // Simple flat top
+                    Cylinder {
+                        radius: config.radius * 1.1,
+                        half_height: COLUMN_CAPITAL_HEIGHT / 2.0,
+                    }
                 }
-            }
-            ColumnStyle::Doric => {
-                // Slightly wider capital with decorative ridges
-                Cylinder {
-                    radius: config.radius * 1.15,
-                    half_height: COLUMN_CAPITAL_HEIGHT / 2.0,
+                ColumnStyle::Doric => {
+                    // Slightly wider capital with decorative ridges
+                    Cylinder {
+                        radius: config.radius * 1.15,
+                        half_height: COLUMN_CAPITAL_HEIGHT / 2.0,
+                    }
                 }
-            }
-            ColumnStyle::Ionic => {
-                // Wider capital for scroll bases
-                Cylinder {
-                    radius: config.radius * 1.25,
-                    half_height: COLUMN_CAPITAL_HEIGHT / 2.0,
+                ColumnStyle::Ionic => {
+                    // Wider capital for scroll bases
+                    Cylinder {
+                        radius: config.radius * 1.25,
+                        half_height: COLUMN_CAPITAL_HEIGHT / 2.0,
+                    }
                 }
-            }
+            });
+            ctx.cache.structure_column_capital = Some(handle.clone());
+            handle
         });
-        cache.structure_column_capital = Some(handle.clone());
-        handle
-    });
 
-    let shaft_material = materials.add(StandardMaterial {
+    let shaft_material = ctx.materials.add(StandardMaterial {
         base_color: STRUCTURE_STONE_COLOR,
         perceptual_roughness: 0.8,
         ..default()
     });
 
-    let capital_material = materials.add(StandardMaterial {
+    let capital_material = ctx.materials.add(StandardMaterial {
         base_color: match config.style {
             ColumnStyle::Plain => STRUCTURE_STONE_COLOR,
             ColumnStyle::Doric => STRUCTURE_STONE_COLOR,
@@ -2613,7 +2544,8 @@ pub fn spawn_column(
         position.y as f32 + TILE_CENTER_OFFSET,
     );
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -2625,9 +2557,10 @@ pub fn spawn_column(
         .id();
 
     // Spawn base
-    let base = commands
+    let base = ctx
+        .commands
         .spawn((
-            Mesh3d(meshes.add(Cylinder {
+            Mesh3d(ctx.meshes.add(Cylinder {
                 radius: config.radius * 1.2,
                 half_height: COLUMN_BASE_HEIGHT / 2.0,
             })),
@@ -2637,10 +2570,11 @@ pub fn spawn_column(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(base);
+    ctx.commands.entity(parent).add_child(base);
 
     // Spawn shaft
-    let shaft = commands
+    let shaft = ctx
+        .commands
         .spawn((
             Mesh3d(shaft_mesh),
             MeshMaterial3d(shaft_material),
@@ -2649,10 +2583,11 @@ pub fn spawn_column(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(shaft);
+    ctx.commands.entity(parent).add_child(shaft);
 
     // Spawn capital
-    let capital = commands
+    let capital = ctx
+        .commands
         .spawn((
             Mesh3d(capital_mesh),
             MeshMaterial3d(capital_material),
@@ -2661,7 +2596,7 @@ pub fn spawn_column(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(capital);
+    ctx.commands.entity(parent).add_child(capital);
 
     parent
 }
@@ -2675,13 +2610,10 @@ pub fn spawn_column(
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `config` - Arch configuration (width, height, thickness)
-/// * `cache` - Mutable reference to mesh cache for reuse
 ///
 /// # Returns
 ///
@@ -2690,52 +2622,49 @@ pub fn spawn_column(
 /// # Examples
 ///
 /// ```text
-/// use antares::game::systems::procedural_meshes::spawn_arch;
+/// use antares::game::systems::procedural_meshes::{spawn_arch, MeshSpawnContext};
 /// use antares::domain::world::ArchConfig;
 ///
+/// let mut ctx = MeshSpawnContext { commands: &mut commands, materials: &mut materials,
+///     meshes: &mut meshes, cache: &mut cache };
 /// let config = ArchConfig::default();
-/// let arch_entity = spawn_arch(&mut commands, &mut materials, &mut meshes,
-///     position, map_id, config, &mut cache);
+/// let arch_entity = spawn_arch(&mut ctx, position, map_id, config);
 /// ```
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_arch(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: crate::domain::world::ArchConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     // Get or create arch curve mesh
-    let arch_mesh = cache.structure_arch_curve.clone().unwrap_or_else(|| {
+    let arch_mesh = ctx.cache.structure_arch_curve.clone().unwrap_or_else(|| {
         // Create a torus segment for the arch (approximation)
-        let handle = meshes.add(Torus {
+        let handle = ctx.meshes.add(Torus {
             major_radius: ARCH_INNER_RADIUS,
             minor_radius: config.thickness / 2.0,
         });
-        cache.structure_arch_curve = Some(handle.clone());
+        ctx.cache.structure_arch_curve = Some(handle.clone());
         handle
     });
 
     // Get or create support mesh
-    let support_mesh = cache.structure_arch_support.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cuboid::new(
+    let support_mesh = ctx.cache.structure_arch_support.clone().unwrap_or_else(|| {
+        let handle = ctx.meshes.add(Cuboid::new(
             ARCH_SUPPORT_WIDTH,
             ARCH_SUPPORT_HEIGHT,
             config.thickness,
         ));
-        cache.structure_arch_support = Some(handle.clone());
+        ctx.cache.structure_arch_support = Some(handle.clone());
         handle
     });
 
-    let arch_material = materials.add(StandardMaterial {
+    let arch_material = ctx.materials.add(StandardMaterial {
         base_color: STRUCTURE_STONE_COLOR,
         perceptual_roughness: 0.8,
         ..default()
     });
 
-    let support_material = materials.add(StandardMaterial {
+    let support_material = ctx.materials.add(StandardMaterial {
         base_color: STRUCTURE_MARBLE_COLOR,
         perceptual_roughness: 0.75,
         ..default()
@@ -2747,7 +2676,8 @@ pub fn spawn_arch(
         position.y as f32 + TILE_CENTER_OFFSET,
     );
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -2759,7 +2689,8 @@ pub fn spawn_arch(
         .id();
 
     // Spawn arch curve (centered and scaled to fit width/height)
-    let arch = commands
+    let arch = ctx
+        .commands
         .spawn((
             Mesh3d(arch_mesh),
             MeshMaterial3d(arch_material),
@@ -2772,10 +2703,11 @@ pub fn spawn_arch(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(arch);
+    ctx.commands.entity(parent).add_child(arch);
 
     // Spawn left support
-    let left_support = commands
+    let left_support = ctx
+        .commands
         .spawn((
             Mesh3d(support_mesh.clone()),
             MeshMaterial3d(support_material.clone()),
@@ -2788,10 +2720,11 @@ pub fn spawn_arch(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(left_support);
+    ctx.commands.entity(parent).add_child(left_support);
 
     // Spawn right support
-    let right_support = commands
+    let right_support = ctx
+        .commands
         .spawn((
             Mesh3d(support_mesh),
             MeshMaterial3d(support_material),
@@ -2804,12 +2737,12 @@ pub fn spawn_arch(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(right_support);
+    ctx.commands.entity(parent).add_child(right_support);
 
     parent
 }
 
-// ==================== Phase 5: Performance & Polish ====================
+// ==================== Performance & Polish ====================
 
 /// Calculate the mesh complexity level for LOD selection
 ///
@@ -2846,11 +2779,11 @@ pub fn calculate_lod_level(vertex_count: usize) -> crate::domain::world::DetailL
 ///
 /// Simplified mesh handle
 pub fn create_simplified_mesh(mesh: &Mesh, reduction_ratio: f32) -> Mesh {
-    // For Phase 5, implement basic vertex reduction by sampling
+    // Implement basic vertex reduction by sampling
     // In a full implementation, this would use proper mesh decimation
     let reduction_ratio = reduction_ratio.clamp(0.0, 0.9);
 
-    // Return the same mesh for now - full LOD implementation deferred to Phase 6
+    // Return the same mesh for now - full LOD implementation deferred
     // This is a placeholder that maintains the mesh exactly
     if reduction_ratio == 0.0 {
         mesh.clone()
@@ -3086,7 +3019,7 @@ mod tests {
         assert!(cache.tree_trunk.is_none(), "Cache should start empty");
     }
 
-    // ==================== Phase 2: Shrub & Grass Tests ====================
+    // ==================== Shrub & Grass Tests ====================
 
     /// Tests that cache properly stores shrub stem meshes
     #[test]
@@ -3213,7 +3146,6 @@ mod tests {
         let _ = BENCH_HEIGHT;
         let _ = TABLE_HEIGHT;
         let _ = CHAIR_HEIGHT;
-        let _ = THRONE_HEIGHT;
         let _ = CHEST_HEIGHT;
         let _ = TORCH_HANDLE_HEIGHT;
     }
@@ -3494,20 +3426,18 @@ mod tests {
     fn test_structure_color_constants_valid() {
         let _ = STRUCTURE_STONE_COLOR;
         let _ = STRUCTURE_MARBLE_COLOR;
-        let _ = STRUCTURE_IRON_COLOR;
-        let _ = STRUCTURE_GOLD_COLOR;
     }
 
     /// Tests structure dimension constants are positive
     #[test]
     fn test_structure_dimensions_positive() {
         // Constants verified at compile time via their usage
-        let _ = COLUMN_SHAFT_RADIUS;
         let _ = COLUMN_CAPITAL_HEIGHT;
         let _ = ARCH_INNER_RADIUS;
-        let _ = ARCH_OUTER_RADIUS;
-        let _ = WALL_THICKNESS;
-        let _ = RAILING_POST_RADIUS;
+        let _ = ARCH_SUPPORT_WIDTH;
+        let _ = ARCH_SUPPORT_HEIGHT;
+        let _ = DOOR_FRAME_THICKNESS;
+        let _ = DOOR_FRAME_BORDER;
     }
 
     /// Tests cache properly stores structure component meshes
@@ -3525,7 +3455,7 @@ mod tests {
         assert!(cache.structure_railing_bar.is_none());
     }
 
-    // ==================== Phase 2: Door Frame Tests ====================
+    // ==================== Door Frame Tests ====================
 
     /// Tests door frame constants are valid and sensible
     #[test]
@@ -3644,16 +3574,13 @@ mod tests {
             let config = DoorFrameConfig::default();
             let position = crate::domain::types::Position::new(0, 0);
             let map_id: crate::domain::types::MapId = 1;
-            spawn_door_frame(
-                &mut commands,
-                &mut materials,
-                &mut meshes,
-                position,
-                map_id,
-                config,
-                &mut cache,
-                None,
-            );
+            let mut ctx = MeshSpawnContext {
+                commands: &mut commands,
+                materials: &mut materials,
+                meshes: &mut meshes,
+                cache: &mut cache,
+            };
+            spawn_door_frame(&mut ctx, position, map_id, config, None);
         }
 
         let mut app = bevy::app::App::new();
@@ -3693,15 +3620,18 @@ mod tests {
             let frame_config = DoorFrameConfig::default();
             let position = crate::domain::types::Position::new(2, 3);
             let map_id: crate::domain::types::MapId = 1;
+            let mut ctx = MeshSpawnContext {
+                commands: &mut commands,
+                materials: &mut materials,
+                meshes: &mut meshes,
+                cache: &mut cache,
+            };
             spawn_door_with_frame(
-                &mut commands,
-                &mut materials,
-                &mut meshes,
+                &mut ctx,
                 position,
                 map_id,
                 door_config,
                 frame_config,
-                &mut cache,
                 Some(90.0),
             );
         }
@@ -3748,16 +3678,13 @@ mod tests {
             let config = DoorFrameConfig::default();
             let position = crate::domain::types::Position::new(4, 7);
             let map_id: crate::domain::types::MapId = 42;
-            spawn_door_frame(
-                &mut commands,
-                &mut materials,
-                &mut meshes,
-                position,
-                map_id,
-                config,
-                &mut cache,
-                None,
-            );
+            let mut ctx = MeshSpawnContext {
+                commands: &mut commands,
+                materials: &mut materials,
+                meshes: &mut meshes,
+                cache: &mut cache,
+            };
+            spawn_door_frame(&mut ctx, position, map_id, config, None);
         }
 
         let mut app = bevy::app::App::new();
@@ -3802,7 +3729,7 @@ mod tests {
         );
     }
 
-    // ==================== Phase 5: Performance & Polish Tests ====================
+    // ==================== Performance & Polish Tests ====================
 
     /// Tests DetailLevel from_distance for full quality
     #[test]
@@ -4034,7 +3961,7 @@ mod tests {
         // Test passes if Clone trait is implemented
     }
 
-    // ==================== Phase 3: Tree Material Cache Tests ====================
+    // ==================== Tree Material Cache Tests ====================
 
     /// Tests that foliage_texture_path returns a non-empty .png path for all TreeType variants
     #[test]
@@ -4151,26 +4078,44 @@ mod tests {
     }
 }
 
+/// Parameters for spawning a furniture item, bundling the properties that
+/// would otherwise push `spawn_furniture` over clippy's 7-argument threshold.
+#[derive(Clone, Debug)]
+pub struct FurnitureSpawnParams {
+    /// Type of furniture to spawn (Bench, Table, Chair, …)
+    pub furniture_type: world::FurnitureType,
+    /// Optional Y-axis rotation in degrees
+    pub rotation_y: Option<f32>,
+    /// Size multiplier applied to default dimensions
+    pub scale: f32,
+    /// Material type (Wood, Stone, Metal, Gold) — determines base colour
+    pub material_type: world::FurnitureMaterial,
+    /// Furniture flags (lit, locked, blocking)
+    pub flags: world::FurnitureFlags,
+    /// Optional RGB colour tint `[0.0..1.0]` applied multiplicatively
+    pub color_tint: Option<[f32; 3]>,
+    /// Optional item ID required to unlock a `Door`; `None` means no key
+    pub key_item_id: Option<types::ItemId>,
+}
+
 /// Spawns a furniture item based on type with custom properties
 ///
-/// The `key_item_id` parameter sets the required key item on [`DoorState`] for
-/// `FurnitureType::Door` entities; `None` means the door has no key requirement.
-#[allow(clippy::too_many_arguments)]
+/// The `key_item_id` field on [`FurnitureSpawnParams`] sets the required key
+/// item on [`DoorState`] for `FurnitureType::Door` entities; `None` means the
+/// door has no key requirement.
 pub fn spawn_furniture(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
-    furniture_type: world::FurnitureType,
-    rotation_y: Option<f32>,
-    scale: f32,
-    material_type: world::FurnitureMaterial,
-    flags: &world::FurnitureFlags,
-    color_tint: Option<[f32; 3]>,
-    key_item_id: Option<types::ItemId>,
-    cache: &mut ProceduralMeshCache,
+    params: &FurnitureSpawnParams,
 ) -> Entity {
+    let furniture_type = params.furniture_type;
+    let rotation_y = params.rotation_y;
+    let scale = params.scale;
+    let material_type = params.material_type;
+    let flags = &params.flags;
+    let color_tint = params.color_tint;
+    let key_item_id = params.key_item_id;
     use crate::domain::world::FurnitureType;
 
     // Apply material properties based on material_type from domain model
@@ -4195,9 +4140,7 @@ pub fn spawn_furniture(
                 ..Default::default()
             };
             config.length *= scale;
-            spawn_bench(
-                commands, materials, meshes, position, map_id, config, cache, rotation_y,
-            )
+            spawn_bench(ctx, position, map_id, config, rotation_y)
         }
         FurnitureType::Table => {
             let mut config = TableConfig {
@@ -4206,36 +4149,28 @@ pub fn spawn_furniture(
             };
             config.width *= scale;
             config.depth *= scale;
-            spawn_table(
-                commands, materials, meshes, position, map_id, config, cache, rotation_y,
-            )
+            spawn_table(ctx, position, map_id, config, rotation_y)
         }
         FurnitureType::Chair => {
             let config = ChairConfig {
                 color_override: Some(final_color),
                 ..Default::default()
             };
-            spawn_chair(
-                commands, materials, meshes, position, map_id, config, cache, rotation_y,
-            )
+            spawn_chair(ctx, position, map_id, config, rotation_y)
         }
         FurnitureType::Throne => {
             let config = ThroneConfig {
                 color_override: Some(final_color),
                 ..Default::default()
             };
-            spawn_throne(
-                commands, materials, meshes, position, map_id, config, cache, rotation_y,
-            )
+            spawn_throne(ctx, position, map_id, config, rotation_y)
         }
         FurnitureType::Torch => {
             let config = TorchConfig {
                 lit: flags.lit,
                 ..Default::default()
             };
-            spawn_torch(
-                commands, materials, meshes, position, map_id, config, cache, rotation_y,
-            )
+            spawn_torch(ctx, position, map_id, config, rotation_y)
         }
         FurnitureType::Chest => {
             let config = ChestConfig {
@@ -4243,9 +4178,7 @@ pub fn spawn_furniture(
                 locked: flags.locked,
                 size_multiplier: scale,
             };
-            spawn_chest(
-                commands, materials, meshes, position, map_id, config, cache, rotation_y,
-            )
+            spawn_chest(ctx, position, map_id, config, rotation_y)
         }
         FurnitureType::Barrel => {
             let mut config = BarrelConfig {
@@ -4254,9 +4187,7 @@ pub fn spawn_furniture(
             };
             config.height *= scale;
             config.radius *= scale;
-            spawn_barrel(
-                commands, materials, meshes, position, map_id, config, cache, rotation_y,
-            )
+            spawn_barrel(ctx, position, map_id, config, rotation_y)
         }
         FurnitureType::Bookshelf => {
             let mut config = BookshelfConfig {
@@ -4264,9 +4195,7 @@ pub fn spawn_furniture(
                 ..Default::default()
             };
             config.height *= scale;
-            spawn_bookshelf(
-                commands, materials, meshes, position, map_id, config, cache, rotation_y,
-            )
+            spawn_bookshelf(ctx, position, map_id, config, rotation_y)
         }
         FurnitureType::Door => {
             let door_config = DoorConfig {
@@ -4279,17 +4208,8 @@ pub fn spawn_furniture(
                 color_override: Some(final_color),
             };
             let frame_config = crate::domain::world::DoorFrameConfig::default();
-            let (door_entity, _frame_entity) = spawn_door_with_frame(
-                commands,
-                materials,
-                meshes,
-                position,
-                map_id,
-                door_config,
-                frame_config,
-                cache,
-                rotation_y,
-            );
+            let (door_entity, _frame_entity) =
+                spawn_door_with_frame(ctx, position, map_id, door_config, frame_config, rotation_y);
             // Attach interaction components so map-loaded doors can be queried
             // and interacted with through the split exploration input flow.
             let rotation_radians = rotation_y.unwrap_or(0.0_f32).to_radians();
@@ -4298,7 +4218,7 @@ pub fn spawn_furniture(
                 ds.key_item_id = key_item_id;
                 ds
             };
-            commands.entity(door_entity).insert((
+            ctx.commands.entity(door_entity).insert((
                 FurnitureEntity::new(world::FurnitureType::Door, flags.blocking),
                 door_state,
                 Interactable::with_distance(InteractionType::OpenDoor, 1.5),
@@ -4330,28 +4250,24 @@ impl Default for BarrelConfig {
 }
 
 /// Spawns a barrel
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_barrel(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: BarrelConfig,
-    _cache: &mut ProceduralMeshCache, // Unused for now unless we cache barrel parts
     rotation_y: Option<f32>,
 ) -> Entity {
     let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
 
-    let mesh = meshes.add(Cylinder::new(config.radius, config.height));
+    let mesh = ctx.meshes.add(Cylinder::new(config.radius, config.height));
 
-    let material = materials.add(StandardMaterial {
+    let material = ctx.materials.add(StandardMaterial {
         base_color: config.color_override.unwrap_or(Color::srgb(0.5, 0.35, 0.2)),
         perceptual_roughness: 0.8,
         ..default()
     });
 
-    commands
+    ctx.commands
         .spawn((
             Mesh3d(mesh),
             MeshMaterial3d(material),
@@ -4450,30 +4366,33 @@ impl Default for DoorConfig {
 }
 
 /// Spawns a bookshelf using multiple cuboids
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_bookshelf(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: BookshelfConfig,
-    _cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
 ) -> Entity {
     let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
 
-    let back_mesh = meshes.add(Cuboid::new(config.width, config.height, 0.05));
-    let side_mesh = meshes.add(Cuboid::new(0.05, config.height, config.depth));
-    let shelf_mesh = meshes.add(Cuboid::new(config.width - 0.1, 0.05, config.depth - 0.05));
+    let back_mesh = ctx
+        .meshes
+        .add(Cuboid::new(config.width, config.height, 0.05));
+    let side_mesh = ctx
+        .meshes
+        .add(Cuboid::new(0.05, config.height, config.depth));
+    let shelf_mesh = ctx
+        .meshes
+        .add(Cuboid::new(config.width - 0.1, 0.05, config.depth - 0.05));
 
-    let material = materials.add(StandardMaterial {
+    let material = ctx.materials.add(StandardMaterial {
         base_color: config.color_override.unwrap_or(Color::srgb(0.4, 0.25, 0.1)),
         perceptual_roughness: 0.9,
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -4490,7 +4409,8 @@ pub fn spawn_bookshelf(
         .id();
 
     // Back panel
-    let back = commands
+    let back = ctx
+        .commands
         .spawn((
             Mesh3d(back_mesh),
             MeshMaterial3d(material.clone()),
@@ -4499,10 +4419,11 @@ pub fn spawn_bookshelf(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(back);
+    ctx.commands.entity(parent).add_child(back);
 
     // Side panels
-    let side_l = commands
+    let side_l = ctx
+        .commands
         .spawn((
             Mesh3d(side_mesh.clone()),
             MeshMaterial3d(material.clone()),
@@ -4511,9 +4432,10 @@ pub fn spawn_bookshelf(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(side_l);
+    ctx.commands.entity(parent).add_child(side_l);
 
-    let side_r = commands
+    let side_r = ctx
+        .commands
         .spawn((
             Mesh3d(side_mesh),
             MeshMaterial3d(material.clone()),
@@ -4522,13 +4444,14 @@ pub fn spawn_bookshelf(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(side_r);
+    ctx.commands.entity(parent).add_child(side_r);
 
     // Shelves
     let shelf_count = 4;
     for i in 0..=shelf_count {
         let h = (i as f32 / shelf_count as f32) * config.height;
-        let shelf = commands
+        let shelf = ctx
+            .commands
             .spawn((
                 Mesh3d(shelf_mesh.clone()),
                 MeshMaterial3d(material.clone()),
@@ -4537,7 +4460,7 @@ pub fn spawn_bookshelf(
                 Visibility::default(),
             ))
             .id();
-        commands.entity(parent).add_child(shelf);
+        ctx.commands.entity(parent).add_child(shelf);
     }
 
     parent
@@ -4556,27 +4479,20 @@ pub fn spawn_bookshelf(
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `config` - Door configuration (width, height, thickness, plank_count, studs, hinges, color)
-/// * `cache` - Mutable reference to mesh cache for reuse
 /// * `rotation_y` - Optional rotation in degrees around Y-axis
 ///
 /// # Returns
 ///
 /// Entity ID of the parent door entity
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_door(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: DoorConfig,
-    cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
 ) -> Entity {
     let color = config.color_override.unwrap_or(DOOR_PANEL_COLOR);
@@ -4584,7 +4500,7 @@ pub fn spawn_door(
 
     // ── Materials ──────────────────────────────────────────────────────────
     // Wood panel material — warm, rough surface
-    let panel_material = materials.add(StandardMaterial {
+    let panel_material = ctx.materials.add(StandardMaterial {
         base_color: color,
         perceptual_roughness: 0.85,
         metallic: 0.0,
@@ -4597,7 +4513,7 @@ pub fn spawn_door(
         color.to_srgba().green * 0.45,
         color.to_srgba().blue * 0.45,
     );
-    let metal_material = materials.add(StandardMaterial {
+    let metal_material = ctx.materials.add(StandardMaterial {
         base_color: metal_color,
         perceptual_roughness: 0.4,
         metallic: 0.85,
@@ -4606,29 +4522,37 @@ pub fn spawn_door(
 
     // ── Cached meshes ──────────────────────────────────────────────────────
     // Main door panel
-    let panel_mesh = cache.get_or_create_furniture_mesh("door_panel", meshes, || {
-        Cuboid::new(config.width, config.height, config.thickness).into()
-    });
+    let panel_mesh = ctx
+        .cache
+        .get_or_create_furniture_mesh("door_panel", ctx.meshes, || {
+            Cuboid::new(config.width, config.height, config.thickness).into()
+        });
 
     // Cross brace strip (full width of door, thin and slightly proud)
-    let brace_mesh = cache.get_or_create_furniture_mesh("door_brace", meshes, || {
-        Cuboid::new(
-            config.width,
-            DOOR_BRACE_HEIGHT,
-            config.thickness + DOOR_BRACE_PROUD * 2.0,
-        )
-        .into()
-    });
+    let brace_mesh = ctx
+        .cache
+        .get_or_create_furniture_mesh("door_brace", ctx.meshes, || {
+            Cuboid::new(
+                config.width,
+                DOOR_BRACE_HEIGHT,
+                config.thickness + DOOR_BRACE_PROUD * 2.0,
+            )
+            .into()
+        });
 
     // Hinge cuboid (left edge)
-    let hinge_mesh = cache.get_or_create_furniture_mesh("door_hinge", meshes, || {
-        Cuboid::new(DOOR_HINGE_WIDTH, DOOR_HINGE_HEIGHT, config.thickness + 0.02).into()
-    });
+    let hinge_mesh = ctx
+        .cache
+        .get_or_create_furniture_mesh("door_hinge", ctx.meshes, || {
+            Cuboid::new(DOOR_HINGE_WIDTH, DOOR_HINGE_HEIGHT, config.thickness + 0.02).into()
+        });
 
     // Handle cylinder (horizontal, pointing along Z so it protrudes from the face)
-    let handle_mesh = cache.get_or_create_furniture_mesh("door_handle", meshes, || {
-        Cylinder::new(DOOR_HANDLE_RADIUS, DOOR_HANDLE_LENGTH).into()
-    });
+    let handle_mesh = ctx
+        .cache
+        .get_or_create_furniture_mesh("door_handle", ctx.meshes, || {
+            Cylinder::new(DOOR_HANDLE_RADIUS, DOOR_HANDLE_LENGTH).into()
+        });
 
     // ── Parent entity ──────────────────────────────────────────────────────
     let transform = Transform::from_xyz(
@@ -4638,7 +4562,8 @@ pub fn spawn_door(
     )
     .with_rotation(Quat::from_rotation_y(rotation_radians));
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -4650,7 +4575,8 @@ pub fn spawn_door(
         .id();
 
     // ── Main panel ─────────────────────────────────────────────────────────
-    let panel = commands
+    let panel = ctx
+        .commands
         .spawn((
             Mesh3d(panel_mesh),
             MeshMaterial3d(panel_material.clone()),
@@ -4659,13 +4585,13 @@ pub fn spawn_door(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(panel);
+    ctx.commands.entity(parent).add_child(panel);
 
     // ── Plank dividers ─────────────────────────────────────────────────────
     // Thin raised strips running horizontally across the panel to simulate planks
     if config.plank_count > 1 {
         let strip_height = 0.025_f32;
-        let strip_mesh = meshes.add(Cuboid::new(
+        let strip_mesh = ctx.meshes.add(Cuboid::new(
             config.width + 0.005,
             strip_height,
             config.thickness + DOOR_BRACE_PROUD,
@@ -4673,7 +4599,8 @@ pub fn spawn_door(
         let plank_gap = config.height / config.plank_count as f32;
         for i in 1..config.plank_count {
             let y = i as f32 * plank_gap;
-            let strip = commands
+            let strip = ctx
+                .commands
                 .spawn((
                     Mesh3d(strip_mesh.clone()),
                     MeshMaterial3d(panel_material.clone()),
@@ -4682,7 +4609,7 @@ pub fn spawn_door(
                     Visibility::default(),
                 ))
                 .id();
-            commands.entity(parent).add_child(strip);
+            ctx.commands.entity(parent).add_child(strip);
         }
     }
 
@@ -4690,7 +4617,8 @@ pub fn spawn_door(
     // Two heavy horizontal braces at 1/3 and 2/3 height for structural appearance
     for frac in [1.0_f32 / 3.0, 2.0 / 3.0] {
         let y = frac * config.height;
-        let brace = commands
+        let brace = ctx
+            .commands
             .spawn((
                 Mesh3d(brace_mesh.clone()),
                 MeshMaterial3d(panel_material.clone()),
@@ -4699,7 +4627,7 @@ pub fn spawn_door(
                 Visibility::default(),
             ))
             .id();
-        commands.entity(parent).add_child(brace);
+        ctx.commands.entity(parent).add_child(brace);
     }
 
     // ── Hinges ─────────────────────────────────────────────────────────────
@@ -4707,7 +4635,8 @@ pub fn spawn_door(
         let hinge_x = -(config.width / 2.0) + DOOR_HINGE_WIDTH / 2.0;
         for frac in [0.25_f32, 0.75] {
             let y = frac * config.height;
-            let hinge = commands
+            let hinge = ctx
+                .commands
                 .spawn((
                     Mesh3d(hinge_mesh.clone()),
                     MeshMaterial3d(metal_material.clone()),
@@ -4716,7 +4645,7 @@ pub fn spawn_door(
                     Visibility::default(),
                 ))
                 .id();
-            commands.entity(parent).add_child(hinge);
+            ctx.commands.entity(parent).add_child(hinge);
         }
     }
 
@@ -4725,7 +4654,8 @@ pub fn spawn_door(
     let handle_x = config.width / 2.0 - 0.12;
     let handle_y = config.height * 0.45; // Slightly below mid-height (ergonomic)
     let handle_z = config.thickness / 2.0 + DOOR_HANDLE_LENGTH / 2.0 + 0.01;
-    let handle = commands
+    let handle = ctx
+        .commands
         .spawn((
             Mesh3d(handle_mesh),
             MeshMaterial3d(metal_material),
@@ -4735,7 +4665,7 @@ pub fn spawn_door(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(handle);
+    ctx.commands.entity(parent).add_child(handle);
 
     parent
 }
@@ -4758,8 +4688,8 @@ pub fn spawn_door(
 /// * `meshes`     - Mesh asset storage
 /// * `position`   - Tile position in world coordinates
 /// * `map_id`     - Map identifier used for entity cleanup on map unload
+/// * `ctx`        - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `config`     - Door frame configuration (width, height, frame_thickness)
-/// * `cache`      - Mutable reference to mesh cache for reuse across tiles
 /// * `rotation_y` - Optional Y-axis rotation in degrees (0 = door faces +Z)
 ///
 /// # Returns
@@ -4770,24 +4700,19 @@ pub fn spawn_door(
 /// # Examples
 ///
 /// ```text
-/// use antares::game::systems::procedural_meshes::spawn_door_frame;
+/// use antares::game::systems::procedural_meshes::{spawn_door_frame, MeshSpawnContext};
 /// use antares::domain::world::DoorFrameConfig;
 ///
+/// let mut ctx = MeshSpawnContext { commands: &mut commands, materials: &mut materials,
+///     meshes: &mut meshes, cache: &mut cache };
 /// let config = DoorFrameConfig::default();
-/// let frame = spawn_door_frame(
-///     &mut commands, &mut materials, &mut meshes,
-///     position, map_id, config, &mut cache, None,
-/// );
+/// let frame = spawn_door_frame(&mut ctx, position, map_id, config, None);
 /// ```
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_door_frame(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: crate::domain::world::DoorFrameConfig,
-    cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
 ) -> Entity {
     let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
@@ -4795,7 +4720,7 @@ pub fn spawn_door_frame(
     // ── Material ───────────────────────────────────────────────────────────
     // Stone color matches columns and arches — architectural structures share
     // the same visual language.
-    let frame_material = materials.add(StandardMaterial {
+    let frame_material = ctx.materials.add(StandardMaterial {
         base_color: STRUCTURE_STONE_COLOR,
         perceptual_roughness: 0.85,
         metallic: 0.0,
@@ -4807,16 +4732,20 @@ pub fn spawn_door_frame(
     // Height extends to cover the full opening plus the lintel thickness so
     // there is no gap at the top corner joints.
     let post_height = config.height + config.frame_thickness;
-    let post_mesh = cache.get_or_create_structure_mesh("door_frame", meshes, || {
-        Cuboid::new(config.frame_thickness, post_height, config.frame_thickness).into()
-    });
+    let post_mesh = ctx
+        .cache
+        .get_or_create_structure_mesh("door_frame", ctx.meshes, || {
+            Cuboid::new(config.frame_thickness, post_height, config.frame_thickness).into()
+        });
 
     // ── Lintel mesh ────────────────────────────────────────────────────────
     // The lintel spans the full outer width of the frame (opening + both posts).
     let lintel_width = config.width + 2.0 * config.frame_thickness;
-    let lintel_mesh = cache.get_or_create_structure_mesh("door_frame_lintel", meshes, || {
-        Cuboid::new(lintel_width, config.frame_thickness, config.frame_thickness).into()
-    });
+    let lintel_mesh =
+        ctx.cache
+            .get_or_create_structure_mesh("door_frame_lintel", ctx.meshes, || {
+                Cuboid::new(lintel_width, config.frame_thickness, config.frame_thickness).into()
+            });
 
     // ── Parent entity ──────────────────────────────────────────────────────
     let transform = Transform::from_xyz(
@@ -4826,7 +4755,8 @@ pub fn spawn_door_frame(
     )
     .with_rotation(Quat::from_rotation_y(rotation_radians));
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             transform,
             GlobalTransform::default(),
@@ -4842,7 +4772,8 @@ pub fn spawn_door_frame(
     let post_x = config.width / 2.0 + config.frame_thickness / 2.0;
     let post_y = post_height / 2.0;
 
-    let left_post = commands
+    let left_post = ctx
+        .commands
         .spawn((
             Mesh3d(post_mesh.clone()),
             MeshMaterial3d(frame_material.clone()),
@@ -4851,10 +4782,11 @@ pub fn spawn_door_frame(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(left_post);
+    ctx.commands.entity(parent).add_child(left_post);
 
     // ── Right post ─────────────────────────────────────────────────────────
-    let right_post = commands
+    let right_post = ctx
+        .commands
         .spawn((
             Mesh3d(post_mesh),
             MeshMaterial3d(frame_material.clone()),
@@ -4863,14 +4795,15 @@ pub fn spawn_door_frame(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(right_post);
+    ctx.commands.entity(parent).add_child(right_post);
 
     // ── Lintel ─────────────────────────────────────────────────────────────
     // Sits on top of the opening.  Its bottom edge is at y = config.height and
     // its center is half a frame_thickness above that.
     let lintel_y = config.height + config.frame_thickness / 2.0;
 
-    let lintel = commands
+    let lintel = ctx
+        .commands
         .spawn((
             Mesh3d(lintel_mesh),
             MeshMaterial3d(frame_material),
@@ -4879,7 +4812,7 @@ pub fn spawn_door_frame(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(lintel);
+    ctx.commands.entity(parent).add_child(lintel);
 
     parent
 }
@@ -4900,14 +4833,11 @@ pub fn spawn_door_frame(
 ///
 /// # Arguments
 ///
-/// * `commands`     - Bevy Commands for entity spawning
-/// * `materials`    - Material asset storage
-/// * `meshes`       - Mesh asset storage
+/// * `ctx`          - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
 /// * `position`     - Tile position in world coordinates
 /// * `map_id`       - Map identifier for entity cleanup
 /// * `door_config`  - Door panel configuration
 /// * `frame_config` - Door frame configuration
-/// * `cache`        - Mutable reference to mesh cache for reuse
 /// * `rotation_y`   - Optional Y-axis rotation in degrees applied to both entities
 ///
 /// # Returns
@@ -4920,49 +4850,28 @@ pub fn spawn_door_frame(
 /// # Examples
 ///
 /// ```text
-/// use antares::game::systems::procedural_meshes::{spawn_door_with_frame, DoorConfig};
+/// use antares::game::systems::procedural_meshes::{spawn_door_with_frame, DoorConfig, MeshSpawnContext};
 /// use antares::domain::world::DoorFrameConfig;
 ///
+/// let mut ctx = MeshSpawnContext { commands: &mut commands, materials: &mut materials,
+///     meshes: &mut meshes, cache: &mut cache };
 /// let (door, frame) = spawn_door_with_frame(
-///     &mut commands, &mut materials, &mut meshes,
-///     position, map_id,
+///     &mut ctx, position, map_id,
 ///     DoorConfig::default(), DoorFrameConfig::default(),
-///     &mut cache, Some(90.0),
+///     Some(90.0),
 /// );
 /// ```
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_door_with_frame(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     door_config: DoorConfig,
     frame_config: crate::domain::world::DoorFrameConfig,
-    cache: &mut ProceduralMeshCache,
     rotation_y: Option<f32>,
 ) -> (Entity, Entity) {
-    let door_entity = spawn_door(
-        commands,
-        materials,
-        meshes,
-        position,
-        map_id,
-        door_config,
-        cache,
-        rotation_y,
-    );
+    let door_entity = spawn_door(ctx, position, map_id, door_config, rotation_y);
 
-    let frame_entity = spawn_door_frame(
-        commands,
-        materials,
-        meshes,
-        position,
-        map_id,
-        frame_config,
-        cache,
-        rotation_y,
-    );
+    let frame_entity = spawn_door_frame(ctx, position, map_id, frame_config, rotation_y);
 
     (door_entity, frame_entity)
 }
@@ -5315,10 +5224,10 @@ const ITEM_LEATHER_COLOR: Color = Color::srgb(0.40, 0.28, 0.15);
 /// Default metallic color for helmets and shields.
 const ITEM_METAL_COLOR: Color = Color::srgb(0.60, 0.60, 0.65);
 /// Default parchment color for scrolls.
-#[allow(dead_code)]
+#[cfg(test)]
 const ITEM_PARCHMENT_COLOR: Color = Color::srgb(0.85, 0.80, 0.65);
 /// Default gold color for rings.
-#[allow(dead_code)]
+#[cfg(test)]
 const ITEM_GOLD_COLOR: Color = Color::srgb(0.80, 0.65, 0.20);
 
 // ==================== Item Mesh Spawn Functions ====================
@@ -5335,55 +5244,54 @@ const ITEM_GOLD_COLOR: Color = Color::srgb(0.80, 0.65, 0.20);
 ///
 /// # Arguments
 ///
-/// * `commands`  - Bevy `Commands` for entity creation.
-/// * `materials` - Material asset storage.
-/// * `meshes`    - Mesh asset storage.
+/// * `ctx`       - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache).
 /// * `position`  - Tile position in world coordinates.
 /// * `map_id`    - Map identifier (for cleanup on map change).
 /// * `config`    - Sword appearance configuration.
-/// * `cache`     - Mesh cache (reuses geometry across multiple drops).
 ///
 /// # Returns
 ///
 /// Entity ID of the parent sword entity.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_sword_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: SwordConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     let color = config.color.unwrap_or(ITEM_SWORD_COLOR);
     let bl = config.blade_length;
     let bw = config.blade_width;
 
     // Blade mesh (lying on X axis, thin in Y)
-    let blade_mesh =
-        cache.get_or_create_item_mesh("sword", meshes, || Cuboid::new(bl, bw * 0.3, bw).into());
+    let blade_mesh = ctx
+        .cache
+        .get_or_create_item_mesh("sword", ctx.meshes, || Cuboid::new(bl, bw * 0.3, bw).into());
 
     // Crossguard mesh (perpendicular, shorter)
-    let guard_mesh = meshes.add(Mesh::from(Cuboid::new(bw * 3.0, bw * 0.3, bw * 0.6)));
+    let guard_mesh = ctx
+        .meshes
+        .add(Mesh::from(Cuboid::new(bw * 3.0, bw * 0.3, bw * 0.6)));
 
     // Handle mesh
-    let handle_mesh = meshes.add(Mesh::from(Cuboid::new(bl * 0.25, bw * 0.3, bw * 0.7)));
+    let handle_mesh = ctx
+        .meshes
+        .add(Mesh::from(Cuboid::new(bl * 0.25, bw * 0.3, bw * 0.7)));
 
-    let blade_mat = materials.add(StandardMaterial {
+    let blade_mat = ctx.materials.add(StandardMaterial {
         base_color: color,
         metallic: 0.9,
         perceptual_roughness: 0.2,
         ..default()
     });
-    let handle_mat = materials.add(StandardMaterial {
+    let handle_mat = ctx.materials.add(StandardMaterial {
         base_color: ITEM_WOOD_COLOR,
         metallic: 0.0,
         perceptual_roughness: 0.8,
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -5398,7 +5306,8 @@ pub fn spawn_sword_mesh(
         ))
         .id();
 
-    let blade = commands
+    let blade = ctx
+        .commands
         .spawn((
             Mesh3d(blade_mesh),
             MeshMaterial3d(blade_mat.clone()),
@@ -5407,10 +5316,11 @@ pub fn spawn_sword_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(blade);
+    ctx.commands.entity(parent).add_child(blade);
 
     if config.has_crossguard {
-        let guard = commands
+        let guard = ctx
+            .commands
             .spawn((
                 Mesh3d(guard_mesh),
                 MeshMaterial3d(blade_mat),
@@ -5419,10 +5329,11 @@ pub fn spawn_sword_mesh(
                 Visibility::default(),
             ))
             .id();
-        commands.entity(parent).add_child(guard);
+        ctx.commands.entity(parent).add_child(guard);
     }
 
-    let handle = commands
+    let handle = ctx
+        .commands
         .spawn((
             Mesh3d(handle_mesh),
             MeshMaterial3d(handle_mat),
@@ -5431,7 +5342,7 @@ pub fn spawn_sword_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(handle);
+    ctx.commands.entity(parent).add_child(handle);
 
     parent
 }
@@ -5443,37 +5354,37 @@ pub fn spawn_sword_mesh(
 /// # Returns
 ///
 /// Entity ID of the parent dagger entity.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_dagger_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: DaggerConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     let color = config.color.unwrap_or(ITEM_SWORD_COLOR);
     let bl = config.blade_length;
     let bw = 0.05_f32;
 
-    let blade_mesh =
-        cache.get_or_create_item_mesh("dagger", meshes, || Cuboid::new(bl, bw * 0.3, bw).into());
-    let handle_mesh = meshes.add(Mesh::from(Cuboid::new(bl * 0.3, bw * 0.3, bw * 0.8)));
+    let blade_mesh = ctx.cache.get_or_create_item_mesh("dagger", ctx.meshes, || {
+        Cuboid::new(bl, bw * 0.3, bw).into()
+    });
+    let handle_mesh = ctx
+        .meshes
+        .add(Mesh::from(Cuboid::new(bl * 0.3, bw * 0.3, bw * 0.8)));
 
-    let blade_mat = materials.add(StandardMaterial {
+    let blade_mat = ctx.materials.add(StandardMaterial {
         base_color: color,
         metallic: 0.9,
         perceptual_roughness: 0.2,
         ..default()
     });
-    let handle_mat = materials.add(StandardMaterial {
+    let handle_mat = ctx.materials.add(StandardMaterial {
         base_color: ITEM_WOOD_COLOR,
         perceptual_roughness: 0.8,
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -5488,7 +5399,8 @@ pub fn spawn_dagger_mesh(
         ))
         .id();
 
-    let blade = commands
+    let blade = ctx
+        .commands
         .spawn((
             Mesh3d(blade_mesh),
             MeshMaterial3d(blade_mat),
@@ -5497,9 +5409,10 @@ pub fn spawn_dagger_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(blade);
+    ctx.commands.entity(parent).add_child(blade);
 
-    let handle = commands
+    let handle = ctx
+        .commands
         .spawn((
             Mesh3d(handle_mesh),
             MeshMaterial3d(handle_mat),
@@ -5508,7 +5421,7 @@ pub fn spawn_dagger_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(handle);
+    ctx.commands.entity(parent).add_child(handle);
 
     parent
 }
@@ -5520,38 +5433,38 @@ pub fn spawn_dagger_mesh(
 /// # Returns
 ///
 /// Entity ID of the parent blunt-weapon entity.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_blunt_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: BluntConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     let color = config.color.unwrap_or(ITEM_BLUNT_COLOR);
     let hr = config.head_radius;
     let hl = config.handle_length;
 
     // Head: short cylinder lying on its side (height = diameter)
-    let head_mesh =
-        cache.get_or_create_item_mesh("blunt", meshes, || Cylinder::new(hr, hr * 2.0).into());
-    let handle_mesh = meshes.add(Mesh::from(Cuboid::new(hl, hr * 0.35, hr * 0.35)));
+    let head_mesh = ctx
+        .cache
+        .get_or_create_item_mesh("blunt", ctx.meshes, || Cylinder::new(hr, hr * 2.0).into());
+    let handle_mesh = ctx
+        .meshes
+        .add(Mesh::from(Cuboid::new(hl, hr * 0.35, hr * 0.35)));
 
-    let head_mat = materials.add(StandardMaterial {
+    let head_mat = ctx.materials.add(StandardMaterial {
         base_color: color,
         metallic: 0.7,
         perceptual_roughness: 0.3,
         ..default()
     });
-    let handle_mat = materials.add(StandardMaterial {
+    let handle_mat = ctx.materials.add(StandardMaterial {
         base_color: ITEM_WOOD_COLOR,
         perceptual_roughness: 0.8,
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -5567,7 +5480,8 @@ pub fn spawn_blunt_mesh(
         ))
         .id();
 
-    let head = commands
+    let head = ctx
+        .commands
         .spawn((
             Mesh3d(head_mesh),
             MeshMaterial3d(head_mat),
@@ -5576,9 +5490,10 @@ pub fn spawn_blunt_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(head);
+    ctx.commands.entity(parent).add_child(head);
 
-    let handle = commands
+    let handle = ctx
+        .commands
         .spawn((
             Mesh3d(handle_mesh),
             MeshMaterial3d(handle_mat),
@@ -5587,7 +5502,7 @@ pub fn spawn_blunt_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(handle);
+    ctx.commands.entity(parent).add_child(handle);
 
     parent
 }
@@ -5599,36 +5514,34 @@ pub fn spawn_blunt_mesh(
 /// # Returns
 ///
 /// Entity ID of the parent staff entity.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_staff_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: StaffConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     let color = config.color.unwrap_or(ITEM_WOOD_COLOR);
     let len = config.length;
     let orb_r = config.orb_radius;
 
-    let shaft_mesh =
-        cache.get_or_create_item_mesh("staff", meshes, || Cylinder::new(0.025, len).into());
-    let orb_mesh = meshes.add(Mesh::from(Sphere::new(orb_r)));
+    let shaft_mesh = ctx
+        .cache
+        .get_or_create_item_mesh("staff", ctx.meshes, || Cylinder::new(0.025, len).into());
+    let orb_mesh = ctx.meshes.add(Mesh::from(Sphere::new(orb_r)));
 
-    let shaft_mat = materials.add(StandardMaterial {
+    let shaft_mat = ctx.materials.add(StandardMaterial {
         base_color: color,
         perceptual_roughness: 0.8,
         ..default()
     });
-    let orb_mat = materials.add(StandardMaterial {
+    let orb_mat = ctx.materials.add(StandardMaterial {
         base_color: Color::srgb(0.3, 0.0, 0.6),
         emissive: LinearRgba::new(0.2, 0.0, 0.4, 1.0),
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -5644,7 +5557,8 @@ pub fn spawn_staff_mesh(
         ))
         .id();
 
-    let shaft = commands
+    let shaft = ctx
+        .commands
         .spawn((
             Mesh3d(shaft_mesh),
             MeshMaterial3d(shaft_mat),
@@ -5653,10 +5567,11 @@ pub fn spawn_staff_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(shaft);
+    ctx.commands.entity(parent).add_child(shaft);
 
     if orb_r > 0.0 {
-        let orb = commands
+        let orb = ctx
+            .commands
             .spawn((
                 Mesh3d(orb_mesh),
                 MeshMaterial3d(orb_mat),
@@ -5665,7 +5580,7 @@ pub fn spawn_staff_mesh(
                 Visibility::default(),
             ))
             .id();
-        commands.entity(parent).add_child(orb);
+        ctx.commands.entity(parent).add_child(orb);
     }
 
     parent
@@ -5678,32 +5593,31 @@ pub fn spawn_staff_mesh(
 /// # Returns
 ///
 /// Entity ID of the parent bow entity.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_bow_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: BowConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     let color = config.color.unwrap_or(ITEM_WOOD_COLOR);
     let arc_h = config.arc_height;
 
     // Approximate the arc as two angled limb pieces + centre grip
-    let limb_mesh = cache.get_or_create_item_mesh("bow", meshes, || {
+    let limb_mesh = ctx.cache.get_or_create_item_mesh("bow", ctx.meshes, || {
         Cuboid::new(0.04, 0.04, arc_h * 0.6).into()
     });
-    let grip_mesh = meshes.add(Mesh::from(Cuboid::new(0.04, 0.04, arc_h * 0.3)));
+    let grip_mesh = ctx
+        .meshes
+        .add(Mesh::from(Cuboid::new(0.04, 0.04, arc_h * 0.3)));
 
-    let bow_mat = materials.add(StandardMaterial {
+    let bow_mat = ctx.materials.add(StandardMaterial {
         base_color: color,
         perceptual_roughness: 0.85,
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -5719,7 +5633,8 @@ pub fn spawn_bow_mesh(
         .id();
 
     // Upper limb — angled outward
-    let upper = commands
+    let upper = ctx
+        .commands
         .spawn((
             Mesh3d(limb_mesh.clone()),
             MeshMaterial3d(bow_mat.clone()),
@@ -5728,10 +5643,11 @@ pub fn spawn_bow_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(upper);
+    ctx.commands.entity(parent).add_child(upper);
 
     // Lower limb
-    let lower = commands
+    let lower = ctx
+        .commands
         .spawn((
             Mesh3d(limb_mesh),
             MeshMaterial3d(bow_mat.clone()),
@@ -5741,10 +5657,11 @@ pub fn spawn_bow_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(lower);
+    ctx.commands.entity(parent).add_child(lower);
 
     // Centre grip
-    let grip = commands
+    let grip = ctx
+        .commands
         .spawn((
             Mesh3d(grip_mesh),
             MeshMaterial3d(bow_mat),
@@ -5753,7 +5670,7 @@ pub fn spawn_bow_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(grip);
+    ctx.commands.entity(parent).add_child(grip);
 
     parent
 }
@@ -5763,15 +5680,11 @@ pub fn spawn_bow_mesh(
 /// # Returns
 ///
 /// Entity ID of the parent armour entity.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_armor_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: ArmorMeshConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     let color = config.color.unwrap_or(if config.is_helmet {
         ITEM_METAL_COLOR
@@ -5779,7 +5692,7 @@ pub fn spawn_armor_mesh(
         ITEM_LEATHER_COLOR
     });
 
-    let body_mesh = cache.get_or_create_item_mesh("armor", meshes, || {
+    let body_mesh = ctx.cache.get_or_create_item_mesh("armor", ctx.meshes, || {
         if config.is_helmet {
             Sphere::new(config.width * 0.5).into()
         } else {
@@ -5787,14 +5700,15 @@ pub fn spawn_armor_mesh(
         }
     });
 
-    let mat = materials.add(StandardMaterial {
+    let mat = ctx.materials.add(StandardMaterial {
         base_color: color,
         metallic: if config.is_helmet { 0.7 } else { 0.1 },
         perceptual_roughness: if config.is_helmet { 0.3 } else { 0.8 },
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -5809,7 +5723,8 @@ pub fn spawn_armor_mesh(
         ))
         .id();
 
-    let body = commands
+    let body = ctx
+        .commands
         .spawn((
             Mesh3d(body_mesh),
             MeshMaterial3d(mat),
@@ -5818,7 +5733,7 @@ pub fn spawn_armor_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(body);
+    ctx.commands.entity(parent).add_child(body);
 
     parent
 }
@@ -5830,31 +5745,29 @@ pub fn spawn_armor_mesh(
 /// # Returns
 ///
 /// Entity ID of the parent shield entity.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_shield_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: ShieldConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     let color = config.color.unwrap_or(ITEM_METAL_COLOR);
     let r = config.radius;
 
     // Approximate shield as a flat cylinder (disc shape)
-    let disc_mesh =
-        cache.get_or_create_item_mesh("shield", meshes, || Cylinder::new(r, 0.04).into());
+    let disc_mesh = ctx
+        .cache
+        .get_or_create_item_mesh("shield", ctx.meshes, || Cylinder::new(r, 0.04).into());
 
-    let mat = materials.add(StandardMaterial {
+    let mat = ctx.materials.add(StandardMaterial {
         base_color: color,
         metallic: 0.6,
         perceptual_roughness: 0.35,
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -5869,7 +5782,8 @@ pub fn spawn_shield_mesh(
         ))
         .id();
 
-    let disc = commands
+    let disc = ctx
+        .commands
         .spawn((
             Mesh3d(disc_mesh),
             MeshMaterial3d(mat),
@@ -5878,7 +5792,7 @@ pub fn spawn_shield_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(disc);
+    ctx.commands.entity(parent).add_child(disc);
 
     parent
 }
@@ -5890,37 +5804,35 @@ pub fn spawn_shield_mesh(
 /// # Returns
 ///
 /// Entity ID of the parent potion entity.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_potion_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: PotionConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     let [lr, lg, lb, la] = config.liquid_color;
     let [br, bg, bb, ba] = config.bottle_color;
 
-    let body_mesh =
-        cache.get_or_create_item_mesh("potion", meshes, || Cylinder::new(0.05, 0.18).into());
-    let stopper_mesh = meshes.add(Mesh::from(Sphere::new(0.028)));
+    let body_mesh = ctx
+        .cache
+        .get_or_create_item_mesh("potion", ctx.meshes, || Cylinder::new(0.05, 0.18).into());
+    let stopper_mesh = ctx.meshes.add(Mesh::from(Sphere::new(0.028)));
 
-    let bottle_mat = materials.add(StandardMaterial {
+    let bottle_mat = ctx.materials.add(StandardMaterial {
         base_color: Color::srgba(br, bg, bb, ba),
         alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.1,
         ..default()
     });
-    let liquid_mat = materials.add(StandardMaterial {
+    let liquid_mat = ctx.materials.add(StandardMaterial {
         base_color: Color::srgba(lr, lg, lb, la),
         alpha_mode: AlphaMode::Blend,
         emissive: LinearRgba::new(lr * 0.2, lg * 0.2, lb * 0.2, 1.0),
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -5935,7 +5847,8 @@ pub fn spawn_potion_mesh(
         ))
         .id();
 
-    let body = commands
+    let body = ctx
+        .commands
         .spawn((
             Mesh3d(body_mesh),
             MeshMaterial3d(bottle_mat),
@@ -5944,11 +5857,12 @@ pub fn spawn_potion_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(body);
+    ctx.commands.entity(parent).add_child(body);
 
     // Liquid shimmer (inner slightly smaller cylinder)
-    let inner_mesh = meshes.add(Mesh::from(Cylinder::new(0.04, 0.14)));
-    let liquid = commands
+    let inner_mesh = ctx.meshes.add(Mesh::from(Cylinder::new(0.04, 0.14)));
+    let liquid = ctx
+        .commands
         .spawn((
             Mesh3d(inner_mesh),
             MeshMaterial3d(liquid_mat),
@@ -5957,12 +5871,13 @@ pub fn spawn_potion_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(liquid);
+    ctx.commands.entity(parent).add_child(liquid);
 
-    let stopper = commands
+    let stopper = ctx
+        .commands
         .spawn((
             Mesh3d(stopper_mesh),
-            MeshMaterial3d(materials.add(StandardMaterial {
+            MeshMaterial3d(ctx.materials.add(StandardMaterial {
                 base_color: Color::srgb(0.3, 0.15, 0.05),
                 perceptual_roughness: 0.9,
                 ..default()
@@ -5972,7 +5887,7 @@ pub fn spawn_potion_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(stopper);
+    ctx.commands.entity(parent).add_child(stopper);
 
     parent
 }
@@ -5984,29 +5899,27 @@ pub fn spawn_potion_mesh(
 /// # Returns
 ///
 /// Entity ID of the parent scroll entity.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_scroll_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: ScrollConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     let [r, g, b, a] = config.color;
 
-    let roll_mesh =
-        cache.get_or_create_item_mesh("scroll", meshes, || Cylinder::new(0.03, 0.28).into());
-    let sheet_mesh = meshes.add(Mesh::from(Cuboid::new(0.28, 0.004, 0.22)));
+    let roll_mesh = ctx
+        .cache
+        .get_or_create_item_mesh("scroll", ctx.meshes, || Cylinder::new(0.03, 0.28).into());
+    let sheet_mesh = ctx.meshes.add(Mesh::from(Cuboid::new(0.28, 0.004, 0.22)));
 
-    let parchment_mat = materials.add(StandardMaterial {
+    let parchment_mat = ctx.materials.add(StandardMaterial {
         base_color: Color::srgba(r, g, b, a),
         perceptual_roughness: 0.95,
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -6022,7 +5935,8 @@ pub fn spawn_scroll_mesh(
         .id();
 
     // Left roll
-    let roll_l = commands
+    let roll_l = ctx
+        .commands
         .spawn((
             Mesh3d(roll_mesh.clone()),
             MeshMaterial3d(parchment_mat.clone()),
@@ -6032,10 +5946,11 @@ pub fn spawn_scroll_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(roll_l);
+    ctx.commands.entity(parent).add_child(roll_l);
 
     // Right roll
-    let roll_r = commands
+    let roll_r = ctx
+        .commands
         .spawn((
             Mesh3d(roll_mesh),
             MeshMaterial3d(parchment_mat.clone()),
@@ -6045,10 +5960,11 @@ pub fn spawn_scroll_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(roll_r);
+    ctx.commands.entity(parent).add_child(roll_r);
 
     // Flat sheet
-    let sheet = commands
+    let sheet = ctx
+        .commands
         .spawn((
             Mesh3d(sheet_mesh),
             MeshMaterial3d(parchment_mat),
@@ -6057,7 +5973,7 @@ pub fn spawn_scroll_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(sheet);
+    ctx.commands.entity(parent).add_child(sheet);
 
     parent
 }
@@ -6069,19 +5985,15 @@ pub fn spawn_scroll_mesh(
 /// # Returns
 ///
 /// Entity ID of the parent ring entity.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_ring_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: RingMeshConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     let [r, g, b, a] = config.color;
 
-    let ring_mesh = cache.get_or_create_item_mesh("ring", meshes, || {
+    let ring_mesh = ctx.cache.get_or_create_item_mesh("ring", ctx.meshes, || {
         Torus {
             minor_radius: 0.018,
             major_radius: 0.065,
@@ -6089,14 +6001,15 @@ pub fn spawn_ring_mesh(
         .into()
     });
 
-    let mat = materials.add(StandardMaterial {
+    let mat = ctx.materials.add(StandardMaterial {
         base_color: Color::srgba(r, g, b, a),
         metallic: 0.95,
         perceptual_roughness: 0.15,
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -6111,7 +6024,8 @@ pub fn spawn_ring_mesh(
         ))
         .id();
 
-    let ring = commands
+    let ring = ctx
+        .commands
         .spawn((
             Mesh3d(ring_mesh),
             MeshMaterial3d(mat),
@@ -6120,7 +6034,7 @@ pub fn spawn_ring_mesh(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(ring);
+    ctx.commands.entity(parent).add_child(ring);
 
     parent
 }
@@ -6134,25 +6048,22 @@ pub fn spawn_ring_mesh(
 /// # Returns
 ///
 /// Entity ID of the parent ammo entity.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_ammo_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     config: AmmoConfig,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     let [r, g, b, a] = config.color;
 
-    let mat = materials.add(StandardMaterial {
+    let mat = ctx.materials.add(StandardMaterial {
         base_color: Color::srgba(r, g, b, a),
         perceptual_roughness: 0.75,
         ..default()
     });
 
-    let parent = commands
+    let parent = ctx
+        .commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
@@ -6169,9 +6080,11 @@ pub fn spawn_ammo_mesh(
 
     match config.ammo_type.as_str() {
         "stone" => {
-            let stone_mesh =
-                cache.get_or_create_item_mesh("ammo", meshes, || Sphere::new(0.045).into());
-            let stone = commands
+            let stone_mesh = ctx
+                .cache
+                .get_or_create_item_mesh("ammo", ctx.meshes, || Sphere::new(0.045).into());
+            let stone = ctx
+                .commands
                 .spawn((
                     Mesh3d(stone_mesh),
                     MeshMaterial3d(mat),
@@ -6180,12 +6093,14 @@ pub fn spawn_ammo_mesh(
                     Visibility::default(),
                 ))
                 .id();
-            commands.entity(parent).add_child(stone);
+            ctx.commands.entity(parent).add_child(stone);
         }
         "bolt" => {
-            let bolt_mesh =
-                cache.get_or_create_item_mesh("ammo", meshes, || Cylinder::new(0.015, 0.22).into());
-            let bolt = commands
+            let bolt_mesh = ctx
+                .cache
+                .get_or_create_item_mesh("ammo", ctx.meshes, || Cylinder::new(0.015, 0.22).into());
+            let bolt = ctx
+                .commands
                 .spawn((
                     Mesh3d(bolt_mesh),
                     MeshMaterial3d(mat),
@@ -6194,15 +6109,17 @@ pub fn spawn_ammo_mesh(
                     Visibility::default(),
                 ))
                 .id();
-            commands.entity(parent).add_child(bolt);
+            ctx.commands.entity(parent).add_child(bolt);
         }
         _ => {
             // Default: arrow shaft
-            let shaft_mesh =
-                cache.get_or_create_item_mesh("ammo", meshes, || Cylinder::new(0.008, 0.35).into());
-            let tip_mesh = meshes.add(Mesh::from(Cuboid::new(0.03, 0.03, 0.04)));
+            let shaft_mesh = ctx
+                .cache
+                .get_or_create_item_mesh("ammo", ctx.meshes, || Cylinder::new(0.008, 0.35).into());
+            let tip_mesh = ctx.meshes.add(Mesh::from(Cuboid::new(0.03, 0.03, 0.04)));
 
-            let shaft = commands
+            let shaft = ctx
+                .commands
                 .spawn((
                     Mesh3d(shaft_mesh),
                     MeshMaterial3d(mat.clone()),
@@ -6211,15 +6128,16 @@ pub fn spawn_ammo_mesh(
                     Visibility::default(),
                 ))
                 .id();
-            commands.entity(parent).add_child(shaft);
+            ctx.commands.entity(parent).add_child(shaft);
 
-            let tip_mat = materials.add(StandardMaterial {
+            let tip_mat = ctx.materials.add(StandardMaterial {
                 base_color: ITEM_METAL_COLOR,
                 metallic: 0.8,
                 perceptual_roughness: 0.25,
                 ..default()
             });
-            let tip = commands
+            let tip = ctx
+                .commands
                 .spawn((
                     Mesh3d(tip_mesh),
                     MeshMaterial3d(tip_mat),
@@ -6228,7 +6146,7 @@ pub fn spawn_ammo_mesh(
                     Visibility::default(),
                 ))
                 .id();
-            commands.entity(parent).add_child(tip);
+            ctx.commands.entity(parent).add_child(tip);
         }
     }
 
@@ -6266,18 +6184,13 @@ pub fn spawn_ammo_mesh(
 ///
 /// // Obtain a descriptor from an item definition:
 /// // let descriptor = ItemMeshDescriptor::from_item(&item);
-/// // let entity = spawn_dropped_item_mesh(&mut commands, &mut materials, &mut meshes,
-/// //     Position::new(5, 7), 1, &descriptor, &mut cache);
+/// // let entity = spawn_dropped_item_mesh(&mut ctx, Position::new(5, 7), 1, &descriptor);
 /// ```
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_dropped_item_mesh(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
     position: types::Position,
     map_id: types::MapId,
     descriptor: &crate::domain::visual::item_mesh::ItemMeshDescriptor,
-    cache: &mut ProceduralMeshCache,
 ) -> Entity {
     use crate::domain::visual::item_mesh::ItemMeshCategory;
 
@@ -6286,9 +6199,7 @@ pub fn spawn_dropped_item_mesh(
 
     match descriptor.category {
         ItemMeshCategory::Sword => spawn_sword_mesh(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             SwordConfig {
@@ -6297,24 +6208,20 @@ pub fn spawn_dropped_item_mesh(
                 has_crossguard: true,
                 color: Some(primary),
             },
-            cache,
         ),
+
         ItemMeshCategory::Dagger => spawn_dagger_mesh(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             DaggerConfig {
                 blade_length: descriptor.blade_length,
                 color: Some(primary),
             },
-            cache,
         ),
+
         ItemMeshCategory::Blunt => spawn_blunt_mesh(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             BluntConfig {
@@ -6322,12 +6229,10 @@ pub fn spawn_dropped_item_mesh(
                 handle_length: 0.35,
                 color: Some(primary),
             },
-            cache,
         ),
+
         ItemMeshCategory::Staff => spawn_staff_mesh(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             StaffConfig {
@@ -6335,24 +6240,20 @@ pub fn spawn_dropped_item_mesh(
                 orb_radius: 0.06,
                 color: Some(primary),
             },
-            cache,
         ),
+
         ItemMeshCategory::Bow => spawn_bow_mesh(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             BowConfig {
                 arc_height: 0.35,
                 color: Some(primary),
             },
-            cache,
         ),
+
         ItemMeshCategory::BodyArmor => spawn_armor_mesh(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             ArmorMeshConfig {
@@ -6361,12 +6262,10 @@ pub fn spawn_dropped_item_mesh(
                 color: Some(primary),
                 is_helmet: false,
             },
-            cache,
         ),
+
         ItemMeshCategory::Helmet => spawn_armor_mesh(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             ArmorMeshConfig {
@@ -6375,26 +6274,22 @@ pub fn spawn_dropped_item_mesh(
                 color: Some(primary),
                 is_helmet: true,
             },
-            cache,
         ),
+
         ItemMeshCategory::Shield => spawn_shield_mesh(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             ShieldConfig {
                 radius: 0.22,
                 color: Some(primary),
             },
-            cache,
         ),
+
         ItemMeshCategory::Boots => {
             // Boots rendered as a low flat armour piece
             spawn_armor_mesh(
-                commands,
-                materials,
-                meshes,
+                ctx,
                 position,
                 map_id,
                 ArmorMeshConfig {
@@ -6403,29 +6298,23 @@ pub fn spawn_dropped_item_mesh(
                     color: Some(primary),
                     is_helmet: false,
                 },
-                cache,
             )
         }
         ItemMeshCategory::Ring | ItemMeshCategory::Amulet => {
             let [rr, rg, rb, ra] = descriptor.primary_color;
             spawn_ring_mesh(
-                commands,
-                materials,
-                meshes,
+                ctx,
                 position,
                 map_id,
                 RingMeshConfig {
                     color: [rr, rg, rb, ra],
                 },
-                cache,
             )
         }
         ItemMeshCategory::Belt | ItemMeshCategory::Cloak => {
             // Belt / cloak rendered as flat armour piece
             spawn_armor_mesh(
-                commands,
-                materials,
-                meshes,
+                ctx,
                 position,
                 map_id,
                 ArmorMeshConfig {
@@ -6434,66 +6323,53 @@ pub fn spawn_dropped_item_mesh(
                     color: Some(primary),
                     is_helmet: false,
                 },
-                cache,
             )
         }
         ItemMeshCategory::Potion => {
             let [lr, lg, lb, la] = descriptor.primary_color;
             spawn_potion_mesh(
-                commands,
-                materials,
-                meshes,
+                ctx,
                 position,
                 map_id,
                 PotionConfig {
                     liquid_color: [lr, lg, lb, la],
                     bottle_color: [0.6, 0.6, 0.8, 0.55],
                 },
-                cache,
             )
         }
         ItemMeshCategory::Scroll => {
             let [sr, sg, sb, sa] = descriptor.primary_color;
             spawn_scroll_mesh(
-                commands,
-                materials,
-                meshes,
+                ctx,
                 position,
                 map_id,
                 ScrollConfig {
                     color: [sr, sg, sb, sa],
                 },
-                cache,
             )
         }
         ItemMeshCategory::Ammo => {
             let [ar, ag, ab, aa] = descriptor.primary_color;
             spawn_ammo_mesh(
-                commands,
-                materials,
-                meshes,
+                ctx,
                 position,
                 map_id,
                 AmmoConfig {
                     ammo_type: "arrow".to_string(),
                     color: [ar, ag, ab, aa],
                 },
-                cache,
             )
         }
         ItemMeshCategory::QuestItem => {
             // Quest items rendered as glowing orb (ring mesh with emissive)
             let [qr, qg, qb, qa] = descriptor.primary_color;
             spawn_ring_mesh(
-                commands,
-                materials,
-                meshes,
+                ctx,
                 position,
                 map_id,
                 RingMeshConfig {
                     color: [qr, qg, qb, qa],
                 },
-                cache,
             )
         }
     }

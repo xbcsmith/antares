@@ -12,7 +12,7 @@
 //! - Caches materials per sprite sheet to minimize draw calls
 //! - Provides UV transforms for texture atlas sprite selection
 //! - No external dependencies - native Bevy only
-//! - Supports material property overrides (Phase 6: emissive, alpha, metallic, roughness)
+//! - Supports material property overrides (emissive, alpha, metallic, roughness)
 //!
 //! # Examples
 //!
@@ -112,7 +112,7 @@ pub struct SpriteSheetConfig {
 ///     }
 /// }
 /// ```
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct SpriteAssets {
     /// Cached materials per sprite sheet path
     materials: HashMap<String, Handle<StandardMaterial>>,
@@ -275,7 +275,7 @@ impl SpriteAssets {
             ..default()
         };
 
-        // Apply material property overrides if provided (Phase 6)
+        // Apply material property overrides if provided
         if let Some(props) = material_properties {
             if let Some(emissive_color) = props.emissive {
                 // emissive expects LinearRgba, convert from sRGB
@@ -457,12 +457,6 @@ impl SpriteAssets {
     }
 }
 
-impl Default for SpriteAssets {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,7 +547,7 @@ mod asset_loading_tests {
 
     /// Test that placeholder sprite sheets can be loaded and registered
     ///
-    /// This test verifies Phase 4 deliverable: placeholder sprites are
+    /// This test verifies that placeholder sprites are
     /// properly configured and ready for asset loading.
     #[test]
     fn test_load_placeholder_sprites() {
@@ -667,7 +661,7 @@ mod asset_loading_tests {
 
     /// Test that placeholder PNG files exist on disk
     ///
-    /// This test verifies Phase 4 deliverable: all placeholder sprite sheets
+    /// This test verifies that all placeholder sprite sheets
     /// have been created and are available in the assets directory.
     #[test]
     fn test_placeholder_png_files_exist() {
@@ -693,11 +687,7 @@ mod asset_loading_tests {
 
         for path in paths {
             let full_path = std::path::Path::new(path);
-            assert!(
-                full_path.exists(),
-                "Missing placeholder PNG file: {} (required for Phase 4)",
-                path
-            );
+            assert!(full_path.exists(), "Missing placeholder PNG file: {}", path);
 
             // Verify file has content (not empty)
             let metadata = std::fs::metadata(path)
@@ -712,7 +702,7 @@ mod asset_loading_tests {
 
     /// Test that directory structure is properly organized
     ///
-    /// This test verifies Phase 4 deliverable: sprite assets are organized
+    /// This test verifies that sprite assets are organized
     /// into logical subdirectories (tiles, actors, events, ui).
     #[test]
     fn test_sprite_directory_structure() {

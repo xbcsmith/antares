@@ -138,7 +138,7 @@ pub const ATTRIBUTE_MODIFIER_MAX: i16 = 255;
 /// attr.reset();
 /// assert_eq!(attr.current, 10);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct AttributePair {
     /// Permanent base value
     pub base: u8,
@@ -234,7 +234,7 @@ impl<'de> serde::Deserialize<'de> for AttributePair {
 /// hp.modify(-20);
 /// assert_eq!(hp.current, 30);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct AttributePair16 {
     /// Permanent base value
     pub base: u16,
@@ -361,7 +361,7 @@ impl Stats {
 // ===== Resistances =====
 
 /// Resistances to various damage types and effects
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Resistances {
     /// Generic magic resistance
     pub magic: AttributePair,
@@ -406,12 +406,6 @@ impl Resistances {
         self.fear.reset();
         self.poison.reset();
         self.psychic.reset();
-    }
-}
-
-impl Default for Resistances {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -481,7 +475,7 @@ pub enum CharacterLocation {
 /// assert!(condition.has(Condition::POISONED));
 /// assert!(!condition.is_fine());
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Condition(u8);
 
 impl Condition {
@@ -569,12 +563,6 @@ impl Condition {
     }
 }
 
-impl Default for Condition {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ===== Inventory =====
 
 /// Inventory slot with item ID and charges
@@ -596,7 +584,7 @@ pub struct InventorySlot {
 /// assert!(inventory.has_space());
 /// assert!(!inventory.is_full());
 /// ```
-#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Component, Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Inventory {
     pub items: Vec<InventorySlot>,
 }
@@ -641,12 +629,6 @@ impl Inventory {
     }
 }
 
-impl Default for Inventory {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ===== Equipment =====
 
 /// Equipped items in specific slots
@@ -659,7 +641,7 @@ impl Default for Inventory {
 /// let mut equipment = Equipment::new();
 /// assert_eq!(equipment.equipped_count(), 0);
 /// ```
-#[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Component, Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Equipment {
     pub weapon: Option<ItemId>,
     pub armor: Option<ItemId>,
@@ -752,12 +734,6 @@ impl Equipment {
             self.accessory2,
         ]
         .contains(&Some(item_id))
-    }
-}
-
-impl Default for Equipment {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -864,7 +840,7 @@ impl EquipmentSlot {
 // ===== SpellBook =====
 
 /// Character's known spells organized by school and level
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SpellBook {
     /// Cleric spells by level (1-7)
     pub cleric_spells: [Vec<SpellId>; 7],
@@ -1030,16 +1006,10 @@ impl SpellBook {
     }
 }
 
-impl Default for SpellBook {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ===== QuestFlags =====
 
 /// Per-character quest and event tracking
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct QuestFlags {
     /// Indexed flags for game events
     pub flags: Vec<bool>,
@@ -1062,12 +1032,6 @@ impl QuestFlags {
     /// Gets a flag by index
     pub fn get_flag(&self, index: usize) -> bool {
         self.flags.get(index).copied().unwrap_or(false)
-    }
-}
-
-impl Default for QuestFlags {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -1178,20 +1142,6 @@ pub struct Character {
     pub gold: u32,
     /// Individual gems (0-max)
     pub gems: u32,
-    /// Legacy food counter — deprecated in Phase 2.
-    ///
-    /// Food is now represented as `ConsumableEffect::IsFood` inventory items
-    /// (e.g. "Food Ration", item id 53).  The rest system reads food from
-    /// character inventories via [`crate::domain::resources::count_food_in_party`].
-    ///
-    /// This field is kept for save-game backward compatibility but is **no
-    /// longer read or written by any game logic**.  Do not rely on it.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use ConsumableEffect::IsFood inventory items instead; \
-                see food_system_implementation_plan.md Phase 2"
-    )]
-    pub food: u8,
 }
 
 impl Character {
@@ -1229,7 +1179,6 @@ impl Character {
         sex: Sex,
         alignment: Alignment,
     ) -> Self {
-        #[allow(deprecated)]
         Self {
             name,
             race_id,
@@ -1258,7 +1207,6 @@ impl Character {
             worthiness: 0,
             gold: 0,
             gems: 0,
-            food: 0,
         }
     }
 
@@ -1544,17 +1492,6 @@ pub struct Party {
     pub gold: u32,
     /// Party gems (can be pooled)
     pub gems: u32,
-    /// Legacy party food pool — deprecated in Phase 2.
-    ///
-    /// Food is now tracked as `ConsumableEffect::IsFood` items in each
-    /// character's inventory.  This field is retained for save-game
-    /// backward compatibility only and is **not read by any rest logic**.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use ConsumableEffect::IsFood inventory items instead; \
-                see food_system_implementation_plan.md Phase 2"
-    )]
-    pub food: u32,
     /// Combat: which positions can attack
     pub position_index: [bool; 6],
     /// Available light units for dark areas
@@ -1567,12 +1504,10 @@ impl Party {
 
     /// Creates a new empty party
     pub fn new() -> Self {
-        #[allow(deprecated)]
         Self {
             members: Vec::new(),
             gold: 0,
             gems: 0,
-            food: 0,
             position_index: [true, true, true, false, false, false],
             light_units: 0,
         }
@@ -1628,7 +1563,7 @@ impl Default for Party {
 // ===== Roster =====
 
 /// Character roster (character pool)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Roster {
     /// Up to 18 characters total
     pub characters: Vec<Character>,
@@ -1798,12 +1733,6 @@ impl Roster {
     }
 }
 
-impl Default for Roster {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1820,7 +1749,7 @@ mod tests {
         )
     }
 
-    // ===== Phase 2: TimedStatBoost tests =====
+    // ===== TimedStatBoost tests =====
 
     #[test]
     fn test_timed_stat_boosts_defaults_empty_on_new_character() {
@@ -1975,8 +1904,8 @@ mod tests {
     #[test]
     fn test_timed_stat_boost_serde_default_deserializes() {
         // Serialise a character to RON, then strip the timed_stat_boosts field
-        // to simulate a save file created before Phase 2 (the field did not
-        // exist yet).  #[serde(default)] must cause it to deserialise as an
+        // to simulate a save file created before timed_stat_boosts existed
+        // (the field did not exist yet).  #[serde(default)] must cause it to deserialise as an
         // empty Vec rather than returning an error.
         let hero = make_hero();
         let serialized = ron::to_string(&hero).expect("serialization must succeed");
@@ -2316,12 +2245,6 @@ mod tests {
         assert_eq!(hero.level, 1);
         assert_eq!(hero.experience, 0);
         assert_eq!(hero.age, 18);
-        // Phase 2: food is now tracked as IsFood inventory items, not Character.food.
-        // Character::new() sets food=0 (deprecated field).
-        #[allow(deprecated)]
-        {
-            assert_eq!(hero.food, 0);
-        }
         assert_eq!(hero.gold, 0);
         assert_eq!(hero.gems, 0);
         assert!(hero.is_alive());

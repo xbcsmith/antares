@@ -25,6 +25,7 @@ pub mod character_definition;
 pub mod classes;
 pub mod combat;
 pub mod conditions;
+pub mod database_common;
 pub mod dialogue;
 pub mod inventory;
 pub mod items;
@@ -37,6 +38,7 @@ pub mod races;
 pub mod resources;
 pub mod transactions;
 pub mod types;
+pub mod validation;
 pub mod visual;
 pub mod world;
 

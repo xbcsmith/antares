@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Performance measurements for grass rendering systems (Phase 2)
+//! Performance measurements for grass rendering systems
 //!
 //! Simple benchmark using standard library timing.
 //! Run with: `cargo bench --bench grass_rendering`

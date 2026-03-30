@@ -7,15 +7,14 @@
 // These templates are used by merchant NPCs during testing to verify
 // that npc_stock_templates load correctly from a campaign data directory.
 //
-// Phase 3 additions: Food Ration (id 108, IsFood 1) and Trail Ration
-// (id 109, IsFood 3) are now included in merchant and innkeeper stock so
-// the party can purchase food for resting.  This validates the full
-// Phase 3 requirement: players can interact with merchants and buy food
-// rations into their inventories using gold.
+// Food Ration (id 108, IsFood 1) and Trail Ration (id 109, IsFood 3) are
+// included in merchant and innkeeper stock so the party can purchase food
+// for resting.  Players can interact with merchants and buy food rations
+// into their inventories using gold.
 //
-// Phase 6 additions: magic_item_pool, magic_slot_count, and magic_refresh_days
-// are now present on each template.  The blacksmith template keeps
-// magic_slot_count: 0 to verify the disabled-rotation path in tests.
+// magic_item_pool, magic_slot_count, and magic_refresh_days are present on
+// each template.  The blacksmith template keeps magic_slot_count: 0 to
+// verify the disabled-rotation path in tests.
 //
 // NOTE: Item IDs listed in magic_item_pool should resolve to items where
 // is_magical() == true in the item database.  Non-magical items are accepted
@@ -41,7 +40,7 @@
     // Low quantities enforce resource management decisions for new players.
     // Only the most basic weapons, armor, and one healing consumable are stocked.
     //
-    // Phase 3: Food Ration and Trail Ration added so the party can purchase
+    // Food Ration and Trail Ration included so the party can purchase
     // food for resting after spending their starting rations.
     //
     // Magic rotation: 2 slots drawn from a pool of 5 magical items, refreshed
@@ -59,7 +58,7 @@
             (item_id: 23,  quantity: 2, override_price: None),    // Wooden Shield
             // Consumables
             (item_id: 50,  quantity: 3, override_price: None),    // Healing Potion
-            // Food — purchasable rations so the party can rest (Phase 3)
+            // Food — purchasable rations so the party can rest
             (item_id: 108, quantity: 10, override_price: None),   // Food Ration  (IsFood 1)
             (item_id: 109, quantity: 5,  override_price: None),   // Trail Ration (IsFood 3)
         ],
@@ -99,7 +98,7 @@
     // correctly from a campaign stock template and that a merchant NPC
     // referencing this template can supply food rations to the party.
     //
-    // This template is the canonical test fixture for Phase 3 merchant
+    // This template is the canonical test fixture for merchant
     // integration tests: it MUST contain Food Ration (108) and Trail
     // Ration (109) with non-zero quantities.
     (
@@ -107,7 +106,7 @@
         entries: [
             // Consumables
             (item_id: 50,  quantity: 5,  override_price: None),   // Healing Potion
-            // Food — purchasable rations so the party can rest (Phase 3)
+            // Food — purchasable rations so the party can rest
             (item_id: 108, quantity: 20, override_price: None),   // Food Ration  (IsFood 1)
             (item_id: 109, quantity: 10, override_price: None),   // Trail Ration (IsFood 3)
             // Ammunition
@@ -127,7 +126,7 @@
     // Prices are slightly above the item's base_cost to reflect the
     // innkeeper's convenience markup (override_price in gold).
     //
-    // This template is used in Phase 3 tests to verify that an innkeeper NPC
+    // This template is used in tests to verify that an innkeeper NPC
     // can sell food rations.  A non-zero quantity on both food items is required.
     (
         id: "tutorial_innkeeper_stock",

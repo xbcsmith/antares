@@ -2184,7 +2184,7 @@ mod tests {
 
     #[test]
     fn test_import_meshes_from_obj_file_skeleton_fixture() {
-        let path = fixture_path("examples/skeleton.obj");
+        let path = fixture_path("data/test_fixtures/skeleton.obj");
         let obj_string = std::fs::read_to_string(&path).unwrap();
         let expected_meshes = obj_string
             .lines()
@@ -2203,7 +2203,7 @@ mod tests {
 
     #[test]
     fn test_import_meshes_from_obj_file_female_fixture() {
-        let path = fixture_path("examples/female_1.obj");
+        let path = fixture_path("data/test_fixtures/female_1.obj");
         let obj_string = std::fs::read_to_string(&path).unwrap();
         let expected_meshes = obj_string
             .lines()

@@ -6723,7 +6723,6 @@ mod tests {
         };
         ctx.begin_pass(raw_input);
 
-        #[allow(deprecated)]
         let items = vec![Item {
             id: 1,
             name: "Sword".to_string(),

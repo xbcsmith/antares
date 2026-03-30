@@ -392,7 +392,7 @@ impl InnManagementState {
 /// assert_eq!(spells.fire_protection, 0);
 /// assert_eq!(spells.effective_resistance(ResistanceType::Fire), 0);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ActiveSpells {
     /// Resistance to fear effects
     pub fear_protection: u8,
@@ -536,12 +536,6 @@ impl ActiveSpells {
     }
 }
 
-impl Default for ActiveSpells {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ===== Quest Log =====
 
 /// Quest objective tracking
@@ -610,7 +604,7 @@ impl Quest {
 }
 
 /// Quest log tracking
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct QuestLog {
     /// Active quests
     pub active_quests: Vec<Quest>,
@@ -638,12 +632,6 @@ impl QuestLog {
             let quest = self.active_quests.remove(pos);
             self.completed_quests.push(quest.id);
         }
-    }
-}
-
-impl Default for QuestLog {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -826,7 +814,7 @@ impl GameState {
         // Load campaign content (propagates CampaignError::DatabaseError or others)
         let content_db = campaign.load_content()?;
 
-        // Basic Phase 1 validation: ensure core content groups are present
+        // Basic validation: ensure core content groups are present
         if content_db.classes.all_classes().count() == 0 {
             return Err(CampaignError::DatabaseError(
                 "Classes database is empty".to_string(),
@@ -847,9 +835,6 @@ impl GameState {
 
         let mut party = Party::new();
         party.gold = starting_gold;
-        // NOTE: party.food is deprecated (Phase 2). Food is now tracked as
-        // ConsumableEffect::IsFood inventory items granted during character
-        // instantiation via CharacterDefinition::instantiate().
 
         // Preserve campaign-specific game configuration for state
         let campaign_config = campaign.game_config.clone();
@@ -874,7 +859,7 @@ impl GameState {
             campaign_config: CampaignConfig::default(),
         };
 
-        // Phase 2: Initialize roster from content database (premade characters)
+        // Initialize roster from content database (premade characters)
         state.initialize_roster(&content_db).map_err(|e| {
             CampaignError::DatabaseError(format!("Roster initialization failed: {}", e))
         })?;
@@ -1334,7 +1319,7 @@ impl GameState {
                 .map_err(MoveHandleError::CombatInit)?;
 
                 // Enter combat with prepared combat state
-                // Phase 1: store the type; Phase 2+ will act on it.
+                // store the type
                 let _ = encounter_group.combat_event_type;
                 self.mode = GameMode::Combat(cs);
 
@@ -1364,7 +1349,7 @@ impl GameState {
                 )
                 .map_err(MoveHandleError::CombatInit)?;
 
-                // Phase 1: store the type; Phase 2+ will act on it.
+                // store the type
                 let _ = combat_event_type;
 
                 // Enter combat with prepared combat state
@@ -1752,7 +1737,7 @@ impl GameState {
         // Tick active spell durations and per-character timed stat boosts
         for _ in 0..minutes {
             self.active_spells.tick();
-            // Phase 2: tick per-character timed stat boosts
+            // tick per-character timed stat boosts
             for member in &mut self.party.members {
                 member.tick_timed_stat_boosts_minute();
             }
@@ -1999,7 +1984,7 @@ mod tests {
         assert_eq!(state.time.minute, 5);
     }
 
-    // ===== Phase 2: TimedStatBoost wiring tests =====
+    // ===== TimedStatBoost wiring tests =====
 
     #[test]
     fn test_advance_time_ticks_timed_stat_boosts() {
@@ -2845,7 +2830,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 2: Party Management Integration Tests =====
+    // ===== Party Management Integration Tests =====
 
     #[test]
     fn test_game_state_recruit_character() {
@@ -3153,7 +3138,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 5: Persistence & Save Game Integration Tests =====
+    // ===== Persistence & Save Game Integration Tests =====
 
     #[test]
     fn test_full_save_load_cycle_with_recruitment() {
@@ -3624,7 +3609,7 @@ mod tests {
         assert_eq!(in_party_indices.len(), state.party.size());
     }
 
-    // ===== Phase 5: NPC Runtime Initialization Tests =====
+    // ===== NPC Runtime Initialization Tests =====
 
     /// Helper that builds a minimal `ContentDatabase` with one merchant NPC and a
     /// matching stock template.  Used by the `ensure_npc_runtime_initialized` tests.
@@ -3736,7 +3721,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 1: Time Advancement Hook Tests =====
+    // ===== Time Advancement Hook Tests =====
 
     /// Helper: build a minimal world with a single passable 20×20 map, party at (10,10).
     fn build_world_with_map() -> crate::domain::world::World {
@@ -4032,7 +4017,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 4: ActiveSpells::effective_resistance tests =====
+    // ===== ActiveSpells::effective_resistance tests =====
 
     #[test]
     fn test_effective_resistance_zero_when_no_protection() {
@@ -4066,7 +4051,7 @@ mod tests {
         // Each of the eight ResistanceType variants must return ACTIVE_PROTECTION_BONUS
         // when its mapped ActiveSpells field is non-zero.
         //
-        // Mapping (mirrors Phase 3 / apply_consumable_effect_exploration):
+        // Mapping (mirrors apply_consumable_effect_exploration):
         //   Fire        → fire_protection
         //   Cold        → cold_protection
         //   Electricity → electricity_protection
@@ -4125,13 +4110,12 @@ mod tests {
         );
     }
 
-    // ===== Phase 5: End-to-end timed potion / active-spell expiry tests =====
+    // ===== End-to-end timed potion / active-spell expiry tests =====
 
     /// Simulates applying a 60-minute fire-resistance potion directly on
     /// `active_spells` (the same write `apply_consumable_effect_exploration`
     /// would perform) and verifies that `advance_time(60)` fully drains it.
     #[test]
-    #[allow(deprecated)]
     fn test_timed_resistance_potion_expires_after_advance_time() {
         use crate::application::GameState;
         use crate::domain::character::{Alignment, Character, Sex};
@@ -4167,7 +4151,6 @@ mod tests {
     /// Verifies that a 30-minute Might boost applied via `apply_timed_stat_boost`
     /// is correctly expired (and the stat restored) after `advance_time(30)`.
     #[test]
-    #[allow(deprecated)]
     fn test_timed_attribute_potion_expires_after_advance_time() {
         use crate::application::GameState;
         use crate::domain::character::{Alignment, Character, Sex};
@@ -4216,7 +4199,6 @@ mod tests {
     /// expire when `rest_party` is called for a full rest (12 hours = 720 minutes),
     /// which is well beyond the 60-minute durations used here.
     #[test]
-    #[allow(deprecated)]
     fn test_timed_potion_expires_during_rest() {
         use crate::application::GameState;
         use crate::domain::character::{Alignment, Character, Sex};
@@ -4296,7 +4278,6 @@ mod tests {
     /// via `apply_consumable_effect` raises the stat permanently — no timed boost
     /// is registered, and the stat is unchanged after `advance_time(999)`.
     #[test]
-    #[allow(deprecated)]
     fn test_permanent_attribute_potion_survives_advance_time() {
         use crate::application::GameState;
         use crate::domain::character::{Alignment, Character, Sex};
@@ -4351,7 +4332,6 @@ mod tests {
     /// replaces the remaining duration (not adds to it), and the new 60-minute
     /// window ticks down independently from the original.
     #[test]
-    #[allow(deprecated)]
     fn test_second_resistance_potion_overwrites_duration() {
         use crate::application::GameState;
 

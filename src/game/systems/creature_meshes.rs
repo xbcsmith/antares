@@ -34,6 +34,14 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
+/// Query for creature entities that have visuals but haven't had textures loaded yet.
+type CreatureTextureQuery<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static CreatureVisual, &'static Children),
+    (Without<TextureLoaded>, With<CreatureVisual>),
+>;
+
 /// Converts a domain MeshDefinition to a Bevy Mesh
 ///
 /// This function performs the core conversion from the domain-level mesh
@@ -430,16 +438,12 @@ pub fn load_texture(asset_server: &AssetServer, texture_path: &str) -> Handle<Im
 ///     app.add_systems(Update, texture_loading_system);
 /// }
 /// ```
-#[allow(clippy::type_complexity)]
 pub fn texture_loading_system(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     creatures: Res<crate::application::resources::GameContent>,
-    query: Query<
-        (Entity, &CreatureVisual, &Children),
-        (Without<TextureLoaded>, With<CreatureVisual>),
-    >,
+    query: CreatureTextureQuery,
     mut mesh_parts: Query<(&MeshPart, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
     for (entity, creature_visual, children) in query.iter() {

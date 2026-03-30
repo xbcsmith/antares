@@ -2319,7 +2319,6 @@ mod tests {
 
         // Create an item with a matching name pattern
         use antares::domain::types::DiceRoll;
-        #[allow(deprecated)]
         let item = Item {
             id: 1 as ItemId,
             name: "Longsword".to_string(),

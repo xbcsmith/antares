@@ -1650,7 +1650,7 @@ mod door_interaction_tests {
         parse_key_code(&cfg.move_forward[0]).expect("default move_forward key must be parseable")
     }
 
-    // ── Phase 3 Unit-style tests (pure DoorState logic) ───────────────────
+    // ── Unit-style tests (pure DoorState logic) ───────────────────────────
 
     /// `DoorState::new(false, 0.0)` produces a closed, unlocked door with no key.
     #[test]
@@ -1674,7 +1674,7 @@ mod door_interaction_tests {
         assert!((closed_angle - base).abs() < 1e-6);
     }
 
-    // ── Phase 3 Integration tests (Bevy headless App) ─────────────────────
+    // ── Integration tests (Bevy headless App) ─────────────────────────────
 
     /// Pressing interact on an unlocked furniture door opens it.
     #[test]
@@ -1992,9 +1992,9 @@ mod door_interaction_tests {
     }
 }
 
-/// Integration tests for Phase 2: tile-based LockedDoor map-event interaction.
+/// Integration tests for tile-based LockedDoor map-event interaction.
 ///
-/// These tests exercise the E-key path added in Phase 2 that checks whether the
+/// These tests exercise the E-key path that checks whether the
 /// tile directly ahead has an associated `MapEvent::LockedDoor` and handles:
 ///
 /// - Regular (non-locked) `WallType::Door` tiles open on E with no event.
@@ -2213,7 +2213,7 @@ mod locked_door_map_event_tests {
     /// Resources registered:
     /// - `InputConfigResource` (zero cooldown)
     /// - `GlobalState` (with map + party placeholder)
-    /// - `LockInteractionPending` (Phase 2 resource)
+    /// - `LockInteractionPending`
     /// - `GameLog` (for log message assertions)
     /// - `PendingRecruitmentContext`
     /// - Messages: `MapEventTriggered`, `InitiateRestEvent`
@@ -2329,7 +2329,7 @@ mod locked_door_map_event_tests {
     /// Pressing `E` in front of a plain `WallType::Door` tile (no `LockedDoor`
     /// map event) must set the tile to `WallType::None` and clear `blocked`.
     ///
-    /// This covers the "existing behaviour" fallback added in Phase 2 for
+    /// This covers the "existing behaviour" fallback for
     /// tile-based doors that are not associated with a lock.
     #[test]
     fn test_e_key_on_regular_door_opens_it() {
@@ -2525,7 +2525,7 @@ mod locked_door_map_event_tests {
         );
         assert!(tile.blocked, "Door tile must remain blocked with wrong key");
 
-        // LockInteractionPending must be set (Phase 3 will offer pick-lock/bash).
+        // LockInteractionPending must be set (lock UI will offer pick-lock/bash).
         let pending = app.world().resource::<LockInteractionPending>();
         assert_eq!(
             pending.lock_id,

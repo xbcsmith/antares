@@ -46,17 +46,11 @@ pub struct UndoRedoState {
 }
 
 /// Undo/Redo manager
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct UndoRedoManager {
     undo_stack: Vec<Box<dyn Command>>,
     redo_stack: Vec<Box<dyn Command>>,
     state: UndoRedoState,
-}
-
-impl Default for UndoRedoManager {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl UndoRedoManager {
@@ -586,7 +580,6 @@ mod tests {
     use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
     use antares::domain::types::DiceRoll;
 
-    #[allow(deprecated)]
     fn create_test_item(id: u32, name: &str) -> Item {
         Item {
             id: id.try_into().expect("ItemId out of range"),

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 5: Tutorial Campaign Visual Metadata Updates Script
+//! Tutorial Campaign Visual Metadata Updates Script
 //!
 //! This script updates all tutorial campaign maps with visual metadata for trees, grass,
 //! and other terrain-specific visual properties. It creates backup files before modification
@@ -219,7 +219,7 @@ fn update_grass_metadata(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("\n=== Phase 5: Tutorial Campaign Visual Metadata Updates ===\n");
+    println!("\n=== Tutorial Campaign Visual Metadata Updates ===\n");
 
     let base_path = "campaigns/tutorial/data/maps";
 

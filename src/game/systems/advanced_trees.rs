@@ -78,7 +78,7 @@ pub struct Branch {
 /// - `branches[0]` is always the root/trunk
 /// - All indices in `Branch::children` are valid (< branches.len())
 /// - No cycles in parent-child relationships
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BranchGraph {
     /// All branches in the tree (index 0 is root/trunk)
     pub branches: Vec<Branch>,
@@ -130,12 +130,6 @@ impl BranchGraph {
         }
 
         self.bounds = (min, max);
-    }
-}
-
-impl Default for BranchGraph {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -422,7 +416,7 @@ impl TreeType {
 
 /// Generates a tree mesh from a branch graph
 ///
-/// For Phase 1, generates a simple mesh. In later phases, this will be extended to
+/// Generates a simple mesh from the branch graph. This will be extended to
 /// create tapered cylinders for each branch segment and foliage spheres at endpoints.
 ///
 /// # Arguments
@@ -1295,7 +1289,7 @@ mod tests {
         );
     }
 
-    // ========== Phase 1: Recursive Branch Generation Tests ==========
+    // ========== Recursive Branch Generation Tests ==========
 
     #[test]
     fn test_generate_branch_graph_creates_trunk() {
@@ -1563,7 +1557,7 @@ mod tests {
         }
     }
 
-    // ========== Phase 2: Tapered Cylinder Mesh Generation Tests ==========
+    // ========== Tapered Cylinder Mesh Generation Tests ==========
 
     #[test]
     fn test_create_tapered_cylinder_vertex_count() {
@@ -1884,7 +1878,7 @@ mod tests {
         );
     }
 
-    // ==================== Phase 3: Foliage Distribution Tests ====================
+    // ==================== Foliage Distribution Tests ====================
 
     #[test]
     fn test_get_leaf_branches_finds_endpoints() {
@@ -2029,7 +2023,7 @@ mod tests {
         );
     }
 
-    // ==================== Phase 3: Palm Tree Tests ====================
+    // ==================== Palm Tree Tests ====================
 
     /// Tests that TreeType::Palm config returns correct trunk_radius and height
     #[test]

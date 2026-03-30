@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Character class definitions and database
@@ -10,13 +10,12 @@
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
-//! See `docs/explanation/sdk_implementation_plan.md` Phase 1 for implementation details.
+//! See `docs/explanation/sdk_implementation_plan.md` for implementation details.
 
 use crate::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
 use crate::domain::types::{DiceRoll, ItemId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use thiserror::Error;
 
 // ===== Error Types =====
@@ -330,89 +329,25 @@ pub struct ClassDatabase {
     classes: HashMap<ClassId, ClassDefinition>,
 }
 
+crate::impl_ron_database!(
+    ClassDatabase,
+    entity: ClassDefinition,
+    key: String,
+    error: ClassError,
+    field: classes,
+    id_of: |c: &ClassDefinition| c.id.clone(),
+    dup_err: ClassError::DuplicateId,
+    read_err: |e| ClassError::LoadError(format!("Failed to read file: {}", e)),
+    parse_err: |e| ClassError::ParseError(format!("RON parse error: {}", e)),
+    post_load: ClassDatabase::validate,
+);
+
 impl ClassDatabase {
     /// Creates an empty class database
     pub fn new() -> Self {
         Self {
             classes: HashMap::new(),
         }
-    }
-
-    /// Loads class definitions from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing class definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(ClassDatabase)` on success, or an error if the file
-    /// cannot be read or parsed.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::domain::classes::ClassDatabase;
-    ///
-    /// let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
-    /// assert!(db.get_class("knight").is_some());
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ClassError> {
-        let contents = std::fs::read_to_string(path.as_ref())
-            .map_err(|e| ClassError::LoadError(format!("Failed to read file: {}", e)))?;
-
-        Self::load_from_string(&contents)
-    }
-
-    /// Loads class definitions from a RON string
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - RON string containing class definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(ClassDatabase)` on success, or an error if parsing fails.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::classes::ClassDatabase;
-    ///
-    /// let ron_data = r#"[
-    ///     (
-    ///         id: "knight",
-    ///         name: "Knight",
-    ///         description: "A brave warrior",
-    ///         hp_die: (count: 1, sides: 10, bonus: 0),
-    ///         spell_school: None,
-    ///         is_pure_caster: false,
-    ///         spell_stat: None,
-    ///         disablement_bit: 0,
-    ///         special_abilities: [],
-    ///         starting_weapon_id: None,
-    ///         starting_armor_id: None,
-    ///         starting_items: [],
-    ///     ),
-    /// ]"#;
-    ///
-    /// let db = ClassDatabase::load_from_string(ron_data).unwrap();
-    /// assert!(db.get_class("knight").is_some());
-    /// ```
-    pub fn load_from_string(data: &str) -> Result<Self, ClassError> {
-        let classes: Vec<ClassDefinition> = ron::from_str(data)
-            .map_err(|e| ClassError::ParseError(format!("RON parse error: {}", e)))?;
-
-        let mut db = Self::new();
-        for class_def in classes {
-            if db.classes.contains_key(&class_def.id) {
-                return Err(ClassError::DuplicateId(class_def.id.clone()));
-            }
-            db.classes.insert(class_def.id.clone(), class_def);
-        }
-
-        db.validate()?;
-        Ok(db)
     }
 
     /// Gets a class definition by ID

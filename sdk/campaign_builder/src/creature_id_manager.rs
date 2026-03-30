@@ -246,7 +246,7 @@ pub struct IdChange {
 /// let next_id = manager.suggest_next_id(CreatureCategory::Monsters);
 /// assert_eq!(next_id, 2);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CreatureIdManager {
     /// Set of currently used IDs
     used_ids: HashSet<CreatureId>,
@@ -666,12 +666,6 @@ impl CreatureIdManager {
         used_ids: &HashSet<CreatureId>,
     ) -> Option<CreatureId> {
         category.id_range().find(|id| !used_ids.contains(id))
-    }
-}
-
-impl Default for CreatureIdManager {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

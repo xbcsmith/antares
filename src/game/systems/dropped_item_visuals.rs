@@ -311,7 +311,7 @@ mod tests {
     /// §3.6 — `load_map_dropped_items_system` fires [`ItemDroppedEvent`] for
     /// every item in `map.dropped_items` when the active map is first loaded.
     ///
-    /// This is the key Phase-3.2 addition: runtime-dropped items stored in
+    /// This is the key addition: runtime-dropped items stored in
     /// `map.dropped_items` (not just static `MapEvent::DroppedItem` entries
     /// in the events `HashMap`) are surfaced as `ItemDroppedEvent` messages
     /// on map load, which causes [`spawn_dropped_item_system`] to spawn their

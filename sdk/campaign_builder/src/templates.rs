@@ -167,7 +167,6 @@ impl TemplateManager {
     }
 
     /// Create an item from a template
-    #[allow(deprecated)]
     pub fn create_item(&self, template_id: &str, id: u32) -> Option<Item> {
         let id: u8 = id.try_into().ok()?;
         match template_id {
@@ -926,7 +925,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_custom_templates() {
         let mut manager = TemplateManager::new();
         let initial_count = manager.item_templates().len();

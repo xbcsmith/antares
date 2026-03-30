@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Procedural sprite selection system (Phase 6)
+//! Procedural sprite selection system
 //!
 //! Provides functions to resolve sprite selection rules to concrete sprites,
 //! enabling automatic sprite variation based on tile position, randomness,

@@ -28,6 +28,9 @@ pub mod domain;
 pub mod game;
 pub mod sdk;
 
+#[cfg(test)]
+pub mod test_helpers;
+
 // Re-export commonly used types for convenience
 pub use domain::types::{CharacterId, EventId, InnkeeperId, ItemId, MapId, MonsterId, SpellId};
 pub use domain::types::{DiceRoll, Direction, GameTime, Position, TimeOfDay};

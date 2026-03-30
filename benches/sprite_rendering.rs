@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Performance measurements for sprite rendering system (Phase 3)
+//! Performance measurements for sprite rendering system
 //!
 //! Simple benchmark using standard library timing.
 //! Run with: `cargo run --release --bin sprite_rendering_bench`

@@ -206,7 +206,7 @@ pub struct NpcDefinition {
     /// `npc_stock_templates.ron`. When `None`, the merchant starts with no stock.
     ///
     /// This is static definition data. Runtime mutable stock quantities live in
-    /// `NpcRuntimeState` (Phase 2).
+    /// `NpcRuntimeState`.
     #[serde(default)]
     pub stock_template: Option<String>,
 
@@ -927,7 +927,7 @@ NpcDefinition(
         assert!(innkeeper.creature_id.is_none());
     }
 
-    // ----- Phase 1 new tests -----
+    // ----- NpcDefinition field tests -----
 
     #[test]
     fn test_npc_definition_is_priest_defaults_false() {

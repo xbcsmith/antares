@@ -107,7 +107,7 @@ pub fn spawn_choice_ui(
             };
 
             // Selected background intentionally slightly different so tests can detect it.
-            // Using a literal here avoids needing to change components for Phase 2.
+            // Using a literal here avoids needing to change components.
             let selected_bg = Color::srgba(0.12, 0.12, 0.15, 1.0);
 
             let bg_color = if selected {

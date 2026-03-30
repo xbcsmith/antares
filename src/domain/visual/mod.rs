@@ -71,6 +71,7 @@ pub mod texture_atlas;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::types::CreatureId;
+use crate::domain::validation::ValidationError;
 
 /// A single mesh definition with vertices, indices, and optional attributes
 ///
@@ -482,27 +483,36 @@ impl CreatureDefinition {
     ///
     /// assert!(creature.validate().is_ok());
     /// ```
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), ValidationError> {
         if self.meshes.is_empty() {
-            return Err("Creature must have at least one mesh".to_string());
-        }
-
-        if self.meshes.len() != self.mesh_transforms.len() {
-            return Err(format!(
-                "Mesh count ({}) must match transform count ({})",
-                self.meshes.len(),
-                self.mesh_transforms.len()
+            return Err(ValidationError::EmptyField(
+                "Creature must have at least one mesh".to_string(),
             ));
         }
 
+        if self.meshes.len() != self.mesh_transforms.len() {
+            return Err(ValidationError::CountMismatch(format!(
+                "Mesh count ({}) must match transform count ({})",
+                self.meshes.len(),
+                self.mesh_transforms.len()
+            )));
+        }
+
         if self.scale <= 0.0 {
-            return Err(format!("Scale must be positive, got {}", self.scale));
+            return Err(ValidationError::OutOfRange(format!(
+                "Scale must be positive, got {}",
+                self.scale
+            )));
         }
 
         // Validate each mesh
         for (i, mesh) in self.meshes.iter().enumerate() {
-            mesh_validation::validate_mesh_definition(mesh)
-                .map_err(|e| format!("Mesh {}: {}", i, e))?;
+            mesh_validation::validate_mesh_definition(mesh).map_err(|e| {
+                ValidationError::Nested {
+                    context: format!("Mesh {}", i),
+                    source: Box::new(e),
+                }
+            })?;
         }
 
         Ok(())
@@ -757,6 +767,7 @@ mod tests {
         assert!(creature
             .validate()
             .unwrap_err()
+            .to_string()
             .contains("at least one mesh"));
     }
 
@@ -773,7 +784,11 @@ mod tests {
         };
 
         assert!(creature.validate().is_err());
-        assert!(creature.validate().unwrap_err().contains("must match"));
+        assert!(creature
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("must match"));
     }
 
     #[test]
@@ -792,6 +807,7 @@ mod tests {
         assert!(creature
             .validate()
             .unwrap_err()
+            .to_string()
             .contains("must be positive"));
     }
 

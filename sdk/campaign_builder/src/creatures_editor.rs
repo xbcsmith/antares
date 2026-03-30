@@ -2274,7 +2274,7 @@ impl CreaturesEditorState {
         self.validation_info.clear();
 
         if let Err(error) = self.edit_buffer.validate() {
-            self.validation_errors.push(error);
+            self.validation_errors.push(error.to_string());
         }
 
         for (mesh_idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {

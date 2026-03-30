@@ -59,7 +59,6 @@ use crate::domain::world::{Map, TerrainType, Tile, WallType};
 /// assert_eq!(sword.name, "Longsword");
 /// assert!(sword.is_weapon());
 /// ```
-#[allow(deprecated)]
 pub fn basic_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
     Item {
         id,
@@ -96,7 +95,6 @@ pub fn basic_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
 /// let greatsword = two_handed_weapon(2, "Greatsword", DiceRoll::new(2, 6, 0));
 /// assert_eq!(greatsword.name, "Greatsword");
 /// ```
-#[allow(deprecated)]
 pub fn two_handed_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
     Item {
         id,
@@ -134,7 +132,6 @@ pub fn two_handed_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
 /// assert_eq!(flame_sword.name, "Flame Sword");
 /// assert!(flame_sword.is_magical());
 /// ```
-#[allow(deprecated)]
 pub fn magical_weapon(id: ItemId, name: &str, damage: DiceRoll, bonus: i8) -> Item {
     Item {
         id,
@@ -186,7 +183,6 @@ pub fn magical_weapon(id: ItemId, name: &str, damage: DiceRoll, bonus: i8) -> It
 /// assert_eq!(chainmail.name, "Chainmail");
 /// assert!(chainmail.is_armor());
 /// ```
-#[allow(deprecated)]
 pub fn basic_armor(id: ItemId, name: &str, ac_bonus: u8) -> Item {
     let weight = ac_bonus * 5;
     Item {
@@ -222,7 +218,6 @@ pub fn basic_armor(id: ItemId, name: &str, ac_bonus: u8) -> Item {
 /// let wooden_shield = shield(11, "Wooden Shield", 1);
 /// assert_eq!(wooden_shield.name, "Wooden Shield");
 /// ```
-#[allow(deprecated)]
 pub fn shield(id: ItemId, name: &str, ac_bonus: u8) -> Item {
     Item {
         id,
@@ -258,7 +253,6 @@ pub fn shield(id: ItemId, name: &str, ac_bonus: u8) -> Item {
 /// assert_eq!(enchanted_mail.name, "Enchanted Mail");
 /// assert!(enchanted_mail.is_magical());
 /// ```
-#[allow(deprecated)]
 pub fn magical_armor(id: ItemId, name: &str, ac_bonus: u8, magic_bonus: i8) -> Item {
     let weight = ac_bonus * 5;
     Item {
@@ -303,7 +297,6 @@ pub fn magical_armor(id: ItemId, name: &str, ac_bonus: u8, magic_bonus: i8) -> I
 /// });
 /// assert_eq!(ring.name, "Ring of Strength");
 /// ```
-#[allow(deprecated)]
 pub fn basic_ring(id: ItemId, name: &str, bonus: Bonus) -> Item {
     Item {
         id,
@@ -341,7 +334,6 @@ pub fn basic_ring(id: ItemId, name: &str, bonus: Bonus) -> Item {
 /// });
 /// assert_eq!(amulet.name, "Amulet of Protection");
 /// ```
-#[allow(deprecated)]
 pub fn basic_amulet(id: ItemId, name: &str, bonus: Bonus) -> Item {
     Item {
         id,
@@ -377,7 +369,6 @@ pub fn basic_amulet(id: ItemId, name: &str, bonus: Bonus) -> Item {
 /// let potion = healing_potion(30, "Healing Potion", 20);
 /// assert_eq!(potion.name, "Healing Potion");
 /// ```
-#[allow(deprecated)]
 pub fn healing_potion(id: ItemId, name: &str, healing_amount: u16) -> Item {
     Item {
         id,
@@ -412,7 +403,6 @@ pub fn healing_potion(id: ItemId, name: &str, healing_amount: u16) -> Item {
 /// let potion = sp_potion(31, "Mana Potion", 10);
 /// assert_eq!(potion.name, "Mana Potion");
 /// ```
-#[allow(deprecated)]
 pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item {
     Item {
         id,
@@ -461,7 +451,6 @@ pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item {
 /// let item = timed_fire_resist_potion(62, 60, "Fire Resist Potion");
 /// assert_eq!(item.name, "Fire Resist Potion");
 /// ```
-#[allow(deprecated)]
 pub fn timed_fire_resist_potion(id: ItemId, duration_minutes: u16, name: &str) -> Item {
     use crate::domain::items::types::{normalize_duration, ResistanceType};
     Item {
@@ -511,7 +500,6 @@ pub fn timed_fire_resist_potion(id: ItemId, duration_minutes: u16, name: &str) -
 /// let item = timed_might_potion(63, 30, "Might Potion");
 /// assert_eq!(item.name, "Might Potion");
 /// ```
-#[allow(deprecated)]
 pub fn timed_might_potion(id: ItemId, duration_minutes: u16, name: &str) -> Item {
     use crate::domain::items::types::{normalize_duration, AttributeType};
     Item {
@@ -576,7 +564,6 @@ pub fn timed_might_potion(id: ItemId, duration_minutes: u16, name: &str) -> Item
 ///     assert!(!data.is_combat_usable);
 /// }
 /// ```
-#[allow(deprecated)]
 pub fn resurrection_scroll(id: ItemId, name: &str) -> Item {
     resurrection_scroll_with_hp(id, name, 1)
 }
@@ -618,7 +605,6 @@ pub fn resurrection_scroll(id: ItemId, name: &str) -> Item {
 ///     assert!(!data.is_combat_usable);
 /// }
 /// ```
-#[allow(deprecated)]
 pub fn resurrection_scroll_with_hp(id: ItemId, name: &str, hp: u16) -> Item {
     Item {
         id,
@@ -655,7 +641,6 @@ pub fn resurrection_scroll_with_hp(id: ItemId, name: &str, hp: u16) -> Item {
 /// let arrows = arrow_bundle(40, 20);
 /// assert!(arrows.name.contains("Arrow"));
 /// ```
-#[allow(deprecated)]
 pub fn arrow_bundle(id: ItemId, quantity: u16) -> Item {
     Item {
         id,
@@ -689,7 +674,6 @@ pub fn arrow_bundle(id: ItemId, quantity: u16) -> Item {
 /// let bolts = bolt_bundle(41, 15);
 /// assert!(bolts.name.contains("Bolt"));
 /// ```
-#[allow(deprecated)]
 pub fn bolt_bundle(id: ItemId, count: u16) -> Item {
     Item {
         id,
@@ -725,7 +709,6 @@ pub fn bolt_bundle(id: ItemId, count: u16) -> Item {
 /// let key = quest_item(50, "Ancient Key", "brothers_quest");
 /// assert_eq!(key.name, "Ancient Key");
 /// ```
-#[allow(deprecated)]
 pub fn quest_item(id: ItemId, name: &str, quest_id: &str) -> Item {
     Item {
         id,

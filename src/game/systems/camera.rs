@@ -493,7 +493,7 @@ mod tests {
     fn test_default_camera_config_values() {
         let config = CameraConfig::default();
 
-        // Verify default values match Phase 1 implementation
+        // Verify default values match implementation
         assert_eq!(config.mode, CameraMode::FirstPerson);
         assert_eq!(config.eye_height, 0.6);
         assert_eq!(config.fov, 70.0);

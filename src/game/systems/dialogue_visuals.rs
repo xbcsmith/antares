@@ -112,7 +112,7 @@ pub fn spawn_dialogue_bubble(
                     DialogueContentText,
                 ));
 
-                // Choice list container (empty for now; populated by choice UI in Phase 2)
+                // Choice list container (empty for now; populated by choice UI)
                 parent.spawn((Node { ..default() }, DialogueChoiceList));
             })
             .id();

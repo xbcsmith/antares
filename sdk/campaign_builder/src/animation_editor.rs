@@ -81,7 +81,7 @@ pub struct AnimationCreateBuffer {
 }
 
 /// Buffer for editing a keyframe
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct KeyframeBuffer {
     /// Time of the keyframe
     pub time: f32,
@@ -611,16 +611,6 @@ impl AnimationCreateBuffer {
             duration: self.duration,
             keyframes: vec![],
             looping: self.looping,
-        }
-    }
-}
-
-impl Default for KeyframeBuffer {
-    fn default() -> Self {
-        Self {
-            time: 0.0,
-            mesh_index: 0,
-            transform: MeshTransform::default(),
         }
     }
 }

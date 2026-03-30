@@ -32,6 +32,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::domain::validation::ValidationError;
+
 /// A reference to an animation clip
 ///
 /// References an animation by name for playback in a blend tree.
@@ -368,7 +370,7 @@ impl BlendNode {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if valid, or `Err(String)` with error description
+    /// Returns `Ok(())` if valid, or `Err(ValidationError)` with error description
     ///
     /// # Errors
     ///
@@ -388,17 +390,19 @@ impl BlendNode {
     /// let node = BlendNode::clip("Walk".to_string(), 1.0);
     /// assert!(node.validate().is_ok());
     /// ```
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), ValidationError> {
         match self {
             BlendNode::Clip(clip) => {
                 if clip.animation_name.is_empty() {
-                    return Err("Animation clip has empty name".to_string());
+                    return Err(ValidationError::EmptyField(
+                        "Animation clip has empty name".to_string(),
+                    ));
                 }
                 if clip.speed <= 0.0 {
-                    return Err(format!(
+                    return Err(ValidationError::OutOfRange(format!(
                         "Animation clip '{}' has invalid speed: {}",
                         clip.animation_name, clip.speed
-                    ));
+                    )));
                 }
             }
             BlendNode::Blend2D {
@@ -407,23 +411,31 @@ impl BlendNode {
                 samples,
             } => {
                 if x_param.is_empty() {
-                    return Err("Blend2D x_param is empty".to_string());
+                    return Err(ValidationError::EmptyField(
+                        "Blend2D x_param is empty".to_string(),
+                    ));
                 }
                 if y_param.is_empty() {
-                    return Err("Blend2D y_param is empty".to_string());
+                    return Err(ValidationError::EmptyField(
+                        "Blend2D y_param is empty".to_string(),
+                    ));
                 }
                 if samples.is_empty() {
-                    return Err("Blend2D has no samples".to_string());
+                    return Err(ValidationError::EmptyField(
+                        "Blend2D has no samples".to_string(),
+                    ));
                 }
                 for sample in samples {
                     if sample.animation.animation_name.is_empty() {
-                        return Err("Blend2D sample has empty animation name".to_string());
+                        return Err(ValidationError::EmptyField(
+                            "Blend2D sample has empty animation name".to_string(),
+                        ));
                     }
                     if sample.animation.speed <= 0.0 {
-                        return Err(format!(
+                        return Err(ValidationError::OutOfRange(format!(
                             "Blend2D sample '{}' has invalid speed: {}",
                             sample.animation.animation_name, sample.animation.speed
-                        ));
+                        )));
                     }
                 }
             }
@@ -433,18 +445,26 @@ impl BlendNode {
                 weight,
             } => {
                 if *weight < 0.0 || *weight > 1.0 {
-                    return Err(format!("Additive weight out of range [0,1]: {}", weight));
+                    return Err(ValidationError::OutOfRange(format!(
+                        "Additive weight out of range [0,1]: {}",
+                        weight
+                    )));
                 }
                 base.validate()?;
                 additive.validate()?;
             }
             BlendNode::LayeredBlend { layers } => {
                 if layers.is_empty() {
-                    return Err("LayeredBlend has no layers".to_string());
+                    return Err(ValidationError::EmptyField(
+                        "LayeredBlend has no layers".to_string(),
+                    ));
                 }
                 for (layer, weight) in layers {
                     if *weight < 0.0 || *weight > 1.0 {
-                        return Err(format!("Layer weight out of range [0,1]: {}", weight));
+                        return Err(ValidationError::OutOfRange(format!(
+                            "Layer weight out of range [0,1]: {}",
+                            weight
+                        )));
                     }
                     layer.validate()?;
                 }
@@ -565,7 +585,7 @@ mod tests {
         let node = BlendNode::clip("".to_string(), 1.0);
         let result = node.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("empty name"));
+        assert!(result.unwrap_err().to_string().contains("empty name"));
     }
 
     #[test]
@@ -573,7 +593,7 @@ mod tests {
         let node = BlendNode::clip("Walk".to_string(), 0.0);
         let result = node.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid speed"));
+        assert!(result.unwrap_err().to_string().contains("invalid speed"));
     }
 
     #[test]
@@ -592,7 +612,7 @@ mod tests {
         let node = BlendNode::blend_2d("speed".to_string(), "direction".to_string(), vec![]);
         let result = node.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("no samples"));
+        assert!(result.unwrap_err().to_string().contains("no samples"));
     }
 
     #[test]
@@ -618,7 +638,7 @@ mod tests {
 
         let result = node.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("out of range"));
+        assert!(result.unwrap_err().to_string().contains("out of range"));
     }
 
     #[test]
@@ -635,7 +655,7 @@ mod tests {
         let node = BlendNode::LayeredBlend { layers: vec![] };
         let result = node.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("no layers"));
+        assert!(result.unwrap_err().to_string().contains("no layers"));
     }
 
     #[test]

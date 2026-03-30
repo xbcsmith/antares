@@ -406,21 +406,10 @@ impl SaveGameManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Character, CharacterLocation};
+    use crate::domain::character::CharacterLocation;
     use crate::domain::types::InnkeeperId;
+    use crate::test_helpers::factories::test_character;
     use tempfile::TempDir;
-
-    // Helper to create a test character
-    fn create_test_character(name: &str) -> Character {
-        use crate::domain::character::{Alignment, Sex};
-        Character::new(
-            name.to_string(),
-            "human".to_string(),
-            "knight".to_string(),
-            Sex::Male,
-            Alignment::Good,
-        )
-    }
 
     #[test]
     fn test_save_game_new() {
@@ -489,8 +478,6 @@ mod tests {
         let mut game_state = GameState::new();
         game_state.campaign = Some(campaign);
         // Apply starting gold from campaign config.
-        // NOTE: party.food is deprecated (Phase 2) — food is now tracked as
-        // ConsumableEffect::IsFood inventory items, not a numeric counter.
         game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
         let save = SaveGame::new(game_state);
 
@@ -600,7 +587,7 @@ mod tests {
         assert_eq!(campaign_ref.name, "Tutorial Campaign");
     }
 
-    // ===== Phase 5: Party Management Persistence Tests =====
+    // ===== Party Management Persistence Tests =====
 
     #[test]
     fn test_save_party_locations() {
@@ -610,9 +597,9 @@ mod tests {
         let mut game_state = GameState::new();
 
         // Add 3 characters to party
-        let char1 = create_test_character("Knight");
-        let char2 = create_test_character("Archer");
-        let char3 = create_test_character("Cleric");
+        let char1 = test_character("Knight");
+        let char2 = test_character("Archer");
+        let char3 = test_character("Cleric");
 
         game_state
             .roster
@@ -668,9 +655,9 @@ mod tests {
         let mut game_state = GameState::new();
 
         // Add characters at different inns
-        let char1 = create_test_character("InnChar1");
-        let char2 = create_test_character("InnChar2");
-        let char3 = create_test_character("InnChar3");
+        let char1 = test_character("InnChar1");
+        let char2 = test_character("InnChar2");
+        let char3 = test_character("InnChar3");
 
         let inn1: InnkeeperId = "tutorial_innkeeper_town".to_string();
         let inn2: InnkeeperId = "tutorial_innkeeper_town2".to_string();
@@ -723,7 +710,7 @@ mod tests {
         let mut game_state = GameState::new();
 
         // Add a single character located at an inn so the save contains AtInn(...)
-        let char1 = create_test_character("FormatChar");
+        let char1 = test_character("FormatChar");
         let inn = "tutorial_innkeeper_town".to_string();
         game_state
             .roster
@@ -781,7 +768,7 @@ mod tests {
         let mut game_state = GameState::new();
         game_state
             .roster
-            .add_character(create_test_character("OldChar"), CharacterLocation::InParty)
+            .add_character(test_character("OldChar"), CharacterLocation::InParty)
             .unwrap();
 
         // Save normally
@@ -831,7 +818,7 @@ mod tests {
         let mut game_state = GameState::new();
 
         // Simulate recruiting a character
-        let recruited = create_test_character("RecruitedNPC");
+        let recruited = test_character("RecruitedNPC");
         game_state
             .roster
             .add_character(recruited, CharacterLocation::InParty)
@@ -876,38 +863,29 @@ mod tests {
         // Mix of party members, inn characters, and map characters
         game_state
             .roster
-            .add_character(
-                create_test_character("PartyMember1"),
-                CharacterLocation::InParty,
-            )
+            .add_character(test_character("PartyMember1"), CharacterLocation::InParty)
+            .unwrap();
+        game_state
+            .roster
+            .add_character(test_character("PartyMember2"), CharacterLocation::InParty)
             .unwrap();
         game_state
             .roster
             .add_character(
-                create_test_character("PartyMember2"),
-                CharacterLocation::InParty,
-            )
-            .unwrap();
-        game_state
-            .roster
-            .add_character(
-                create_test_character("InnChar1"),
+                test_character("InnChar1"),
                 CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
             )
             .unwrap();
         game_state
             .roster
             .add_character(
-                create_test_character("InnChar2"),
+                test_character("InnChar2"),
                 CharacterLocation::AtInn("tutorial_innkeeper_town2".to_string()),
             )
             .unwrap();
         game_state
             .roster
-            .add_character(
-                create_test_character("MapChar"),
-                CharacterLocation::OnMap(5),
-            )
+            .add_character(test_character("MapChar"), CharacterLocation::OnMap(5))
             .unwrap();
 
         // Add party members to party
@@ -986,7 +964,7 @@ mod tests {
 
             game_state
                 .roster
-                .add_character(create_test_character(&char_name), location)
+                .add_character(test_character(&char_name), location)
                 .unwrap();
         }
 
@@ -1060,7 +1038,7 @@ mod tests {
             };
             game_state
                 .roster
-                .add_character(create_test_character(&format!("Char{}", i)), location)
+                .add_character(test_character(&format!("Char{}", i)), location)
                 .unwrap();
         }
 
@@ -1099,7 +1077,7 @@ mod tests {
         assert_eq!(loaded_state.party.members[1].name, "Char2");
     }
 
-    // ===== Phase 5: NPC Runtime Persistence Tests =====
+    // ===== NPC Runtime Persistence Tests =====
 
     /// Helper that builds a `GameState` pre-populated with one merchant NPC's
     /// runtime stock so that save/load tests can verify round-trip fidelity.
@@ -1207,7 +1185,7 @@ mod tests {
     #[test]
     fn test_save_load_legacy_format_empty_npc_runtime() {
         // Arrange: produce a save file, then strip the npc_runtime field to
-        // simulate a save file created before Phase 2 was implemented.
+        // simulate a save file created before npc_runtime was implemented.
         let temp_dir = TempDir::new().unwrap();
         let manager = SaveGameManager::new(temp_dir.path()).unwrap();
 
@@ -1216,7 +1194,7 @@ mod tests {
         state
             .roster
             .add_character(
-                create_test_character("LegacyChar"),
+                test_character("LegacyChar"),
                 crate::domain::character::CharacterLocation::InParty,
             )
             .unwrap();
@@ -1313,12 +1291,12 @@ mod tests {
         );
     }
 
-    // ===== Buy and Sell Phase 5: Tutorial Data Wiring, Save Persistence =====
+    // ===== Buy and Sell: Tutorial Data Wiring, Save Persistence =====
 
     /// Verifies that buying an item from a merchant reduces the stock count and
     /// that the reduction persists across a save/load cycle.
     ///
-    /// Per Phase 5 spec (section 5.3): create a GameState with a merchant having
+    /// Create a GameState with a merchant having
     /// 3 units of item 1, buy 1 unit (stock → 2), serialise, deserialise, and
     /// assert the loaded state shows 2 units.
     #[test]
@@ -1359,10 +1337,10 @@ mod tests {
         }
 
         // 3. Serialise to RON with save_game.
-        manager.save("phase5_buy_test", &state).unwrap();
+        manager.save("buy_sell_test", &state).unwrap();
 
         // 4. Deserialise with load_game.
-        let loaded = manager.load("phase5_buy_test").unwrap();
+        let loaded = manager.load("buy_sell_test").unwrap();
 
         // 5. Assert the loaded state has 2 units of item 1 in the merchant stock.
         let loaded_runtime = loaded
@@ -1451,8 +1429,8 @@ mod tests {
         }
 
         // Save then load.
-        manager.save("phase5_container_test", &state).unwrap();
-        let loaded = manager.load("phase5_container_test").unwrap();
+        manager.save("container_test", &state).unwrap();
+        let loaded = manager.load("container_test").unwrap();
 
         // Verify the container on the loaded map has exactly items 10 and 30.
         let loaded_map = loaded
@@ -1490,7 +1468,7 @@ mod tests {
     /// Verifies that `last_restock_day`, `magic_slots`, and `last_magic_refresh_day`
     /// survive a full save/load cycle.
     ///
-    /// These Phase-6 fields are serialised as part of `NpcRuntimeState` inside
+    /// These fields are serialised as part of `NpcRuntimeState` inside
     /// `GameState::npc_runtime`.  This test ensures they are not silently dropped
     /// or reset to their default sentinel values during round-trip serialisation.
     #[test]
@@ -1529,7 +1507,7 @@ mod tests {
             restock_template: Some("tutorial_merchant_stock".to_string()),
         };
 
-        let mut runtime = NpcRuntimeState::new("merchant_phase6".to_string());
+        let mut runtime = NpcRuntimeState::new("merchant_restock".to_string());
         runtime.stock = Some(stock);
         runtime.last_restock_day = 3;
         runtime.magic_slots = vec![101, 102];
@@ -1539,16 +1517,16 @@ mod tests {
 
         // Save and reload.
         manager
-            .save("phase6_restock_roundtrip", &state)
+            .save("restock_roundtrip", &state)
             .expect("save must succeed");
         let loaded = manager
-            .load("phase6_restock_roundtrip")
+            .load("restock_roundtrip")
             .expect("load must succeed");
 
         let loaded_runtime = loaded
             .npc_runtime
-            .get(&"merchant_phase6".to_string())
-            .expect("merchant_phase6 must be present after round-trip");
+            .get(&"merchant_restock".to_string())
+            .expect("merchant_restock must be present after round-trip");
 
         assert_eq!(
             loaded_runtime.last_restock_day, 3,
@@ -1592,7 +1570,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 5: Lock State Persistence Tests =====
+    // ===== Lock State Persistence Tests =====
 
     /// Verifies that unlocking a door in one session and saving/loading
     /// leaves the door open in the restored session.

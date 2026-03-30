@@ -15,7 +15,7 @@
 //! - `types`: Core world data structures (Tile, Map, World, etc.)
 //! - `movement`: Party movement and navigation logic
 //! - `events`: Map event handling system
-//! - `sprite_selection`: Procedural sprite selection (Phase 6)
+//! - `sprite_selection`: Procedural sprite selection
 //! - `dropped_items`: Domain record for items lying on the ground ([`DroppedItem`])
 //! - `furniture`: Data-driven furniture definitions ([`FurnitureDefinition`], [`FurnitureDatabase`])
 //! - `lock`: Lock state domain types and unlock functions ([`LockState`], [`try_unlock`], etc.)

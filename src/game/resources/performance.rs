@@ -114,7 +114,7 @@ impl PerformanceMetrics {
     pub fn min_frame_time_ms(&self) -> f32 {
         self.frame_times
             .iter()
-            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .min_by(|a, b| a.total_cmp(b))
             .copied()
             .unwrap_or(0.0)
             * 1000.0
@@ -124,7 +124,7 @@ impl PerformanceMetrics {
     pub fn max_frame_time_ms(&self) -> f32 {
         self.frame_times
             .iter()
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max_by(|a, b| a.total_cmp(b))
             .copied()
             .unwrap_or(0.0)
             * 1000.0
@@ -453,5 +453,23 @@ mod tests {
         assert_eq!(metrics.lod_stats.get(&0).unwrap().total_triangles, 2000);
         assert_eq!(metrics.lod_stats.get(&1).unwrap().count, 1);
         assert_eq!(metrics.total_lod_entities(), 3);
+    }
+
+    #[test]
+    fn test_min_frame_time_handles_nan() {
+        let mut metrics = PerformanceMetrics::new();
+        metrics.update_frame_time(f32::NAN);
+        metrics.update_frame_time(0.016);
+        // Should not panic — NaN sorts to one end with total_cmp
+        let _min = metrics.min_frame_time_ms();
+    }
+
+    #[test]
+    fn test_max_frame_time_handles_nan() {
+        let mut metrics = PerformanceMetrics::new();
+        metrics.update_frame_time(f32::NAN);
+        metrics.update_frame_time(0.016);
+        // Should not panic — NaN sorts to one end with total_cmp
+        let _max = metrics.max_frame_time_ms();
     }
 }

@@ -58,6 +58,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::domain::validation::ValidationError;
 use crate::domain::visual::blend_tree::BlendNode;
 
 /// Condition for triggering a state transition
@@ -502,7 +503,7 @@ impl AnimationStateMachine {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if valid, or `Err(String)` with error description
+    /// Returns `Ok(())` if valid, or `Err(ValidationError)` with error description
     ///
     /// # Errors
     ///
@@ -526,31 +527,33 @@ impl AnimationStateMachine {
     ///
     /// assert!(state_machine.validate().is_ok());
     /// ```
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), ValidationError> {
         if self.states.is_empty() {
-            return Err("State machine has no states".to_string());
+            return Err(ValidationError::EmptyField(
+                "State machine has no states".to_string(),
+            ));
         }
 
         if !self.current_state.is_empty() && !self.states.contains_key(&self.current_state) {
-            return Err(format!(
+            return Err(ValidationError::MissingReference(format!(
                 "Current state '{}' does not exist",
                 self.current_state
-            ));
+            )));
         }
 
         // Validate all transitions reference existing states
         for transition in &self.transitions {
             if !self.states.contains_key(&transition.from) {
-                return Err(format!(
+                return Err(ValidationError::MissingReference(format!(
                     "Transition references non-existent state: '{}'",
                     transition.from
-                ));
+                )));
             }
             if !self.states.contains_key(&transition.to) {
-                return Err(format!(
+                return Err(ValidationError::MissingReference(format!(
                     "Transition references non-existent state: '{}'",
                     transition.to
-                ));
+                )));
             }
         }
 
@@ -740,7 +743,7 @@ mod tests {
         let state_machine = AnimationStateMachine::new("Test".to_string());
         let result = state_machine.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("no states"));
+        assert!(result.unwrap_err().to_string().contains("no states"));
     }
 
     #[test]
@@ -754,7 +757,7 @@ mod tests {
 
         let result = state_machine.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("does not exist"));
+        assert!(result.unwrap_err().to_string().contains("does not exist"));
     }
 
     #[test]

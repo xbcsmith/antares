@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Modifier keys for shortcuts
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Modifiers {
     pub ctrl: bool,
     pub shift: bool,
@@ -77,12 +77,6 @@ impl Modifiers {
     /// Check if any modifier is pressed
     pub fn any(&self) -> bool {
         !self.is_none()
-    }
-}
-
-impl Default for Modifiers {
-    fn default() -> Self {
-        Self::NONE
     }
 }
 

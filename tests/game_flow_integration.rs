@@ -112,20 +112,10 @@ fn test_party_resource_sharing() {
     // Act: Modify shared resources
     game_state.party.gold += 100;
     game_state.party.gems += 10;
-    // Phase 2: party.food is deprecated; food is now IsFood inventory items.
-    // These assignments use the legacy field for backward-compat testing only.
-    #[allow(deprecated)]
-    {
-        game_state.party.food += 50;
-    }
 
     // Assert: Resources are shared at party level
     assert_eq!(game_state.party.gold, 100);
     assert_eq!(game_state.party.gems, 10);
-    #[allow(deprecated)]
-    {
-        assert_eq!(game_state.party.food, 50);
-    }
 }
 
 #[test]
@@ -277,12 +267,6 @@ fn test_exploration_loop_simulation() {
         .add_member(adventurer)
         .expect("Failed to add adventurer");
 
-    // Phase 2: party.food is deprecated; food is now IsFood inventory items.
-    // These assignments use the legacy field for simulation testing only.
-    #[allow(deprecated)]
-    {
-        game_state.party.food = 100;
-    }
     game_state.party.gold = 50;
 
     // Simulate exploration actions
@@ -292,13 +276,6 @@ fn test_exploration_loop_simulation() {
     // 2. Check status
     assert_eq!(game_state.mode, GameMode::Exploration);
     assert!(game_state.party.members[0].is_alive());
-
-    // 3. Consume food (every 24 hours in real game)
-    #[allow(deprecated)]
-    {
-        game_state.party.food -= 1;
-        assert_eq!(game_state.party.food, 99);
-    }
 
     // 4. Enter menu to check inventory
     game_state.enter_menu();

@@ -8,7 +8,7 @@
 //!
 //! # Architecture Reference
 //!
-//! See `docs/explanation/sdk_implementation_plan.md` Phase 3 for implementation details.
+//! See `docs/explanation/sdk_implementation_plan.md` for implementation details.
 //!
 //! # Module Organization
 //!

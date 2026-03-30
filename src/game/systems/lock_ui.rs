@@ -3,7 +3,7 @@
 
 //! Lock interaction UI — Pick Lock / Bash prompt.
 //!
-//! When [`LockInteractionPending`] is set by Phase 2's input or events system,
+//! When [`LockInteractionPending`] is set by the input or events system,
 //! this module renders a small centred egui window prompting the player to
 //! choose "Pick Lock" (Robber only) or "Bash" and to select an acting character.
 //!
@@ -14,8 +14,7 @@
 //!
 //! # Architecture Reference
 //!
-//! See Phase 3 of
-//! `docs/explanation/locked_objects_and_keys_implementation_plan.md`.
+//! See `docs/explanation/locked_objects_and_keys_implementation_plan.md`.
 
 use crate::application::resources::GameContent;
 use crate::domain::character::Character;
@@ -472,7 +471,7 @@ fn lock_action_system(
                 for member in global_state.0.party.members.iter_mut() {
                     member.hp.modify(-(*damage as i32));
                 }
-                // Apply status-condition / teleport effects (Phase 5).
+                // Apply status-condition / teleport effects.
                 let effect_messages = apply_trap_effects(effect.as_deref(), &mut global_state.0);
                 for effect_msg in effect_messages {
                     info!("{}", effect_msg);
@@ -1159,7 +1158,7 @@ mod tests {
     /// `ContainerInventory` mode (and into the replacement `Container` event)
     /// after a successful unlock via `apply_success`.
     ///
-    /// This is the regression test for the Phase 1 gap where `items` was
+    /// This is the regression test for a gap where `items` was
     /// missing from `MapEvent::LockedContainer` and `apply_success` always
     /// passed `vec![]`.
     #[test]
@@ -1291,7 +1290,7 @@ mod tests {
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    // Phase 5 — Trap condition-effect tests
+    // Trap condition-effect tests
     // ────────────────────────────────────────────────────────────────────────
 
     /// A `"poison"` trap effect applies `Condition::POISONED` to the lead

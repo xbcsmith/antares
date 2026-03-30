@@ -544,7 +544,7 @@ pub fn compute_lockpick_chance(character: &Character, class_db: &ClassDatabase) 
 ///
 /// - The trap fires when `random_range(0..100) < trap_chance`.
 /// - Damage is `1d6 × (trap_chance / 10)`, minimum 1.
-/// - `effect` is `None` in Phase 1 (future phases may add status conditions).
+/// - `effect` is `None` currently (future work may add status conditions).
 fn roll_trap<R: Rng>(trap_chance: u8, rng: &mut R) -> Option<UnlockOutcome> {
     let roll: u32 = rng.random_range(0..100);
     if roll < trap_chance as u32 {

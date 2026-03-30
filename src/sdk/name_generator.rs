@@ -61,15 +61,9 @@ pub enum NameTheme {
 ///
 /// This generator is `Send` and `Sync` but uses thread-local RNG internally.
 /// Each thread will have its own randomness state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NameGenerator {
     // Future: could add custom word lists here
-}
-
-impl Default for NameGenerator {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl NameGenerator {
