@@ -1628,24 +1628,28 @@ fn slider_value_from_cursor(
     ((cursor_position.x - left) / width).clamp(0.0, 1.0)
 }
 
+/// Query for slider track button entities with their interaction state and layout.
+type SliderTrackQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Interaction,
+        Ref<'static, Interaction>,
+        &'static SliderTrack,
+        &'static Node,
+        &'static GlobalTransform,
+    ),
+    With<Button>,
+>;
+
 /// Handle mouse input for settings sliders.
 ///
 /// This supports both click-to-set and hover+drag while the left mouse button is held.
-#[allow(clippy::type_complexity)]
 fn handle_slider_mouse(
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
     primary_window: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut slider_query: Query<&mut SettingSlider>,
-    track_query: Query<
-        (
-            &Interaction,
-            Ref<Interaction>,
-            &SliderTrack,
-            &Node,
-            &GlobalTransform,
-        ),
-        With<Button>,
-    >,
+    track_query: SliderTrackQuery,
     mut global_state: ResMut<GlobalState>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Menu(ref m) if m.current_submenu == MenuType::Settings)

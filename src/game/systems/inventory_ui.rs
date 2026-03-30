@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Inventory UI System - Character inventory management interface
@@ -38,7 +38,7 @@ use crate::domain::items::consumable_usage::{
     apply_consumable_effect_exploration, ConsumableApplyResult,
 };
 use crate::domain::items::equipment_validation::EquipError;
-use crate::domain::items::types::{ConsumableEffect, ItemType};
+use crate::domain::items::types::{normalize_duration, ConsumableData, ConsumableEffect, ItemType};
 use crate::domain::transactions::{drop_item, equip_item, unequip_item, TransactionError};
 use crate::game::resources::GlobalState;
 use crate::game::systems::item_world_events::ItemDroppedEvent;
@@ -469,248 +469,135 @@ fn build_action_list(
     actions
 }
 
-// ===== Input System =====
+// ===== Input System Helpers =====
 
-/// Handles keyboard input for inventory navigation.
+/// Handles keyboard input during the `ActionNavigation` phase.
 ///
-/// Runs every frame; only processes input when
-/// `GlobalState.0.mode` is `GameMode::Inventory(_)`.
-///
-/// ## Key routing summary
-///
-/// | Phase             | Key              | Effect                                              |
-/// |-------------------|------------------|-----------------------------------------------------|
-/// | Either            | `Esc` (slot)     | Close inventory                                     |
-/// | Either            | `Esc` (action)   | Cancel action mode, return to selected slot         |
-/// | Either            | `Tab`            | Advance character panel focus (clears slot)         |
-/// | Either            | `Shift+Tab`      | Retreat character panel focus (clears slot)         |
-/// | SlotNavigation    | `←→↑↓`          | Navigate the slot grid                              |
-/// | SlotNavigation    | `↑` (row 0)      | Move focus to the equipment strip                   |
-/// | SlotNavigation    | `Enter`          | Enter ActionNavigation for the highlighted slot     |
-/// | SlotNavigation    | `E`              | Equip the highlighted equipable item directly       |
-/// | SlotNavigation    | `U`              | Use the highlighted consumable directly             |
-/// | EquipStrip        | `←→`            | Cycle equipment strip cells                         |
-/// | EquipStrip        | `↓`             | Return focus to inventory grid row 0                |
-/// | EquipStrip        | `Enter`          | Dispatch UnequipItemAction for the focused cell     |
-/// | ActionNavigation  | `←→`            | Cycle action buttons                                |
-/// | ActionNavigation  | `Enter`          | Execute focused action; return to slot 0            |
-#[allow(clippy::too_many_lines)]
+/// Processes Escape (cancel), Left/Right (cycle actions), and Enter (execute
+/// action). All paths within this function handle one key event and return.
 #[allow(clippy::too_many_arguments)]
-fn inventory_input_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut global_state: ResMut<GlobalState>,
-    mut nav_state: ResMut<InventoryNavigationState>,
-    mut drop_writer: MessageWriter<DropItemAction>,
-    mut transfer_writer: MessageWriter<TransferItemAction>,
-    game_content: Option<Res<GameContent>>,
-    mut use_writer: MessageWriter<UseItemExplorationAction>,
-    mut equip_writer: MessageWriter<EquipItemAction>,
-    mut unequip_writer: MessageWriter<UnequipItemAction>,
+fn handle_action_selection(
+    keyboard: &ButtonInput<KeyCode>,
+    nav_state: &mut InventoryNavigationState,
+    global_state: &mut GlobalState,
+    focused_party_index: usize,
+    panel_names: &[(usize, String)],
+    game_content: Option<&GameContent>,
+    drop_writer: &mut MessageWriter<DropItemAction>,
+    transfer_writer: &mut MessageWriter<TransferItemAction>,
+    use_writer: &mut MessageWriter<UseItemExplorationAction>,
+    equip_writer: &mut MessageWriter<EquipItemAction>,
+    unequip_writer: &mut MessageWriter<UnequipItemAction>,
 ) {
-    // Bail if not in inventory mode; reset nav state for next entry.
-    let party_size = match &global_state.0.mode {
-        GameMode::Inventory(_) => global_state.0.party.members.len().min(PARTY_MAX_SIZE),
-        _ => {
-            nav_state.reset();
+    let slot_idx = match nav_state.selected_slot_index {
+        Some(s) => s,
+        None => {
+            // Guard: no slot selected; drop back to slot navigation
+            nav_state.phase = NavigationPhase::SlotNavigation;
             return;
         }
     };
 
-    // ── Collect open panels and focused party index ────────────────────────
-    let (focused_party_index, open_panels_snapshot) = match &global_state.0.mode {
-        GameMode::Inventory(s) => (s.focused_index, s.open_panels.clone()),
-        _ => return,
-    };
-
-    // Build panel_names from open panels (same logic as inventory_ui_system)
-    let panel_names: Vec<(usize, String)> = open_panels_snapshot
-        .iter()
-        .filter_map(|&pi| {
-            global_state
-                .0
-                .party
-                .members
-                .get(pi)
-                .map(|m| (pi, m.name.clone()))
-        })
-        .collect();
-
-    // ── Phase: ActionNavigation ────────────────────────────────────────────
-    if nav_state.phase == NavigationPhase::ActionNavigation {
-        let slot_idx = match nav_state.selected_slot_index {
-            Some(s) => s,
-            None => {
-                // Guard: no slot selected; drop back to slot navigation
-                nav_state.phase = NavigationPhase::SlotNavigation;
-                return;
-            }
-        };
-
-        // Esc in action mode — cancel, return to slot navigation
-        if keyboard.just_pressed(KeyCode::Escape) {
-            nav_state.phase = NavigationPhase::SlotNavigation;
-            return;
-        }
-
-        // Build the action list for the focused panel
-        let focused_char_opt = global_state.0.party.members.get(focused_party_index);
-        let actions = match focused_char_opt {
-            Some(ch) => build_action_list(
-                focused_party_index,
-                slot_idx,
-                &panel_names,
-                ch,
-                game_content.as_deref(),
-            ),
-            None => {
-                nav_state.phase = NavigationPhase::SlotNavigation;
-                return;
-            }
-        };
-        let action_count = actions.len();
-
-        if action_count == 0 {
-            nav_state.phase = NavigationPhase::SlotNavigation;
-            return;
-        }
-
-        // Left/Right — cycle action button focus
-        if keyboard.just_pressed(KeyCode::ArrowLeft) {
-            nav_state.focused_action_index = if nav_state.focused_action_index == 0 {
-                action_count - 1
-            } else {
-                nav_state.focused_action_index - 1
-            };
-            return;
-        }
-        if keyboard.just_pressed(KeyCode::ArrowRight) {
-            nav_state.focused_action_index = (nav_state.focused_action_index + 1) % action_count;
-            return;
-        }
-
-        // Enter — execute focused action then return to slot 0
-        if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
-            let action_idx = nav_state.focused_action_index.min(action_count - 1);
-            match &actions[action_idx] {
-                PanelAction::Use { party_index, .. } => {
-                    use_writer.write(UseItemExplorationAction {
-                        party_index: *party_index,
-                        slot_index: slot_idx,
-                    });
-                }
-                PanelAction::Drop { party_index, .. } => {
-                    drop_writer.write(DropItemAction {
-                        party_index: *party_index,
-                        slot_index: slot_idx,
-                    });
-                }
-                PanelAction::Transfer {
-                    from_party_index,
-                    to_party_index,
-                    ..
-                } => {
-                    transfer_writer.write(TransferItemAction {
-                        from_party_index: *from_party_index,
-                        from_slot_index: slot_idx,
-                        to_party_index: *to_party_index,
-                    });
-                }
-                PanelAction::Equip { party_index, .. } => {
-                    equip_writer.write(EquipItemAction {
-                        party_index: *party_index,
-                        slot_index: slot_idx,
-                    });
-                }
-                PanelAction::Unequip { party_index, slot } => {
-                    unequip_writer.write(UnequipItemAction {
-                        party_index: *party_index,
-                        slot: *slot,
-                    });
-                }
-            }
-            // Return to slot 0 in slot-navigation phase
-            if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
-                inv_state.selected_slot = Some(0);
-            }
-            nav_state.selected_slot_index = Some(0);
-            nav_state.focused_action_index = 0;
-            nav_state.phase = NavigationPhase::SlotNavigation;
-            return;
-        }
-
-        // Any other key in action mode is ignored
-        return;
-    }
-
-    // ── Phase: SlotNavigation ──────────────────────────────────────────────
-
-    // NOTE: The configured inventory toggle key ("I" by default) is intentionally
-    // NOT handled here. The split input systems owned by `InputPlugin` handle the
-    // open/close toggle for that key before inventory UI input runs. Duplicating
-    // it here would cause the inventory to open and close in the same frame.
-
-    // Esc in slot mode — close inventory
+    // Esc in action mode — cancel, return to slot navigation
     if keyboard.just_pressed(KeyCode::Escape) {
-        let resume_mode = match &global_state.0.mode {
-            GameMode::Inventory(s) => s.get_resume_mode(),
-            _ => return,
-        };
-        global_state.0.mode = resume_mode;
-        nav_state.reset();
+        nav_state.phase = NavigationPhase::SlotNavigation;
         return;
     }
 
-    // ── Tab / Shift-Tab — cycle the yellow-border panel focus ─────────────
-    //
-    // TAB only changes which character panel has focus. It does NOT affect
-    // the slot grid cursor. Slot selection is cleared whenever focus changes
-    // because the cursor position belongs to a specific character's panel.
-    let shift_held = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
-
-    let focus_next = keyboard.just_pressed(KeyCode::Tab) && !shift_held;
-    let focus_prev = keyboard.just_pressed(KeyCode::Tab) && shift_held;
-
-    if focus_next || focus_prev {
-        if let GameMode::Inventory(inv_state) = &mut global_state.0.mode {
-            if focus_prev {
-                inv_state.focused_index = if inv_state.focused_index == 0 {
-                    party_size.saturating_sub(1)
-                } else {
-                    inv_state.focused_index - 1
-                };
-                // Ensure newly focused panel is in open_panels
-                if !inv_state.open_panels.contains(&inv_state.focused_index)
-                    && inv_state.open_panels.len() < PARTY_MAX_SIZE
-                {
-                    inv_state.open_panels.push(inv_state.focused_index);
-                }
-            } else {
-                inv_state.focused_index = if party_size == 0 {
-                    0
-                } else {
-                    (inv_state.focused_index + 1) % party_size
-                };
-                // Ensure newly focused panel is in open_panels
-                if !inv_state.open_panels.contains(&inv_state.focused_index)
-                    && inv_state.open_panels.len() < PARTY_MAX_SIZE
-                {
-                    inv_state.open_panels.push(inv_state.focused_index);
-                }
-            }
-            // Clear slot selection — cursor stays at the new panel's grid
-            inv_state.selected_slot = None;
+    // Build the action list for the focused panel
+    let focused_char_opt = global_state.0.party.members.get(focused_party_index);
+    let actions = match focused_char_opt {
+        Some(ch) => build_action_list(focused_party_index, slot_idx, panel_names, ch, game_content),
+        None => {
+            nav_state.phase = NavigationPhase::SlotNavigation;
+            return;
         }
-        nav_state.selected_slot_index = None;
-        nav_state.focused_action_index = 0;
-        nav_state.selected_equip_slot = None;
+    };
+    let action_count = actions.len();
+
+    if action_count == 0 {
+        nav_state.phase = NavigationPhase::SlotNavigation;
         return;
     }
 
-    // ── Equipment strip navigation ─────────────────────────────────────────
-    //
-    // When `selected_equip_slot` is `Some`, the equipment strip has focus.
-    // Left/Right cycle through the 7 slots; Down returns to grid row 0;
-    // Enter dispatches UnequipItemAction for the focused cell.
+    // Left/Right — cycle action button focus
+    if keyboard.just_pressed(KeyCode::ArrowLeft) {
+        nav_state.focused_action_index = if nav_state.focused_action_index == 0 {
+            action_count - 1
+        } else {
+            nav_state.focused_action_index - 1
+        };
+        return;
+    }
+    if keyboard.just_pressed(KeyCode::ArrowRight) {
+        nav_state.focused_action_index = (nav_state.focused_action_index + 1) % action_count;
+        return;
+    }
+
+    // Enter — execute focused action then return to slot 0
+    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
+        let action_idx = nav_state.focused_action_index.min(action_count - 1);
+        match &actions[action_idx] {
+            PanelAction::Use { party_index, .. } => {
+                use_writer.write(UseItemExplorationAction {
+                    party_index: *party_index,
+                    slot_index: slot_idx,
+                });
+            }
+            PanelAction::Drop { party_index, .. } => {
+                drop_writer.write(DropItemAction {
+                    party_index: *party_index,
+                    slot_index: slot_idx,
+                });
+            }
+            PanelAction::Transfer {
+                from_party_index,
+                to_party_index,
+                ..
+            } => {
+                transfer_writer.write(TransferItemAction {
+                    from_party_index: *from_party_index,
+                    from_slot_index: slot_idx,
+                    to_party_index: *to_party_index,
+                });
+            }
+            PanelAction::Equip { party_index, .. } => {
+                equip_writer.write(EquipItemAction {
+                    party_index: *party_index,
+                    slot_index: slot_idx,
+                });
+            }
+            PanelAction::Unequip { party_index, slot } => {
+                unequip_writer.write(UnequipItemAction {
+                    party_index: *party_index,
+                    slot: *slot,
+                });
+            }
+        }
+        // Return to slot 0 in slot-navigation phase
+        if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+            inv_state.selected_slot = Some(0);
+        }
+        nav_state.selected_slot_index = Some(0);
+        nav_state.focused_action_index = 0;
+        nav_state.phase = NavigationPhase::SlotNavigation;
+    }
+
+    // Any other key in action mode is ignored
+}
+
+/// Handles equipment-strip keyboard navigation and the `E`-key equip shortcut.
+///
+/// Returns `true` if input was consumed (the caller should `return` early).
+fn handle_equip_flow(
+    keyboard: &ButtonInput<KeyCode>,
+    nav_state: &mut InventoryNavigationState,
+    global_state: &mut GlobalState,
+    focused_party_index: usize,
+    game_content: Option<&GameContent>,
+    equip_writer: &mut MessageWriter<EquipItemAction>,
+    unequip_writer: &mut MessageWriter<UnequipItemAction>,
+) -> bool {
     const EQUIP_SLOTS: [EquipmentSlot; 7] = [
         EquipmentSlot::Weapon,
         EquipmentSlot::Armor,
@@ -725,7 +612,7 @@ fn inventory_input_system(
         // Esc — exit equipment strip, back to slot navigation
         if keyboard.just_pressed(KeyCode::Escape) {
             nav_state.selected_equip_slot = None;
-            return;
+            return true;
         }
 
         // ArrowDown — return to inventory grid row 0
@@ -735,7 +622,7 @@ fn inventory_input_system(
                 inv_state.selected_slot = Some(0);
             }
             nav_state.selected_slot_index = Some(0);
-            return;
+            return true;
         }
 
         // ArrowLeft / ArrowRight — cycle through equipment strip cells
@@ -752,7 +639,7 @@ fn inventory_input_system(
                 };
                 nav_state.selected_equip_slot = Some(EQUIP_SLOTS[next]);
             }
-            return;
+            return true;
         }
 
         // Enter — dispatch UnequipItemAction for the focused equipment slot
@@ -762,11 +649,11 @@ fn inventory_input_system(
                 slot: equip_slot,
             });
             nav_state.selected_equip_slot = None;
-            return;
+            return true;
         }
 
         // Any other key while strip is focused is ignored
-        return;
+        return true;
     }
 
     // E key — equip the highlighted item directly (bypasses ActionNavigation)
@@ -780,7 +667,6 @@ fn inventory_input_system(
                 .and_then(|ch| {
                     ch.inventory.items.get(slot_idx).and_then(|slot| {
                         game_content
-                            .as_deref()
                             .and_then(|gc| gc.db().items.get_item(slot.item_id))
                             .and_then(|item| EquipmentSlot::for_item(item, &ch.equipment))
                     })
@@ -800,9 +686,22 @@ fn inventory_input_system(
                 nav_state.phase = NavigationPhase::SlotNavigation;
             }
         }
-        return;
+        return true;
     }
 
+    false
+}
+
+/// Handles `U`-key (use consumable), `Enter` (confirm slot), and arrow-key
+/// grid navigation during the `SlotNavigation` phase.
+fn handle_grid_navigation(
+    keyboard: &ButtonInput<KeyCode>,
+    nav_state: &mut InventoryNavigationState,
+    global_state: &mut GlobalState,
+    focused_party_index: usize,
+    game_content: Option<&GameContent>,
+    use_writer: &mut MessageWriter<UseItemExplorationAction>,
+) {
     // U key — use consumable in the highlighted slot directly (bypasses ActionNavigation)
     if keyboard.just_pressed(KeyCode::KeyU) {
         if let Some(slot_idx) = nav_state.selected_slot_index {
@@ -812,11 +711,7 @@ fn inventory_input_system(
                 .members
                 .get(focused_party_index)
                 .and_then(|ch| ch.inventory.items.get(slot_idx))
-                .and_then(|slot| {
-                    game_content
-                        .as_deref()
-                        .and_then(|gc| gc.db().items.get_item(slot.item_id))
-                })
+                .and_then(|slot| game_content.and_then(|gc| gc.db().items.get_item(slot.item_id)))
                 .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
                 .unwrap_or(false);
 
@@ -914,6 +809,386 @@ fn inventory_input_system(
     }
 }
 
+// ===== Input System =====
+
+/// Handles keyboard input for inventory navigation.
+///
+/// Runs every frame; only processes input when
+/// `GlobalState.0.mode` is `GameMode::Inventory(_)`.
+///
+/// ## Key routing summary
+///
+/// | Phase             | Key              | Effect                                              |
+/// |-------------------|------------------|-----------------------------------------------------|
+/// | Either            | `Esc` (slot)     | Close inventory                                     |
+/// | Either            | `Esc` (action)   | Cancel action mode, return to selected slot         |
+/// | Either            | `Tab`            | Advance character panel focus (clears slot)         |
+/// | Either            | `Shift+Tab`      | Retreat character panel focus (clears slot)         |
+/// | SlotNavigation    | `←→↑↓`          | Navigate the slot grid                              |
+/// | SlotNavigation    | `↑` (row 0)      | Move focus to the equipment strip                   |
+/// | SlotNavigation    | `Enter`          | Enter ActionNavigation for the highlighted slot     |
+/// | SlotNavigation    | `E`              | Equip the highlighted equipable item directly       |
+/// | SlotNavigation    | `U`              | Use the highlighted consumable directly             |
+/// | EquipStrip        | `←→`            | Cycle equipment strip cells                         |
+/// | EquipStrip        | `↓`             | Return focus to inventory grid row 0                |
+/// | EquipStrip        | `Enter`          | Dispatch UnequipItemAction for the focused cell     |
+/// | ActionNavigation  | `←→`            | Cycle action buttons                                |
+/// | ActionNavigation  | `Enter`          | Execute focused action; return to slot 0            |
+#[allow(clippy::too_many_arguments)]
+fn inventory_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut global_state: ResMut<GlobalState>,
+    mut nav_state: ResMut<InventoryNavigationState>,
+    mut drop_writer: MessageWriter<DropItemAction>,
+    mut transfer_writer: MessageWriter<TransferItemAction>,
+    game_content: Option<Res<GameContent>>,
+    mut use_writer: MessageWriter<UseItemExplorationAction>,
+    mut equip_writer: MessageWriter<EquipItemAction>,
+    mut unequip_writer: MessageWriter<UnequipItemAction>,
+) {
+    // Bail if not in inventory mode; reset nav state for next entry.
+    let party_size = match &global_state.0.mode {
+        GameMode::Inventory(_) => global_state.0.party.members.len().min(PARTY_MAX_SIZE),
+        _ => {
+            nav_state.reset();
+            return;
+        }
+    };
+
+    // ── Collect open panels and focused party index ────────────────────────
+    let (focused_party_index, open_panels_snapshot) = match &global_state.0.mode {
+        GameMode::Inventory(s) => (s.focused_index, s.open_panels.clone()),
+        _ => return,
+    };
+
+    // Build panel_names from open panels (same logic as inventory_ui_system)
+    let panel_names: Vec<(usize, String)> = open_panels_snapshot
+        .iter()
+        .filter_map(|&pi| {
+            global_state
+                .0
+                .party
+                .members
+                .get(pi)
+                .map(|m| (pi, m.name.clone()))
+        })
+        .collect();
+
+    // ── Phase: ActionNavigation ────────────────────────────────────────────
+    if nav_state.phase == NavigationPhase::ActionNavigation {
+        handle_action_selection(
+            &keyboard,
+            &mut nav_state,
+            &mut global_state,
+            focused_party_index,
+            &panel_names,
+            game_content.as_deref(),
+            &mut drop_writer,
+            &mut transfer_writer,
+            &mut use_writer,
+            &mut equip_writer,
+            &mut unequip_writer,
+        );
+        return;
+    }
+
+    // ── Phase: SlotNavigation ──────────────────────────────────────────────
+
+    // NOTE: The configured inventory toggle key ("I" by default) is intentionally
+    // NOT handled here. The split input systems owned by `InputPlugin` handle the
+    // open/close toggle for that key before inventory UI input runs. Duplicating
+    // it here would cause the inventory to open and close in the same frame.
+
+    // Esc in slot mode — close inventory
+    if keyboard.just_pressed(KeyCode::Escape) {
+        let resume_mode = match &global_state.0.mode {
+            GameMode::Inventory(s) => s.get_resume_mode(),
+            _ => return,
+        };
+        global_state.0.mode = resume_mode;
+        nav_state.reset();
+        return;
+    }
+
+    // ── Tab / Shift-Tab — cycle the yellow-border panel focus ─────────────
+    //
+    // TAB only changes which character panel has focus. It does NOT affect
+    // the slot grid cursor. Slot selection is cleared whenever focus changes
+    // because the cursor position belongs to a specific character's panel.
+    let shift_held = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
+
+    let focus_next = keyboard.just_pressed(KeyCode::Tab) && !shift_held;
+    let focus_prev = keyboard.just_pressed(KeyCode::Tab) && shift_held;
+
+    if focus_next || focus_prev {
+        if let GameMode::Inventory(inv_state) = &mut global_state.0.mode {
+            if focus_prev {
+                inv_state.focused_index = if inv_state.focused_index == 0 {
+                    party_size.saturating_sub(1)
+                } else {
+                    inv_state.focused_index - 1
+                };
+                // Ensure newly focused panel is in open_panels
+                if !inv_state.open_panels.contains(&inv_state.focused_index)
+                    && inv_state.open_panels.len() < PARTY_MAX_SIZE
+                {
+                    inv_state.open_panels.push(inv_state.focused_index);
+                }
+            } else {
+                inv_state.focused_index = if party_size == 0 {
+                    0
+                } else {
+                    (inv_state.focused_index + 1) % party_size
+                };
+                // Ensure newly focused panel is in open_panels
+                if !inv_state.open_panels.contains(&inv_state.focused_index)
+                    && inv_state.open_panels.len() < PARTY_MAX_SIZE
+                {
+                    inv_state.open_panels.push(inv_state.focused_index);
+                }
+            }
+            // Clear slot selection — cursor stays at the new panel's grid
+            inv_state.selected_slot = None;
+        }
+        nav_state.selected_slot_index = None;
+        nav_state.focused_action_index = 0;
+        nav_state.selected_equip_slot = None;
+        return;
+    }
+
+    // ── Equipment strip navigation & E-key equip ──────────────────────────
+    if handle_equip_flow(
+        &keyboard,
+        &mut nav_state,
+        &mut global_state,
+        focused_party_index,
+        game_content.as_deref(),
+        &mut equip_writer,
+        &mut unequip_writer,
+    ) {
+        return;
+    }
+
+    // ── U-key, Enter, and arrow-key grid navigation ───────────────────────
+    handle_grid_navigation(
+        &keyboard,
+        &mut nav_state,
+        &mut global_state,
+        focused_party_index,
+        game_content.as_deref(),
+        &mut use_writer,
+    );
+}
+
+// ===== UI System Helpers =====
+
+/// Renders the status line (focused character and selected item) and keyboard
+/// navigation hint below it.
+fn render_equipment_panel(
+    ui: &mut egui::Ui,
+    global_state: &GlobalState,
+    focused_index: usize,
+    selected_slot: Option<usize>,
+    game_content: Option<&GameContent>,
+    nav_state: &InventoryNavigationState,
+) {
+    // ── Status line: focused character + selected item ───────────────
+    {
+        let party = &global_state.0.party;
+        if focused_index < party.members.len() {
+            let character = &party.members[focused_index];
+            let status = match selected_slot {
+                Some(slot_idx) if slot_idx < character.inventory.items.len() => {
+                    let slot = &character.inventory.items[slot_idx];
+                    let item_opt = game_content.and_then(|gc| gc.db().items.get_item(slot.item_id));
+                    let item_name = item_opt
+                        .map(|item| item.name.clone())
+                        .unwrap_or_else(|| format!("Item #{}", slot.item_id));
+                    let is_consumable = item_opt
+                        .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
+                        .unwrap_or(false);
+                    let use_hint = if is_consumable { "  [U: use]" } else { "" };
+                    format!(
+                        "Focus: {}  |  Selected: {} (slot {}){}",
+                        character.name, item_name, slot_idx, use_hint
+                    )
+                }
+                _ => format!("Focus: {}", character.name),
+            };
+            ui.label(egui::RichText::new(status).strong());
+        }
+    }
+
+    // ── Hint line changes based on navigation phase ──────────────────
+    let hint = if nav_state.selected_equip_slot.is_some() {
+        "←→: cycle equipment slots   ↓: back to inventory   Enter: unequip   Esc: cancel"
+    } else {
+        match nav_state.phase {
+            NavigationPhase::SlotNavigation => {
+                "Tab: cycle character   ←→↑↓: navigate slots   Enter: select item   E: equip   U: use   Esc/I: close"
+            }
+            NavigationPhase::ActionNavigation => {
+                "←→: cycle actions   Enter: execute   Esc: cancel"
+            }
+        }
+    };
+    ui.label(egui::RichText::new(hint).small().weak());
+}
+
+/// Renders the grid of character panels arranged in rows and columns.
+///
+/// Returns a pending [`PanelAction`] and an optional clicked-slot update
+/// `(party_index, slot_idx, has_item)`.
+#[allow(clippy::too_many_arguments)]
+fn render_item_grid(
+    ui: &mut egui::Ui,
+    open_panels: &[usize],
+    focused_index: usize,
+    selected_slot: Option<usize>,
+    nav_state: &InventoryNavigationState,
+    global_state: &GlobalState,
+    game_content: Option<&GameContent>,
+    panel_names: &[(usize, String)],
+) -> (Option<PanelAction>, Option<(usize, usize, bool)>) {
+    let mut pending_action: Option<PanelAction> = None;
+    let mut clicked_slot_update: Option<(usize, usize, bool)> = None;
+
+    // 1–3 panels → 1 row of 3 columns.  4–6 panels → 2 rows of 3 columns.
+    let num_panels = open_panels.len().max(1);
+    let cols = num_panels.min(3);
+    let rows = num_panels.div_ceil(cols);
+
+    let available = ui.available_size();
+    // Divide remaining height evenly between rows; subtract inter-row gap.
+    let panel_h = ((available.y - (rows as f32 - 1.0) * 4.0) / rows as f32).max(80.0);
+    // Each column takes an equal share of the width minus inter-col gaps.
+    let panel_w = ((available.x - (cols as f32 - 1.0) * 4.0) / cols as f32).max(80.0);
+
+    // Lay panels out row by row using plain horizontal strips.
+    for row in 0..rows {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for col in 0..cols {
+                let panel_pos = row * cols + col;
+                if panel_pos >= open_panels.len() {
+                    // Placeholder to keep columns aligned
+                    ui.allocate_exact_size(egui::vec2(panel_w, panel_h), egui::Sense::hover());
+                    continue;
+                }
+                let party_index = open_panels[panel_pos];
+                let is_focused = party_index == focused_index;
+                // Only pass selected_slot and action focus to the focused panel —
+                // every other panel gets None so highlights only appear on the
+                // active character.
+                let panel_selected = if is_focused { selected_slot } else { None };
+                let panel_action_focus =
+                    if is_focused && nav_state.phase == NavigationPhase::ActionNavigation {
+                        Some(nav_state.focused_action_index)
+                    } else {
+                        None
+                    };
+
+                // Only pass selected_equip_slot to the focused panel
+                let panel_equip_slot = if is_focused {
+                    nav_state.selected_equip_slot
+                } else {
+                    None
+                };
+
+                // push_id mandatory per sdk/AGENTS.md
+                ui.push_id(format!("inv_panel_{}", party_index), |ui| {
+                    let panel_result = render_character_panel(
+                        ui,
+                        party_index,
+                        is_focused,
+                        panel_selected,
+                        panel_action_focus,
+                        egui::vec2(panel_w, panel_h),
+                        global_state,
+                        game_content,
+                        panel_names,
+                        panel_equip_slot,
+                    );
+                    if let Some(action) = panel_result.action {
+                        pending_action = Some(action);
+                    }
+                    if let Some(slot_idx) = panel_result.clicked_slot {
+                        let has_item = global_state
+                            .0
+                            .party
+                            .members
+                            .get(party_index)
+                            .map(|ch| slot_idx < ch.inventory.items.len())
+                            .unwrap_or(false);
+                        clicked_slot_update = Some((party_index, slot_idx, has_item));
+                    }
+                });
+            }
+        });
+        if row + 1 < rows {
+            ui.add_space(4.0);
+        }
+    }
+
+    (pending_action, clicked_slot_update)
+}
+
+/// Dispatches a pending [`PanelAction`] into the appropriate message writer.
+fn render_action_bar(
+    pending_action: Option<PanelAction>,
+    use_writer: &mut MessageWriter<UseItemExplorationAction>,
+    drop_writer: &mut MessageWriter<DropItemAction>,
+    transfer_writer: &mut MessageWriter<TransferItemAction>,
+    equip_writer: &mut MessageWriter<EquipItemAction>,
+    unequip_writer: &mut MessageWriter<UnequipItemAction>,
+) {
+    if let Some(action) = pending_action {
+        match action {
+            PanelAction::Use {
+                party_index,
+                slot_index,
+            } => {
+                use_writer.write(UseItemExplorationAction {
+                    party_index,
+                    slot_index,
+                });
+            }
+            PanelAction::Drop {
+                party_index,
+                slot_index,
+            } => {
+                drop_writer.write(DropItemAction {
+                    party_index,
+                    slot_index,
+                });
+            }
+            PanelAction::Transfer {
+                from_party_index,
+                from_slot_index,
+                to_party_index,
+            } => {
+                transfer_writer.write(TransferItemAction {
+                    from_party_index,
+                    from_slot_index,
+                    to_party_index,
+                });
+            }
+            PanelAction::Equip {
+                party_index,
+                slot_index,
+            } => {
+                equip_writer.write(EquipItemAction {
+                    party_index,
+                    slot_index,
+                });
+            }
+            PanelAction::Unequip { party_index, slot } => {
+                unequip_writer.write(UnequipItemAction { party_index, slot });
+            }
+        }
+    }
+}
+
 // ===== UI System =====
 
 /// Renders the egui inventory overlay when in `GameMode::Inventory`.
@@ -923,7 +1198,6 @@ fn inventory_input_system(
 /// panel has a dark header bar with the character name and a body filled with
 /// a painter-drawn slot grid showing item-type silhouettes — matching the
 /// target mockup style.
-#[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 fn inventory_ui_system(
     mut contexts: EguiContexts,
@@ -978,128 +1252,29 @@ fn inventory_ui_system(
             });
         });
 
-        // ── Status line: focused character + selected item ───────────────
-        {
-            let party = &global_state.0.party;
-            if focused_index < party.members.len() {
-                let character = &party.members[focused_index];
-                let status = match selected_slot {
-                    Some(slot_idx) if slot_idx < character.inventory.items.len() => {
-                        let slot = &character.inventory.items[slot_idx];
-                        let item_opt = game_content
-                            .as_deref()
-                            .and_then(|gc| gc.db().items.get_item(slot.item_id));
-                        let item_name = item_opt
-                            .map(|item| item.name.clone())
-                            .unwrap_or_else(|| format!("Item #{}", slot.item_id));
-                        let is_consumable = item_opt
-                            .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
-                            .unwrap_or(false);
-                        let use_hint = if is_consumable { "  [U: use]" } else { "" };
-                        format!(
-                            "Focus: {}  |  Selected: {} (slot {}){}",
-                            character.name, item_name, slot_idx, use_hint
-                        )
-                    }
-                    _ => format!("Focus: {}", character.name),
-                };
-                ui.label(egui::RichText::new(status).strong());
-            }
-        }
-
-        // ── Hint line changes based on navigation phase ──────────────────
-        let hint = if nav_state.selected_equip_slot.is_some() {
-            "←→: cycle equipment slots   ↓: back to inventory   Enter: unequip   Esc: cancel"
-        } else {
-            match nav_state.phase {
-                NavigationPhase::SlotNavigation => {
-                    "Tab: cycle character   ←→↑↓: navigate slots   Enter: select item   E: equip   U: use   Esc/I: close"
-                }
-                NavigationPhase::ActionNavigation => {
-                    "←→: cycle actions   Enter: execute   Esc: cancel"
-                }
-            }
-        };
-        ui.label(egui::RichText::new(hint).small().weak());
+        render_equipment_panel(
+            ui,
+            &global_state,
+            focused_index,
+            selected_slot,
+            game_content.as_deref(),
+            &nav_state,
+        );
         ui.separator();
 
         // ── Panel layout ─────────────────────────────────────────────────
-        // 1–3 panels → 1 row of 3 columns.  4–6 panels → 2 rows of 3 columns.
-        let num_panels = open_panels.len().max(1);
-        let cols = num_panels.min(3);
-        let rows = num_panels.div_ceil(cols);
-
-        let available = ui.available_size();
-        // Divide remaining height evenly between rows; subtract inter-row gap.
-        let panel_h = ((available.y - (rows as f32 - 1.0) * 4.0) / rows as f32).max(80.0);
-        // Each column takes an equal share of the width minus inter-col gaps.
-        let panel_w = ((available.x - (cols as f32 - 1.0) * 4.0) / cols as f32).max(80.0);
-
-        // Lay panels out row by row using plain horizontal strips.
-        for row in 0..rows {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                for col in 0..cols {
-                    let panel_pos = row * cols + col;
-                    if panel_pos >= open_panels.len() {
-                        // Placeholder to keep columns aligned
-                        ui.allocate_exact_size(egui::vec2(panel_w, panel_h), egui::Sense::hover());
-                        continue;
-                    }
-                    let party_index = open_panels[panel_pos];
-                    let is_focused = party_index == focused_index;
-                    // Only pass selected_slot and action focus to the focused panel —
-                    // every other panel gets None so highlights only appear on the
-                    // active character.
-                    let panel_selected = if is_focused { selected_slot } else { None };
-                    let panel_action_focus =
-                        if is_focused && nav_state.phase == NavigationPhase::ActionNavigation {
-                            Some(nav_state.focused_action_index)
-                        } else {
-                            None
-                        };
-
-                    // Only pass selected_equip_slot to the focused panel
-                    let panel_equip_slot = if is_focused {
-                        nav_state.selected_equip_slot
-                    } else {
-                        None
-                    };
-
-                    // push_id mandatory per sdk/AGENTS.md
-                    ui.push_id(format!("inv_panel_{}", party_index), |ui| {
-                        let panel_result = render_character_panel(
-                            ui,
-                            party_index,
-                            is_focused,
-                            panel_selected,
-                            panel_action_focus,
-                            egui::vec2(panel_w, panel_h),
-                            &global_state,
-                            game_content.as_deref(),
-                            &panel_names,
-                            panel_equip_slot,
-                        );
-                        if let Some(action) = panel_result.action {
-                            pending_action = Some(action);
-                        }
-                        if let Some(slot_idx) = panel_result.clicked_slot {
-                            let has_item = global_state
-                                .0
-                                .party
-                                .members
-                                .get(party_index)
-                                .map(|ch| slot_idx < ch.inventory.items.len())
-                                .unwrap_or(false);
-                            clicked_slot_update = Some((party_index, slot_idx, has_item));
-                        }
-                    });
-                }
-            });
-            if row + 1 < rows {
-                ui.add_space(4.0);
-            }
-        }
+        let (action, slot_update) = render_item_grid(
+            ui,
+            &open_panels,
+            focused_index,
+            selected_slot,
+            &nav_state,
+            &global_state,
+            game_content.as_deref(),
+            &panel_names,
+        );
+        pending_action = action;
+        clicked_slot_update = slot_update;
     });
 
     if let Some((party_index, slot_idx, has_item)) = clicked_slot_update {
@@ -1122,51 +1297,14 @@ fn inventory_ui_system(
         nav_state.selected_equip_slot = None;
     }
 
-    if let Some(action) = pending_action {
-        match action {
-            PanelAction::Use {
-                party_index,
-                slot_index,
-            } => {
-                use_writer.write(UseItemExplorationAction {
-                    party_index,
-                    slot_index,
-                });
-            }
-            PanelAction::Drop {
-                party_index,
-                slot_index,
-            } => {
-                drop_writer.write(DropItemAction {
-                    party_index,
-                    slot_index,
-                });
-            }
-            PanelAction::Transfer {
-                from_party_index,
-                from_slot_index,
-                to_party_index,
-            } => {
-                transfer_writer.write(TransferItemAction {
-                    from_party_index,
-                    from_slot_index,
-                    to_party_index,
-                });
-            }
-            PanelAction::Equip {
-                party_index,
-                slot_index,
-            } => {
-                equip_writer.write(EquipItemAction {
-                    party_index,
-                    slot_index,
-                });
-            }
-            PanelAction::Unequip { party_index, slot } => {
-                unequip_writer.write(UnequipItemAction { party_index, slot });
-            }
-        }
-    }
+    render_action_bar(
+        pending_action,
+        &mut use_writer,
+        &mut drop_writer,
+        &mut transfer_writer,
+        &mut equip_writer,
+        &mut unequip_writer,
+    );
 }
 
 /// Renders a single character panel at a fixed pixel size.
@@ -2238,6 +2376,167 @@ fn inventory_action_system(
     }
 }
 
+// ===== Exploration Use Helpers =====
+
+/// Formats a validation error from [`ItemUseError`] into a player-facing message.
+fn build_use_error_message(e: &ItemUseError, item_name: &str) -> String {
+    match e {
+        ItemUseError::InventorySlotInvalid(_) => {
+            "Cannot use item: no item in that slot.".to_string()
+        }
+        ItemUseError::ItemNotFound(_) => "Cannot use item: item data not found.".to_string(),
+        ItemUseError::NotConsumable => {
+            format!("Cannot use {item_name}: not a consumable.")
+        }
+        ItemUseError::NotUsableInCombat => {
+            format!("Cannot use {item_name} outside of combat.")
+        }
+        ItemUseError::NoCharges => {
+            format!("Cannot use {item_name}: no charges remaining.")
+        }
+        ItemUseError::AlignmentRestriction => {
+            format!("Cannot use {item_name}: alignment restriction.")
+        }
+        ItemUseError::ClassRestriction => {
+            format!("Cannot use {item_name}: class restriction.")
+        }
+        ItemUseError::RaceRestriction => {
+            format!("Cannot use {item_name}: race restriction.")
+        }
+        ItemUseError::InvalidTarget => {
+            format!("Cannot use {item_name}: invalid target.")
+        }
+        ItemUseError::Other(msg) => {
+            format!("Cannot use item: {msg}.")
+        }
+    }
+}
+
+/// Resolves the item name and [`ConsumableData`] for a consumable use action.
+///
+/// Returns `Err((message, category))` if the slot is empty, the item is not
+/// found in the database, or the item is not a consumable.
+fn resolve_consumable_for_use(
+    character: &crate::domain::character::Character,
+    slot_index: usize,
+    game_content: &GameContent,
+) -> Result<(String, ConsumableData), (String, LogCategory)> {
+    let content_db = game_content.db();
+    let slot = character.inventory.items.get(slot_index).ok_or_else(|| {
+        (
+            "Cannot use item: no item in that slot.".to_string(),
+            LogCategory::System,
+        )
+    })?;
+    let item = content_db.items.get_item(slot.item_id).ok_or_else(|| {
+        (
+            "Cannot use item: item data not found.".to_string(),
+            LogCategory::System,
+        )
+    })?;
+    let consumable = match &item.item_type {
+        ItemType::Consumable(data) => *data,
+        _ => {
+            return Err((
+                format!("Cannot use {}: not a consumable.", item.name),
+                LogCategory::Item,
+            ))
+        }
+    };
+    Ok((item.name.clone(), consumable))
+}
+
+/// Builds the player-facing log message after a consumable effect is applied.
+fn build_consumable_use_log(
+    consumable_data: &ConsumableData,
+    result: &ConsumableApplyResult,
+    item_name: &str,
+    character_name: &str,
+) -> String {
+    let minutes_opt = normalize_duration(consumable_data.duration_minutes);
+
+    match consumable_data.effect {
+        ConsumableEffect::HealHp(_) => {
+            if result.healing == 0 {
+                format!("{item_name} used. {character_name} was already at full health.")
+            } else {
+                format!(
+                    "{item_name} used. {character_name} recovered {} HP.",
+                    result.healing
+                )
+            }
+        }
+        ConsumableEffect::RestoreSp(_) => {
+            if result.sp_restored == 0 {
+                format!("{item_name} used. {character_name} was already at full SP.")
+            } else {
+                format!(
+                    "{item_name} used. {character_name} recovered {} SP.",
+                    result.sp_restored
+                )
+            }
+        }
+        ConsumableEffect::CureCondition(_) => {
+            format!("{item_name} used. Conditions cleared.")
+        }
+        ConsumableEffect::BoostAttribute(attr, _) => {
+            if result.attribute_boost_is_timed {
+                if let Some(mins) = minutes_opt {
+                    format!(
+                        "{item_name} used. {} increased for {} minutes.",
+                        attr.display_name(),
+                        mins
+                    )
+                } else {
+                    format!(
+                        "{item_name} used. {character_name}'s {} increased.",
+                        attr.display_name()
+                    )
+                }
+            } else {
+                format!(
+                    "{item_name} used. {character_name}'s {} increased.",
+                    attr.display_name()
+                )
+            }
+        }
+        ConsumableEffect::BoostResistance(res, _) => {
+            if result.resistance_boost_is_timed {
+                if let Some(mins) = minutes_opt {
+                    format!(
+                        "{item_name} used. {} resistance active for {} minutes.",
+                        res.display_name(),
+                        mins
+                    )
+                } else {
+                    format!(
+                        "{item_name} used. {character_name}'s {} resistance increased.",
+                        res.display_name()
+                    )
+                }
+            } else {
+                format!(
+                    "{item_name} used. {character_name}'s {} resistance increased.",
+                    res.display_name()
+                )
+            }
+        }
+        ConsumableEffect::IsFood(_) => {
+            format!("{item_name} used.")
+        }
+        ConsumableEffect::Resurrect(_) => {
+            if result.healing == 0 {
+                format!("{item_name} used. {character_name} could not be resurrected.")
+            } else {
+                format!(
+                    "{item_name} used. {character_name} has been resurrected with {} HP.",
+                    result.healing
+                )
+            }
+        }
+    }
+}
+
 // ===== Exploration Use Handler =====
 
 /// Handles [`UseItemExplorationAction`] messages emitted by the inventory UI.
@@ -2259,7 +2558,6 @@ fn inventory_action_system(
 ///
 /// Self-target only: the effect is always applied to the character who owns
 /// the item. Cross-party targeting is out of scope for this phase.
-#[allow(clippy::too_many_lines)]
 fn handle_use_item_action_exploration(
     mut reader: MessageReader<UseItemExplorationAction>,
     mut global_state: ResMut<GlobalState>,
@@ -2305,15 +2603,12 @@ fn handle_use_item_action_exploration(
         }
 
         // Step 3: validate via shared gate (in_combat = false).
-        // We take a snapshot (clone) so that validation sees the current state
-        // without holding an immutable borrow while we mutate below.
         let validation_result = {
             let character = &global_state.0.party.members[party_index];
             validate_item_use_slot(character, slot_index, content_db, false)
         };
 
         if let Err(ref e) = validation_result {
-            // Build item name for the error message if possible.
             let item_name: String = global_state
                 .0
                 .party
@@ -2324,42 +2619,9 @@ fn handle_use_item_action_exploration(
                 .map(|item| item.name.clone())
                 .unwrap_or_else(|| "that item".to_string());
 
-            let msg = match e {
-                ItemUseError::InventorySlotInvalid(_) => {
-                    "Cannot use item: no item in that slot.".to_string()
-                }
-                ItemUseError::ItemNotFound(_) => {
-                    "Cannot use item: item data not found.".to_string()
-                }
-                ItemUseError::NotConsumable => {
-                    format!("Cannot use {item_name}: not a consumable.")
-                }
-                ItemUseError::NotUsableInCombat => {
-                    format!("Cannot use {item_name} outside of combat.")
-                }
-                ItemUseError::NoCharges => {
-                    format!("Cannot use {item_name}: no charges remaining.")
-                }
-                ItemUseError::AlignmentRestriction => {
-                    format!("Cannot use {item_name}: alignment restriction.")
-                }
-                ItemUseError::ClassRestriction => {
-                    format!("Cannot use {item_name}: class restriction.")
-                }
-                ItemUseError::RaceRestriction => {
-                    format!("Cannot use {item_name}: race restriction.")
-                }
-                ItemUseError::InvalidTarget => {
-                    format!("Cannot use {item_name}: invalid target.")
-                }
-                ItemUseError::Other(msg) => {
-                    format!("Cannot use item: {msg}.")
-                }
-            };
-
             if let Some(ref mut writer) = game_log_writer {
                 writer.write(GameLogEvent {
-                    text: msg,
+                    text: build_use_error_message(e, &item_name),
                     category: LogCategory::Item,
                 });
             }
@@ -2376,46 +2638,21 @@ fn handle_use_item_action_exploration(
         }
 
         // Step 4: capture item name and full ConsumableData before any mutation.
-        // This short immutable borrow ends before we take a mutable borrow below.
-        let (item_name, consumable_data) = {
-            let character = &global_state.0.party.members[party_index];
-            let slot = match character.inventory.items.get(slot_index) {
-                Some(s) => s,
-                None => {
-                    if let Some(ref mut writer) = game_log_writer {
-                        writer.write(GameLogEvent {
-                            text: "Cannot use item: no item in that slot.".to_string(),
-                            category: LogCategory::System,
-                        });
-                    }
-                    continue;
+        let (item_name, consumable_data) = match resolve_consumable_for_use(
+            &global_state.0.party.members[party_index],
+            slot_index,
+            content,
+        ) {
+            Ok(result) => result,
+            Err((msg, category)) => {
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: msg,
+                        category,
+                    });
                 }
-            };
-            let item = match content_db.items.get_item(slot.item_id) {
-                Some(i) => i,
-                None => {
-                    if let Some(ref mut writer) = game_log_writer {
-                        writer.write(GameLogEvent {
-                            text: "Cannot use item: item data not found.".to_string(),
-                            category: LogCategory::System,
-                        });
-                    }
-                    continue;
-                }
-            };
-            let consumable = match &item.item_type {
-                ItemType::Consumable(data) => data,
-                _ => {
-                    if let Some(ref mut writer) = game_log_writer {
-                        writer.write(GameLogEvent {
-                            text: format!("Cannot use {}: not a consumable.", item.name),
-                            category: LogCategory::Item,
-                        });
-                    }
-                    continue;
-                }
-            };
-            (item.name.clone(), *consumable)
+                continue;
+            }
         };
 
         // Step 5: consume one charge (mutable borrow of the character).
@@ -2469,89 +2706,8 @@ fn handle_use_item_action_exploration(
             .map(|ch| ch.name.clone())
             .unwrap_or_else(|| "Unknown".to_string());
 
-        use crate::domain::items::types::normalize_duration;
-        let minutes_opt = normalize_duration(consumable_data.duration_minutes);
-
-        let log_msg = match consumable_data.effect {
-            ConsumableEffect::HealHp(_) => {
-                if result.healing == 0 {
-                    format!("{item_name} used. {character_name} was already at full health.")
-                } else {
-                    format!(
-                        "{item_name} used. {character_name} recovered {} HP.",
-                        result.healing
-                    )
-                }
-            }
-            ConsumableEffect::RestoreSp(_) => {
-                if result.sp_restored == 0 {
-                    format!("{item_name} used. {character_name} was already at full SP.")
-                } else {
-                    format!(
-                        "{item_name} used. {character_name} recovered {} SP.",
-                        result.sp_restored
-                    )
-                }
-            }
-            ConsumableEffect::CureCondition(_) => {
-                format!("{item_name} used. Conditions cleared.")
-            }
-            ConsumableEffect::BoostAttribute(attr, _) => {
-                if result.attribute_boost_is_timed {
-                    if let Some(mins) = minutes_opt {
-                        format!(
-                            "{item_name} used. {} increased for {} minutes.",
-                            attr.display_name(),
-                            mins
-                        )
-                    } else {
-                        format!(
-                            "{item_name} used. {character_name}'s {} increased.",
-                            attr.display_name()
-                        )
-                    }
-                } else {
-                    format!(
-                        "{item_name} used. {character_name}'s {} increased.",
-                        attr.display_name()
-                    )
-                }
-            }
-            ConsumableEffect::BoostResistance(res, _) => {
-                if result.resistance_boost_is_timed {
-                    if let Some(mins) = minutes_opt {
-                        format!(
-                            "{item_name} used. {} resistance active for {} minutes.",
-                            res.display_name(),
-                            mins
-                        )
-                    } else {
-                        format!(
-                            "{item_name} used. {character_name}'s {} resistance increased.",
-                            res.display_name()
-                        )
-                    }
-                } else {
-                    format!(
-                        "{item_name} used. {character_name}'s {} resistance increased.",
-                        res.display_name()
-                    )
-                }
-            }
-            ConsumableEffect::IsFood(_) => {
-                format!("{item_name} used.")
-            }
-            ConsumableEffect::Resurrect(_) => {
-                if result.healing == 0 {
-                    format!("{item_name} used. {character_name} could not be resurrected.")
-                } else {
-                    format!(
-                        "{item_name} used. {character_name} has been resurrected with {} HP.",
-                        result.healing
-                    )
-                }
-            }
-        };
+        let log_msg =
+            build_consumable_use_log(&consumable_data, &result, &item_name, &character_name);
 
         if let Some(ref mut writer) = game_log_writer {
             writer.write(GameLogEvent {

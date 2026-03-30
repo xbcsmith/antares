@@ -849,3 +849,139 @@ All six sub-tasks from the cleanup plan have been completed:
 - [x] All new modules have SPDX headers
 - [x] All public items documented with `///` doc comments
 - [x] No test references `campaigns/tutorial`
+
+## Phase 5: Structural Refactoring (Complete)
+
+### Overview
+
+Phase 5 addressed long-term maintainability by introducing parameter structs,
+extracting sub-functions from oversized systems, and defining type aliases for
+complex Bevy queries. All three sub-tasks are complete and all targeted clippy
+suppressions have been eliminated.
+
+**Final suppression counts eliminated:**
+
+| Suppression                            | Before | After | Reduction |
+| -------------------------------------- | ------ | ----- | --------- |
+| `#[allow(clippy::too_many_arguments)]` | 78     | 0     | 100%      |
+| `#[allow(clippy::too_many_lines)]`     | 10     | 0     | 100%      |
+| `#[allow(clippy::type_complexity)]`    | 14     | 0     | 100%      |
+
+---
+
+### 5.1 — Introduce `MeshSpawnContext` Parameter Struct (Complete)
+
+Unified a broken dual-definition of `MeshSpawnContext` in
+`procedural_meshes.rs` into a single struct bundling `Commands`, `Assets<Mesh>`,
+`Assets<StandardMaterial>`, and `ProceduralMeshCache`. Refactored all ~30
+`spawn_*` functions to accept `&mut MeshSpawnContext<'_, '_, '_>` instead of
+individual parameters.
+
+#### What Was Changed
+
+| Change                                                                                                                                          | Files touched            |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| Removed duplicate `MeshSpawnContext<'a>` struct                                                                                                 | `procedural_meshes.rs`   |
+| Removed duplicate `ctx` parameters from ~15 functions                                                                                           | `procedural_meshes.rs`   |
+| Merged `commands` into `MeshSpawnContext` for 3 functions (`spawn_shrub`, `spawn_column`, `spawn_arch`)                                         | `procedural_meshes.rs`   |
+| Merged `commands` into `MeshSpawnContext` for 11 item mesh functions (`spawn_dagger_mesh` through `spawn_ammo_mesh`, `spawn_dropped_item_mesh`) | `procedural_meshes.rs`   |
+| Created `FurnitureSpawnParams` struct to bundle 7 params                                                                                        | `procedural_meshes.rs`   |
+| Updated `spawn_furniture` to accept `&FurnitureSpawnParams`                                                                                     | `procedural_meshes.rs`   |
+| Updated `spawn_furniture_with_rendering` to accept `&FurnitureSpawnParams`                                                                      | `furniture_rendering.rs` |
+| Updated callers of `spawn_shrub` to create `MeshSpawnContext`                                                                                   | `map.rs`                 |
+| Updated callers of `spawn_furniture` / `spawn_furniture_with_rendering`                                                                         | `map.rs`, `events.rs`    |
+| Deleted stale `procedural_meshes.rs.bak`                                                                                                        | filesystem               |
+
+#### New Types
+
+- `FurnitureSpawnParams` — bundles `furniture_type`, `rotation_y`, `scale`,
+  `material_type`, `flags`, `color_tint`, and `key_item_id` into a single
+  struct, keeping `spawn_furniture` and `spawn_furniture_with_rendering` under
+  clippy's 7-argument threshold.
+
+---
+
+### 5.2 — Extract Sub-Renderers from Large UI Systems (Complete)
+
+Eliminated all `#[allow(clippy::too_many_lines)]` suppressions in
+`src/game/systems/` (from 10 → 0, 100% reduction) by extracting self-contained
+logical blocks into private helper functions. Pure refactoring — no behavioral
+changes.
+
+#### What Was Extracted (Earlier Pass)
+
+| File                                                          | Extracted helpers                                                                     |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `temple_ui.rs` — `temple_ui_system`                           | `render_temple_header`, `render_dead_member_row`, `render_temple_footer`              |
+| `temple_ui.rs` — `temple_input_system`                        | _(allow was unnecessary — already ≤100 lines)_                                        |
+| `inn_ui.rs` — `inn_ui_system`                                 | `render_party_member_card`, `render_roster_member_card`, `render_inn_instructions`    |
+| `merchant_inventory_ui.rs` — `merchant_inventory_ui_system`   | `render_merchant_top_bar`, `merchant_hint_text`, `render_merchant_character_strip`    |
+| `container_inventory_ui.rs` — `container_inventory_ui_system` | `render_container_top_bar`, `container_hint_text`, `render_container_character_strip` |
+
+#### What Was Extracted (This Pass)
+
+| File                        | Function                             | Extracted helpers                                                                   |
+| --------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
+| `inventory_ui.rs`           | `inventory_input_system`             | `handle_grid_navigation`, `handle_action_selection`, `handle_equip_flow`            |
+| `inventory_ui.rs`           | `inventory_ui_system`                | `render_equipment_panel`, `render_item_grid`, `render_action_bar`                   |
+| `inventory_ui.rs`           | `handle_use_item_action_exploration` | `build_use_error_message`, `resolve_consumable_for_use`, `build_consumable_use_log` |
+| `merchant_inventory_ui.rs`  | `merchant_inventory_input_system`    | _(suppression removed — function now ≤100 lines after prior extraction)_            |
+| `container_inventory_ui.rs` | `container_inventory_input_system`   | _(suppression removed — function now ≤100 lines after prior extraction)_            |
+
+#### Supporting Types Added (Earlier Pass)
+
+- `TempleRowAction` — enum for dead-member row click results (`Select`, `Resurrect`)
+- `InnPartyCardAction` — enum for party card interactions (`Select`, `Deselect`, `Dismiss`)
+- `InnRosterCardAction` — enum for roster card interactions (`Select`, `Deselect`, `Recruit`, `Swap`)
+
+---
+
+### 5.3 — Introduce Bevy SystemParam Structs and Type Aliases (Complete)
+
+Eliminated all `#[allow(clippy::type_complexity)]` suppressions (from 14 → 0,
+100% reduction). Most were resolved in earlier phases; the single remaining
+suppression was in `combat.rs`.
+
+#### What Was Changed
+
+| File        | Change                                                                                 |
+| ----------- | -------------------------------------------------------------------------------------- |
+| `combat.rs` | Created `MonsterHpHoverBarQueries` type alias for `ParamSet<(Query<...>, Query<...>)>` |
+| `combat.rs` | Removed `#[allow(clippy::type_complexity)]` from `update_monster_hp_hover_bars`        |
+
+#### Previously Defined Type Aliases (Already in Place)
+
+The following type aliases were already present in `combat.rs` from earlier work:
+
+- `EnemyHpBarQuery`, `EnemyHpTextQuery`, `EnemyConditionTextQuery`
+- `TurnOrderTextQuery`, `BossHpBarQuery`, `BossHpBarTextQuery`
+- `ActionButtonQuery`, `EnemyCardInteractionQuery`
+- `CombatCameraQuery`, `EncounterVisualQuery`, `MonsterHpHoverTextQuery`
+
+---
+
+### Deliverables Checklist
+
+- [x] `MeshSpawnContext` struct unified; all `spawn_*` functions refactored
+- [x] `FurnitureSpawnParams` struct created for furniture spawning
+- [x] All `too_many_lines` suppressions in `src/game/systems/` eliminated (10 → 0)
+- [x] All `too_many_arguments` suppressions in `procedural_meshes.rs` eliminated
+- [x] `MonsterHpHoverBarQueries` type alias introduced
+- [x] Zero `#[allow(clippy::type_complexity)]` suppressions remain
+- [x] Stale `.bak` file deleted
+
+### Quality Gates
+
+- `cargo fmt --all` — ✅ no output (all files formatted)
+- `cargo check --all-targets --all-features` — ✅ 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — ✅ 0 warnings
+- `cargo nextest run --all-features` — ✅ 4002 passed, 0 failed, 8 skipped
+
+### Architecture Compliance
+
+- [x] No architectural deviations from `architecture.md`
+- [x] Pure refactoring — no behavioral changes
+- [x] Data structures match architecture.md Section 4
+- [x] Type aliases used consistently (MapId, ItemId, etc.)
+- [x] Constants extracted, not hardcoded
+- [x] No test references `campaigns/tutorial`

@@ -19,8 +19,8 @@ use crate::domain::world::{DoorFrameConfig, FurnitureFlags, FurnitureMaterial, F
 use crate::game::components::{DoorState, FurnitureEntity, Interactable, InteractionType};
 use crate::game::systems::procedural_meshes::{
     spawn_bench, spawn_chair, spawn_chest, spawn_door_with_frame, spawn_table, spawn_throne,
-    spawn_torch, BenchConfig, ChairConfig, ChestConfig, DoorConfig, ProceduralMeshCache,
-    TableConfig, ThroneConfig, TorchConfig,
+    spawn_torch, BenchConfig, ChairConfig, ChestConfig, DoorConfig, FurnitureSpawnParams,
+    MeshSpawnContext, ProceduralMeshCache, TableConfig, ThroneConfig, TorchConfig,
 };
 
 /// Resolves effective furniture properties by merging a [`FurnitureDatabase`]
@@ -274,22 +274,20 @@ pub fn spawn_custom_furniture_mesh_with_rendering(
 /// # Returns
 ///
 /// Entity ID of spawned furniture entity
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_furniture_with_rendering(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    ctx: &mut MeshSpawnContext,
     position: types::Position,
     map_id: types::MapId,
-    furniture_type: FurnitureType,
-    rotation_y: Option<f32>,
-    scale: f32,
-    material: FurnitureMaterial,
-    flags: FurnitureFlags,
-    color_tint: Option<[f32; 3]>,
-    key_item_id: Option<types::ItemId>,
-    cache: &mut ProceduralMeshCache,
+    params: &FurnitureSpawnParams,
 ) -> Entity {
+    let furniture_type = params.furniture_type;
+    let rotation_y = params.rotation_y;
+    let scale = params.scale;
+    let material = params.material_type;
+    let flags = &params.flags;
+    let color_tint = params.color_tint;
+    let key_item_id = params.key_item_id;
+
     // Get base material properties
     let base_color_rgb = material.base_color();
 
@@ -307,22 +305,17 @@ pub fn spawn_furniture_with_rendering(
     // Spawn the furniture using the procedural mesh system
     let furniture_entity = match furniture_type {
         FurnitureType::Throne => spawn_throne(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             ThroneConfig {
                 ornamentation_level: 0.7,
                 color_override: Some(final_color),
             },
-            cache,
             rotation_y,
         ),
         FurnitureType::Bench => spawn_bench(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             BenchConfig {
@@ -330,13 +323,10 @@ pub fn spawn_furniture_with_rendering(
                 height: 0.4 * scale,
                 color_override: Some(final_color),
             },
-            cache,
             rotation_y,
         ),
         FurnitureType::Table => spawn_table(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             TableConfig {
@@ -345,13 +335,10 @@ pub fn spawn_furniture_with_rendering(
                 height: 0.7 * scale,
                 color_override: Some(final_color),
             },
-            cache,
             rotation_y,
         ),
         FurnitureType::Chair => spawn_chair(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             ChairConfig {
@@ -359,13 +346,10 @@ pub fn spawn_furniture_with_rendering(
                 has_armrests: false,
                 color_override: Some(final_color),
             },
-            cache,
             rotation_y,
         ),
         FurnitureType::Torch => spawn_torch(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             TorchConfig {
@@ -373,13 +357,10 @@ pub fn spawn_furniture_with_rendering(
                 height: 1.2 * scale,
                 flame_color: Some(final_color),
             },
-            cache,
             rotation_y,
         ),
         FurnitureType::Chest => spawn_chest(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             ChestConfig {
@@ -387,13 +368,10 @@ pub fn spawn_furniture_with_rendering(
                 size_multiplier: scale,
                 color_override: Some(final_color),
             },
-            cache,
             rotation_y,
         ),
         FurnitureType::Bookshelf => spawn_table(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             TableConfig {
@@ -402,13 +380,10 @@ pub fn spawn_furniture_with_rendering(
                 height: 1.8 * scale,
                 color_override: Some(final_color),
             },
-            cache,
             rotation_y,
         ),
         FurnitureType::Barrel => spawn_chest(
-            commands,
-            materials,
-            meshes,
+            ctx,
             position,
             map_id,
             ChestConfig {
@@ -416,14 +391,11 @@ pub fn spawn_furniture_with_rendering(
                 size_multiplier: 0.9 * scale,
                 color_override: Some(final_color),
             },
-            cache,
             rotation_y,
         ),
         FurnitureType::Door => {
             let (door_entity, _frame_entity) = spawn_door_with_frame(
-                commands,
-                materials,
-                meshes,
+                ctx,
                 position,
                 map_id,
                 DoorConfig {
@@ -435,7 +407,6 @@ pub fn spawn_furniture_with_rendering(
                     ..Default::default()
                 },
                 DoorFrameConfig::default(),
-                cache,
                 rotation_y,
             );
             // Attach DoorState so the interaction system can track open/locked state.
@@ -444,20 +415,20 @@ pub fn spawn_furniture_with_rendering(
             let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
             let mut door_state = DoorState::new(flags.locked, rotation_radians);
             door_state.key_item_id = key_item_id;
-            commands.entity(door_entity).insert(door_state);
+            ctx.commands.entity(door_entity).insert(door_state);
             door_entity
         }
     };
 
     // Add FurnitureEntity marker component
-    commands
+    ctx.commands
         .entity(furniture_entity)
         .insert(FurnitureEntity::new(furniture_type, flags.blocking));
 
     // Add Interactable component if applicable
     if let Some(interaction_type) = get_interaction_type(furniture_type) {
         let distance = get_interaction_distance(furniture_type);
-        commands
+        ctx.commands
             .entity(furniture_entity)
             .insert(Interactable::with_distance(interaction_type, distance));
     }

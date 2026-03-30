@@ -896,40 +896,49 @@ fn spawn_map(
                                 if rendered_t
                                     == crate::game::systems::advanced_trees::TreeType::Shrub
                                 {
+                                    let mut ctx = procedural_meshes::MeshSpawnContext {
+                                        commands: &mut commands,
+                                        materials: &mut materials,
+                                        meshes: &mut meshes,
+                                        cache: procedural_cache,
+                                    };
                                     procedural_meshes::spawn_shrub(
-                                        &mut commands,
-                                        &mut materials,
-                                        &mut meshes,
+                                        &mut ctx,
                                         pos,
                                         map.id,
                                         Some(&tile.visual),
-                                        procedural_cache,
                                     );
                                 } else {
+                                    let mut ctx = procedural_meshes::MeshSpawnContext {
+                                        commands: &mut commands,
+                                        materials: &mut materials,
+                                        meshes: &mut meshes,
+                                        cache: procedural_cache,
+                                    };
                                     procedural_meshes::spawn_tree(
-                                        &mut commands,
-                                        &mut materials,
-                                        &mut meshes,
+                                        &mut ctx,
                                         &asset_server,
                                         pos,
                                         map.id,
                                         Some(&tile.visual),
                                         Some(rendered_t),
-                                        procedural_cache,
                                     );
                                 }
                             } else if is_forest {
                                 // Default tree for Forest terrain with no explicit tree type
+                                let mut ctx = procedural_meshes::MeshSpawnContext {
+                                    commands: &mut commands,
+                                    materials: &mut materials,
+                                    meshes: &mut meshes,
+                                    cache: procedural_cache,
+                                };
                                 procedural_meshes::spawn_tree(
-                                    &mut commands,
-                                    &mut materials,
-                                    &mut meshes,
+                                    &mut ctx,
                                     &asset_server,
                                     pos,
                                     map.id,
                                     Some(&tile.visual),
                                     None, // Use default tree type
-                                    procedural_cache,
                                 );
                             }
 
@@ -937,14 +946,17 @@ fn spawn_map(
                             if is_forest {
                                 let mut rng = rand::rng();
                                 if rng.random_range(0..10) < 4 {
+                                    let mut ctx = procedural_meshes::MeshSpawnContext {
+                                        commands: &mut commands,
+                                        materials: &mut materials,
+                                        meshes: &mut meshes,
+                                        cache: procedural_cache,
+                                    };
                                     procedural_meshes::spawn_shrub(
-                                        &mut commands,
-                                        &mut materials,
-                                        &mut meshes,
+                                        &mut ctx,
                                         pos,
                                         map.id,
                                         Some(&tile.visual),
-                                        procedural_cache,
                                     );
                                 }
                             }
@@ -1309,27 +1321,33 @@ fn spawn_map(
 
             match event {
                 world::MapEvent::Sign { name, facing, .. } => {
+                    let mut ctx = procedural_meshes::MeshSpawnContext {
+                        commands: &mut commands,
+                        materials: &mut materials,
+                        meshes: &mut meshes,
+                        cache: procedural_cache,
+                    };
                     procedural_meshes::spawn_sign(
-                        &mut commands,
-                        &mut materials,
-                        &mut meshes,
+                        &mut ctx,
                         *position,
                         name.clone(),
                         map.id,
-                        procedural_cache,
                         rotation_y,
                         *facing, // cardinal facing from map event
                     );
                 }
                 world::MapEvent::Teleport { name, .. } => {
+                    let mut ctx = procedural_meshes::MeshSpawnContext {
+                        commands: &mut commands,
+                        materials: &mut materials,
+                        meshes: &mut meshes,
+                        cache: procedural_cache,
+                    };
                     procedural_meshes::spawn_portal(
-                        &mut commands,
-                        &mut materials,
-                        &mut meshes,
+                        &mut ctx,
                         *position,
                         name.clone(),
                         map.id,
-                        procedural_cache,
                         rotation_y,
                     );
                 }
@@ -1362,21 +1380,28 @@ fn spawn_map(
                         &content.0.furniture,
                     );
 
-                    procedural_meshes::spawn_furniture(
-                        &mut commands,
-                        &mut materials,
-                        &mut meshes,
-                        *position,
-                        map.id,
-                        resolved_type,
-                        *rotation_y,
-                        resolved_scale,
-                        resolved_material,
-                        &resolved_flags,
-                        resolved_tint,
-                        *key_item_id,
-                        procedural_cache,
-                    );
+                    {
+                        let mut ctx = procedural_meshes::MeshSpawnContext {
+                            commands: &mut commands,
+                            materials: &mut materials,
+                            meshes: &mut meshes,
+                            cache: procedural_cache,
+                        };
+                        procedural_meshes::spawn_furniture(
+                            &mut ctx,
+                            *position,
+                            map.id,
+                            &procedural_meshes::FurnitureSpawnParams {
+                                furniture_type: resolved_type,
+                                rotation_y: *rotation_y,
+                                scale: resolved_scale,
+                                material_type: resolved_material,
+                                flags: resolved_flags,
+                                color_tint: resolved_tint,
+                                key_item_id: *key_item_id,
+                            },
+                        );
+                    }
                 }
                 world::MapEvent::Encounter {
                     monster_group,

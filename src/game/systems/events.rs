@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::application::resources::GameContent;
@@ -13,7 +13,9 @@ use crate::game::systems::furniture_rendering::{
 };
 use crate::game::systems::item_world_events::ItemPickedUpEvent;
 use crate::game::systems::map::{EventTrigger, MapChangeEvent, NpcMarker, TileCoord};
-use crate::game::systems::procedural_meshes::ProceduralMeshCache;
+use crate::game::systems::procedural_meshes::{
+    FurnitureSpawnParams, MeshSpawnContext, ProceduralMeshCache,
+};
 use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use bevy::prelude::*;
 
@@ -708,20 +710,25 @@ fn handle_events(
                         &content.db().furniture,
                     );
 
-                    spawn_furniture_with_rendering(
+                    let mut ctx = MeshSpawnContext {
                         commands,
-                        materials_res,
-                        meshes_res,
+                        materials: materials_res,
+                        meshes: meshes_res,
+                        cache: &mut furniture_cache,
+                    };
+                    spawn_furniture_with_rendering(
+                        &mut ctx,
                         trigger.position,
                         map_id,
-                        resolved_type,
-                        *rotation_y,
-                        resolved_scale,
-                        resolved_material,
-                        resolved_flags,
-                        resolved_tint,
-                        *key_item_id,
-                        &mut furniture_cache,
+                        &FurnitureSpawnParams {
+                            furniture_type: resolved_type,
+                            rotation_y: *rotation_y,
+                            scale: resolved_scale,
+                            material_type: resolved_material,
+                            flags: resolved_flags,
+                            color_tint: resolved_tint,
+                            key_item_id: *key_item_id,
+                        },
                     );
                 }
             }

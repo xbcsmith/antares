@@ -1428,6 +1428,133 @@ fn sync_combat_to_party_on_exit(
     combat_res.clear();
 }
 
+// ===== Combat UI Query Type Aliases =====
+
+/// Query for enemy HP bar fill nodes, excluding boss HP bars.
+type EnemyHpBarQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static EnemyHpBarFill,
+        &'static mut Node,
+        &'static mut BackgroundColor,
+    ),
+    Without<BossHpBarFill>,
+>;
+
+/// Query for enemy HP text entities, excluding name, condition, turn order, and boss texts.
+type EnemyHpTextQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static EnemyHpText, &'static mut Text),
+    (
+        Without<EnemyNameText>,
+        Without<EnemyConditionText>,
+        Without<TurnOrderText>,
+        Without<BossHpBarText>,
+    ),
+>;
+
+/// Query for enemy condition text entities, excluding HP, name, turn order, and boss texts.
+type EnemyConditionTextQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static EnemyConditionText, &'static mut Text),
+    (
+        Without<EnemyHpText>,
+        Without<EnemyNameText>,
+        Without<TurnOrderText>,
+        Without<BossHpBarText>,
+    ),
+>;
+
+/// Query for the turn order text entity, excluding all enemy-specific text markers.
+type TurnOrderTextQuery<'w, 's> = Query<
+    'w,
+    's,
+    &'static mut Text,
+    (
+        With<TurnOrderText>,
+        Without<EnemyHpText>,
+        Without<EnemyNameText>,
+        Without<EnemyConditionText>,
+        Without<BossHpBarText>,
+    ),
+>;
+
+/// Query for boss HP bar fill nodes, excluding standard enemy HP bars.
+type BossHpBarQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static BossHpBarFill,
+        &'static mut Node,
+        &'static mut BackgroundColor,
+    ),
+    Without<EnemyHpBarFill>,
+>;
+
+/// Query for boss HP bar text entities, excluding standard enemy HP text.
+type BossHpBarTextQuery<'w, 's> =
+    Query<'w, 's, (&'static BossHpBarText, &'static mut Text), Without<EnemyHpText>>;
+
+/// Query for action button interactions used by the combat input system.
+type ActionButtonQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Interaction,
+        Ref<'static, Interaction>,
+        &'static ActionButton,
+    ),
+    With<Button>,
+>;
+
+/// Query for enemy card interactions used by the target selection system.
+type EnemyCardInteractionQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Interaction,
+        Ref<'static, Interaction>,
+        &'static EnemyCard,
+    ),
+    With<Button>,
+>;
+
+/// Query for the main camera transform used by hover bar world-projection.
+type CombatCameraQuery<'w, 's> =
+    Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>;
+
+/// Query for encounter visual markers and their world transforms.
+type EncounterVisualQuery<'w, 's> =
+    Query<'w, 's, (&'static EncounterVisualMarker, &'static GlobalTransform)>;
+
+/// Query for monster HP hover bar text entities.
+type MonsterHpHoverTextQuery<'w, 's> =
+    Query<'w, 's, (&'static MonsterHpHoverBarHpText, &'static mut Text)>;
+
+/// Bundled queries for monster HP hover bar containers and fills.
+///
+/// Used by [`update_monster_hp_hover_bars`] to read bar layout and update fill
+/// widths without violating Bevy's borrow rules (both queries touch `Node`).
+type MonsterHpHoverBarQueries<'w, 's> = ParamSet<
+    'w,
+    's,
+    (
+        Query<'static, 'static, (&'static MonsterHpHoverBar, &'static mut Node)>,
+        Query<
+            'static,
+            'static,
+            (
+                &'static MonsterHpHoverBarFill,
+                &'static mut Node,
+                &'static mut BackgroundColor,
+            ),
+        >,
+    ),
+>;
+
 // ===== Combat UI Systems =====
 
 /// System: Setup combat UI when entering combat mode
@@ -1866,50 +1993,18 @@ fn cleanup_combat_ui(
 ///
 /// Updates enemy HP bars, turn order display, and action menu visibility.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::type_complexity)]
 fn update_combat_ui(
     combat_res: Res<CombatResource>,
     global_state: Res<GlobalState>,
-    mut enemy_hp_bars: Query<
-        (&EnemyHpBarFill, &mut Node, &mut BackgroundColor),
-        Without<BossHpBarFill>,
-    >,
-    mut enemy_hp_texts: Query<
-        (&EnemyHpText, &mut Text),
-        (
-            Without<EnemyNameText>,
-            Without<EnemyConditionText>,
-            Without<TurnOrderText>,
-            Without<BossHpBarText>,
-        ),
-    >,
-    mut enemy_condition_texts: Query<
-        (&EnemyConditionText, &mut Text),
-        (
-            Without<EnemyHpText>,
-            Without<EnemyNameText>,
-            Without<TurnOrderText>,
-            Without<BossHpBarText>,
-        ),
-    >,
-    mut turn_order_text: Query<
-        &mut Text,
-        (
-            With<TurnOrderText>,
-            Without<EnemyHpText>,
-            Without<EnemyNameText>,
-            Without<EnemyConditionText>,
-            Without<BossHpBarText>,
-        ),
-    >,
+    mut enemy_hp_bars: EnemyHpBarQuery,
+    mut enemy_hp_texts: EnemyHpTextQuery,
+    mut enemy_condition_texts: EnemyConditionTextQuery,
+    mut turn_order_text: TurnOrderTextQuery,
     mut action_menu: Query<&mut Visibility, With<ActionMenuPanel>>,
     turn_state: Res<CombatTurnStateResource>,
     mut action_menu_state: ResMut<ActionMenuState>,
-    mut boss_hp_fills: Query<
-        (&BossHpBarFill, &mut Node, &mut BackgroundColor),
-        Without<EnemyHpBarFill>,
-    >,
-    mut boss_hp_texts: Query<(&BossHpBarText, &mut Text), Without<EnemyHpText>>,
+    mut boss_hp_fills: BossHpBarQuery,
+    mut boss_hp_texts: BossHpBarTextQuery,
 ) {
     // Only update when in combat mode
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
@@ -2264,11 +2359,10 @@ fn confirm_attack_target(
 /// Both mouse and keyboard routes call `dispatch_combat_action` /
 /// `confirm_attack_target` so their semantics are identical.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::type_complexity)]
 fn combat_input_system(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
-    mut interactions: Query<(&Interaction, Ref<Interaction>, &ActionButton), With<Button>>,
+    mut interactions: ActionButtonQuery,
     global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     mut target_sel: ResMut<TargetSelection>,
@@ -2608,10 +2702,9 @@ fn update_target_highlight(
 }
 
 /// Handle clicks on enemy cards during target selection and emit `AttackAction`.
-#[allow(clippy::type_complexity)]
 fn select_target(
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
-    mut interactions: Query<(&Interaction, Ref<Interaction>, &EnemyCard), With<Button>>,
+    mut interactions: EnemyCardInteractionQuery,
     mut target_sel: ResMut<TargetSelection>,
     mut action_menu_state: ResMut<ActionMenuState>,
     mut ranged_pending: ResMut<RangedAttackPending>,
@@ -5591,18 +5684,14 @@ fn spawn_monster_hp_hover_bars(
 }
 
 /// System: update `MonsterHpHoverBar` fill widths each frame from `CombatResource`.
-#[allow(clippy::type_complexity)]
 fn update_monster_hp_hover_bars(
     combat_res: Res<CombatResource>,
     global_state: Res<GlobalState>,
-    camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    camera_query: CombatCameraQuery,
     primary_window: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    encounter_visual_query: Query<(&EncounterVisualMarker, &GlobalTransform)>,
-    mut hp_text_query: Query<(&MonsterHpHoverBarHpText, &mut Text)>,
-    mut hover_bar_queries: ParamSet<(
-        Query<(&MonsterHpHoverBar, &mut Node)>,
-        Query<(&MonsterHpHoverBarFill, &mut Node, &mut BackgroundColor)>,
-    )>,
+    encounter_visual_query: EncounterVisualQuery,
+    mut hp_text_query: MonsterHpHoverTextQuery,
+    mut hover_bar_queries: MonsterHpHoverBarQueries,
 ) {
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
         return;

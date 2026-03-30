@@ -56,6 +56,30 @@ use crate::game::resources::sprite_assets::SpriteAssets;
 use bevy::math::Affine2;
 use bevy::prelude::*;
 
+/// Query for animated tile sprites whose frame changed and need UV updates.
+type AnimatedTileSpriteQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static AnimatedSprite,
+        &'static TileSprite,
+        &'static MeshMaterial3d<StandardMaterial>,
+    ),
+    Changed<AnimatedSprite>,
+>;
+
+/// Query for animated actor sprites whose frame changed and need UV updates.
+type AnimatedActorSpriteQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static AnimatedSprite,
+        &'static ActorSprite,
+        &'static MeshMaterial3d<StandardMaterial>,
+    ),
+    (Changed<AnimatedSprite>, Without<TileSprite>),
+>;
+
 /// Updates material UV transforms for animated sprites
 ///
 /// Processes two query types:
@@ -84,25 +108,10 @@ use bevy::prelude::*;
 ///     app.add_systems(Update, update_animated_sprite_uv);
 /// }
 /// ```
-#[allow(clippy::type_complexity)]
 pub fn update_animated_sprite_uv(
     sprite_assets: Res<SpriteAssets>,
-    mut tile_query: Query<
-        (
-            &AnimatedSprite,
-            &TileSprite,
-            &MeshMaterial3d<StandardMaterial>,
-        ),
-        Changed<AnimatedSprite>,
-    >,
-    mut actor_query: Query<
-        (
-            &AnimatedSprite,
-            &ActorSprite,
-            &MeshMaterial3d<StandardMaterial>,
-        ),
-        (Changed<AnimatedSprite>, Without<TileSprite>),
-    >,
+    mut tile_query: AnimatedTileSpriteQuery,
+    mut actor_query: AnimatedActorSpriteQuery,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Update animated tile sprites

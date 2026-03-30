@@ -283,7 +283,6 @@ impl MerchantNavState {
 ///
 /// Runs every frame; only processes input when
 /// `GlobalState.0.mode == GameMode::MerchantInventory(_)`.
-#[allow(clippy::too_many_lines)]
 fn merchant_inventory_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut global_state: ResMut<GlobalState>,
@@ -488,10 +487,73 @@ fn merchant_inventory_input_system(
     }
 }
 
+// ===== Private UI helpers (extracted from `merchant_inventory_ui_system`) =====
+
+/// Renders the top bar with title, keyboard hints, and party gold display.
+fn render_merchant_top_bar(ui: &mut egui::Ui, party_gold: u32) {
+    ui.horizontal(|ui| {
+        ui.heading("Merchant Trade");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new("[Esc] close   [Tab] switch panel   [1-6] switch character")
+                    .small()
+                    .weak(),
+            );
+            ui.separator();
+            let gold_str = format_gold(party_gold);
+            ui.label(
+                egui::RichText::new(format!("Gold: {}", gold_str))
+                    .color(egui::Color32::from_rgb(255, 215, 0))
+                    .strong(),
+            );
+        });
+    });
+}
+
+/// Returns the hint text for the current navigation phase.
+fn merchant_hint_text(phase: &NavigationPhase) -> &'static str {
+    match phase {
+        NavigationPhase::SlotNavigation => {
+            "Tab: switch panel   1-6: change character   ←→↑↓: navigate   Enter: select   Esc: close"
+        }
+        NavigationPhase::ActionNavigation => "Enter: execute action   Esc: cancel",
+    }
+}
+
+/// Renders the active-character selector strip (number-key buttons).
+fn render_merchant_character_strip(
+    ui: &mut egui::Ui,
+    party: &crate::domain::character::Party,
+    active_char_idx: usize,
+) {
+    let party_len = party.members.len();
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Character:").strong());
+        for i in 0..party_len {
+            ui.push_id(format!("merch_char_btn_{}", i), |ui| {
+                let member = &party.members[i];
+                let is_active = i == active_char_idx;
+                let label = egui::RichText::new(format!("[{}] {}", i + 1, member.name))
+                    .color(if is_active {
+                        egui::Color32::YELLOW
+                    } else {
+                        egui::Color32::LIGHT_GRAY
+                    })
+                    .small();
+                if ui.button(label).clicked() {
+                    // Character switching via mouse is handled via direct
+                    // mutation within the UI — we send the action inline.
+                    // (Cannot call ResMut here; handled in input system on
+                    //  next frame — acceptable single-frame lag)
+                }
+            });
+        }
+    });
+}
+
 // ===== UI system =====
 
 /// Renders the merchant inventory split-screen overlay.
-#[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 fn merchant_inventory_ui_system(
     mut contexts: EguiContexts,
@@ -518,59 +580,14 @@ fn merchant_inventory_ui_system(
     let merchant_focused = merchant_state.merchant_has_focus();
 
     egui::CentralPanel::default().show(ctx, |ui| {
-        // ── Top bar ──────────────────────────────────────────────────────
-        ui.horizontal(|ui| {
-            ui.heading("Merchant Trade");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new("[Esc] close   [Tab] switch panel   [1-6] switch character")
-                        .small()
-                        .weak(),
-                );
-                ui.separator();
-                let gold_str = format_gold(global_state.0.party.gold);
-                ui.label(
-                    egui::RichText::new(format!("Gold: {}", gold_str))
-                        .color(egui::Color32::from_rgb(255, 215, 0))
-                        .strong(),
-                );
-            });
-        });
-
-        // ── Status / hint line ───────────────────────────────────────────
-        let hint = match nav_state.phase {
-            NavigationPhase::SlotNavigation => {
-                "Tab: switch panel   1-6: change character   ←→↑↓: navigate   Enter: select   Esc: close"
-            }
-            NavigationPhase::ActionNavigation => "Enter: execute action   Esc: cancel",
-        };
-        ui.label(egui::RichText::new(hint).small().weak());
+        render_merchant_top_bar(ui, global_state.0.party.gold);
+        ui.label(
+            egui::RichText::new(merchant_hint_text(&nav_state.phase))
+                .small()
+                .weak(),
+        );
         ui.separator();
-
-        // ── Active character selector strip ──────────────────────────────
-        let party_len = global_state.0.party.members.len();
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Character:").strong());
-            for i in 0..party_len {
-                ui.push_id(format!("merch_char_btn_{}", i), |ui| {
-                    let member = &global_state.0.party.members[i];
-                    let is_active = i == char_idx;
-                    let label = egui::RichText::new(format!("[{}] {}", i + 1, member.name))
-                        .color(if is_active {
-                            egui::Color32::YELLOW
-                        } else {
-                            egui::Color32::LIGHT_GRAY
-                        })
-                        .small();
-                    if ui.button(label).clicked() {
-                        // Character switching via mouse is handled via direct
-                        // mutation within the UI — we send the action inline.
-                        // (Cannot call ResMut here; handled in input system on
-                        //  next frame — acceptable single-frame lag)
-                    }
-                });
-            }
-        });
+        render_merchant_character_strip(ui, &global_state.0.party, char_idx);
         ui.add_space(4.0);
 
         // ── Split panel layout ───────────────────────────────────────────
@@ -588,9 +605,7 @@ fn merchant_inventory_ui_system(
                     char_idx,
                     char_focused,
                     merchant_state.character_selected_slot,
-                    if char_focused
-                        && nav_state.phase == NavigationPhase::ActionNavigation
-                    {
+                    if char_focused && nav_state.phase == NavigationPhase::ActionNavigation {
                         Some(nav_state.focused_action_index)
                     } else {
                         None
@@ -610,8 +625,9 @@ fn merchant_inventory_ui_system(
                 }
 
                 if let Some(slot_idx) = panel_result.clicked_slot {
-                    select_char_writer
-                        .write(SelectMerchantCharacterSlotAction { slot_index: slot_idx });
+                    select_char_writer.write(SelectMerchantCharacterSlotAction {
+                        slot_index: slot_idx,
+                    });
                 }
             });
 
@@ -622,9 +638,7 @@ fn merchant_inventory_ui_system(
                     &merchant_state,
                     merchant_focused,
                     merchant_state.merchant_selected_slot,
-                    if merchant_focused
-                        && nav_state.phase == NavigationPhase::ActionNavigation
-                    {
+                    if merchant_focused && nav_state.phase == NavigationPhase::ActionNavigation {
                         Some(nav_state.focused_action_index)
                     } else {
                         None

@@ -339,7 +339,6 @@ impl ContainerNavState {
 ///
 /// Runs every frame; only processes input when
 /// `GlobalState.0.mode == GameMode::ContainerInventory(_)`.
-#[allow(clippy::too_many_lines)]
 fn container_inventory_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut global_state: ResMut<GlobalState>,
@@ -566,10 +565,63 @@ fn container_inventory_input_system(
     }
 }
 
+// ===== Private UI helpers (extracted from `container_inventory_ui_system`) ====
+
+/// Renders the top bar with container name and keyboard hints.
+fn render_container_top_bar(ui: &mut egui::Ui, container_name: &str) {
+    ui.horizontal(|ui| {
+        ui.heading(format!("Container: {}", container_name));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new("[Esc] close   [Tab] switch panel   [1-6] switch character")
+                    .small()
+                    .weak(),
+            );
+        });
+    });
+}
+
+/// Returns the hint text for the current navigation phase.
+fn container_hint_text(phase: &NavigationPhase) -> &'static str {
+    match phase {
+        NavigationPhase::SlotNavigation => {
+            "Tab: switch panel   1-6: change character   ←→↑↓: navigate   Enter: select   Esc: close"
+        }
+        NavigationPhase::ActionNavigation => "←→: cycle actions   Enter: execute   Esc: cancel",
+    }
+}
+
+/// Renders the active-character selector strip (number-key buttons).
+fn render_container_character_strip(
+    ui: &mut egui::Ui,
+    party: &crate::domain::character::Party,
+    active_char_idx: usize,
+) {
+    let party_len = party.members.len();
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Character:").strong());
+        for i in 0..party_len {
+            ui.push_id(format!("cont_char_btn_{}", i), |ui| {
+                let member = &party.members[i];
+                let is_active = i == active_char_idx;
+                let label = egui::RichText::new(format!("[{}] {}", i + 1, member.name))
+                    .color(if is_active {
+                        egui::Color32::YELLOW
+                    } else {
+                        egui::Color32::LIGHT_GRAY
+                    })
+                    .small();
+                // Mouse clicks on character buttons are informational only;
+                // switching is handled via number keys in the input system.
+                let _ = ui.button(label);
+            });
+        }
+    });
+}
+
 // ===== UI system =====
 
 /// Renders the container inventory split-screen overlay.
-#[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 fn container_inventory_ui_system(
     mut contexts: EguiContexts,
@@ -597,51 +649,14 @@ fn container_inventory_ui_system(
     let cont_focused = container_state.container_has_focus();
 
     egui::CentralPanel::default().show(ctx, |ui| {
-        // ── Top bar ──────────────────────────────────────────────────────
-        ui.horizontal(|ui| {
-            ui.heading(format!("Container: {}", container_state.container_name));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(
-                        "[Esc] close   [Tab] switch panel   [1-6] switch character",
-                    )
-                    .small()
-                    .weak(),
-                );
-            });
-        });
-
-        // ── Hint line ────────────────────────────────────────────────────
-        let hint = match nav_state.phase {
-            NavigationPhase::SlotNavigation => {
-                "Tab: switch panel   1-6: change character   ←→↑↓: navigate   Enter: select   Esc: close"
-            }
-            NavigationPhase::ActionNavigation => "←→: cycle actions   Enter: execute   Esc: cancel",
-        };
-        ui.label(egui::RichText::new(hint).small().weak());
+        render_container_top_bar(ui, &container_state.container_name);
+        ui.label(
+            egui::RichText::new(container_hint_text(&nav_state.phase))
+                .small()
+                .weak(),
+        );
         ui.separator();
-
-        // ── Active character selector strip ──────────────────────────────
-        let party_len = global_state.0.party.members.len();
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Character:").strong());
-            for i in 0..party_len {
-                ui.push_id(format!("cont_char_btn_{}", i), |ui| {
-                    let member = &global_state.0.party.members[i];
-                    let is_active = i == char_idx;
-                    let label = egui::RichText::new(format!("[{}] {}", i + 1, member.name))
-                        .color(if is_active {
-                            egui::Color32::YELLOW
-                        } else {
-                            egui::Color32::LIGHT_GRAY
-                        })
-                        .small();
-                    // Mouse clicks on character buttons are informational only;
-                    // switching is handled via number keys in the input system.
-                    let _ = ui.button(label);
-                });
-            }
-        });
+        render_container_character_strip(ui, &global_state.0.party, char_idx);
         ui.add_space(4.0);
 
         // ── Split panel layout ───────────────────────────────────────────
