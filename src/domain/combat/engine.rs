@@ -1724,7 +1724,7 @@ mod tests {
         )
     }
 
-    // ===== Phase 2: ambush_round_active tests =====
+    // ===== ambush_round_active tests =====
 
     /// `CombatState::new` must initialise `ambush_round_active` to `false`.
     #[test]
@@ -2046,7 +2046,7 @@ mod tests {
         combat.add_player(character);
 
         // Apply damage to an already-unconscious (0 HP) character.
-        // With the Phase 2 logic the character must transition to DEAD.
+        // The character must transition to DEAD.
         let _ = apply_damage(&mut combat, CombatantId::Player(0), 5);
 
         if let Some(Combatant::Player(c)) = combat.participants.first() {
@@ -2632,7 +2632,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 3: Damage Floor and Bonus Application Verification =====
+    // ===== Damage Floor and Bonus Application Verification =====
 
     /// A cursed weapon with a large negative bonus (1d4-10) must never cause a
     /// hit to deal 0 damage.  `DiceRoll::roll` clamps its raw result at 0, but
@@ -2857,12 +2857,12 @@ mod tests {
         }
     }
 
-    // ===== Phase 4: ActiveSpells resistance projection tests =====
+    // ===== ActiveSpells resistance projection tests =====
 
     #[test]
     fn test_resistance_check_without_active_spells() {
         // resolve_attack with active_spells: None must behave identically to
-        // before Phase 4 — no resistance reduction for physical attacks.
+        // before ActiveSpells — no resistance reduction for physical attacks.
         let mut combat = CombatState::new(Handicap::Even);
 
         let mut attacker = create_test_character("Attacker", 10);

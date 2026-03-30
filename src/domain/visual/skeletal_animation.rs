@@ -54,6 +54,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::domain::validation::ValidationError;
 use crate::domain::visual::skeleton::BoneId;
 
 /// A single keyframe for a bone in a skeletal animation
@@ -344,7 +345,7 @@ impl SkeletalAnimation {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if valid, or `Err(String)` with error description
+    /// Returns `Ok(())` if valid, or `Err(ValidationError)` with error description
     ///
     /// # Errors
     ///
@@ -364,46 +365,51 @@ impl SkeletalAnimation {
     ///
     /// assert!(animation.validate().is_ok());
     /// ```
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), ValidationError> {
         if self.duration <= 0.0 {
-            return Err(format!(
+            return Err(ValidationError::OutOfRange(format!(
                 "Animation duration must be positive, got {}",
                 self.duration
-            ));
+            )));
         }
 
         if self.name.is_empty() {
-            return Err("Animation name cannot be empty".to_string());
+            return Err(ValidationError::EmptyField(
+                "Animation name cannot be empty".to_string(),
+            ));
         }
 
         // Validate each bone track
         for (bone_id, keyframes) in &self.bone_tracks {
             if keyframes.is_empty() {
-                return Err(format!("Bone {} has empty keyframe track", bone_id));
+                return Err(ValidationError::EmptyField(format!(
+                    "Bone {} has empty keyframe track",
+                    bone_id
+                )));
             }
 
             // Check keyframe times are valid and sorted
             let mut prev_time = -1.0;
             for keyframe in keyframes {
                 if keyframe.time < 0.0 {
-                    return Err(format!(
+                    return Err(ValidationError::OutOfRange(format!(
                         "Bone {} has keyframe with negative time: {}",
                         bone_id, keyframe.time
-                    ));
+                    )));
                 }
 
                 if keyframe.time > self.duration {
-                    return Err(format!(
+                    return Err(ValidationError::OutOfRange(format!(
                         "Bone {} has keyframe at time {} which exceeds duration {}",
                         bone_id, keyframe.time, self.duration
-                    ));
+                    )));
                 }
 
                 if keyframe.time < prev_time {
-                    return Err(format!(
+                    return Err(ValidationError::Structural(format!(
                         "Bone {} has unsorted keyframes: {} comes after {}",
                         bone_id, keyframe.time, prev_time
-                    ));
+                    )));
                 }
 
                 prev_time = keyframe.time;
@@ -649,7 +655,7 @@ mod tests {
         let animation = SkeletalAnimation::new("Invalid".to_string(), -1.0, false);
         let result = animation.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("positive"));
+        assert!(result.unwrap_err().to_string().contains("positive"));
     }
 
     #[test]
@@ -657,7 +663,7 @@ mod tests {
         let animation = SkeletalAnimation::new("".to_string(), 1.0, false);
         let result = animation.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("empty"));
+        assert!(result.unwrap_err().to_string().contains("empty"));
     }
 
     #[test]
@@ -667,7 +673,7 @@ mod tests {
 
         let result = animation.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("exceeds duration"));
+        assert!(result.unwrap_err().to_string().contains("exceeds duration"));
     }
 
     #[test]
@@ -680,7 +686,7 @@ mod tests {
 
         let result = animation.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unsorted"));
+        assert!(result.unwrap_err().to_string().contains("unsorted"));
     }
 
     #[test]

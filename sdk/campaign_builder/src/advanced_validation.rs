@@ -715,7 +715,6 @@ mod tests {
     use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
     use antares::domain::types::DiceRoll;
 
-    #[allow(deprecated)]
     fn create_test_item(id: u32, value: u32) -> Item {
         Item {
             id: id as u8,

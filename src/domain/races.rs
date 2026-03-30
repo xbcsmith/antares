@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Character race definitions and database
@@ -10,12 +10,12 @@
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
-//! See `docs/explanation/hardcoded_removal_implementation_plan.md` Phase 4.
+//! See `docs/explanation/hardcoded_removal_implementation_plan.md` for implementation details.
 
 use crate::domain::proficiency::ProficiencyDatabase;
+use crate::domain::validation::ValidationError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use thiserror::Error;
 
 // ===== Error Types =====
@@ -209,13 +209,13 @@ impl Resistances {
     }
 
     /// Validates that all resistance values are in the valid range (0-100)
-    pub fn validate(&self) -> Result<(), String> {
-        let check = |name: &str, value: u8| {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        let check = |name: &str, value: u8| -> Result<(), ValidationError> {
             if value > 100 {
-                Err(format!(
+                Err(ValidationError::OutOfRange(format!(
                     "{} resistance {} exceeds maximum of 100",
                     name, value
-                ))
+                )))
             } else {
                 Ok(())
             }
@@ -451,92 +451,25 @@ pub struct RaceDatabase {
     races: HashMap<RaceId, RaceDefinition>,
 }
 
+crate::impl_ron_database!(
+    RaceDatabase,
+    entity: RaceDefinition,
+    key: String,
+    error: RaceError,
+    field: races,
+    id_of: |r: &RaceDefinition| r.id.clone(),
+    dup_err: RaceError::DuplicateId,
+    read_err: |e| RaceError::LoadError(format!("Failed to read file: {}", e)),
+    parse_err: |e| RaceError::ParseError(format!("RON parse error: {}", e)),
+    post_load: RaceDatabase::validate,
+);
+
 impl RaceDatabase {
     /// Creates an empty race database
     pub fn new() -> Self {
         Self {
             races: HashMap::new(),
         }
-    }
-
-    /// Loads race definitions from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing race definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(RaceDatabase)` on success, or an error if the file
-    /// cannot be read or parsed.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::domain::races::RaceDatabase;
-    ///
-    /// let db = RaceDatabase::load_from_file("data/races.ron").unwrap();
-    /// assert!(db.get_race("human").is_some());
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, RaceError> {
-        let contents = std::fs::read_to_string(path.as_ref())
-            .map_err(|e| RaceError::LoadError(format!("Failed to read file: {}", e)))?;
-
-        Self::load_from_string(&contents)
-    }
-
-    /// Loads race definitions from a RON string
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - RON string containing race definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(RaceDatabase)` on success, or an error if parsing fails.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::races::RaceDatabase;
-    ///
-    /// let ron_data = r#"[
-    ///     (
-    ///         id: "human",
-    ///         name: "Human",
-    ///         description: "Versatile and adaptable",
-    ///         stat_modifiers: (
-    ///             might: 0, intellect: 0, personality: 0,
-    ///             endurance: 0, speed: 0, accuracy: 0, luck: 0,
-    ///         ),
-    ///         resistances: (
-    ///             magic: 0, fire: 0, cold: 0, electricity: 0,
-    ///             acid: 0, fear: 0, poison: 0, psychic: 0,
-    ///         ),
-    ///         special_abilities: [],
-    ///         size: Medium,
-    ///         proficiencies: [],
-    ///         incompatible_item_tags: [],
-    ///     ),
-    /// ]"#;
-    ///
-    /// let db = RaceDatabase::load_from_string(ron_data).unwrap();
-    /// assert!(db.get_race("human").is_some());
-    /// ```
-    pub fn load_from_string(data: &str) -> Result<Self, RaceError> {
-        let races: Vec<RaceDefinition> = ron::from_str(data)
-            .map_err(|e| RaceError::ParseError(format!("RON parse error: {}", e)))?;
-
-        let mut db = Self::new();
-        for race_def in races {
-            if db.races.contains_key(&race_def.id) {
-                return Err(RaceError::DuplicateId(race_def.id.clone()));
-            }
-            db.races.insert(race_def.id.clone(), race_def);
-        }
-
-        db.validate()?;
-        Ok(db)
     }
 
     /// Gets a race definition by ID

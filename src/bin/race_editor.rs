@@ -28,35 +28,17 @@
 //! - Input validation
 //! - Pretty-printed RON output
 
+#[path = "editor_common.rs"]
+mod editor_common;
+use editor_common::{
+    filter_valid_proficiencies, filter_valid_tags, truncate, STANDARD_ITEM_TAGS,
+    STANDARD_PROFICIENCY_IDS,
+};
+
 use antares::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
-
-/// Standard proficiency IDs recognized by the system
-const STANDARD_PROFICIENCY_IDS: &[&str] = &[
-    "simple_weapon",
-    "martial_melee",
-    "martial_ranged",
-    "blunt_weapon",
-    "unarmed",
-    "light_armor",
-    "medium_armor",
-    "heavy_armor",
-    "shield",
-    "arcane_item",
-    "divine_item",
-];
-
-/// Standard item tags used for race restrictions
-const STANDARD_ITEM_TAGS: &[&str] = &[
-    "large_weapon",
-    "two_handed",
-    "heavy_armor",
-    "elven_crafted",
-    "dwarven_crafted",
-    "requires_strength",
-];
 
 /// Main application state
 struct RaceEditor {
@@ -766,37 +748,9 @@ impl RaceEditor {
 }
 
 // ===== Helper Functions =====
-
-/// Truncates a string to a maximum length
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
-}
-
-// NOTE: `parse_multistring_input` is a test-only helper and has been moved into the
-// `#[cfg(test)] mod tests` module to avoid dead-code warnings in non-test builds.
-// The real implementation is now defined inside the test module below.
-
-/// Filters proficiencies to include only standard ones
-fn filter_valid_proficiencies(candidates: &[String]) -> Vec<String> {
-    candidates
-        .iter()
-        .filter(|p| STANDARD_PROFICIENCY_IDS.contains(&p.as_str()))
-        .cloned()
-        .collect()
-}
-
-/// Filters tags to include only standard item tags
-fn filter_valid_tags(candidates: &[String]) -> Vec<String> {
-    candidates
-        .iter()
-        .filter(|t| STANDARD_ITEM_TAGS.contains(&t.as_str()))
-        .cloned()
-        .collect()
-}
+// `truncate`, `filter_valid_proficiencies`, `filter_valid_tags`,
+// `STANDARD_PROFICIENCY_IDS`, and `STANDARD_ITEM_TAGS` are imported
+// from `editor_common`.
 
 // ===== Main Entry Point =====
 

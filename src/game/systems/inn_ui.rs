@@ -14,7 +14,7 @@ use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-/// Inn mouse/keyboard parity audit (Phase 5)
+/// Inn mouse/keyboard parity audit
 ///
 /// Current mouse parity status against `inn_input_system`:
 /// - Select party member: mouse card click emits `SelectPartyMember` and
@@ -32,7 +32,7 @@ use bevy_egui::{egui, EguiContexts};
 ///
 /// Conclusion:
 /// Mouse and keyboard selection state are already synchronized through
-/// `inn_selection_system`, so the Phase 5 work here is to preserve that parity
+/// `inn_selection_system`, so the work here is to preserve that parity
 /// explicitly and lock it in with regression tests.
 pub struct InnUiPlugin;
 
@@ -119,10 +119,274 @@ pub struct InnNavigationState {
     pub focus_on_exit: bool,
 }
 
+// ===== Private UI helpers (extracted from `inn_ui_system`) ====================
+
+/// Action produced by interacting with a party-member card in the inn UI.
+enum InnPartyCardAction {
+    /// Toggle selection of this party member.
+    Select(usize),
+    /// Deselect (clicked an already-selected card).
+    Deselect,
+    /// Dismiss this party member to the inn.
+    Dismiss(usize),
+}
+
+/// Action produced by interacting with a roster-member card in the inn UI.
+enum InnRosterCardAction {
+    /// Select this roster member.
+    Select(usize),
+    /// Deselect (clicked an already-selected card).
+    Deselect,
+    /// Recruit this roster member into the party.
+    Recruit(usize),
+    /// Swap a party member with this roster member.
+    Swap {
+        /// Party index of the member being swapped out.
+        party_index: usize,
+        /// Roster index of the member being swapped in.
+        roster_index: usize,
+    },
+}
+
+/// Renders a single filled party-member card (or an empty slot placeholder).
+///
+/// Returns `Some(InnPartyCardAction)` when the user clicks a button/card,
+/// or `None` if no interaction occurred this frame.
+fn render_party_member_card(
+    ui: &mut egui::Ui,
+    party_idx: usize,
+    member: &crate::domain::character::Character,
+    is_mouse_selected: bool,
+    is_keyboard_focused: bool,
+) -> Option<InnPartyCardAction> {
+    let mut action = None;
+    let is_active = is_mouse_selected || is_keyboard_focused;
+
+    let mut frame = egui::Frame::group(ui.style()).multiply_with_opacity(0.7);
+    if is_active {
+        frame = frame.fill(egui::Color32::from_rgba_premultiplied(80, 80, 0, 100));
+        frame = frame.stroke(egui::Stroke::new(2.0, egui::Color32::YELLOW));
+    } else {
+        frame = frame.fill(egui::Color32::from_gray(30));
+    }
+
+    let size = egui::vec2(110.0, 160.0);
+    let response = ui.add(egui::Button::new("").frame(false).min_size(size));
+
+    if response.clicked() {
+        if is_mouse_selected {
+            action = Some(InnPartyCardAction::Deselect);
+        } else {
+            action = Some(InnPartyCardAction::Select(party_idx));
+        }
+    }
+
+    let rect = response.rect;
+    let painter = ui.painter();
+
+    painter.rect_filled(rect, 4.0, frame.fill);
+    painter.rect_stroke(rect, 4.0, frame.stroke, egui::StrokeKind::Inside);
+
+    if response.hovered() && !is_active {
+        painter.rect_stroke(
+            rect,
+            4.0,
+            egui::Stroke::new(1.0, egui::Color32::LIGHT_GRAY),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    ui.new_child(egui::UiBuilder::new().max_rect(rect))
+        .scope(|ui| {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.add_space(8.0);
+                ui.vertical(|ui| {
+                    let name_text = if is_keyboard_focused {
+                        egui::RichText::new(&member.name)
+                            .strong()
+                            .color(egui::Color32::from_rgb(150, 220, 120))
+                    } else if is_mouse_selected {
+                        egui::RichText::new(&member.name)
+                            .strong()
+                            .color(egui::Color32::YELLOW)
+                    } else {
+                        egui::RichText::new(&member.name).strong()
+                    };
+
+                    ui.label(name_text);
+                    ui.label(format!("Lvl {}", member.level));
+                    ui.label(format!("HP: {}/{}", member.hp.current, member.hp.base));
+                    ui.label(format!("SP: {}/{}", member.sp.current, member.sp.base));
+                    ui.label(&member.class_id);
+                    ui.label(&member.race_id);
+
+                    ui.add_space(5.0);
+
+                    if ui.button("Dismiss").clicked() {
+                        action = Some(InnPartyCardAction::Dismiss(party_idx));
+                    }
+                });
+            });
+        });
+
+    action
+}
+
+/// Renders a single roster-member card in the inn UI.
+///
+/// Returns `Some(InnRosterCardAction)` when the user clicks a button/card,
+/// or `None` if no interaction occurred this frame.
+fn render_roster_member_card(
+    ui: &mut egui::Ui,
+    roster_idx: usize,
+    character: &crate::domain::character::Character,
+    is_mouse_selected: bool,
+    is_keyboard_focused: bool,
+    party_full: bool,
+    swap_party_index: Option<usize>,
+) -> Option<InnRosterCardAction> {
+    let mut action = None;
+    let is_active = is_mouse_selected || is_keyboard_focused;
+
+    let mut frame = egui::Frame::group(ui.style()).multiply_with_opacity(0.7);
+    if is_active {
+        frame = frame.fill(egui::Color32::from_rgba_premultiplied(80, 80, 0, 100));
+        frame = frame.stroke(egui::Stroke::new(2.0, egui::Color32::YELLOW));
+    } else {
+        frame = frame.fill(egui::Color32::from_gray(30));
+    }
+
+    let size = egui::vec2(130.0, 180.0);
+    let response = ui.add(egui::Button::new("").frame(false).min_size(size));
+
+    if response.clicked() {
+        if is_mouse_selected {
+            action = Some(InnRosterCardAction::Deselect);
+        } else {
+            action = Some(InnRosterCardAction::Select(roster_idx));
+        }
+    }
+
+    let rect = response.rect;
+    let painter = ui.painter();
+    painter.rect_filled(rect, 4.0, frame.fill);
+    painter.rect_stroke(rect, 4.0, frame.stroke, egui::StrokeKind::Inside);
+
+    if response.hovered() && !is_active {
+        painter.rect_stroke(
+            rect,
+            4.0,
+            egui::Stroke::new(1.0, egui::Color32::LIGHT_GRAY),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    ui.new_child(egui::UiBuilder::new().max_rect(rect))
+        .scope(|ui| {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.add_space(8.0);
+                ui.vertical(|ui| {
+                    let name_text = if is_keyboard_focused {
+                        egui::RichText::new(&character.name)
+                            .strong()
+                            .color(egui::Color32::from_rgb(150, 220, 120))
+                    } else if is_mouse_selected {
+                        egui::RichText::new(&character.name)
+                            .strong()
+                            .color(egui::Color32::YELLOW)
+                    } else {
+                        egui::RichText::new(&character.name).strong()
+                    };
+
+                    ui.label(name_text);
+                    ui.label(&character.race_id);
+                    ui.label(&character.class_id);
+                    ui.label(format!("Lvl {}", character.level));
+                    ui.label(format!(
+                        "HP: {}/{}",
+                        character.hp.current, character.hp.base
+                    ));
+
+                    ui.add_space(5.0);
+
+                    if ui
+                        .add_enabled(!party_full, egui::Button::new("Recruit"))
+                        .clicked()
+                    {
+                        action = Some(InnRosterCardAction::Recruit(roster_idx));
+                    }
+
+                    if party_full {
+                        ui.label(egui::RichText::new("Party full").small().weak());
+                    }
+
+                    if let Some(party_idx) = swap_party_index {
+                        if ui.button("Swap").clicked() {
+                            action = Some(InnRosterCardAction::Swap {
+                                party_index: party_idx,
+                                roster_index: roster_idx,
+                            });
+                        }
+                    }
+                });
+            });
+        });
+
+    action
+}
+
+/// Renders the instruction lines at the bottom of the inn UI.
+fn render_inn_instructions(ui: &mut egui::Ui) {
+    ui.add_space(10.0);
+    ui.label(egui::RichText::new("Instructions:").weak());
+    ui.label(
+        egui::RichText::new("• Click Dismiss to send party member to this inn")
+            .weak()
+            .small(),
+    );
+    ui.label(
+        egui::RichText::new("• Click Recruit to add character to party (if room)")
+            .weak()
+            .small(),
+    );
+    ui.label(
+        egui::RichText::new("• Select party member, then click Swap on inn character to exchange")
+            .weak()
+            .small(),
+    );
+    ui.label(
+        egui::RichText::new("• Press ESC or click Exit Inn to return to exploration")
+            .weak()
+            .small()
+            .color(egui::Color32::from_rgb(144, 238, 144)),
+    );
+    ui.label(
+        egui::RichText::new(
+            "• Keyboard: TAB to switch focus, Arrow Keys to navigate, Enter/Space to select",
+        )
+        .weak()
+        .small()
+        .color(egui::Color32::LIGHT_BLUE),
+    );
+    ui.label(
+        egui::RichText::new("• Keyboard: D to dismiss, R to recruit, S to swap")
+            .weak()
+            .small()
+            .color(egui::Color32::LIGHT_BLUE),
+    );
+    ui.label(
+        egui::RichText::new("• Mouse: Click to select, use buttons to perform actions")
+            .weak()
+            .small()
+            .color(egui::Color32::LIGHT_YELLOW),
+    );
+}
+
 // ===== UI System =====
 
 /// Renders the inn management UI when in InnManagement mode
-#[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 fn inn_ui_system(
     mut contexts: EguiContexts,
@@ -163,103 +427,36 @@ fn inn_ui_system(
         ui.horizontal_wrapped(|ui| {
             let party_count = global_state.0.party.members.len();
 
-            // Display party members
             for party_idx in 0..6 {
                 ui.push_id(format!("party_card_{}", party_idx), |ui| {
                     if party_idx < party_count {
                         let member = &global_state.0.party.members[party_idx];
-
                         let is_mouse_selected = selected_party == Some(party_idx);
                         let is_keyboard_focused = nav_state.focus_on_party
                             && nav_state.selected_party_index == Some(party_idx);
-                        let is_active = is_mouse_selected || is_keyboard_focused;
-                        let mut frame = egui::Frame::group(ui.style()).multiply_with_opacity(0.7);
-                        if is_active {
-                            frame =
-                                frame.fill(egui::Color32::from_rgba_premultiplied(80, 80, 0, 100));
-                            frame = frame.stroke(egui::Stroke::new(2.0, egui::Color32::YELLOW));
-                        } else {
-                            frame = frame.fill(egui::Color32::from_gray(30));
-                        }
 
-                        // Allocate the area and handle interaction using an invisible button pattern
-                        let size = egui::vec2(110.0, 160.0);
-                        let response = ui.add(egui::Button::new("").frame(false).min_size(size));
-
-                        if response.clicked() {
-                            // Toggle selection via event
-                            if is_mouse_selected {
+                        let card_action = render_party_member_card(
+                            ui,
+                            party_idx,
+                            member,
+                            is_mouse_selected,
+                            is_keyboard_focused,
+                        );
+                        match card_action {
+                            Some(InnPartyCardAction::Select(idx)) => {
+                                select_party_events.write(SelectPartyMember { party_index: idx });
+                            }
+                            Some(InnPartyCardAction::Deselect) => {
                                 select_party_events.write(SelectPartyMember {
                                     party_index: usize::MAX,
                                 });
-                            } else {
-                                select_party_events.write(SelectPartyMember {
-                                    party_index: party_idx,
-                                });
                             }
+                            Some(InnPartyCardAction::Dismiss(idx)) => {
+                                dismiss_events.write(InnDismissCharacter { party_index: idx });
+                            }
+                            None => {}
                         }
-
-                        let rect = response.rect;
-                        let painter = ui.painter();
-
-                        // Draw background/frame
-                        painter.rect_filled(rect, 4.0, frame.fill);
-                        painter.rect_stroke(rect, 4.0, frame.stroke, egui::StrokeKind::Inside);
-
-                        if response.hovered() && !is_active {
-                            painter.rect_stroke(
-                                rect,
-                                4.0,
-                                egui::Stroke::new(1.0, egui::Color32::LIGHT_GRAY),
-                                egui::StrokeKind::Inside,
-                            );
-                        }
-
-                        // Draw content inside a child UI at the rect
-                        ui.new_child(egui::UiBuilder::new().max_rect(rect))
-                            .scope(|ui| {
-                                ui.add_space(8.0); // Padding
-                                ui.horizontal(|ui| {
-                                    ui.add_space(8.0);
-                                    ui.vertical(|ui| {
-                                        let name_text = if is_keyboard_focused {
-                                            egui::RichText::new(&member.name)
-                                                .strong()
-                                                .color(egui::Color32::from_rgb(150, 220, 120))
-                                        } else if is_mouse_selected {
-                                            egui::RichText::new(&member.name)
-                                                .strong()
-                                                .color(egui::Color32::YELLOW)
-                                        } else {
-                                            egui::RichText::new(&member.name).strong()
-                                        };
-
-                                        ui.label(name_text);
-                                        ui.label(format!("Lvl {}", member.level));
-                                        ui.label(format!(
-                                            "HP: {}/{}",
-                                            member.hp.current, member.hp.base
-                                        ));
-                                        ui.label(format!(
-                                            "SP: {}/{}",
-                                            member.sp.current, member.sp.base
-                                        ));
-                                        ui.label(&member.class_id);
-                                        ui.label(&member.race_id);
-
-                                        ui.add_space(5.0);
-
-                                        // Dismiss button
-                                        if ui.button("Dismiss").clicked() {
-                                            dismiss_events.write(InnDismissCharacter {
-                                                party_index: party_idx,
-                                            });
-                                        }
-                                    });
-                                });
-                            });
                     } else {
-                        // Empty slot
                         egui::Frame::group(ui.style())
                             .fill(egui::Color32::from_gray(20))
                             .show(ui, |ui| {
@@ -303,111 +500,49 @@ fn inn_ui_system(
         if inn_characters.is_empty() {
             ui.label(egui::RichText::new("No characters available at this inn").italics());
         } else {
+            let party_full = global_state.0.party.members.len() >= PARTY_MAX_SIZE;
+            let swap_party_index = selected_party.or(nav_state.selected_party_index);
+
             ui.horizontal_wrapped(|ui| {
                 for (roster_idx, character) in inn_characters {
                     ui.push_id(format!("roster_card_{}", roster_idx), |ui| {
                         let is_mouse_selected = selected_roster == Some(roster_idx);
                         let is_keyboard_focused = !nav_state.focus_on_party
                             && nav_state.selected_roster_index == Some(roster_idx);
-                        let is_active = is_mouse_selected || is_keyboard_focused;
 
-                        let mut frame = egui::Frame::group(ui.style()).multiply_with_opacity(0.7);
-                        if is_active {
-                            frame =
-                                frame.fill(egui::Color32::from_rgba_premultiplied(80, 80, 0, 100));
-                            frame = frame.stroke(egui::Stroke::new(2.0, egui::Color32::YELLOW));
-                        } else {
-                            frame = frame.fill(egui::Color32::from_gray(30));
-                        }
-
-                        let size = egui::vec2(130.0, 180.0);
-                        let response = ui.add(egui::Button::new("").frame(false).min_size(size));
-
-                        if response.clicked() {
-                            if is_mouse_selected {
+                        let card_action = render_roster_member_card(
+                            ui,
+                            roster_idx,
+                            character,
+                            is_mouse_selected,
+                            is_keyboard_focused,
+                            party_full,
+                            swap_party_index,
+                        );
+                        match card_action {
+                            Some(InnRosterCardAction::Select(idx)) => {
+                                select_roster_events
+                                    .write(SelectRosterMember { roster_index: idx });
+                            }
+                            Some(InnRosterCardAction::Deselect) => {
                                 select_roster_events.write(SelectRosterMember {
                                     roster_index: usize::MAX,
                                 });
-                            } else {
-                                select_roster_events.write(SelectRosterMember {
-                                    roster_index: roster_idx,
+                            }
+                            Some(InnRosterCardAction::Recruit(idx)) => {
+                                recruit_events.write(InnRecruitCharacter { roster_index: idx });
+                            }
+                            Some(InnRosterCardAction::Swap {
+                                party_index,
+                                roster_index,
+                            }) => {
+                                swap_events.write(InnSwapCharacters {
+                                    party_index,
+                                    roster_index,
                                 });
                             }
+                            None => {}
                         }
-
-                        let rect = response.rect;
-                        let painter = ui.painter();
-                        painter.rect_filled(rect, 4.0, frame.fill);
-                        painter.rect_stroke(rect, 4.0, frame.stroke, egui::StrokeKind::Inside);
-
-                        if response.hovered() && !is_active {
-                            painter.rect_stroke(
-                                rect,
-                                4.0,
-                                egui::Stroke::new(1.0, egui::Color32::LIGHT_GRAY),
-                                egui::StrokeKind::Inside,
-                            );
-                        }
-
-                        ui.new_child(egui::UiBuilder::new().max_rect(rect))
-                            .scope(|ui| {
-                                ui.add_space(8.0);
-                                ui.horizontal(|ui| {
-                                    ui.add_space(8.0);
-                                    ui.vertical(|ui| {
-                                        let name_text = if is_keyboard_focused {
-                                            egui::RichText::new(&character.name)
-                                                .strong()
-                                                .color(egui::Color32::from_rgb(150, 220, 120))
-                                        } else if is_mouse_selected {
-                                            egui::RichText::new(&character.name)
-                                                .strong()
-                                                .color(egui::Color32::YELLOW)
-                                        } else {
-                                            egui::RichText::new(&character.name).strong()
-                                        };
-
-                                        ui.label(name_text);
-                                        ui.label(&character.race_id);
-                                        ui.label(&character.class_id);
-                                        ui.label(format!("Lvl {}", character.level));
-                                        ui.label(format!(
-                                            "HP: {}/{}",
-                                            character.hp.current, character.hp.base
-                                        ));
-
-                                        ui.add_space(5.0);
-
-                                        let party_full =
-                                            global_state.0.party.members.len() >= PARTY_MAX_SIZE;
-                                        if ui
-                                            .add_enabled(!party_full, egui::Button::new("Recruit"))
-                                            .clicked()
-                                        {
-                                            recruit_events.write(InnRecruitCharacter {
-                                                roster_index: roster_idx,
-                                            });
-                                        }
-
-                                        if party_full {
-                                            ui.label(
-                                                egui::RichText::new("Party full").small().weak(),
-                                            );
-                                        }
-
-                                        if let Some(party_idx) =
-                                            selected_party.or(nav_state.selected_party_index)
-                                        {
-                                            if ui.button("Swap").clicked() {
-                                                swap_events.write(InnSwapCharacters {
-                                                    party_index: party_idx,
-                                                    roster_index: roster_idx,
-                                                });
-                                            }
-                                        }
-                                    });
-                                });
-                            });
                     });
                 }
             });
@@ -445,52 +580,7 @@ fn inn_ui_system(
             );
         });
 
-        // Instructions
-        ui.add_space(10.0);
-        ui.label(egui::RichText::new("Instructions:").weak());
-        ui.label(
-            egui::RichText::new("• Click Dismiss to send party member to this inn")
-                .weak()
-                .small(),
-        );
-        ui.label(
-            egui::RichText::new("• Click Recruit to add character to party (if room)")
-                .weak()
-                .small(),
-        );
-        ui.label(
-            egui::RichText::new(
-                "• Select party member, then click Swap on inn character to exchange",
-            )
-            .weak()
-            .small(),
-        );
-        ui.label(
-            egui::RichText::new("• Press ESC or click Exit Inn to return to exploration")
-                .weak()
-                .small()
-                .color(egui::Color32::from_rgb(144, 238, 144)),
-        );
-        ui.label(
-            egui::RichText::new(
-                "• Keyboard: TAB to switch focus, Arrow Keys to navigate, Enter/Space to select",
-            )
-            .weak()
-            .small()
-            .color(egui::Color32::LIGHT_BLUE),
-        );
-        ui.label(
-            egui::RichText::new("• Keyboard: D to dismiss, R to recruit, S to swap")
-                .weak()
-                .small()
-                .color(egui::Color32::LIGHT_BLUE),
-        );
-        ui.label(
-            egui::RichText::new("• Mouse: Click to select, use buttons to perform actions")
-                .weak()
-                .small()
-                .color(egui::Color32::LIGHT_YELLOW),
-        );
+        render_inn_instructions(ui);
     });
 }
 

@@ -96,7 +96,6 @@ fn create_test_weapon() -> Item {
         }),
         base_cost: 150,
         sell_cost: 75,
-        #[allow(deprecated)]
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -122,7 +121,6 @@ fn create_test_armor() -> Item {
         }),
         base_cost: 500,
         sell_cost: 250,
-        #[allow(deprecated)]
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -147,7 +145,6 @@ fn create_test_accessory() -> Item {
         }),
         base_cost: 1000,
         sell_cost: 500,
-        #[allow(deprecated)]
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -173,7 +170,6 @@ fn create_test_consumable() -> Item {
         }),
         base_cost: 50,
         sell_cost: 25,
-        #[allow(deprecated)]
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -198,7 +194,6 @@ fn create_test_ammo() -> Item {
         }),
         base_cost: 10,
         sell_cost: 5,
-        #[allow(deprecated)]
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -223,7 +218,6 @@ fn create_test_quest_item() -> Item {
         }),
         base_cost: 0,
         sell_cost: 0,
-        #[allow(deprecated)]
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -584,7 +578,6 @@ fn test_item_all_classifications_preserved() {
             }),
             base_cost: 100,
             sell_cost: 50,
-            #[allow(deprecated)]
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,

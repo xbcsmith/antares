@@ -1,7 +1,7 @@
 // classes.ron - Character class definitions for Antares RPG
 //
 // This file contains all character class definitions in RON (Rusty Object Notation) format.
-// See docs/explanation/sdk_implementation_plan.md Phase 1 for specifications.
+// See docs/explanation/sdk_implementation_plan.md for specifications.
 //
 // HP Dice:
 //   - Knight:   1d10 (highest HP)

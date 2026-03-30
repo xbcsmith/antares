@@ -256,7 +256,10 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                         let dmg = (base + bonus).max(0) as u16;
 
                         // Apply damage to the monster
-                        let _ = mon.take_damage(dmg);
+                        let died = mon.take_damage(dmg);
+                        if died {
+                            tracing::debug!("Monster at index {} slain by spell", idx);
+                        }
 
                         // We already have the target index (idx) for single-target spells
                         affected.push(idx);
@@ -264,7 +267,14 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
 
                         // Apply conditions (best-effort)
                         for def in &cond_defs {
-                            let _ = apply_condition_to_monster_by_id(mon, &def.id, content);
+                            if let Err(e) = apply_condition_to_monster_by_id(mon, &def.id, content)
+                            {
+                                tracing::warn!(
+                                    "Failed to apply condition '{}' to monster: {}",
+                                    def.id,
+                                    e
+                                );
+                            }
                         }
                     }
                     _ => return Err(SpellCastError::InvalidTarget),
@@ -280,12 +290,23 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                         let bonus = (caster_intellect as i32 - 10) / 2;
                         let dmg = (base + bonus).max(0) as u16;
 
-                        let _ = mon.take_damage(dmg);
+                        let died = mon.take_damage(dmg);
+                        if died {
+                            tracing::debug!("Monster at index {} slain by spell", i);
+                        }
                         affected.push(i);
                         total_damage += dmg as i32;
 
                         for cond in &spell.applied_conditions {
-                            let _ = apply_condition_to_monster_by_id(mon.as_mut(), cond, content);
+                            if let Err(e) =
+                                apply_condition_to_monster_by_id(mon.as_mut(), cond, content)
+                            {
+                                tracing::warn!(
+                                    "Failed to apply condition '{}' to monster: {}",
+                                    cond,
+                                    e
+                                );
+                            }
                         }
                     }
                 }
@@ -310,8 +331,15 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                             total_damage += dmg;
 
                             for cond in &spell.applied_conditions {
-                                let _ =
-                                    apply_condition_to_character_by_id(pc.as_mut(), cond, content);
+                                if let Err(e) =
+                                    apply_condition_to_character_by_id(pc.as_mut(), cond, content)
+                                {
+                                    tracing::warn!(
+                                        "Failed to apply condition '{}' to character: {}",
+                                        cond,
+                                        e
+                                    );
+                                }
                             }
                         }
                         _ => return Err(SpellCastError::InvalidTarget),
@@ -333,7 +361,15 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                         total_damage += dmg;
 
                         for cond in &spell.applied_conditions {
-                            let _ = apply_condition_to_character_by_id(pc.as_mut(), cond, content);
+                            if let Err(e) =
+                                apply_condition_to_character_by_id(pc.as_mut(), cond, content)
+                            {
+                                tracing::warn!(
+                                    "Failed to apply condition '{}' to character: {}",
+                                    cond,
+                                    e
+                                );
+                            }
                         }
                     }
                 }
@@ -357,7 +393,15 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                     total_damage += dmg;
 
                     for cond in &spell.applied_conditions {
-                        let _ = apply_condition_to_character_by_id(pc.as_mut(), cond, content);
+                        if let Err(e) =
+                            apply_condition_to_character_by_id(pc.as_mut(), cond, content)
+                        {
+                            tracing::warn!(
+                                "Failed to apply condition '{}' to character: {}",
+                                cond,
+                                e
+                            );
+                        }
                     }
                 } else {
                     return Err(SpellCastError::InvalidTarget);

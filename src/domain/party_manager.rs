@@ -432,24 +432,14 @@ impl PartyManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Alignment, Sex};
-
-    fn create_test_character(name: &str, race_id: &str, class_id: &str) -> Character {
-        Character::new(
-            name.to_string(),
-            race_id.to_string(),
-            class_id.to_string(),
-            Sex::Male,
-            Alignment::Good,
-        )
-    }
+    use crate::test_helpers::factories::test_character_with_race_class;
 
     #[test]
     fn test_recruit_to_party_success() {
         let mut party = Party::new();
         let mut roster = Roster::new();
 
-        let char1 = create_test_character("Warrior", "human", "knight");
+        let char1 = test_character_with_race_class("Warrior", "human", "knight");
         roster
             .add_character(
                 char1,
@@ -471,7 +461,8 @@ mod tests {
 
         // Fill party to max
         for i in 0..Party::MAX_MEMBERS {
-            let character = create_test_character(&format!("Char{}", i), "human", "knight");
+            let character =
+                test_character_with_race_class(&format!("Char{}", i), "human", "knight");
             roster
                 .add_character(
                     character.clone(),
@@ -482,7 +473,7 @@ mod tests {
         }
 
         // Add one more to roster
-        let extra_char = create_test_character("Extra", "human", "knight");
+        let extra_char = test_character_with_race_class("Extra", "human", "knight");
         roster
             .add_character(
                 extra_char,
@@ -500,7 +491,7 @@ mod tests {
         let mut party = Party::new();
         let mut roster = Roster::new();
 
-        let char1 = create_test_character("Warrior", "human", "knight");
+        let char1 = test_character_with_race_class("Warrior", "human", "knight");
         roster
             .add_character(
                 char1,
@@ -534,8 +525,8 @@ mod tests {
         let mut roster = Roster::new();
 
         // Add two characters
-        let char1 = create_test_character("Warrior", "human", "knight");
-        let char2 = create_test_character("Mage", "elf", "mage");
+        let char1 = test_character_with_race_class("Warrior", "human", "knight");
+        let char2 = test_character_with_race_class("Mage", "elf", "mage");
         roster
             .add_character(
                 char1,
@@ -575,7 +566,7 @@ mod tests {
         let mut party = Party::new();
         let mut roster = Roster::new();
 
-        let char1 = create_test_character("Warrior", "human", "knight");
+        let char1 = test_character_with_race_class("Warrior", "human", "knight");
         roster
             .add_character(
                 char1,
@@ -600,14 +591,14 @@ mod tests {
         let mut party = Party::new();
         let mut roster = Roster::new();
 
-        let char1 = create_test_character("Warrior", "human", "knight");
+        let char1 = test_character_with_race_class("Warrior", "human", "knight");
         roster
             .add_character(
                 char1,
                 CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
             )
             .unwrap();
-        let char2 = create_test_character("Mage", "gnome", "sorcerer");
+        let char2 = test_character_with_race_class("Mage", "gnome", "sorcerer");
         roster
             .add_character(
                 char2,
@@ -637,8 +628,8 @@ mod tests {
         let mut roster = Roster::new();
 
         // Add characters
-        let char1 = create_test_character("Warrior", "human", "knight");
-        let char2 = create_test_character("Mage", "elf", "mage");
+        let char1 = test_character_with_race_class("Warrior", "human", "knight");
+        let char2 = test_character_with_race_class("Mage", "elf", "mage");
         roster
             .add_character(
                 char1,
@@ -675,8 +666,8 @@ mod tests {
         let mut party = Party::new();
         let mut roster = Roster::new();
 
-        let char1 = create_test_character("Warrior", "human", "knight");
-        let char2 = create_test_character("Mage", "elf", "mage");
+        let char1 = test_character_with_race_class("Warrior", "human", "knight");
+        let char2 = test_character_with_race_class("Mage", "elf", "mage");
         roster
             .add_character(
                 char1,
@@ -705,7 +696,7 @@ mod tests {
         let mut party = Party::new();
         let mut roster = Roster::new();
 
-        let char1 = create_test_character("Warrior", "human", "knight");
+        let char1 = test_character_with_race_class("Warrior", "human", "knight");
         roster
             .add_character(
                 char1,
@@ -728,8 +719,8 @@ mod tests {
         let mut party = Party::new();
         let mut roster = Roster::new();
 
-        let char1 = create_test_character("Warrior", "human", "knight");
-        let char2 = create_test_character("Mage", "elf", "mage");
+        let char1 = test_character_with_race_class("Warrior", "human", "knight");
+        let char2 = test_character_with_race_class("Mage", "elf", "mage");
         roster
             .add_character(
                 char1,
@@ -758,7 +749,8 @@ mod tests {
 
         // Add multiple characters
         for i in 0..4 {
-            let character = create_test_character(&format!("Char{}", i), "human", "knight");
+            let character =
+                test_character_with_race_class(&format!("Char{}", i), "human", "knight");
             roster
                 .add_character(
                     character.clone(),
@@ -798,7 +790,7 @@ mod tests {
         let party = Party::new();
         let mut roster = Roster::new();
 
-        let char1 = create_test_character("Warrior", "human", "knight");
+        let char1 = test_character_with_race_class("Warrior", "human", "knight");
         roster
             .add_character(
                 char1,
@@ -825,7 +817,8 @@ mod tests {
 
         // Fill party
         for i in 0..Party::MAX_MEMBERS {
-            let character = create_test_character(&format!("Char{}", i), "human", "knight");
+            let character =
+                test_character_with_race_class(&format!("Char{}", i), "human", "knight");
             roster
                 .add_character(
                     character.clone(),
@@ -836,7 +829,7 @@ mod tests {
         }
 
         // Add one more to roster
-        let extra = create_test_character("Extra", "human", "knight");
+        let extra = test_character_with_race_class("Extra", "human", "knight");
         roster
             .add_character(
                 extra,
@@ -854,7 +847,7 @@ mod tests {
         let mut party = Party::new();
         let mut roster = Roster::new();
 
-        let char1 = create_test_character("NPC", "human", "knight");
+        let char1 = test_character_with_race_class("NPC", "human", "knight");
         roster
             .add_character(
                 char1,
@@ -874,7 +867,7 @@ mod tests {
         let mut roster = Roster::new();
 
         // Party member at inn 1
-        let char1 = create_test_character("Warrior", "human", "knight");
+        let char1 = test_character_with_race_class("Warrior", "human", "knight");
         roster
             .add_character(
                 char1,
@@ -883,7 +876,7 @@ mod tests {
             .unwrap();
 
         // NPC on map 5
-        let char2 = create_test_character("NPC", "elf", "mage");
+        let char2 = test_character_with_race_class("NPC", "elf", "mage");
         roster
             .add_character(char2, CharacterLocation::OnMap(5))
             .unwrap();

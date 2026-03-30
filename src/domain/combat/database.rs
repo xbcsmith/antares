@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Monster database - Loading and managing monster definitions from RON files
@@ -13,10 +13,11 @@
 use crate::domain::character::Stats;
 use crate::domain::combat::monster::{LootTable, Monster, MonsterResistances};
 use crate::domain::combat::types::Attack;
+
 use crate::domain::types::{CreatureId, MonsterId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+
 use thiserror::Error;
 
 // ===== Error Types =====
@@ -217,11 +218,23 @@ impl MonsterDefinition {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MonsterDatabase {
     /// All monsters indexed by ID
     monsters: HashMap<MonsterId, MonsterDefinition>,
 }
+
+crate::impl_ron_database!(
+    MonsterDatabase,
+    entity: MonsterDefinition,
+    key: MonsterId,
+    error: MonsterDatabaseError,
+    field: monsters,
+    id_of: |m: &MonsterDefinition| m.id,
+    dup_err: MonsterDatabaseError::DuplicateId,
+    read_err: MonsterDatabaseError::ReadError,
+    parse_err: MonsterDatabaseError::ParseError,
+);
 
 impl MonsterDatabase {
     /// Create an empty monster database
@@ -238,66 +251,6 @@ impl MonsterDatabase {
         Self {
             monsters: HashMap::new(),
         }
-    }
-
-    /// Load monster database from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing monster definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(MonsterDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `MonsterDatabaseError::ReadError` if file cannot be read
-    /// Returns `MonsterDatabaseError::ParseError` if RON parsing fails
-    /// Returns `MonsterDatabaseError::DuplicateId` if duplicate monster IDs found
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::domain::combat::database::MonsterDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = MonsterDatabase::load_from_file("data/monsters.ron")?;
-    /// println!("Loaded {} monsters", db.len());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, MonsterDatabaseError> {
-        let contents = std::fs::read_to_string(path)?;
-        Self::load_from_string(&contents)
-    }
-
-    /// Load monster database from a RON string
-    ///
-    /// # Arguments
-    ///
-    /// * `ron_data` - RON-formatted string containing monster definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(MonsterDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `MonsterDatabaseError::ParseError` if RON parsing fails
-    /// Returns `MonsterDatabaseError::DuplicateId` if duplicate monster IDs found
-    pub fn load_from_string(ron_data: &str) -> Result<Self, MonsterDatabaseError> {
-        let monsters: Vec<MonsterDefinition> = ron::from_str(ron_data)?;
-        let mut db = Self::new();
-
-        for monster in monsters {
-            if db.monsters.contains_key(&monster.id) {
-                return Err(MonsterDatabaseError::DuplicateId(monster.id));
-            }
-            db.monsters.insert(monster.id, monster);
-        }
-
-        Ok(db)
     }
 
     /// Add a monster to the database
@@ -401,12 +354,6 @@ impl MonsterDatabase {
     /// Check if database is empty
     pub fn is_empty(&self) -> bool {
         self.monsters.is_empty()
-    }
-}
-
-impl Default for MonsterDatabase {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -576,7 +523,7 @@ mod tests {
         let db = MonsterDatabase::load_from_file(monsters_path)
             .expect("Failed to load tutorial monsters");
 
-        // Expected monster-to-creature mappings from Phase 2 plan
+        // Expected monster-to-creature mappings
         // Monster IDs match Creature IDs for direct visual mapping
         let expected_mappings = [
             (1, Some(1)),   // Goblin -> Goblin

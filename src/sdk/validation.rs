@@ -9,7 +9,7 @@
 //!
 //! # Architecture Reference
 //!
-//! See `docs/explanation/sdk_implementation_plan.md` Phase 3.3 for specifications.
+//! See `docs/explanation/sdk_implementation_plan.md` for specifications.
 //!
 //! # Examples
 //!
@@ -2220,7 +2220,7 @@ mod tests {
     }
 
     // ========================================================================
-    // Phase 4: Integration Testing - Edge Cases for Innkeeper Validation
+    // Integration Testing - Edge Cases for Innkeeper Validation
     // ========================================================================
 
     #[test]
@@ -2428,7 +2428,7 @@ mod tests {
         ));
     }
 
-    // ===== Phase 4: Merchant Stock and Service Catalog Validation Tests =====
+    // ===== Merchant Stock and Service Catalog Validation Tests =====
 
     #[test]
     fn test_validate_merchant_stock_valid() {
@@ -2668,7 +2668,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 1: Helmet / Boots Slot Integrity Tests =====
+    // ===== Helmet / Boots Slot Integrity Tests =====
 
     #[test]
     fn test_sdk_validation_helmet_in_wrong_slot_fails() {

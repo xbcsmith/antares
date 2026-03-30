@@ -748,16 +748,16 @@ pub struct TextureLoaded;
 /// Placeholder component for future animation support
 ///
 /// This component will eventually track animation state for creatures
-/// with keyframe animations defined. Currently a placeholder for Phase 5.
+/// with keyframe animations defined. Currently a placeholder.
 ///
-/// # Future Fields (Phase 5)
+/// # Future Fields
 ///
 /// * `current_animation` - Name of the currently playing animation
 /// * `animation_time` - Current playback time
 /// * `looping` - Whether animation should loop
 #[derive(Component, Debug, Clone, Default)]
 pub struct CreatureAnimationState {
-    // Placeholder for Phase 5: Animation Keyframes
+    // Placeholder for animation keyframes
     // Will include:
     // - current_animation: String
     // - animation_time: f32

@@ -10,7 +10,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.3 for character and party
 //! specifications, and `docs/explanation/ecs_inventory_view_implementation_plan.md`
-//! Phase 1 for the design rationale behind these types.
+//! for the design rationale behind these types.
 
 use crate::domain::character::PARTY_MAX_SIZE;
 use bevy::prelude::*;
@@ -56,20 +56,11 @@ pub struct CharacterEntity {
 /// let pe = PartyEntities::default();
 /// assert!(pe.entities.iter().all(|e| e.is_none()));
 /// ```
-#[derive(Resource, Debug)]
+#[derive(Resource, Debug, Default)]
 pub struct PartyEntities {
     /// Indexed by party slot.  `entities[i]` is the Bevy entity for party
     /// member `i`, or `None` if the slot is unoccupied.
     pub entities: [Option<Entity>; PARTY_MAX_SIZE],
-}
-
-impl Default for PartyEntities {
-    /// Returns a `PartyEntities` with every slot set to `None`.
-    fn default() -> Self {
-        Self {
-            entities: [None; PARTY_MAX_SIZE],
-        }
-    }
 }
 
 // ============================================================

@@ -191,7 +191,7 @@ impl InteractionType {
 /// assert!(!door.is_locked);
 /// assert!(door.key_item_id.is_none());
 /// ```
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Debug, Default)]
 pub struct DoorState {
     /// Whether the door panel is currently rotated open (90° from base)
     pub is_open: bool,
@@ -234,12 +234,6 @@ impl DoorState {
             key_item_id: None,
             base_rotation_y,
         }
-    }
-}
-
-impl Default for DoorState {
-    fn default() -> Self {
-        Self::new(false, 0.0)
     }
 }
 

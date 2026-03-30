@@ -59,6 +59,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::domain::types::CreatureId;
+use crate::domain::validation::ValidationError;
 use crate::domain::visual::CreatureDefinition;
 
 /// Defines override parameters for creating a creature variation
@@ -256,43 +257,46 @@ impl CreatureVariation {
     /// let variation = CreatureVariation::new(1, "Variant");
     /// assert!(variation.validate(&creature).is_ok());
     /// ```
-    pub fn validate(&self, base: &CreatureDefinition) -> Result<(), String> {
+    pub fn validate(&self, base: &CreatureDefinition) -> Result<(), ValidationError> {
         let mesh_count = base.meshes.len();
 
         // Check color overrides
         for &mesh_index in self.mesh_color_overrides.keys() {
             if mesh_index >= mesh_count {
-                return Err(format!(
+                return Err(ValidationError::OutOfRange(format!(
                     "Color override mesh index {} out of bounds (base has {} meshes)",
                     mesh_index, mesh_count
-                ));
+                )));
             }
         }
 
         // Check scale overrides
         for &mesh_index in self.mesh_scale_overrides.keys() {
             if mesh_index >= mesh_count {
-                return Err(format!(
+                return Err(ValidationError::OutOfRange(format!(
                     "Scale override mesh index {} out of bounds (base has {} meshes)",
                     mesh_index, mesh_count
-                ));
+                )));
             }
         }
 
         // Validate scale override is positive
         if let Some(scale) = self.scale_override {
             if scale <= 0.0 {
-                return Err(format!("Scale override must be positive, got {}", scale));
+                return Err(ValidationError::OutOfRange(format!(
+                    "Scale override must be positive, got {}",
+                    scale
+                )));
             }
         }
 
         // Validate mesh scale overrides are positive
         for (mesh_index, scale) in &self.mesh_scale_overrides {
             if scale[0] <= 0.0 || scale[1] <= 0.0 || scale[2] <= 0.0 {
-                return Err(format!(
+                return Err(ValidationError::OutOfRange(format!(
                     "Mesh {} scale override must have all positive components, got [{}, {}, {}]",
                     mesh_index, scale[0], scale[1], scale[2]
-                ));
+                )));
             }
         }
 
@@ -538,6 +542,7 @@ mod tests {
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
+            .to_string()
             .contains("Color override mesh index 5 out of bounds"));
     }
 
@@ -551,6 +556,7 @@ mod tests {
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
+            .to_string()
             .contains("Scale override mesh index 10 out of bounds"));
     }
 
@@ -564,6 +570,7 @@ mod tests {
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
+            .to_string()
             .contains("Scale override must be positive"));
     }
 
@@ -577,6 +584,7 @@ mod tests {
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
+            .to_string()
             .contains("Scale override must be positive"));
     }
 
@@ -590,6 +598,7 @@ mod tests {
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
+            .to_string()
             .contains("must have all positive components"));
     }
 
@@ -603,6 +612,7 @@ mod tests {
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
+            .to_string()
             .contains("must have all positive components"));
     }
 

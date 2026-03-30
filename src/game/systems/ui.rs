@@ -4,6 +4,7 @@
 use crate::application::GameMode;
 use crate::game::resources::GlobalState;
 use crate::game::systems::hud::{HUD_BOTTOM_GAP, HUD_PANEL_HEIGHT};
+use crate::game::systems::ui_helpers::{text_style, LABEL_FONT_SIZE};
 use crate::sdk::game_config::GameLogConfig;
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
@@ -177,7 +178,7 @@ impl LogEntry {
     /// Compatibility helper that forwards to the underlying entry text.
     ///
     /// This preserves existing tests and transitional code that still treat
-    /// log entries like string values during the Phase 1 migration.
+    /// log entries like string values.
     pub fn contains(&self, pattern: &str) -> bool {
         self.text.contains(pattern)
     }
@@ -376,11 +377,7 @@ fn setup_game_log_panel(
                 .with_children(|header| {
                     header.spawn((
                         Text::new("Game Log"),
-                        TextFont {
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
+                        text_style(LABEL_FONT_SIZE, Color::WHITE),
                     ));
 
                     header

@@ -11,7 +11,7 @@
 //! # Architecture Reference
 //!
 //! See the furniture RON implementation plan in
-//! `docs/explanation/furniture_as_ron_implementation_plan.md` Phase 1.
+//! `docs/explanation/furniture_as_ron_implementation_plan.md` for implementation details.
 //!
 //! # Examples
 //!
@@ -271,6 +271,18 @@ pub struct FurnitureDatabase {
     items: HashMap<FurnitureId, FurnitureDefinition>,
 }
 
+crate::impl_ron_database!(
+    FurnitureDatabase,
+    entity: FurnitureDefinition,
+    key: FurnitureId,
+    error: FurnitureDatabaseError,
+    field: items,
+    id_of: |d: &FurnitureDefinition| d.id,
+    dup_err: FurnitureDatabaseError::DuplicateId,
+    read_err: FurnitureDatabaseError::ReadError,
+    parse_err: FurnitureDatabaseError::ParseError,
+);
+
 /// Database of custom furniture meshes loaded from `furniture_mesh_registry.ron`
 ///
 /// Furniture mesh assets reuse the same underlying [`crate::domain::visual::CreatureDefinition`]
@@ -442,69 +454,6 @@ impl FurnitureDatabase {
         Self {
             items: HashMap::new(),
         }
-    }
-
-    /// Loads a furniture database from a RON file on disk
-    ///
-    /// Expects the file to contain a `Vec<FurnitureDefinition>` in RON format.
-    ///
-    /// # Errors
-    ///
-    /// - [`FurnitureDatabaseError::ReadError`] if the file cannot be read
-    /// - [`FurnitureDatabaseError::ParseError`] if the RON is malformed
-    /// - [`FurnitureDatabaseError::DuplicateId`] if two entries share an ID
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::domain::world::furniture::FurnitureDatabase;
-    ///
-    /// let db = FurnitureDatabase::load_from_file("data/furniture.ron")
-    ///     .expect("Failed to load furniture");
-    /// println!("Loaded {} furniture definitions", db.len());
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, FurnitureDatabaseError> {
-        let contents = std::fs::read_to_string(path)?;
-        Self::load_from_string(&contents)
-    }
-
-    /// Loads a furniture database from a RON-formatted string
-    ///
-    /// Expects a `Vec<FurnitureDefinition>` in RON format.
-    ///
-    /// # Errors
-    ///
-    /// - [`FurnitureDatabaseError::ParseError`] if the RON is malformed
-    /// - [`FurnitureDatabaseError::DuplicateId`] if two entries share an ID
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::world::furniture::FurnitureDatabase;
-    ///
-    /// let ron_data = r#"[
-    ///     (
-    ///         id: 1,
-    ///         name: "Wooden Bench",
-    ///         category: Seating,
-    ///         base_type: Bench,
-    ///         material: Wood,
-    ///         scale: 1.0,
-    ///         description: Some("A simple bench."),
-    ///     ),
-    /// ]"#;
-    ///
-    /// let db = FurnitureDatabase::load_from_string(ron_data).unwrap();
-    /// assert_eq!(db.len(), 1);
-    /// assert!(db.get_by_id(1).is_some());
-    /// ```
-    pub fn load_from_string(ron_data: &str) -> Result<Self, FurnitureDatabaseError> {
-        let definitions: Vec<FurnitureDefinition> = ron::from_str(ron_data)?;
-        let mut db = Self::new();
-        for def in definitions {
-            db.add(def)?;
-        }
-        Ok(db)
     }
 
     /// Adds a definition to the database

@@ -3,9 +3,9 @@
 
 //! Combat systems and support types
 //!
-//! Phase 1: Core Combat Infrastructure
-//! Phase 2: Combat UI System
-//! Phase 3: Visual Combat Feedback and Animation State
+//! Core Combat Infrastructure
+//! Combat UI System
+//! Visual Combat Feedback and Animation State
 //!
 //! This module implements the foundational Bevy plugin and systems needed to
 //! start and synchronize combat state with the global `GameState`, plus the
@@ -37,7 +37,7 @@
 //! # Notes
 //!
 //! This file intentionally keeps systems small and focused. More complex action
-//! handling and AI belong to later phases (Phase 3+).
+//! handling and AI belong to later phases.
 //!
 //! # Examples
 //!
@@ -72,13 +72,14 @@ use crate::game::systems::combat_visual::{
     hide_indicator_during_animation, spawn_turn_indicator, update_turn_indicator,
 };
 use crate::game::systems::map::EncounterVisualMarker;
+use crate::game::systems::ui_helpers::{text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE};
 
 /// Message emitted when combat has started.
 ///
 /// Other systems can listen to this to set up UI or audio.
 /// The `encounter_position` and `encounter_map_id` fields carry the world tile
 /// that triggered the encounter so `handle_combat_started` can store them in
-/// `CombatResource` for later use by `handle_combat_victory` (Phase 4).
+/// `CombatResource` for later use by `handle_combat_victory`.
 #[derive(Message)]
 pub struct CombatStarted {
     /// Tile position of the `MapEvent::Encounter` that started this combat.
@@ -181,7 +182,7 @@ impl Default for CombatTurnStateResource {
     }
 }
 
-// ===== Phase 2: Combat UI Constants =====
+// ===== Combat UI Constants =====
 
 /// Height of the enemy panel (monster cards + HP bars).
 pub const COMBAT_ENEMY_PANEL_HEIGHT: Val = Val::Px(200.0);
@@ -295,7 +296,7 @@ pub const COMBAT_LOG_MONSTER_PALETTE: [Color; 8] = [
     Color::srgb(0.70, 0.95, 0.95),
 ];
 
-// ===== Phase 3: Visual Feedback Color Constants =====
+// ===== Visual Feedback Color Constants =====
 
 /// Colour for damage floating numbers (red)
 pub const FEEDBACK_COLOR_DAMAGE: Color = Color::srgb(1.0, 0.3, 0.3);
@@ -309,7 +310,7 @@ pub const FEEDBACK_COLOR_MISS: Color = Color::srgb(0.8, 0.8, 0.8);
 /// Colour for status/condition floating text (yellow)
 pub const FEEDBACK_COLOR_STATUS: Color = Color::srgb(1.0, 0.8, 0.0);
 
-// ===== Phase 4: Boss HP Bar Constants =====
+// ===== Boss HP Bar Constants =====
 
 /// Width of the boss HP bar (wider and more prominent than standard enemy bars).
 pub const BOSS_HP_BAR_WIDTH: f32 = 400.0;
@@ -441,7 +442,7 @@ impl Default for CombatResource {
     }
 }
 
-// ===== Phase 2: Combat UI Marker Components =====
+// ===== Combat UI Marker Components =====
 
 /// Marker component for enemy card UI elements
 #[derive(Component, Debug, Clone, Copy)]
@@ -490,7 +491,7 @@ pub struct EnemyConditionText {
     pub participant_index: usize,
 }
 
-// ===== Phase 4: Boss HP Bar Components =====
+// ===== Boss HP Bar Components =====
 
 /// Marker component for the Boss HP bar panel root.
 ///
@@ -617,7 +618,7 @@ pub struct FloatingDamage {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct DamageText;
 
-// ===== Phase 3: Combat Feedback Event =====
+// ===== Combat Feedback Event =====
 
 /// The type of visual effect to display for a combat action result.
 ///
@@ -675,7 +676,7 @@ pub struct CombatFeedbackEvent {
     pub effect: CombatFeedbackEffect,
 }
 
-// ===== Phase 3: Monster HP Hover Bar =====
+// ===== Monster HP Hover Bar =====
 
 /// Marker component for in-world (screen-space) monster HP hover bars.
 ///
@@ -842,7 +843,7 @@ pub struct CombatLogColorState {
 }
 
 /// Resource storing persistent combat log lines and typewriter animation state.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct CombatLogState {
     /// Rolling set of lines shown in the combat log bubble.
     pub lines: Vec<CombatLogLine>,
@@ -850,16 +851,6 @@ pub struct CombatLogState {
     pub active_line_visible_chars: usize,
     /// Sub-character accumulator used by the typewriter effect.
     pub reveal_accumulator: f32,
-}
-
-impl Default for CombatLogState {
-    fn default() -> Self {
-        Self {
-            lines: Vec::new(),
-            active_line_visible_chars: 0,
-            reveal_accumulator: 0.0,
-        }
-    }
 }
 
 impl CombatLogState {
@@ -919,7 +910,7 @@ impl Plugin for CombatPlugin {
             .add_message::<FleeAction>()
             .add_message::<CombatVictory>()
             .add_message::<CombatDefeat>()
-            // Phase 3: feedback event bus
+            // Feedback event bus
             .add_message::<CombatFeedbackEvent>()
             .insert_resource(CombatResource::new())
             .insert_resource(CombatTurnStateResource::default())
@@ -954,7 +945,7 @@ impl Plugin for CombatPlugin {
             )
             // Sync back to party when combat ends
             .add_systems(Update, sync_combat_to_party_on_exit)
-            // Phase 3: Player Action Systems
+            // Player Action Systems
             .add_systems(Update, combat_input_system)
             .add_systems(Update, update_action_highlight.after(combat_input_system))
             .add_systems(Update, enter_target_selection)
@@ -971,7 +962,7 @@ impl Plugin for CombatPlugin {
             .add_systems(Update, handle_use_item_action)
             .add_systems(Update, handle_defend_action)
             .add_systems(Update, handle_flee_action)
-            // Phase 3: Spawn anchored feedback numbers after action handlers write the event
+            // Spawn anchored feedback numbers after action handlers write the event
             .add_systems(
                 Update,
                 spawn_combat_feedback
@@ -1014,18 +1005,18 @@ impl Plugin for CombatPlugin {
             )
             .add_systems(Update, reset_combat_log_on_exit)
             .add_systems(Update, reset_combat_log_colors_on_exit)
-            // Phase 3: Monster HP hover bars
+            // Monster HP hover bars
             .add_systems(Update, spawn_monster_hp_hover_bars.after(setup_combat_ui))
             .add_systems(
                 Update,
                 update_monster_hp_hover_bars.after(spawn_monster_hp_hover_bars),
             )
             .add_systems(Update, cleanup_monster_hp_hover_bars)
-            // Phase 5: Combat resolution & rewards
+            // Combat resolution & rewards
             .add_systems(Update, check_combat_resolution)
             .add_systems(Update, handle_combat_victory)
             .add_systems(Update, handle_combat_defeat)
-            // Phase 2: Combat UI systems
+            // Combat UI systems
             // Must run after handle_combat_started so combat_event_type is
             // already set when we decide which buttons to spawn.
             .add_systems(Update, setup_combat_ui.after(handle_combat_started))
@@ -1049,11 +1040,11 @@ impl Plugin for CombatPlugin {
                     .after(update_action_highlight),
             )
             .add_systems(Update, cleanup_floating_damage)
-            // Phase 4: Monster AI — must run AFTER update_combat_ui so the UI
+            // Monster AI — must run AFTER update_combat_ui so the UI
             // always reflects the current EnemyTurn state (and hides the action
             // menu) before the monster acts and potentially advances the turn.
             .add_systems(Update, execute_monster_turn.after(update_combat_ui))
-            // Phase 1 (Time): advance game clock once per new combat round.
+            // Advance game clock once per new combat round.
             // Runs after all action handlers so the round counter is already
             // incremented before we sample it.
             .add_systems(
@@ -1078,8 +1069,8 @@ impl Plugin for CombatPlugin {
 ///
 /// The `combat_event_type` is stored on the returned `CombatState` for later
 /// phases to read (ambush suppresses player turn 1, boss sets advance/regen
-/// flags, etc.).  Phase 1 stores the value end-to-end; the mechanics are wired
-/// in Phase 2+.
+/// flags, etc.).  The value is stored end-to-end; the mechanics are wired
+/// in subsequent layers.
 ///
 /// Returns an error if any monster in `group` is not found in the content DB.
 ///
@@ -1111,7 +1102,7 @@ pub fn start_encounter(
     group: &[u8],
     combat_event_type: CombatEventType,
 ) -> Result<(), crate::domain::combat::database::MonsterDatabaseError> {
-    // Phase 2: select handicap based on combat event type.
+    // Select handicap based on combat event type.
     // Ambush gives monsters the initiative advantage for round 1.
     let handicap = if combat_event_type.gives_monster_advantage() {
         Handicap::MonsterAdvantage
@@ -1124,11 +1115,11 @@ pub fn start_encounter(
     // Copy the campaign death mode so apply_damage respects it for this combat.
     cs.unconscious_before_death = game_state.campaign_config.unconscious_before_death;
 
-    // Phase 2: set the ambush flag so the game layer can suppress player
+    // Set the ambush flag so the game layer can suppress player
     // actions during round 1.
     cs.ambush_round_active = combat_event_type == CombatEventType::Ambush;
 
-    // Phase 2: Boss mechanics — monsters advance and regenerate each round;
+    // Boss mechanics — monsters advance and regenerate each round;
     // the party cannot bribe or surrender.
     if combat_event_type.applies_boss_mechanics() {
         cs.monsters_advance = true;
@@ -1186,7 +1177,7 @@ fn handle_combat_started(
             // stuck on PlayerTurn, causing the action buttons to flash incorrectly
             // and the monster turn to be skipped or mishandled on the first frame.
             //
-            // Phase 2: during an ambush round 1 the party cannot act, so force
+            // During an ambush round 1 the party cannot act, so force
             // EnemyTurn regardless of the turn order — monsters always go first.
             turn_state.0 = if combat_res.state.ambush_round_active {
                 info!("Combat started: ambush — monsters act first in round 1, setting EnemyTurn");
@@ -1205,7 +1196,7 @@ fn handle_combat_started(
             };
 
             // Store encounter position so handle_combat_victory can remove
-            // the MapEvent::Encounter from the map on victory (Phase 4).
+            // the MapEvent::Encounter from the map on victory.
             combat_res.encounter_position = msg.encounter_position;
             combat_res.encounter_map_id = msg.encounter_map_id;
             combat_res.combat_event_type = msg.combat_event_type;
@@ -1217,7 +1208,7 @@ fn handle_combat_started(
             }
             info!("Combat event type: {:?}", combat_res.combat_event_type);
 
-            // Phase 2: emit a combat log entry that describes how the battle began.
+            // Emit a combat log entry that describes how the battle began.
             let opening_text = match msg.combat_event_type {
                 CombatEventType::Ambush => {
                     "The monsters ambush the party! The party is surprised!".to_string()
@@ -1427,7 +1418,134 @@ fn sync_combat_to_party_on_exit(
     combat_res.clear();
 }
 
-// ===== Phase 2: Combat UI Systems =====
+// ===== Combat UI Query Type Aliases =====
+
+/// Query for enemy HP bar fill nodes, excluding boss HP bars.
+type EnemyHpBarQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static EnemyHpBarFill,
+        &'static mut Node,
+        &'static mut BackgroundColor,
+    ),
+    Without<BossHpBarFill>,
+>;
+
+/// Query for enemy HP text entities, excluding name, condition, turn order, and boss texts.
+type EnemyHpTextQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static EnemyHpText, &'static mut Text),
+    (
+        Without<EnemyNameText>,
+        Without<EnemyConditionText>,
+        Without<TurnOrderText>,
+        Without<BossHpBarText>,
+    ),
+>;
+
+/// Query for enemy condition text entities, excluding HP, name, turn order, and boss texts.
+type EnemyConditionTextQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static EnemyConditionText, &'static mut Text),
+    (
+        Without<EnemyHpText>,
+        Without<EnemyNameText>,
+        Without<TurnOrderText>,
+        Without<BossHpBarText>,
+    ),
+>;
+
+/// Query for the turn order text entity, excluding all enemy-specific text markers.
+type TurnOrderTextQuery<'w, 's> = Query<
+    'w,
+    's,
+    &'static mut Text,
+    (
+        With<TurnOrderText>,
+        Without<EnemyHpText>,
+        Without<EnemyNameText>,
+        Without<EnemyConditionText>,
+        Without<BossHpBarText>,
+    ),
+>;
+
+/// Query for boss HP bar fill nodes, excluding standard enemy HP bars.
+type BossHpBarQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static BossHpBarFill,
+        &'static mut Node,
+        &'static mut BackgroundColor,
+    ),
+    Without<EnemyHpBarFill>,
+>;
+
+/// Query for boss HP bar text entities, excluding standard enemy HP text.
+type BossHpBarTextQuery<'w, 's> =
+    Query<'w, 's, (&'static BossHpBarText, &'static mut Text), Without<EnemyHpText>>;
+
+/// Query for action button interactions used by the combat input system.
+type ActionButtonQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Interaction,
+        Ref<'static, Interaction>,
+        &'static ActionButton,
+    ),
+    With<Button>,
+>;
+
+/// Query for enemy card interactions used by the target selection system.
+type EnemyCardInteractionQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Interaction,
+        Ref<'static, Interaction>,
+        &'static EnemyCard,
+    ),
+    With<Button>,
+>;
+
+/// Query for the main camera transform used by hover bar world-projection.
+type CombatCameraQuery<'w, 's> =
+    Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>;
+
+/// Query for encounter visual markers and their world transforms.
+type EncounterVisualQuery<'w, 's> =
+    Query<'w, 's, (&'static EncounterVisualMarker, &'static GlobalTransform)>;
+
+/// Query for monster HP hover bar text entities.
+type MonsterHpHoverTextQuery<'w, 's> =
+    Query<'w, 's, (&'static MonsterHpHoverBarHpText, &'static mut Text)>;
+
+/// Bundled queries for monster HP hover bar containers and fills.
+///
+/// Used by [`update_monster_hp_hover_bars`] to read bar layout and update fill
+/// widths without violating Bevy's borrow rules (both queries touch `Node`).
+type MonsterHpHoverBarQueries<'w, 's> = ParamSet<
+    'w,
+    's,
+    (
+        Query<'static, 'static, (&'static MonsterHpHoverBar, &'static mut Node)>,
+        Query<
+            'static,
+            'static,
+            (
+                &'static MonsterHpHoverBarFill,
+                &'static mut Node,
+                &'static mut BackgroundColor,
+            ),
+        >,
+    ),
+>;
+
+// ===== Combat UI Systems =====
 
 /// System: Setup combat UI when entering combat mode
 ///
@@ -1510,11 +1628,7 @@ fn setup_combat_ui(
                                     // Enemy name
                                     card.spawn((
                                         Text::new(monster.name.clone()),
-                                        TextFont {
-                                            font_size: 14.0,
-                                            ..default()
-                                        },
-                                        TextColor(Color::WHITE),
+                                        text_style(LABEL_FONT_SIZE, Color::WHITE),
                                         EnemyNameText {
                                             participant_index: idx,
                                         },
@@ -1581,7 +1695,7 @@ fn setup_combat_ui(
                     }
                 });
 
-            // ── Boss HP Bar (Phase 4) ───────────────────────────────────────────
+            // ── Boss HP Bar ─────────────────────────────────────────────────────
             // Only spawn when this is a Boss encounter.  The bar is rendered at the
             // top-centre of the screen, above the combat log, for maximum visibility.
             if combat_res.combat_event_type == CombatEventType::Boss {
@@ -1689,11 +1803,7 @@ fn setup_combat_ui(
                 .with_children(|turn_panel| {
                     turn_panel.spawn((
                         Text::new("Turn Order: "),
-                        TextFont {
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
+                        text_style(BODY_FONT_SIZE, Color::WHITE),
                         TurnOrderText,
                     ));
                 });
@@ -1759,11 +1869,7 @@ fn setup_combat_ui(
                             .with_children(|button| {
                                 button.spawn((
                                     Text::new(label),
-                                    TextFont {
-                                        font_size: 14.0,
-                                        ..default()
-                                    },
-                                    TextColor(Color::WHITE),
+                                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                                 ));
                             });
                     }
@@ -1791,11 +1897,7 @@ fn setup_combat_ui(
                             .with_children(|button| {
                                 button.spawn((
                                     Text::new("Ranged"),
-                                    TextFont {
-                                        font_size: 14.0,
-                                        ..default()
-                                    },
-                                    TextColor(Color::WHITE),
+                                    text_style(LABEL_FONT_SIZE, Color::WHITE),
                                 ));
                             });
                     }
@@ -1881,50 +1983,18 @@ fn cleanup_combat_ui(
 ///
 /// Updates enemy HP bars, turn order display, and action menu visibility.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::type_complexity)]
 fn update_combat_ui(
     combat_res: Res<CombatResource>,
     global_state: Res<GlobalState>,
-    mut enemy_hp_bars: Query<
-        (&EnemyHpBarFill, &mut Node, &mut BackgroundColor),
-        Without<BossHpBarFill>,
-    >,
-    mut enemy_hp_texts: Query<
-        (&EnemyHpText, &mut Text),
-        (
-            Without<EnemyNameText>,
-            Without<EnemyConditionText>,
-            Without<TurnOrderText>,
-            Without<BossHpBarText>,
-        ),
-    >,
-    mut enemy_condition_texts: Query<
-        (&EnemyConditionText, &mut Text),
-        (
-            Without<EnemyHpText>,
-            Without<EnemyNameText>,
-            Without<TurnOrderText>,
-            Without<BossHpBarText>,
-        ),
-    >,
-    mut turn_order_text: Query<
-        &mut Text,
-        (
-            With<TurnOrderText>,
-            Without<EnemyHpText>,
-            Without<EnemyNameText>,
-            Without<EnemyConditionText>,
-            Without<BossHpBarText>,
-        ),
-    >,
+    mut enemy_hp_bars: EnemyHpBarQuery,
+    mut enemy_hp_texts: EnemyHpTextQuery,
+    mut enemy_condition_texts: EnemyConditionTextQuery,
+    mut turn_order_text: TurnOrderTextQuery,
     mut action_menu: Query<&mut Visibility, With<ActionMenuPanel>>,
     turn_state: Res<CombatTurnStateResource>,
     mut action_menu_state: ResMut<ActionMenuState>,
-    mut boss_hp_fills: Query<
-        (&BossHpBarFill, &mut Node, &mut BackgroundColor),
-        Without<EnemyHpBarFill>,
-    >,
-    mut boss_hp_texts: Query<(&BossHpBarText, &mut Text), Without<EnemyHpText>>,
+    mut boss_hp_fills: BossHpBarQuery,
+    mut boss_hp_texts: BossHpBarTextQuery,
 ) {
     // Only update when in combat mode
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
@@ -2047,7 +2117,7 @@ fn update_combat_ui(
         *visibility = new_visibility;
     }
 
-    // ── Boss HP Bar Update (Phase 4) ──────────────────────────────────────
+    // ── Boss HP Bar Update ────────────────────────────────────────────────
     for (fill, mut node, mut color) in &mut boss_hp_fills {
         if let Some(Combatant::Monster(monster)) =
             combat_res.state.participants.get(fill.participant_index)
@@ -2132,7 +2202,7 @@ fn update_ranged_button_color(
     }
 }
 
-// ===== Phase 3: Player Action Systems =====
+// ===== Player Action Systems =====
 
 /// Handle input from action buttons and keyboard shortcuts during PlayerTurn.
 ///
@@ -2197,7 +2267,7 @@ fn dispatch_combat_action(
             }
         }
         ActionButtonType::Cast | ActionButtonType::Item => {
-            // Phase 4: submenu open — handled by separate systems
+            // Submenu open — handled by separate systems
         }
     }
 }
@@ -2279,11 +2349,10 @@ fn confirm_attack_target(
 /// Both mouse and keyboard routes call `dispatch_combat_action` /
 /// `confirm_attack_target` so their semantics are identical.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::type_complexity)]
 fn combat_input_system(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
-    mut interactions: Query<(&Interaction, Ref<Interaction>, &ActionButton), With<Button>>,
+    mut interactions: ActionButtonQuery,
     global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     mut target_sel: ResMut<TargetSelection>,
@@ -2299,7 +2368,7 @@ fn combat_input_system(
         return;
     }
 
-    // Phase 2: During an ambush round the party is surprised and cannot act.
+    // During an ambush round the party is surprised and cannot act.
     // `handle_combat_started` already sets `CombatTurnState::EnemyTurn` for
     // ambush round 1, so this guard provides defence-in-depth: even if a
     // player-turn combatant appears in the turn order during round 1 we
@@ -2623,21 +2692,18 @@ fn update_target_highlight(
 }
 
 /// Handle clicks on enemy cards during target selection and emit `AttackAction`.
-#[allow(clippy::type_complexity)]
 fn select_target(
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
-    mut interactions: Query<(&Interaction, Ref<Interaction>, &EnemyCard), With<Button>>,
+    mut interactions: EnemyCardInteractionQuery,
     mut target_sel: ResMut<TargetSelection>,
     mut action_menu_state: ResMut<ActionMenuState>,
     mut ranged_pending: ResMut<RangedAttackPending>,
     mut attack_writer: Option<MessageWriter<AttackAction>>,
     mut ranged_writer: Option<MessageWriter<RangedAttackAction>>,
 ) {
-    if target_sel.0.is_none() {
+    let Some(attacker) = target_sel.0 else {
         return;
-    }
-
-    let attacker = target_sel.0.unwrap();
+    };
 
     let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
 
@@ -2730,7 +2796,10 @@ pub fn perform_attack_action_with_rng(
 
     // Apply damage
     if damage > 0 {
-        let _ = apply_damage(&mut combat_res.state, action.target, damage)?;
+        let died = apply_damage(&mut combat_res.state, action.target, damage)?;
+        if died {
+            tracing::debug!("Combatant {:?} was slain by damage", action.target);
+        }
     }
 
     // Apply special effect if any (map to condition by name)
@@ -2925,7 +2994,10 @@ pub fn perform_ranged_attack_action_with_rng(
 
     // Apply damage.
     if damage > 0 {
-        let _ = apply_damage(&mut combat_res.state, action.target, damage)?;
+        let died = apply_damage(&mut combat_res.state, action.target, damage)?;
+        if died {
+            tracing::debug!("Combatant {:?} was slain by damage", action.target);
+        }
     }
 
     // Apply special effect if any.
@@ -3211,19 +3283,21 @@ fn handle_attack_action(
                 .unwrap_or(0),
         };
 
-        // Phase 3: set Animating before the domain call
+        // Set Animating before the domain call
         let prior_turn_state = turn_state.0;
         turn_state.0 = CombatTurnState::Animating;
 
         let mut rng = rand::rng();
-        let _ = perform_attack_action_with_rng(
+        if let Err(e) = perform_attack_action_with_rng(
             &mut combat_res,
             action,
             content_ref,
             &mut global_state,
             &mut turn_state,
             &mut rng,
-        );
+        ) {
+            tracing::warn!("Attack action failed: {}", e);
+        }
 
         // Compute post-attack HP and damage dealt
         let post_hp: u16 = match action.target {
@@ -3249,7 +3323,7 @@ fn handle_attack_action(
 
         let dmg = (pre_hp as i32 - post_hp as i32).max(0) as u32;
 
-        // Phase 3: emit feedback event instead of spawning inline
+        // Emit feedback event instead of spawning inline
         let effect = if dmg > 0 {
             CombatFeedbackEffect::Damage(dmg)
         } else {
@@ -3262,7 +3336,7 @@ fn handle_attack_action(
             &mut feedback_writer,
         );
 
-        // Phase 3: restore turn state after action (perform_* may have already updated it)
+        // Restore turn state after action (perform_* may have already updated it)
         // Only restore if perform_* left it as Animating (meaning it didn't naturally advance)
         if matches!(turn_state.0, CombatTurnState::Animating) {
             turn_state.0 = prior_turn_state;
@@ -3325,21 +3399,23 @@ fn handle_use_item_action(
                 .unwrap_or((0, 0)),
         };
 
-        // Phase 3: set Animating before the domain call
+        // Set Animating before the domain call
         let prior_turn_state = turn_state.0;
         turn_state.0 = CombatTurnState::Animating;
 
         let mut rng = rand::rng();
 
         // Perform the use (domain-level). This consumes inventory charges and applies effects.
-        let _ = perform_use_item_action_with_rng(
+        if let Err(e) = perform_use_item_action_with_rng(
             &mut combat_res,
             action,
             content_ref,
             &mut global_state,
             &mut turn_state,
             &mut rng,
-        );
+        ) {
+            tracing::warn!("Use item action failed: {}", e);
+        }
 
         // Compute post-use HP/SP and differences
         let (post_hp, post_sp): (u16, u16) = match action.target {
@@ -3366,7 +3442,7 @@ fn handle_use_item_action(
         let hp_delta = post_hp as i32 - pre_hp as i32;
         let sp_delta = post_sp as i32 - pre_sp as i32;
 
-        // Phase 3: emit typed feedback event; restore Animating state if unchanged
+        // Emit typed feedback event; restore Animating state if unchanged
         if hp_delta < 0 {
             let dmg = (-hp_delta) as u32;
             emit_combat_feedback(
@@ -3420,7 +3496,7 @@ fn handle_use_item_action(
             }
         }
 
-        // Phase 3: restore turn state after action
+        // Restore turn state after action
         if matches!(turn_state.0, CombatTurnState::Animating) {
             turn_state.0 = prior_turn_state;
         }
@@ -3629,21 +3705,23 @@ fn handle_cast_spell_action(
                 .unwrap_or(0),
         };
 
-        // Phase 3: set Animating before the domain call
+        // Set Animating before the domain call
         let prior_turn_state = turn_state.0;
         turn_state.0 = CombatTurnState::Animating;
 
         let mut rng = rand::rng();
 
         // Perform the cast (domain-level). This consumes SP/gems and applies effects.
-        let _ = perform_cast_action_with_rng(
+        if let Err(e) = perform_cast_action_with_rng(
             &mut combat_res,
             action,
             content_ref,
             &mut global_state,
             &mut turn_state,
             &mut rng,
-        );
+        ) {
+            tracing::warn!("Cast action failed: {}", e);
+        }
 
         // Compute post-spell HP and damage dealt
         let post_hp: u16 = match action.target {
@@ -3669,7 +3747,7 @@ fn handle_cast_spell_action(
 
         let dmg = (pre_hp as i32 - post_hp as i32).max(0) as u32;
 
-        // Phase 3: emit typed feedback instead of inline spawn
+        // Emit typed feedback instead of inline spawn
         let effect = if dmg > 0 {
             CombatFeedbackEffect::Damage(dmg)
         } else {
@@ -3682,7 +3760,7 @@ fn handle_cast_spell_action(
             &mut feedback_writer,
         );
 
-        // Phase 3: restore turn state after action
+        // Restore turn state after action
         if matches!(turn_state.0, CombatTurnState::Animating) {
             turn_state.0 = prior_turn_state;
         }
@@ -3750,7 +3828,10 @@ pub fn perform_defend_action(
         .filter_map(|id| content.db().conditions.get_condition(id).cloned())
         .collect();
 
-    let _ = combat_res.state.advance_turn(&cond_defs);
+    let turn_effects = combat_res.state.advance_turn(&cond_defs);
+    if !turn_effects.is_empty() {
+        tracing::debug!("Turn advance effects: {:?}", turn_effects);
+    }
 
     // Update turn state
     if let Some(next) = combat_res
@@ -3780,13 +3861,15 @@ fn handle_defend_action(
     for action in reader.read() {
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
-        let _ = perform_defend_action(
+        if let Err(e) = perform_defend_action(
             &mut combat_res,
             action,
             content_ref,
             &mut global_state,
             &mut turn_state,
-        );
+        ) {
+            tracing::warn!("Defend action failed: {}", e);
+        }
     }
 }
 
@@ -3817,7 +3900,10 @@ pub fn perform_flee_action(
             .into_iter()
             .filter_map(|id| content.db().conditions.get_condition(id).cloned())
             .collect();
-        combat_res.state.advance_turn(&cond_defs);
+        let turn_effects = combat_res.state.advance_turn(&cond_defs);
+        if !turn_effects.is_empty() {
+            tracing::debug!("Turn advance effects: {:?}", turn_effects);
+        }
         if let Some(next) = combat_res
             .state
             .turn_order
@@ -3880,7 +3966,10 @@ pub fn perform_flee_action(
         .into_iter()
         .filter_map(|id| content.db().conditions.get_condition(id).cloned())
         .collect();
-    combat_res.state.advance_turn(&cond_defs);
+    let turn_effects = combat_res.state.advance_turn(&cond_defs);
+    if !turn_effects.is_empty() {
+        tracing::debug!("Turn advance effects: {:?}", turn_effects);
+    }
     if let Some(next) = combat_res
         .state
         .turn_order
@@ -3908,12 +3997,14 @@ fn handle_flee_action(
     for _ in reader.read() {
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
-        let _ = perform_flee_action(
+        if let Err(e) = perform_flee_action(
             &mut combat_res,
             content_ref,
             &mut global_state,
             &mut turn_state,
-        );
+        ) {
+            tracing::warn!("Flee action failed: {}", e);
+        }
     }
 }
 
@@ -3948,7 +4039,7 @@ fn select_monster_target(
             let (idx, _) = candidates
                 .iter()
                 .min_by_key(|(_, pc)| pc.hp.current)
-                .unwrap();
+                .expect("candidates guaranteed non-empty by is_empty guard");
             Some(CombatantId::Player(*idx))
         }
         crate::domain::combat::monster::AiBehavior::Defensive => {
@@ -3958,7 +4049,7 @@ fn select_monster_target(
                 .max_by_key(|(_, pc)| {
                     (pc.stats.might.current as i32) + (pc.stats.accuracy.current as i32)
                 })
-                .unwrap();
+                .expect("candidates guaranteed non-empty by is_empty guard");
             Some(CombatantId::Player(*idx))
         }
         crate::domain::combat::monster::AiBehavior::Random => {
@@ -4037,7 +4128,7 @@ pub fn perform_monster_turn_with_rng(
             return Err(CombatError::CombatantNotFound(attacker));
         };
 
-    // Phase 4: Boss monsters never flee regardless of flee_threshold.
+    // Boss monsters never flee regardless of flee_threshold.
     // For non-boss encounters, monsters with flee_threshold > 0 may attempt
     // to flee when their HP drops below the threshold.
     let should_flee_this_turn = if combat_res.combat_event_type == CombatEventType::Boss {
@@ -4061,7 +4152,10 @@ pub fn perform_monster_turn_with_rng(
             .into_iter()
             .filter_map(|id| content.db().conditions.get_condition(id).cloned())
             .collect();
-        let _ = combat_res.state.advance_turn(&cond_defs);
+        let turn_effects = combat_res.state.advance_turn(&cond_defs);
+        if !turn_effects.is_empty() {
+            tracing::debug!("Turn advance effects: {:?}", turn_effects);
+        }
         if let Some(next) = combat_res
             .state
             .turn_order
@@ -4087,7 +4181,10 @@ pub fn perform_monster_turn_with_rng(
 
     // Apply damage (mutably modify combat state)
     if damage > 0 {
-        let _ = apply_damage(&mut combat_res.state, target, damage)?;
+        let died = apply_damage(&mut combat_res.state, target, damage)?;
+        if died {
+            tracing::debug!("Combatant {:?} was slain by damage", target);
+        }
     }
 
     // Apply special effect if any (map to condition by name)
@@ -4147,9 +4244,12 @@ pub fn perform_monster_turn_with_rng(
         .filter_map(|id| content.db().conditions.get_condition(id).cloned())
         .collect();
 
-    let _ = combat_res.state.advance_turn(&cond_defs);
+    let turn_effects = combat_res.state.advance_turn(&cond_defs);
+    if !turn_effects.is_empty() {
+        tracing::debug!("Turn advance effects: {:?}", turn_effects);
+    }
 
-    // Phase 4: Boss encounters regenerate BOSS_REGEN_PER_ROUND HP per round
+    // Boss encounters regenerate BOSS_REGEN_PER_ROUND HP per round
     // (in addition to the 1 HP from advance_round's base regeneration).
     // The base engine regenerates 1 HP; we add 4 more to reach BOSS_REGEN_PER_ROUND.
     if combat_res.combat_event_type == CombatEventType::Boss && combat_res.state.monsters_regenerate
@@ -4186,7 +4286,7 @@ pub fn perform_monster_turn_with_rng(
 /// Picks an attack and target using AI, performs the attack, and advances
 /// the turn. Uses the global RNG for in-game randomness.
 ///
-/// # Phase 2 — Ambush round handling
+/// # Ambush round handling
 ///
 /// During round 1 of an ambush (`CombatState::ambush_round_active == true`),
 /// player-combatant slots in the turn order must be skipped automatically so
@@ -4207,7 +4307,7 @@ fn execute_monster_turn(
     time: Option<Res<Time>>,
     mut was_enemy_turn: Local<bool>,
 ) {
-    // Phase 2: During an ambush round, if the current slot belongs to a player,
+    // During an ambush round, if the current slot belongs to a player,
     // auto-skip it with a "Surprised!" log entry and advance the turn.
     // This keeps the EnemyTurn state active until all slots are consumed and
     // `advance_round` fires, clearing `ambush_round_active` at round 2.
@@ -4235,7 +4335,10 @@ fn execute_monster_turn(
                 .filter_map(|id| content_ref.db().conditions.get_condition(id).cloned())
                 .collect();
 
-            let _ = combat_res.state.advance_turn(&cond_defs);
+            let turn_effects = combat_res.state.advance_turn(&cond_defs);
+            if !turn_effects.is_empty() {
+                tracing::debug!("Turn advance effects: {:?}", turn_effects);
+            }
 
             // After advancing, determine what the next actor is.
             if let Some(next) = combat_res
@@ -4301,7 +4404,10 @@ fn execute_monster_turn(
             // the round wraps; we pass an empty condition list here because the
             // full DoT tick already happened in perform_monster_turn_with_rng on
             // earlier turns this round).
-            let _ = combat_res.state.advance_turn(&[]);
+            let turn_effects = combat_res.state.advance_turn(&[]);
+            if !turn_effects.is_empty() {
+                tracing::debug!("Turn advance effects (skip): {:?}", turn_effects);
+            }
             turn_state.0 = match combat_res
                 .state
                 .turn_order
@@ -4353,7 +4459,7 @@ fn execute_monster_turn(
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
         let mut rng = rand::rng();
-        // Phase 4: capture the round counter before the turn so we can detect
+        // Capture the round counter before the turn so we can detect
         // when a new round starts and emit boss-regeneration log lines.
         let round_before = combat_res.state.round;
         let outcome = perform_monster_turn_with_rng(
@@ -4365,7 +4471,7 @@ fn execute_monster_turn(
         );
         let round_after = combat_res.state.round;
 
-        // Phase 4: emit boss regeneration log line when a new round started
+        // Emit boss regeneration log line when a new round started
         if round_after > round_before
             && combat_res.combat_event_type == CombatEventType::Boss
             && combat_res.state.monsters_regenerate
@@ -4413,7 +4519,7 @@ fn execute_monster_turn(
     }
 }
 
-// ===== Phase 5: Combat Resolution & Rewards =====
+// ===== Combat Resolution & Rewards =====
 
 /// System: Detect when combat ends (Victory/Defeat) and emit an appropriate message
 ///
@@ -4545,10 +4651,17 @@ pub fn process_combat_victory_with_rng(
             }
 
             // Award experience using domain helper (respects dead checks)
-            let _ = crate::domain::progression::award_experience(
+            if let Err(e) = crate::domain::progression::award_experience(
                 &mut global_state.0.party.members[party_idx],
                 award,
-            );
+            ) {
+                tracing::warn!(
+                    "Failed to award {} XP to party member {}: {}",
+                    award,
+                    party_idx,
+                    e
+                );
+            }
             xp_awarded.push((party_idx, award));
         }
     }
@@ -4601,7 +4714,9 @@ pub fn process_combat_victory_with_rng(
         for &party_idx in &recipients {
             if let Some(member) = global_state.0.party.members.get_mut(party_idx) {
                 if member.inventory.has_space() {
-                    let _ = member.inventory.add_item(*item_id, 0);
+                    if let Err(e) = member.inventory.add_item(*item_id, 0) {
+                        tracing::warn!("Failed to add loot item {:?}: {}", item_id, e);
+                    }
                     placed = true;
                     break;
                 }
@@ -4612,7 +4727,9 @@ pub fn process_combat_victory_with_rng(
         if !placed {
             for member in global_state.0.party.members.iter_mut() {
                 if member.is_alive() && member.inventory.has_space() {
-                    let _ = member.inventory.add_item(*item_id, 0);
+                    if let Err(e) = member.inventory.add_item(*item_id, 0) {
+                        tracing::warn!("Failed to add loot item {:?}: {}", item_id, e);
+                    }
                     break;
                 }
             }
@@ -4695,11 +4812,7 @@ fn handle_combat_victory(
                             summary.total_gems,
                             summary.items
                         )),
-                        TextFont {
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
+                        text_style(BODY_FONT_SIZE, Color::WHITE),
                     ));
                 });
 
@@ -4761,11 +4874,7 @@ fn handle_combat_defeat(
             .with_children(|parent| {
                 parent.spawn((
                     Text::new("You have been defeated. Returning to menu...".to_string()),
-                    TextFont {
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
+                    text_style(BODY_FONT_SIZE, Color::WHITE),
                 ));
             });
 
@@ -4807,7 +4916,7 @@ fn handle_combat_defeat(
     }
 }
 
-// ===== Phase 3: Visual Combat Feedback Helpers & Systems =====
+// ===== Visual Combat Feedback Helpers & Systems =====
 
 /// Helper: write a `CombatFeedbackEvent` to the message bus when a writer is available.
 ///
@@ -5313,7 +5422,7 @@ fn reset_combat_log_on_exit(
 /// clipped.  For player targets it is spawned at an absolute position (HUD
 /// bottom area) because the player HUD layout differs per game.
 ///
-/// Colour is chosen from the Phase 3 constants:
+/// Colour is chosen from the visual feedback constants:
 /// - Red   (`FEEDBACK_COLOR_DAMAGE`) — `Damage(_)`
 /// - Green (`FEEDBACK_COLOR_HEAL`)   — `Heal(_)`
 /// - Grey  (`FEEDBACK_COLOR_MISS`)   — `Miss`
@@ -5565,18 +5674,14 @@ fn spawn_monster_hp_hover_bars(
 }
 
 /// System: update `MonsterHpHoverBar` fill widths each frame from `CombatResource`.
-#[allow(clippy::type_complexity)]
 fn update_monster_hp_hover_bars(
     combat_res: Res<CombatResource>,
     global_state: Res<GlobalState>,
-    camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    camera_query: CombatCameraQuery,
     primary_window: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    encounter_visual_query: Query<(&EncounterVisualMarker, &GlobalTransform)>,
-    mut hp_text_query: Query<(&MonsterHpHoverBarHpText, &mut Text)>,
-    mut hover_bar_queries: ParamSet<(
-        Query<(&MonsterHpHoverBar, &mut Node)>,
-        Query<(&MonsterHpHoverBarFill, &mut Node, &mut BackgroundColor)>,
-    )>,
+    encounter_visual_query: EncounterVisualQuery,
+    mut hp_text_query: MonsterHpHoverTextQuery,
+    mut hover_bar_queries: MonsterHpHoverBarQueries,
 ) {
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
         return;
@@ -5997,7 +6102,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 2: Normal and Ambush Combat Tests =====
+    // ===== Normal and Ambush Combat Tests =====
 
     /// `start_encounter` with `CombatEventType::Normal` must produce a
     /// `CombatState` with `handicap == Handicap::Even`.
@@ -6411,7 +6516,7 @@ mod tests {
         );
     }
 
-    /// Phase 2 — During round 1 of an ambush, the player's turn must be
+    /// During round 1 of an ambush, the player's turn must be
     /// auto-skipped (suppressed) by `execute_monster_turn`.  The combat log
     /// must record a "surprised" message and `CombatTurnStateResource` must
     /// remain `EnemyTurn` after the skip so that the monster gets to act.
@@ -6491,7 +6596,7 @@ mod tests {
         );
     }
 
-    /// Phase 2 — In round 2 of an ambush encounter `ambush_round_active` is
+    /// In round 2 of an ambush encounter `ambush_round_active` is
     /// `false`, so the player must NOT be skipped.  `combat_input_system` must
     /// dispatch the player's action normally and `CombatTurnStateResource` must
     /// be `PlayerTurn` at the start of the round.
@@ -6547,7 +6652,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 2: Combat UI Tests =====
+    // ===== Combat UI Tests =====
 
     /// Verify combat UI spawns when entering combat
     #[test]
@@ -7227,7 +7332,7 @@ mod tests {
         assert!(matches!(gs_after.0.mode, GameMode::Menu(_)));
     }
 
-    // ===== Phase 3: Player Action System Tests =====
+    // ===== Player Action System Tests =====
 
     #[test]
     fn test_attack_action_applies_damage() {
@@ -7529,7 +7634,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 4: Monster AI Tests =====
+    // ===== Monster AI Tests =====
 
     /// Verify monster AI (Aggressive) chooses the lowest HP target
     #[test]
@@ -7811,7 +7916,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 2: Target Selection and Action Completeness Tests =====
+    // ===== Target Selection and Action Completeness Tests =====
 
     /// T2-1: `Tab` during target-select mode cycles `active_target_index`
     /// through alive monsters, wrapping back to 0 after the last.
@@ -8146,7 +8251,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 1: Input Reliability Tests =====
+    // ===== Input Reliability Tests =====
 
     /// T1-1: `Tab` cycles active_index through all five actions (0 → 4).
     #[test]
@@ -8683,7 +8788,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 3: Visual Combat Feedback Tests =====
+    // ===== Visual Combat Feedback Tests =====
 
     /// T3-1: Firing an `AttackAction` that hits emits a `CombatFeedbackEvent`
     /// with `effect: Damage(_)`.
@@ -9376,7 +9481,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 4: Defeated Monster World-Mesh Removal =====
+    // ===== Defeated Monster World-Mesh Removal =====
 
     /// T4-E1: After a `MapEvent::Encounter` triggers combat, `combat_res.encounter_position`
     /// and `combat_res.encounter_map_id` must be set to the tile position and map id.
@@ -9816,12 +9921,12 @@ mod tests {
         );
     }
 
-    // ── Phase 2 integration tests ─────────────────────────────────────────────
+    // ── Integration tests ─────────────────────────────────────────────────────
     // These tests verify that `perform_attack_action_with_rng` now calls
     // `get_character_attack` and dispatches on `MeleeAttackResult` instead of
     // using the old hardcoded `DiceRoll::new(1, 4, 0)`.
 
-    /// Build a minimal weapon `Item` for use in Phase 2 integration tests.
+    /// Build a minimal weapon `Item` for use in integration tests.
     fn make_p2_weapon_item(
         id: u8,
         damage: DiceRoll,
@@ -9896,7 +10001,7 @@ mod tests {
         (cr, content, gs, ts)
     }
 
-    /// Phase 2 – T1: A player with a longsword (1d8, bonus 0) must deal damage
+    /// T1: A player with a longsword (1d8, bonus 0) must deal damage
     /// in the range [1, 8].  Over 50 seeds at least one roll must exceed 4,
     /// proving the old hardcoded 1d4 is gone.
     #[test]
@@ -9971,7 +10076,7 @@ mod tests {
         );
     }
 
-    /// Phase 2 – T2: An unarmed player (`equipment.weapon = None`) must deal at
+    /// T2: An unarmed player (`equipment.weapon = None`) must deal at
     /// most 2 damage per hit — the 1d2 UNARMED_DAMAGE fallback.
     #[test]
     fn test_player_attack_unarmed_when_no_weapon() {
@@ -10033,7 +10138,7 @@ mod tests {
         }
     }
 
-    /// Phase 2 – T3: A cursed dagger (1d4 with bonus -3 baked into the
+    /// T3: A cursed dagger (1d4 with bonus -3 baked into the
     /// `DiceRoll`) must always deal at least 1 damage when it hits — the damage
     /// floor from `DiceRoll::roll` prevents negative or zero results.
     #[test]
@@ -10115,7 +10220,7 @@ mod tests {
         }
     }
 
-    /// Phase 2 – T4: A player with a `MartialRanged` bow who triggers the melee
+    /// T4: A player with a `MartialRanged` bow who triggers the melee
     /// action path must have their turn skipped — `perform_attack_action_with_rng`
     /// returns `Ok(())` and the monster's HP is completely unchanged.
     #[test]
@@ -10180,7 +10285,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 3: Ranged and Magic Combat Tests =====
+    // ===== Ranged and Magic Combat Tests =====
 
     /// Helper: create a bow (MartialRanged weapon) item with a given id.
     fn make_bow_item(id: u8) -> crate::domain::items::Item {
@@ -10727,7 +10832,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 4: Boss Combat Tests =====
+    // ===== Boss Combat Tests =====
 
     /// 4.1 — `start_encounter` with Boss type must set `monsters_advance = true`.
     #[test]
@@ -11144,7 +11249,7 @@ mod tests {
         );
     }
 
-    /// Phase 1: One complete combat round must advance the in-game clock by
+    /// One complete combat round must advance the in-game clock by
     /// exactly `TIME_COST_COMBAT_ROUND_MINUTES`.
     ///
     /// Strategy: build a minimal Bevy app with `CombatPlugin`, put the

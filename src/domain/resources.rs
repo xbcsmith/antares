@@ -6,9 +6,9 @@
 //! This module implements party-wide resource management including food
 //! consumption, light tracking, and rest/recovery mechanics.
 //!
-//! # Food System (Phase 2)
+//! # Food System
 //!
-//! As of Phase 2, food is tracked as inventory items (e.g. "Food Ration") carrying
+//! Food is tracked as inventory items (e.g. "Food Ration") carrying
 //! `ConsumableEffect::IsFood(n)`, not as the legacy `Character.food` numeric counter.
 //!
 //! - [`count_food_in_party`] — counts total ration-units across all inventories.

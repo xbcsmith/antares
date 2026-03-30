@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Menu plugin and system implementations for Phase 4-6: Menu UI Rendering, Save/Load, and Settings Integration
+//! Menu plugin and system implementations: Menu UI Rendering, Save/Load, and Settings Integration
 //!
 //! This module implements the complete menu UI system with:
 //! - UI spawning based on current submenu (Main/SaveLoad/Settings)
@@ -9,7 +9,7 @@
 //! - Dynamic button color updates based on selection
 //! - Save/Load menu with scrollable save list
 //! - Save and load game operations
-//! - Settings menu with volume sliders (Phase 6)
+//! - Settings menu with volume sliders
 //! - Proper cleanup when exiting menu mode
 
 use bevy::ecs::world::World;
@@ -22,6 +22,7 @@ use crate::application::GameMode;
 use crate::game::components::menu::*;
 use crate::game::resources::GlobalState;
 use crate::game::systems::mouse_input;
+use crate::game::systems::ui_helpers::{text_style, BODY_FONT_SIZE};
 
 /// Path to the Antares icon, relative to the Bevy asset root (campaign directory).
 /// Bevy resolves paths relative to `BEVY_ASSET_ROOT` (the campaign dir), so the
@@ -35,7 +36,7 @@ impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(
             SaveGameManager::new("saves")
-                .unwrap_or_else(|e| panic!("Failed to initialize SaveGameManager: {}", e)),
+                .expect("SaveGameManager state directory 'saves' must be writable"),
         );
 
         app.add_systems(
@@ -475,11 +476,7 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                                                         "Save: {}",
                                                         save_info.filename
                                                     )),
-                                                    TextFont {
-                                                        font_size: 16.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(Color::WHITE),
+                                                    text_style(BODY_FONT_SIZE, Color::WHITE),
                                                 ));
                                             },
                                         );
@@ -674,7 +671,7 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
     );
 }
 
-/// Spawn the settings menu UI with audio sliders and graphics settings (Phase 6)
+/// Spawn the settings menu UI with audio sliders and graphics settings
 fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application::GameState) {
     commands
         .spawn((
@@ -762,11 +759,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("Master Volume: {:.0}%", master_vol * 100.0)),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -810,11 +803,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("Music Volume: {:.0}%", music_vol * 100.0)),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -858,11 +847,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("SFX Volume: {:.0}%", sfx_vol * 100.0)),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -906,11 +891,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("Ambient Volume: {:.0}%", ambient_vol * 100.0)),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -989,11 +970,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                     "Fullscreen: {}",
                                     if graphics.fullscreen { "ON" } else { "OFF" }
                                 )),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -1022,11 +999,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                         "OFF"
                                     }
                                 )),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -1051,11 +1024,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                     "VSync: {}",
                                     if graphics.vsync { "ON" } else { "OFF" }
                                 )),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -1077,11 +1046,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|button| {
                             button.spawn((
                                 Text::new(format!("Shadow Quality: {:?}", graphics.shadow_quality)),
-                                TextFont {
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style(BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -1663,24 +1628,28 @@ fn slider_value_from_cursor(
     ((cursor_position.x - left) / width).clamp(0.0, 1.0)
 }
 
+/// Query for slider track button entities with their interaction state and layout.
+type SliderTrackQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Interaction,
+        Ref<'static, Interaction>,
+        &'static SliderTrack,
+        &'static Node,
+        &'static GlobalTransform,
+    ),
+    With<Button>,
+>;
+
 /// Handle mouse input for settings sliders.
 ///
 /// This supports both click-to-set and hover+drag while the left mouse button is held.
-#[allow(clippy::type_complexity)]
 fn handle_slider_mouse(
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
     primary_window: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut slider_query: Query<&mut SettingSlider>,
-    track_query: Query<
-        (
-            &Interaction,
-            Ref<Interaction>,
-            &SliderTrack,
-            &Node,
-            &GlobalTransform,
-        ),
-        With<Button>,
-    >,
+    track_query: SliderTrackQuery,
     mut global_state: ResMut<GlobalState>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Menu(ref m) if m.current_submenu == MenuType::Settings)
@@ -1950,7 +1919,7 @@ mod tests {
     }
 
     // ========================================================================
-    // Phase 6: Settings Menu Integration Tests
+    // Settings Menu Integration Tests
     // ========================================================================
 
     #[test]

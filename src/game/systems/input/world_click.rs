@@ -7,7 +7,7 @@
 //! so the rest of the input system does not need to know about primary-window
 //! lookup details, cursor validation, or the centre-third heuristic.
 //!
-//! The helper here intentionally preserves the current Phase 6 behavior:
+//! The helper here intentionally preserves the current behavior:
 //!
 //! - only left-clicks are considered
 //! - only the primary window is considered

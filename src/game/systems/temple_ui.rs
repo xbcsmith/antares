@@ -188,12 +188,229 @@ pub fn visible_dead_members(party: &Party) -> Vec<(usize, &Character)> {
         .collect()
 }
 
+// ── Private UI helpers (extracted from `temple_ui_system`) ────────────────────
+
+/// Action produced by a dead-member row click in the temple UI.
+enum TempleRowAction {
+    /// The user clicked "Select" for the member at the given list index.
+    Select(usize),
+    /// The user clicked "Resurrect" for the member at the given party index.
+    Resurrect(usize),
+}
+
+/// Renders the temple header: title, NPC flavour quote, party resources, and
+/// resurrection cost.
+fn render_temple_header(
+    ui: &mut egui::Ui,
+    npc_name: &str,
+    party_gold: u32,
+    party_gems: u32,
+    service_cost: (u32, u32),
+) {
+    ui.heading(format!("Temple of Healing — Priest: {}", npc_name));
+    ui.add_space(6.0);
+    ui.label(
+        egui::RichText::new(
+            "\"The gods have mercy on the fallen. I can restore the breath of life.\"",
+        )
+        .italics()
+        .color(egui::Color32::from_rgb(180, 200, 255)),
+    );
+    ui.add_space(10.0);
+    ui.separator();
+    ui.add_space(6.0);
+
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(format!("Party gold: {}", party_gold)).color(egui::Color32::YELLOW),
+        );
+        ui.add_space(20.0);
+        ui.label(
+            egui::RichText::new(format!("Party gems: {}", party_gems))
+                .color(egui::Color32::from_rgb(100, 200, 255)),
+        );
+    });
+    ui.add_space(6.0);
+    ui.label(
+        egui::RichText::new(format!(
+            "Resurrection cost: {} gold, {} gem(s)",
+            service_cost.0, service_cost.1
+        ))
+        .color(egui::Color32::from_rgb(220, 180, 80)),
+    );
+    ui.add_space(10.0);
+    ui.separator();
+    ui.add_space(10.0);
+}
+
+/// Renders a single dead-member row inside the temple scroll area.
+///
+/// `highlight` carries the name-label colour when the row is active:
+/// `Some(green)` for keyboard focus, `Some(yellow)` for mouse selection,
+/// `None` when the row is idle.
+///
+/// Returns `Some(TempleRowAction)` when the user clicks a button in the row,
+/// or `None` if no interaction occurred this frame.
+fn render_dead_member_row(
+    ui: &mut egui::Ui,
+    list_idx: usize,
+    party_idx: usize,
+    member: &Character,
+    highlight: Option<egui::Color32>,
+    can_afford: bool,
+    service_cost: (u32, u32),
+) -> Option<TempleRowAction> {
+    let mut action = None;
+    let is_active = highlight.is_some();
+
+    ui.push_id(format!("temple_member_{}", list_idx), |ui| {
+        let mut frame = egui::Frame::group(ui.style());
+        if is_active {
+            frame = frame
+                .fill(egui::Color32::from_rgba_premultiplied(80, 80, 0, 120))
+                .stroke(egui::Stroke::new(2.0, egui::Color32::YELLOW));
+        } else {
+            frame = frame.fill(egui::Color32::from_gray(30));
+        }
+
+        frame.show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if is_active {
+                    ui.label(egui::RichText::new("►").color(egui::Color32::YELLOW));
+                } else {
+                    ui.label("  ");
+                }
+
+                ui.vertical(|ui| {
+                    let name_text = egui::RichText::new(&member.name)
+                        .strong()
+                        .color(highlight.unwrap_or(egui::Color32::WHITE));
+                    ui.label(name_text);
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} — Level {}",
+                            member.class_id, member.level
+                        ))
+                        .small()
+                        .weak(),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Cost: {} gold, {} gem(s)",
+                            service_cost.0, service_cost.1
+                        ))
+                        .small()
+                        .color(egui::Color32::from_rgb(220, 180, 80)),
+                    );
+                });
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Select").clicked() {
+                        action = Some(TempleRowAction::Select(list_idx));
+                    }
+
+                    let resurrect_enabled = can_afford && is_active;
+                    if ui
+                        .add_enabled(
+                            resurrect_enabled,
+                            egui::Button::new(egui::RichText::new("Resurrect").color(
+                                if resurrect_enabled {
+                                    egui::Color32::from_rgb(80, 220, 120)
+                                } else {
+                                    egui::Color32::GRAY
+                                },
+                            )),
+                        )
+                        .clicked()
+                    {
+                        action = Some(TempleRowAction::Resurrect(party_idx));
+                    }
+                });
+            });
+        });
+        ui.add_space(4.0);
+    });
+
+    action
+}
+
+/// Renders the temple footer: status message, exit button, and instructions.
+///
+/// Returns `true` when the user clicks the "Exit Temple" button.
+fn render_temple_footer(
+    ui: &mut egui::Ui,
+    status_message: Option<&str>,
+    focus_on_exit: bool,
+) -> bool {
+    let mut exit_clicked = false;
+
+    ui.add_space(10.0);
+    ui.separator();
+    ui.add_space(6.0);
+
+    if let Some(msg) = status_message {
+        let is_error = msg.contains("Insufficient")
+            || msg.contains("permadeath")
+            || msg.contains("not dead")
+            || msg.contains("not found");
+        let text = if is_error {
+            egui::RichText::new(msg).color(egui::Color32::RED)
+        } else {
+            egui::RichText::new(msg).color(egui::Color32::from_rgb(80, 220, 120))
+        };
+        ui.label(text);
+        ui.add_space(6.0);
+    }
+
+    ui.horizontal(|ui| {
+        let exit_text = if focus_on_exit {
+            egui::RichText::new("Exit Temple")
+                .strong()
+                .size(15.0)
+                .color(egui::Color32::from_rgb(144, 238, 144))
+        } else {
+            egui::RichText::new("Exit Temple").size(15.0)
+        };
+        if ui
+            .add_sized([130.0, 28.0], egui::Button::new(exit_text))
+            .clicked()
+        {
+            exit_clicked = true;
+        }
+        ui.label(
+            egui::RichText::new("(or press ESC)")
+                .weak()
+                .color(egui::Color32::LIGHT_GREEN),
+        );
+    });
+
+    ui.add_space(10.0);
+    ui.label(egui::RichText::new("Instructions:").weak());
+    ui.label(
+        egui::RichText::new("• Click Select or use Arrow Keys to highlight a dead party member")
+            .weak()
+            .small(),
+    );
+    ui.label(
+        egui::RichText::new("• Click Resurrect or press Enter/Space to revive (costs gold & gems)")
+            .weak()
+            .small(),
+    );
+    ui.label(
+        egui::RichText::new("• Press ESC or click Exit Temple to leave")
+            .weak()
+            .small()
+            .color(egui::Color32::from_rgb(144, 238, 144)),
+    );
+
+    exit_clicked
+}
+
 // ── UI system ─────────────────────────────────────────────────────────────────
 
 /// Renders the temple service panel when the game is in
 /// [`GameMode::TempleService`] mode.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_lines)]
 fn temple_ui_system(
     mut contexts: EguiContexts,
     global_state: Res<GlobalState>,
@@ -229,42 +446,7 @@ fn temple_ui_system(
     let party_gems = global_state.0.party.gems;
 
     egui::CentralPanel::default().show(ctx, |ui| {
-        ui.heading(format!("Temple of Healing — Priest: {}", npc_name));
-        ui.add_space(6.0);
-        ui.label(
-            egui::RichText::new(
-                "\"The gods have mercy on the fallen. I can restore the breath of life.\"",
-            )
-            .italics()
-            .color(egui::Color32::from_rgb(180, 200, 255)),
-        );
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(6.0);
-
-        // Party resources line
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(format!("Party gold: {}", party_gold))
-                    .color(egui::Color32::YELLOW),
-            );
-            ui.add_space(20.0);
-            ui.label(
-                egui::RichText::new(format!("Party gems: {}", party_gems))
-                    .color(egui::Color32::from_rgb(100, 200, 255)),
-            );
-        });
-        ui.add_space(6.0);
-        ui.label(
-            egui::RichText::new(format!(
-                "Resurrection cost: {} gold, {} gem(s)",
-                service_cost.0, service_cost.1
-            ))
-            .color(egui::Color32::from_rgb(220, 180, 80)),
-        );
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
+        render_temple_header(ui, npc_name, party_gold, party_gems, service_cost);
 
         // Dead party members list
         ui.label(
@@ -288,171 +470,46 @@ fn temple_ui_system(
                 .max_height(240.0)
                 .show(ui, |ui| {
                     for (list_idx, (party_idx, member)) in dead_members.iter().enumerate() {
-                        ui.push_id(format!("temple_member_{}", list_idx), |ui| {
-                            let is_keyboard = nav_state.focused_index == Some(list_idx);
-                            let is_selected = temple_state.selected_member_index == Some(list_idx);
-                            let is_active = is_keyboard || is_selected;
-
-                            let mut frame = egui::Frame::group(ui.style());
-                            if is_active {
-                                frame = frame
-                                    .fill(egui::Color32::from_rgba_premultiplied(80, 80, 0, 120))
-                                    .stroke(egui::Stroke::new(2.0, egui::Color32::YELLOW));
-                            } else {
-                                frame = frame.fill(egui::Color32::from_gray(30));
+                        let is_keyboard = nav_state.focused_index == Some(list_idx);
+                        let is_selected = temple_state.selected_member_index == Some(list_idx);
+                        let highlight = if is_keyboard {
+                            Some(egui::Color32::from_rgb(150, 220, 120))
+                        } else if is_selected {
+                            Some(egui::Color32::YELLOW)
+                        } else {
+                            None
+                        };
+                        let row_action = render_dead_member_row(
+                            ui,
+                            list_idx,
+                            *party_idx,
+                            member,
+                            highlight,
+                            can_afford,
+                            service_cost,
+                        );
+                        match row_action {
+                            Some(TempleRowAction::Select(idx)) => {
+                                select_events.write(SelectTempleMember { member_index: idx });
                             }
-
-                            frame.show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    // Selection indicator
-                                    if is_active {
-                                        ui.label(
-                                            egui::RichText::new("►").color(egui::Color32::YELLOW),
-                                        );
-                                    } else {
-                                        ui.label("  ");
-                                    }
-
-                                    ui.vertical(|ui| {
-                                        let name_text = egui::RichText::new(&member.name)
-                                            .strong()
-                                            .color(if is_keyboard {
-                                                egui::Color32::from_rgb(150, 220, 120)
-                                            } else if is_selected {
-                                                egui::Color32::YELLOW
-                                            } else {
-                                                egui::Color32::WHITE
-                                            });
-                                        ui.label(name_text);
-                                        ui.label(
-                                            egui::RichText::new(format!(
-                                                "{} — Level {}",
-                                                member.class_id, member.level
-                                            ))
-                                            .small()
-                                            .weak(),
-                                        );
-                                        ui.label(
-                                            egui::RichText::new(format!(
-                                                "Cost: {} gold, {} gem(s)",
-                                                service_cost.0, service_cost.1
-                                            ))
-                                            .small()
-                                            .color(egui::Color32::from_rgb(220, 180, 80)),
-                                        );
-                                    });
-
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            // Select button
-                                            if ui.button("Select").clicked() {
-                                                select_events.write(SelectTempleMember {
-                                                    member_index: list_idx,
-                                                });
-                                            }
-
-                                            // Resurrect button (enabled only when affordable
-                                            // and this member is selected)
-                                            let resurrect_enabled = can_afford && is_active;
-                                            if ui
-                                                .add_enabled(
-                                                    resurrect_enabled,
-                                                    egui::Button::new(
-                                                        egui::RichText::new("Resurrect").color(
-                                                            if resurrect_enabled {
-                                                                egui::Color32::from_rgb(
-                                                                    80, 220, 120,
-                                                                )
-                                                            } else {
-                                                                egui::Color32::GRAY
-                                                            },
-                                                        ),
-                                                    ),
-                                                )
-                                                .clicked()
-                                            {
-                                                resurrect_events.write(TempleResurrectCharacter {
-                                                    character_index: *party_idx,
-                                                });
-                                            }
-                                        },
-                                    );
+                            Some(TempleRowAction::Resurrect(idx)) => {
+                                resurrect_events.write(TempleResurrectCharacter {
+                                    character_index: idx,
                                 });
-                            });
-                            ui.add_space(4.0);
-                        });
+                            }
+                            None => {}
+                        }
                     }
                 });
         }
 
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(6.0);
-
-        // Status / error message
-        if let Some(ref msg) = temple_state.status_message {
-            let is_error = msg.contains("Insufficient")
-                || msg.contains("permadeath")
-                || msg.contains("not dead")
-                || msg.contains("not found");
-
-            let text = if is_error {
-                egui::RichText::new(msg.as_str()).color(egui::Color32::RED)
-            } else {
-                egui::RichText::new(msg.as_str()).color(egui::Color32::from_rgb(80, 220, 120))
-            };
-            ui.label(text);
-            ui.add_space(6.0);
+        if render_temple_footer(
+            ui,
+            temple_state.status_message.as_deref(),
+            nav_state.focus_on_exit,
+        ) {
+            exit_events.write(ExitTemple);
         }
-
-        // Exit button
-        ui.horizontal(|ui| {
-            let exit_text = if nav_state.focus_on_exit {
-                egui::RichText::new("Exit Temple")
-                    .strong()
-                    .size(15.0)
-                    .color(egui::Color32::from_rgb(144, 238, 144))
-            } else {
-                egui::RichText::new("Exit Temple").size(15.0)
-            };
-
-            if ui
-                .add_sized([130.0, 28.0], egui::Button::new(exit_text))
-                .clicked()
-            {
-                exit_events.write(ExitTemple);
-            }
-
-            ui.label(
-                egui::RichText::new("(or press ESC)")
-                    .weak()
-                    .color(egui::Color32::LIGHT_GREEN),
-            );
-        });
-
-        ui.add_space(10.0);
-        ui.label(egui::RichText::new("Instructions:").weak());
-        ui.label(
-            egui::RichText::new(
-                "• Click Select or use Arrow Keys to highlight a dead party member",
-            )
-            .weak()
-            .small(),
-        );
-        ui.label(
-            egui::RichText::new(
-                "• Click Resurrect or press Enter/Space to revive (costs gold & gems)",
-            )
-            .weak()
-            .small(),
-        );
-        ui.label(
-            egui::RichText::new("• Press ESC or click Exit Temple to leave")
-                .weak()
-                .small()
-                .color(egui::Color32::from_rgb(144, 238, 144)),
-        );
     });
 }
 
@@ -523,7 +580,7 @@ fn temple_action_system(
                     log.add_system(format!("Resurrection failed: {}", e));
                 }
                 if let GameMode::TempleService(ref mut ts) = global_state.0.mode {
-                    ts.status_message = Some(e);
+                    ts.status_message = Some(e.to_string());
                 }
             }
         }
@@ -541,7 +598,6 @@ fn temple_action_system(
 // ── Input system ──────────────────────────────────────────────────────────────
 
 /// Handles keyboard input for the temple service UI.
-#[allow(clippy::too_many_lines)]
 fn temple_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     global_state: Res<GlobalState>,

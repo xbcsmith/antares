@@ -9,7 +9,7 @@
 //!
 //! # Architecture Reference
 //!
-//! See `docs/explanation/sdk_implementation_plan.md` Phase 3.2 for specifications.
+//! See `docs/explanation/sdk_implementation_plan.md` for specifications.
 //!
 //! # Examples
 //!
@@ -34,6 +34,7 @@ use crate::domain::character_definition::CharacterDatabase;
 use crate::domain::classes::ClassDatabase;
 use crate::domain::combat::monster::Monster;
 use crate::domain::conditions::{ConditionDefinition, ConditionId};
+use crate::domain::database_common::load_ron_entries;
 use crate::domain::dialogue::{DialogueId, DialogueTree};
 use crate::domain::items::ItemDatabase;
 use crate::domain::magic::types::Spell;
@@ -115,7 +116,7 @@ impl From<RaceError> for DatabaseError {
 
 // ===== Race System =====
 // Race types are now imported from crate::domain::races module.
-// See docs/explanation/hardcoded_removal_implementation_plan.md Phase 4.
+// See docs/explanation/hardcoded_removal_implementation_plan.md
 
 // ===== Spell System =====
 
@@ -179,16 +180,14 @@ impl SpellDatabase {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| DatabaseError::SpellLoadError(format!("Failed to read file: {}", e)))?;
 
-        let spells: Vec<Spell> = ron::from_str(&contents)
-            .map_err(|e| DatabaseError::SpellLoadError(format!("Failed to parse RON: {}", e)))?;
+        let spells = load_ron_entries(
+            &contents,
+            |s: &Spell| s.id,
+            |id| DatabaseError::SpellLoadError(format!("Duplicate spell ID: {}", id)),
+            |e| DatabaseError::SpellLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut spell_map = HashMap::new();
-        for spell in spells {
-            spell_map.insert(spell.id, spell);
-        }
-
-        Ok(Self { spells: spell_map })
+        Ok(Self { spells })
     }
 
     /// Gets a spell by ID
@@ -289,18 +288,14 @@ impl MonsterDatabase {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| DatabaseError::MonsterLoadError(format!("Failed to read file: {}", e)))?;
 
-        let monsters: Vec<Monster> = ron::from_str(&contents)
-            .map_err(|e| DatabaseError::MonsterLoadError(format!("Failed to parse RON: {}", e)))?;
+        let monsters = load_ron_entries(
+            &contents,
+            |m: &Monster| m.id,
+            |id| DatabaseError::MonsterLoadError(format!("Duplicate monster ID: {}", id)),
+            |e| DatabaseError::MonsterLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut monster_map = HashMap::new();
-        for monster in monsters {
-            monster_map.insert(monster.id, monster);
-        }
-
-        Ok(Self {
-            monsters: monster_map,
-        })
+        Ok(Self { monsters })
     }
 
     /// Gets a monster by ID
@@ -391,7 +386,7 @@ impl MapDatabase {
                 let contents = match std::fs::read_to_string(&path) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("Warning: failed to read map file {}: {}", path.display(), e);
+                        tracing::warn!("Failed to read map file {}: {}", path.display(), e);
                         // Skip unreadable map files instead of failing the whole load
                         continue;
                     }
@@ -410,8 +405,8 @@ impl MapDatabase {
                         maps.insert(map.id, map);
                     }
                     Err(e) => {
-                        eprintln!(
-                            "Warning: failed to parse map file {}: {}. Skipping this map.",
+                        tracing::warn!(
+                            "Failed to parse map file {}: {}. Skipping this map.",
                             path.display(),
                             e
                         );
@@ -499,16 +494,14 @@ impl QuestDatabase {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| DatabaseError::QuestLoadError(format!("Failed to read file: {}", e)))?;
 
-        let quests: Vec<Quest> = ron::from_str(&contents)
-            .map_err(|e| DatabaseError::QuestLoadError(format!("Failed to parse RON: {}", e)))?;
+        let quests = load_ron_entries(
+            &contents,
+            |q: &Quest| q.id,
+            |id| DatabaseError::QuestLoadError(format!("Duplicate quest ID: {}", id)),
+            |e| DatabaseError::QuestLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut quest_map = HashMap::new();
-        for quest in quests {
-            quest_map.insert(quest.id, quest);
-        }
-
-        Ok(Self { quests: quest_map })
+        Ok(Self { quests })
     }
 
     /// Gets a quest by ID
@@ -682,19 +675,14 @@ impl ConditionDatabase {
             DatabaseError::ConditionLoadError(format!("Failed to read file: {}", e))
         })?;
 
-        let conditions: Vec<ConditionDefinition> = ron::from_str(&contents).map_err(|e| {
-            DatabaseError::ConditionLoadError(format!("Failed to parse RON: {}", e))
-        })?;
+        let conditions = load_ron_entries(
+            &contents,
+            |c: &ConditionDefinition| c.id.clone(),
+            |id| DatabaseError::ConditionLoadError(format!("Duplicate condition ID: {}", id)),
+            |e| DatabaseError::ConditionLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut condition_map = HashMap::new();
-        for condition in conditions {
-            condition_map.insert(condition.id.clone(), condition);
-        }
-
-        Ok(Self {
-            conditions: condition_map,
-        })
+        Ok(Self { conditions })
     }
 
     /// Gets a condition by ID
@@ -784,18 +772,14 @@ impl DialogueDatabase {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| DatabaseError::DialogueLoadError(format!("Failed to read file: {}", e)))?;
 
-        let dialogues: Vec<DialogueTree> = ron::from_str(&contents)
-            .map_err(|e| DatabaseError::DialogueLoadError(format!("Failed to parse RON: {}", e)))?;
+        let dialogues = load_ron_entries(
+            &contents,
+            |d: &DialogueTree| d.id,
+            |id| DatabaseError::DialogueLoadError(format!("Duplicate dialogue ID: {}", id)),
+            |e| DatabaseError::DialogueLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut dialogue_map = HashMap::new();
-        for dialogue in dialogues {
-            dialogue_map.insert(dialogue.id, dialogue);
-        }
-
-        Ok(Self {
-            dialogues: dialogue_map,
-        })
+        Ok(Self { dialogues })
     }
 
     /// Gets a dialogue by ID
@@ -824,7 +808,7 @@ impl DialogueDatabase {
     }
 
     /// Validates all dialogues in the database
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), crate::domain::validation::ValidationError> {
         for dialogue in self.dialogues.values() {
             dialogue.validate()?;
         }
@@ -875,7 +859,7 @@ impl DialogueDatabase {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NpcDatabase {
     npcs: HashMap<crate::domain::world::NpcId, crate::domain::world::NpcDefinition>,
 }
@@ -937,16 +921,14 @@ impl NpcDatabase {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| DatabaseError::NpcLoadError(format!("Failed to read file: {}", e)))?;
 
-        let npcs: Vec<crate::domain::world::NpcDefinition> = ron::from_str(&contents)
-            .map_err(|e| DatabaseError::NpcLoadError(format!("Failed to parse RON: {}", e)))?;
+        let npcs = load_ron_entries(
+            &contents,
+            |n: &crate::domain::world::NpcDefinition| n.id.clone(),
+            |id| DatabaseError::NpcLoadError(format!("Duplicate NPC ID: {}", id)),
+            |e| DatabaseError::NpcLoadError(format!("Failed to parse RON: {}", e)),
+        )?;
 
-        // Build HashMap from vector
-        let mut npc_map = HashMap::new();
-        for npc in npcs {
-            npc_map.insert(npc.id.clone(), npc);
-        }
-
-        Ok(Self { npcs: npc_map })
+        Ok(Self { npcs })
     }
 
     /// Gets an NPC by ID
@@ -1017,12 +999,6 @@ impl NpcDatabase {
                 }
             })
             .collect()
-    }
-}
-
-impl Default for NpcDatabase {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -1200,7 +1176,7 @@ impl ContentDatabase {
             ClassDatabase::new()
         };
 
-        // Load races (Phase 2 - currently placeholder)
+        // Load races (currently placeholder)
         let races = if data_dir.join("races.ron").exists() {
             RaceDatabase::load_from_file(data_dir.join("races.ron"))?
         } else {
@@ -1349,7 +1325,7 @@ impl ContentDatabase {
             ClassDatabase::new()
         };
 
-        // Load races (Phase 2)
+        // Load races
         let races = if data_path.join("races.ron").exists() {
             RaceDatabase::load_from_file(data_path.join("races.ron"))?
         } else {
@@ -2296,7 +2272,7 @@ mod tests {
 
     /// Loading `data/test_campaign/data/spells.ron` must yield at least one
     /// spell that has `resurrect_hp: Some(1)` — the "Resurrect" entry added
-    /// in Phase 3.
+    /// previously.
     #[test]
     fn test_resurrect_spell_loads_from_test_campaign() {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -2304,7 +2280,7 @@ mod tests {
         let db =
             SpellDatabase::load_from_file(&path).expect("should load spells from test_campaign");
 
-        // Spell ID 776 is the "Resurrect" entry added in Phase 3.
+        // Spell ID 776 is the "Resurrect" entry.
         let spell = db
             .get_spell(776)
             .expect("test_campaign/data/spells.ron must contain spell with id 776 (Resurrect)");
@@ -2332,7 +2308,7 @@ mod tests {
     }
 
     /// `ConditionDatabase` loaded from `data/test_campaign/data/conditions.ron`
-    /// must contain a `"dead"` entry (added in Phase 2).
+    /// must contain a `"dead"` entry.
     #[test]
     fn test_dead_condition_in_ron_loaded() {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -2341,7 +2317,7 @@ mod tests {
             .expect("should load conditions from test_campaign");
         assert!(
             db.has_condition(&"dead".to_string()),
-            "conditions.ron must contain a 'dead' entry (Phase 2 requirement)"
+            "conditions.ron must contain a 'dead' entry"
         );
     }
 
@@ -3076,7 +3052,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 4: MerchantStockTemplateDatabase and ContentDatabase Integration Tests =====
+    // ===== MerchantStockTemplateDatabase and ContentDatabase Integration Tests =====
 
     #[test]
     fn test_merchant_stock_template_database_new() {
@@ -3290,12 +3266,12 @@ mod tests {
         );
     }
 
-    /// Phase 3 — Merchant and Innkeeper Integration
+    /// Merchant and Innkeeper Integration
     ///
     /// Verify that the core `npc_stock_templates.ron` contains food items
     /// (Food Ration id 53, Trail Ration id 54) in the `general_store_basic`
     /// and `innkeeper_basic` templates.  This test is the acceptance gate for
-    /// Phase 3.3 deliverable: "Merchant stock templates updated with food items".
+    /// the deliverable: "Merchant stock templates updated with food items".
     #[test]
     fn test_general_store_basic_contains_food_rations() {
         let path = "data/npc_stock_templates.ron";
@@ -3349,7 +3325,7 @@ mod tests {
         );
     }
 
-    /// Phase 3 — Merchant and Innkeeper Integration
+    /// Merchant and Innkeeper Integration
     ///
     /// Verify that the `innkeeper_basic` template exists in the core data and
     /// stocks food rations so an innkeeper NPC can sell food to the party.
@@ -3394,7 +3370,7 @@ mod tests {
         );
     }
 
-    /// Phase 3 — Merchant and Innkeeper Integration
+    /// Merchant and Innkeeper Integration
     ///
     /// Verify that the `general_goods` template alias exists and also contains
     /// food rations.
@@ -3426,7 +3402,7 @@ mod tests {
         );
     }
 
-    /// Phase 3 — Merchant and Innkeeper Integration (test campaign)
+    /// Merchant and Innkeeper Integration (test campaign)
     ///
     /// Verify that the test campaign's `tutorial_merchant_stock` template
     /// contains food rations (item_id 108 = Food Ration, item_id 109 = Trail
@@ -3473,7 +3449,7 @@ mod tests {
         );
     }
 
-    /// Phase 3 — Merchant and Innkeeper Integration (test campaign)
+    /// Merchant and Innkeeper Integration (test campaign)
     ///
     /// Verify that the test campaign's `tutorial_general_store` template exists
     /// and contains food rations.
@@ -3530,7 +3506,7 @@ mod tests {
         );
     }
 
-    /// Phase 3 — Merchant and Innkeeper Integration (test campaign)
+    /// Merchant and Innkeeper Integration (test campaign)
     ///
     /// Verify that the test campaign's `tutorial_innkeeper_stock` template
     /// exists and contains food rations with override prices, confirming the
@@ -3581,12 +3557,12 @@ mod tests {
         );
     }
 
-    /// Phase 3 — Stock template populates MerchantStock correctly
+    /// Stock template populates MerchantStock correctly
     ///
     /// End-to-end test: load the test campaign, build a runtime NPC state from
     /// the `tutorial_general_store` template, and assert that the resulting
     /// `MerchantStock` contains Food Ration and Trail Ration entries with
-    /// non-zero quantities.  This is the full acceptance test for Phase 3.4
+    /// non-zero quantities.  This is the full acceptance test for the
     /// success criteria: "Players can interact with merchants and natively buy
     /// food rations into their inventory using gold."
     #[test]
@@ -3636,10 +3612,10 @@ mod tests {
         );
     }
 
-    /// Phase 4: Verify that the test-campaign priest NPC has a `service_catalog`
+    /// Verify that the test-campaign priest NPC has a `service_catalog`
     /// containing the `"resurrect"` service.
     ///
-    /// This test satisfies the Phase 4.4 requirement:
+    /// This test satisfies the requirement:
     /// `test_temple_npc_has_resurrect_service` — Test campaign priest NPC has
     /// `service_catalog` with `"resurrect"`.
     #[test]

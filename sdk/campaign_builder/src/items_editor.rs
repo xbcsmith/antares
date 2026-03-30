@@ -117,7 +117,6 @@ impl ItemsEditorState {
         Self::default()
     }
 
-    #[allow(deprecated)]
     pub fn default_item() -> Item {
         Item {
             id: 0,
@@ -354,7 +353,6 @@ impl ItemsEditorState {
         }
     }
 
-    #[allow(deprecated)]
     #[allow(clippy::too_many_arguments)]
     fn show_list(
         &mut self,
@@ -1627,7 +1625,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_type_filter_matches_weapon() {
         let weapon_item = Item {
             id: 1,
@@ -1658,7 +1655,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_type_filter_matches_armor() {
         let armor_item = Item {
             id: 2,
@@ -1687,7 +1683,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_type_filter_matches_quest() {
         let quest_item = Item {
             id: 3,
@@ -1839,7 +1834,6 @@ mod tests {
     /// losing their ration value. This simulates loading an existing food item
     /// into the editor state and inspecting the buffered effect.
     #[test]
-    #[allow(deprecated)]
     fn test_is_food_item_loads_into_edit_buffer() {
         let mut state = ItemsEditorState::new();
         // Simulate selecting a Food Ration for editing
@@ -1884,7 +1878,6 @@ mod tests {
     /// Ensures a Trail Ration (ration_value=3) round-trips through the editor
     /// buffer correctly — verifying non-unit ration values are preserved.
     #[test]
-    #[allow(deprecated)]
     fn test_is_food_trail_ration_loads_into_edit_buffer() {
         let mut state = ItemsEditorState::new();
         state.edit_buffer = Item {
@@ -1924,7 +1917,6 @@ mod tests {
     /// items are consumables). Campaign developers will use the Consumable filter
     /// to find food items in the editor list view.
     #[test]
-    #[allow(deprecated)]
     fn test_consumable_filter_matches_food_item() {
         let food_item = Item {
             id: 53,
@@ -1993,7 +1985,6 @@ mod tests {
     /// Setting `duration_minutes = Some(60)` in the edit buffer is preserved
     /// after round-tripping through the buffer — simulating save/reload.
     #[test]
-    #[allow(deprecated)]
     fn test_duration_field_round_trips_through_editor() {
         let mut state = ItemsEditorState::new();
         state.edit_buffer = Item {

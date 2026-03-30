@@ -433,7 +433,7 @@ impl CombatEventType {
     }
 }
 
-// ===== Phase 4: Boss Combat Constants =====
+// ===== Boss Combat Constants =====
 
 /// HP regeneration per round for boss monsters when `monsters_regenerate` is true.
 ///
@@ -647,7 +647,7 @@ mod tests {
         assert_ne!(player, monster);
     }
 
-    // ===== Phase 4: Boss Combat Constant Tests =====
+    // ===== Boss Combat Constant Tests =====
 
     #[test]
     fn test_boss_regen_per_round_constant() {

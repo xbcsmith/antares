@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Map editor helper functions and integration for Phase 5
+//! Map editor helper functions and integration
 //!
 //! This module provides helper functions for integrating the SDK content database
 //! with map editing tools, including smart ID suggestions, content browsing,
@@ -9,7 +9,7 @@
 //!
 //! # Architecture Reference
 //!
-//! See `docs/explanation/sdk_and_campaign_architecture.md` Phase 4 for specifications.
+//! See `docs/explanation/sdk_and_campaign_architecture.md` for specifications.
 //!
 //! # Examples
 //!
@@ -483,7 +483,7 @@ mod tests {
     }
 }
 
-// ===== Sprite Sheet Management (Phase 5) =====
+// ===== Sprite Sheet Management =====
 
 /// Type alias for sprite search results: (sheet_key, sprite_index, sprite_name)
 pub type SpriteSearchResult = (String, u32, String);

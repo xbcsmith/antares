@@ -697,7 +697,7 @@ pub fn process_rest(
             // If the party can't pay, refuse rest entirely: no food consumed,
             // no HP/SP restored, no mode change.
             //
-            // Phase 2: food is tracked as IsFood inventory items.  We use an
+            // Food is tracked as IsFood inventory items.  We use an
             // empty ItemDatabase as a fallback so the food check passes
             // gracefully when no campaign content is loaded (e.g. unit tests
             // that don't set up GameContent).

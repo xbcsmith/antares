@@ -967,7 +967,6 @@ impl CampaignBuilderApp {
     }
 
     /// Create a default item for the edit buffer
-    #[allow(deprecated)]
     fn default_item() -> Item {
         Item {
             id: 0,
@@ -5760,7 +5759,7 @@ impl CampaignBuilderApp {
                     ui.label("No files loaded. Use Tools > Refresh File Tree");
                 } else {
                     for node in &self.file_tree {
-                        self.show_file_node(ui, node, 0);
+                        show_file_node(ui, node, 0);
                     }
                 }
             });
@@ -5770,23 +5769,6 @@ impl CampaignBuilderApp {
                 ui.label("No campaign directory loaded");
                 ui.label("Open or save a campaign to view its file structure");
             });
-        }
-    }
-
-    #[allow(clippy::only_used_in_recursion)]
-    fn show_file_node(&self, ui: &mut egui::Ui, node: &FileNode, depth: usize) {
-        let indent = depth as f32 * 20.0;
-        ui.horizontal(|ui| {
-            ui.add_space(indent);
-
-            let icon = if node.is_directory { "📁" } else { "📄" };
-            ui.label(format!("{} {}", icon, node.name));
-        });
-
-        if node.is_directory && !node.children.is_empty() {
-            for child in &node.children {
-                self.show_file_node(ui, child, depth + 1);
-            }
         }
     }
 
@@ -6637,6 +6619,22 @@ impl CampaignBuilderApp {
                 ui.label("No campaign directory loaded");
                 ui.label("Open or create a campaign to manage assets");
             });
+        }
+    }
+}
+
+fn show_file_node(ui: &mut egui::Ui, node: &FileNode, depth: usize) {
+    let indent = depth as f32 * 20.0;
+    ui.horizontal(|ui| {
+        ui.add_space(indent);
+
+        let icon = if node.is_directory { "📁" } else { "📄" };
+        ui.label(format!("{} {}", icon, node.name));
+    });
+
+    if node.is_directory && !node.children.is_empty() {
+        for child in &node.children {
+            show_file_node(ui, child, depth + 1);
         }
     }
 }
@@ -9615,7 +9613,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_type_filter_all_types() {
         use antares::domain::items::types::*;
 
@@ -9751,7 +9748,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_import_export_roundtrip() {
         use antares::domain::items::types::*;
 
@@ -9808,7 +9804,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_type_specific_editors() {
         use antares::domain::items::types::*;
 
@@ -9887,7 +9882,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_combined_filters() {
         use antares::domain::items::types::*;
 
@@ -10008,7 +10002,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_preview_displays_all_info() {
         use antares::domain::items::types::*;
 

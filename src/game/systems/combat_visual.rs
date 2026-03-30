@@ -27,6 +27,12 @@ use crate::game::systems::combat::{
     TURN_INDICATOR_COLOR,
 };
 
+/// Query for existing turn indicator entities and their associated combatant data.
+type TurnIndicatorQuery<'w, 's> = Query<'w, 's, (Entity, &'static TurnIndicator)>;
+
+/// Query for enemy card entities used as turn indicator attachment points.
+type EnemyCardQuery<'w, 's> = Query<'w, 's, (Entity, &'static EnemyCard)>;
+
 /// Spawns a turn indicator for the current combatant if none exists.
 ///
 /// - When the current combatant is a monster, the indicator is spawned as a
@@ -159,13 +165,12 @@ pub fn spawn_turn_indicator(
 /// - Performs a "move" by despawning the old indicator and spawning a new one
 ///   attached to the correct UI node. (Simple and avoids complicated
 ///   re-parent/state mutation while remaining clear.)
-#[allow(clippy::type_complexity)]
 pub fn update_turn_indicator(
     mut commands: Commands,
     global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
-    existing: Query<(Entity, &TurnIndicator)>,
-    enemy_cards: Query<(Entity, &EnemyCard)>,
+    existing: TurnIndicatorQuery,
+    enemy_cards: EnemyCardQuery,
     action_panels: Query<Entity, With<ActionMenuPanel>>,
     turn_state: Option<Res<CombatTurnStateResource>>,
 ) {

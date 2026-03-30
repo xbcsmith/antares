@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Item database - Loading and managing item definitions from RON files
@@ -16,7 +16,6 @@ use crate::domain::types::ItemId;
 use crate::domain::visual::creature_database::CreatureDatabase;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use thiserror::Error;
 
 // ===== Error Types =====
@@ -75,11 +74,23 @@ pub enum ItemDatabaseError {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ItemDatabase {
     /// All items indexed by ID
     items: HashMap<ItemId, Item>,
 }
+
+crate::impl_ron_database!(
+    ItemDatabase,
+    entity: Item,
+    key: ItemId,
+    error: ItemDatabaseError,
+    field: items,
+    id_of: |i: &Item| i.id,
+    dup_err: ItemDatabaseError::DuplicateId,
+    read_err: ItemDatabaseError::ReadError,
+    parse_err: ItemDatabaseError::ParseError,
+);
 
 impl ItemDatabase {
     /// Create an empty item database
@@ -96,66 +107,6 @@ impl ItemDatabase {
         Self {
             items: HashMap::new(),
         }
-    }
-
-    /// Load item database from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing item definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(ItemDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `ItemDatabaseError::ReadError` if file cannot be read
-    /// Returns `ItemDatabaseError::ParseError` if RON parsing fails
-    /// Returns `ItemDatabaseError::DuplicateId` if duplicate item IDs found
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::domain::items::ItemDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = ItemDatabase::load_from_file("data/items.ron")?;
-    /// println!("Loaded {} items", db.len());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ItemDatabaseError> {
-        let contents = std::fs::read_to_string(path)?;
-        Self::load_from_string(&contents)
-    }
-
-    /// Load item database from a RON string
-    ///
-    /// # Arguments
-    ///
-    /// * `ron_data` - RON-formatted string containing item definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(ItemDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `ItemDatabaseError::ParseError` if RON parsing fails
-    /// Returns `ItemDatabaseError::DuplicateId` if duplicate item IDs found
-    pub fn load_from_string(ron_data: &str) -> Result<Self, ItemDatabaseError> {
-        let items: Vec<Item> = ron::from_str(ron_data)?;
-        let mut db = Self::new();
-
-        for item in items {
-            if db.items.contains_key(&item.id) {
-                return Err(ItemDatabaseError::DuplicateId(item.id));
-            }
-            db.items.insert(item.id, item);
-        }
-
-        Ok(db)
     }
 
     /// Add an item to the database
@@ -364,12 +315,12 @@ impl ItemDatabase {
         for (id, item) in &self.items {
             let descriptor = ItemMeshDescriptor::from_item(item);
             let creature_def = descriptor.to_creature_definition();
-            creature_def.validate().map_err(|message| {
-                ItemDatabaseError::InvalidMeshDescriptor {
+            creature_def
+                .validate()
+                .map_err(|e| ItemDatabaseError::InvalidMeshDescriptor {
                     item_id: *id,
-                    message,
-                }
-            })?;
+                    message: e.to_string(),
+                })?;
         }
         Ok(())
     }
@@ -442,12 +393,12 @@ impl ItemDatabase {
             if item.mesh_descriptor_override.is_some() {
                 let descriptor = ItemMeshDescriptor::from_item(item);
                 let creature_def = descriptor.to_creature_definition();
-                creature_def.validate().map_err(|message| {
-                    ItemDatabaseError::InvalidMeshDescriptor {
+                creature_def
+                    .validate()
+                    .map_err(|e| ItemDatabaseError::InvalidMeshDescriptor {
                         item_id: *id,
-                        message,
-                    }
-                })?;
+                        message: e.to_string(),
+                    })?;
             }
         }
         Ok(())
@@ -610,12 +561,6 @@ impl ItemMeshDatabase {
         &self,
     ) -> Result<(), crate::domain::visual::creature_database::CreatureDatabaseError> {
         self.inner.validate()
-    }
-}
-
-impl Default for ItemDatabase {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

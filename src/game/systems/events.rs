@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::application::resources::GameContent;
@@ -13,7 +13,9 @@ use crate::game::systems::furniture_rendering::{
 };
 use crate::game::systems::item_world_events::ItemPickedUpEvent;
 use crate::game::systems::map::{EventTrigger, MapChangeEvent, NpcMarker, TileCoord};
-use crate::game::systems::procedural_meshes::ProceduralMeshCache;
+use crate::game::systems::procedural_meshes::{
+    FurnitureSpawnParams, MeshSpawnContext, ProceduralMeshCache,
+};
 use crate::game::systems::ui::{GameLogEvent, LogCategory};
 use bevy::prelude::*;
 
@@ -121,11 +123,11 @@ fn check_for_events(
                             current_pos
                         );
                     }
-                    // Phase 2 (locks): LockedDoor and LockedContainer tiles are
-                    // blocked so the party cannot physically stand on them. Skip
-                    // auto-triggering here; interaction is driven by the split
-                    // exploration-interaction input path (or explicit
-                    // `MapEventTriggered` in tests).
+                    // LockedDoor and LockedContainer tiles are blocked so the
+                    // party cannot physically stand on them. Skip auto-triggering
+                    // here; interaction is driven by the split exploration-
+                    // interaction input path (or explicit `MapEventTriggered`
+                    // in tests).
                     MapEvent::LockedDoor { .. } | MapEvent::LockedContainer { .. } => {
                         info!(
                             "Party at {:?} is on a LockedDoor/LockedContainer event; \
@@ -288,7 +290,7 @@ fn handle_events(
     mut pending_recruitment: Option<
         ResMut<crate::game::systems::dialogue::PendingRecruitmentContext>,
     >,
-    // Phase 2 (locks): signal resource consumed by Phase 3's lock-choice UI.
+    // Lock signal resource consumed by the lock-choice UI.
     // Using Option<ResMut<...>> so handle_events can run in test apps that do
     // not register InputPlugin (and therefore may not have the resource).
     mut lock_pending: Option<ResMut<LockInteractionPending>>,
@@ -311,7 +313,7 @@ fn handle_events(
                     .map(|map| map.name.clone())
                     .unwrap_or_else(|| format!("Map {}", map_id));
                 let msg = format!("Entering {}...", map_name);
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -336,7 +338,7 @@ fn handle_events(
                 });
 
                 let msg = format!("{}: {}", name, text);
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -348,7 +350,7 @@ fn handle_events(
                 damage, effect: _, ..
             } => {
                 let msg = format!("Trapped! Took {} damage.", damage);
-                println!("{}", msg);
+                tracing::warn!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -359,7 +361,7 @@ fn handle_events(
             }
             MapEvent::Treasure { loot, .. } => {
                 let msg = format!("Found treasure! {} item(s).", loot.len());
-                println!("{}", msg);
+                tracing::warn!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -374,7 +376,7 @@ fn handle_events(
                 ..
             } => {
                 let msg = format!("Monsters! ({} foes)", monster_group.len());
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -462,7 +464,7 @@ fn handle_events(
                         });
 
                         let msg = format!("{} speaks.", npc_def.name);
-                        println!("{}", msg);
+                        tracing::info!("{}", msg);
                         if let Some(ref mut writer) = game_log_writer {
                             writer.write(GameLogEvent {
                                 text: msg,
@@ -484,7 +486,7 @@ fn handle_events(
                         });
 
                         let msg = format!("{} speaks.", npc_def.name);
-                        println!("{}", msg);
+                        tracing::info!("{}", msg);
                         if let Some(ref mut writer) = game_log_writer {
                             writer.write(GameLogEvent {
                                 text: msg,
@@ -495,7 +497,7 @@ fn handle_events(
                 } else {
                     // NPC not found in database - log error
                     let msg = format!("Error: NPC '{}' not found in database", npc_id);
-                    println!("{}", msg);
+                    tracing::error!("{}", msg);
                     if let Some(ref mut writer) = game_log_writer {
                         writer.write(GameLogEvent {
                             text: msg,
@@ -513,7 +515,7 @@ fn handle_events(
                 facing: _,
             } => {
                 let msg = format!("Met {}.", name);
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -608,7 +610,7 @@ fn handle_events(
                 innkeeper_id,
             } => {
                 let msg = format!("Entering {}.", name);
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -654,7 +656,7 @@ fn handle_events(
                 } else {
                     // NPC definition not found
                     let err = format!("Error: Innkeeper '{}' not found in database", innkeeper_id);
-                    println!("{}", err);
+                    tracing::error!("{}", err);
                     if let Some(ref mut writer) = game_log_writer {
                         writer.write(GameLogEvent {
                             text: err,
@@ -675,7 +677,7 @@ fn handle_events(
                 key_item_id,
             } => {
                 let msg = format!("Furniture placed: {}", name);
-                println!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
@@ -708,20 +710,25 @@ fn handle_events(
                         &content.db().furniture,
                     );
 
-                    spawn_furniture_with_rendering(
+                    let mut ctx = MeshSpawnContext {
                         commands,
-                        materials_res,
-                        meshes_res,
+                        materials: materials_res,
+                        meshes: meshes_res,
+                        cache: &mut furniture_cache,
+                    };
+                    spawn_furniture_with_rendering(
+                        &mut ctx,
                         trigger.position,
                         map_id,
-                        resolved_type,
-                        *rotation_y,
-                        resolved_scale,
-                        resolved_material,
-                        resolved_flags,
-                        resolved_tint,
-                        *key_item_id,
-                        &mut furniture_cache,
+                        &FurnitureSpawnParams {
+                            furniture_type: resolved_type,
+                            rotation_y: *rotation_y,
+                            scale: resolved_scale,
+                            material_type: resolved_material,
+                            flags: resolved_flags,
+                            color_tint: resolved_tint,
+                            key_item_id: *key_item_id,
+                        },
                     );
                 }
             }
@@ -757,7 +764,7 @@ fn handle_events(
                 // `load_map_dropped_items_system` which fires `ItemDroppedEvent`
                 // for each one on map load.  Stepping on the tile does nothing
                 // interactive — the party picks the item up via the dedicated
-                // pickup action (Phase 3+).  We log it here for diagnostics.
+                // pickup action.  We log it here for diagnostics.
                 let msg = format!("Stepped on dropped item: {} (id={})", name, item_id);
                 info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
@@ -768,7 +775,7 @@ fn handle_events(
                 }
             }
 
-            // Phase 2 (locks): handle a LockedDoor event triggered via
+            // Handle a LockedDoor event triggered via
             // `MapEventTriggered` (e.g. from programmatic tests or a future
             // game-world trigger system). The primary player path goes through
             // the split exploration-interaction input flow, but this arm
@@ -917,7 +924,7 @@ fn handle_events(
                 }
             }
 
-            // Phase 2 (locks): same key-check logic as LockedDoor.
+            // Same key-check logic as LockedDoor.
             MapEvent::LockedContainer {
                 name,
                 lock_id,
@@ -1097,7 +1104,7 @@ fn handle_event_result(
             });
 
             let msg = format!("Visiting {}.", npc_def.name);
-            println!("{}", msg);
+            tracing::info!("{}", msg);
             if let Some(ref mut writer) = game_log_writer {
                 writer.write(GameLogEvent {
                     text: msg,
@@ -1130,7 +1137,7 @@ fn handle_event_result(
         }
     } else {
         let msg = format!("Error: Merchant NPC '{}' not found in database", npc_id);
-        println!("{}", msg);
+        tracing::error!("{}", msg);
         if let Some(ref mut writer) = game_log_writer {
             writer.write(GameLogEvent {
                 text: msg,
@@ -2362,11 +2369,11 @@ mod tests {
     }
 }
 
-/// Integration tests for Phase 2: `MapEvent::LockedDoor` arriving via the
+/// Integration tests for `MapEvent::LockedDoor` arriving via the
 /// `MapEventTriggered` message sets `LockInteractionPending`.
 ///
-/// These tests exercise the `handle_events` match arm for `LockedDoor` that
-/// was added in Phase 2. The primary player path goes through the split
+/// These tests exercise the `handle_events` match arm for `LockedDoor`. The
+/// primary player path goes through the split
 /// exploration-interaction input flow, but `handle_events` must handle the same
 /// logic for programmatic tests and
 /// future game-world trigger systems.
@@ -2400,7 +2407,7 @@ mod locked_door_event_tests {
     /// - `GlobalState` with a 10×10 map + one party member
     /// - `GameContent` (empty database — sufficient for class lookups that
     ///   return `None`, yielding `can_lockpick = false`)
-    /// - `LockInteractionPending` (Phase 2 resource under test)
+    /// - `LockInteractionPending` (resource under test)
     /// - `GameLog` (for log message assertions)
     fn build_event_test_app() -> App {
         let mut app = App::new();
@@ -2481,7 +2488,7 @@ mod locked_door_event_tests {
     /// `LockInteractionPending` with the lock's ID and position.
     ///
     /// This covers the programmatic-trigger path (e.g. tests, scripted events)
-    /// described in Phase 2 Section 2.3.
+    /// described in the lock interaction design.
     #[test]
     fn test_locked_door_event_sets_pending_resource() {
         let mut app = build_event_test_app();

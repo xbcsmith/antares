@@ -166,7 +166,7 @@ impl StockEntry {
 /// assert!(stock.decrement(1));
 /// assert_eq!(stock.get_entry(1).unwrap().quantity, 4);
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MerchantStock {
     /// Current mutable runtime stock entries
     pub entries: Vec<StockEntry>,
@@ -326,12 +326,6 @@ impl MerchantStock {
     }
 }
 
-impl Default for MerchantStock {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ===== ServiceEntry =====
 
 /// A single service offered by a priest or innkeeper NPC
@@ -437,7 +431,7 @@ impl ServiceEntry {
 /// assert!(catalog.has_service("heal_all"));
 /// assert!(!catalog.has_service("resurrect"));
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ServiceCatalog {
     /// All services offered by this NPC
     pub services: Vec<ServiceEntry>,
@@ -504,12 +498,6 @@ impl ServiceCatalog {
     /// ```
     pub fn has_service(&self, service_id: &str) -> bool {
         self.services.iter().any(|s| s.service_id == service_id)
-    }
-}
-
-impl Default for ServiceCatalog {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
