@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Item database - Loading and managing item definitions from RON files
@@ -10,14 +10,12 @@
 //!
 //! See `docs/reference/architecture.md` Section 7.1-7.2 for data file specifications.
 
-use crate::domain::database_common::{load_ron_entries, load_ron_file};
 use crate::domain::items::types::Item;
 use crate::domain::proficiency::ProficiencyDatabase;
 use crate::domain::types::ItemId;
 use crate::domain::visual::creature_database::CreatureDatabase;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use thiserror::Error;
 
 // ===== Error Types =====
@@ -82,6 +80,18 @@ pub struct ItemDatabase {
     items: HashMap<ItemId, Item>,
 }
 
+crate::impl_ron_database!(
+    ItemDatabase,
+    entity: Item,
+    key: ItemId,
+    error: ItemDatabaseError,
+    field: items,
+    id_of: |i: &Item| i.id,
+    dup_err: ItemDatabaseError::DuplicateId,
+    read_err: ItemDatabaseError::ReadError,
+    parse_err: ItemDatabaseError::ParseError,
+);
+
 impl ItemDatabase {
     /// Create an empty item database
     ///
@@ -97,70 +107,6 @@ impl ItemDatabase {
         Self {
             items: HashMap::new(),
         }
-    }
-
-    /// Load item database from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing item definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(ItemDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `ItemDatabaseError::ReadError` if file cannot be read
-    /// Returns `ItemDatabaseError::ParseError` if RON parsing fails
-    /// Returns `ItemDatabaseError::DuplicateId` if duplicate item IDs found
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::domain::items::ItemDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = ItemDatabase::load_from_file("data/items.ron")?;
-    /// println!("Loaded {} items", db.len());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ItemDatabaseError> {
-        Ok(Self {
-            items: load_ron_file(
-                path,
-                |i: &Item| i.id,
-                ItemDatabaseError::DuplicateId,
-                Into::into,
-                Into::into,
-            )?,
-        })
-    }
-
-    /// Load item database from a RON string
-    ///
-    /// # Arguments
-    ///
-    /// * `ron_data` - RON-formatted string containing item definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(ItemDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `ItemDatabaseError::ParseError` if RON parsing fails
-    /// Returns `ItemDatabaseError::DuplicateId` if duplicate item IDs found
-    pub fn load_from_string(ron_data: &str) -> Result<Self, ItemDatabaseError> {
-        Ok(Self {
-            items: load_ron_entries(
-                ron_data,
-                |i: &Item| i.id,
-                ItemDatabaseError::DuplicateId,
-                Into::into,
-            )?,
-        })
     }
 
     /// Add an item to the database

@@ -3054,9 +3054,10 @@ impl Map {
                 } else {
                     // NPC definition not found in database
                     // In production, this should log a warning
-                    eprintln!(
-                        "Warning: NPC '{}' not found in database on map {}",
-                        placement.npc_id, self.id
+                    tracing::warn!(
+                        "NPC '{}' not found in database on map {}",
+                        placement.npc_id,
+                        self.id
                     );
                     None
                 }

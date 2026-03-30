@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Monster database - Loading and managing monster definitions from RON files
@@ -13,11 +13,11 @@
 use crate::domain::character::Stats;
 use crate::domain::combat::monster::{LootTable, Monster, MonsterResistances};
 use crate::domain::combat::types::Attack;
-use crate::domain::database_common::{load_ron_entries, load_ron_file};
+
 use crate::domain::types::{CreatureId, MonsterId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+
 use thiserror::Error;
 
 // ===== Error Types =====
@@ -224,6 +224,18 @@ pub struct MonsterDatabase {
     monsters: HashMap<MonsterId, MonsterDefinition>,
 }
 
+crate::impl_ron_database!(
+    MonsterDatabase,
+    entity: MonsterDefinition,
+    key: MonsterId,
+    error: MonsterDatabaseError,
+    field: monsters,
+    id_of: |m: &MonsterDefinition| m.id,
+    dup_err: MonsterDatabaseError::DuplicateId,
+    read_err: MonsterDatabaseError::ReadError,
+    parse_err: MonsterDatabaseError::ParseError,
+);
+
 impl MonsterDatabase {
     /// Create an empty monster database
     ///
@@ -239,70 +251,6 @@ impl MonsterDatabase {
         Self {
             monsters: HashMap::new(),
         }
-    }
-
-    /// Load monster database from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing monster definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(MonsterDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `MonsterDatabaseError::ReadError` if file cannot be read
-    /// Returns `MonsterDatabaseError::ParseError` if RON parsing fails
-    /// Returns `MonsterDatabaseError::DuplicateId` if duplicate monster IDs found
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::domain::combat::database::MonsterDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = MonsterDatabase::load_from_file("data/monsters.ron")?;
-    /// println!("Loaded {} monsters", db.len());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, MonsterDatabaseError> {
-        Ok(Self {
-            monsters: load_ron_file(
-                path,
-                |m: &MonsterDefinition| m.id,
-                MonsterDatabaseError::DuplicateId,
-                Into::into,
-                Into::into,
-            )?,
-        })
-    }
-
-    /// Load monster database from a RON string
-    ///
-    /// # Arguments
-    ///
-    /// * `ron_data` - RON-formatted string containing monster definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(MonsterDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `MonsterDatabaseError::ParseError` if RON parsing fails
-    /// Returns `MonsterDatabaseError::DuplicateId` if duplicate monster IDs found
-    pub fn load_from_string(ron_data: &str) -> Result<Self, MonsterDatabaseError> {
-        Ok(Self {
-            monsters: load_ron_entries(
-                ron_data,
-                |m: &MonsterDefinition| m.id,
-                MonsterDatabaseError::DuplicateId,
-                Into::into,
-            )?,
-        })
     }
 
     /// Add a monster to the database

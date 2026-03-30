@@ -112,7 +112,7 @@ pub struct SpriteSheetConfig {
 ///     }
 /// }
 /// ```
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct SpriteAssets {
     /// Cached materials per sprite sheet path
     materials: HashMap<String, Handle<StandardMaterial>>,
@@ -454,12 +454,6 @@ impl SpriteAssets {
     /// ```
     pub fn get_config(&self, key: &str) -> Option<&SpriteSheetConfig> {
         self.configs.get(key)
-    }
-}
-
-impl Default for SpriteAssets {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

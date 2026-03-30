@@ -20,6 +20,7 @@ use bevy::color::LinearRgba;
 use bevy::prelude::*;
 use rand::Rng;
 use std::collections::HashMap;
+use tracing;
 
 // ==================== Mesh Caching ====================
 
@@ -45,7 +46,7 @@ use std::collections::HashMap;
 /// let handle2 = get_or_create_mesh(&mut cache, &mut meshes, ...);
 /// assert_eq!(handle1, handle2);  // Same handle reused
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ProceduralMeshCache {
     /// Cached trunk mesh handle for trees
     tree_trunk: Option<Handle<Mesh>>,
@@ -97,17 +98,14 @@ pub struct ProceduralMeshCache {
     /// Cached mesh handle for arch supports
     structure_arch_support: Option<Handle<Mesh>>,
     /// Cached mesh handle for wall segments
-    #[allow(dead_code)]
     structure_wall: Option<Handle<Mesh>>,
     /// Cached mesh handle for door frame posts (vertical sides, used by spawn_door_frame)
     structure_door_frame: Option<Handle<Mesh>>,
     /// Cached mesh handle for door frame lintel (horizontal top bar, used by spawn_door_frame)
     structure_door_frame_lintel: Option<Handle<Mesh>>,
     /// Cached mesh handle for railing posts
-    #[allow(dead_code)]
     structure_railing_post: Option<Handle<Mesh>>,
     /// Cached mesh handle for railing bars
-    #[allow(dead_code)]
     structure_railing_bar: Option<Handle<Mesh>>,
     /// Cached mesh handles for creature visuals by (CreatureId, mesh_index)
     creature_meshes: HashMap<(CreatureId, usize), Handle<Mesh>>,
@@ -316,65 +314,6 @@ impl ProceduralMeshCache {
     }
 }
 
-impl Default for ProceduralMeshCache {
-    /// Creates a new empty cache with no cached meshes
-    fn default() -> Self {
-        Self {
-            tree_trunk: None,
-            tree_foliage: None,
-            tree_meshes: HashMap::new(),
-            portal_frame_horizontal: None,
-            portal_frame_vertical: None,
-            sign_post: None,
-            sign_board: None,
-            shrub_stem: None,
-            grass_blade: None,
-            furniture_bench_seat: None,
-            furniture_bench_leg: None,
-            furniture_table_top: None,
-            furniture_table_leg: None,
-            furniture_chair_seat: None,
-            furniture_chair_back: None,
-            furniture_chair_leg: None,
-            furniture_throne_seat: None,
-            furniture_throne_back: None,
-            furniture_throne_arm: None,
-            furniture_chest_body: None,
-            furniture_chest_lid: None,
-            furniture_torch_handle: None,
-            furniture_torch_flame: None,
-            furniture_door_panel: None,
-            furniture_door_brace: None,
-            furniture_door_hinge: None,
-            furniture_door_handle: None,
-            structure_column_shaft: None,
-            structure_column_capital: None,
-            structure_arch_curve: None,
-            structure_arch_support: None,
-            structure_wall: None,
-            structure_door_frame: None,
-            structure_door_frame_lintel: None,
-            structure_railing_post: None,
-            structure_railing_bar: None,
-            creature_meshes: HashMap::new(),
-            item_sword: None,
-            item_dagger: None,
-            item_blunt: None,
-            item_staff: None,
-            item_bow: None,
-            item_armor: None,
-            item_shield: None,
-            item_potion: None,
-            item_scroll: None,
-            item_ring: None,
-            item_ammo: None,
-            item_quest: None,
-            tree_bark_material: None,
-            tree_foliage_materials: HashMap::new(),
-        }
-    }
-}
-
 // ==================== Cache Helper Methods ====================
 
 impl ProceduralMeshCache {
@@ -420,7 +359,10 @@ impl ProceduralMeshCache {
             "door_brace" => &mut self.furniture_door_brace,
             "door_hinge" => &mut self.furniture_door_hinge,
             "door_handle" => &mut self.furniture_door_handle,
-            _ => panic!("Unknown furniture component: {}", component),
+            _ => {
+                tracing::error!("Unknown furniture component: {component}");
+                return meshes.add(creator());
+            }
         };
 
         handle.get_or_insert_with(|| meshes.add(creator())).clone()
@@ -459,7 +401,10 @@ impl ProceduralMeshCache {
             "door_frame_lintel" => &mut self.structure_door_frame_lintel,
             "railing_post" => &mut self.structure_railing_post,
             "railing_bar" => &mut self.structure_railing_bar,
-            _ => panic!("Unknown structure component: {}", component),
+            _ => {
+                tracing::error!("Unknown structure component: {component}");
+                return meshes.add(creator());
+            }
         };
 
         handle.get_or_insert_with(|| meshes.add(creator())).clone()
@@ -535,9 +480,10 @@ impl ProceduralMeshCache {
     /// * `meshes`   - Mutable reference to Bevy's mesh asset storage.
     /// * `creator`  - Closure that generates the mesh if it is not yet cached.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `category` is not one of the recognised item category strings.
+    /// Logs a `tracing::error!` and returns an uncached mesh handle if
+    /// `category` is not one of the recognised item category strings.
     pub fn get_or_create_item_mesh<F>(
         &mut self,
         category: &str,
@@ -560,7 +506,10 @@ impl ProceduralMeshCache {
             "ring" => &mut self.item_ring,
             "ammo" => &mut self.item_ammo,
             "quest" => &mut self.item_quest,
-            _ => panic!("Unknown item cache category: {}", category),
+            _ => {
+                tracing::error!("Unknown item cache category: {category}");
+                return meshes.add(creator());
+            }
         };
 
         handle.get_or_insert_with(|| meshes.add(creator())).clone()

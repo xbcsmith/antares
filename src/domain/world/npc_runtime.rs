@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! NPC runtime state - mutable per-session NPC data
@@ -24,13 +24,11 @@
 //! inventory system implementation plan for complete specifications.
 //! Daily restock and magic-item rotation are driven by `GameState::advance_time`.
 
-use crate::domain::database_common::load_ron_entries;
 use crate::domain::inventory::{MerchantStock, StockEntry};
 use crate::domain::types::ItemId;
 use crate::domain::world::npc::{NpcDefinition, NpcId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use thiserror::Error;
 
 // ===== MerchantStockTemplate =====
@@ -74,7 +72,7 @@ fn default_magic_refresh_days() -> u32 {
 /// Templates are **never** mutated during play; all mutations happen on the
 /// `MerchantStock` stored inside `NpcRuntimeState`.
 ///
-/// The three Phase-6 fields (`magic_item_pool`, `magic_slot_count`,
+/// The three magic-stock fields (`magic_item_pool`, `magic_slot_count`,
 /// `magic_refresh_days`) all carry `#[serde(default)]` so that existing `.ron`
 /// files without those fields deserialise without error — the effect is that
 /// magic-item rotation is simply disabled for any template that omits them.
@@ -243,7 +241,7 @@ pub struct NpcRuntimeState {
 impl NpcRuntimeState {
     /// Creates a new runtime state with no stock and no consumed services
     ///
-    /// All Phase-6 restock tracking fields are initialised to their sentinel
+    /// All restock tracking fields are initialised to their sentinel
     /// values (`0` / empty) so the first `tick_restock` call triggers an
     /// immediate restock.
     ///
@@ -845,6 +843,18 @@ pub struct MerchantStockTemplateDatabase {
     templates: HashMap<String, MerchantStockTemplate>,
 }
 
+crate::impl_ron_database!(
+    MerchantStockTemplateDatabase,
+    entity: MerchantStockTemplate,
+    key: String,
+    error: MerchantStockTemplateDatabaseError,
+    field: templates,
+    id_of: |t: &MerchantStockTemplate| t.id.clone(),
+    dup_err: MerchantStockTemplateDatabaseError::DuplicateId,
+    read_err: MerchantStockTemplateDatabaseError::ReadError,
+    parse_err: MerchantStockTemplateDatabaseError::ParseError,
+);
+
 impl MerchantStockTemplateDatabase {
     /// Creates a new empty database
     ///
@@ -902,74 +912,6 @@ impl MerchantStockTemplateDatabase {
     /// ```
     pub fn get(&self, id: &str) -> Option<&MerchantStockTemplate> {
         self.templates.get(id)
-    }
-
-    /// Loads a template database from a RON file
-    ///
-    /// The file must contain a `Vec<MerchantStockTemplate>`.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the `.ron` file
-    ///
-    /// # Errors
-    ///
-    /// Returns `MerchantStockTemplateDatabaseError::ReadError` if the file cannot be read.
-    /// Returns `MerchantStockTemplateDatabaseError::ParseError` if RON parsing fails.
-    /// Returns `MerchantStockTemplateDatabaseError::DuplicateId` if two templates share the same ID.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::domain::world::npc_runtime::MerchantStockTemplateDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = MerchantStockTemplateDatabase::load_from_file("data/npc_stock_templates.ron")?;
-    /// println!("Loaded {} templates", db.len());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(
-        path: P,
-    ) -> Result<Self, MerchantStockTemplateDatabaseError> {
-        let contents = std::fs::read_to_string(path)?;
-        Self::load_from_string(&contents)
-    }
-
-    /// Loads a template database from a RON string
-    ///
-    /// # Arguments
-    ///
-    /// * `ron_data` - RON-formatted string containing a `Vec<MerchantStockTemplate>`
-    ///
-    /// # Errors
-    ///
-    /// Returns `MerchantStockTemplateDatabaseError::ParseError` if RON parsing fails.
-    /// Returns `MerchantStockTemplateDatabaseError::DuplicateId` if two templates share the same ID.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::world::npc_runtime::MerchantStockTemplateDatabase;
-    ///
-    /// let ron = r#"[
-    ///     (id: "weapons_basic", entries: [
-    ///         (item_id: 1, quantity: 3, override_price: None),
-    ///     ]),
-    /// ]"#;
-    ///
-    /// let db = MerchantStockTemplateDatabase::load_from_string(ron).unwrap();
-    /// assert_eq!(db.len(), 1);
-    /// ```
-    pub fn load_from_string(ron_data: &str) -> Result<Self, MerchantStockTemplateDatabaseError> {
-        Ok(Self {
-            templates: load_ron_entries(
-                ron_data,
-                |t: &MerchantStockTemplate| t.id.clone(),
-                MerchantStockTemplateDatabaseError::DuplicateId,
-                Into::into,
-            )?,
-        })
     }
 
     /// Returns the number of templates in the database
@@ -1794,7 +1736,7 @@ mod tests {
         assert_eq!(shop_a.entries[0].item_id, 1);
         assert_eq!(shop_a.entries[0].quantity, 5);
         assert_eq!(shop_a.entries[1].override_price, Some(999));
-        // Phase-6 defaults applied.
+        // Magic-stock defaults applied.
         assert_eq!(shop_a.magic_slot_count, 0);
         assert!(shop_a.magic_item_pool.is_empty());
         assert_eq!(shop_a.magic_refresh_days, 7);

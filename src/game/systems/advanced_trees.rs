@@ -78,7 +78,7 @@ pub struct Branch {
 /// - `branches[0]` is always the root/trunk
 /// - All indices in `Branch::children` are valid (< branches.len())
 /// - No cycles in parent-child relationships
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BranchGraph {
     /// All branches in the tree (index 0 is root/trunk)
     pub branches: Vec<Branch>,
@@ -130,12 +130,6 @@ impl BranchGraph {
         }
 
         self.bounds = (min, max);
-    }
-}
-
-impl Default for BranchGraph {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

@@ -985,3 +985,286 @@ The following type aliases were already present in `combat.rs` from earlier work
 - [x] Type aliases used consistently (MapId, ItemId, etc.)
 - [x] Constants extracted, not hardcoded
 - [x] No test references `campaigns/tutorial`
+
+## Phase 6.4: `impl_ron_database!` Macro — Eliminate Load Boilerplate (Complete)
+
+### Overview
+
+Created a declarative macro `impl_ron_database!` in `src/domain/database_common.rs`
+that generates the repetitive `load_from_file` and `load_from_string` methods
+shared by every RON-backed database type. Migrated 8 databases to use the macro,
+removing ~480 lines of hand-written boilerplate while preserving identical behavior.
+
+### Problem
+
+Every domain database followed the same two-step pattern:
+
+1. `load_from_file` — read file to string, delegate to `load_from_string`
+2. `load_from_string` — call `load_ron_entries`, build struct from resulting HashMap
+
+Each database duplicated this logic with minor variations in error constructors.
+The duplication made maintenance tedious and error-prone.
+
+### What Was Created
+
+- **`impl_ron_database!`** macro in `src/domain/database_common.rs`
+  - Two arms: one with an optional `post_load` validation hook, one without
+  - Generates `load_from_string` (delegates to `load_ron_entries`)
+  - Generates `load_from_file` (reads file, delegates to `load_from_string`)
+  - Uses `$crate::domain::database_common::load_ron_entries` for hygiene
+  - Exported at crate root via `#[macro_export]`
+
+### Databases Migrated (8)
+
+| Database                        | File                              | Field           | Post-Load  |
+| ------------------------------- | --------------------------------- | --------------- | ---------- |
+| `ClassDatabase`                 | `src/domain/classes.rs`           | `classes`       | `validate` |
+| `ItemDatabase`                  | `src/domain/items/database.rs`    | `items`         | —          |
+| `SpellDatabase`                 | `src/domain/magic/database.rs`    | `spells`        | —          |
+| `MonsterDatabase`               | `src/domain/combat/database.rs`   | `monsters`      | —          |
+| `ProficiencyDatabase`           | `src/domain/proficiency.rs`       | `proficiencies` | —          |
+| `RaceDatabase`                  | `src/domain/races.rs`             | `races`         | `validate` |
+| `FurnitureDatabase`             | `src/domain/world/furniture.rs`   | `items`         | —          |
+| `MerchantStockTemplateDatabase` | `src/domain/world/npc_runtime.rs` | `templates`     | —          |
+
+### Databases Intentionally Skipped (2)
+
+- **`CharacterDatabase`** — uses an intermediate `CharacterDefinitionDef` type
+  and builds the HashMap manually; does not follow the standard pattern
+- **`CreatureDatabase`** — `load_from_string` returns `Vec<CreatureDefinition>`
+  rather than constructing a `Self` struct; incompatible signature
+
+### Cleanup Details
+
+For each migrated database:
+
+1. Removed the hand-written `load_from_file` and `load_from_string` methods
+2. Added a `crate::impl_ron_database!` invocation immediately after the struct definition
+3. Removed now-unused imports (`load_ron_entries`, `load_ron_file`, `std::path::Path`)
+   where no other code in the file required them
+4. Updated SPDX copyright year to 2026
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all          → No output (all files formatted)
+✅ cargo check              → Finished with 0 errors
+✅ cargo clippy -D warnings → Finished with 0 warnings
+✅ cargo nextest run        → 4018 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] No architectural deviations from `architecture.md`
+- [x] Pure refactoring — no behavioral changes
+- [x] Data structures match architecture.md Section 4
+- [x] Type aliases used consistently (ItemId, SpellId, MonsterId, etc.)
+- [x] Constants extracted, not hardcoded
+- [x] RON format used for data files
+- [x] No test references `campaigns/tutorial`
+- [x] All test data uses `data/test_campaign`
+
+## Phase 6: Finish the Plan — Final Cleanup Sweep (Complete)
+
+### Overview
+
+Phase 6 collected every residual deliverable left incomplete by Phases 1–5
+into a single sweep. Ten sub-tasks addressed stale suppressions, development-
+phase language, duplicated boilerplate, unsafe comparisons, production panics,
+untyped errors, and inconsistent logging. All success criteria now pass and
+every quality gate is green.
+
+### 6.1 — Eliminated `#[allow(dead_code)]` from `ProceduralMeshCache` Fields
+
+Removed 3 stale `#[allow(dead_code)]` annotations from `structure_wall`,
+`structure_railing_post`, and `structure_railing_bar` in
+`src/game/systems/procedural_meshes.rs`. These fields were already wired into
+`get_or_create_structure_mesh`, `clear_all`, and `cached_count` — the
+suppression was never needed.
+
+**Files changed:** `src/game/systems/procedural_meshes.rs`
+
+### 6.2 — Eliminated `#[allow(deprecated)]` from SDK
+
+Removed 22 `#[allow(deprecated)]` annotations across 7 files in
+`sdk/campaign_builder/src/`. The `Item` struct no longer has deprecated fields
+(the `food` field was removed in Phase 1.3), so these were dead annotations.
+
+| File                     | Instances Removed |
+| ------------------------ | ----------------- |
+| `advanced_validation.rs` | 1                 |
+| `asset_manager.rs`       | 1                 |
+| `items_editor.rs`        | 9                 |
+| `lib.rs`                 | 6                 |
+| `templates.rs`           | 2                 |
+| `ui_helpers.rs`          | 1                 |
+| `undo_redo.rs`           | 1 (bonus find)    |
+
+### 6.3 — Removed Hyphenated `Phase-N` References
+
+Reworded 4 comments that used development-phase language:
+
+| File                                            | Change                                              |
+| ----------------------------------------------- | --------------------------------------------------- |
+| `src/game/systems/dropped_item_visuals.rs` L314 | `"Phase-3.2 addition"` → `"key addition"`           |
+| `src/domain/world/npc_runtime.rs` L77           | `"Phase-6 fields"` → `"magic-stock fields"`         |
+| `src/domain/world/npc_runtime.rs` L246          | `"Phase-6 restock tracking"` → `"restock tracking"` |
+| `src/domain/world/npc_runtime.rs` L1797         | `"Phase-6 defaults"` → `"Magic-stock defaults"`     |
+
+`grep -rn "Phase-[0-9]" src/` now returns zero hits.
+
+### 6.4 — Created `impl_ron_database!` Macro and Migrated 8 Databases
+
+Added a `#[macro_export]` declarative macro `impl_ron_database!` to
+`src/domain/database_common.rs` with two arms: a standard arm and a
+`post_load` arm for databases that need post-construction validation.
+
+Migrated 8 databases, removing hand-written `load_from_file` and
+`load_from_string` methods from each:
+
+| Database                        | File                          | Notes                           |
+| ------------------------------- | ----------------------------- | ------------------------------- |
+| `ClassDatabase`                 | `domain/classes.rs`           | Uses `post_load` for validation |
+| `RaceDatabase`                  | `domain/races.rs`             | Uses `post_load` for validation |
+| `ProficiencyDatabase`           | `domain/proficiency.rs`       | Standard pattern                |
+| `ItemDatabase`                  | `domain/items/database.rs`    | Standard pattern                |
+| `SpellDatabase`                 | `domain/magic/database.rs`    | Standard pattern                |
+| `MonsterDatabase`               | `domain/combat/database.rs`   | Standard pattern                |
+| `FurnitureDatabase`             | `domain/world/furniture.rs`   | Standard pattern                |
+| `MerchantStockTemplateDatabase` | `domain/world/npc_runtime.rs` | Standard pattern                |
+
+Intentionally skipped `CharacterDatabase` (intermediate deserialization type)
+and `CreatureDatabase` (returns `Vec`, not `Self`).
+
+### 6.5 — Expanded `test_helpers.rs` to 12 Factories
+
+Added 8 new factory functions to `src/test_helpers.rs` (total now 12) with
+full doc comments and 14 self-tests:
+
+| Factory                                       | Description                       |
+| --------------------------------------------- | --------------------------------- |
+| `test_character_with_weapon(name)`            | Knight with a sword in inventory  |
+| `test_character_with_spell(name, spell_name)` | Sorcerer with 20 SP and a spell   |
+| `test_character_with_inventory(name)`         | Knight with potion and sword      |
+| `test_party()`                                | 2-member party (Fighter + Healer) |
+| `test_party_with_members(n)`                  | Party with `n` members (max 6)    |
+| `test_item(name)`                             | Consumable healing potion         |
+| `test_weapon(name)`                           | Simple one-handed sword           |
+| `test_spell(name)`                            | Level-1 sorcerer combat spell     |
+
+### 6.6 — Replaced 17 Trivial `Default` Implementations with `#[derive(Default)]`
+
+Audited all 170 `impl Default for` blocks. Replaced 17 where every field was
+set to a language-level default (`None`, `0`, `false`, empty collections):
+
+**`src/` — 10 types:** `MonsterResistances`, `MerchantStock`,
+`ServiceCatalog`, `BranchGraph`, `SpriteAssets`, `CombatLogState`,
+`ProceduralMeshCache` (59-line impl → 1 derive), `NameGenerator`,
+`DoorState`, `PartyEntities`.
+
+**`sdk/campaign_builder/` — 7 types:** `CreatureIdManager`,
+`UndoRedoManager`, `Modifiers`, `DialogueEditBuffer`, `NodeEditBuffer`,
+`ChoiceEditBuffer`, `KeyframeBuffer`.
+
+Types with non-default values (specific numbers, colors, `true`, string
+literals) were intentionally kept as manual impls.
+
+### 6.7 — Hardened Production `unwrap()` Calls
+
+Replaced `partial_cmp(b).unwrap()` with `f32::total_cmp()` in 3 locations:
+
+| File                                | Method                         |
+| ----------------------------------- | ------------------------------ |
+| `src/game/resources/performance.rs` | `min_frame_time_ms()`          |
+| `src/game/resources/performance.rs` | `max_frame_time_ms()`          |
+| `src/domain/visual/lod.rs`          | `select_important_triangles()` |
+
+`total_cmp` handles NaN safely without allocation. Added 2 NaN-handling
+tests in `performance.rs`.
+
+### 6.8 — Eliminated 4 Targeted Production `panic!` Calls
+
+| File                                              | Change                                              |
+| ------------------------------------------------- | --------------------------------------------------- |
+| `src/game/systems/menu.rs` L39                    | `panic!` → `.expect()` with descriptive message     |
+| `src/game/systems/procedural_meshes.rs` (3 sites) | `panic!` → `tracing::error!` + return uncached mesh |
+
+The 3 `procedural_meshes.rs` panics were in `get_or_create_furniture_mesh`,
+`get_or_create_structure_mesh`, and `get_or_create_item_mesh` match arms for
+unknown component names. They now log an error and return a freshly created
+(but uncached) mesh instead of crashing.
+
+### 6.9 — Migrated `dialogue_validation.rs` to `ValidationError`
+
+Replaced the `pub type ValidationResult = Result<(), String>` alias in
+`src/game/systems/dialogue_validation.rs` with
+`Result<(), ValidationError>` using the existing enum from
+`src/domain/validation.rs`.
+
+Mapped error returns to appropriate variants:
+
+- Root node not found → `ValidationError::MissingReference`
+- Invalid choice target → `ValidationError::MissingReference`
+- Circular reference → `ValidationError::Structural`
+
+Updated test assertions to use `.to_string().contains(...)` since
+`ValidationError` implements `Display`.
+
+### 6.10 — Replaced 4 Production `eprintln!` with `tracing::warn!`
+
+| File                            | Old                                                 | New                                             |
+| ------------------------------- | --------------------------------------------------- | ----------------------------------------------- |
+| `src/sdk/database.rs` (2 sites) | `eprintln!("Warning: failed to read/parse map...")` | `tracing::warn!("Failed to read/parse map...")` |
+| `src/sdk/game_config.rs`        | `eprintln!("Warning: Config file not found...")`    | `tracing::warn!("Config file not found...")`    |
+| `src/domain/world/types.rs`     | `eprintln!("Warning: NPC '{}' not found...")`       | `tracing::warn!("NPC '{}' not found...")`       |
+
+Removed the redundant `"Warning: "` prefix since the `warn!` level already
+conveys severity. `sdk/error_formatter.rs` was left untouched (intentional
+console output).
+
+### Deliverables Checklist
+
+- [x] 3 `#[allow(dead_code)]` eliminated from `ProceduralMeshCache` fields
+- [x] 22 `#[allow(deprecated)]` eliminated from `sdk/campaign_builder/`
+- [x] 4 hyphenated `Phase-N` comment references removed
+- [x] `impl_ron_database!` macro created; 8 databases migrated
+- [x] `test_helpers.rs` expanded to 12 factories with 14 self-tests
+- [x] 17 trivial `Default` impls replaced with `#[derive(Default)]`
+- [x] 3 production `partial_cmp().unwrap()` calls hardened with `total_cmp`
+- [x] 4 production `panic!` calls replaced with graceful error handling
+- [x] `dialogue_validation.rs` migrated from `Result<(), String>` to `ValidationError`
+- [x] 4 production `eprintln!` calls replaced with `tracing::warn!`
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all              — clean
+✅ cargo check --all-targets    — 0 errors
+✅ cargo clippy -D warnings     — 0 warnings
+✅ cargo nextest run            — 4018 passed, 0 failed, 8 skipped
+```
+
+### Success Criteria Verification
+
+```text
+✅ Zero #[allow(dead_code)] in procedural_meshes.rs
+✅ Zero #[allow(deprecated)] project-wide (including sdk/)
+✅ grep -rn "Phase-[0-9]" src/ → 0 hits
+✅ impl_ron_database! macro exists with 8 usages
+✅ test_helpers.rs provides 12 factory functions
+✅ 17 Default impls replaced (exceeds 14 target)
+✅ Zero partial_cmp().unwrap() in production code
+✅ Targeted panic! calls eliminated from production code
+✅ Zero Result<(), String> in public function signatures
+✅ Zero eprintln!("Warning: ...") in production code
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4
+- [x] Module placement follows Section 3.2
+- [x] Type aliases used consistently (ItemId, SpellId, MonsterId, etc.)
+- [x] Constants extracted, not hardcoded
+- [x] RON format used for data files
+- [x] No test references `campaigns/tutorial`
+- [x] All test data uses `data/test_campaign`

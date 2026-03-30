@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Proficiency system for item usage restrictions
@@ -36,11 +36,9 @@
 //! assert!(class_profs.contains(&prof_id));
 //! ```
 
-use crate::domain::database_common::load_ron_entries;
 use crate::domain::items::{ArmorClassification, MagicItemClassification, WeaponClassification};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use thiserror::Error;
 
 // ===== Error Types =====
@@ -235,6 +233,18 @@ pub struct ProficiencyDatabase {
     proficiencies: HashMap<ProficiencyId, ProficiencyDefinition>,
 }
 
+crate::impl_ron_database!(
+    ProficiencyDatabase,
+    entity: ProficiencyDefinition,
+    key: String,
+    error: ProficiencyError,
+    field: proficiencies,
+    id_of: |d: &ProficiencyDefinition| d.id.clone(),
+    dup_err: ProficiencyError::DuplicateId,
+    read_err: |e| ProficiencyError::LoadError(e.to_string()),
+    parse_err: |e| ProficiencyError::ParseError(e.to_string()),
+);
+
 impl ProficiencyDatabase {
     /// Creates a new empty proficiency database
     ///
@@ -250,83 +260,6 @@ impl ProficiencyDatabase {
         Self {
             proficiencies: HashMap::new(),
         }
-    }
-
-    /// Loads proficiency definitions from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing proficiency definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns a `ProficiencyDatabase` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `ProficiencyError::LoadError` if the file cannot be read
-    /// Returns `ProficiencyError::ParseError` if the RON syntax is invalid
-    /// Returns `ProficiencyError::DuplicateId` if duplicate IDs are found
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::domain::proficiency::ProficiencyDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = ProficiencyDatabase::load_from_file("data/proficiencies.ron")?;
-    /// assert!(!db.is_empty());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ProficiencyError> {
-        let contents = std::fs::read_to_string(path.as_ref())
-            .map_err(|e| ProficiencyError::LoadError(e.to_string()))?;
-
-        Self::load_from_string(&contents)
-    }
-
-    /// Loads proficiency definitions from a RON string
-    ///
-    /// # Arguments
-    ///
-    /// * `contents` - RON-formatted string containing proficiency definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns a `ProficiencyDatabase` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `ProficiencyError::ParseError` if the RON syntax is invalid
-    /// Returns `ProficiencyError::DuplicateId` if duplicate IDs are found
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::proficiency::ProficiencyDatabase;
-    ///
-    /// let ron = r#"[
-    ///     (
-    ///         id: "simple_weapon",
-    ///         name: "Simple Weapons",
-    ///         category: Weapon,
-    ///         description: "Basic weapons",
-    ///     ),
-    /// ]"#;
-    ///
-    /// let db = ProficiencyDatabase::load_from_string(ron).unwrap();
-    /// assert_eq!(db.len(), 1);
-    /// ```
-    pub fn load_from_string(contents: &str) -> Result<Self, ProficiencyError> {
-        let proficiencies = load_ron_entries(
-            contents,
-            |d: &ProficiencyDefinition| d.id.clone(),
-            ProficiencyError::DuplicateId,
-            |e| ProficiencyError::ParseError(e.to_string()),
-        )?;
-
-        Ok(Self { proficiencies })
     }
 
     /// Gets a proficiency definition by ID

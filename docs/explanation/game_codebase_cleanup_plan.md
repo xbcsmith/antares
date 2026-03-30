@@ -11,8 +11,10 @@ field-reassign-with-default suppressions**, **~58 `#[allow(deprecated)]`
 suppressions** (37 in live code + 21 in `.bak` files), **1 `unused_mut`
 suppression**, **2 `only_used_in_recursion` suppressions**, **~50 silent error
 drops in production code**, **24 TODO/placeholder stubs**, and **~1,200 lines
-of duplicate code** that can be consolidated. The cleanup is organized into five
-phases, ordered by risk (lowest first) and impact (highest first).
+of duplicate code** that can be consolidated. The cleanup is organized into six
+phases, ordered by risk (lowest first) and impact (highest first). Phase 6
+collects residual deliverables from Phases 1–4 that were missed or left
+incomplete during their original implementation.
 
 We do not care about backwards compatibility.
 
@@ -671,6 +673,231 @@ commonly-shared query parameters. For simpler cases, define a type alias:
 
 ---
 
+### Phase 6: Finish the Plan (Low–Medium Risk, Completeness)
+
+Phases 1–5 left a trail of residual deliverables — items marked done that
+weren't fully complete, items never started, and edge cases that slipped
+through success-criteria grep patterns. This phase collects every known gap
+into a single sweep so the cleanup plan can be closed out.
+
+#### 6.1 Eliminate Remaining `#[allow(dead_code)]` on `ProceduralMeshCache` Fields
+
+**Residual from Phase 1.2 — 3 suppressions remain.**
+
+Three struct fields in `src/game/systems/procedural_meshes.rs` still carry
+`#[allow(dead_code)]`:
+
+| Field                    | Line  | Action                                              |
+| ------------------------ | ----- | --------------------------------------------------- |
+| `structure_wall`         | ~L100 | Wire into `spawn_wall` or remove if truly unused    |
+| `structure_railing_post` | ~L108 | Wire into `spawn_railing` or remove if truly unused |
+| `structure_railing_bar`  | ~L110 | Wire into `spawn_railing` or remove if truly unused |
+
+For each field: if a `spawn_*` function exists that should use the cached
+mesh, update it to read from the cache. If no consumer exists or is planned,
+delete the field entirely. Do **not** leave `#[allow(dead_code)]`.
+
+#### 6.2 Eliminate Remaining `#[allow(deprecated)]` in SDK
+
+**Residual from Phase 1.3 — ~21 suppressions remain in `sdk/campaign_builder/`.**
+
+These stem from `Item` struct construction that still references deprecated
+fields. Files affected:
+
+- `sdk/campaign_builder/src/advanced_validation.rs`
+- `sdk/campaign_builder/src/asset_manager.rs`
+- `sdk/campaign_builder/src/items_editor.rs` (9 instances)
+- `sdk/campaign_builder/src/lib.rs` (6 instances)
+- `sdk/campaign_builder/src/templates.rs` (2 instances)
+- `sdk/campaign_builder/src/ui_helpers.rs` (1 instance)
+
+Update all SDK `Item` construction sites to use the current field layout.
+Remove every `#[allow(deprecated)]` suppression.
+
+#### 6.3 Remove Hyphenated `Phase-N` References from Production Comments
+
+**Residual from Phase 2.2 — 4 references survive the space-separated grep.**
+
+| File                                       | Line  | Current Text                 | Action                         |
+| ------------------------------------------ | ----- | ---------------------------- | ------------------------------ |
+| `src/game/systems/dropped_item_visuals.rs` | L314  | `"Phase-3.2 addition"`       | Reword to describe the feature |
+| `src/domain/world/npc_runtime.rs`          | L77   | `"Phase-6 fields"`           | Reword to describe the fields  |
+| `src/domain/world/npc_runtime.rs`          | L246  | `"Phase-6 restock tracking"` | Reword to `"restock tracking"` |
+| `src/domain/world/npc_runtime.rs`          | L1797 | `"Phase-6 defaults applied"` | Reword to `"defaults applied"` |
+
+These pass the existing `grep -rn "Phase [0-9]"` criteria (space-separated)
+but are still development-phase language that should not survive in a cleaned
+codebase.
+
+#### 6.4 Create `RonDatabase` Trait or Macro
+
+**Unstarted from Phase 3.1 — 0 of 16 implementations migrated.**
+
+The `load_from_file` / `load_from_string` pattern is identically repeated in
+16 database types across `src/domain/` and `src/sdk/database.rs` (see Phase
+3.1 for the full list). Create a trait or declarative macro in
+`src/domain/database_common.rs` that provides blanket implementations given
+the entity type, ID accessor, error variant, and `HashMap` field name.
+
+**Target**: Zero duplicated `load_from_file` / `load_from_string` boilerplate.
+Estimated reduction: ~350 lines.
+
+#### 6.5 Expand `test_helpers.rs` to 12+ Factories
+
+**Residual from Phase 3.4 — only 4 factories exist with 3 consumers.**
+
+The current `src/test_helpers.rs` provides `test_character`,
+`test_character_with_class`, `test_character_with_race_class`, and
+`test_dead_character`. The original deliverable called for 12+ factories
+covering the remaining inline test constructors.
+
+Add the following factories and migrate their consumers:
+
+| Factory                                  | Consumer Modules                                          |
+| ---------------------------------------- | --------------------------------------------------------- |
+| `test_character_with_weapon(name)`       | `combat/engine.rs`, `items/consumable_usage.rs`           |
+| `test_character_with_spell(name, spell)` | `magic/casting.rs`                                        |
+| `test_character_with_inventory(name)`    | `transactions.rs`, `items/consumable_usage.rs`            |
+| `test_party()`                           | `save_game.rs`, `resources.rs`, `party_manager.rs`        |
+| `test_party_with_members(n)`             | `combat/engine.rs`, `progression.rs`                      |
+| `test_item(name)`                        | `transactions.rs`, `items/consumable_usage.rs`, `lock.rs` |
+| `test_weapon(name)`                      | `combat/engine.rs`                                        |
+| `test_spell(name)`                       | `magic/casting.rs`                                        |
+
+Migrate the remaining ~9 test modules that still construct characters inline
+to use the shared factories.
+
+#### 6.6 Replace Trivial `Default` Implementations with `#[derive(Default)]`
+
+**Unstarted from Phase 3.6 — 80+ manual impls remain.**
+
+Audit all `impl Default for X` blocks. For each one where `default()` only
+delegates to `Self::new()` **and** `new()` produces all-default values (empty
+collections, zeros, `false`, `None`), replace with `#[derive(Default)]` and
+remove the manual impl block.
+
+Known candidates (at least 14 in `src/`):
+
+- `GameState` (`application/mod.rs`)
+- `Party` (`domain/character.rs`)
+- `MonsterResistances` (`domain/combat/monster.rs`)
+- `MerchantStock`, `ServiceCatalog` (`domain/inventory.rs`)
+- `MeshTransform` (`domain/visual/mod.rs`)
+- `World` (`domain/world/types.rs`)
+- `BranchGraph` (`game/systems/advanced_trees.rs`)
+- `CombatResource` (`game/systems/combat.rs`)
+- `SpriteAssets` (`game/resources/sprite_assets.rs`)
+
+Plus ~10 in `sdk/` (`ContextMenuManager`, `CreatureIdManager`,
+`ShortcutManager`, `UndoRedoManager`, `PreviewRenderer`, etc.)
+
+For types where `new()` sets non-default values (string literals, specific
+numbers, colors), the manual impl is correct — leave those alone.
+
+Estimated reduction: ~60 lines.
+
+#### 6.7 Harden Remaining Production `unwrap()` Calls
+
+**Residual from Phase 4.5 — 2 `unwrap()` calls remain in `performance.rs`.**
+
+| File                            | Line  | Pattern                                | Fix                                                  |
+| ------------------------------- | ----- | -------------------------------------- | ---------------------------------------------------- |
+| `game/resources/performance.rs` | ~L117 | `.partial_cmp(b).unwrap()` in `min_by` | Replace with `f32::total_cmp` or `.unwrap_or(Equal)` |
+| `game/resources/performance.rs` | ~L127 | `.partial_cmp(b).unwrap()` in `max_by` | Replace with `f32::total_cmp` or `.unwrap_or(Equal)` |
+
+These will panic on NaN `f32` values. Use `f32::total_cmp` for a safe,
+allocation-free comparison that handles NaN correctly.
+
+#### 6.8 Eliminate Remaining Production `panic!` Calls
+
+**Residual from Phase 4.4 — 4 production `panic!` calls remain.**
+
+| File                                | Line  | Context                          | Fix                                                 |
+| ----------------------------------- | ----- | -------------------------------- | --------------------------------------------------- |
+| `game/systems/menu.rs`              | ~L39  | `SaveGameManager` initialization | Return `Result` or use `expect()` with message      |
+| `game/systems/procedural_meshes.rs` | ~L423 | Unknown component match arm      | Log `tracing::error!` + return early or use default |
+| `game/systems/procedural_meshes.rs` | ~L462 | Unknown component match arm      | Log `tracing::error!` + return early or use default |
+| `game/systems/procedural_meshes.rs` | ~L563 | Unknown component match arm      | Log `tracing::error!` + return early or use default |
+
+The `procedural_meshes.rs` panics are in match arms for enum variants that
+should never appear — replace with `tracing::error!` + a safe no-op fallback
+rather than crashing the game. For `menu.rs`, propagate the error or use
+`expect("SaveGameManager state directory must be writable")` with a
+descriptive message.
+
+#### 6.9 Migrate `dialogue_validation.rs` to `ValidationError`
+
+**Residual from Phase 4.6 — `Result<(), String>` remains in public API.**
+
+`src/game/systems/dialogue_validation.rs` L20 defines:
+
+```
+pub type ValidationResult = Result<(), String>;
+```
+
+Migrate all validation functions in this file to return
+`Result<(), ValidationError>` using the existing `ValidationError` enum from
+`src/domain/validation.rs`. Update all callers.
+
+#### 6.10 Replace Remaining Production `eprintln!` with `tracing`
+
+**Residual from Phase 4.7 — 4 `eprintln!("Warning: ...")` calls remain.**
+
+| File                    | Line   | Current Message                        | Replacement      |
+| ----------------------- | ------ | -------------------------------------- | ---------------- |
+| `sdk/database.rs`       | ~L389  | `"Warning: failed to read map file…"`  | `tracing::warn!` |
+| `sdk/database.rs`       | ~L408  | `"Warning: failed to parse map file…"` | `tracing::warn!` |
+| `sdk/game_config.rs`    | ~L184  | `"Warning: Config file not found…"`    | `tracing::warn!` |
+| `domain/world/types.rs` | ~L3057 | `"Warning: NPC '{}' not found…"`       | `tracing::warn!` |
+
+Note: `sdk/error_formatter.rs` intentionally uses `println!`/`eprintln!` as a
+console output formatter — that is correct by design and should not be
+changed.
+
+#### 6.11 Testing Requirements
+
+- All existing tests pass without modification (or with updated imports).
+- New `RonDatabase` trait/macro has its own unit tests.
+- New test factories have their own tests verifying default state.
+- Each hardened `unwrap()` / replaced `panic!` path has a test exercising
+  the new error branch.
+- `dialogue_validation.rs` callers updated and tested with `ValidationError`.
+- Test coverage does not decrease.
+
+#### 6.12 Deliverables
+
+- [ ] 3 `#[allow(dead_code)]` eliminated from `ProceduralMeshCache` fields
+- [ ] ~21 `#[allow(deprecated)]` eliminated from `sdk/campaign_builder/`
+- [ ] 4 hyphenated `Phase-N` comment references removed
+- [ ] `RonDatabase` trait/macro created; 16 implementations migrated
+- [ ] `test_helpers.rs` expanded to 12+ factories; ~9 remaining consumers
+      migrated
+- [ ] Trivial `Default` impls replaced with `#[derive(Default)]` (~14+ types)
+- [ ] 2 production `unwrap()` calls in `performance.rs` hardened
+- [ ] 4 production `panic!` calls replaced with graceful error handling
+- [ ] `dialogue_validation.rs` migrated from `Result<(), String>` to
+      `ValidationError`
+- [ ] 4 production `eprintln!` calls replaced with `tracing::warn!`
+
+#### 6.13 Success Criteria
+
+- Zero `#[allow(dead_code)]` suppressions remain in `procedural_meshes.rs`.
+- Zero `#[allow(deprecated)]` suppressions remain project-wide (including
+  `sdk/`).
+- `grep -rn "Phase-[0-9]" src/` returns zero hits.
+- Zero duplicated `load_from_file` / `load_from_string` boilerplate.
+- `test_helpers.rs` provides ≥ 12 factory functions with ≥ 10 consumer
+  modules.
+- Net reduction of ≥ 60 lines from `Default` impl cleanup.
+- Zero `partial_cmp().unwrap()` in production code.
+- Zero `panic!` in production code outside of tests.
+- Zero `Result<(), String>` in public function signatures.
+- Zero `eprintln!("Warning: ...")` calls in production code (excluding
+  `error_formatter.rs`).
+- All quality gates pass.
+
+---
+
 ## Appendix A: Placeholder Stubs and Missing Features
 
 The 24 placeholder stubs discovered during the codebase audit, plus 4
@@ -685,25 +912,26 @@ intentionally kept in their own plan to prevent scope creep.
 
 ## Appendix B: Suppression Elimination Summary
 
-| Suppression                                     | Count   | Phase | Action                                 |
-| ----------------------------------------------- | ------- | ----- | -------------------------------------- |
-| `#[allow(deprecated)]`                          | 58      | 1.3   | Remove `food` field entirely           |
-| `#[allow(dead_code)]`                           | 34      | 1.2   | Delete dead code                       |
-| `#[allow(clippy::field_reassign_with_default)]` | 11      | 1.4   | Builder methods or struct literals     |
-| `#[allow(unused_mut)]`                          | 1       | 1.5   | Remove `mut` + adjust patterns         |
-| `#[allow(clippy::only_used_in_recursion)]`      | 2       | 4.8   | Investigate and resolve                |
-| `#[allow(clippy::too_many_arguments)]`          | 78      | 5.1   | `MeshSpawnContext` + parameter structs |
-| `#[allow(clippy::too_many_lines)]`              | 10      | 5.2   | Extract sub-renderers                  |
-| `#[allow(clippy::type_complexity)]`             | 14      | 5.3   | `SystemParam` structs + type aliases   |
-| **Total**                                       | **208** |       | **Target: 0**                          |
+| Suppression                                     | Count   | Phase   | Action                                 |
+| ----------------------------------------------- | ------- | ------- | -------------------------------------- |
+| `#[allow(deprecated)]`                          | 58      | 1.3/6.2 | Remove `food` field entirely; fix SDK  |
+| `#[allow(dead_code)]`                           | 34      | 1.2/6.1 | Delete dead code; fix mesh cache       |
+| `#[allow(clippy::field_reassign_with_default)]` | 11      | 1.4     | Builder methods or struct literals     |
+| `#[allow(unused_mut)]`                          | 1       | 1.5     | Remove `mut` + adjust patterns         |
+| `#[allow(clippy::only_used_in_recursion)]`      | 2       | 4.8     | Investigate and resolve                |
+| `#[allow(clippy::too_many_arguments)]`          | 78      | 5.1     | `MeshSpawnContext` + parameter structs |
+| `#[allow(clippy::too_many_lines)]`              | 10      | 5.2     | Extract sub-renderers                  |
+| `#[allow(clippy::type_complexity)]`             | 14      | 5.3     | `SystemParam` structs + type aliases   |
+| **Total**                                       | **208** |         | **Target: 0**                          |
 
 ## Appendix C: Files Changed Per Phase
 
-| Phase             | Estimated Files Touched   | Estimated Net Line Change |
-| ----------------- | ------------------------- | ------------------------- |
-| 1: Dead Weight    | ~27 files + 10 deletions  | −300 lines                |
-| 2: Phase Refs     | ~60 files                 | −0 lines (rewording only) |
-| 3: Dedup          | ~30 files + 4 new modules | −800 lines                |
-| 4: Error Handling | ~15 files + 1 new module  | +200 lines (logging)      |
-| 5: Structural     | ~12 files + 3 new structs | −100 lines                |
-| **Total**         | ~82 unique files          | **−1,000 lines net**      |
+| Phase              | Estimated Files Touched   | Estimated Net Line Change |
+| ------------------ | ------------------------- | ------------------------- |
+| 1: Dead Weight     | ~27 files + 10 deletions  | −300 lines                |
+| 2: Phase Refs      | ~60 files                 | −0 lines (rewording only) |
+| 3: Dedup           | ~30 files + 4 new modules | −800 lines                |
+| 4: Error Handling  | ~15 files + 1 new module  | +200 lines (logging)      |
+| 5: Structural      | ~12 files + 3 new structs | −100 lines                |
+| 6: Finish the Plan | ~45 files + 1 new module  | −450 lines                |
+| **Total**          | ~105 unique files         | **−1,450 lines net**      |

@@ -194,7 +194,7 @@ pub enum MerchantDialogueUpdate {
 /// Merchant dialogue policy uses the edited tree identity and display metadata
 /// as the stable anchor for SDK-generated merchant templates and SDK-inserted
 /// merchant branches while preserving authored dialogue content where possible.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DialogueEditBuffer {
     pub id: String,
     pub name: String,
@@ -203,20 +203,8 @@ pub struct DialogueEditBuffer {
     pub associated_quest: String,
 }
 
-impl Default for DialogueEditBuffer {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            speaker_name: String::new(),
-            repeatable: false,
-            associated_quest: String::new(),
-        }
-    }
-}
-
 /// Buffer for node form fields
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NodeEditBuffer {
     pub id: String,
     pub text: String,
@@ -224,33 +212,12 @@ pub struct NodeEditBuffer {
     pub is_terminal: bool,
 }
 
-impl Default for NodeEditBuffer {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            text: String::new(),
-            speaker_override: String::new(),
-            is_terminal: false,
-        }
-    }
-}
-
 /// Buffer for choice form fields
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChoiceEditBuffer {
     pub text: String,
     pub target_node: String,
     pub ends_dialogue: bool,
-}
-
-impl Default for ChoiceEditBuffer {
-    fn default() -> Self {
-        Self {
-            text: String::new(),
-            target_node: String::new(),
-            ends_dialogue: false,
-        }
-    }
 }
 
 /// Buffer for condition form fields

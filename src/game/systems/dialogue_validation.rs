@@ -13,11 +13,12 @@
 //! These checks are useful both at load time and for debugging dialogue authoring issues.
 
 use crate::domain::dialogue::{DialogueTree, NodeId};
+use crate::domain::validation::ValidationError;
 use bevy::log::info;
 use std::collections::{HashSet, VecDeque};
 
 /// Result type for dialogue validation operations
-pub type ValidationResult = Result<(), String>;
+pub type ValidationResult = Result<(), ValidationError>;
 
 /// Validates a dialogue tree for common errors
 ///
@@ -54,10 +55,10 @@ pub type ValidationResult = Result<(), String>;
 pub fn validate_dialogue_tree(tree: &DialogueTree) -> ValidationResult {
     // Check 1: Root node exists
     if tree.get_node(tree.root_node).is_none() {
-        return Err(format!(
+        return Err(ValidationError::MissingReference(format!(
             "Root node {} not found in dialogue tree {}",
             tree.root_node, tree.id
-        ));
+        )));
     }
 
     // Check 2: All choice targets exist
@@ -65,10 +66,10 @@ pub fn validate_dialogue_tree(tree: &DialogueTree) -> ValidationResult {
         for (choice_idx, choice) in node.choices.iter().enumerate() {
             if let Some(target_node) = choice.target_node {
                 if tree.get_node(target_node).is_none() {
-                    return Err(format!(
+                    return Err(ValidationError::MissingReference(format!(
                         "Choice {} in node {} references non-existent target node {}",
                         choice_idx, node_id, target_node
-                    ));
+                    )));
                 }
             }
         }
@@ -107,10 +108,10 @@ fn detect_cycles(tree: &DialogueTree) -> ValidationResult {
             if let Some(cycle_node) = dfs_find_cycle(tree, node_id, &mut visited, &mut rec_stack) {
                 // If the cycle has no reachable termination, it's an error.
                 if !reachable_to_termination(tree, cycle_node) {
-                    return Err(format!(
+                    return Err(ValidationError::Structural(format!(
                         "Circular reference detected in dialogue tree {} starting from node {}",
                         tree.id, cycle_node
-                    ));
+                    )));
                 }
                 // Otherwise, cycle is escapable; continue checking remaining nodes.
             }
@@ -224,7 +225,10 @@ mod tests {
         let tree = DialogueTree::new(1, "Test", 999); // Root node 999 doesn't exist
         let result = validate_dialogue_tree(&tree);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Root node 999 not found"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Root node 999 not found"));
     }
 
     #[test]
@@ -243,7 +247,10 @@ mod tests {
 
         let result = validate_dialogue_tree(&tree);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("non-existent target node 999"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("non-existent target node 999"));
     }
 
     #[test]
@@ -317,7 +324,10 @@ mod tests {
 
         let result = validate_dialogue_tree(&tree);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Circular reference"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Circular reference"));
     }
 
     #[test]

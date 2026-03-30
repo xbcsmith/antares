@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Spell database - Loading and managing spell definitions from RON files
@@ -10,12 +10,10 @@
 //!
 //! See `docs/reference/architecture.md` Section 7.1-7.2 for data file specifications.
 
-use crate::domain::database_common::{load_ron_entries, load_ron_file};
 use crate::domain::magic::types::{Spell, SpellSchool};
 use crate::domain::types::SpellId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use thiserror::Error;
 
 // ===== Error Types =====
@@ -66,6 +64,18 @@ pub struct SpellDatabase {
     spells: HashMap<SpellId, Spell>,
 }
 
+crate::impl_ron_database!(
+    SpellDatabase,
+    entity: Spell,
+    key: SpellId,
+    error: SpellDatabaseError,
+    field: spells,
+    id_of: |s: &Spell| s.id,
+    dup_err: SpellDatabaseError::DuplicateId,
+    read_err: SpellDatabaseError::ReadError,
+    parse_err: SpellDatabaseError::ParseError,
+);
+
 impl SpellDatabase {
     /// Create an empty spell database
     ///
@@ -81,70 +91,6 @@ impl SpellDatabase {
         Self {
             spells: HashMap::new(),
         }
-    }
-
-    /// Load spell database from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing spell definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(SpellDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `SpellDatabaseError::ReadError` if file cannot be read
-    /// Returns `SpellDatabaseError::ParseError` if RON parsing fails
-    /// Returns `SpellDatabaseError::DuplicateId` if duplicate spell IDs found
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::domain::magic::SpellDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = SpellDatabase::load_from_file("data/spells.ron")?;
-    /// println!("Loaded {} spells", db.len());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, SpellDatabaseError> {
-        Ok(Self {
-            spells: load_ron_file(
-                path,
-                |s: &Spell| s.id,
-                SpellDatabaseError::DuplicateId,
-                Into::into,
-                Into::into,
-            )?,
-        })
-    }
-
-    /// Load spell database from a RON string
-    ///
-    /// # Arguments
-    ///
-    /// * `ron_data` - RON-formatted string containing spell definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(SpellDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `SpellDatabaseError::ParseError` if RON parsing fails
-    /// Returns `SpellDatabaseError::DuplicateId` if duplicate spell IDs found
-    pub fn load_from_string(ron_data: &str) -> Result<Self, SpellDatabaseError> {
-        Ok(Self {
-            spells: load_ron_entries(
-                ron_data,
-                |s: &Spell| s.id,
-                SpellDatabaseError::DuplicateId,
-                Into::into,
-            )?,
-        })
     }
 
     /// Add a spell to the database

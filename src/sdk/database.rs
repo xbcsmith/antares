@@ -386,7 +386,7 @@ impl MapDatabase {
                 let contents = match std::fs::read_to_string(&path) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("Warning: failed to read map file {}: {}", path.display(), e);
+                        tracing::warn!("Failed to read map file {}: {}", path.display(), e);
                         // Skip unreadable map files instead of failing the whole load
                         continue;
                     }
@@ -405,8 +405,8 @@ impl MapDatabase {
                         maps.insert(map.id, map);
                     }
                     Err(e) => {
-                        eprintln!(
-                            "Warning: failed to parse map file {}: {}. Skipping this map.",
+                        tracing::warn!(
+                            "Failed to parse map file {}: {}. Skipping this map.",
                             path.display(),
                             e
                         );

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared helpers for RON-based database loading.
+//! Shared helpers and macros for RON-based database loading.
 //!
 //! Many domain and SDK database types follow the same pattern:
 //!
@@ -206,6 +206,143 @@ where
 {
     let contents = std::fs::read_to_string(path).map_err(read_err)?;
     load_ron_entries(&contents, id_of, dup_err, parse_err)
+}
+
+/// Generates `load_from_file` and `load_from_string` methods for a RON-backed database.
+///
+/// The macro expects a database struct with a single `HashMap` field
+/// that stores entities keyed by their ID.
+///
+/// # Parameters
+///
+/// * `$db` — The database struct type (e.g. `ClassDatabase`)
+/// * `entity: $entity` — The entity type stored in the HashMap values
+/// * `key: $key` — The key/ID type
+/// * `error: $error` — The database's error enum type
+/// * `field: $field` — The name of the HashMap field on the struct
+/// * `id_of: $id_of` — An expression that extracts the key from an `&$entity`
+/// * `dup_err: $dup_err` — A closure/constructor that creates a duplicate-ID error from a key
+/// * `read_err: $read_err` — A closure/constructor that wraps an `std::io::Error`
+/// * `parse_err: $parse_err` — A closure/constructor that wraps a `ron::error::SpannedError`
+/// * `post_load: $post_load` — (optional) A function `&Self -> Result<(), $error>` called after
+///   construction (e.g. `ClassDatabase::validate`)
+///
+/// # Examples
+///
+/// Basic usage (no post-load validation):
+///
+/// ```ignore
+/// crate::impl_ron_database!(
+///     ItemDatabase,
+///     entity: Item,
+///     key: ItemId,
+///     error: ItemDatabaseError,
+///     field: items,
+///     id_of: |i: &Item| i.id,
+///     dup_err: ItemDatabaseError::DuplicateId,
+///     read_err: Into::into,
+///     parse_err: Into::into,
+/// );
+/// ```
+///
+/// With post-load validation:
+///
+/// ```ignore
+/// crate::impl_ron_database!(
+///     ClassDatabase,
+///     entity: ClassDefinition,
+///     key: String,
+///     error: ClassError,
+///     field: classes,
+///     id_of: |c: &ClassDefinition| c.id.clone(),
+///     dup_err: ClassError::DuplicateId,
+///     read_err: |e| ClassError::LoadError(format!("Failed to read file: {}", e)),
+///     parse_err: |e| ClassError::ParseError(format!("RON parse error: {}", e)),
+///     post_load: ClassDatabase::validate,
+/// );
+/// ```
+#[macro_export]
+macro_rules! impl_ron_database {
+    // Arm with post_load validation hook
+    (
+        $db:ty,
+        entity: $entity:ty,
+        key: $key:ty,
+        error: $error:ty,
+        field: $field:ident,
+        id_of: $id_of:expr,
+        dup_err: $dup_err:expr,
+        read_err: $read_err:expr,
+        parse_err: $parse_err:expr,
+        post_load: $post_load:expr $(,)?
+    ) => {
+        impl $db {
+            /// Load the database from a RON string.
+            ///
+            /// # Errors
+            ///
+            /// Returns an error if parsing fails, a duplicate ID is found,
+            /// or post-load validation fails.
+            pub fn load_from_string(data: &str) -> Result<Self, $error> {
+                let db = Self {
+                    $field: $crate::domain::database_common::load_ron_entries(
+                        data, $id_of, $dup_err, $parse_err,
+                    )?,
+                };
+                ($post_load)(&db)?;
+                Ok(db)
+            }
+
+            /// Load the database from a RON file on disk.
+            ///
+            /// # Errors
+            ///
+            /// Returns an error if the file cannot be read, parsing fails,
+            /// a duplicate ID is found, or post-load validation fails.
+            pub fn load_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, $error> {
+                let contents = std::fs::read_to_string(path.as_ref()).map_err($read_err)?;
+                Self::load_from_string(&contents)
+            }
+        }
+    };
+    // Arm without post_load
+    (
+        $db:ty,
+        entity: $entity:ty,
+        key: $key:ty,
+        error: $error:ty,
+        field: $field:ident,
+        id_of: $id_of:expr,
+        dup_err: $dup_err:expr,
+        read_err: $read_err:expr,
+        parse_err: $parse_err:expr $(,)?
+    ) => {
+        impl $db {
+            /// Load the database from a RON string.
+            ///
+            /// # Errors
+            ///
+            /// Returns an error if parsing fails or a duplicate ID is found.
+            pub fn load_from_string(data: &str) -> Result<Self, $error> {
+                Ok(Self {
+                    $field: $crate::domain::database_common::load_ron_entries(
+                        data, $id_of, $dup_err, $parse_err,
+                    )?,
+                })
+            }
+
+            /// Load the database from a RON file on disk.
+            ///
+            /// # Errors
+            ///
+            /// Returns an error if the file cannot be read, parsing fails,
+            /// or a duplicate ID is found.
+            pub fn load_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, $error> {
+                let contents = std::fs::read_to_string(path.as_ref()).map_err($read_err)?;
+                Self::load_from_string(&contents)
+            }
+        }
+    };
 }
 
 #[cfg(test)]

@@ -36,7 +36,7 @@ impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(
             SaveGameManager::new("saves")
-                .unwrap_or_else(|e| panic!("Failed to initialize SaveGameManager: {}", e)),
+                .expect("SaveGameManager state directory 'saves' must be writable"),
         );
 
         app.add_systems(

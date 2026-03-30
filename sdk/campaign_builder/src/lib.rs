@@ -967,7 +967,6 @@ impl CampaignBuilderApp {
     }
 
     /// Create a default item for the edit buffer
-    #[allow(deprecated)]
     fn default_item() -> Item {
         Item {
             id: 0,
@@ -9614,7 +9613,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_type_filter_all_types() {
         use antares::domain::items::types::*;
 
@@ -9750,7 +9748,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_import_export_roundtrip() {
         use antares::domain::items::types::*;
 
@@ -9807,7 +9804,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_type_specific_editors() {
         use antares::domain::items::types::*;
 
@@ -9886,7 +9882,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_combined_filters() {
         use antares::domain::items::types::*;
 
@@ -10007,7 +10002,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_preview_displays_all_info() {
         use antares::domain::items::types::*;
 

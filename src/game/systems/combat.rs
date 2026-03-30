@@ -843,7 +843,7 @@ pub struct CombatLogColorState {
 }
 
 /// Resource storing persistent combat log lines and typewriter animation state.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct CombatLogState {
     /// Rolling set of lines shown in the combat log bubble.
     pub lines: Vec<CombatLogLine>,
@@ -851,16 +851,6 @@ pub struct CombatLogState {
     pub active_line_visible_chars: usize,
     /// Sub-character accumulator used by the typewriter effect.
     pub reveal_accumulator: f32,
-}
-
-impl Default for CombatLogState {
-    fn default() -> Self {
-        Self {
-            lines: Vec::new(),
-            active_line_visible_chars: 0,
-            reveal_accumulator: 0.0,
-        }
-    }
 }
 
 impl CombatLogState {
