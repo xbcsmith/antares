@@ -233,6 +233,10 @@ GameConfig(
         // Uses Bevy KeyCode names, e.g. "L", "F10", "Tab"
         toggle_key: "L",
 
+        // Keyboard key used to open the full-screen game log overlay
+        // Uses Bevy KeyCode names, e.g. "G", "F10", "Tab"
+        fullscreen_toggle_key: "G",
+
         // Whether to show timestamps alongside log entries
         // Reserved for future presentation work
         show_timestamps: false,

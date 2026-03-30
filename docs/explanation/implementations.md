@@ -1268,3 +1268,154 @@ console output).
 - [x] RON format used for data files
 - [x] No test references `campaigns/tutorial`
 - [x] All test data uses `data/test_campaign`
+
+## Game Feature Completion — Phase 1: Input and UI Fixes (Complete)
+
+### Overview
+
+Phase 1 addresses the highest player-visible bugs: input coordination
+during the lock prompt, game log positioning, a full-screen game log
+overlay, and recruited NPC mesh persistence. Every change follows the
+architecture in `docs/reference/architecture.md` and passes all four
+quality gates.
+
+### 1.1 — Fix Lock UI Input Consumption
+
+**Problem**: The lock prompt runs during `GameMode::Exploration` with no
+input coordination. Both `handle_global_input_toggles` and
+`handle_exploration_input_movement` execute normally, so ESC opens the
+game menu and arrow keys move the party while the lock prompt is visible.
+
+**Changes**:
+
+- `src/game/systems/input.rs` — Added `lock_pending: Res<LockInteractionPending>`
+  to `handle_global_input_toggles` and `handle_exploration_input_movement`.
+  Both systems early-return when `lock_pending.lock_id.is_some()`, blocking
+  ESC menu toggle and arrow-key movement while the lock prompt is visible.
+- `src/game/systems/lock_ui.rs` — Added `ArrowUp` / `ArrowDown` keyboard
+  navigation to `lock_prompt_ui_system` so the player can cycle through
+  party members without the number row.
+
+**Tests added**:
+
+- `test_escape_blocked_during_lock_prompt_no_menu_toggle`
+- `test_movement_blocked_during_lock_prompt_position_unchanged`
+
+### 1.2 — Relocate Game Log to Upper-Left Corner
+
+**Problem**: The game log panel was positioned at bottom-left, overlapping
+with the HUD area.
+
+**Changes**:
+
+- `src/game/systems/ui.rs` — Replaced `bottom: Val::Px(hud_height + hud_gap + 8.0)`
+  with `top: Val::Px(8.0)` in `setup_game_log_panel`, placing the panel in
+  the upper-left corner.
+
+**Tests added**:
+
+- `test_game_log_panel_renders_in_upper_left` — asserts `left: 8px`,
+  `top: 8px`, `position_type: Absolute`.
+
+### 1.3 — Implement Full-Screen Game Log View
+
+**Changes**:
+
+- `src/application/mod.rs` — Added `GameMode::GameLog` variant to the
+  `GameMode` enum.
+- `src/game/systems/input/mode_guards.rs` — Added `GameMode::GameLog` to
+  `movement_blocked_for_mode` so all exploration input is blocked while
+  viewing the full log.
+- `src/game/systems/input/keymap.rs` — Added `GameAction::GameLog` variant.
+- `src/game/systems/input/frame_input.rs` — Added `game_log_toggle: bool`
+  field to `FrameInputIntent` and wired it through `decode_frame_input`.
+- `src/game/systems/input/global_toggles.rs` — Added `GameMode::GameLog`
+  handling:
+  - ESC (`menu_toggle`) returns from `GameLog` to `Exploration`.
+  - `game_log_toggle` opens `GameLog` from `Exploration` and closes it
+    back to `Exploration`.
+- `src/sdk/game_config.rs` — Added `fullscreen_toggle_key: String` to
+  `GameLogConfig` (default `"G"`, with `#[serde(default)]` for backwards
+  compatibility). Added `game_log: Vec<String>` to `ControlsConfig`
+  (default `["G"]`).
+- `src/game/systems/ui.rs` — Added `FullscreenLogFilterState` resource,
+  `fullscreen_game_log_ui_system` (egui-based full-screen overlay with
+  scrollable entry list and category filter toggle buttons), and
+  `bevy_color_to_egui` helper. Updated `sync_game_log_panel_visibility`
+  to hide the small panel when `GameMode::GameLog` is active.
+- `campaigns/config.template.ron` — Added `fullscreen_toggle_key: "G"`.
+
+**Tests added**:
+
+- `test_movement_blocked_for_mode_game_log_true`
+- `test_input_blocked_for_mode_game_log_true`
+- `test_handle_global_mode_toggles_game_log_opens_from_exploration`
+- `test_handle_global_mode_toggles_game_log_closes_back_to_exploration`
+- `test_handle_global_mode_toggles_game_log_ignored_in_combat`
+- `test_handle_global_mode_toggles_escape_closes_game_log_to_exploration`
+- `test_handle_global_mode_toggles_escape_closes_game_log_not_menu`
+- `test_fullscreen_log_filter_state_default_all_enabled`
+- `test_fullscreen_log_filter_state_toggle_category`
+- `test_bevy_color_to_egui_converts_correctly`
+- `test_parse_toggle_key_g`
+
+### 1.4 — Fix Recruited Character Mesh Persistence
+
+**Problem**: The `RecruitToInn` dialogue action removed the recruitment
+event from the map but did not emit `DespawnRecruitableVisual`, leaving
+the NPC mesh visible after recruitment. Similarly,
+`process_recruitment_responses` in the standalone recruitment dialog
+never removed the map event or despawned the visual.
+
+**Changes**:
+
+- `src/game/systems/dialogue.rs` — In the `RecruitToInn` branch of
+  `execute_action`, after `remove_event()` succeeds, now emits
+  `DespawnRecruitableVisual` matching the pattern used in
+  `execute_recruit_to_party`. The `handle_recruitment_actions` stub was
+  converted to a no-op (the recruitment logic is fully handled by
+  `execute_action`); it is retained as a scheduling placeholder because
+  removing it from the `DialoguePlugin` system tuple changes Bevy's
+  internal scheduling order and breaks message delivery in integration
+  tests.
+- `src/game/systems/recruitment_dialog.rs` — Added
+  `MessageWriter<DespawnRecruitableVisual>` to `process_recruitment_responses`.
+  Created `remove_recruitment_event_and_despawn` helper that scans the
+  current map's events for a matching `MapEvent::RecruitableCharacter`,
+  removes it, and emits `DespawnRecruitableVisual`. Called after both
+  `AddedToParty` and `SentToInn` success paths.
+
+**Tests added**:
+
+- `test_recruit_to_inn_action_removes_map_event_with_recruitment_context`
+
+### Deliverables Checklist
+
+- [x] Lock UI blocks exploration movement and ESC menu toggle
+- [x] Lock UI supports arrow key navigation for character selection
+- [x] Game log relocated to upper-left corner
+- [x] Full-screen game log view implemented with scroll and category filters
+- [x] Full-screen log toggle from configurable key (default G) and ESC to close
+- [x] `RecruitToInn` dialogue action emits `DespawnRecruitableVisual`
+- [x] Dead-code `handle_recruitment_actions` stub converted to no-op
+- [x] `process_recruitment_responses` fixed for future use
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all         → No output (all files formatted)
+✅ cargo check             → Finished with 0 errors
+✅ cargo clippy            → Finished with 0 warnings
+✅ cargo nextest run       → 4033 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4
+- [x] `GameMode::GameLog` added following existing enum conventions
+- [x] Module placement follows Section 3.2
+- [x] Type aliases used consistently
+- [x] Constants extracted, not hardcoded
+- [x] RON format used for data files
+- [x] No test references `campaigns/tutorial`
+- [x] All test data uses `data/test_campaign`

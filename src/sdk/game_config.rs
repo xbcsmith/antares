@@ -254,6 +254,14 @@ pub struct GameLogConfig {
     /// Toggle key used to show or hide the game log panel.
     pub toggle_key: String,
 
+    /// Toggle key used to open the full-screen game log overlay.
+    ///
+    /// When pressed in [`Exploration`](crate::application::GameMode::Exploration)
+    /// mode, transitions to [`GameLog`](crate::application::GameMode::GameLog).
+    /// Defaults to `"G"`.
+    #[serde(default = "default_fullscreen_toggle_key")]
+    pub fullscreen_toggle_key: String,
+
     /// Whether timestamps should be shown alongside log entries.
     pub show_timestamps: bool,
 
@@ -270,12 +278,17 @@ pub struct GameLogConfig {
     pub default_enabled_categories: Vec<String>,
 }
 
+fn default_fullscreen_toggle_key() -> String {
+    "G".to_string()
+}
+
 impl Default for GameLogConfig {
     fn default() -> Self {
         Self {
             max_entries: 200,
             visible_by_default: true,
             toggle_key: "L".to_string(),
+            fullscreen_toggle_key: "G".to_string(),
             show_timestamps: false,
             panel_width_px: 300.0,
             panel_height_px: 200.0,
@@ -532,6 +545,10 @@ pub struct ControlsConfig {
     #[serde(default = "default_automap_keys")]
     pub automap: Vec<String>,
 
+    /// Keys for opening or closing the full-screen game log overlay
+    #[serde(default = "default_game_log_keys")]
+    pub game_log: Vec<String>,
+
     /// Movement cooldown in seconds (prevents double-moves)
     pub movement_cooldown: f32,
 }
@@ -548,6 +565,10 @@ fn default_automap_keys() -> Vec<String> {
     vec!["M".to_string()]
 }
 
+fn default_game_log_keys() -> Vec<String> {
+    vec!["G".to_string()]
+}
+
 impl Default for ControlsConfig {
     fn default() -> Self {
         Self {
@@ -560,6 +581,7 @@ impl Default for ControlsConfig {
             inventory: default_inventory_keys(),
             rest: default_rest_keys(),
             automap: default_automap_keys(),
+            game_log: default_game_log_keys(),
             movement_cooldown: 0.2,
         }
     }

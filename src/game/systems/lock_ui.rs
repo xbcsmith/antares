@@ -191,6 +191,20 @@ fn lock_prompt_ui_system(
                 nav_state.selected_character = Some(idx);
             }
         }
+
+        // Arrow keys cycle through party members.
+        if kb.just_pressed(KeyCode::ArrowUp) && member_count > 0 {
+            nav_state.selected_character = Some(match nav_state.selected_character {
+                Some(idx) if idx > 0 => idx - 1,
+                Some(_) | None => member_count - 1,
+            });
+        }
+        if kb.just_pressed(KeyCode::ArrowDown) && member_count > 0 {
+            nav_state.selected_character = Some(match nav_state.selected_character {
+                Some(idx) if idx + 1 < member_count => idx + 1,
+                Some(_) | None => 0,
+            });
+        }
     }
 
     let ctx = match contexts.ctx_mut() {

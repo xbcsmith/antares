@@ -1,9 +1,8 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::application::GameMode;
 use crate::game::resources::GlobalState;
-use crate::game::systems::hud::{HUD_BOTTOM_GAP, HUD_PANEL_HEIGHT};
 use crate::game::systems::ui_helpers::{text_style, LABEL_FONT_SIZE};
 use crate::sdk::game_config::GameLogConfig;
 use bevy::input::ButtonInput;
@@ -12,6 +11,7 @@ use bevy::ui::widget::Text;
 use bevy::ui::{
     AlignItems, FlexDirection, Interaction, Overflow, PositionType, ScrollPosition, Val,
 };
+use bevy_egui::{egui, EguiContexts};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -29,6 +29,7 @@ impl Plugin for UiPlugin {
         app.add_message::<GameLogEvent>()
             .init_resource::<GameLog>()
             .init_resource::<GameLogUiState>()
+            .init_resource::<FullscreenLogFilterState>()
             .add_systems(Startup, setup_game_log_panel)
             .add_systems(
                 Update,
@@ -39,6 +40,7 @@ impl Plugin for UiPlugin {
                     sync_game_log_panel_visibility,
                     sync_game_log_ui,
                     auto_scroll_game_log_viewport,
+                    fullscreen_game_log_ui_system,
                 ),
             );
     }
@@ -319,6 +321,24 @@ impl GameLog {
     }
 }
 
+/// Persistent filter state for the fullscreen game log overlay.
+///
+/// Stored as a Bevy resource so filter selections survive open/close cycles
+/// within the same play session.
+#[derive(Resource, Debug, Clone)]
+pub struct FullscreenLogFilterState {
+    /// Categories currently enabled in the fullscreen log filter bar.
+    pub active_categories: HashSet<LogCategory>,
+}
+
+impl Default for FullscreenLogFilterState {
+    fn default() -> Self {
+        Self {
+            active_categories: LogCategory::all().into_iter().collect(),
+        }
+    }
+}
+
 fn setup_game_log_panel(
     mut commands: Commands,
     mut game_log: ResMut<GameLog>,
@@ -343,10 +363,7 @@ fn setup_game_log_panel(
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(8.0),
-                bottom: match (HUD_PANEL_HEIGHT, HUD_BOTTOM_GAP) {
-                    (Val::Px(hud_height), Val::Px(hud_gap)) => Val::Px(hud_height + hud_gap + 8.0),
-                    _ => Val::Px(102.0),
-                },
+                top: Val::Px(8.0),
                 width: Val::Px(owned_config.panel_width_px),
                 height: Val::Px(owned_config.panel_height_px),
                 flex_direction: FlexDirection::Column,
@@ -506,7 +523,10 @@ fn sync_game_log_panel_visibility(
     let in_combat = global_state
         .as_ref()
         .is_some_and(|state| matches!(state.0.mode, GameMode::Combat(_)));
-    let should_show = ui_state.visible && !in_combat;
+    let in_fullscreen_log = global_state
+        .as_ref()
+        .is_some_and(|state| matches!(state.0.mode, GameMode::GameLog));
+    let should_show = ui_state.visible && !in_combat && !in_fullscreen_log;
 
     for mut visibility in &mut panel_query {
         *visibility = if should_show {
@@ -538,7 +558,7 @@ fn sync_game_log_ui(
 
         if !matches!(
             global_state.0.mode,
-            GameMode::Exploration | GameMode::Dialogue(_) | GameMode::Menu(_)
+            GameMode::Exploration | GameMode::Dialogue(_) | GameMode::Menu(_) | GameMode::GameLog
         ) {
             return;
         }
@@ -640,6 +660,7 @@ fn handle_log_filter_buttons(
 
 fn parse_toggle_key(key: &str) -> Option<KeyCode> {
     match key {
+        "G" => Some(KeyCode::KeyG),
         "L" => Some(KeyCode::KeyL),
         "I" => Some(KeyCode::KeyI),
         "M" => Some(KeyCode::KeyM),
@@ -662,12 +683,194 @@ fn parse_toggle_key(key: &str) -> Option<KeyCode> {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Full-screen game log overlay
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Renders the full-screen game log overlay using egui when the game mode is
+/// [`GameMode::GameLog`].
+///
+/// Displays all [`GameLog`] entries in a scrollable list with category filter
+/// buttons.  The overlay occupies the entire screen and is dismissed by ESC
+/// (handled in `handle_global_mode_toggles`) or by pressing the fullscreen
+/// toggle key again (handled in `handle_global_mode_toggles`).
+fn fullscreen_game_log_ui_system(
+    contexts: Option<EguiContexts>,
+    global_state: Option<Res<GlobalState>>,
+    game_log: Res<GameLog>,
+    mut filter_state: ResMut<FullscreenLogFilterState>,
+) {
+    let Some(ref global_state) = global_state else {
+        return;
+    };
+
+    if !matches!(global_state.0.mode, GameMode::GameLog) {
+        return;
+    }
+
+    let Some(mut contexts) = contexts else {
+        return;
+    };
+
+    let ctx = match contexts.ctx_mut() {
+        Ok(ctx) => ctx,
+        Err(_) => return,
+    };
+
+    egui::CentralPanel::default().show(ctx, |ui| {
+        ui.vertical(|ui| {
+            // ── Header row ───────────────────────────────────────────────
+            ui.horizontal(|ui| {
+                ui.heading("Game Log");
+                ui.separator();
+
+                // Category filter toggle buttons.
+                for category in LogCategory::all() {
+                    let active = filter_state.active_categories.contains(&category);
+                    let label = category.short_label();
+                    let response = ui.selectable_label(active, label);
+                    if response.clicked() {
+                        if active {
+                            filter_state.active_categories.remove(&category);
+                        } else {
+                            filter_state.active_categories.insert(category);
+                        }
+                    }
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let filtered_count = game_log
+                        .entries
+                        .iter()
+                        .filter(|e| filter_state.active_categories.contains(&e.category))
+                        .count();
+                    ui.label(format!("{} entries", filtered_count));
+                });
+            });
+
+            ui.separator();
+
+            // ── Scrollable entry list ────────────────────────────────────
+            egui::ScrollArea::vertical()
+                .id_salt("fullscreen_game_log_scroll")
+                .auto_shrink([false, false])
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    for entry in &game_log.entries {
+                        if !filter_state.active_categories.contains(&entry.category) {
+                            continue;
+                        }
+
+                        let color = bevy_color_to_egui(entry.color);
+                        ui.label(egui::RichText::new(&entry.text).color(color));
+                    }
+                });
+        });
+
+        // ── Footer hint ──────────────────────────────────────────────────
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new("Press ESC or G to close")
+                    .small()
+                    .color(egui::Color32::GRAY),
+            );
+        });
+    });
+}
+
+/// Converts a Bevy [`Color`] to an egui [`egui::Color32`].
+fn bevy_color_to_egui(color: Color) -> egui::Color32 {
+    let srgba = color.to_srgba();
+    egui::Color32::from_rgba_unmultiplied(
+        (srgba.red * 255.0) as u8,
+        (srgba.green * 255.0) as u8,
+        (srgba.blue * 255.0) as u8,
+        (srgba.alpha * 255.0) as u8,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn color_components(color: Color) -> [f32; 4] {
         color.to_srgba().to_f32_array()
+    }
+
+    #[test]
+    fn test_fullscreen_log_filter_state_default_all_enabled() {
+        let state = FullscreenLogFilterState::default();
+        for category in LogCategory::all() {
+            assert!(
+                state.active_categories.contains(&category),
+                "expected {:?} to be enabled by default",
+                category
+            );
+        }
+    }
+
+    #[test]
+    fn test_fullscreen_log_filter_state_toggle_category() {
+        let mut state = FullscreenLogFilterState::default();
+        state.active_categories.remove(&LogCategory::Combat);
+        assert!(!state.active_categories.contains(&LogCategory::Combat));
+        state.active_categories.insert(LogCategory::Combat);
+        assert!(state.active_categories.contains(&LogCategory::Combat));
+    }
+
+    #[test]
+    fn test_bevy_color_to_egui_converts_correctly() {
+        let white = bevy_color_to_egui(Color::srgb(1.0, 1.0, 1.0));
+        // Allow ±1 tolerance for floating-point rounding in sRGB conversion.
+        assert!(
+            white.r() >= 254,
+            "expected white.r >= 254, got {}",
+            white.r()
+        );
+        assert!(
+            white.g() >= 254,
+            "expected white.g >= 254, got {}",
+            white.g()
+        );
+        assert!(
+            white.b() >= 254,
+            "expected white.b >= 254, got {}",
+            white.b()
+        );
+
+        let red = bevy_color_to_egui(Color::srgb(1.0, 0.0, 0.0));
+        assert!(red.r() >= 254, "expected red.r >= 254, got {}", red.r());
+        assert_eq!(red.g(), 0);
+        assert_eq!(red.b(), 0);
+    }
+
+    #[test]
+    fn test_game_log_panel_renders_in_upper_left() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(UiPlugin);
+        app.update();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&Node, With<GameLogPanelRoot>>();
+        let node = query
+            .iter(app.world())
+            .next()
+            .expect("GameLogPanelRoot should exist");
+
+        assert_eq!(node.left, Val::Px(8.0), "panel must be at left: 8px");
+        assert_eq!(node.top, Val::Px(8.0), "panel must be at top: 8px");
+        assert_eq!(
+            node.position_type,
+            PositionType::Absolute,
+            "panel must use absolute positioning"
+        );
+    }
+
+    #[test]
+    fn test_parse_toggle_key_g() {
+        assert_eq!(parse_toggle_key("G"), Some(KeyCode::KeyG));
     }
 
     #[test]

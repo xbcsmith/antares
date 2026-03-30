@@ -88,6 +88,12 @@ pub enum GameMode {
     /// drives the rest sequence one hour per Bevy frame and detect encounter
     /// interruptions.
     Resting(RestState),
+    /// Full-screen scrollable game log overlay.
+    ///
+    /// Entered by pressing the fullscreen log toggle key (default `G`) or
+    /// clicking the "Game Log" header in the small log panel.  ESC returns
+    /// to the previous [`GameMode`].
+    GameLog,
 }
 
 // ===== Rest State =====
