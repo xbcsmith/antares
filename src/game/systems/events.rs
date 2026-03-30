@@ -326,6 +326,7 @@ fn handle_events(
                 map_change_writer.write(MapChangeEvent {
                     target_map: *map_id,
                     target_pos: *destination,
+                    is_portal: true,
                 });
             }
             MapEvent::Sign { text, name, .. } => {

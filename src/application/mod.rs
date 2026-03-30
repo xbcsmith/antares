@@ -1296,7 +1296,7 @@ impl GameState {
 
         // Each successful step costs time — advance before event resolution so
         // that the clock ticks even when an event fires (traps, encounters, etc.).
-        self.advance_time(crate::domain::resources::TIME_COST_STEP_MINUTES, None);
+        self.advance_time_seconds(self.config.time.movement_step_seconds, None);
 
         // If there is no explicit map event at this position, first roll for a
         // random encounter (map-level encounter tables / terrain modifiers apply).
@@ -1648,7 +1648,7 @@ impl GameState {
 
         // Advance the authoritative clock via the GameState path so that active
         // spells are ticked and merchant stock is restocked for the full duration.
-        self.advance_time(hours * 60, templates);
+        self.advance_time_minutes(hours * 60, templates);
 
         Ok(())
     }
@@ -1692,9 +1692,27 @@ impl GameState {
     ///    restored to its pre-boost level.
     /// 3. Triggers NPC merchant restock (if `templates` is `Some`).
     ///
+    /// Advances the in-game clock by `seconds` and ticks all time-sensitive state.
+    ///
+    /// This is the single authoritative time-advancement path. The clock is
+    /// updated in seconds for sub-minute resolution, but spell/boost ticking
+    /// only occurs at minute boundaries (Option A: per-minute ticking).
+    ///
+    /// For every full minute contained in `seconds`:
+    ///
+    /// 1. Decrements all [`ActiveSpells`] protection field counters by 1 via
+    ///    [`ActiveSpells::tick`].
+    /// 2. Ticks per-character timed attribute boosts via
+    ///    [`crate::domain::character::Character::tick_timed_stat_boosts_minute`].
+    /// 3. Triggers NPC merchant restock (if `templates` is `Some`).
+    ///
+    /// Sub-minute advances (e.g. 30 seconds) update the clock but do **not**
+    /// trigger effect ticks, since spells and stat boosts are measured in
+    /// minutes.
+    ///
     /// # Arguments
     ///
-    /// * `minutes`   - Number of in-game minutes to advance.
+    /// * `seconds`   - Number of in-game seconds to advance.
     /// * `templates` - Template database used to replenish merchant stock.
     ///   Pass `None` in contexts where the content is not available (e.g.
     ///   headless unit tests that do not load campaign data); restocking is
@@ -1708,9 +1726,22 @@ impl GameState {
     ///
     /// let mut state = GameState::new();
     /// let templates = MerchantStockTemplateDatabase::new();
-    /// state.advance_time(60, Some(&templates));
+    /// state.advance_time_seconds(3600, Some(&templates));
     /// assert_eq!(state.time.minute, 0);
+    /// assert_eq!(state.time.second, 0);
     /// assert_eq!(state.time.hour, 7);
+    /// ```
+    ///
+    /// Sub-minute advance (no spell ticking):
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    ///
+    /// let mut state = GameState::new();
+    /// state.active_spells.light = 10;
+    /// state.advance_time_seconds(30, None); // 30 seconds — no minute boundary crossed
+    /// assert_eq!(state.time.second, 30);
+    /// assert_eq!(state.active_spells.light, 10); // unchanged — sub-minute
     /// ```
     ///
     /// Timed attribute boost expiry:
@@ -1729,29 +1760,62 @@ impl GameState {
     /// hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(10));
     /// state.party.add_member(hero).unwrap();
     ///
-    /// // Boost expires after exactly 10 ticks.
-    /// state.advance_time(10, None);
+    /// // Boost expires after exactly 10 minute-ticks (600 seconds).
+    /// state.advance_time_seconds(600, None);
     /// assert_eq!(state.party.members[0].stats.might.current, base_might);
     /// assert!(state.party.members[0].timed_stat_boosts.is_empty());
     /// ```
-    pub fn advance_time(
+    pub fn advance_time_seconds(
         &mut self,
-        minutes: u32,
+        seconds: u32,
         templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
     ) {
-        self.time.advance_minutes(minutes);
+        self.time.advance_seconds(seconds);
+
         // Tick active spell durations and per-character timed stat boosts
-        for _ in 0..minutes {
+        // at minute granularity (Option A). Sub-minute advances do not tick.
+        let minutes_to_tick = seconds / 60;
+        for _ in 0..minutes_to_tick {
             self.active_spells.tick();
-            // tick per-character timed stat boosts
             for member in &mut self.party.members {
                 member.tick_timed_stat_boosts_minute();
             }
         }
+
         // Trigger daily restock and magic-slot rotation when templates are available.
         if let Some(tmpl) = templates {
             self.npc_runtime.tick_restock(&self.time, tmpl);
         }
+    }
+
+    /// Convenience wrapper that advances time by the given number of minutes.
+    ///
+    /// Delegates to [`advance_time_seconds`](Self::advance_time_seconds) with
+    /// `minutes * 60`. Use this for callers that still think in minutes (e.g.
+    /// rest, spell durations).
+    ///
+    /// # Arguments
+    ///
+    /// * `minutes`   - Number of in-game minutes to advance.
+    /// * `templates` - Optional merchant-stock template database.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    ///
+    /// let mut state = GameState::new();
+    /// state.advance_time_minutes(60, None);
+    /// assert_eq!(state.time.hour, 7);
+    /// assert_eq!(state.time.minute, 0);
+    /// assert_eq!(state.time.second, 0);
+    /// ```
+    pub fn advance_time_minutes(
+        &mut self,
+        minutes: u32,
+        templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
+    ) {
+        self.advance_time_seconds(minutes * 60, templates);
     }
 
     /// Ensures all merchant NPCs in the content database have runtime state initialised.
@@ -1985,7 +2049,7 @@ mod tests {
         let mut state = GameState::new();
         state.active_spells.light = 10;
 
-        state.advance_time(5, None);
+        state.advance_time_minutes(5, None);
         assert_eq!(state.active_spells.light, 5);
         assert_eq!(state.time.minute, 5);
     }
@@ -2013,7 +2077,7 @@ mod tests {
         state.party.add_member(hero).unwrap();
 
         // Advance 5 minutes — boost expires exactly on the 5th tick
-        state.advance_time(5, None);
+        state.advance_time_minutes(5, None);
 
         assert_eq!(
             state.party.members[0].stats.might.current, base_might,
@@ -2045,7 +2109,7 @@ mod tests {
         state.party.add_member(hero).unwrap();
 
         // Advance 7 minutes — both counters should tick together
-        state.advance_time(7, None);
+        state.advance_time_minutes(7, None);
 
         assert_eq!(
             state.active_spells.light, 3,
@@ -2062,7 +2126,7 @@ mod tests {
         );
 
         // Advance 3 more minutes — boost expires
-        state.advance_time(3, None);
+        state.advance_time_minutes(3, None);
 
         assert_eq!(
             state.active_spells.light, 0,
@@ -2097,7 +2161,7 @@ mod tests {
 
         // Advance past a day boundary with None templates — must not panic and must
         // not alter stock.
-        state.advance_time(1440, None); // 24 hours
+        state.advance_time_minutes(1440, None); // 24 hours
 
         let runtime = state
             .npc_runtime
@@ -2159,7 +2223,7 @@ mod tests {
 
         // GameState starts at day 1, hour 0, minute 0.
         // Advance 24 hours so a new day begins (day 2).
-        state.advance_time(1440, Some(&templates));
+        state.advance_time_minutes(1440, Some(&templates));
 
         let runtime = state.npc_runtime.get(&"merchant_bob".to_string()).unwrap();
         assert_eq!(
@@ -3742,33 +3806,35 @@ mod tests {
 
     #[test]
     fn test_step_advances_time() {
-        // A successful step must advance game time by exactly TIME_COST_STEP_MINUTES.
-        use crate::domain::resources::TIME_COST_STEP_MINUTES;
+        // A successful step must advance game time by exactly
+        // config.time.movement_step_seconds (default 30 seconds).
         use crate::domain::types::Direction;
         use crate::sdk::database::ContentDatabase;
 
         let mut state = GameState::new();
         state.world = build_world_with_map();
-        // Use total_days() so the cumulative-minute baseline is correct across
-        // month/year boundaries (day is now 1–30 within-month, not a running total).
-        let before = state.time.total_days() as u64 * 24 * 60
-            + state.time.hour as u64 * 60
-            + state.time.minute as u64;
+
+        // Compute total seconds from the epoch so the baseline is correct
+        // across month/year boundaries.
+        let total_seconds = |s: &GameState| -> u64 {
+            (s.time.total_days() as u64 - 1) * 86400
+                + s.time.hour as u64 * 3600
+                + s.time.minute as u64 * 60
+                + s.time.second as u64
+        };
+        let before = total_seconds(&state);
 
         let content = ContentDatabase::new();
         state
             .move_party_and_handle_events(Direction::North, &content)
             .expect("move north on clear map must succeed");
 
-        let after = state.time.total_days() as u64 * 24 * 60
-            + state.time.hour as u64 * 60
-            + state.time.minute as u64;
+        let after = total_seconds(&state);
 
         assert_eq!(
             after - before,
-            TIME_COST_STEP_MINUTES as u64,
-            "one step must advance time by exactly TIME_COST_STEP_MINUTES ({} min)",
-            TIME_COST_STEP_MINUTES
+            30,
+            "one step must advance time by exactly 30 seconds (default movement_step_seconds)"
         );
     }
 
@@ -3801,6 +3867,10 @@ mod tests {
         let result = state.move_party_and_handle_events(Direction::North, &content);
         assert!(result.is_err(), "move into a wall must return an error");
 
+        assert_eq!(
+            state.time.second, time_before.second,
+            "blocked step must not advance seconds"
+        );
         assert_eq!(
             state.time.minute, time_before.minute,
             "blocked step must not advance minutes"
@@ -3883,6 +3953,11 @@ mod tests {
             "rest_party must advance time by exactly {} hours ({} minutes)",
             hours,
             hours * 60
+        );
+        // Rest always advances on whole-minute boundaries, so seconds must be 0.
+        assert_eq!(
+            state.time.second, 0,
+            "rest_party must leave seconds at 0 (minute-aligned advancement)"
         );
     }
 
@@ -4015,7 +4090,7 @@ mod tests {
 
         // Start at 06:00, advance 16 hours → 22:00 (Night)
         let mut state = GameState::new();
-        state.advance_time(16 * 60, None);
+        state.advance_time_minutes(16 * 60, None);
         assert_eq!(
             state.time_of_day(),
             TimeOfDay::Night,
@@ -4146,7 +4221,7 @@ mod tests {
         );
 
         // Advance exactly 60 minutes — every tick drains one unit, so it must reach 0.
-        state.advance_time(60, None);
+        state.advance_time_minutes(60, None);
 
         assert_eq!(
             state.active_spells.fire_protection, 0,
@@ -4155,7 +4230,7 @@ mod tests {
     }
 
     /// Verifies that a 30-minute Might boost applied via `apply_timed_stat_boost`
-    /// is correctly expired (and the stat restored) after `advance_time(30)`.
+    /// is correctly expired (and the stat restored) after `advance_time_minutes(30)`.
     #[test]
     fn test_timed_attribute_potion_expires_after_advance_time() {
         use crate::application::GameState;
@@ -4189,7 +4264,7 @@ mod tests {
         state.party.add_member(hero).unwrap();
 
         // Advance exactly 30 minutes — the boost must expire on the last tick.
-        state.advance_time(30, None);
+        state.advance_time_minutes(30, None);
 
         assert!(
             state.party.members[0].timed_stat_boosts.is_empty(),
@@ -4322,11 +4397,11 @@ mod tests {
         state.party.add_member(hero).unwrap();
 
         // Advance a large number of minutes — the permanent boost must survive.
-        state.advance_time(999, None);
+        state.advance_time_minutes(999, None);
 
         assert_eq!(
             state.party.members[0].stats.might.current, boosted_might,
-            "Might must remain permanently boosted after advance_time(999)"
+            "Might must remain permanently boosted after advance_time_minutes(999)"
         );
         assert!(
             state.party.members[0].timed_stat_boosts.is_empty(),
@@ -4347,10 +4422,10 @@ mod tests {
         state.active_spells.fire_protection = 60;
 
         // Advance 30 minutes — 30 minutes remain from the first potion.
-        state.advance_time(30, None);
+        state.advance_time_minutes(30, None);
         assert_eq!(
             state.active_spells.fire_protection, 30,
-            "30 minutes must remain after the first advance_time(30)"
+            "30 minutes must remain after the first advance_time_minutes(30)"
         );
 
         // Second potion: overwrites with a fresh 60-minute duration (not 90).
@@ -4361,10 +4436,163 @@ mod tests {
         );
 
         // Advance 30 more minutes — 30 minutes remain from the second potion.
-        state.advance_time(30, None);
+        state.advance_time_minutes(30, None);
         assert_eq!(
             state.active_spells.fire_protection, 30,
-            "30 minutes must remain from the second potion after another advance_time(30)"
+            "30 minutes must remain from the second potion after another advance_time_minutes(30)"
         );
+    }
+
+    // ===== Phase 2: Time Advancement System Tests =====
+
+    /// `advance_time_seconds(30)` from 12:00:00 yields 12:00:30 — sub-minute
+    /// resolution works and does NOT tick spell/boost effects.
+    #[test]
+    fn test_advance_time_seconds_sub_minute_no_tick() {
+        let mut state = GameState::new();
+        state.active_spells.light = 10;
+        state.time = crate::domain::types::GameTime::new_full(1, 1, 1, 12, 0);
+
+        state.advance_time_seconds(30, None);
+
+        assert_eq!(state.time.hour, 12);
+        assert_eq!(state.time.minute, 0);
+        assert_eq!(state.time.second, 30);
+        // Sub-minute advance must NOT tick spells.
+        assert_eq!(
+            state.active_spells.light, 10,
+            "sub-minute advance must not tick active spells"
+        );
+    }
+
+    /// `advance_time_seconds(90)` from 12:00:30 yields 12:02:00 and ticks
+    /// effects once (90 / 60 = 1 full minute).
+    #[test]
+    fn test_advance_time_seconds_minute_rollover() {
+        let mut state = GameState::new();
+        state.active_spells.light = 10;
+        state.time = crate::domain::types::GameTime::new_full_with_seconds(1, 1, 1, 12, 0, 30);
+
+        state.advance_time_seconds(90, None);
+
+        assert_eq!(state.time.hour, 12);
+        assert_eq!(state.time.minute, 2);
+        assert_eq!(state.time.second, 0);
+        // 90 seconds = 1 full minute tick.
+        assert_eq!(
+            state.active_spells.light, 9,
+            "90 seconds should tick spells once (1 full minute)"
+        );
+    }
+
+    /// `advance_time_minutes` delegates to `advance_time_seconds` correctly.
+    #[test]
+    fn test_advance_time_minutes_delegates_to_seconds() {
+        let mut state_a = GameState::new();
+        let mut state_b = GameState::new();
+        state_a.active_spells.light = 20;
+        state_b.active_spells.light = 20;
+
+        state_a.advance_time_minutes(5, None);
+        state_b.advance_time_seconds(300, None);
+
+        assert_eq!(state_a.time.hour, state_b.time.hour);
+        assert_eq!(state_a.time.minute, state_b.time.minute);
+        assert_eq!(state_a.time.second, state_b.time.second);
+        assert_eq!(state_a.active_spells.light, state_b.active_spells.light);
+    }
+
+    /// Movement advances time by exactly `movement_step_seconds` (default 30s)
+    /// from the `TimeConfig` on the game state's config.
+    #[test]
+    fn test_movement_uses_config_time_step() {
+        use crate::domain::types::Direction;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut state = GameState::new();
+        state.world = build_world_with_map();
+        // Override movement_step_seconds to a custom value.
+        state.config.time.movement_step_seconds = 45;
+
+        let total_seconds = |s: &GameState| -> u64 {
+            (s.time.total_days() as u64 - 1) * 86400
+                + s.time.hour as u64 * 3600
+                + s.time.minute as u64 * 60
+                + s.time.second as u64
+        };
+        let before = total_seconds(&state);
+
+        let content = ContentDatabase::new();
+        state
+            .move_party_and_handle_events(Direction::North, &content)
+            .expect("move north on clear map must succeed");
+
+        let after = total_seconds(&state);
+        assert_eq!(
+            after - before,
+            45,
+            "movement must advance time by exactly movement_step_seconds (custom 45)"
+        );
+    }
+
+    /// `advance_time_seconds(3600)` advances the clock by exactly 1 hour and
+    /// ticks effects 60 times.
+    #[test]
+    fn test_advance_time_seconds_full_hour() {
+        let mut state = GameState::new();
+        state.active_spells.light = 100;
+
+        state.advance_time_seconds(3600, None);
+
+        assert_eq!(state.time.hour, 7); // default start 06:00 + 1 hour
+        assert_eq!(state.time.minute, 0);
+        assert_eq!(state.time.second, 0);
+        assert_eq!(
+            state.active_spells.light, 40,
+            "3600 seconds = 60 minute ticks, 100 - 60 = 40"
+        );
+    }
+
+    /// Rest still works correctly via `advance_time_minutes` — hours * 60
+    /// minutes is faithfully converted to seconds internally.
+    #[test]
+    fn test_rest_uses_advance_time_minutes_path() {
+        let mut state = GameState::new();
+        state.active_spells.light = 200;
+
+        // Simulate what rest_party does internally: advance_time_minutes(hours * 60)
+        let hours = 3u32;
+        state.advance_time_minutes(hours * 60, None);
+
+        assert_eq!(state.time.hour, 9); // 06:00 + 3 hours = 09:00
+        assert_eq!(state.time.minute, 0);
+        assert_eq!(state.time.second, 0);
+        // 3 hours = 180 minute ticks. 200 - 180 = 20.
+        assert_eq!(
+            state.active_spells.light, 20,
+            "3 hours of rest must tick spells 180 times"
+        );
+    }
+
+    /// Backward-compatible deserialization: `GameTime` without `second` field
+    /// defaults to 0, and `advance_time_seconds` works correctly on it.
+    #[test]
+    fn test_backward_compat_game_time_no_second_field() {
+        use crate::domain::types::GameTime;
+
+        // Deserialize a GameTime RON snippet that omits the `second` field.
+        let ron_str = "(day: 5, hour: 8, minute: 30)";
+        let time: GameTime = ron::from_str(ron_str).expect("RON deserialize must succeed");
+        assert_eq!(time.day, 5);
+        assert_eq!(time.hour, 8);
+        assert_eq!(time.minute, 30);
+        assert_eq!(time.second, 0, "missing second field must default to 0");
+
+        // Verify advance_time_seconds works on a GameState with this time.
+        let mut state = GameState::new();
+        state.time = time;
+        state.advance_time_seconds(45, None);
+        assert_eq!(state.time.second, 45);
+        assert_eq!(state.time.minute, 30);
     }
 }

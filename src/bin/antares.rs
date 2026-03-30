@@ -381,6 +381,7 @@ mod tests {
                 camera: CameraConfig::default(),
                 rest: Default::default(),
                 game_log: Default::default(),
+                time: Default::default(),
             },
         }
     }

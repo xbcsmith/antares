@@ -217,6 +217,34 @@ GameConfig(
     ),
 
     // ========================================================================
+    // Time Advancement Configuration
+    // ========================================================================
+    time: TimeConfig(
+        // Seconds of in-game time consumed per tile step in exploration mode.
+        // 30 seconds = half a minute per step (default)
+        // 60 seconds = one minute per step (slower pacing)
+        // 0  = instant movement (no time passes)
+        movement_step_seconds: 30,
+
+        // Seconds of in-game time consumed per individual combat turn.
+        // Each participant's action (attack, cast, defend, etc.) costs this much.
+        // 10 seconds = default (a 5-participant round = 50 seconds)
+        // 60 seconds = one minute per turn (slower, more dramatic combat)
+        combat_turn_seconds: 10,
+
+        // Seconds of in-game time consumed when transitioning between maps.
+        // 1800 seconds = 30 minutes (default — represents travel time)
+        // 3600 seconds = 1 hour (longer journeys between areas)
+        // 0    = instant transition (no time passes)
+        map_transition_seconds: 1800,
+
+        // Seconds of in-game time consumed for portal/teleport transitions.
+        // 0 = instant (default — portals are magical instant transport)
+        // 60 = one minute (brief disorientation after teleport)
+        portal_transition_seconds: 0,
+    ),
+
+    // ========================================================================
     // Game Log Configuration
     // ========================================================================
     game_log: GameLogConfig(

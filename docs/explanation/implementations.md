@@ -1419,3 +1419,169 @@ never removed the map event or despawned the visual.
 - [x] RON format used for data files
 - [x] No test references `campaigns/tutorial`
 - [x] All test data uses `data/test_campaign`
+
+## Game Feature Completion — Phase 2: Time Advancement System (Complete)
+
+### Overview
+
+Phase 2 adds sub-minute time resolution to the game engine. Previously, the
+smallest time unit was one minute; all actions (movement, combat, map
+transitions) advanced the clock in whole minutes. This phase introduces a
+`second` field on `GameTime`, a configurable `TimeConfig` struct, and rewires
+every time-advancing code path to use seconds as the fundamental unit.
+
+### 2.1 — Add Sub-Minute Resolution to `GameTime`
+
+**File**: `src/domain/types.rs`
+
+- Added `second: u8` field to `GameTime` with `#[serde(default)]` for
+  backward-compatible save deserialization.
+- Added `advance_seconds(seconds: u32)` as the new primitive time-advancement
+  method. It handles seconds → minutes → hours → days → months → years
+  rollover in a single pass.
+- Refactored all existing advance methods to delegate:
+  - `advance_minutes(m)` → `advance_seconds(m * 60)`
+  - `advance_hours(h)` → `advance_seconds(h * 3600)`
+  - `advance_days(d)` → `advance_seconds(d * 86400)`
+- Added `new_full_with_seconds(year, month, day, hour, minute, second)` constructor.
+- Added `Display` implementation: `Y{year} M{month} D{day} {hour:02}:{minute:02}:{second:02}`.
+- Updated all existing tests; added 8 new tests covering seconds rollover,
+  serde defaults, delegation, and display formatting.
+
+### 2.2 — Add `TimeConfig` to Game Configuration
+
+**File**: `src/sdk/game_config.rs`
+
+- Added `TimeConfig` struct with four configurable fields:
+  - `movement_step_seconds: u32` (default 30) — seconds per exploration tile step
+  - `combat_turn_seconds: u32` (default 10) — seconds per combat turn
+  - `map_transition_seconds: u32` (default 1800) — seconds per map transition (30 min)
+  - `portal_transition_seconds: u32` (default 0) — seconds for portal (instant)
+- All fields use `#[serde(default = "...")]` for partial RON deserialization.
+- Added `time: TimeConfig` field to `GameConfig` with `#[serde(default)]`.
+- Added `validate()` method (u32 fields cannot be negative; always passes).
+- Updated `GameConfig::validate` to call `self.time.validate()`.
+- Added 5 new tests: defaults, validation, RON round-trip, missing-field
+  deserialization, and GameConfig integration.
+
+### 2.3 — Update `GameState::advance_time` for Seconds
+
+**File**: `src/application/mod.rs`
+
+- Replaced `advance_time(minutes, templates)` with two methods:
+  - `advance_time_seconds(seconds, templates)` — the new primary method.
+    Advances the clock in seconds via `GameTime::advance_seconds`. Ticks
+    active spells and timed stat boosts per-minute only when full minute
+    boundaries are crossed (`seconds / 60` ticks). Sub-minute advances
+    (e.g. 30 seconds for a step) update the clock but do **not** trigger
+    effect ticking, since spells and stat boosts are measured in minutes
+    (Option A from the plan).
+  - `advance_time_minutes(minutes, templates)` — convenience wrapper that
+    calls `advance_time_seconds(minutes * 60, templates)` for callers that
+    still think in minutes (rest, potions).
+- Updated all internal callers:
+  - `move_party_and_handle_events` → `advance_time_seconds(self.config.time.movement_step_seconds, None)`
+  - `rest_party` → `advance_time_minutes(hours * 60, templates)`
+- Updated all tests (12 call sites) from `advance_time(N, None)` to
+  `advance_time_minutes(N, None)`.
+
+### 2.4 — Wire Time Advancement to Movement
+
+**File**: `src/application/mod.rs`
+
+- Movement now reads `self.config.time.movement_step_seconds` (default 30)
+  instead of the old constant `TIME_COST_STEP_MINUTES` (5 minutes).
+- The `test_step_advances_time` test was rewritten to verify exactly 30
+  seconds elapsed using a total-seconds helper.
+- Added `test_movement_uses_config_time_step` that overrides
+  `movement_step_seconds` to a custom value (45) and verifies the override
+  is respected.
+
+### 2.5 — Wire Time Advancement to Combat (Per-Turn)
+
+**File**: `src/game/systems/combat.rs`
+
+- Added `last_timed_turn: usize` field to `CombatResource` alongside
+  `last_timed_round`.
+- Changed `tick_combat_time` from round-based to turn-based detection:
+  it now compares both `(round, current_turn)` against
+  `(last_timed_round, last_timed_turn)`. When either changes, a single
+  turn's worth of time is charged using
+  `global_state.0.config.time.combat_turn_seconds` (default 10 seconds).
+- Updated `CombatResource::new()` and `clear()` to initialize/reset
+  `last_timed_turn = 0`.
+- Rewrote `test_combat_round_advances_time` → `test_combat_turn_advances_time`
+  to verify exactly 10 seconds per turn and stable subsequent frames.
+
+### 2.6 — Wire Time Advancement to Portals (Instant)
+
+**Files**: `src/game/systems/map.rs`, `src/game/systems/events.rs`
+
+- Added `is_portal: bool` field to `MapChangeEvent`.
+- Updated `map_change_handler` to check `is_portal`:
+  - `true` → uses `config.time.portal_transition_seconds` (default 0)
+  - `false` → uses `config.time.map_transition_seconds` (default 1800)
+- Updated `handle_events` in `events.rs` to set `is_portal: true` when
+  emitting `MapChangeEvent` for `MapEvent::Teleport` events.
+- Updated all test `MapChangeEvent` constructions with `is_portal: false`.
+- Rewrote `test_map_transition_advances_time` to use seconds-based
+  verification with `TimeConfig::default().map_transition_seconds`.
+- Added `test_portal_transition_advances_zero_seconds` verifying that
+  `is_portal: true` does not advance the clock with default config.
+
+### 2.7 — Update HUD Clock Display
+
+**File**: `src/game/systems/hud.rs`
+
+- Changed `format_clock_time(hour, minute)` to
+  `format_clock_time(hour, minute, second)` — now produces `"HH:MM:SS"`.
+- Updated `update_clock` system to pass `game_time.second`.
+- Updated initial clock text from `"00:00"` to `"00:00:00"`.
+- Updated `ClockTimeText` doc comment from `"HH:MM"` to `"HH:MM:SS"`.
+- Updated all 8 existing clock tests; added 2 new tests for seconds
+  formatting.
+
+### 2.8 — Supporting File Updates
+
+- **`src/game/systems/rest.rs`**: `advance_time(60, None)` →
+  `advance_time_minutes(60, None)`.
+- **`src/game/systems/time.rs`**: `advance_time(ev.minutes, None)` →
+  `advance_time_minutes(ev.minutes, None)`. Updated doc comments.
+- **`src/domain/resources.rs`**: Updated comment referencing `advance_time`.
+- **`data/test_campaign/config.ron`**: Added `TimeConfig` section with
+  default values.
+- **`campaigns/config.template.ron`**: Added fully-documented `TimeConfig`
+  section.
+
+### Deliverables Checklist
+
+- [x] `GameTime.second` field added with `advance_seconds()` method
+- [x] All existing advance methods delegate to `advance_seconds()`
+- [x] `TimeConfig` struct added to `GameConfig`
+- [x] `advance_time_seconds()` replaces `advance_time()` as primary method
+- [x] Movement wired to configurable seconds (default 30)
+- [x] Combat wired to per-turn configurable seconds (default 10)
+- [x] Portal transitions are instant (0 seconds)
+- [x] HUD clock updated for sub-minute display (`HH:MM:SS`)
+- [x] `data/test_campaign/config.ron` updated with `TimeConfig`
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all         → No output (all files formatted)
+✅ cargo check             → Finished with 0 errors
+✅ cargo clippy            → Finished with 0 warnings
+✅ cargo nextest run       → 4056 tests run: 4056 passed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4
+- [x] `GameTime.second` added with backward-compatible `#[serde(default)]`
+- [x] `TimeConfig` follows existing config pattern (`RestConfig`, `GameLogConfig`)
+- [x] Module placement follows Section 3.2
+- [x] Type aliases used consistently
+- [x] Constants extracted into `TimeConfig`, not hardcoded
+- [x] RON format used for data files
+- [x] No test references `campaigns/tutorial`
+- [x] All test data uses `data/test_campaign`

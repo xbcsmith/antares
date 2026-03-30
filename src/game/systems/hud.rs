@@ -254,7 +254,7 @@ pub struct CompassText;
 #[derive(Component)]
 pub struct ClockRoot;
 
-/// Marker component for the time-of-day text node (displays "HH:MM")
+/// Marker component for the time-of-day text node (displays "HH:MM:SS")
 #[derive(Component)]
 pub struct ClockTimeText;
 
@@ -630,9 +630,9 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                     ClockRoot,
                 ))
                 .with_children(|parent| {
-                    // Time line: "HH:MM"
+                    // Time line: "HH:MM:SS"
                     parent.spawn((
-                        Text::new("00:00"),
+                        Text::new("00:00:00"),
                         TextFont {
                             font_size: CLOCK_FONT_SIZE,
                             ..default()
@@ -960,7 +960,7 @@ fn update_clock(
     let time_color = clock_text_color(time_of_day);
 
     for (mut text, mut color) in &mut time_query {
-        **text = format_clock_time(game_time.hour, game_time.minute);
+        **text = format_clock_time(game_time.hour, game_time.minute, game_time.second);
         *color = TextColor(time_color);
     }
     for (mut text, _color) in &mut date_query {
@@ -2221,27 +2221,28 @@ pub fn count_conditions(conditions: &Condition) -> u8 {
 /// assert_eq!(direction_to_string(&Direction::North), "N");
 /// assert_eq!(direction_to_string(&Direction::East), "E");
 /// ```
-/// Formats the in-game hour and minute as a zero-padded "HH:MM" string.
+/// Formats the in-game hour, minute, and second as a zero-padded "HH:MM:SS" string.
 ///
 /// # Arguments
 /// * `hour`   - Current hour (0–23)
 /// * `minute` - Current minute (0–59)
+/// * `second` - Current second (0–59)
 ///
 /// # Returns
-/// A `String` in `"HH:MM"` format.
+/// A `String` in `"HH:MM:SS"` format.
 ///
 /// # Examples
 ///
 /// ```
 /// use antares::game::systems::hud::format_clock_time;
 ///
-/// assert_eq!(format_clock_time(0, 0),   "00:00");
-/// assert_eq!(format_clock_time(9, 5),   "09:05");
-/// assert_eq!(format_clock_time(12, 5),  "12:05");
-/// assert_eq!(format_clock_time(23, 59), "23:59");
+/// assert_eq!(format_clock_time(0, 0, 0),   "00:00:00");
+/// assert_eq!(format_clock_time(9, 5, 30),  "09:05:30");
+/// assert_eq!(format_clock_time(12, 5, 0),  "12:05:00");
+/// assert_eq!(format_clock_time(23, 59, 59), "23:59:59");
 /// ```
-pub fn format_clock_time(hour: u8, minute: u8) -> String {
-    format!("{:02}:{:02}", hour, minute)
+pub fn format_clock_time(hour: u8, minute: u8, second: u8) -> String {
+    format!("{:02}:{:02}:{:02}", hour, minute, second)
 }
 
 /// Formats the in-game calendar date as `"Y{year} M{month} D{day}"`.
@@ -3543,58 +3544,70 @@ mod clock_tests {
 
     // ── format_clock_time ────────────────────────────────────────────────────
 
-    /// hour=0, minute=0 → "00:00"  (midnight — both fields must be zero-padded)
+    /// hour=0, minute=0, second=0 → "00:00:00"  (midnight — all fields must be zero-padded)
     #[test]
     fn test_clock_format_midnight() {
-        assert_eq!(format_clock_time(0, 0), "00:00");
+        assert_eq!(format_clock_time(0, 0, 0), "00:00:00");
     }
 
-    /// hour=12, minute=5 → "12:05"  (single-digit minute is zero-padded)
+    /// hour=12, minute=5, second=0 → "12:05:00"  (single-digit minute is zero-padded)
     #[test]
     fn test_clock_format_noon() {
-        assert_eq!(format_clock_time(12, 5), "12:05");
+        assert_eq!(format_clock_time(12, 5, 0), "12:05:00");
     }
 
-    /// hour=9, minute=0 → "09:00"  (single-digit hour is zero-padded)
+    /// hour=9, minute=0, second=0 → "09:00:00"  (single-digit hour is zero-padded)
     #[test]
     fn test_clock_format_single_digit_hour() {
-        assert_eq!(format_clock_time(9, 0), "09:00");
+        assert_eq!(format_clock_time(9, 0, 0), "09:00:00");
     }
 
-    /// hour=23, minute=59 → "23:59"  (end-of-day boundary)
+    /// hour=23, minute=59, second=0 → "23:59:00"  (end-of-day boundary)
     #[test]
     fn test_clock_format_end_of_day() {
-        assert_eq!(format_clock_time(23, 59), "23:59");
+        assert_eq!(format_clock_time(23, 59, 0), "23:59:00");
     }
 
-    /// hour=0, minute=1 → "00:01"  (both zero-padded)
+    /// hour=0, minute=1, second=0 → "00:01:00"  (all zero-padded)
     #[test]
     fn test_clock_format_zero_hour_one_minute() {
-        assert_eq!(format_clock_time(0, 1), "00:01");
+        assert_eq!(format_clock_time(0, 1, 0), "00:01:00");
     }
 
-    /// hour=6, minute=30 → "06:30"  (dawn start time — used in GameState default)
+    /// hour=6, minute=30, second=0 → "06:30:00"  (dawn start time — used in GameState default)
     #[test]
     fn test_clock_format_dawn_default() {
-        assert_eq!(format_clock_time(6, 30), "06:30");
+        assert_eq!(format_clock_time(6, 30, 0), "06:30:00");
+    }
+
+    /// hour=14, minute=30, second=45 → "14:30:45"  (non-zero seconds)
+    #[test]
+    fn test_clock_format_with_seconds() {
+        assert_eq!(format_clock_time(14, 30, 45), "14:30:45");
+    }
+
+    /// hour=0, minute=0, second=5 → "00:00:05"  (single-digit second is zero-padded)
+    #[test]
+    fn test_clock_format_seconds_zero_padded() {
+        assert_eq!(format_clock_time(0, 0, 5), "00:00:05");
     }
 
     /// Verify all valid hours (0-23) produce correctly formatted strings
     #[test]
     fn test_clock_format_all_hours_produce_valid_strings() {
         for hour in 0u8..24 {
-            let formatted = format_clock_time(hour, 0);
-            // Must be exactly 5 characters: "HH:MM"
+            let formatted = format_clock_time(hour, 0, 0);
+            // Must be exactly 8 characters: "HH:MM:SS"
             assert_eq!(
                 formatted.len(),
-                5,
-                "format_clock_time({}, 0) produced '{}' — expected 5 chars",
+                8,
+                "format_clock_time({}, 0, 0) produced '{}' — expected 8 chars",
                 hour,
                 formatted
             );
             assert!(
                 formatted.contains(':'),
-                "format_clock_time({}, 0) missing colon",
+                "format_clock_time({}, 0, 0) missing colon",
                 hour
             );
         }
@@ -3604,11 +3617,11 @@ mod clock_tests {
     #[test]
     fn test_clock_format_all_minutes_produce_valid_strings() {
         for minute in 0u8..60 {
-            let formatted = format_clock_time(0, minute);
+            let formatted = format_clock_time(0, minute, 0);
             assert_eq!(
                 formatted.len(),
-                5,
-                "format_clock_time(0, {}) produced '{}' — expected 5 chars",
+                8,
+                "format_clock_time(0, {}, 0) produced '{}' — expected 8 chars",
                 minute,
                 formatted
             );
@@ -3870,10 +3883,10 @@ mod clock_tests {
         let mut time_q = world.query_filtered::<&Text, With<ClockTimeText>>();
         let time_text_ref = time_q.single(world).unwrap();
         let time_text: &str = time_text_ref;
-        // GameState::new() starts at 06:00
+        // GameState::new() starts at 06:00:00
         assert!(
-            time_text.contains("06:00"),
-            "ClockTimeText should contain '06:00' at default start, got '{}'",
+            time_text.contains("06:00:00"),
+            "ClockTimeText should contain '06:00:00' at default start, got '{}'",
             time_text
         );
 
@@ -3913,8 +3926,8 @@ mod clock_tests {
         let time_text_ref = time_q.single(world).unwrap();
         let time_text: &str = time_text_ref;
         assert!(
-            time_text.contains("00:00"),
-            "ClockTimeText should contain '00:00' after 18h advance, got '{}'",
+            time_text.contains("00:00:00"),
+            "ClockTimeText should contain '00:00:00' after 18h advance, got '{}'",
             time_text
         );
 

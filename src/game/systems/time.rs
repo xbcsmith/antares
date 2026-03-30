@@ -21,7 +21,7 @@
 //! transitions, rest ticks, or future food/condition hooks — should **send**
 //! a [`TimeAdvanceEvent`] rather than mutating `GlobalState` directly.
 //! The single [`apply_time_advance`] system drains the event queue each frame
-//! and calls [`GameState::advance_time`] once per event, keeping time mutation
+//! and calls [`GameState::advance_time_minutes`] once per event, keeping time mutation
 //! centralised and easy to audit.
 //!
 //! ### Usage
@@ -145,7 +145,7 @@ pub fn update_ambient_light(
 // ===== TimeAdvanceEvent system =====
 
 /// Bevy system that drains all [`TimeAdvanceEvent`]s queued this frame and
-/// applies them to the in-game clock via [`crate::application::GameState::advance_time`].
+/// applies them to the in-game clock via [`crate::application::GameState::advance_time_minutes`].
 ///
 /// This system is registered by [`TimeOfDayPlugin`] and runs **before**
 /// [`update_ambient_light`] so that the ambient light always reflects the
@@ -173,7 +173,7 @@ pub fn apply_time_advance(
     mut events: MessageReader<TimeAdvanceEvent>,
 ) {
     for ev in events.read() {
-        global_state.0.advance_time(ev.minutes, None);
+        global_state.0.advance_time_minutes(ev.minutes, None);
     }
 }
 

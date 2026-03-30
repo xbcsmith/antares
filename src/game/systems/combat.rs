@@ -398,9 +398,14 @@ pub struct CombatResource {
     /// Set alongside `encounter_position`; cleared after victory.
     pub encounter_map_id: Option<crate::domain::types::MapId>,
     /// The last round number for which game time was advanced.
-    /// Used by `tick_combat_time` to detect new rounds and charge
-    /// `TIME_COST_COMBAT_ROUND_MINUTES` exactly once per round.
+    /// Used by `tick_combat_time` to detect new turns and charge
+    /// `combat_turn_seconds` exactly once per turn.
     pub last_timed_round: u32,
+    /// The last turn index for which game time was advanced.
+    /// Used alongside `last_timed_round` by `tick_combat_time` to detect
+    /// individual turn changes and advance time by
+    /// `config.time.combat_turn_seconds` once per turn.
+    pub last_timed_turn: usize,
     /// Type of the current combat encounter.
     ///
     /// Set when `CombatStarted` is received and cleared (reset to
@@ -420,6 +425,7 @@ impl CombatResource {
             encounter_position: None,
             encounter_map_id: None,
             last_timed_round: 0,
+            last_timed_turn: 0,
             combat_event_type: CombatEventType::Normal,
         }
     }
@@ -432,6 +438,7 @@ impl CombatResource {
         self.encounter_position = None;
         self.encounter_map_id = None;
         self.last_timed_round = 0;
+        self.last_timed_turn = 0;
         self.combat_event_type = CombatEventType::Normal;
     }
 }
@@ -4525,13 +4532,16 @@ fn execute_monster_turn(
 ///
 /// This ensures the resolution is only handled once by tracking a flag in
 /// `CombatResource`.
-/// System: advance game time by `TIME_COST_COMBAT_ROUND_MINUTES` once per new
-/// combat round.
+/// System: advance game time by `combat_turn_seconds` once per new combat turn.
 ///
-/// `CombatResource::last_timed_round` is initialised to `0` and the combat
-/// state's round counter starts at `1`, so the first round is charged
-/// immediately when combat begins.  Subsequent rounds are charged when
-/// `combat_res.state.round` exceeds `last_timed_round`.
+/// Tracks both `last_timed_round` and `last_timed_turn` to detect when a new
+/// individual turn occurs (each participant's action). The first turn of the
+/// first round is charged immediately when combat begins because
+/// `last_timed_round` starts at `0` while `combat.state.round` starts at `1`.
+///
+/// Time is advanced using the configurable
+/// [`TimeConfig::combat_turn_seconds`](crate::sdk::game_config::TimeConfig::combat_turn_seconds)
+/// from the game configuration (default 10 seconds per turn).
 ///
 /// This system is a no-op outside of combat, ensuring that the clock is never
 /// advanced by stale combat data.
@@ -4542,13 +4552,15 @@ fn tick_combat_time(mut combat_res: ResMut<CombatResource>, mut global_state: Re
     }
 
     let current_round = combat_res.state.round;
-    if current_round > combat_res.last_timed_round {
-        let new_rounds = current_round - combat_res.last_timed_round;
-        global_state.0.advance_time(
-            new_rounds * crate::domain::resources::TIME_COST_COMBAT_ROUND_MINUTES,
-            None,
-        );
+    let current_turn = combat_res.state.current_turn;
+
+    // Detect any turn change: either the round advanced or the turn index
+    // within the current round changed.
+    if current_round != combat_res.last_timed_round || current_turn != combat_res.last_timed_turn {
+        let seconds_per_turn = global_state.0.config.time.combat_turn_seconds;
+        global_state.0.advance_time_seconds(seconds_per_turn, None);
         combat_res.last_timed_round = current_round;
+        combat_res.last_timed_turn = current_turn;
     }
 }
 
@@ -11249,16 +11261,18 @@ mod tests {
         );
     }
 
-    /// One complete combat round must advance the in-game clock by
-    /// exactly `TIME_COST_COMBAT_ROUND_MINUTES`.
+    /// The first combat turn must advance the in-game clock by exactly
+    /// `combat_turn_seconds` from `TimeConfig` (default 10 seconds).
     ///
     /// Strategy: build a minimal Bevy app with `CombatPlugin`, put the
     /// `GlobalState` into combat mode with round = 1, run one update frame so
     /// that `tick_combat_time` executes, and assert the clock advanced by the
     /// expected amount.
     #[test]
-    fn test_combat_round_advances_time() {
-        use crate::domain::resources::TIME_COST_COMBAT_ROUND_MINUTES;
+    fn test_combat_turn_advances_time() {
+        use crate::sdk::game_config::TimeConfig;
+
+        let default_combat_turn_seconds = TimeConfig::default().combat_turn_seconds;
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
@@ -11276,52 +11290,56 @@ mod tests {
         gs.party.add_member(hero.clone()).unwrap();
         gs.enter_combat();
 
-        // Record the starting total minutes.
-        // Use total_days() so the cumulative-minute baseline is correct across
-        // month/year boundaries (day is now 1–30 within-month, not a running total).
-        let start_minutes = gs.time.total_days() as u64 * 24 * 60
-            + gs.time.hour as u64 * 60
-            + gs.time.minute as u64;
+        // Record the starting total seconds.
+        let total_seconds = |s: &crate::application::GameState| -> u64 {
+            (s.time.total_days() as u64 - 1) * 86400
+                + s.time.hour as u64 * 3600
+                + s.time.minute as u64 * 60
+                + s.time.second as u64
+        };
+        let start_secs = total_seconds(&gs);
 
         app.insert_resource(crate::game::resources::GlobalState(gs));
 
-        // The CombatResource starts with last_timed_round = 0.
-        // After sync_party_to_combat runs, combat.state.round == 1.
-        // tick_combat_time sees current_round (1) > last_timed_round (0),
-        // so it charges TIME_COST_COMBAT_ROUND_MINUTES and sets last_timed_round = 1.
+        // The CombatResource starts with last_timed_round = 0, last_timed_turn = 0.
+        // After sync_party_to_combat runs, combat.state.round == 1, current_turn == 0.
+        // tick_combat_time sees a turn change (round 0→1) and charges
+        // combat_turn_seconds, then updates last_timed_round = 1.
         app.update();
 
         let time_after_first_frame = {
             let state = app
                 .world()
                 .resource::<crate::game::resources::GlobalState>();
-            let end_minutes = state.0.time.total_days() as u64 * 24 * 60
-                + state.0.time.hour as u64 * 60
-                + state.0.time.minute as u64;
+            let end_secs = total_seconds(&state.0);
 
             assert_eq!(
-                end_minutes - start_minutes,
-                TIME_COST_COMBAT_ROUND_MINUTES as u64,
-                "one combat round must advance the clock by exactly TIME_COST_COMBAT_ROUND_MINUTES ({} min)",
-                TIME_COST_COMBAT_ROUND_MINUTES
+                end_secs - start_secs,
+                default_combat_turn_seconds as u64,
+                "one combat turn must advance the clock by exactly combat_turn_seconds ({} sec)",
+                default_combat_turn_seconds
             );
 
             // Capture the time so we can compare after the next frame.
             state.0.time
         };
 
-        // Subsequent frames with the same round number must NOT advance time again.
-        app.update(); // same round — no new charge
+        // Subsequent frames with the same round and turn must NOT advance time again.
+        app.update(); // same round, same turn — no new charge
         let state2 = app
             .world()
             .resource::<crate::game::resources::GlobalState>();
         assert_eq!(
+            state2.0.time.second, time_after_first_frame.second,
+            "same-turn subsequent frame must not advance seconds again"
+        );
+        assert_eq!(
             state2.0.time.minute, time_after_first_frame.minute,
-            "same-round subsequent frame must not advance minutes again"
+            "same-turn subsequent frame must not advance minutes again"
         );
         assert_eq!(
             state2.0.time.hour, time_after_first_frame.hour,
-            "same-round subsequent frame must not advance hours again"
+            "same-turn subsequent frame must not advance hours again"
         );
     }
 
