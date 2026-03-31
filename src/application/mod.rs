@@ -94,6 +94,12 @@ pub enum GameMode {
     /// clicking the "Game Log" header in the small log panel.  ESC returns
     /// to the previous [`GameMode`].
     GameLog,
+    /// All party members are dead — the game is over.
+    ///
+    /// Entered when a trap, combat, or other hazard kills every living party
+    /// member.  The UI should display a "Game Over" screen with options to
+    /// load a save or quit.
+    GameOver,
 }
 
 // ===== Rest State =====
@@ -616,6 +622,14 @@ pub struct QuestLog {
     pub active_quests: Vec<Quest>,
     /// Completed quest IDs
     pub completed_quests: Vec<String>,
+    /// Quest IDs that have been unlocked and are available to start.
+    ///
+    /// Populated by the [`crate::domain::quest::QuestReward::UnlockQuest`]
+    /// reward.  When a quest completion unlocks another quest, the target
+    /// quest ID is inserted here.  The quest-start flow can optionally
+    /// check this set to gate quest availability.
+    #[serde(default)]
+    pub available_quests: std::collections::HashSet<u16>,
 }
 
 impl QuestLog {
@@ -624,6 +638,7 @@ impl QuestLog {
         Self {
             active_quests: Vec::new(),
             completed_quests: Vec::new(),
+            available_quests: std::collections::HashSet::new(),
         }
     }
 
@@ -638,6 +653,45 @@ impl QuestLog {
             let quest = self.active_quests.remove(pos);
             self.completed_quests.push(quest.id);
         }
+    }
+
+    /// Marks a quest as available/unlocked so it can be started.
+    ///
+    /// Called by the [`crate::domain::quest::QuestReward::UnlockQuest`]
+    /// handler when a completed quest unlocks a follow-up quest.
+    ///
+    /// # Arguments
+    ///
+    /// * `quest_id` - Domain-level quest ID to unlock.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::QuestLog;
+    ///
+    /// let mut log = QuestLog::new();
+    /// assert!(!log.is_quest_available(5));
+    /// log.unlock_quest(5);
+    /// assert!(log.is_quest_available(5));
+    /// ```
+    pub fn unlock_quest(&mut self, quest_id: u16) {
+        self.available_quests.insert(quest_id);
+    }
+
+    /// Returns `true` if the given quest has been unlocked.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::QuestLog;
+    ///
+    /// let mut log = QuestLog::new();
+    /// log.unlock_quest(10);
+    /// assert!(log.is_quest_available(10));
+    /// assert!(!log.is_quest_available(11));
+    /// ```
+    pub fn is_quest_available(&self, quest_id: u16) -> bool {
+        self.available_quests.contains(&quest_id)
     }
 }
 
@@ -757,6 +811,46 @@ pub enum RecruitResult {
 
     /// Character recruitment was declined by the player
     Declined,
+}
+
+/// Maps a trap effect name string to a [`crate::domain::character::Condition`] bitflag.
+///
+/// Trap events store their status effect as an `Option<String>`.  This helper
+/// translates well-known effect names into the corresponding condition flag so
+/// that [`GameState::move_party_and_handle_events`] and the Bevy
+/// [`crate::game::systems::events::handle_events`] system can apply effects
+/// uniformly.
+///
+/// Unknown effect names return [`crate::domain::character::Condition::FINE`]
+/// (no effect) and a warning is logged.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::map_effect_to_condition;
+/// use antares::domain::character::Condition;
+///
+/// assert_eq!(map_effect_to_condition("poison"), Condition::POISONED);
+/// assert_eq!(map_effect_to_condition("paralysis"), Condition::PARALYZED);
+/// assert_eq!(map_effect_to_condition("unknown"), Condition::FINE);
+/// ```
+pub fn map_effect_to_condition(effect: &str) -> u8 {
+    use crate::domain::character::Condition;
+    match effect.to_ascii_lowercase().as_str() {
+        "poison" | "poisoned" => Condition::POISONED,
+        "paralysis" | "paralyze" | "paralyzed" => Condition::PARALYZED,
+        "sleep" | "asleep" => Condition::ASLEEP,
+        "blind" | "blinded" => Condition::BLINDED,
+        "silence" | "silenced" => Condition::SILENCED,
+        "disease" | "diseased" => Condition::DISEASED,
+        "unconscious" => Condition::UNCONSCIOUS,
+        "death" | "dead" => Condition::DEAD,
+        "stone" | "petrify" | "petrified" => Condition::STONE,
+        other => {
+            tracing::warn!("Unknown trap effect '{}' — no condition applied", other);
+            Condition::FINE
+        }
+    }
 }
 
 impl GameState {
@@ -1363,13 +1457,69 @@ impl GameState {
             }
 
             crate::domain::world::EventResult::NpcDialogue { npc_id } => {
-                // Start dialogue mode (dialogue state may need NPC context)
-                let _ = npc_id; // TODO: pass npc_id into dialogue state when implemented
-                self.mode = GameMode::Dialogue(crate::application::dialogue::DialogueState::new());
+                // Start dialogue mode with NPC context so dialogue systems
+                // know which NPC the party is speaking to.
+                let mut dialogue_state = crate::application::dialogue::DialogueState::new();
+                dialogue_state.speaker_npc_id = Some(npc_id);
+                self.mode = GameMode::Dialogue(dialogue_state);
+            }
+
+            crate::domain::world::EventResult::Trap { damage, effect } => {
+                // Apply trap damage to all living party members.
+                for member in &mut self.party.members {
+                    if member.is_alive() {
+                        member.hp.modify(-(damage as i32));
+                        if member.hp.current == 0 {
+                            member
+                                .conditions
+                                .add(crate::domain::character::Condition::DEAD);
+                        }
+                    }
+                }
+
+                // Apply status effect if present.
+                if let Some(ref effect_name) = effect {
+                    let flag = map_effect_to_condition(effect_name);
+                    if flag != crate::domain::character::Condition::FINE {
+                        for member in &mut self.party.members {
+                            if member.is_alive() {
+                                member.conditions.add(flag);
+                            }
+                        }
+                    }
+                }
+
+                // Check for party wipe.
+                if self.party.living_count() == 0 {
+                    self.mode = GameMode::GameOver;
+                }
+            }
+
+            crate::domain::world::EventResult::Treasure { loot } => {
+                // Distribute loot items across party members with inventory
+                // space.  Each item ID in the loot vec is an `ItemId` (u8).
+                for item_byte in &loot {
+                    let item_id = *item_byte as crate::domain::types::ItemId;
+                    let mut placed = false;
+                    for member in &mut self.party.members {
+                        if member.inventory.has_space()
+                            && member.inventory.add_item(item_id, 1).is_ok()
+                        {
+                            placed = true;
+                            break;
+                        }
+                    }
+                    if !placed {
+                        tracing::warn!(
+                            "Treasure item {} lost — no party member has inventory space",
+                            item_id
+                        );
+                    }
+                }
             }
 
             _ => {
-                // Other events (treasure, teleport, trap, etc.) are handled elsewhere or are no-ops here
+                // Other events (teleport, sign, etc.) are handled elsewhere or are no-ops here
             }
         }
 
@@ -4594,5 +4744,391 @@ mod tests {
         state.advance_time_seconds(45, None);
         assert_eq!(state.time.second, 45);
         assert_eq!(state.time.minute, 30);
+    }
+
+    #[test]
+    fn test_map_effect_to_condition_known_effects() {
+        use crate::application::map_effect_to_condition;
+        use crate::domain::character::Condition;
+
+        assert_eq!(map_effect_to_condition("poison"), Condition::POISONED);
+        assert_eq!(map_effect_to_condition("poisoned"), Condition::POISONED);
+        assert_eq!(map_effect_to_condition("paralysis"), Condition::PARALYZED);
+        assert_eq!(map_effect_to_condition("paralyze"), Condition::PARALYZED);
+        assert_eq!(map_effect_to_condition("sleep"), Condition::ASLEEP);
+        assert_eq!(map_effect_to_condition("blind"), Condition::BLINDED);
+        assert_eq!(map_effect_to_condition("silence"), Condition::SILENCED);
+        assert_eq!(map_effect_to_condition("disease"), Condition::DISEASED);
+        assert_eq!(
+            map_effect_to_condition("unconscious"),
+            Condition::UNCONSCIOUS
+        );
+        assert_eq!(map_effect_to_condition("death"), Condition::DEAD);
+        assert_eq!(map_effect_to_condition("stone"), Condition::STONE);
+        assert_eq!(map_effect_to_condition("petrify"), Condition::STONE);
+    }
+
+    #[test]
+    fn test_map_effect_to_condition_unknown_returns_fine() {
+        use crate::application::map_effect_to_condition;
+        use crate::domain::character::Condition;
+
+        assert_eq!(map_effect_to_condition("unknown"), Condition::FINE);
+        assert_eq!(map_effect_to_condition("fireball"), Condition::FINE);
+    }
+
+    #[test]
+    fn test_map_effect_to_condition_case_insensitive() {
+        use crate::application::map_effect_to_condition;
+        use crate::domain::character::Condition;
+
+        assert_eq!(map_effect_to_condition("POISON"), Condition::POISONED);
+        assert_eq!(map_effect_to_condition("Paralysis"), Condition::PARALYZED);
+        assert_eq!(map_effect_to_condition("SLEEP"), Condition::ASLEEP);
+    }
+
+    #[test]
+    fn test_quest_log_unlock_quest() {
+        let mut log = QuestLog::new();
+        assert!(!log.is_quest_available(5));
+        log.unlock_quest(5);
+        assert!(log.is_quest_available(5));
+        assert!(!log.is_quest_available(6));
+    }
+
+    #[test]
+    fn test_quest_log_unlock_quest_idempotent() {
+        let mut log = QuestLog::new();
+        log.unlock_quest(10);
+        log.unlock_quest(10);
+        assert!(log.is_quest_available(10));
+        assert_eq!(log.available_quests.len(), 1);
+    }
+
+    #[test]
+    fn test_quest_log_available_quests_serialization() {
+        let mut log = QuestLog::new();
+        log.unlock_quest(1);
+        log.unlock_quest(2);
+
+        let serialized =
+            ron::ser::to_string_pretty(&log, ron::ser::PrettyConfig::default()).expect("serialize");
+        let deserialized: QuestLog = ron::from_str(&serialized).expect("deserialize");
+        assert!(deserialized.is_quest_available(1));
+        assert!(deserialized.is_quest_available(2));
+        assert!(!deserialized.is_quest_available(3));
+    }
+
+    #[test]
+    fn test_quest_log_backward_compat_no_available_quests_field() {
+        // Simulate a legacy save without available_quests field
+        let ron_str = r#"(
+            active_quests: [],
+            completed_quests: [],
+        )"#;
+        let log: QuestLog = ron::from_str(ron_str).expect("deserialize legacy quest log");
+        assert!(log.available_quests.is_empty());
+    }
+
+    #[test]
+    fn test_trap_event_reduces_party_hp() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(50);
+        state.party.add_member(hero).unwrap();
+
+        // Set up a world with a map containing a trap
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let trap_pos = Position::new(1, 0);
+        map.add_event(
+            trap_pos,
+            MapEvent::Trap {
+                name: "Pit Trap".to_string(),
+                description: "A hidden pit".to_string(),
+                damage: 10,
+                effect: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        // Build a minimal content database
+        let content = crate::sdk::database::ContentDatabase::new();
+
+        let result =
+            state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        assert!(result.is_ok());
+
+        // Hero should have taken 10 damage: 50 - 10 = 40
+        assert_eq!(state.party.members[0].hp.current, 40);
+    }
+
+    #[test]
+    fn test_trap_event_with_effect_applies_condition() {
+        use crate::domain::character::{Alignment, Character, Condition, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(100);
+        state.party.add_member(hero).unwrap();
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let trap_pos = Position::new(1, 0);
+        map.add_event(
+            trap_pos,
+            MapEvent::Trap {
+                name: "Poison Trap".to_string(),
+                description: "".to_string(),
+                damage: 5,
+                effect: Some("poison".to_string()),
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        assert_eq!(state.party.members[0].hp.current, 95);
+        assert!(state.party.members[0].conditions.has(Condition::POISONED));
+    }
+
+    #[test]
+    fn test_trap_kills_all_members_triggers_game_over() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(5);
+        state.party.add_member(hero).unwrap();
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            Position::new(1, 0),
+            MapEvent::Trap {
+                name: "Death Trap".to_string(),
+                description: "".to_string(),
+                damage: 100,
+                effect: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        assert_eq!(state.party.living_count(), 0);
+        assert!(matches!(state.mode, GameMode::GameOver));
+    }
+
+    #[test]
+    fn test_treasure_event_distributes_items() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            Position::new(1, 0),
+            MapEvent::Treasure {
+                name: "Chest".to_string(),
+                description: "A shiny chest".to_string(),
+                loot: vec![5, 10],
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        // Items should be in first member's inventory
+        let inv = &state.party.members[0].inventory;
+        assert_eq!(inv.items.len(), 2);
+        assert!(inv.items.iter().any(|slot| slot.item_id == 5));
+        assert!(inv.items.iter().any(|slot| slot.item_id == 10));
+    }
+
+    #[test]
+    fn test_treasure_event_consumed_after_collection() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        let treasure_pos = Position::new(1, 0);
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            treasure_pos,
+            MapEvent::Treasure {
+                name: "Chest".to_string(),
+                description: "".to_string(),
+                loot: vec![1],
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        // Treasure event should have been consumed by trigger_event (domain layer)
+        assert!(state
+            .world
+            .get_current_map()
+            .unwrap()
+            .get_event(treasure_pos)
+            .is_none());
+    }
+
+    #[test]
+    fn test_npc_dialogue_carries_npc_id() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        let npc_pos = Position::new(1, 0);
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            npc_pos,
+            MapEvent::NpcDialogue {
+                name: "Elder".to_string(),
+                description: "".to_string(),
+                npc_id: "village_elder".to_string(),
+                time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        // Should be in dialogue mode with npc_id set
+        match &state.mode {
+            GameMode::Dialogue(ds) => {
+                assert_eq!(ds.speaker_npc_id, Some("village_elder".to_string()));
+            }
+            other => panic!("Expected Dialogue mode, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_trap_dead_members_take_no_damage() {
+        use crate::domain::character::{Alignment, Character, Condition, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+
+        // Living hero
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(50);
+        state.party.add_member(hero).unwrap();
+
+        // Dead companion
+        let mut dead_guy = Character::new(
+            "DeadGuy".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        dead_guy.hp.current = 0;
+        dead_guy.conditions.add(Condition::DEAD);
+        state.party.add_member(dead_guy).unwrap();
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            Position::new(1, 0),
+            MapEvent::Trap {
+                name: "Trap".to_string(),
+                description: "".to_string(),
+                damage: 10,
+                effect: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        // Living hero takes damage
+        assert_eq!(state.party.members[0].hp.current, 40);
+        // Dead member unchanged
+        assert_eq!(state.party.members[1].hp.current, 0);
     }
 }

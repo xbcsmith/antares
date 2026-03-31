@@ -318,9 +318,12 @@ impl QuestSystem {
                         }
                     }
                 }
-                QuestReward::UnlockQuest(_qid) => {
-                    // Unlocking quests requires campaign logic; for now it's a no-op.
-                    // TODO: integrate with quest availability system.
+                QuestReward::UnlockQuest(qid) => {
+                    game_state.quests.unlock_quest(*qid);
+                    tracing::info!(
+                        "Quest reward unlocked quest {} for future availability",
+                        qid
+                    );
                 }
                 QuestReward::SetFlag { flag_name, value } => {
                     // Simple global flag handling is not implemented in GameState yet.
@@ -543,5 +546,93 @@ mod tests {
         // Reward applied
         assert_eq!(gs.party.gold, 50);
         assert!(gs.quests.completed_quests.contains(&"3".to_string()));
+    }
+
+    #[test]
+    fn test_unlock_quest_reward_makes_quest_available() {
+        // Quest 1: kill 1 monster, reward = UnlockQuest(2)
+        let mut db = ContentDatabase::new();
+        let mut q = Quest::new(1, "First Quest", "Start here");
+        let mut stage = QuestStage::new(1, "Do task");
+        stage.add_objective(QuestObjective::KillMonsters {
+            monster_id: 1,
+            quantity: 1,
+        });
+        q.add_stage(stage);
+        q.add_reward(QuestReward::UnlockQuest(2));
+        db.quests.add_quest(q);
+
+        let mut gs = crate::application::GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+
+        let mut qs = QuestSystem::new();
+        qs.start_quest(1, &mut gs, &db).expect("start_quest");
+
+        // Quest 2 should not yet be available
+        assert!(!gs.quests.is_quest_available(2));
+
+        // Complete quest 1
+        qs.process_event(
+            &QuestProgressEvent::MonsterKilled {
+                monster_id: 1,
+                count: 1,
+            },
+            &mut gs,
+            &db,
+        );
+
+        // Quest 1 should be completed
+        assert!(gs.quests.completed_quests.contains(&"1".to_string()));
+
+        // Quest 2 should now be available via UnlockQuest reward
+        assert!(gs.quests.is_quest_available(2));
+    }
+
+    #[test]
+    fn test_unlock_quest_reward_multiple_unlocks() {
+        let mut db = ContentDatabase::new();
+        let mut q = Quest::new(10, "Multi Unlock", "Unlocks two quests");
+        let mut stage = QuestStage::new(1, "Finish");
+        stage.add_objective(QuestObjective::KillMonsters {
+            monster_id: 3,
+            quantity: 1,
+        });
+        q.add_stage(stage);
+        q.add_reward(QuestReward::UnlockQuest(20));
+        q.add_reward(QuestReward::UnlockQuest(30));
+        db.quests.add_quest(q);
+
+        let mut gs = crate::application::GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+
+        let mut qs = QuestSystem::new();
+        qs.start_quest(10, &mut gs, &db).expect("start_quest");
+
+        qs.process_event(
+            &QuestProgressEvent::MonsterKilled {
+                monster_id: 3,
+                count: 1,
+            },
+            &mut gs,
+            &db,
+        );
+
+        assert!(gs.quests.is_quest_available(20));
+        assert!(gs.quests.is_quest_available(30));
+        assert!(!gs.quests.is_quest_available(40));
     }
 }

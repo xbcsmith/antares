@@ -1585,3 +1585,198 @@ every time-advancing code path to use seconds as the fundamental unit.
 - [x] RON format used for data files
 - [x] No test references `campaigns/tutorial`
 - [x] All test data uses `data/test_campaign`
+
+## Game Feature Completion — Phase 3: Core Game Mechanics (Complete)
+
+### Overview
+
+Implemented Phase 3 of the Game Feature Completion Plan: core game mechanics
+for traps, treasure, dialogue recruitment, NPC dialogue context, and quest
+reward unlocking. These are fundamental RPG mechanics that were previously
+stubbed out with TODO comments.
+
+All four quality gates pass. Test count increased from 4056 to 4078 (22 new
+tests added). Zero errors, zero warnings.
+
+### 3.1 — Implement Trap Damage Application
+
+**Files modified**: `src/application/mod.rs`, `src/game/systems/events.rs`
+
+Trap events now apply damage to all living party members when triggered:
+
+- **Application layer** (`move_party_and_handle_events`): When
+  `EventResult::Trap { damage, effect }` is returned by `trigger_event`, the
+  handler iterates all living party members and calls `hp.modify(-damage)`.
+  Members reduced to 0 HP receive the `Condition::DEAD` flag.
+- **Bevy event layer** (`handle_events`): The `MapEvent::Trap` handler applies
+  the same damage logic and logs per-character damage messages with
+  `LogCategory::Combat`.
+- **Effect application**: If the trap has an `effect` string (e.g., `"poison"`,
+  `"paralysis"`), the `map_effect_to_condition()` helper maps it to the
+  corresponding `Condition` bitflag and applies it to all living members.
+- **Party wipe check**: After damage and effects, if `party.living_count() == 0`,
+  the game transitions to `GameMode::GameOver`.
+- **Event removal**: The Bevy handler removes the trap event from the map after
+  triggering (the domain-layer `trigger_event` also removes it).
+
+#### New public API
+
+- `map_effect_to_condition(effect: &str) -> u8` — Maps well-known trap effect
+  names (poison, paralysis, sleep, blind, silence, disease, unconscious, death,
+  stone/petrify) to `Condition` bitflags. Unknown effects return
+  `Condition::FINE` with a warning log.
+
+#### New `GameMode` variant
+
+- `GameMode::GameOver` — Entered when all party members die. The UI should
+  display a "Game Over" screen with options to load a save or quit.
+
+### 3.2 — Implement Treasure Loot Distribution
+
+**Files modified**: `src/application/mod.rs`, `src/game/systems/events.rs`
+
+Treasure events now distribute loot items to party member inventories:
+
+- **Application layer** (`move_party_and_handle_events`): For each item ID in
+  the `loot` vector, finds the first party member with inventory space and calls
+  `inventory.add_item(item_id, 1)`. If no member has space, logs a warning.
+- **Bevy event layer** (`handle_events`): Same distribution logic, plus
+  per-item log messages with `LogCategory::Item` including the item name
+  (resolved from the content database). Full inventories produce an
+  "Inventory full — item lost!" warning.
+- **Event consumption**: The Bevy handler removes the treasure event from the
+  map after collection. The domain-layer `trigger_event` also removes it.
+
+### 3.3 — Verify Dialogue Recruitment Actions
+
+**Files reviewed**: `src/game/systems/dialogue.rs`
+
+The `RecruitToParty` and `RecruitToInn` `DialogueAction` variants were already
+fully implemented in `execute_action`:
+
+- `RecruitToParty` delegates to `execute_recruit_to_party()` which calls
+  `game_state.recruit_from_map()`, handles all result variants (AddedToParty,
+  SentToInn, errors), removes the map event, and emits
+  `DespawnRecruitableVisual`.
+- `RecruitToInn` implements full inn-assignment logic: verifies the character
+  isn't already encountered, validates the innkeeper exists, instantiates the
+  character, adds to roster at the specified inn, marks as encountered, removes
+  the map event, and emits `DespawnRecruitableVisual`.
+- The `handle_recruitment_actions` stub remains as a no-op for Bevy scheduling
+  compatibility (documented in its doc comment).
+
+No code changes were needed — the existing implementation satisfies all
+deliverables for this task.
+
+### 3.4 — Wire NPC Dialogue with `npc_id` Context
+
+**Files modified**: `src/application/mod.rs`
+
+Previously, the `EventResult::NpcDialogue { npc_id }` handler in
+`move_party_and_handle_events` discarded the NPC ID with `let _ = npc_id`.
+
+Now, the handler creates a `DialogueState` and sets `speaker_npc_id` to
+`Some(npc_id)` before entering `GameMode::Dialogue`. This allows downstream
+dialogue systems to reference which NPC the party is speaking to (for
+NPC-specific responses, stock lookups, inn management, etc.).
+
+The `DialogueState` struct already had the `speaker_npc_id: Option<String>`
+field from prior work — this change simply wires it up in the application-layer
+event handler.
+
+### 3.5 — Implement Quest Reward `UnlockQuest`
+
+**Files modified**: `src/application/mod.rs`, `src/application/quests.rs`
+
+The `QuestReward::UnlockQuest(quest_id)` handler was previously a no-op TODO.
+
+#### `QuestLog` changes
+
+Added to `QuestLog` in `src/application/mod.rs`:
+
+- `available_quests: HashSet<u16>` — Set of quest IDs that have been unlocked.
+  Uses `#[serde(default)]` for backward compatibility with existing saves.
+- `unlock_quest(quest_id: u16)` — Inserts a quest ID into the available set.
+- `is_quest_available(quest_id: u16) -> bool` — Checks if a quest has been
+  unlocked.
+
+#### `apply_rewards` change
+
+In `src/application/quests.rs`, the `QuestReward::UnlockQuest(qid)` arm now
+calls `game_state.quests.unlock_quest(*qid)` and logs the unlock via
+`tracing::info!`.
+
+### Testing
+
+22 new tests added across three files (4056 → 4078 total):
+
+**`src/application/mod.rs` (14 tests)**:
+
+| Test                                                       | Coverage                            |
+| ---------------------------------------------------------- | ----------------------------------- |
+| `test_map_effect_to_condition_known_effects`               | All known effect→condition mappings |
+| `test_map_effect_to_condition_unknown_returns_fine`        | Unknown effects return FINE         |
+| `test_map_effect_to_condition_case_insensitive`            | Case-insensitive matching           |
+| `test_quest_log_unlock_quest`                              | Basic unlock and availability       |
+| `test_quest_log_unlock_quest_idempotent`                   | Double-unlock doesn't duplicate     |
+| `test_quest_log_available_quests_serialization`            | RON round-trip                      |
+| `test_quest_log_backward_compat_no_available_quests_field` | Legacy save compat                  |
+| `test_trap_event_reduces_party_hp`                         | Trap damage reduces living HP       |
+| `test_trap_event_with_effect_applies_condition`            | Trap effect sets condition          |
+| `test_trap_kills_all_members_triggers_game_over`           | Lethal trap → GameOver              |
+| `test_trap_dead_members_take_no_damage`                    | Dead members skipped                |
+| `test_treasure_event_distributes_items`                    | Loot items added to inventory       |
+| `test_treasure_event_consumed_after_collection`            | Event removed from map              |
+| `test_npc_dialogue_carries_npc_id`                         | speaker_npc_id set in DialogueState |
+
+**`src/application/quests.rs` (2 tests)**:
+
+| Test                                             | Coverage                                  |
+| ------------------------------------------------ | ----------------------------------------- |
+| `test_unlock_quest_reward_makes_quest_available` | UnlockQuest reward marks target available |
+| `test_unlock_quest_reward_multiple_unlocks`      | Multiple UnlockQuest rewards in one quest |
+
+**`src/game/systems/events.rs` (6 tests)**:
+
+| Test                                                          | Coverage                          |
+| ------------------------------------------------------------- | --------------------------------- |
+| `test_trap_damage_living_members_take_damage_dead_unaffected` | Bevy-layer trap damage            |
+| `test_trap_effect_poison_sets_condition_on_living_members`    | Bevy-layer effect application     |
+| `test_trap_party_wipe_all_dead_triggers_game_over`            | Bevy-layer GameOver transition    |
+| `test_treasure_distribution_items_added_to_inventory`         | Bevy-layer item distribution      |
+| `test_treasure_full_inventory_items_lost_no_panic`            | Graceful full-inventory handling  |
+| `test_treasure_event_removal_after_collection`                | Event removed from map after loot |
+
+### Deliverables Checklist
+
+- [x] Trap damage applied to party members
+- [x] Trap effects (conditions) applied
+- [x] Party wipe check after trap damage
+- [x] Treasure loot distributed to party inventories
+- [x] Treasure events consumed after collection
+- [x] `RecruitToParty` and `RecruitToInn` dialogue actions fully implemented
+- [x] `npc_id` passed through to `DialogueState`
+- [x] `UnlockQuest` reward functional
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all           → No output (all files formatted)
+✅ cargo check               → Finished with 0 errors
+✅ cargo clippy -D warnings  → Finished with 0 warnings
+✅ cargo nextest run         → 4078 tests run: 4078 passed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 (Condition bitflags,
+      Inventory, Party, QuestLog)
+- [x] Module placement follows Section 3.2 (application layer for state,
+      game/systems for Bevy event handling)
+- [x] Type aliases used consistently (ItemId, QuestId, etc.)
+- [x] Constants not hardcoded (Condition flags referenced by name)
+- [x] AttributePair pattern respected (hp.modify for damage application)
+- [x] Game mode context respected (GameOver for party wipe)
+- [x] No test references `campaigns/tutorial`
+- [x] All test data uses `data/test_campaign` or inline construction
+- [x] No architectural deviations from architecture.md
