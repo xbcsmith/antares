@@ -75,6 +75,7 @@ input coordination. Both `handle_global_input_toggles` and
 `handle_exploration_input_movement` execute normally.
 
 **Files**:
+
 - `src/game/systems/input.rs` — `handle_global_input_toggles` (L144),
   `handle_exploration_input_movement` (L219)
 - `src/game/systems/input/global_toggles.rs` — `handle_global_mode_toggles`
@@ -100,6 +101,7 @@ input coordination. Both `handle_global_input_toggles` and
 #### 1.2 Relocate Game Log to Upper-Left Corner
 
 **Files**:
+
 - `src/game/systems/ui.rs` — `setup_game_log_panel` (L321–476)
 
 **Changes**:
@@ -114,6 +116,7 @@ input coordination. Both `handle_global_input_toggles` and
 #### 1.3 Implement Full-Screen Game Log View
 
 **Files**:
+
 - `src/game/systems/ui.rs` — new systems and components
 - `src/application/mod.rs` — `GameMode` enum (L48)
 - `src/game/systems/input/mode_guards.rs` — `movement_blocked_for_mode`
@@ -146,6 +149,7 @@ input coordination. Both `handle_global_input_toggles` and
 #### 1.4 Fix Recruited Character Mesh Persistence
 
 **Files**:
+
 - `src/game/systems/dialogue.rs` — `execute_action` `RecruitToInn` branch
   (L1089–1103)
 - `src/game/systems/recruitment_dialog.rs` — `process_recruitment_responses`
@@ -185,14 +189,14 @@ input coordination. Both `handle_global_input_toggles` and
 
 #### 1.6 Deliverables
 
-- [ ] Lock UI blocks exploration movement and ESC menu toggle
-- [ ] Lock UI supports arrow key navigation for character selection
-- [ ] Game log relocated to upper-left corner
-- [ ] Full-screen game log view implemented with scroll and category filters
-- [ ] Full-screen log toggle from small panel header and configurable key
-- [ ] `RecruitToInn` dialogue action emits `DespawnRecruitableVisual`
-- [ ] Dead-code `handle_recruitment_actions` stub removed
-- [ ] `process_recruitment_responses` fixed for future use
+- [x] Lock UI blocks exploration movement and ESC menu toggle
+- [x] Lock UI supports arrow key navigation for character selection
+- [x] Game log relocated to upper-left corner
+- [x] Full-screen game log view implemented with scroll and category filters
+- [x] Full-screen log toggle from small panel header and configurable key
+- [x] `RecruitToInn` dialogue action emits `DespawnRecruitableVisual`
+- [x] Dead-code `handle_recruitment_actions` stub removed
+- [x] `process_recruitment_responses` fixed for future use
 
 #### 1.7 Success Criteria
 
@@ -213,6 +217,7 @@ for all other time-dependent systems.
 #### 2.1 Add Sub-Minute Resolution to `GameTime`
 
 **Files**:
+
 - `src/domain/types.rs` — `GameTime` struct (L511–524)
 
 **Changes**:
@@ -237,6 +242,7 @@ for all other time-dependent systems.
 #### 2.2 Add `TimeConfig` to Game Configuration
 
 **Files**:
+
 - `src/sdk/game_config.rs` — `GameConfig` struct
 - `src/domain/resources.rs` — time cost constants (L76–84)
 
@@ -259,6 +265,7 @@ for all other time-dependent systems.
 #### 2.3 Update `GameState::advance_time` for Seconds
 
 **Files**:
+
 - `src/application/mod.rs` — `advance_time` (L1746–1766)
 
 **Changes**:
@@ -281,6 +288,7 @@ for all other time-dependent systems.
 #### 2.4 Wire Time Advancement to Movement
 
 **Files**:
+
 - `src/application/mod.rs` — `move_party_and_handle_events` (L1308)
 
 **Changes**:
@@ -295,6 +303,7 @@ for all other time-dependent systems.
 #### 2.5 Wire Time Advancement to Combat (Per-Turn)
 
 **Files**:
+
 - `src/game/systems/combat.rs` — `tick_combat_time` (L4432–4447),
   `CombatResource` (L398)
 
@@ -313,6 +322,7 @@ for all other time-dependent systems.
 #### 2.6 Wire Time Advancement to Portals (Instant)
 
 **Files**:
+
 - `src/game/systems/map.rs` — map transition handling (~L502)
 
 **Changes**:
@@ -329,6 +339,7 @@ for all other time-dependent systems.
 #### 2.7 Update HUD Clock Display
 
 **Files**:
+
 - `src/game/systems/hud.rs` — `update_clock` system
 
 **Changes**:
@@ -384,6 +395,7 @@ These are fundamental RPG mechanics that are currently non-functional.
 #### 3.1 Implement Trap Damage Application
 
 **Files**:
+
 - `src/game/systems/events.rs` — `MapEvent::Trap` handler (L349–359)
 - `src/domain/resources.rs` or `src/domain/combat/` — damage application
 
@@ -403,6 +415,7 @@ These are fundamental RPG mechanics that are currently non-functional.
 #### 3.2 Implement Treasure Loot Distribution
 
 **Files**:
+
 - `src/game/systems/events.rs` — `MapEvent::Treasure` handler (L360–370)
 
 **Changes**:
@@ -422,6 +435,7 @@ These are fundamental RPG mechanics that are currently non-functional.
 #### 3.3 Implement Dialogue Recruitment Actions
 
 **Files**:
+
 - `src/game/systems/dialogue.rs` — `handle_recruitment_actions` stub
   (L1649–1705)
 
@@ -449,6 +463,7 @@ variants `RecruitToParty` and `RecruitToInn` processed in `execute_action`.
 #### 3.4 Wire NPC Dialogue with `npc_id` Context
 
 **Files**:
+
 - `src/application/mod.rs` — `EventResult::NpcDialogue` handler (L1374–1378)
 - `src/application/dialogue.rs` — `DialogueState` struct
 
@@ -464,6 +479,7 @@ variants `RecruitToParty` and `RecruitToInn` processed in `execute_action`.
 #### 3.5 Implement Quest Reward `UnlockQuest`
 
 **Files**:
+
 - `src/application/quests.rs` — `QuestReward::UnlockQuest` handler (L309–312)
 
 **Changes**:
@@ -521,6 +537,7 @@ internal systems.
 #### 4.1 Fix Starting Map String-to-ID Conversion
 
 **Files**:
+
 - `src/sdk/campaign_loader.rs` — `TryFrom<CampaignMetadata>` (L503–513)
 
 **Changes**:
@@ -537,6 +554,7 @@ internal systems.
 #### 4.2 Implement Semantic Save Version Checking
 
 **Files**:
+
 - `src/application/save_game.rs` — `validate_version` (L180–190)
 
 **Changes**:
@@ -551,6 +569,7 @@ internal systems.
 #### 4.3 Implement `validate_references` in SDK Validation
 
 **Files**:
+
 - `src/sdk/validation.rs` — `validate_references` (L476–493)
 
 **Changes**:
@@ -567,6 +586,7 @@ internal systems.
 #### 4.4 Implement `validate_connectivity` in SDK Validation
 
 **Files**:
+
 - `src/sdk/validation.rs` — `validate_connectivity` (L974–984)
 
 **Changes**:
@@ -579,6 +599,7 @@ internal systems.
 #### 4.5 Load Monster/Item IDs Dynamically in `validate_map`
 
 **Files**:
+
 - `src/bin/validate_map.rs` — hardcoded ID arrays (L18–27)
 
 **Changes**:
@@ -593,6 +614,7 @@ internal systems.
 #### 4.6 Implement `current_inn_id()`
 
 **Files**:
+
 - `src/application/mod.rs` — `current_inn_id` (L1125–1133)
 
 **Changes**:
@@ -639,6 +661,7 @@ core gameplay.
 #### 5.1 Implement Audio Playback
 
 **Files**:
+
 - `src/game/systems/audio.rs` — `handle_audio_messages` (L286–337),
   `AudioPlugin::build`
 
@@ -655,6 +678,7 @@ core gameplay.
 #### 5.2 Implement Mesh Streaming Load/Unload
 
 **Files**:
+
 - `src/game/systems/performance.rs` — mesh streaming stubs (L144–150)
 
 **Changes**:
@@ -669,6 +693,7 @@ core gameplay.
 #### 5.3 Implement LOD Mesh Simplification
 
 **Files**:
+
 - `src/game/systems/procedural_meshes.rs` — `create_simplified_mesh`
   (L2848–2861)
 
@@ -683,6 +708,7 @@ core gameplay.
 #### 5.4 Handle Unknown Combat Conditions
 
 **Files**:
+
 - `src/domain/combat/engine.rs` — unknown condition handling (L1080–1082)
 
 **Changes**:
@@ -694,6 +720,7 @@ core gameplay.
 #### 5.5 Provide Feedback for Failed Spell Casts
 
 **Files**:
+
 - `src/game/systems/combat.rs` — failed spell cast handling (L3048–3052)
 
 **Changes**:
@@ -733,23 +760,23 @@ core gameplay.
 These items are acknowledged but not prioritized in this plan. They can be
 addressed opportunistically or in a future plan.
 
-| # | File | Description |
-|---|------|-------------|
-| 1 | `game/components/creature.rs` L748 | `CreatureAnimationState` is empty struct — placeholder for animation keyframes |
-| 2 | `game/systems/dialogue_visuals.rs` L115 | Choice UI container spawned empty — populated by separate choice UI |
-| 3 | `application/quests.rs` L228 | Some quest objective types (TalkToNpc, DeliverItem, EscortNpc, CustomFlag) unhandled |
-| 4 | `sdk/campaign_loader.rs` L418 | Campaign ID override has no warning when file ID ≠ directory name |
-| 5 | `sdk/quest_editor.rs` L437 | Cross-quest existence not validated for `UnlockQuest` targets |
-| 6 | `sdk/game_config.rs` L748 | `allow_partial_rest` config exists but partial rest UI not implemented |
-| 7 | `game/systems/combat.rs` L3550 | Ranged attack miss uses placeholder `CombatFeedbackEffect::Miss` |
+| #   | File                                    | Description                                                                          |
+| --- | --------------------------------------- | ------------------------------------------------------------------------------------ |
+| 1   | `game/components/creature.rs` L748      | `CreatureAnimationState` is empty struct — placeholder for animation keyframes       |
+| 2   | `game/systems/dialogue_visuals.rs` L115 | Choice UI container spawned empty — populated by separate choice UI                  |
+| 3   | `application/quests.rs` L228            | Some quest objective types (TalkToNpc, DeliverItem, EscortNpc, CustomFlag) unhandled |
+| 4   | `sdk/campaign_loader.rs` L418           | Campaign ID override has no warning when file ID ≠ directory name                    |
+| 5   | `sdk/quest_editor.rs` L437              | Cross-quest existence not validated for `UnlockQuest` targets                        |
+| 6   | `sdk/game_config.rs` L748               | `allow_partial_rest` config exists but partial rest UI not implemented               |
+| 7   | `game/systems/combat.rs` L3550          | Ranged attack miss uses placeholder `CombatFeedbackEffect::Miss`                     |
 
 ## Appendix B: Files Changed Per Phase
 
-| Phase | Estimated Files Touched | Complexity |
-|-------|------------------------|------------|
-| 1: Input & UI Fixes | ~12 files | Medium |
-| 2: Time Advancement | ~8 files + config updates | Medium-High |
-| 3: Core Mechanics | ~6 files | Medium |
-| 4: Validation & Stubs | ~6 files | Medium |
-| 5: Audio, Mesh, LOD | ~5 files | High |
-| **Total** | ~35 unique files | |
+| Phase                 | Estimated Files Touched   | Complexity  |
+| --------------------- | ------------------------- | ----------- |
+| 1: Input & UI Fixes   | ~12 files                 | Medium      |
+| 2: Time Advancement   | ~8 files + config updates | Medium-High |
+| 3: Core Mechanics     | ~6 files                  | Medium      |
+| 4: Validation & Stubs | ~6 files                  | Medium      |
+| 5: Audio, Mesh, LOD   | ~5 files                  | High        |
+| **Total**             | ~35 unique files          |             |

@@ -1405,6 +1405,10 @@ never removed the map event or despawned the visual.
   `execute_action`, after `remove_event()` succeeds, now emits
   `DespawnRecruitableVisual` matching the pattern used in
   `execute_recruit_to_party`. The `handle_recruitment_actions` stub was
+  removed entirely. An explicit `.before(consume_game_log_events)`
+  ordering constraint was added to `handle_select_choice` in the
+  `DialoguePlugin` system tuple so that message delivery order is
+  guaranteed without relying on the stub as a scheduling placeholder.
   converted to a no-op (the recruitment logic is fully handled by
   `execute_action`); it is retained as a scheduling placeholder because
   removing it from the `DialoguePlugin` system tuple changes Bevy's
@@ -1421,12 +1425,37 @@ never removed the map event or despawned the visual.
 
 - `test_recruit_to_inn_action_removes_map_event_with_recruitment_context`
 
+### 1.5 — Add Clickable Header to Small Game Log Panel
+
+**Problem**: The full-screen game log could only be opened via the
+configurable keyboard key (default `G`). The plan called for the small
+panel's "Game Log" header text to also serve as a click target.
+
+**Changes**:
+
+- `src/game/systems/ui.rs` — Added `GameLogHeaderButton` marker
+  component. Wrapped the "Game Log" `Text` node in a `Button` entity
+  carrying `GameLogHeaderButton`, with a transparent background so it
+  looks the same as before. Added `handle_game_log_header_click` system
+  that detects `Interaction::Pressed` on the button and transitions from
+  `GameMode::Exploration` to `GameMode::GameLog`. System registered in
+  `UiPlugin`.
+- `src/game/systems/ui.rs` — Made `consume_game_log_events` public so
+  that `DialoguePlugin` can reference it for ordering constraints.
+
+**Tests added**:
+
+- `test_game_log_header_click_opens_fullscreen_log`
+
 ### Deliverables Checklist
 
 - [x] Lock UI blocks exploration movement and ESC menu toggle
 - [x] Lock UI supports arrow key navigation for character selection
 - [x] Game log relocated to upper-left corner
 - [x] Full-screen game log view implemented with scroll and category filters
+- [x] Full-screen log toggle from small panel header click and configurable key (default G), ESC to close
+- [x] `RecruitToInn` dialogue action emits `DespawnRecruitableVisual`
+- [x] Dead-code `handle_recruitment_actions` stub removed
 - [x] Full-screen log toggle from configurable key (default G) and ESC to close
 - [x] `RecruitToInn` dialogue action emits `DespawnRecruitableVisual`
 - [x] Dead-code `handle_recruitment_actions` stub converted to no-op
@@ -1438,6 +1467,7 @@ never removed the map event or despawned the visual.
 ✅ cargo fmt --all         → No output (all files formatted)
 ✅ cargo check             → Finished with 0 errors
 ✅ cargo clippy            → Finished with 0 warnings
+✅ cargo nextest run       → 4095 passed, 0 failed, 8 skipped
 ✅ cargo nextest run       → 4033 passed, 0 failed, 8 skipped
 ```
 

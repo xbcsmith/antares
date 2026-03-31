@@ -40,6 +40,7 @@ impl Plugin for UiPlugin {
                     sync_game_log_panel_visibility,
                     sync_game_log_ui,
                     auto_scroll_game_log_viewport,
+                    handle_game_log_header_click,
                     fullscreen_game_log_ui_system,
                 ),
             );
@@ -93,6 +94,11 @@ pub struct GameLogScrollViewport;
 /// Marker for the line-list container inside the game log panel.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct GameLogLineList;
+
+/// Marker for the clickable "Game Log" header button that opens the
+/// full-screen log view.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GameLogHeaderButton;
 
 /// Marker for an individual rendered game log line.
 #[derive(Component, Debug, Clone, Copy)]
@@ -392,10 +398,20 @@ fn setup_game_log_panel(
                     Name::new("GameLogHeader"),
                 ))
                 .with_children(|header| {
-                    header.spawn((
-                        Text::new("Game Log"),
-                        text_style(LABEL_FONT_SIZE, Color::WHITE),
-                    ));
+                    header
+                        .spawn((
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::NONE),
+                            GameLogHeaderButton,
+                        ))
+                        .with_child((
+                            Text::new("Game Log"),
+                            text_style(LABEL_FONT_SIZE, Color::WHITE),
+                        ));
 
                     header
                         .spawn((
@@ -537,7 +553,16 @@ fn sync_game_log_panel_visibility(
     }
 }
 
-fn consume_game_log_events(mut reader: MessageReader<GameLogEvent>, mut game_log: ResMut<GameLog>) {
+/// Drains [`GameLogEvent`] messages and appends them to the [`GameLog`] resource.
+///
+/// This is intentionally `pub` so that other plugins (e.g. `DialoguePlugin`)
+/// can add `.before(consume_game_log_events)` ordering constraints to
+/// guarantee that messages written during the same frame are consumed in the
+/// same `app.update()` cycle.
+pub fn consume_game_log_events(
+    mut reader: MessageReader<GameLogEvent>,
+    mut game_log: ResMut<GameLog>,
+) {
     for event in reader.read() {
         game_log.add_entry(event.text.clone(), event.category);
     }
@@ -624,6 +649,26 @@ fn auto_scroll_game_log_viewport(
     }
 
     ui_state.needs_scroll_to_bottom = false;
+}
+
+/// Transitions to [`GameMode::GameLog`] when the player clicks the "Game Log"
+/// header button on the small log panel.
+fn handle_game_log_header_click(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<GameLogHeaderButton>)>,
+    mut global_state: Option<ResMut<GlobalState>>,
+) {
+    let Some(ref mut global_state) = global_state else {
+        return;
+    };
+
+    for interaction in &interaction_query {
+        if *interaction == Interaction::Pressed
+            && matches!(global_state.0.mode, GameMode::Exploration)
+        {
+            global_state.0.mode = GameMode::GameLog;
+            bevy::prelude::info!("Fullscreen game log opened via header click");
+        }
+    }
 }
 
 fn handle_log_filter_buttons(
@@ -1146,6 +1191,47 @@ mod tests {
             (alpha - 0.5).abs() < 0.01,
             "expected panel opacity close to 0.5, got {}",
             alpha
+        );
+    }
+
+    #[test]
+    fn test_game_log_header_click_opens_fullscreen_log() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+
+        let state = crate::application::GameState::new();
+        assert!(
+            matches!(state.mode, GameMode::Exploration),
+            "precondition: mode starts as Exploration"
+        );
+        app.insert_resource(GlobalState(state));
+        app.add_plugins(UiPlugin);
+
+        app.update();
+
+        // Find the header button entity.
+        let button_entity = {
+            let mut query = app
+                .world_mut()
+                .query_filtered::<Entity, With<GameLogHeaderButton>>();
+            query
+                .iter(app.world())
+                .next()
+                .expect("GameLogHeaderButton should exist")
+        };
+
+        // Simulate a click on the header button.
+        app.world_mut()
+            .entity_mut(button_entity)
+            .insert(Interaction::Pressed);
+
+        app.update();
+
+        let global_state = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(global_state.0.mode, GameMode::GameLog),
+            "clicking the header button should transition to GameMode::GameLog"
         );
     }
 }

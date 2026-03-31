@@ -132,6 +132,16 @@ We need to add a tray icon for the game like the ones we added for the SDK.
 
 ✅ PLAN WRITTEN - [Game Tray Icon Implementation Plan](./game_tray_icon_implementation_plan.md)
 
+### Spell System Updates
+
+We need to fix the Combat Spell System. Curently there is no concept of a player Spell book, learned spells (from scroll or NPC), the combat system has no way for a Character to cast spells in combat. Spell casting should cost Spell Points per cast and in some cases Gems or other Consumables (configurable in spell data). We will need to add support for spell point bar to the HUD layout like the Hit Point Bar (but blue). Spells also need to be cast outside of combat. We will need to add support for casting spells outside of combat as well. We will need to add support for spell effects that can be applied outside of combat as well. We will need to add support for spell effects that can be applied in combat as well. We will need to add support for spell effects that can be applied in both combat and out of combat as well. We will need to add support for spell effects that can be applied to characters, monsters, and the environment as well. We will need to add support for spell effects that can be applied to characters, monsters, and the environment in both combat and out of combat as well. We will need to add support for spell effects that can be applied to characters, monsters, and the environment in both combat and out of combat as well.
+
+We will need to add support for spell effects that can be applied to characters, monsters, and the environment in both combat and out of combat as well. Research the Code base to find out how to implement the spell system updates. We will need to add new components, systems, and UI elements to support the new spell system. We will also need to update the existing combat system to support spell casting and spell effects. We will also need to update the existing character system to support learned spells and spell points. We will also need to update the existing inventory system to support spell scrolls and other spell-related items. We will also need to update the existing dialogue system to support learning spells from NPCs. We will also need to update the existing quest system to support quests that reward spells or require spell casting. We will also need to update the existing save/load system to support saving and loading learned spells, spell points, and spell effects. The SDK will need to be updated to support creating spells, spell scrolls, and other spell-related items as well as supporting learning spells from NPCs and quests.
+
+Write a plan with a phased approach to implementing the spell system updates in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Spell System Updates Implementation Plan](./spell_system_updates_implementation_plan.md)
+
 ## Future Features and Fixes
 
 ### Notes
