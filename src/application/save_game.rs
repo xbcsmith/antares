@@ -33,6 +33,41 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+/// Parsed semantic version for compatibility checking.
+///
+/// Implements the subset of semver needed to validate save game versions:
+/// - Same major version → compatible (with optional migration)
+/// - Different major version → incompatible
+/// - Minor/patch differences → compatible with logged warnings
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SemVer {
+    major: u32,
+    minor: u32,
+    patch: u32,
+}
+
+impl SemVer {
+    /// Parses a "major.minor.patch" string into a `SemVer`.
+    ///
+    /// Returns `None` if the string is not a valid semver triple.
+    fn parse(version: &str) -> Option<Self> {
+        let parts: Vec<&str> = version.split('.').collect();
+        if parts.len() != 3 {
+            return None;
+        }
+        Some(Self {
+            major: parts[0].parse().ok()?,
+            minor: parts[1].parse().ok()?,
+            patch: parts[2].parse().ok()?,
+        })
+    }
+
+    /// Returns `true` if `other` is compatible with `self` (same major version).
+    fn is_compatible_with(&self, other: &SemVer) -> bool {
+        self.major == other.major
+    }
+}
+
 /// Save game errors
 #[derive(Error, Debug)]
 pub enum SaveGameError {
@@ -180,16 +215,44 @@ impl SaveGame {
     pub fn validate_version(&self) -> Result<(), SaveGameError> {
         let current_version = env!("CARGO_PKG_VERSION");
 
-        // For now, exact version match required
-        // TODO: Implement semantic version compatibility checking
-        if self.version != current_version {
-            return Err(SaveGameError::VersionMismatch {
-                expected: current_version.to_string(),
-                found: self.version.clone(),
-            });
-        }
+        let save_ver = SemVer::parse(&self.version);
+        let current_ver = SemVer::parse(current_version);
 
-        Ok(())
+        match (save_ver, current_ver) {
+            (Some(save), Some(current)) => {
+                if !save.is_compatible_with(&current) {
+                    return Err(SaveGameError::VersionMismatch {
+                        expected: current_version.to_string(),
+                        found: self.version.clone(),
+                    });
+                }
+                // Compatible — log warnings for minor/patch differences
+                if save.minor != current.minor {
+                    tracing::warn!(
+                        "Save game minor version differs: save={}, current={}. Loading with possible schema migration.",
+                        self.version,
+                        current_version
+                    );
+                } else if save.patch != current.patch {
+                    tracing::info!(
+                        "Save game patch version differs: save={}, current={}",
+                        self.version,
+                        current_version
+                    );
+                }
+                Ok(())
+            }
+            _ => {
+                // Unparseable version string — fall back to exact match
+                if self.version != current_version {
+                    return Err(SaveGameError::VersionMismatch {
+                        expected: current_version.to_string(),
+                        found: self.version.clone(),
+                    });
+                }
+                Ok(())
+            }
+        }
     }
 }
 
@@ -500,12 +563,79 @@ mod tests {
     fn test_save_game_version_mismatch() {
         let game_state = GameState::new();
         let mut save = SaveGame::new(game_state);
-        save.version = "99.99.99".to_string();
+        save.version = "9.0.0".to_string();
 
         assert!(matches!(
             save.validate_version(),
             Err(SaveGameError::VersionMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn test_save_game_version_compatible_minor_diff() {
+        // Same major, different minor — should be compatible
+        let game_state = GameState::new();
+        let mut save = SaveGame::new(game_state);
+        // Set version to same major but different minor
+        let current = env!("CARGO_PKG_VERSION");
+        let current_ver = current.split('.').collect::<Vec<_>>();
+        let same_major_diff_minor = format!(
+            "{}.{}.{}",
+            current_ver[0],
+            current_ver[1].parse::<u32>().unwrap() + 1,
+            current_ver[2]
+        );
+        save.version = same_major_diff_minor;
+
+        // Should succeed (same major version)
+        assert!(save.validate_version().is_ok());
+    }
+
+    #[test]
+    fn test_save_game_version_incompatible_major_diff() {
+        // Different major version — should be incompatible
+        let game_state = GameState::new();
+        let mut save = SaveGame::new(game_state);
+        save.version = "99.0.0".to_string();
+
+        let result = save.validate_version();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            SaveGameError::VersionMismatch { expected, found } => {
+                assert_eq!(found, "99.0.0");
+                assert_eq!(expected, env!("CARGO_PKG_VERSION"));
+            }
+            other => panic!("Expected VersionMismatch, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_save_game_version_compatible_patch_diff() {
+        // Same major and minor, different patch — should be compatible
+        let game_state = GameState::new();
+        let mut save = SaveGame::new(game_state);
+        let current = env!("CARGO_PKG_VERSION");
+        let current_ver = current.split('.').collect::<Vec<_>>();
+        let same_major_minor_diff_patch = format!(
+            "{}.{}.{}",
+            current_ver[0],
+            current_ver[1],
+            current_ver[2].parse::<u32>().unwrap() + 5
+        );
+        save.version = same_major_minor_diff_patch;
+
+        assert!(save.validate_version().is_ok());
+    }
+
+    #[test]
+    fn test_save_game_version_unparseable_fallback() {
+        // Unparseable version string — falls back to exact match
+        let game_state = GameState::new();
+        let mut save = SaveGame::new(game_state);
+        save.version = "not-a-version".to_string();
+
+        let result = save.validate_version();
+        assert!(result.is_err());
     }
 
     #[test]

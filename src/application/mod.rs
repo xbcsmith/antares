@@ -1198,23 +1198,48 @@ impl GameState {
         )
     }
 
-    /// Gets the current inn ID from game state
+    /// Gets the current inn ID from the party's location.
     ///
-    /// Returns the inn/town ID where the party is currently located, if any.
-    /// This is used to determine where dismissed characters should be stored.
+    /// Checks the following in order:
+    /// 1. The tile the party is standing on for an `EnterInn` event
+    /// 2. Any `EnterInn` event on the current map (nearest inn)
+    /// 3. The campaign's configured starting innkeeper as a fallback
     ///
     /// # Returns
     ///
-    /// Returns `Some(InnkeeperId)` if party is at an inn, `None` otherwise.
+    /// Returns `Some(InnkeeperId)` if an inn can be determined, `None` otherwise.
     ///
-    /// # Note
+    /// # Examples
     ///
-    /// This is a placeholder implementation. Full implementation requires
-    /// innkeeper-based location system to be completed.
+    /// ```
+    /// use antares::application::GameState;
+    ///
+    /// let state = GameState::new();
+    /// // No campaign loaded and no inn events → None
+    /// let inn_id = state.current_inn_id();
+    /// // Falls back to campaign starting innkeeper or None
+    /// ```
     pub fn current_inn_id(&self) -> Option<InnkeeperId> {
-        // TODO: Implement once innkeeper-based location system is complete
-        // For now, return None as a safe default
-        None
+        if let Some(map) = self.world.get_current_map() {
+            // 1. Check the party's current tile for an EnterInn event
+            if let Some(crate::domain::world::MapEvent::EnterInn { innkeeper_id, .. }) =
+                map.get_event(self.world.party_position)
+            {
+                return Some(innkeeper_id.clone());
+            }
+
+            // 2. Check any EnterInn event on the current map
+            for event in map.events.values() {
+                if let crate::domain::world::MapEvent::EnterInn { innkeeper_id, .. } = event {
+                    return Some(innkeeper_id.clone());
+                }
+            }
+        }
+
+        // 3. Fall back to the campaign's starting innkeeper
+        self.campaign
+            .as_ref()
+            .map(|c| c.config.starting_innkeeper.clone())
     }
 
     // ===== Map Recruitment System =====
@@ -5130,5 +5155,134 @@ mod tests {
         assert_eq!(state.party.members[0].hp.current, 40);
         // Dead member unchanged
         assert_eq!(state.party.members[1].hp.current, 0);
+    }
+
+    #[test]
+    fn test_current_inn_id_at_inn_event() {
+        let mut state = GameState::new();
+        // Create a map with an EnterInn event at the party's position
+        let mut map = crate::domain::world::Map::new(
+            1,
+            "Test Town".to_string(),
+            "A test town".to_string(),
+            10,
+            10,
+        );
+        map.events.insert(
+            crate::domain::types::Position::new(0, 0),
+            crate::domain::world::MapEvent::EnterInn {
+                name: "Town Inn".to_string(),
+                description: "A cozy inn".to_string(),
+                innkeeper_id: "town_innkeeper".to_string(),
+            },
+        );
+        state.world.maps.insert(1, map);
+        state.world.current_map = 1;
+        state.world.party_position = crate::domain::types::Position::new(0, 0);
+
+        assert_eq!(state.current_inn_id(), Some("town_innkeeper".to_string()));
+    }
+
+    #[test]
+    fn test_current_inn_id_not_at_inn_but_inn_on_map() {
+        let mut state = GameState::new();
+        let mut map = crate::domain::world::Map::new(
+            1,
+            "Test Town".to_string(),
+            "A test town".to_string(),
+            10,
+            10,
+        );
+        // Inn is at position (5, 5), party is at (0, 0)
+        map.events.insert(
+            crate::domain::types::Position::new(5, 5),
+            crate::domain::world::MapEvent::EnterInn {
+                name: "Far Inn".to_string(),
+                description: "An inn across town".to_string(),
+                innkeeper_id: "far_innkeeper".to_string(),
+            },
+        );
+        state.world.maps.insert(1, map);
+        state.world.current_map = 1;
+        state.world.party_position = crate::domain::types::Position::new(0, 0);
+
+        assert_eq!(state.current_inn_id(), Some("far_innkeeper".to_string()));
+    }
+
+    #[test]
+    fn test_current_inn_id_no_inn_on_map_no_campaign() {
+        let state = GameState::new();
+        // No maps loaded, no campaign → None
+        assert_eq!(state.current_inn_id(), None);
+    }
+
+    #[test]
+    fn test_current_inn_id_no_inn_on_map_with_campaign_fallback() {
+        let mut state = GameState::new();
+        // Create a map with no inn events
+        let map = crate::domain::world::Map::new(
+            1,
+            "Dungeon".to_string(),
+            "A dark dungeon".to_string(),
+            10,
+            10,
+        );
+        state.world.maps.insert(1, map);
+        state.world.current_map = 1;
+
+        // Set up a campaign with a starting innkeeper
+        state.campaign = Some(crate::sdk::campaign_loader::Campaign {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            version: "1.0.0".to_string(),
+            author: "Test".to_string(),
+            description: "Test".to_string(),
+            engine_version: "0.1.0".to_string(),
+            required_features: Vec::new(),
+            config: crate::sdk::campaign_loader::CampaignConfig {
+                starting_map: 1,
+                starting_position: crate::domain::types::Position::new(0, 0),
+                starting_direction: crate::domain::types::Direction::North,
+                starting_gold: 0,
+                starting_food: 0,
+                starting_innkeeper: "default_innkeeper".to_string(),
+                max_party_size: 6,
+                max_roster_size: 20,
+                difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
+                permadeath: false,
+                allow_multiclassing: false,
+                starting_level: 1,
+                max_level: 20,
+                starting_time: crate::domain::types::GameTime::new(1, 8, 0),
+            },
+            data: crate::sdk::campaign_loader::CampaignData {
+                items: "data/items.ron".to_string(),
+                spells: "data/spells.ron".to_string(),
+                monsters: "data/monsters.ron".to_string(),
+                classes: "data/classes.ron".to_string(),
+                races: "data/races.ron".to_string(),
+                maps: "data/maps".to_string(),
+                quests: "data/quests.ron".to_string(),
+                dialogues: "data/dialogues.ron".to_string(),
+                characters: "data/characters.ron".to_string(),
+                creatures: "data/creatures.ron".to_string(),
+                furniture: "data/furniture.ron".to_string(),
+            },
+            assets: crate::sdk::campaign_loader::CampaignAssets {
+                tilesets: "assets/tilesets".to_string(),
+                music: "assets/music".to_string(),
+                sounds: "assets/sounds".to_string(),
+                images: "assets/images".to_string(),
+                fonts: "assets/fonts".to_string(),
+            },
+            root_path: std::path::PathBuf::new(),
+            game_config: crate::sdk::game_config::GameConfig::default(),
+        });
+
+        // Should fall back to campaign starting innkeeper
+        assert_eq!(
+            state.current_inn_id(),
+            Some("default_innkeeper".to_string())
+        );
     }
 }
