@@ -1409,6 +1409,11 @@ never removed the map event or despawned the visual.
   ordering constraint was added to `handle_select_choice` in the
   `DialoguePlugin` system tuple so that message delivery order is
   guaranteed without relying on the stub as a scheduling placeholder.
+  converted to a no-op (the recruitment logic is fully handled by
+  `execute_action`); it is retained as a scheduling placeholder because
+  removing it from the `DialoguePlugin` system tuple changes Bevy's
+  internal scheduling order and breaks message delivery in integration
+  tests.
 - `src/game/systems/recruitment_dialog.rs` — Added
   `MessageWriter<DespawnRecruitableVisual>` to `process_recruitment_responses`.
   Created `remove_recruitment_event_and_despawn` helper that scans the
@@ -1451,6 +1456,9 @@ panel's "Game Log" header text to also serve as a click target.
 - [x] Full-screen log toggle from small panel header click and configurable key (default G), ESC to close
 - [x] `RecruitToInn` dialogue action emits `DespawnRecruitableVisual`
 - [x] Dead-code `handle_recruitment_actions` stub removed
+- [x] Full-screen log toggle from configurable key (default G) and ESC to close
+- [x] `RecruitToInn` dialogue action emits `DespawnRecruitableVisual`
+- [x] Dead-code `handle_recruitment_actions` stub converted to no-op
 - [x] `process_recruitment_responses` fixed for future use
 
 ### Quality Gates
@@ -1460,6 +1468,7 @@ panel's "Game Log" header text to also serve as a click target.
 ✅ cargo check             → Finished with 0 errors
 ✅ cargo clippy            → Finished with 0 warnings
 ✅ cargo nextest run       → 4095 passed, 0 failed, 8 skipped
+✅ cargo nextest run       → 4033 passed, 0 failed, 8 skipped
 ```
 
 ### Architecture Compliance
