@@ -129,24 +129,46 @@ pub fn lod_auto_tuning_system(
 /// System to manage mesh streaming (loading/unloading)
 ///
 /// Loads meshes when entities get close to camera and unloads
-/// them when they're far away to save memory.
+/// them when they're far away to save memory. Uses Bevy's
+/// `AssetServer` for on-demand mesh loading and drops handles
+/// to allow Bevy to reclaim memory for distant meshes.
 pub fn mesh_streaming_system(
     camera_query: Query<&Transform, With<Camera>>,
-    mut entity_query: Query<(&Transform, &mut MeshStreaming), Without<Camera>>,
+    mut entity_query: Query<(Entity, &Transform, &mut MeshStreaming), Without<Camera>>,
+    asset_server: Option<Res<AssetServer>>,
+    mut commands: Commands,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
     };
 
-    for (transform, mut streaming) in entity_query.iter_mut() {
+    for (entity, transform, mut streaming) in entity_query.iter_mut() {
         let distance = camera_transform.translation.distance(transform.translation);
 
         if !streaming.loaded && distance <= streaming.load_distance {
-            // TODO: Load mesh data
+            // Clone the path up-front to avoid holding an immutable borrow
+            // across the later mutable write to `mesh_handle`.
+            let path_clone = streaming.asset_path.clone();
+            if let Some(path) = path_clone {
+                if let Some(ref server) = asset_server {
+                    let handle: Handle<Mesh> = server.load(path.clone());
+                    commands.entity(entity).insert(Mesh3d(handle.clone()));
+                    streaming.mesh_handle = Some(handle);
+                    tracing::debug!("Mesh streaming: loaded '{}'", path);
+                } else {
+                    tracing::debug!("Mesh streaming: no AssetServer available for '{}'", path);
+                }
+            }
             streaming.loaded = true;
         } else if streaming.loaded && distance > streaming.unload_distance {
-            // TODO: Unload mesh data
+            // Unload mesh data by removing the Mesh3d component and dropping the handle
+            let path_clone = streaming.asset_path.clone();
+            commands.entity(entity).remove::<Mesh3d>();
+            streaming.mesh_handle = None;
             streaming.loaded = false;
+            if let Some(path) = path_clone {
+                tracing::debug!("Mesh streaming: unloaded '{}'", path);
+            }
         }
     }
 }
@@ -302,6 +324,8 @@ mod tests {
                     load_distance: 50.0,
                     unload_distance: 100.0,
                     priority: 0,
+                    asset_path: None,
+                    mesh_handle: None,
                 },
             ))
             .id();
@@ -313,6 +337,40 @@ mod tests {
         // Check mesh was marked for loading
         let streaming = app.world().entity(entity).get::<MeshStreaming>().unwrap();
         assert!(streaming.loaded);
+    }
+
+    #[test]
+    fn test_mesh_streaming_unload() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        // Spawn camera
+        app.world_mut()
+            .spawn((Camera3d::default(), Transform::from_xyz(0.0, 0.0, 0.0)));
+
+        // Spawn far entity that was previously loaded
+        let entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(150.0, 0.0, 0.0),
+                MeshStreaming {
+                    loaded: true,
+                    load_distance: 50.0,
+                    unload_distance: 100.0,
+                    priority: 0,
+                    asset_path: None,
+                    mesh_handle: None,
+                },
+            ))
+            .id();
+
+        // Run system
+        app.add_systems(Update, mesh_streaming_system);
+        app.update();
+
+        // Check mesh was marked for unloading
+        let streaming = app.world().entity(entity).get::<MeshStreaming>().unwrap();
+        assert!(!streaming.loaded);
     }
 
     #[test]

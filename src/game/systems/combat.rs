@@ -641,6 +641,7 @@ pub struct DamageText;
 /// let miss = CombatFeedbackEffect::Miss;
 /// let heal = CombatFeedbackEffect::Heal(8);
 /// let status = CombatFeedbackEffect::Status("Poison".to_string());
+/// let fizzle = CombatFeedbackEffect::Fizzle("Insufficient SP".to_string());
 /// assert_ne!(hit, miss);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -653,6 +654,8 @@ pub enum CombatFeedbackEffect {
     Miss,
     /// A condition or status was applied (condition name).
     Status(String),
+    /// The spell fizzled — cast attempt failed for the given reason.
+    Fizzle(String),
 }
 
 /// Message emitted whenever a combat action produces a visible result.
@@ -3124,10 +3127,10 @@ pub fn perform_cast_action_with_rng(
         rng,
     );
 
-    if let Err(_err) = cast_result {
-        // Casting failed (insufficient SP, wrong class, silenced, etc.)
-        // For now, treat this as a no-op from a combat flow perspective.
-        return Ok(());
+    if let Err(err) = cast_result {
+        // Casting failed — propagate the reason so the caller can emit feedback.
+        tracing::info!("Spell cast failed: {}", err);
+        return Err(CombatError::SpellFizzled(err.to_string()));
     }
 
     // If the combat state indicates a flee, exit combat immediately
@@ -3727,7 +3730,26 @@ fn handle_cast_spell_action(
             &mut turn_state,
             &mut rng,
         ) {
-            tracing::warn!("Cast action failed: {}", e);
+            match &e {
+                CombatError::SpellFizzled(reason) => {
+                    // Emit player-visible feedback for the fizzled spell
+                    emit_combat_feedback(
+                        Some(action.caster),
+                        action.caster,
+                        CombatFeedbackEffect::Fizzle(reason.clone()),
+                        &mut feedback_writer,
+                    );
+                    // Play fizzle SFX
+                    if let Some(ref mut w) = sfx_writer {
+                        w.write(crate::game::systems::audio::PlaySfx {
+                            sfx_id: "spell_fizzle".to_string(),
+                        });
+                    }
+                }
+                _ => {
+                    tracing::warn!("Cast action failed: {}", e);
+                }
+            }
         }
 
         // Compute post-spell HP and damage dealt
@@ -5118,6 +5140,20 @@ fn format_combat_log_line(
                     ],
                 };
             }
+            CombatFeedbackEffect::Fizzle(reason) => {
+                return CombatLogLine {
+                    segments: vec![
+                        CombatLogSegment {
+                            text: source_name,
+                            color: source_color,
+                        },
+                        CombatLogSegment {
+                            text: format!(": Spell fizzled — {}", reason),
+                            color: FEEDBACK_COLOR_MISS,
+                        },
+                    ],
+                };
+            }
         }
     }
 
@@ -5162,6 +5198,18 @@ fn format_combat_log_line(
                 CombatLogSegment {
                     text: format!(": {}", s),
                     color: FEEDBACK_COLOR_STATUS,
+                },
+            ],
+        },
+        CombatFeedbackEffect::Fizzle(reason) => CombatLogLine {
+            segments: vec![
+                CombatLogSegment {
+                    text: target_name,
+                    color: target_color,
+                },
+                CombatLogSegment {
+                    text: format!(": Spell fizzled — {}", reason),
+                    color: FEEDBACK_COLOR_MISS,
                 },
             ],
         },
@@ -5450,6 +5498,9 @@ fn spawn_combat_feedback(
             CombatFeedbackEffect::Heal(n) => (format!("+{}", n), FEEDBACK_COLOR_HEAL),
             CombatFeedbackEffect::Miss => ("Miss".to_string(), FEEDBACK_COLOR_MISS),
             CombatFeedbackEffect::Status(s) => (s.clone(), FEEDBACK_COLOR_STATUS),
+            CombatFeedbackEffect::Fizzle(reason) => {
+                (format!("Fizzled: {}", reason), FEEDBACK_COLOR_MISS)
+            }
         };
 
         let font_size = match &event.effect {

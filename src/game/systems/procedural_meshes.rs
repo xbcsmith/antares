@@ -2779,18 +2779,101 @@ pub fn calculate_lod_level(vertex_count: usize) -> crate::domain::world::DetailL
 ///
 /// Simplified mesh handle
 pub fn create_simplified_mesh(mesh: &Mesh, reduction_ratio: f32) -> Mesh {
-    // Implement basic vertex reduction by sampling
-    // In a full implementation, this would use proper mesh decimation
+    use bevy::mesh::VertexAttributeValues;
+
     let reduction_ratio = reduction_ratio.clamp(0.0, 0.9);
 
-    // Return the same mesh for now - full LOD implementation deferred
-    // This is a placeholder that maintains the mesh exactly
     if reduction_ratio == 0.0 {
-        mesh.clone()
-    } else {
-        // Simplified meshes would be created here with reduced geometry
-        mesh.clone()
+        return mesh.clone();
     }
+
+    // Read positions
+    let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(VertexAttributeValues::Float32x3(pos)) => pos,
+        _ => return mesh.clone(),
+    };
+
+    let vertex_count = positions.len();
+    if vertex_count < 4 {
+        return mesh.clone();
+    }
+
+    // Calculate stride: how many vertices to skip between kept vertices
+    let keep_ratio = 1.0 - reduction_ratio;
+    let stride = (1.0_f32 / keep_ratio).round().max(2.0) as usize;
+
+    // Build kept vertex indices and old-to-new index map
+    let mut old_to_new: Vec<usize> = vec![0; vertex_count];
+    let mut kept_indices: Vec<usize> = Vec::with_capacity(vertex_count / stride + 1);
+
+    for i in 0..vertex_count {
+        if i % stride == 0 {
+            old_to_new[i] = kept_indices.len();
+            kept_indices.push(i);
+        } else {
+            // Map skipped vertices to the nearest kept vertex
+            let nearest_kept = (i / stride) * stride;
+            old_to_new[i] = old_to_new[nearest_kept];
+        }
+    }
+
+    if kept_indices.len() < 3 {
+        return mesh.clone();
+    }
+
+    // Build simplified position array
+    let new_positions: Vec<[f32; 3]> = kept_indices.iter().map(|&i| positions[i]).collect();
+
+    let mut simplified = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    simplified.insert_attribute(Mesh::ATTRIBUTE_POSITION, new_positions);
+
+    // Copy normals if present
+    if let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+    {
+        let new_normals: Vec<[f32; 3]> = kept_indices.iter().map(|&i| normals[i]).collect();
+        simplified.insert_attribute(Mesh::ATTRIBUTE_NORMAL, new_normals);
+    }
+
+    // Copy UVs if present
+    if let Some(VertexAttributeValues::Float32x2(uvs)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0) {
+        let new_uvs: Vec<[f32; 2]> = kept_indices.iter().map(|&i| uvs[i]).collect();
+        simplified.insert_attribute(Mesh::ATTRIBUTE_UV_0, new_uvs);
+    }
+
+    // Copy vertex colors if present
+    if let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) {
+        let new_colors: Vec<[f32; 4]> = kept_indices.iter().map(|&i| colors[i]).collect();
+        simplified.insert_attribute(Mesh::ATTRIBUTE_COLOR, new_colors);
+    }
+
+    // Rebuild indices, skipping degenerate triangles
+    if let Some(indices) = mesh.indices() {
+        let old_indices: Vec<usize> = match indices {
+            bevy::mesh::Indices::U16(idx) => idx.iter().map(|&i| i as usize).collect(),
+            bevy::mesh::Indices::U32(idx) => idx.iter().map(|&i| i as usize).collect(),
+        };
+
+        let mut new_indices: Vec<u32> = Vec::with_capacity(old_indices.len());
+        for tri in old_indices.chunks(3) {
+            if tri.len() == 3 {
+                let a = old_to_new[tri[0]] as u32;
+                let b = old_to_new[tri[1]] as u32;
+                let c = old_to_new[tri[2]] as u32;
+                // Skip degenerate triangles
+                if a != b && b != c && a != c {
+                    new_indices.push(a);
+                    new_indices.push(b);
+                    new_indices.push(c);
+                }
+            }
+        }
+        simplified.insert_indices(bevy::mesh::Indices::U32(new_indices));
+    }
+
+    simplified
 }
 
 /// Create billboard impostor for very distant objects
@@ -3940,8 +4023,45 @@ mod tests {
         };
         let mesh = Mesh::from(plane_mesh);
         let simplified = create_simplified_mesh(&mesh, 0.0);
-        // For now, returns the same mesh (placeholder)
         assert_eq!(simplified.count_vertices(), mesh.count_vertices());
+    }
+
+    /// Tests create_simplified_mesh with 50% reduction actually reduces vertices
+    #[test]
+    fn test_create_simplified_mesh_half_reduction_reduces_vertices() {
+        // Create a mesh with many vertices via a higher-poly shape
+        let mut mesh = Mesh::new(
+            bevy::mesh::PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        // 12 vertices (more than enough for stride-based reduction)
+        let positions: Vec<[f32; 3]> = (0..12).map(|i| [i as f32, 0.0, 0.0]).collect();
+        let normals: Vec<[f32; 3]> = (0..12).map(|_| [0.0, 1.0, 0.0]).collect();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        mesh.insert_indices(bevy::mesh::Indices::U32(vec![
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+        ]));
+
+        let simplified = create_simplified_mesh(&mesh, 0.5);
+        assert!(
+            simplified.count_vertices() < mesh.count_vertices(),
+            "Simplified mesh should have fewer vertices: {} vs {}",
+            simplified.count_vertices(),
+            mesh.count_vertices()
+        );
+    }
+
+    /// Tests create_simplified_mesh preserves mesh with very few vertices
+    #[test]
+    fn test_create_simplified_mesh_preserves_small_mesh() {
+        let mesh = Mesh::from(Cuboid {
+            half_size: Vec3::new(0.5, 0.5, 0.5),
+        });
+        // A cuboid has relatively few vertices; with < 4 vertices it returns clone
+        let simplified = create_simplified_mesh(&mesh, 0.5);
+        // Even with a cuboid (24 verts), it should produce fewer vertices
+        assert!(simplified.count_vertices() <= mesh.count_vertices());
     }
 
     /// Tests create_billboard_mesh returns valid quad

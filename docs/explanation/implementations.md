@@ -1993,3 +1993,179 @@ three-level resolution:
 - [x] No test references `campaigns/tutorial`
 - [x] All test data uses `data/test_campaign` or inline construction
 - [x] No architectural deviations from architecture.md
+
+## Game Feature Completion — Phase 5: Audio, Mesh Streaming, and LOD (Complete)
+
+### Overview
+
+Phase 5 implements the polish layer for the game: real audio playback via
+Bevy Audio, distance-based mesh streaming with actual asset loading/unloading,
+LOD mesh simplification that produces measurably reduced geometry, defensive
+logging for unknown combat conditions, and player-visible feedback for failed
+spell casts.
+
+**Files changed (6):**
+
+| File                                    | Changes                                                                |
+| --------------------------------------- | ---------------------------------------------------------------------- |
+| `src/game/systems/audio.rs`             | Real Bevy Audio integration for music and SFX                          |
+| `src/game/components/performance.rs`    | Extended `MeshStreaming` with `asset_path` and `mesh_handle` fields    |
+| `src/game/systems/performance.rs`       | `mesh_streaming_system` now loads/unloads meshes via `AssetServer`     |
+| `src/game/systems/procedural_meshes.rs` | `create_simplified_mesh` implements vertex-stride decimation           |
+| `src/domain/combat/engine.rs`           | Unknown conditions/attributes emit `tracing::warn!`                    |
+| `src/game/systems/combat.rs`            | `Fizzle` feedback variant; failed spell casts produce visible feedback |
+
+### 5.1 — Implement Audio Playback
+
+Replaced the logging-only `handle_audio_messages` system with real Bevy Audio
+integration.
+
+#### New types
+
+- **`CurrentMusicTrack`** (`Resource`): Tracks the currently playing music
+  entity and its track ID. When a new `PlayMusic` message arrives, the old
+  music entity is despawned before the new one is spawned.
+- **`SfxMarker`** (`Component`): Marker placed on one-shot SFX entities so
+  cleanup systems can identify audio entities spawned by the subsystem.
+
+#### Audio handler behavior
+
+- **Music**: On `PlayMusic`, loads the audio asset via `AssetServer`, spawns an
+  entity with `AudioPlayer<AudioSource>` and `PlaybackSettings::LOOP` (or
+  `::REMOVE` for non-looping tracks). Volume is set to
+  `AudioSettings::effective_music_volume()` via `Volume::Linear(...)`.
+- **SFX**: On `PlaySfx`, spawns a one-shot entity with
+  `PlaybackSettings::DESPAWN` and `SfxMarker`. Volume is set to
+  `AudioSettings::effective_sfx_volume()`.
+- **Graceful degradation**: Uses `Option<Res<AssetServer>>` so tests and
+  minimal harnesses that lack an `AssetServer` degrade silently.
+- **Mute support**: Checks `AudioSettings::enabled` before spawning any audio
+  entities.
+
+### 5.2 — Implement Mesh Streaming Load/Unload
+
+Replaced the TODO stubs in `mesh_streaming_system` with actual asset
+loading/unloading.
+
+#### Component changes (`MeshStreaming`)
+
+Added two new fields:
+
+- `asset_path: Option<String>` — the Bevy asset path for the mesh to stream.
+- `mesh_handle: Option<Handle<Mesh>>` — retains the loaded mesh handle to
+  prevent Bevy from prematurely unloading the asset.
+
+Custom `Debug` impl avoids printing the raw `Handle` internals.
+
+#### System changes (`mesh_streaming_system`)
+
+- **Load path** (entity within `load_distance`): If `asset_path` is set and
+  `AssetServer` is available, calls `server.load(path)`, inserts a `Mesh3d`
+  component on the entity, and stores the handle in `mesh_handle`.
+- **Unload path** (entity beyond `unload_distance`): Removes the `Mesh3d`
+  component, drops the mesh handle (allowing Bevy to reclaim memory), and
+  resets `loaded = false`.
+- Both paths emit `tracing::debug!` messages for observability.
+
+### 5.3 — Implement LOD Mesh Simplification
+
+Replaced the placeholder `mesh.clone()` in `create_simplified_mesh` with a
+real vertex-stride-based decimation algorithm.
+
+#### Algorithm
+
+1. Clamp `reduction_ratio` to `[0.0, 0.9]`.
+2. Early-return original mesh for `ratio == 0.0`, missing position attribute,
+   `< 4` vertices, or `< 3` kept vertices.
+3. Calculate stride: `(1.0 / (1.0 - ratio)).round().max(2.0)`.
+4. Build `old_to_new` vertex index remapping table — skipped vertices map to
+   their nearest kept vertex.
+5. Copy kept positions, normals, UVs, and vertex colors.
+6. Rebuild triangle indices through the remapping, **skipping degenerate
+   triangles** where two or more vertices collapse to the same new index.
+7. Handles both `U16` and `U32` index formats.
+
+#### New tests
+
+- `test_create_simplified_mesh_half_reduction_reduces_vertices` — constructs a
+  12-vertex mesh, applies 50% reduction, asserts fewer vertices.
+- `test_create_simplified_mesh_preserves_small_mesh` — applies reduction to a
+  cuboid, asserts vertex count is ≤ original.
+
+### 5.4 — Handle Unknown Combat Conditions
+
+Replaced 4 silent no-op wildcard match arms with `tracing::warn!` calls in
+`src/domain/combat/engine.rs`:
+
+1. **`apply_condition_to_character` — `StatusEffect` wildcard**: Now logs
+   `"Unknown status effect '{}' in condition '{}'; ignoring"`.
+2. **`apply_condition_to_character` — `AttributeModifier` wildcard**: Now logs
+   `"Unknown attribute modifier '{}' (value={}) in condition '{}'; ignoring"`.
+3. **`apply_condition_to_monster` — `StatusEffect` wildcard**: Now logs
+   `"Unknown monster status effect '{}' in condition '{}'; ignoring"`.
+4. **`apply_condition_to_monster` — `AttributeModifier` wildcard**: Now logs
+   `"Unknown monster attribute modifier '{}' (value={}) in condition '{}';
+ignoring"`.
+
+All messages include the condition definition ID for debugging.
+
+### 5.5 — Provide Feedback for Failed Spell Casts
+
+Replaced the silent no-op in `perform_cast_action_with_rng` with player-visible
+feedback.
+
+#### New `CombatFeedbackEffect::Fizzle(String)` variant
+
+Added to the `CombatFeedbackEffect` enum alongside `Damage`, `Heal`, `Miss`,
+and `Status`. Carries the human-readable failure reason.
+
+#### New `CombatError::SpellFizzled(String)` variant
+
+Added to the `CombatError` enum in `domain/combat/engine.rs`. Propagates the
+spell casting failure reason from the domain layer to the game layer.
+
+#### Flow changes
+
+1. `perform_cast_action_with_rng`: When `execute_spell_cast_by_id` returns an
+   `Err`, logs at `info` level and returns
+   `Err(CombatError::SpellFizzled(reason))` instead of `Ok(())`.
+2. `handle_cast_spell_action`: Pattern-matches on the error:
+   - `SpellFizzled(reason)` → emits `CombatFeedbackEffect::Fizzle(reason)` via
+     `emit_combat_feedback` and writes a `"spell_fizzle"` SFX event.
+   - Other errors → falls through to existing `tracing::warn!`.
+3. `format_combat_log_line`: Both match arms (with-source and fallback) now
+   handle `Fizzle`, displaying `"Spell fizzled — {reason}"` in
+   `FEEDBACK_COLOR_MISS`.
+4. `spawn_combat_feedback`: Renders `"Fizzled: {reason}"` text in
+   `FEEDBACK_COLOR_MISS`.
+
+### Deliverables Checklist
+
+- [x] Audio system plays SFX and music via Bevy Audio
+- [x] Mesh streaming loads/unloads based on distance
+- [x] LOD mesh simplification produces reduced geometry
+- [x] Unknown combat conditions logged with warning
+- [x] Failed spell casts produce player-visible feedback
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all         → No output (all files formatted)
+✅ cargo check             → "Finished" with 0 errors
+✅ cargo clippy            → "Finished" with 0 warnings
+✅ cargo nextest run       → 4094 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 (`CombatError`,
+      `CombatFeedbackEffect`, `MeshStreaming`, `AudioSettings`)
+- [x] Module placement follows Section 3.2 (audio in `game/systems/`,
+      combat engine in `domain/combat/`, performance in `game/systems/` and
+      `game/components/`)
+- [x] Type aliases used consistently
+- [x] Constants not hardcoded
+- [x] `Result`-based error handling throughout
+- [x] No test references `campaigns/tutorial`
+- [x] All test data uses `data/test_campaign` or inline construction
+- [x] No architectural deviations from architecture.md
