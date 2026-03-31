@@ -326,6 +326,7 @@ fn handle_events(
                 map_change_writer.write(MapChangeEvent {
                     target_map: *map_id,
                     target_pos: *destination,
+                    is_portal: true,
                 });
             }
             MapEvent::Sign { text, name, .. } => {
@@ -346,10 +347,56 @@ fn handle_events(
                     });
                 }
             }
-            MapEvent::Trap {
-                damage, effect: _, ..
-            } => {
-                let msg = format!("Trapped! Took {} damage.", damage);
+            MapEvent::Trap { damage, effect, .. } => {
+                let trap_damage = *damage;
+
+                // Apply damage to every living party member and log per-character.
+                for member in &mut global_state.0.party.members {
+                    if member.is_alive() {
+                        let old_hp = member.hp.current;
+                        member.hp.modify(-(trap_damage as i32));
+                        let actual = old_hp.saturating_sub(member.hp.current);
+
+                        if member.hp.current == 0 {
+                            member
+                                .conditions
+                                .add(crate::domain::character::Condition::DEAD);
+                        }
+
+                        let per_char_msg =
+                            format!("{} takes {} damage from trap!", member.name, actual);
+                        tracing::warn!("{}", per_char_msg);
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: per_char_msg,
+                                category: LogCategory::Combat,
+                            });
+                        }
+                    }
+                }
+
+                // Apply status effect if present.
+                if let Some(ref effect_name) = effect {
+                    let flag = crate::application::map_effect_to_condition(effect_name);
+                    if flag != crate::domain::character::Condition::FINE {
+                        for member in &mut global_state.0.party.members {
+                            if member.is_alive() {
+                                member.conditions.add(flag);
+                            }
+                        }
+                        let effect_msg = format!("The trap inflicts {}!", effect_name);
+                        tracing::warn!("{}", effect_msg);
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: effect_msg,
+                                category: LogCategory::Combat,
+                            });
+                        }
+                    }
+                }
+
+                // Summary log entry.
+                let msg = format!("Trapped! Took {} damage.", trap_damage);
                 tracing::warn!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
@@ -357,18 +404,76 @@ fn handle_events(
                         category: LogCategory::Combat,
                     });
                 }
-                // TODO: Apply damage to party
+
+                // Check for party wipe — all members dead.
+                if global_state.0.party.living_count() == 0 {
+                    tracing::error!("Party wiped by trap!");
+                    global_state.0.mode = crate::application::GameMode::GameOver;
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: "The entire party has perished!".to_string(),
+                            category: LogCategory::Combat,
+                        });
+                    }
+                }
+
+                // Remove trap event from map (one-time).
+                if let Some(map) = global_state.0.world.get_current_map_mut() {
+                    map.remove_event(trigger.position);
+                }
             }
             MapEvent::Treasure { loot, .. } => {
                 let msg = format!("Found treasure! {} item(s).", loot.len());
-                tracing::warn!("{}", msg);
+                tracing::info!("{}", msg);
                 if let Some(ref mut writer) = game_log_writer {
                     writer.write(GameLogEvent {
                         text: msg,
                         category: LogCategory::Item,
                     });
                 }
-                // TODO: Add to inventory
+
+                // Distribute loot items to party members with inventory space.
+                for item_byte in loot {
+                    let item_id = *item_byte as crate::domain::types::ItemId;
+                    let mut placed = false;
+                    for member in &mut global_state.0.party.members {
+                        if member.inventory.has_space()
+                            && member.inventory.add_item(item_id, 1).is_ok()
+                        {
+                            placed = true;
+                            let item_name = content
+                                .db()
+                                .items
+                                .get_item(item_id)
+                                .map(|i| i.name.clone())
+                                .unwrap_or_else(|| format!("Item {}", item_id));
+                            let item_msg = format!("{} receives {}.", member.name, item_name);
+                            tracing::info!("{}", item_msg);
+                            if let Some(ref mut writer) = game_log_writer {
+                                writer.write(GameLogEvent {
+                                    text: item_msg,
+                                    category: LogCategory::Item,
+                                });
+                            }
+                            break;
+                        }
+                    }
+                    if !placed {
+                        let lost_msg = format!("Inventory full — item {} lost!", item_id);
+                        tracing::warn!("{}", lost_msg);
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: lost_msg,
+                                category: LogCategory::Item,
+                            });
+                        }
+                    }
+                }
+
+                // Remove treasure event from map (one-time).
+                if let Some(map) = global_state.0.world.get_current_map_mut() {
+                    map.remove_event(trigger.position);
+                }
             }
             MapEvent::Encounter {
                 monster_group,
@@ -2638,6 +2743,409 @@ mod locked_door_event_tests {
                 .any(|entry| entry.text == "The door is locked."),
             "Game log must contain 'The door is locked.' for no-key lock; got: {:?}",
             log.entries()
+        );
+    }
+}
+
+#[cfg(test)]
+mod trap_treasure_tests {
+    use super::*;
+    use crate::application::{GameMode, GameState};
+    use crate::domain::character::{
+        Alignment, AttributePair16, Character, Condition, Inventory, Sex,
+    };
+    use crate::domain::world::Map;
+    use crate::sdk::database::ContentDatabase;
+
+    /// Position used for trap/treasure events in these tests.
+    fn event_pos() -> Position {
+        Position::new(4, 4)
+    }
+
+    /// Create a character with a given name and HP value.
+    fn make_character(name: &str, hp: u16) -> Character {
+        let mut ch = Character::new(
+            name.to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.hp = AttributePair16::new(hp);
+        ch
+    }
+
+    /// Build a minimal Bevy app wired for `handle_events` trap/treasure tests.
+    ///
+    /// Registers all message channels, `GlobalState`, `GameContent` (empty DB),
+    /// `LockInteractionPending`, the `UiPlugin` (for `GameLog`/`GameLogEvent`),
+    /// and the `handle_events` system under `Update`.
+    fn build_trap_treasure_app(game_state: GameState) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        // Register all message channels that `handle_events` depends on.
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<PickupDroppedItemRequest>();
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_message::<SimpleDialogue>();
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(ContentDatabase::new()));
+        app.init_resource::<LockInteractionPending>();
+
+        // Register handle_events (the system under test).
+        app.add_systems(Update, handle_events);
+        app
+    }
+
+    /// Write a `MapEventTriggered` message into the app.
+    fn fire_event(app: &mut App, event: MapEvent, position: Position) {
+        let mut writer = app
+            .world_mut()
+            .resource_mut::<Messages<MapEventTriggered>>();
+        writer.write(MapEventTriggered { event, position });
+    }
+
+    // ── Test 1: Trap damage applies to living members, skips dead ───────
+
+    /// When a `MapEvent::Trap` fires, all living party members take the
+    /// specified damage.  Dead members must not take additional damage.
+    #[test]
+    fn test_trap_damage_living_members_take_damage_dead_unaffected() {
+        // Arrange: two living members (HP = 30) and one already-dead member.
+        let mut map = Map::new(1, "TrapMap".to_string(), "Test".to_string(), 10, 10);
+        let pos = event_pos();
+        let trap = MapEvent::Trap {
+            name: "Spike Trap".to_string(),
+            description: "A spike trap".to_string(),
+            damage: 10,
+            effect: None,
+        };
+        map.add_event(pos, trap.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(pos);
+
+        let alive1 = make_character("Alice", 30);
+        let alive2 = make_character("Bob", 30);
+        let mut dead_member = make_character("Charlie", 20);
+        dead_member.hp = AttributePair16 {
+            base: 20,
+            current: 0,
+        };
+        dead_member.conditions.add(Condition::DEAD);
+
+        game_state.party.add_member(alive1).unwrap();
+        game_state.party.add_member(alive2).unwrap();
+        game_state.party.add_member(dead_member).unwrap();
+
+        let mut app = build_trap_treasure_app(game_state);
+
+        // Act
+        fire_event(&mut app, trap, pos);
+        app.update();
+
+        // Assert
+        let gs = app.world().resource::<GlobalState>();
+        // Living members took 10 damage: 30 → 20
+        assert_eq!(
+            gs.0.party.members[0].hp.current, 20,
+            "Living member Alice should have 20 HP after 10 trap damage"
+        );
+        assert_eq!(
+            gs.0.party.members[1].hp.current, 20,
+            "Living member Bob should have 20 HP after 10 trap damage"
+        );
+        // Dead member stays at 0 HP and keeps DEAD condition
+        assert_eq!(
+            gs.0.party.members[2].hp.current, 0,
+            "Dead member Charlie should remain at 0 HP"
+        );
+        assert!(
+            gs.0.party.members[2].conditions.has(Condition::DEAD),
+            "Dead member Charlie should still have DEAD condition"
+        );
+    }
+
+    // ── Test 2: Trap with poison effect sets POISONED on living members ─
+
+    /// When a trap has an effect like `"poison"`, the `Condition::POISONED`
+    /// flag is set on every living member.  Dead members are not affected.
+    #[test]
+    fn test_trap_effect_poison_sets_condition_on_living_members() {
+        let mut map = Map::new(1, "PoisonMap".to_string(), "Test".to_string(), 10, 10);
+        let pos = event_pos();
+        let trap = MapEvent::Trap {
+            name: "Poison Trap".to_string(),
+            description: "A poison trap".to_string(),
+            damage: 5,
+            effect: Some("poison".to_string()),
+        };
+        map.add_event(pos, trap.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(pos);
+
+        let alive = make_character("Alice", 50);
+        let mut dead_member = make_character("Bob", 20);
+        dead_member.hp = AttributePair16 {
+            base: 20,
+            current: 0,
+        };
+        dead_member.conditions.add(Condition::DEAD);
+
+        game_state.party.add_member(alive).unwrap();
+        game_state.party.add_member(dead_member).unwrap();
+
+        let mut app = build_trap_treasure_app(game_state);
+
+        // Act
+        fire_event(&mut app, trap, pos);
+        app.update();
+
+        // Assert
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            gs.0.party.members[0].conditions.has(Condition::POISONED),
+            "Living member Alice should have POISONED condition after poison trap"
+        );
+        assert_eq!(
+            gs.0.party.members[0].hp.current, 45,
+            "Living member Alice should have 45 HP after 5 trap damage"
+        );
+        // Dead member should NOT get poisoned
+        assert!(
+            !gs.0.party.members[1].conditions.has(Condition::POISONED),
+            "Dead member Bob should NOT have POISONED condition"
+        );
+    }
+
+    // ── Test 3: Trap party wipe triggers GameOver ───────────────────────
+
+    /// When trap damage kills every party member, `GameMode::GameOver` is set.
+    #[test]
+    fn test_trap_party_wipe_all_dead_triggers_game_over() {
+        let mut map = Map::new(1, "WipeMap".to_string(), "Test".to_string(), 10, 10);
+        let pos = event_pos();
+        let trap = MapEvent::Trap {
+            name: "Death Trap".to_string(),
+            description: "Lethal trap".to_string(),
+            damage: 100,
+            effect: None,
+        };
+        map.add_event(pos, trap.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(pos);
+        game_state.mode = GameMode::Exploration;
+
+        // Two members with low HP — 100 damage kills both.
+        game_state
+            .party
+            .add_member(make_character("Alice", 5))
+            .unwrap();
+        game_state
+            .party
+            .add_member(make_character("Bob", 8))
+            .unwrap();
+
+        let mut app = build_trap_treasure_app(game_state);
+
+        // Act
+        fire_event(&mut app, trap, pos);
+        app.update();
+
+        // Assert
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.party.living_count(),
+            0,
+            "All party members should be dead after lethal trap"
+        );
+        assert!(
+            matches!(gs.0.mode, GameMode::GameOver),
+            "Game mode should be GameOver after party wipe, got {:?}",
+            gs.0.mode
+        );
+        assert!(
+            gs.0.party.members[0].conditions.has(Condition::DEAD),
+            "Alice should have DEAD condition"
+        );
+        assert!(
+            gs.0.party.members[1].conditions.has(Condition::DEAD),
+            "Bob should have DEAD condition"
+        );
+    }
+
+    // ── Test 4: Treasure distributes loot to party inventories ──────────
+
+    /// When `MapEvent::Treasure` fires, loot items are added to party member
+    /// inventories (first member with space receives each item).
+    #[test]
+    fn test_treasure_distribution_items_added_to_inventory() {
+        let mut map = Map::new(1, "TreasureMap".to_string(), "Test".to_string(), 10, 10);
+        let pos = event_pos();
+        let treasure = MapEvent::Treasure {
+            name: "Gold Chest".to_string(),
+            description: "A shiny chest".to_string(),
+            loot: vec![10, 20, 30],
+        };
+        map.add_event(pos, treasure.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(pos);
+
+        game_state
+            .party
+            .add_member(make_character("Alice", 50))
+            .unwrap();
+        game_state
+            .party
+            .add_member(make_character("Bob", 50))
+            .unwrap();
+
+        let mut app = build_trap_treasure_app(game_state);
+
+        // Act
+        fire_event(&mut app, treasure, pos);
+        app.update();
+
+        // Assert: all items go to first member with space (Alice).
+        let gs = app.world().resource::<GlobalState>();
+        let alice_items: Vec<ItemId> = gs.0.party.members[0]
+            .inventory
+            .items
+            .iter()
+            .map(|s| s.item_id)
+            .collect();
+        assert_eq!(
+            alice_items,
+            vec![10, 20, 30],
+            "Alice should have all three loot items; got {:?}",
+            alice_items
+        );
+        // Bob should have nothing — Alice had space for all.
+        assert!(
+            gs.0.party.members[1].inventory.items.is_empty(),
+            "Bob should have no items since Alice had space"
+        );
+    }
+
+    // ── Test 5: Treasure with full inventories loses items gracefully ───
+
+    /// When every party member's inventory is full, treasure items are lost
+    /// (logged as warnings) and the system must not panic.
+    #[test]
+    fn test_treasure_full_inventory_items_lost_no_panic() {
+        let mut map = Map::new(1, "FullMap".to_string(), "Test".to_string(), 10, 10);
+        let pos = event_pos();
+        let treasure = MapEvent::Treasure {
+            name: "Overflow Chest".to_string(),
+            description: "Too much loot".to_string(),
+            loot: vec![99],
+        };
+        map.add_event(pos, treasure.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(pos);
+
+        // Create a member with a full inventory (MAX_ITEMS items).
+        let mut full_member = make_character("Alice", 50);
+        for i in 0..Inventory::MAX_ITEMS {
+            full_member.inventory.add_item(i as ItemId, 0).unwrap();
+        }
+        assert!(full_member.inventory.is_full());
+        game_state.party.add_member(full_member).unwrap();
+
+        let mut app = build_trap_treasure_app(game_state);
+
+        // Act: must not panic even though inventory is full.
+        fire_event(&mut app, treasure, pos);
+        app.update();
+
+        // Assert: item was lost (not added), inventory still at max capacity.
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            gs.0.party.members[0].inventory.is_full(),
+            "Inventory should still be full"
+        );
+        assert_eq!(
+            gs.0.party.members[0].inventory.items.len(),
+            Inventory::MAX_ITEMS,
+            "Inventory should still have exactly MAX_ITEMS items"
+        );
+        // Item 99 should NOT appear anywhere in the inventory.
+        assert!(
+            !gs.0.party.members[0]
+                .inventory
+                .items
+                .iter()
+                .any(|s| s.item_id == 99),
+            "Item 99 should not be in the full inventory"
+        );
+    }
+
+    // ── Test 6: Treasure event is removed from map after collection ─────
+
+    /// After treasure is collected the one-shot event must be removed from
+    /// the map so re-visiting the tile does not award loot again.
+    #[test]
+    fn test_treasure_event_removal_after_collection() {
+        let mut map = Map::new(1, "RemovalMap".to_string(), "Test".to_string(), 10, 10);
+        let pos = event_pos();
+        let treasure = MapEvent::Treasure {
+            name: "One-Time Chest".to_string(),
+            description: "Collect once".to_string(),
+            loot: vec![1],
+        };
+        map.add_event(pos, treasure.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(pos);
+
+        game_state
+            .party
+            .add_member(make_character("Alice", 50))
+            .unwrap();
+
+        // Verify the event exists before collection.
+        assert!(
+            game_state
+                .world
+                .get_current_map()
+                .unwrap()
+                .events
+                .contains_key(&pos),
+            "Treasure event should exist on the map before collection"
+        );
+
+        let mut app = build_trap_treasure_app(game_state);
+
+        // Act
+        fire_event(&mut app, treasure, pos);
+        app.update();
+
+        // Assert: event should be removed from the map.
+        let gs = app.world().resource::<GlobalState>();
+        let map = gs.0.world.get_current_map().unwrap();
+        assert!(
+            !map.events.contains_key(&pos),
+            "Treasure event should be removed from the map after collection"
         );
     }
 }

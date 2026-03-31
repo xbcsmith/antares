@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Map Validation Utility
@@ -10,22 +10,87 @@
 //!   cargo run --bin validate_map data/maps/starter_town.ron
 //!   cargo run --bin validate_map data/maps/*.ron
 
+use antares::domain::items::ItemDatabase;
 use antares::domain::types::Position;
 use antares::domain::world::{Map, MapEvent};
+use antares::sdk::database::MonsterDatabase;
 use std::env;
 use std::fs;
 use std::process;
 
-// Known valid Monster IDs from data files
-// TODO: Load dynamically from data/monsters.ron when database loader is implemented
-const VALID_MONSTER_IDS: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+/// Loads valid monster IDs from the RON data file.
+///
+/// Falls back to a hardcoded default set if the file cannot be loaded.
+fn load_monster_ids() -> Vec<u8> {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = std::path::Path::new(manifest_dir).join("data/test_campaign/data/monsters.ron");
 
-// Known valid Item IDs from data files
-// TODO: Load dynamically from data/items.ron when database loader is implemented
-const VALID_ITEM_IDS: &[u8] = &[
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-    27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
-];
+    match MonsterDatabase::load_from_file(&path) {
+        Ok(db) => {
+            let ids: Vec<u8> = db.all_monsters();
+            if ids.is_empty() {
+                eprintln!(
+                    "Warning: {} loaded but contains no monsters, using defaults",
+                    path.display()
+                );
+                default_monster_ids()
+            } else {
+                println!("Loaded {} monster IDs from {}", ids.len(), path.display());
+                ids
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "Warning: Could not load {}: {}. Using default IDs.",
+                path.display(),
+                e
+            );
+            default_monster_ids()
+        }
+    }
+}
+
+/// Loads valid item IDs from the RON data file.
+///
+/// Falls back to a hardcoded default set if the file cannot be loaded.
+fn load_item_ids() -> Vec<u8> {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = std::path::Path::new(manifest_dir).join("data/test_campaign/data/items.ron");
+
+    match ItemDatabase::load_from_file(&path) {
+        Ok(db) => {
+            let ids: Vec<u8> = db.all_items().iter().map(|item| item.id).collect();
+            if ids.is_empty() {
+                eprintln!(
+                    "Warning: {} loaded but contains no items, using defaults",
+                    path.display()
+                );
+                default_item_ids()
+            } else {
+                println!("Loaded {} item IDs from {}", ids.len(), path.display());
+                ids
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "Warning: Could not load {}: {}. Using default IDs.",
+                path.display(),
+                e
+            );
+            default_item_ids()
+        }
+    }
+}
+
+/// Default monster IDs (fallback when data files unavailable)
+fn default_monster_ids() -> Vec<u8> {
+    vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+}
+
+/// Default item IDs (fallback when data files unavailable)
+fn default_item_ids() -> Vec<u8> {
+    (1..=40).collect()
+}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -38,6 +103,10 @@ fn main() {
         process::exit(1);
     }
 
+    // Load IDs dynamically from data files (with hardcoded fallback)
+    let valid_monster_ids = load_monster_ids();
+    let valid_item_ids = load_item_ids();
+
     let mut total_files = 0;
     let mut valid_files = 0;
     let mut failed_files = 0;
@@ -48,7 +117,7 @@ fn main() {
         println!("Validating: {}", file_path);
         println!("{:-<70}", "");
 
-        match validate_map_file(file_path) {
+        match validate_map_file(file_path, &valid_monster_ids, &valid_item_ids) {
             Ok(map) => {
                 valid_files += 1;
                 println!("✅ VALID");
@@ -78,7 +147,11 @@ fn main() {
 }
 
 /// Validate a map file and return the parsed map or validation errors
-fn validate_map_file(file_path: &str) -> Result<Map, Vec<String>> {
+fn validate_map_file(
+    file_path: &str,
+    valid_monster_ids: &[u8],
+    valid_item_ids: &[u8],
+) -> Result<Map, Vec<String>> {
     let mut errors = Vec::new();
 
     // Read file
@@ -105,7 +178,7 @@ fn validate_map_file(file_path: &str) -> Result<Map, Vec<String>> {
     validate_structure(&map, &mut errors);
 
     // Validate content
-    validate_content(&map, &mut errors);
+    validate_content(&map, &mut errors, valid_monster_ids, valid_item_ids);
 
     // Validate gameplay constraints
     validate_gameplay(&map, &mut errors);
@@ -151,7 +224,12 @@ fn validate_structure(map: &Map, errors: &mut Vec<String>) {
 }
 
 /// Validate map content (events, NPCs, within bounds and valid IDs)
-fn validate_content(map: &Map, errors: &mut Vec<String>) {
+fn validate_content(
+    map: &Map,
+    errors: &mut Vec<String>,
+    valid_monster_ids: &[u8],
+    valid_item_ids: &[u8],
+) {
     // Validate event positions and IDs
     for (pos, event) in &map.events {
         // Check position bounds
@@ -165,10 +243,10 @@ fn validate_content(map: &Map, errors: &mut Vec<String>) {
         // Validate Monster IDs in encounters
         if let MapEvent::Encounter { monster_group, .. } = event {
             for &monster_id in monster_group {
-                if !VALID_MONSTER_IDS.contains(&monster_id) {
+                if !valid_monster_ids.contains(&monster_id) {
                     errors.push(format!(
                         "Invalid Monster ID {} at ({}, {}). Valid IDs: {:?}",
-                        monster_id, pos.x, pos.y, VALID_MONSTER_IDS
+                        monster_id, pos.x, pos.y, valid_monster_ids
                     ));
                 }
             }
@@ -177,7 +255,7 @@ fn validate_content(map: &Map, errors: &mut Vec<String>) {
         // Validate Item IDs in treasure
         if let MapEvent::Treasure { loot, .. } = event {
             for &item_id in loot {
-                if !VALID_ITEM_IDS.contains(&item_id) {
+                if !valid_item_ids.contains(&item_id) {
                     errors.push(format!(
                         "Invalid Item ID {} at ({}, {}). Check data/items.ron",
                         item_id, pos.x, pos.y

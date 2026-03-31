@@ -128,6 +128,7 @@ pub enum ConfigError {
 /// assert_eq!(config.audio.master_volume, 0.8);
 /// assert_eq!(config.rest.full_rest_hours, 12);
 /// assert_eq!(config.game_log.max_entries, 200);
+/// assert_eq!(config.time.movement_step_seconds, 30);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GameConfig {
@@ -150,6 +151,10 @@ pub struct GameConfig {
     /// Game log panel configuration
     #[serde(default)]
     pub game_log: GameLogConfig,
+
+    /// Time advancement configuration
+    #[serde(default)]
+    pub time: TimeConfig,
 }
 
 impl GameConfig {
@@ -223,6 +228,7 @@ impl GameConfig {
         self.camera.validate()?;
         self.rest.validate()?;
         self.game_log.validate()?;
+        self.time.validate()?;
         Ok(())
     }
 }
@@ -254,6 +260,14 @@ pub struct GameLogConfig {
     /// Toggle key used to show or hide the game log panel.
     pub toggle_key: String,
 
+    /// Toggle key used to open the full-screen game log overlay.
+    ///
+    /// When pressed in [`Exploration`](crate::application::GameMode::Exploration)
+    /// mode, transitions to [`GameLog`](crate::application::GameMode::GameLog).
+    /// Defaults to `"G"`.
+    #[serde(default = "default_fullscreen_toggle_key")]
+    pub fullscreen_toggle_key: String,
+
     /// Whether timestamps should be shown alongside log entries.
     pub show_timestamps: bool,
 
@@ -270,12 +284,17 @@ pub struct GameLogConfig {
     pub default_enabled_categories: Vec<String>,
 }
 
+fn default_fullscreen_toggle_key() -> String {
+    "G".to_string()
+}
+
 impl Default for GameLogConfig {
     fn default() -> Self {
         Self {
             max_entries: 200,
             visible_by_default: true,
             toggle_key: "L".to_string(),
+            fullscreen_toggle_key: "G".to_string(),
             show_timestamps: false,
             panel_width_px: 300.0,
             panel_height_px: 200.0,
@@ -532,6 +551,10 @@ pub struct ControlsConfig {
     #[serde(default = "default_automap_keys")]
     pub automap: Vec<String>,
 
+    /// Keys for opening or closing the full-screen game log overlay
+    #[serde(default = "default_game_log_keys")]
+    pub game_log: Vec<String>,
+
     /// Movement cooldown in seconds (prevents double-moves)
     pub movement_cooldown: f32,
 }
@@ -548,6 +571,10 @@ fn default_automap_keys() -> Vec<String> {
     vec!["M".to_string()]
 }
 
+fn default_game_log_keys() -> Vec<String> {
+    vec!["G".to_string()]
+}
+
 impl Default for ControlsConfig {
     fn default() -> Self {
         Self {
@@ -560,6 +587,7 @@ impl Default for ControlsConfig {
             inventory: default_inventory_keys(),
             rest: default_rest_keys(),
             automap: default_automap_keys(),
+            game_log: default_game_log_keys(),
             movement_cooldown: 0.2,
         }
     }
@@ -791,6 +819,105 @@ impl RestConfig {
                 self.rest_encounter_rate_multiplier
             )));
         }
+        Ok(())
+    }
+}
+
+/// Configuration for time advancement rates.
+///
+/// Controls how many in-game seconds each action costs. These defaults
+/// can be overridden per-campaign via the campaign `config.ron` file.
+///
+/// # Defaults
+///
+/// | Field | Default | Meaning |
+/// |---|---|---|
+/// | `movement_step_seconds` | 30 | Seconds per tile step |
+/// | `combat_turn_seconds` | 10 | Seconds per combat turn |
+/// | `map_transition_seconds` | 1800 | Seconds per map transition (30 min) |
+/// | `portal_transition_seconds` | 0 | Seconds for portal (instant) |
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::game_config::TimeConfig;
+///
+/// let cfg = TimeConfig::default();
+/// assert_eq!(cfg.movement_step_seconds, 30);
+/// assert_eq!(cfg.combat_turn_seconds, 10);
+/// assert_eq!(cfg.map_transition_seconds, 1800);
+/// assert_eq!(cfg.portal_transition_seconds, 0);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TimeConfig {
+    /// Seconds of game time consumed per tile step in exploration mode.
+    #[serde(default = "default_movement_step_seconds")]
+    pub movement_step_seconds: u32,
+
+    /// Seconds of game time consumed per combat turn.
+    #[serde(default = "default_combat_turn_seconds")]
+    pub combat_turn_seconds: u32,
+
+    /// Seconds of game time consumed when transitioning between maps.
+    #[serde(default = "default_map_transition_seconds")]
+    pub map_transition_seconds: u32,
+
+    /// Seconds of game time consumed for portal transitions (default 0 = instant).
+    #[serde(default)]
+    pub portal_transition_seconds: u32,
+}
+
+/// Default value for [`TimeConfig::movement_step_seconds`].
+fn default_movement_step_seconds() -> u32 {
+    30
+}
+
+/// Default value for [`TimeConfig::combat_turn_seconds`].
+fn default_combat_turn_seconds() -> u32 {
+    10
+}
+
+/// Default value for [`TimeConfig::map_transition_seconds`].
+fn default_map_transition_seconds() -> u32 {
+    1800
+}
+
+impl Default for TimeConfig {
+    fn default() -> Self {
+        Self {
+            movement_step_seconds: default_movement_step_seconds(),
+            combat_turn_seconds: default_combat_turn_seconds(),
+            map_transition_seconds: default_map_transition_seconds(),
+            portal_transition_seconds: 0,
+        }
+    }
+}
+
+impl TimeConfig {
+    /// Validate the time configuration.
+    ///
+    /// All fields are `u32`, so negative values are impossible.
+    /// Zero is a valid value for any field (meaning "instant").
+    ///
+    /// # Errors
+    ///
+    /// Currently this always returns `Ok(())`. The method exists so that
+    /// future constraints can be added without changing the `GameConfig`
+    /// validation pipeline.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::game_config::TimeConfig;
+    ///
+    /// assert!(TimeConfig::default().validate().is_ok());
+    /// ```
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // movement_step_seconds can be 0 (instant) or positive
+        // combat_turn_seconds can be 0 or positive
+        // map_transition_seconds can be 0 or positive
+        // portal_transition_seconds can be 0 or positive
+        // All values are u32, so no negative values possible
         Ok(())
     }
 }
@@ -1074,6 +1201,58 @@ mod tests {
                 "System".to_string(),
             ]
         );
+
+        // Verify time defaults
+        assert_eq!(config.time.movement_step_seconds, 30);
+        assert_eq!(config.time.combat_turn_seconds, 10);
+        assert_eq!(config.time.map_transition_seconds, 1800);
+        assert_eq!(config.time.portal_transition_seconds, 0);
+    }
+
+    // ── TimeConfig tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_time_config_default_values() {
+        let config = TimeConfig::default();
+        assert_eq!(config.movement_step_seconds, 30);
+        assert_eq!(config.combat_turn_seconds, 10);
+        assert_eq!(config.map_transition_seconds, 1800);
+        assert_eq!(config.portal_transition_seconds, 0);
+    }
+
+    #[test]
+    fn test_time_config_validates() {
+        assert!(TimeConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn test_time_config_ron_roundtrip() {
+        let config = TimeConfig {
+            movement_step_seconds: 60,
+            combat_turn_seconds: 20,
+            map_transition_seconds: 3600,
+            portal_transition_seconds: 5,
+        };
+        let ron_str = ron::to_string(&config).expect("serialize TimeConfig");
+        let deserialized: TimeConfig = ron::from_str(&ron_str).expect("deserialize TimeConfig");
+        assert_eq!(config, deserialized);
+    }
+
+    #[test]
+    fn test_game_config_time_field_default() {
+        let config = GameConfig::default();
+        assert_eq!(config.time, TimeConfig::default());
+    }
+
+    #[test]
+    fn test_time_config_deserialization_with_missing_fields() {
+        // Only supply one field; the rest should get their serde defaults
+        let ron_str = "(movement_step_seconds: 45)";
+        let config: TimeConfig = ron::from_str(ron_str).expect("deserialize partial TimeConfig");
+        assert_eq!(config.movement_step_seconds, 45);
+        assert_eq!(config.combat_turn_seconds, 10);
+        assert_eq!(config.map_transition_seconds, 1800);
+        assert_eq!(config.portal_transition_seconds, 0);
     }
 
     #[test]

@@ -88,6 +88,18 @@ pub enum GameMode {
     /// drives the rest sequence one hour per Bevy frame and detect encounter
     /// interruptions.
     Resting(RestState),
+    /// Full-screen scrollable game log overlay.
+    ///
+    /// Entered by pressing the fullscreen log toggle key (default `G`) or
+    /// clicking the "Game Log" header in the small log panel.  ESC returns
+    /// to the previous [`GameMode`].
+    GameLog,
+    /// All party members are dead — the game is over.
+    ///
+    /// Entered when a trap, combat, or other hazard kills every living party
+    /// member.  The UI should display a "Game Over" screen with options to
+    /// load a save or quit.
+    GameOver,
 }
 
 // ===== Rest State =====
@@ -610,6 +622,14 @@ pub struct QuestLog {
     pub active_quests: Vec<Quest>,
     /// Completed quest IDs
     pub completed_quests: Vec<String>,
+    /// Quest IDs that have been unlocked and are available to start.
+    ///
+    /// Populated by the [`crate::domain::quest::QuestReward::UnlockQuest`]
+    /// reward.  When a quest completion unlocks another quest, the target
+    /// quest ID is inserted here.  The quest-start flow can optionally
+    /// check this set to gate quest availability.
+    #[serde(default)]
+    pub available_quests: std::collections::HashSet<u16>,
 }
 
 impl QuestLog {
@@ -618,6 +638,7 @@ impl QuestLog {
         Self {
             active_quests: Vec::new(),
             completed_quests: Vec::new(),
+            available_quests: std::collections::HashSet::new(),
         }
     }
 
@@ -632,6 +653,45 @@ impl QuestLog {
             let quest = self.active_quests.remove(pos);
             self.completed_quests.push(quest.id);
         }
+    }
+
+    /// Marks a quest as available/unlocked so it can be started.
+    ///
+    /// Called by the [`crate::domain::quest::QuestReward::UnlockQuest`]
+    /// handler when a completed quest unlocks a follow-up quest.
+    ///
+    /// # Arguments
+    ///
+    /// * `quest_id` - Domain-level quest ID to unlock.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::QuestLog;
+    ///
+    /// let mut log = QuestLog::new();
+    /// assert!(!log.is_quest_available(5));
+    /// log.unlock_quest(5);
+    /// assert!(log.is_quest_available(5));
+    /// ```
+    pub fn unlock_quest(&mut self, quest_id: u16) {
+        self.available_quests.insert(quest_id);
+    }
+
+    /// Returns `true` if the given quest has been unlocked.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::QuestLog;
+    ///
+    /// let mut log = QuestLog::new();
+    /// log.unlock_quest(10);
+    /// assert!(log.is_quest_available(10));
+    /// assert!(!log.is_quest_available(11));
+    /// ```
+    pub fn is_quest_available(&self, quest_id: u16) -> bool {
+        self.available_quests.contains(&quest_id)
     }
 }
 
@@ -751,6 +811,46 @@ pub enum RecruitResult {
 
     /// Character recruitment was declined by the player
     Declined,
+}
+
+/// Maps a trap effect name string to a [`crate::domain::character::Condition`] bitflag.
+///
+/// Trap events store their status effect as an `Option<String>`.  This helper
+/// translates well-known effect names into the corresponding condition flag so
+/// that [`GameState::move_party_and_handle_events`] and the Bevy
+/// [`crate::game::systems::events::handle_events`] system can apply effects
+/// uniformly.
+///
+/// Unknown effect names return [`crate::domain::character::Condition::FINE`]
+/// (no effect) and a warning is logged.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::map_effect_to_condition;
+/// use antares::domain::character::Condition;
+///
+/// assert_eq!(map_effect_to_condition("poison"), Condition::POISONED);
+/// assert_eq!(map_effect_to_condition("paralysis"), Condition::PARALYZED);
+/// assert_eq!(map_effect_to_condition("unknown"), Condition::FINE);
+/// ```
+pub fn map_effect_to_condition(effect: &str) -> u8 {
+    use crate::domain::character::Condition;
+    match effect.to_ascii_lowercase().as_str() {
+        "poison" | "poisoned" => Condition::POISONED,
+        "paralysis" | "paralyze" | "paralyzed" => Condition::PARALYZED,
+        "sleep" | "asleep" => Condition::ASLEEP,
+        "blind" | "blinded" => Condition::BLINDED,
+        "silence" | "silenced" => Condition::SILENCED,
+        "disease" | "diseased" => Condition::DISEASED,
+        "unconscious" => Condition::UNCONSCIOUS,
+        "death" | "dead" => Condition::DEAD,
+        "stone" | "petrify" | "petrified" => Condition::STONE,
+        other => {
+            tracing::warn!("Unknown trap effect '{}' — no condition applied", other);
+            Condition::FINE
+        }
+    }
 }
 
 impl GameState {
@@ -1098,23 +1198,48 @@ impl GameState {
         )
     }
 
-    /// Gets the current inn ID from game state
+    /// Gets the current inn ID from the party's location.
     ///
-    /// Returns the inn/town ID where the party is currently located, if any.
-    /// This is used to determine where dismissed characters should be stored.
+    /// Checks the following in order:
+    /// 1. The tile the party is standing on for an `EnterInn` event
+    /// 2. Any `EnterInn` event on the current map (nearest inn)
+    /// 3. The campaign's configured starting innkeeper as a fallback
     ///
     /// # Returns
     ///
-    /// Returns `Some(InnkeeperId)` if party is at an inn, `None` otherwise.
+    /// Returns `Some(InnkeeperId)` if an inn can be determined, `None` otherwise.
     ///
-    /// # Note
+    /// # Examples
     ///
-    /// This is a placeholder implementation. Full implementation requires
-    /// innkeeper-based location system to be completed.
+    /// ```
+    /// use antares::application::GameState;
+    ///
+    /// let state = GameState::new();
+    /// // No campaign loaded and no inn events → None
+    /// let inn_id = state.current_inn_id();
+    /// // Falls back to campaign starting innkeeper or None
+    /// ```
     pub fn current_inn_id(&self) -> Option<InnkeeperId> {
-        // TODO: Implement once innkeeper-based location system is complete
-        // For now, return None as a safe default
-        None
+        if let Some(map) = self.world.get_current_map() {
+            // 1. Check the party's current tile for an EnterInn event
+            if let Some(crate::domain::world::MapEvent::EnterInn { innkeeper_id, .. }) =
+                map.get_event(self.world.party_position)
+            {
+                return Some(innkeeper_id.clone());
+            }
+
+            // 2. Check any EnterInn event on the current map
+            for event in map.events.values() {
+                if let crate::domain::world::MapEvent::EnterInn { innkeeper_id, .. } = event {
+                    return Some(innkeeper_id.clone());
+                }
+            }
+        }
+
+        // 3. Fall back to the campaign's starting innkeeper
+        self.campaign
+            .as_ref()
+            .map(|c| c.config.starting_innkeeper.clone())
     }
 
     // ===== Map Recruitment System =====
@@ -1290,7 +1415,7 @@ impl GameState {
 
         // Each successful step costs time — advance before event resolution so
         // that the clock ticks even when an event fires (traps, encounters, etc.).
-        self.advance_time(crate::domain::resources::TIME_COST_STEP_MINUTES, None);
+        self.advance_time_seconds(self.config.time.movement_step_seconds, None);
 
         // If there is no explicit map event at this position, first roll for a
         // random encounter (map-level encounter tables / terrain modifiers apply).
@@ -1357,13 +1482,69 @@ impl GameState {
             }
 
             crate::domain::world::EventResult::NpcDialogue { npc_id } => {
-                // Start dialogue mode (dialogue state may need NPC context)
-                let _ = npc_id; // TODO: pass npc_id into dialogue state when implemented
-                self.mode = GameMode::Dialogue(crate::application::dialogue::DialogueState::new());
+                // Start dialogue mode with NPC context so dialogue systems
+                // know which NPC the party is speaking to.
+                let mut dialogue_state = crate::application::dialogue::DialogueState::new();
+                dialogue_state.speaker_npc_id = Some(npc_id);
+                self.mode = GameMode::Dialogue(dialogue_state);
+            }
+
+            crate::domain::world::EventResult::Trap { damage, effect } => {
+                // Apply trap damage to all living party members.
+                for member in &mut self.party.members {
+                    if member.is_alive() {
+                        member.hp.modify(-(damage as i32));
+                        if member.hp.current == 0 {
+                            member
+                                .conditions
+                                .add(crate::domain::character::Condition::DEAD);
+                        }
+                    }
+                }
+
+                // Apply status effect if present.
+                if let Some(ref effect_name) = effect {
+                    let flag = map_effect_to_condition(effect_name);
+                    if flag != crate::domain::character::Condition::FINE {
+                        for member in &mut self.party.members {
+                            if member.is_alive() {
+                                member.conditions.add(flag);
+                            }
+                        }
+                    }
+                }
+
+                // Check for party wipe.
+                if self.party.living_count() == 0 {
+                    self.mode = GameMode::GameOver;
+                }
+            }
+
+            crate::domain::world::EventResult::Treasure { loot } => {
+                // Distribute loot items across party members with inventory
+                // space.  Each item ID in the loot vec is an `ItemId` (u8).
+                for item_byte in &loot {
+                    let item_id = *item_byte as crate::domain::types::ItemId;
+                    let mut placed = false;
+                    for member in &mut self.party.members {
+                        if member.inventory.has_space()
+                            && member.inventory.add_item(item_id, 1).is_ok()
+                        {
+                            placed = true;
+                            break;
+                        }
+                    }
+                    if !placed {
+                        tracing::warn!(
+                            "Treasure item {} lost — no party member has inventory space",
+                            item_id
+                        );
+                    }
+                }
             }
 
             _ => {
-                // Other events (treasure, teleport, trap, etc.) are handled elsewhere or are no-ops here
+                // Other events (teleport, sign, etc.) are handled elsewhere or are no-ops here
             }
         }
 
@@ -1642,7 +1823,7 @@ impl GameState {
 
         // Advance the authoritative clock via the GameState path so that active
         // spells are ticked and merchant stock is restocked for the full duration.
-        self.advance_time(hours * 60, templates);
+        self.advance_time_minutes(hours * 60, templates);
 
         Ok(())
     }
@@ -1686,9 +1867,27 @@ impl GameState {
     ///    restored to its pre-boost level.
     /// 3. Triggers NPC merchant restock (if `templates` is `Some`).
     ///
+    /// Advances the in-game clock by `seconds` and ticks all time-sensitive state.
+    ///
+    /// This is the single authoritative time-advancement path. The clock is
+    /// updated in seconds for sub-minute resolution, but spell/boost ticking
+    /// only occurs at minute boundaries (Option A: per-minute ticking).
+    ///
+    /// For every full minute contained in `seconds`:
+    ///
+    /// 1. Decrements all [`ActiveSpells`] protection field counters by 1 via
+    ///    [`ActiveSpells::tick`].
+    /// 2. Ticks per-character timed attribute boosts via
+    ///    [`crate::domain::character::Character::tick_timed_stat_boosts_minute`].
+    /// 3. Triggers NPC merchant restock (if `templates` is `Some`).
+    ///
+    /// Sub-minute advances (e.g. 30 seconds) update the clock but do **not**
+    /// trigger effect ticks, since spells and stat boosts are measured in
+    /// minutes.
+    ///
     /// # Arguments
     ///
-    /// * `minutes`   - Number of in-game minutes to advance.
+    /// * `seconds`   - Number of in-game seconds to advance.
     /// * `templates` - Template database used to replenish merchant stock.
     ///   Pass `None` in contexts where the content is not available (e.g.
     ///   headless unit tests that do not load campaign data); restocking is
@@ -1702,9 +1901,22 @@ impl GameState {
     ///
     /// let mut state = GameState::new();
     /// let templates = MerchantStockTemplateDatabase::new();
-    /// state.advance_time(60, Some(&templates));
+    /// state.advance_time_seconds(3600, Some(&templates));
     /// assert_eq!(state.time.minute, 0);
+    /// assert_eq!(state.time.second, 0);
     /// assert_eq!(state.time.hour, 7);
+    /// ```
+    ///
+    /// Sub-minute advance (no spell ticking):
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    ///
+    /// let mut state = GameState::new();
+    /// state.active_spells.light = 10;
+    /// state.advance_time_seconds(30, None); // 30 seconds — no minute boundary crossed
+    /// assert_eq!(state.time.second, 30);
+    /// assert_eq!(state.active_spells.light, 10); // unchanged — sub-minute
     /// ```
     ///
     /// Timed attribute boost expiry:
@@ -1723,29 +1935,62 @@ impl GameState {
     /// hero.apply_timed_stat_boost(AttributeType::Might, 5, Some(10));
     /// state.party.add_member(hero).unwrap();
     ///
-    /// // Boost expires after exactly 10 ticks.
-    /// state.advance_time(10, None);
+    /// // Boost expires after exactly 10 minute-ticks (600 seconds).
+    /// state.advance_time_seconds(600, None);
     /// assert_eq!(state.party.members[0].stats.might.current, base_might);
     /// assert!(state.party.members[0].timed_stat_boosts.is_empty());
     /// ```
-    pub fn advance_time(
+    pub fn advance_time_seconds(
         &mut self,
-        minutes: u32,
+        seconds: u32,
         templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
     ) {
-        self.time.advance_minutes(minutes);
+        self.time.advance_seconds(seconds);
+
         // Tick active spell durations and per-character timed stat boosts
-        for _ in 0..minutes {
+        // at minute granularity (Option A). Sub-minute advances do not tick.
+        let minutes_to_tick = seconds / 60;
+        for _ in 0..minutes_to_tick {
             self.active_spells.tick();
-            // tick per-character timed stat boosts
             for member in &mut self.party.members {
                 member.tick_timed_stat_boosts_minute();
             }
         }
+
         // Trigger daily restock and magic-slot rotation when templates are available.
         if let Some(tmpl) = templates {
             self.npc_runtime.tick_restock(&self.time, tmpl);
         }
+    }
+
+    /// Convenience wrapper that advances time by the given number of minutes.
+    ///
+    /// Delegates to [`advance_time_seconds`](Self::advance_time_seconds) with
+    /// `minutes * 60`. Use this for callers that still think in minutes (e.g.
+    /// rest, spell durations).
+    ///
+    /// # Arguments
+    ///
+    /// * `minutes`   - Number of in-game minutes to advance.
+    /// * `templates` - Optional merchant-stock template database.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    ///
+    /// let mut state = GameState::new();
+    /// state.advance_time_minutes(60, None);
+    /// assert_eq!(state.time.hour, 7);
+    /// assert_eq!(state.time.minute, 0);
+    /// assert_eq!(state.time.second, 0);
+    /// ```
+    pub fn advance_time_minutes(
+        &mut self,
+        minutes: u32,
+        templates: Option<&crate::domain::world::npc_runtime::MerchantStockTemplateDatabase>,
+    ) {
+        self.advance_time_seconds(minutes * 60, templates);
     }
 
     /// Ensures all merchant NPCs in the content database have runtime state initialised.
@@ -1979,7 +2224,7 @@ mod tests {
         let mut state = GameState::new();
         state.active_spells.light = 10;
 
-        state.advance_time(5, None);
+        state.advance_time_minutes(5, None);
         assert_eq!(state.active_spells.light, 5);
         assert_eq!(state.time.minute, 5);
     }
@@ -2007,7 +2252,7 @@ mod tests {
         state.party.add_member(hero).unwrap();
 
         // Advance 5 minutes — boost expires exactly on the 5th tick
-        state.advance_time(5, None);
+        state.advance_time_minutes(5, None);
 
         assert_eq!(
             state.party.members[0].stats.might.current, base_might,
@@ -2039,7 +2284,7 @@ mod tests {
         state.party.add_member(hero).unwrap();
 
         // Advance 7 minutes — both counters should tick together
-        state.advance_time(7, None);
+        state.advance_time_minutes(7, None);
 
         assert_eq!(
             state.active_spells.light, 3,
@@ -2056,7 +2301,7 @@ mod tests {
         );
 
         // Advance 3 more minutes — boost expires
-        state.advance_time(3, None);
+        state.advance_time_minutes(3, None);
 
         assert_eq!(
             state.active_spells.light, 0,
@@ -2091,7 +2336,7 @@ mod tests {
 
         // Advance past a day boundary with None templates — must not panic and must
         // not alter stock.
-        state.advance_time(1440, None); // 24 hours
+        state.advance_time_minutes(1440, None); // 24 hours
 
         let runtime = state
             .npc_runtime
@@ -2153,7 +2398,7 @@ mod tests {
 
         // GameState starts at day 1, hour 0, minute 0.
         // Advance 24 hours so a new day begins (day 2).
-        state.advance_time(1440, Some(&templates));
+        state.advance_time_minutes(1440, Some(&templates));
 
         let runtime = state.npc_runtime.get(&"merchant_bob".to_string()).unwrap();
         assert_eq!(
@@ -3736,33 +3981,35 @@ mod tests {
 
     #[test]
     fn test_step_advances_time() {
-        // A successful step must advance game time by exactly TIME_COST_STEP_MINUTES.
-        use crate::domain::resources::TIME_COST_STEP_MINUTES;
+        // A successful step must advance game time by exactly
+        // config.time.movement_step_seconds (default 30 seconds).
         use crate::domain::types::Direction;
         use crate::sdk::database::ContentDatabase;
 
         let mut state = GameState::new();
         state.world = build_world_with_map();
-        // Use total_days() so the cumulative-minute baseline is correct across
-        // month/year boundaries (day is now 1–30 within-month, not a running total).
-        let before = state.time.total_days() as u64 * 24 * 60
-            + state.time.hour as u64 * 60
-            + state.time.minute as u64;
+
+        // Compute total seconds from the epoch so the baseline is correct
+        // across month/year boundaries.
+        let total_seconds = |s: &GameState| -> u64 {
+            (s.time.total_days() as u64 - 1) * 86400
+                + s.time.hour as u64 * 3600
+                + s.time.minute as u64 * 60
+                + s.time.second as u64
+        };
+        let before = total_seconds(&state);
 
         let content = ContentDatabase::new();
         state
             .move_party_and_handle_events(Direction::North, &content)
             .expect("move north on clear map must succeed");
 
-        let after = state.time.total_days() as u64 * 24 * 60
-            + state.time.hour as u64 * 60
-            + state.time.minute as u64;
+        let after = total_seconds(&state);
 
         assert_eq!(
             after - before,
-            TIME_COST_STEP_MINUTES as u64,
-            "one step must advance time by exactly TIME_COST_STEP_MINUTES ({} min)",
-            TIME_COST_STEP_MINUTES
+            30,
+            "one step must advance time by exactly 30 seconds (default movement_step_seconds)"
         );
     }
 
@@ -3795,6 +4042,10 @@ mod tests {
         let result = state.move_party_and_handle_events(Direction::North, &content);
         assert!(result.is_err(), "move into a wall must return an error");
 
+        assert_eq!(
+            state.time.second, time_before.second,
+            "blocked step must not advance seconds"
+        );
         assert_eq!(
             state.time.minute, time_before.minute,
             "blocked step must not advance minutes"
@@ -3877,6 +4128,11 @@ mod tests {
             "rest_party must advance time by exactly {} hours ({} minutes)",
             hours,
             hours * 60
+        );
+        // Rest always advances on whole-minute boundaries, so seconds must be 0.
+        assert_eq!(
+            state.time.second, 0,
+            "rest_party must leave seconds at 0 (minute-aligned advancement)"
         );
     }
 
@@ -4009,7 +4265,7 @@ mod tests {
 
         // Start at 06:00, advance 16 hours → 22:00 (Night)
         let mut state = GameState::new();
-        state.advance_time(16 * 60, None);
+        state.advance_time_minutes(16 * 60, None);
         assert_eq!(
             state.time_of_day(),
             TimeOfDay::Night,
@@ -4140,7 +4396,7 @@ mod tests {
         );
 
         // Advance exactly 60 minutes — every tick drains one unit, so it must reach 0.
-        state.advance_time(60, None);
+        state.advance_time_minutes(60, None);
 
         assert_eq!(
             state.active_spells.fire_protection, 0,
@@ -4149,7 +4405,7 @@ mod tests {
     }
 
     /// Verifies that a 30-minute Might boost applied via `apply_timed_stat_boost`
-    /// is correctly expired (and the stat restored) after `advance_time(30)`.
+    /// is correctly expired (and the stat restored) after `advance_time_minutes(30)`.
     #[test]
     fn test_timed_attribute_potion_expires_after_advance_time() {
         use crate::application::GameState;
@@ -4183,7 +4439,7 @@ mod tests {
         state.party.add_member(hero).unwrap();
 
         // Advance exactly 30 minutes — the boost must expire on the last tick.
-        state.advance_time(30, None);
+        state.advance_time_minutes(30, None);
 
         assert!(
             state.party.members[0].timed_stat_boosts.is_empty(),
@@ -4316,11 +4572,11 @@ mod tests {
         state.party.add_member(hero).unwrap();
 
         // Advance a large number of minutes — the permanent boost must survive.
-        state.advance_time(999, None);
+        state.advance_time_minutes(999, None);
 
         assert_eq!(
             state.party.members[0].stats.might.current, boosted_might,
-            "Might must remain permanently boosted after advance_time(999)"
+            "Might must remain permanently boosted after advance_time_minutes(999)"
         );
         assert!(
             state.party.members[0].timed_stat_boosts.is_empty(),
@@ -4341,10 +4597,10 @@ mod tests {
         state.active_spells.fire_protection = 60;
 
         // Advance 30 minutes — 30 minutes remain from the first potion.
-        state.advance_time(30, None);
+        state.advance_time_minutes(30, None);
         assert_eq!(
             state.active_spells.fire_protection, 30,
-            "30 minutes must remain after the first advance_time(30)"
+            "30 minutes must remain after the first advance_time_minutes(30)"
         );
 
         // Second potion: overwrites with a fresh 60-minute duration (not 90).
@@ -4355,10 +4611,678 @@ mod tests {
         );
 
         // Advance 30 more minutes — 30 minutes remain from the second potion.
-        state.advance_time(30, None);
+        state.advance_time_minutes(30, None);
         assert_eq!(
             state.active_spells.fire_protection, 30,
-            "30 minutes must remain from the second potion after another advance_time(30)"
+            "30 minutes must remain from the second potion after another advance_time_minutes(30)"
+        );
+    }
+
+    // ===== Phase 2: Time Advancement System Tests =====
+
+    /// `advance_time_seconds(30)` from 12:00:00 yields 12:00:30 — sub-minute
+    /// resolution works and does NOT tick spell/boost effects.
+    #[test]
+    fn test_advance_time_seconds_sub_minute_no_tick() {
+        let mut state = GameState::new();
+        state.active_spells.light = 10;
+        state.time = crate::domain::types::GameTime::new_full(1, 1, 1, 12, 0);
+
+        state.advance_time_seconds(30, None);
+
+        assert_eq!(state.time.hour, 12);
+        assert_eq!(state.time.minute, 0);
+        assert_eq!(state.time.second, 30);
+        // Sub-minute advance must NOT tick spells.
+        assert_eq!(
+            state.active_spells.light, 10,
+            "sub-minute advance must not tick active spells"
+        );
+    }
+
+    /// `advance_time_seconds(90)` from 12:00:30 yields 12:02:00 and ticks
+    /// effects once (90 / 60 = 1 full minute).
+    #[test]
+    fn test_advance_time_seconds_minute_rollover() {
+        let mut state = GameState::new();
+        state.active_spells.light = 10;
+        state.time = crate::domain::types::GameTime::new_full_with_seconds(1, 1, 1, 12, 0, 30);
+
+        state.advance_time_seconds(90, None);
+
+        assert_eq!(state.time.hour, 12);
+        assert_eq!(state.time.minute, 2);
+        assert_eq!(state.time.second, 0);
+        // 90 seconds = 1 full minute tick.
+        assert_eq!(
+            state.active_spells.light, 9,
+            "90 seconds should tick spells once (1 full minute)"
+        );
+    }
+
+    /// `advance_time_minutes` delegates to `advance_time_seconds` correctly.
+    #[test]
+    fn test_advance_time_minutes_delegates_to_seconds() {
+        let mut state_a = GameState::new();
+        let mut state_b = GameState::new();
+        state_a.active_spells.light = 20;
+        state_b.active_spells.light = 20;
+
+        state_a.advance_time_minutes(5, None);
+        state_b.advance_time_seconds(300, None);
+
+        assert_eq!(state_a.time.hour, state_b.time.hour);
+        assert_eq!(state_a.time.minute, state_b.time.minute);
+        assert_eq!(state_a.time.second, state_b.time.second);
+        assert_eq!(state_a.active_spells.light, state_b.active_spells.light);
+    }
+
+    /// Movement advances time by exactly `movement_step_seconds` (default 30s)
+    /// from the `TimeConfig` on the game state's config.
+    #[test]
+    fn test_movement_uses_config_time_step() {
+        use crate::domain::types::Direction;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut state = GameState::new();
+        state.world = build_world_with_map();
+        // Override movement_step_seconds to a custom value.
+        state.config.time.movement_step_seconds = 45;
+
+        let total_seconds = |s: &GameState| -> u64 {
+            (s.time.total_days() as u64 - 1) * 86400
+                + s.time.hour as u64 * 3600
+                + s.time.minute as u64 * 60
+                + s.time.second as u64
+        };
+        let before = total_seconds(&state);
+
+        let content = ContentDatabase::new();
+        state
+            .move_party_and_handle_events(Direction::North, &content)
+            .expect("move north on clear map must succeed");
+
+        let after = total_seconds(&state);
+        assert_eq!(
+            after - before,
+            45,
+            "movement must advance time by exactly movement_step_seconds (custom 45)"
+        );
+    }
+
+    /// `advance_time_seconds(3600)` advances the clock by exactly 1 hour and
+    /// ticks effects 60 times.
+    #[test]
+    fn test_advance_time_seconds_full_hour() {
+        let mut state = GameState::new();
+        state.active_spells.light = 100;
+
+        state.advance_time_seconds(3600, None);
+
+        assert_eq!(state.time.hour, 7); // default start 06:00 + 1 hour
+        assert_eq!(state.time.minute, 0);
+        assert_eq!(state.time.second, 0);
+        assert_eq!(
+            state.active_spells.light, 40,
+            "3600 seconds = 60 minute ticks, 100 - 60 = 40"
+        );
+    }
+
+    /// Rest still works correctly via `advance_time_minutes` — hours * 60
+    /// minutes is faithfully converted to seconds internally.
+    #[test]
+    fn test_rest_uses_advance_time_minutes_path() {
+        let mut state = GameState::new();
+        state.active_spells.light = 200;
+
+        // Simulate what rest_party does internally: advance_time_minutes(hours * 60)
+        let hours = 3u32;
+        state.advance_time_minutes(hours * 60, None);
+
+        assert_eq!(state.time.hour, 9); // 06:00 + 3 hours = 09:00
+        assert_eq!(state.time.minute, 0);
+        assert_eq!(state.time.second, 0);
+        // 3 hours = 180 minute ticks. 200 - 180 = 20.
+        assert_eq!(
+            state.active_spells.light, 20,
+            "3 hours of rest must tick spells 180 times"
+        );
+    }
+
+    /// Backward-compatible deserialization: `GameTime` without `second` field
+    /// defaults to 0, and `advance_time_seconds` works correctly on it.
+    #[test]
+    fn test_backward_compat_game_time_no_second_field() {
+        use crate::domain::types::GameTime;
+
+        // Deserialize a GameTime RON snippet that omits the `second` field.
+        let ron_str = "(day: 5, hour: 8, minute: 30)";
+        let time: GameTime = ron::from_str(ron_str).expect("RON deserialize must succeed");
+        assert_eq!(time.day, 5);
+        assert_eq!(time.hour, 8);
+        assert_eq!(time.minute, 30);
+        assert_eq!(time.second, 0, "missing second field must default to 0");
+
+        // Verify advance_time_seconds works on a GameState with this time.
+        let mut state = GameState::new();
+        state.time = time;
+        state.advance_time_seconds(45, None);
+        assert_eq!(state.time.second, 45);
+        assert_eq!(state.time.minute, 30);
+    }
+
+    #[test]
+    fn test_map_effect_to_condition_known_effects() {
+        use crate::application::map_effect_to_condition;
+        use crate::domain::character::Condition;
+
+        assert_eq!(map_effect_to_condition("poison"), Condition::POISONED);
+        assert_eq!(map_effect_to_condition("poisoned"), Condition::POISONED);
+        assert_eq!(map_effect_to_condition("paralysis"), Condition::PARALYZED);
+        assert_eq!(map_effect_to_condition("paralyze"), Condition::PARALYZED);
+        assert_eq!(map_effect_to_condition("sleep"), Condition::ASLEEP);
+        assert_eq!(map_effect_to_condition("blind"), Condition::BLINDED);
+        assert_eq!(map_effect_to_condition("silence"), Condition::SILENCED);
+        assert_eq!(map_effect_to_condition("disease"), Condition::DISEASED);
+        assert_eq!(
+            map_effect_to_condition("unconscious"),
+            Condition::UNCONSCIOUS
+        );
+        assert_eq!(map_effect_to_condition("death"), Condition::DEAD);
+        assert_eq!(map_effect_to_condition("stone"), Condition::STONE);
+        assert_eq!(map_effect_to_condition("petrify"), Condition::STONE);
+    }
+
+    #[test]
+    fn test_map_effect_to_condition_unknown_returns_fine() {
+        use crate::application::map_effect_to_condition;
+        use crate::domain::character::Condition;
+
+        assert_eq!(map_effect_to_condition("unknown"), Condition::FINE);
+        assert_eq!(map_effect_to_condition("fireball"), Condition::FINE);
+    }
+
+    #[test]
+    fn test_map_effect_to_condition_case_insensitive() {
+        use crate::application::map_effect_to_condition;
+        use crate::domain::character::Condition;
+
+        assert_eq!(map_effect_to_condition("POISON"), Condition::POISONED);
+        assert_eq!(map_effect_to_condition("Paralysis"), Condition::PARALYZED);
+        assert_eq!(map_effect_to_condition("SLEEP"), Condition::ASLEEP);
+    }
+
+    #[test]
+    fn test_quest_log_unlock_quest() {
+        let mut log = QuestLog::new();
+        assert!(!log.is_quest_available(5));
+        log.unlock_quest(5);
+        assert!(log.is_quest_available(5));
+        assert!(!log.is_quest_available(6));
+    }
+
+    #[test]
+    fn test_quest_log_unlock_quest_idempotent() {
+        let mut log = QuestLog::new();
+        log.unlock_quest(10);
+        log.unlock_quest(10);
+        assert!(log.is_quest_available(10));
+        assert_eq!(log.available_quests.len(), 1);
+    }
+
+    #[test]
+    fn test_quest_log_available_quests_serialization() {
+        let mut log = QuestLog::new();
+        log.unlock_quest(1);
+        log.unlock_quest(2);
+
+        let serialized =
+            ron::ser::to_string_pretty(&log, ron::ser::PrettyConfig::default()).expect("serialize");
+        let deserialized: QuestLog = ron::from_str(&serialized).expect("deserialize");
+        assert!(deserialized.is_quest_available(1));
+        assert!(deserialized.is_quest_available(2));
+        assert!(!deserialized.is_quest_available(3));
+    }
+
+    #[test]
+    fn test_quest_log_backward_compat_no_available_quests_field() {
+        // Simulate a legacy save without available_quests field
+        let ron_str = r#"(
+            active_quests: [],
+            completed_quests: [],
+        )"#;
+        let log: QuestLog = ron::from_str(ron_str).expect("deserialize legacy quest log");
+        assert!(log.available_quests.is_empty());
+    }
+
+    #[test]
+    fn test_trap_event_reduces_party_hp() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(50);
+        state.party.add_member(hero).unwrap();
+
+        // Set up a world with a map containing a trap
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let trap_pos = Position::new(1, 0);
+        map.add_event(
+            trap_pos,
+            MapEvent::Trap {
+                name: "Pit Trap".to_string(),
+                description: "A hidden pit".to_string(),
+                damage: 10,
+                effect: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        // Build a minimal content database
+        let content = crate::sdk::database::ContentDatabase::new();
+
+        let result =
+            state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        assert!(result.is_ok());
+
+        // Hero should have taken 10 damage: 50 - 10 = 40
+        assert_eq!(state.party.members[0].hp.current, 40);
+    }
+
+    #[test]
+    fn test_trap_event_with_effect_applies_condition() {
+        use crate::domain::character::{Alignment, Character, Condition, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(100);
+        state.party.add_member(hero).unwrap();
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let trap_pos = Position::new(1, 0);
+        map.add_event(
+            trap_pos,
+            MapEvent::Trap {
+                name: "Poison Trap".to_string(),
+                description: "".to_string(),
+                damage: 5,
+                effect: Some("poison".to_string()),
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        assert_eq!(state.party.members[0].hp.current, 95);
+        assert!(state.party.members[0].conditions.has(Condition::POISONED));
+    }
+
+    #[test]
+    fn test_trap_kills_all_members_triggers_game_over() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(5);
+        state.party.add_member(hero).unwrap();
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            Position::new(1, 0),
+            MapEvent::Trap {
+                name: "Death Trap".to_string(),
+                description: "".to_string(),
+                damage: 100,
+                effect: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        assert_eq!(state.party.living_count(), 0);
+        assert!(matches!(state.mode, GameMode::GameOver));
+    }
+
+    #[test]
+    fn test_treasure_event_distributes_items() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            Position::new(1, 0),
+            MapEvent::Treasure {
+                name: "Chest".to_string(),
+                description: "A shiny chest".to_string(),
+                loot: vec![5, 10],
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        // Items should be in first member's inventory
+        let inv = &state.party.members[0].inventory;
+        assert_eq!(inv.items.len(), 2);
+        assert!(inv.items.iter().any(|slot| slot.item_id == 5));
+        assert!(inv.items.iter().any(|slot| slot.item_id == 10));
+    }
+
+    #[test]
+    fn test_treasure_event_consumed_after_collection() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        let treasure_pos = Position::new(1, 0);
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            treasure_pos,
+            MapEvent::Treasure {
+                name: "Chest".to_string(),
+                description: "".to_string(),
+                loot: vec![1],
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        // Treasure event should have been consumed by trigger_event (domain layer)
+        assert!(state
+            .world
+            .get_current_map()
+            .unwrap()
+            .get_event(treasure_pos)
+            .is_none());
+    }
+
+    #[test]
+    fn test_npc_dialogue_carries_npc_id() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        let npc_pos = Position::new(1, 0);
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            npc_pos,
+            MapEvent::NpcDialogue {
+                name: "Elder".to_string(),
+                description: "".to_string(),
+                npc_id: "village_elder".to_string(),
+                time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        // Should be in dialogue mode with npc_id set
+        match &state.mode {
+            GameMode::Dialogue(ds) => {
+                assert_eq!(ds.speaker_npc_id, Some("village_elder".to_string()));
+            }
+            other => panic!("Expected Dialogue mode, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_trap_dead_members_take_no_damage() {
+        use crate::domain::character::{Alignment, Character, Condition, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+
+        // Living hero
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(50);
+        state.party.add_member(hero).unwrap();
+
+        // Dead companion
+        let mut dead_guy = Character::new(
+            "DeadGuy".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        dead_guy.hp.current = 0;
+        dead_guy.conditions.add(Condition::DEAD);
+        state.party.add_member(dead_guy).unwrap();
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            Position::new(1, 0),
+            MapEvent::Trap {
+                name: "Trap".to_string(),
+                description: "".to_string(),
+                damage: 10,
+                effect: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        // Living hero takes damage
+        assert_eq!(state.party.members[0].hp.current, 40);
+        // Dead member unchanged
+        assert_eq!(state.party.members[1].hp.current, 0);
+    }
+
+    #[test]
+    fn test_current_inn_id_at_inn_event() {
+        let mut state = GameState::new();
+        // Create a map with an EnterInn event at the party's position
+        let mut map = crate::domain::world::Map::new(
+            1,
+            "Test Town".to_string(),
+            "A test town".to_string(),
+            10,
+            10,
+        );
+        map.events.insert(
+            crate::domain::types::Position::new(0, 0),
+            crate::domain::world::MapEvent::EnterInn {
+                name: "Town Inn".to_string(),
+                description: "A cozy inn".to_string(),
+                innkeeper_id: "town_innkeeper".to_string(),
+            },
+        );
+        state.world.maps.insert(1, map);
+        state.world.current_map = 1;
+        state.world.party_position = crate::domain::types::Position::new(0, 0);
+
+        assert_eq!(state.current_inn_id(), Some("town_innkeeper".to_string()));
+    }
+
+    #[test]
+    fn test_current_inn_id_not_at_inn_but_inn_on_map() {
+        let mut state = GameState::new();
+        let mut map = crate::domain::world::Map::new(
+            1,
+            "Test Town".to_string(),
+            "A test town".to_string(),
+            10,
+            10,
+        );
+        // Inn is at position (5, 5), party is at (0, 0)
+        map.events.insert(
+            crate::domain::types::Position::new(5, 5),
+            crate::domain::world::MapEvent::EnterInn {
+                name: "Far Inn".to_string(),
+                description: "An inn across town".to_string(),
+                innkeeper_id: "far_innkeeper".to_string(),
+            },
+        );
+        state.world.maps.insert(1, map);
+        state.world.current_map = 1;
+        state.world.party_position = crate::domain::types::Position::new(0, 0);
+
+        assert_eq!(state.current_inn_id(), Some("far_innkeeper".to_string()));
+    }
+
+    #[test]
+    fn test_current_inn_id_no_inn_on_map_no_campaign() {
+        let state = GameState::new();
+        // No maps loaded, no campaign → None
+        assert_eq!(state.current_inn_id(), None);
+    }
+
+    #[test]
+    fn test_current_inn_id_no_inn_on_map_with_campaign_fallback() {
+        let mut state = GameState::new();
+        // Create a map with no inn events
+        let map = crate::domain::world::Map::new(
+            1,
+            "Dungeon".to_string(),
+            "A dark dungeon".to_string(),
+            10,
+            10,
+        );
+        state.world.maps.insert(1, map);
+        state.world.current_map = 1;
+
+        // Set up a campaign with a starting innkeeper
+        state.campaign = Some(crate::sdk::campaign_loader::Campaign {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            version: "1.0.0".to_string(),
+            author: "Test".to_string(),
+            description: "Test".to_string(),
+            engine_version: "0.1.0".to_string(),
+            required_features: Vec::new(),
+            config: crate::sdk::campaign_loader::CampaignConfig {
+                starting_map: 1,
+                starting_position: crate::domain::types::Position::new(0, 0),
+                starting_direction: crate::domain::types::Direction::North,
+                starting_gold: 0,
+                starting_food: 0,
+                starting_innkeeper: "default_innkeeper".to_string(),
+                max_party_size: 6,
+                max_roster_size: 20,
+                difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
+                permadeath: false,
+                allow_multiclassing: false,
+                starting_level: 1,
+                max_level: 20,
+                starting_time: crate::domain::types::GameTime::new(1, 8, 0),
+            },
+            data: crate::sdk::campaign_loader::CampaignData {
+                items: "data/items.ron".to_string(),
+                spells: "data/spells.ron".to_string(),
+                monsters: "data/monsters.ron".to_string(),
+                classes: "data/classes.ron".to_string(),
+                races: "data/races.ron".to_string(),
+                maps: "data/maps".to_string(),
+                quests: "data/quests.ron".to_string(),
+                dialogues: "data/dialogues.ron".to_string(),
+                characters: "data/characters.ron".to_string(),
+                creatures: "data/creatures.ron".to_string(),
+                furniture: "data/furniture.ron".to_string(),
+            },
+            assets: crate::sdk::campaign_loader::CampaignAssets {
+                tilesets: "assets/tilesets".to_string(),
+                music: "assets/music".to_string(),
+                sounds: "assets/sounds".to_string(),
+                images: "assets/images".to_string(),
+                fonts: "assets/fonts".to_string(),
+            },
+            root_path: std::path::PathBuf::new(),
+            game_config: crate::sdk::game_config::GameConfig::default(),
+        });
+
+        // Should fall back to campaign starting innkeeper
+        assert_eq!(
+            state.current_inn_id(),
+            Some("default_innkeeper".to_string())
         );
     }
 }

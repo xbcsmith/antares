@@ -136,10 +136,21 @@ pub enum MapEventType {
 }
 
 /// Message used to request a map change (teleportation, portal, etc.)
+///
+/// The `is_portal` flag distinguishes instant portal transitions (which cost
+/// [`TimeConfig::portal_transition_seconds`](crate::sdk::game_config::TimeConfig::portal_transition_seconds),
+/// default 0) from regular map transitions (which cost
+/// [`TimeConfig::map_transition_seconds`](crate::sdk::game_config::TimeConfig::map_transition_seconds),
+/// default 1800 seconds = 30 minutes).
 #[derive(Message, Clone)]
 pub struct MapChangeEvent {
+    /// Target map ID to transition to.
     pub target_map: types::MapId,
+    /// Target position on the destination map.
     pub target_pos: types::Position,
+    /// When `true`, this is a portal transition (instant by default).
+    /// When `false`, this is a regular map transition (30 minutes by default).
+    pub is_portal: bool,
 }
 
 /// Plugin responsible for dynamic map management (spawning/despawning marker
@@ -496,13 +507,17 @@ fn map_change_handler(
                 map.init_lock_states();
                 entered_map_name = Some(map.name.clone());
             }
-            // Each map transition (teleport, dungeon entrance, town portal, etc.)
-            // costs time. Advance after confirming the map actually exists so that
-            // invalid/no-op events do not tick the clock.
-            global_state.0.advance_time(
-                crate::domain::resources::TIME_COST_MAP_TRANSITION_MINUTES,
-                None,
-            );
+            // Each map transition costs time. Portal transitions use the
+            // (typically instant) portal_transition_seconds; regular transitions
+            // use map_transition_seconds from TimeConfig.
+            let transition_seconds = if ev.is_portal {
+                global_state.0.config.time.portal_transition_seconds
+            } else {
+                global_state.0.config.time.map_transition_seconds
+            };
+            global_state
+                .0
+                .advance_time_seconds(transition_seconds, None);
             if let (Some(map_name), Some(ref mut writer)) =
                 (entered_map_name, game_log_writer.as_mut())
             {
@@ -1863,6 +1878,7 @@ mod tests {
         app.world_mut().write_message(MapChangeEvent {
             target_map: 1,
             target_pos: start,
+            is_portal: false,
         });
         app.update();
 
@@ -4035,8 +4051,9 @@ mod tests {
         assert_eq!(results[0].1.npc_id, "npc_smooth_test");
     }
 
-    /// A map transition via `MapChangeEvent` must advance the in-game
-    /// clock by exactly `TIME_COST_MAP_TRANSITION_MINUTES`.
+    /// A map transition via `MapChangeEvent` (non-portal) must advance the
+    /// in-game clock by exactly `map_transition_seconds` from `TimeConfig`
+    /// (default 1800 seconds = 30 minutes).
     ///
     /// Strategy: build a minimal Bevy app with `MapManagerPlugin`, wire up two
     /// maps in `GlobalState`, send a `MapChangeEvent` targeting the second map,
@@ -4044,9 +4061,9 @@ mod tests {
     /// clock advanced by the expected amount.
     #[test]
     fn test_map_transition_advances_time() {
-        use crate::domain::resources::TIME_COST_MAP_TRANSITION_MINUTES;
         use crate::domain::types::Position;
         use crate::domain::world::{Map, World};
+        use crate::sdk::game_config::TimeConfig;
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
@@ -4085,12 +4102,13 @@ mod tests {
         let mut gs = crate::application::GameState::new();
         gs.world = world;
 
-        // Record the starting total minutes.
-        // Use total_days() so the cumulative-minute baseline is correct across
-        // month/year boundaries (day is now 1–30 within-month, not a running total).
-        let start_minutes = gs.time.total_days() as u64 * 24 * 60
-            + gs.time.hour as u64 * 60
-            + gs.time.minute as u64;
+        let default_transition_seconds = TimeConfig::default().map_transition_seconds;
+
+        // Record the starting total seconds.
+        let start_seconds = gs.time.total_days() as u64 * 86400
+            + gs.time.hour as u64 * 3600
+            + gs.time.minute as u64 * 60
+            + gs.time.second as u64;
 
         app.insert_resource(crate::game::resources::GlobalState(gs));
 
@@ -4103,6 +4121,7 @@ mod tests {
             msgs.write(MapChangeEvent {
                 target_map: 2,
                 target_pos: Position::new(1, 1),
+                is_portal: false,
             });
         }
 
@@ -4112,15 +4131,17 @@ mod tests {
         let state = app
             .world()
             .resource::<crate::game::resources::GlobalState>();
-        let end_minutes = state.0.time.total_days() as u64 * 24 * 60
-            + state.0.time.hour as u64 * 60
-            + state.0.time.minute as u64;
+        let end_seconds = state.0.time.total_days() as u64 * 86400
+            + state.0.time.hour as u64 * 3600
+            + state.0.time.minute as u64 * 60
+            + state.0.time.second as u64;
 
         assert_eq!(
-            end_minutes - start_minutes,
-            TIME_COST_MAP_TRANSITION_MINUTES as u64,
-            "a map transition must advance the clock by exactly TIME_COST_MAP_TRANSITION_MINUTES ({} min)",
-            TIME_COST_MAP_TRANSITION_MINUTES
+            end_seconds - start_seconds,
+            default_transition_seconds as u64,
+            "a map transition must advance the clock by exactly map_transition_seconds ({} sec = {} min)",
+            default_transition_seconds,
+            default_transition_seconds / 60
         );
 
         // The active map must also have been updated.
@@ -4189,6 +4210,7 @@ mod tests {
             msgs.write(MapChangeEvent {
                 target_map: 999,
                 target_pos: Position::new(0, 0),
+                is_portal: false,
             });
         }
 
@@ -4209,6 +4231,103 @@ mod tests {
             state.0.time.day, time_before.day,
             "invalid map transition must not advance days"
         );
+        assert_eq!(
+            state.0.time.second, time_before.second,
+            "invalid map transition must not advance seconds"
+        );
+    }
+
+    /// A portal transition (`is_portal: true`) must advance the in-game clock
+    /// by exactly `portal_transition_seconds` from `TimeConfig` (default 0 =
+    /// instant).
+    #[test]
+    fn test_portal_transition_advances_zero_seconds() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, World};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapManagerPlugin);
+
+        app.insert_resource(crate::application::resources::GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(crate::game::resources::GrassQualitySettings::default());
+
+        let mut world = World::new();
+        world.add_map(Map::new(
+            1,
+            "Portal Source".to_string(),
+            "Source".to_string(),
+            10,
+            10,
+        ));
+        world.add_map(Map::new(
+            2,
+            "Portal Dest".to_string(),
+            "Dest".to_string(),
+            10,
+            10,
+        ));
+        world.set_current_map(1);
+        world.set_party_position(Position::new(5, 5));
+
+        let mut gs = crate::application::GameState::new();
+        gs.world = world;
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        let time_before = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>()
+            .0
+            .time;
+
+        // Send a portal MapChangeEvent (is_portal: true).
+        {
+            let mut msgs = app
+                .world_mut()
+                .get_resource_mut::<Messages<MapChangeEvent>>()
+                .expect("MapChangeEvent message queue must exist");
+            msgs.write(MapChangeEvent {
+                target_map: 2,
+                target_pos: Position::new(3, 3),
+                is_portal: true,
+            });
+        }
+
+        app.update();
+
+        let state = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+
+        // Default portal_transition_seconds is 0 — clock must not advance.
+        assert_eq!(
+            state.0.time.second, time_before.second,
+            "portal transition must not advance seconds (default 0)"
+        );
+        assert_eq!(
+            state.0.time.minute, time_before.minute,
+            "portal transition must not advance minutes"
+        );
+        assert_eq!(
+            state.0.time.hour, time_before.hour,
+            "portal transition must not advance hours"
+        );
+        assert_eq!(
+            state.0.time.day, time_before.day,
+            "portal transition must not advance days"
+        );
+
+        // Map and position must still be updated.
+        assert_eq!(state.0.world.current_map, 2);
+        assert_eq!(state.0.world.party_position, Position::new(3, 3));
     }
 
     #[test]

@@ -148,7 +148,13 @@ fn handle_global_input_toggles(
     mut global_state: ResMut<GlobalState>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
     game_content: Option<Res<crate::application::resources::GameContent>>,
+    lock_pending: Res<LockInteractionPending>,
 ) {
+    // Block all global toggles while lock prompt is visible.
+    if lock_pending.lock_id.is_some() {
+        return;
+    }
+
     let frame_input = decode_frame_input(
         &input_config.key_map,
         &keyboard_input,
@@ -234,7 +240,13 @@ fn handle_exploration_input_movement(
         &TileCoord,
     )>,
     mut game_log: ResMut<GameLog>,
+    lock_pending: Res<LockInteractionPending>,
 ) {
+    // Block all movement while lock prompt is visible.
+    if lock_pending.lock_id.is_some() {
+        return;
+    }
+
     let current_time = time.elapsed_secs();
     let cooldown = input_config.controls.movement_cooldown;
     let frame_input = decode_frame_input(
@@ -441,6 +453,7 @@ mod tests {
             inventory: vec!["I".to_string()],
             rest: vec!["R".to_string()],
             automap: vec!["M".to_string()],
+            game_log: vec!["G".to_string()],
             movement_cooldown: -0.1,
         };
 
@@ -1120,6 +1133,82 @@ mod integration_tests {
             fired.is_empty(),
             "R must not fire InitiateRestEvent before duration is chosen; got {:?}",
             fired
+        );
+    }
+
+    /// When `LockInteractionPending.lock_id` is `Some(...)`, pressing ESC
+    /// must NOT toggle the game menu. The `handle_global_input_toggles`
+    /// system early-returns when a lock prompt is active.
+    #[test]
+    fn test_escape_blocked_during_lock_prompt_no_menu_toggle() {
+        let mut app = build_input_app();
+
+        // Set a pending lock interaction.
+        {
+            let mut lock = app.world_mut().resource_mut::<LockInteractionPending>();
+            lock.lock_id = Some("test_lock".to_string());
+            lock.position = Some(crate::domain::types::Position::new(1, 1));
+            lock.can_lockpick = false;
+        }
+
+        // Confirm we start in Exploration mode.
+        {
+            let gs = app.world().resource::<GlobalState>();
+            assert!(
+                matches!(gs.0.mode, crate::application::GameMode::Exploration),
+                "must start in Exploration mode"
+            );
+        }
+
+        // Press Escape — normally opens the menu, but should be blocked.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::Escape);
+        }
+        app.update();
+
+        // Mode must still be Exploration — ESC was blocked by lock prompt.
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, crate::application::GameMode::Exploration),
+            "ESC must not open menu while lock prompt is active; got {:?}",
+            gs.0.mode
+        );
+    }
+
+    /// Arrow/movement keys must not alter the party position while a lock
+    /// interaction prompt is pending (`LockInteractionPending.lock_id` is
+    /// `Some`). The `handle_exploration_input_movement` system early-returns
+    /// when a lock prompt is active.
+    #[test]
+    fn test_movement_blocked_during_lock_prompt_position_unchanged() {
+        let mut app = build_input_app();
+
+        let original_position = {
+            let gs = app.world().resource::<GlobalState>();
+            gs.0.world.party_position
+        };
+
+        // Set a pending lock interaction.
+        {
+            let mut lock = app.world_mut().resource_mut::<LockInteractionPending>();
+            lock.lock_id = Some("test_lock".to_string());
+            lock.position = Some(crate::domain::types::Position::new(1, 1));
+            lock.can_lockpick = false;
+        }
+
+        // Press W (MoveForward per default config) — should be blocked.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::KeyW);
+        }
+        app.update();
+
+        // Party position must be unchanged — movement was blocked by lock prompt.
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.world.party_position, original_position,
+            "Party must not move while lock prompt is active"
         );
     }
 }

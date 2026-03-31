@@ -42,6 +42,7 @@
 //! ```
 
 use crate::sdk::game_config::AudioConfig;
+use bevy::audio::Volume;
 use bevy::prelude::*;
 
 /// Audio settings resource for runtime access
@@ -282,39 +283,101 @@ pub struct PlaySfx {
     pub sfx_id: String,
 }
 
-/// Lightweight handler that consumes audio messages and forwards them to the
-/// audio subsystem (placeholder - currently logs the intent and respects
-/// `AudioSettings`).
+/// Tracks the currently playing background music entity.
+///
+/// When a new `PlayMusic` message arrives, the old music entity (if any)
+/// is despawned and replaced.
+#[derive(Resource, Default)]
+pub struct CurrentMusicTrack {
+    /// Entity playing the current music, if any
+    pub entity: Option<Entity>,
+    /// Track ID of the currently playing music
+    pub track_id: Option<String>,
+}
+
+/// Marker component for one-shot SFX entities.
+///
+/// Added alongside `AudioPlayer` so cleanup systems can identify
+/// audio entities spawned by the audio subsystem.
+#[derive(Component)]
+pub struct SfxMarker;
+
+/// Handles audio messages by spawning Bevy audio entities.
+///
+/// Listens for `PlayMusic` and `PlaySfx` messages and spawns
+/// appropriate audio entities with the correct playback settings
+/// and volume levels derived from `AudioSettings`.
 fn handle_audio_messages(
     mut music_reader: MessageReader<PlayMusic>,
     mut sfx_reader: MessageReader<PlaySfx>,
     settings: Res<AudioSettings>,
+    asset_server: Option<Res<AssetServer>>,
+    mut commands: Commands,
+    mut current_music: ResMut<CurrentMusicTrack>,
 ) {
     // Handle music requests
     for ev in music_reader.read() {
-        if settings.enabled {
-            info!(
-                "Audio: PlayMusic track='{}' looped={} volume={}",
-                ev.track_id,
-                ev.looped,
-                settings.effective_music_volume()
-            );
-        } else {
+        if !settings.enabled {
             debug!("Audio disabled; PlayMusic '{}' ignored", ev.track_id);
+            continue;
         }
+
+        let Some(ref server) = asset_server else {
+            debug!(
+                "No AssetServer available; PlayMusic '{}' deferred",
+                ev.track_id
+            );
+            continue;
+        };
+
+        // Despawn the old music entity if one exists
+        if let Some(old_entity) = current_music.entity.take() {
+            commands.entity(old_entity).despawn();
+        }
+
+        let volume = settings.effective_music_volume();
+        let handle: Handle<AudioSource> = server.load(ev.track_id.clone());
+
+        let playback = if ev.looped {
+            PlaybackSettings::LOOP
+        } else {
+            PlaybackSettings::REMOVE
+        };
+        let playback = playback.with_volume(Volume::Linear(volume));
+
+        let entity = commands
+            .spawn((AudioPlayer::<AudioSource>::new(handle), playback))
+            .id();
+
+        current_music.entity = Some(entity);
+        current_music.track_id = Some(ev.track_id.clone());
+
+        info!(
+            "Audio: Playing music '{}' looped={} volume={:.2}",
+            ev.track_id, ev.looped, volume
+        );
     }
 
     // Handle SFX requests
     for ev in sfx_reader.read() {
-        if settings.enabled {
-            info!(
-                "Audio: PlaySfx sfx='{}' volume={}",
-                ev.sfx_id,
-                settings.effective_sfx_volume()
-            );
-        } else {
+        if !settings.enabled {
             debug!("Audio disabled; PlaySfx '{}' ignored", ev.sfx_id);
+            continue;
         }
+
+        let Some(ref server) = asset_server else {
+            debug!("No AssetServer available; PlaySfx '{}' deferred", ev.sfx_id);
+            continue;
+        };
+
+        let volume = settings.effective_sfx_volume();
+        let handle: Handle<AudioSource> = server.load(ev.sfx_id.clone());
+
+        let playback = PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume));
+
+        commands.spawn((AudioPlayer::<AudioSource>::new(handle), playback, SfxMarker));
+
+        info!("Audio: Playing SFX '{}' volume={:.2}", ev.sfx_id, volume);
     }
 }
 
@@ -327,15 +390,11 @@ impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
         let settings = AudioSettings::from_config(&self.config);
 
-        // Insert the runtime audio settings resource, register audio messages,
-        // and add a simple handler that will eventually be replaced by a real
-        // playback system (Bevy Audio integration).
         app.insert_resource(settings)
+            .init_resource::<CurrentMusicTrack>()
             .add_message::<PlayMusic>()
             .add_message::<PlaySfx>()
             .add_systems(Update, handle_audio_messages);
-
-        // Future: Hook up to concrete audio playback (Bevy's audio) here.
     }
 }
 
@@ -481,13 +540,18 @@ mod tests {
             config: config.clone(),
         });
 
-        // Verify resource was inserted
+        // Verify resources were inserted
         let settings = app.world().resource::<AudioSettings>();
         assert_eq!(settings.master_volume, 0.7);
         assert_eq!(settings.music_volume, 0.5);
         assert_eq!(settings.sfx_volume, 0.9);
         assert_eq!(settings.ambient_volume, 0.4);
         assert!(settings.enabled);
+
+        // Verify CurrentMusicTrack resource was initialized
+        let music_track = app.world().resource::<CurrentMusicTrack>();
+        assert!(music_track.entity.is_none());
+        assert!(music_track.track_id.is_none());
     }
 
     #[test]
@@ -512,5 +576,12 @@ mod tests {
         assert_eq!(cloned.sfx_volume, settings.sfx_volume);
         assert_eq!(cloned.ambient_volume, settings.ambient_volume);
         assert_eq!(cloned.enabled, settings.enabled);
+    }
+
+    #[test]
+    fn test_current_music_track_default() {
+        let track = CurrentMusicTrack::default();
+        assert!(track.entity.is_none());
+        assert!(track.track_id.is_none());
     }
 }

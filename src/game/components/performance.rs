@@ -206,8 +206,11 @@ pub enum PerformanceCategory {
 
 /// Mesh streaming component for memory optimization
 ///
-/// Manages loading/unloading of mesh data based on distance
-#[derive(Component, Debug, Clone)]
+/// Manages loading/unloading of mesh data based on distance to camera.
+/// When the entity is within `load_distance`, its mesh is loaded via the
+/// `AssetServer`. When the entity exceeds `unload_distance`, the mesh
+/// handle is dropped to free memory.
+#[derive(Component, Clone)]
 pub struct MeshStreaming {
     /// Whether mesh data is currently loaded
     pub loaded: bool,
@@ -220,6 +223,28 @@ pub struct MeshStreaming {
 
     /// Priority (higher = load first)
     pub priority: i32,
+
+    /// Asset path for the mesh to stream (e.g. "meshes/tree.gltf")
+    pub asset_path: Option<String>,
+
+    /// Handle to the loaded mesh, retained to prevent Bevy from unloading the asset
+    pub mesh_handle: Option<Handle<Mesh>>,
+}
+
+impl std::fmt::Debug for MeshStreaming {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MeshStreaming")
+            .field("loaded", &self.loaded)
+            .field("load_distance", &self.load_distance)
+            .field("unload_distance", &self.unload_distance)
+            .field("priority", &self.priority)
+            .field("asset_path", &self.asset_path)
+            .field(
+                "mesh_handle",
+                &self.mesh_handle.as_ref().map(|_| "Some(<Handle>)"),
+            )
+            .finish()
+    }
 }
 
 impl Default for MeshStreaming {
@@ -229,6 +254,8 @@ impl Default for MeshStreaming {
             load_distance: 50.0,
             unload_distance: 100.0,
             priority: 0,
+            asset_path: None,
+            mesh_handle: None,
         }
     }
 }
@@ -327,6 +354,8 @@ mod tests {
         assert_eq!(streaming.load_distance, 50.0);
         assert_eq!(streaming.unload_distance, 100.0);
         assert_eq!(streaming.priority, 0);
+        assert!(streaming.asset_path.is_none());
+        assert!(streaming.mesh_handle.is_none());
     }
 
     #[test]
