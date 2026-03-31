@@ -36,6 +36,8 @@ pub enum GameAction {
     Rest,
     /// Open or close the automap overlay.
     Automap,
+    /// Open or close the full-screen game log overlay.
+    GameLog,
 }
 
 /// Key mapping structure for efficient input lookups.
@@ -96,6 +98,7 @@ impl KeyMap {
         insert_action_bindings(&mut bindings, &config.inventory, GameAction::Inventory);
         insert_action_bindings(&mut bindings, &config.rest, GameAction::Rest);
         insert_action_bindings(&mut bindings, &config.automap, GameAction::Automap);
+        insert_action_bindings(&mut bindings, &config.game_log, GameAction::GameLog);
 
         Self { bindings }
     }
@@ -457,6 +460,7 @@ mod tests {
             inventory: vec!["F".to_string()],
             rest: vec!["G".to_string()],
             automap: vec!["M".to_string()],
+            game_log: vec!["H".to_string()],
             movement_cooldown: 0.1,
         };
 
@@ -500,6 +504,7 @@ mod tests {
             inventory: vec!["F".to_string()],
             rest: vec!["R".to_string()],
             automap: vec!["M".to_string()],
+            game_log: vec!["G".to_string()],
             movement_cooldown: 0.2,
         };
 

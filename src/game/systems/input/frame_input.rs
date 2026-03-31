@@ -55,6 +55,8 @@ pub struct FrameInputIntent {
     pub interact: bool,
     /// Whether the centre-screen mouse interaction heuristic fired this frame.
     pub mouse_center_interact: bool,
+    /// Whether the full-screen game log toggle was requested this frame.
+    pub game_log_toggle: bool,
 }
 
 impl FrameInputIntent {
@@ -170,6 +172,7 @@ pub fn decode_frame_input(
         turn_right: key_map.is_action_pressed(GameAction::TurnRight, keyboard_input),
         interact: key_map.is_action_pressed(GameAction::Interact, keyboard_input),
         mouse_center_interact: mouse_center_interact_pressed(mouse_buttons, primary_window),
+        game_log_toggle: key_map.is_action_just_pressed(GameAction::GameLog, keyboard_input),
     }
 }
 
@@ -204,6 +207,7 @@ mod tests {
         assert!(!intent.turn_right);
         assert!(!intent.interact);
         assert!(!intent.mouse_center_interact);
+        assert!(!intent.game_log_toggle);
     }
 
     #[test]
@@ -292,6 +296,7 @@ mod tests {
             rest: vec!["G".to_string()],
             automap: vec!["U".to_string()],
             interact: vec!["O".to_string()],
+            game_log: vec!["H".to_string()],
             ..ControlsConfig::default()
         };
         let key_map = KeyMap::from_controls_config(&config);

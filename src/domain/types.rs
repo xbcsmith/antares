@@ -11,6 +11,8 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.6 for complete specifications.
 
+use std::fmt;
+
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -472,8 +474,9 @@ fn default_month() -> u32 {
 
 /// Game time tracking
 ///
-/// Tracks the in-game calendar date and time. Years, months, days, hours, and
-/// minutes advance as the party travels, rests, and performs actions.
+/// Tracks the in-game calendar date and time. Years, months, days, hours,
+/// minutes, and seconds advance as the party travels, rests, and performs
+/// actions.
 ///
 /// The calendar uses a simplified fixed-length structure:
 /// - 12 months per year ([`MONTHS_PER_YEAR`])
@@ -481,13 +484,13 @@ fn default_month() -> u32 {
 /// - 360 days per year ([`DAYS_PER_YEAR`])
 ///
 /// All fields are 1-based for `year`, `month`, and `day`; `hour` is 0–23;
-/// `minute` is 0–59.
+/// `minute` is 0–59; `second` is 0–59.
 ///
 /// # Backward Compatibility
 ///
-/// The `year` and `month` fields use `#[serde(default)]` so existing save
-/// files and RON data that only contain `day`, `hour`, and `minute` will
-/// deserialize with `year = 1, month = 1`.
+/// The `year`, `month`, and `second` fields use `#[serde(default)]` so
+/// existing save files and RON data that only contain `day`, `hour`, and
+/// `minute` will deserialize with `year = 1, month = 1, second = 0`.
 ///
 /// # Examples
 ///
@@ -498,6 +501,7 @@ fn default_month() -> u32 {
 /// time.advance_minutes(90); // Advance 1 hour 30 minutes
 /// assert_eq!(time.hour, 1);
 /// assert_eq!(time.minute, 30);
+/// assert_eq!(time.second, 0);
 ///
 /// // Full constructor
 /// let full = GameTime::new_full(2, 6, 15, 8, 30);
@@ -506,6 +510,7 @@ fn default_month() -> u32 {
 /// assert_eq!(full.day, 15);
 /// assert_eq!(full.hour, 8);
 /// assert_eq!(full.minute, 30);
+/// assert_eq!(full.second, 0);
 /// ```
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct GameTime {
@@ -521,26 +526,31 @@ pub struct GameTime {
     pub hour: u8,
     /// Current minute (0-59)
     pub minute: u8,
+    /// Current second (0-59)
+    #[serde(default)]
+    pub second: u8,
 }
 
 impl GameTime {
     /// Creates a new `GameTime` at the specified day, hour, and minute.
     ///
-    /// Sets `year = 1` and `month = 1` for backward compatibility with
-    /// existing call sites. Use [`GameTime::new_full`] to specify year and
-    /// month explicitly.
+    /// Sets `year = 1`, `month = 1`, and `second = 0` for backward
+    /// compatibility with existing call sites. Use [`GameTime::new_full`]
+    /// to specify year and month explicitly, or
+    /// [`GameTime::new_full_with_seconds`] for sub-minute precision.
     ///
     /// # Examples
     ///
     /// ```
     /// use antares::domain::types::GameTime;
     ///
-    /// let time = GameTime::new(1, 12, 30); // Year 1, Month 1, Day 1, 12:30 PM
+    /// let time = GameTime::new(1, 12, 30); // Year 1, Month 1, Day 1, 12:30:00
     /// assert_eq!(time.year, 1);
     /// assert_eq!(time.month, 1);
     /// assert_eq!(time.day, 1);
     /// assert_eq!(time.hour, 12);
     /// assert_eq!(time.minute, 30);
+    /// assert_eq!(time.second, 0);
     /// ```
     pub fn new(day: u32, hour: u8, minute: u8) -> Self {
         Self {
@@ -549,10 +559,14 @@ impl GameTime {
             day,
             hour,
             minute,
+            second: 0,
         }
     }
 
     /// Creates a new `GameTime` with all five calendar and clock fields set.
+    ///
+    /// Sets `second = 0`. Use [`GameTime::new_full_with_seconds`] for
+    /// sub-minute precision.
     ///
     /// # Arguments
     ///
@@ -573,6 +587,7 @@ impl GameTime {
     /// assert_eq!(time.day, 20);
     /// assert_eq!(time.hour, 14);
     /// assert_eq!(time.minute, 45);
+    /// assert_eq!(time.second, 0);
     /// ```
     pub fn new_full(year: u32, month: u32, day: u32, hour: u8, minute: u8) -> Self {
         Self {
@@ -581,6 +596,50 @@ impl GameTime {
             day,
             hour,
             minute,
+            second: 0,
+        }
+    }
+
+    /// Creates a new `GameTime` with all six calendar and clock fields set,
+    /// including sub-minute `second` precision.
+    ///
+    /// # Arguments
+    ///
+    /// * `year`   - 1-based year (e.g. `1` for the first in-game year)
+    /// * `month`  - 1-based month within the year (1–12)
+    /// * `day`    - 1-based day within the month (1–30)
+    /// * `hour`   - Hour of day (0–23)
+    /// * `minute` - Minute of hour (0–59)
+    /// * `second` - Second of minute (0–59)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::GameTime;
+    ///
+    /// let time = GameTime::new_full_with_seconds(3, 11, 20, 14, 45, 30);
+    /// assert_eq!(time.year, 3);
+    /// assert_eq!(time.month, 11);
+    /// assert_eq!(time.day, 20);
+    /// assert_eq!(time.hour, 14);
+    /// assert_eq!(time.minute, 45);
+    /// assert_eq!(time.second, 30);
+    /// ```
+    pub fn new_full_with_seconds(
+        year: u32,
+        month: u32,
+        day: u32,
+        hour: u8,
+        minute: u8,
+        second: u8,
+    ) -> Self {
+        Self {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
         }
     }
 
@@ -615,8 +674,52 @@ impl GameTime {
         (self.year - 1) * DAYS_PER_YEAR + (self.month - 1) * DAYS_PER_MONTH + self.day
     }
 
+    /// Advances time by the specified number of seconds.
+    ///
+    /// This is the fundamental time-advance primitive. All other advance
+    /// methods ([`advance_minutes`](Self::advance_minutes),
+    /// [`advance_hours`](Self::advance_hours),
+    /// [`advance_days`](Self::advance_days)) delegate to this method.
+    ///
+    /// Automatically handles rollover through seconds → minutes → hours →
+    /// days → months → years.
+    ///
+    /// | Boundary           | Roll-over rule                          |
+    /// |--------------------|-----------------------------------------|
+    /// | 60 seconds         | → increment minute                      |
+    /// | 60 minutes         | → increment hour                        |
+    /// | 24 hours           | → increment day                         |
+    /// | `DAYS_PER_MONTH`   | → increment month, reset day to 1       |
+    /// | `MONTHS_PER_YEAR`  | → increment year, reset month to 1      |
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::GameTime;
+    ///
+    /// let mut time = GameTime::new(1, 12, 0);
+    /// time.advance_seconds(90); // 1 minute 30 seconds
+    /// assert_eq!(time.hour, 12);
+    /// assert_eq!(time.minute, 1);
+    /// assert_eq!(time.second, 30);
+    /// ```
+    pub fn advance_seconds(&mut self, seconds: u32) {
+        let total_seconds = self.second as u32 + seconds;
+        self.second = (total_seconds % 60) as u8;
+
+        let total_minutes = self.minute as u32 + total_seconds / 60;
+        self.minute = (total_minutes % 60) as u8;
+
+        let total_hours = self.hour as u32 + total_minutes / 60;
+        self.hour = (total_hours % 24) as u8;
+
+        self.day += total_hours / 24;
+        self.apply_day_rollover();
+    }
+
     /// Advances time by the specified number of minutes.
     ///
+    /// Delegates to [`advance_seconds`](Self::advance_seconds) internally.
     /// Automatically handles rollover into hours, days, months, and years.
     ///
     /// | Boundary           | Roll-over rule                          |
@@ -638,27 +741,20 @@ impl GameTime {
     /// assert_eq!(time.minute, 15);
     /// ```
     pub fn advance_minutes(&mut self, minutes: u32) {
-        self.minute += (minutes % 60) as u8;
-        let hours = minutes / 60 + (self.minute / 60) as u32;
-        self.minute %= 60;
-
-        self.hour += (hours % 24) as u8;
-        let days = hours / 24 + (self.hour / 24) as u32;
-        self.hour %= 24;
-
-        self.day += days;
-        self.apply_day_rollover();
+        self.advance_seconds(minutes * 60);
     }
 
     /// Advances time by the specified number of hours.
+    ///
+    /// Delegates to [`advance_seconds`](Self::advance_seconds) internally.
     pub fn advance_hours(&mut self, hours: u32) {
-        self.advance_minutes(hours * 60);
+        self.advance_seconds(hours * 3600);
     }
 
     /// Advances time by the specified number of days.
     ///
-    /// Handles rollover into months and years via the same logic as
-    /// [`GameTime::advance_minutes`].
+    /// Delegates to [`advance_seconds`](Self::advance_seconds) internally.
+    /// Handles rollover into months and years.
     ///
     /// # Examples
     ///
@@ -672,8 +768,7 @@ impl GameTime {
     /// assert_eq!(time.day, 1);
     /// ```
     pub fn advance_days(&mut self, days: u32) {
-        self.day += days;
-        self.apply_day_rollover();
+        self.advance_seconds(days * 86400);
     }
 
     /// Applies month and year rollover after `self.day` has been incremented.
@@ -762,6 +857,26 @@ impl GameTime {
     /// ```
     pub fn is_day(&self) -> bool {
         !self.is_night()
+    }
+}
+
+impl fmt::Display for GameTime {
+    /// Formats the game time as `Y{year} M{month} D{day} {hour:02}:{minute:02}:{second:02}`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::GameTime;
+    ///
+    /// let time = GameTime::new_full_with_seconds(2, 6, 15, 8, 5, 30);
+    /// assert_eq!(format!("{}", time), "Y2 M6 D15 08:05:30");
+    /// ```
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Y{} M{} D{} {:02}:{:02}:{:02}",
+            self.year, self.month, self.day, self.hour, self.minute, self.second
+        )
     }
 }
 
@@ -1081,6 +1196,7 @@ mod tests {
         assert_eq!(time.day, 5);
         assert_eq!(time.hour, 14);
         assert_eq!(time.minute, 30);
+        assert_eq!(time.second, 0);
     }
 
     #[test]
@@ -1090,6 +1206,7 @@ mod tests {
         assert_eq!(time.day, 1);
         assert_eq!(time.hour, 0);
         assert_eq!(time.minute, 30);
+        assert_eq!(time.second, 0);
     }
 
     #[test]
@@ -1099,6 +1216,7 @@ mod tests {
         assert_eq!(time.day, 1);
         assert_eq!(time.hour, 15);
         assert_eq!(time.minute, 0);
+        assert_eq!(time.second, 0);
     }
 
     #[test]
@@ -1108,6 +1226,7 @@ mod tests {
         assert_eq!(time.day, 2);
         assert_eq!(time.hour, 0);
         assert_eq!(time.minute, 15);
+        assert_eq!(time.second, 0);
     }
 
     #[test]
@@ -1117,6 +1236,7 @@ mod tests {
         assert_eq!(time.day, 6);
         assert_eq!(time.hour, 12);
         assert_eq!(time.minute, 0);
+        assert_eq!(time.second, 0);
     }
 
     #[test]
@@ -1146,6 +1266,7 @@ mod tests {
         assert_eq!(time.day, 20);
         assert_eq!(time.hour, 14);
         assert_eq!(time.minute, 45);
+        assert_eq!(time.second, 0);
     }
 
     #[test]
@@ -1158,6 +1279,7 @@ mod tests {
         assert_eq!(time.day, 1);
         assert_eq!(time.hour, 0);
         assert_eq!(time.minute, 0);
+        assert_eq!(time.second, 0);
     }
 
     #[test]
@@ -1170,6 +1292,7 @@ mod tests {
         assert_eq!(time.day, 1);
         assert_eq!(time.hour, 1);
         assert_eq!(time.minute, 0);
+        assert_eq!(time.second, 0);
     }
 
     #[test]
@@ -1184,6 +1307,7 @@ mod tests {
         assert_eq!(time.day, 1);
         assert_eq!(time.hour, 0);
         assert_eq!(time.minute, 0);
+        assert_eq!(time.second, 0);
     }
 
     #[test]
@@ -1196,6 +1320,7 @@ mod tests {
         assert_eq!(time.day, 2);
         assert_eq!(time.hour, 0);
         assert_eq!(time.minute, 0);
+        assert_eq!(time.second, 0);
     }
 
     #[test]
@@ -1229,6 +1354,7 @@ mod tests {
         assert_eq!(time.day, 5);
         assert_eq!(time.hour, 8);
         assert_eq!(time.minute, 0);
+        assert_eq!(time.second, 0, "second should default to 0");
     }
 
     #[test]
@@ -1266,5 +1392,102 @@ mod tests {
         assert_eq!(time.year, 1);
         assert_eq!(time.month, 1);
         assert_eq!(time.day, 15);
+        assert_eq!(time.second, 0);
+    }
+
+    // ===== advance_seconds Tests =====
+
+    #[test]
+    fn test_advance_seconds_basic() {
+        // advance_seconds(30) from 12:00:00 yields 12:00:30
+        let mut time = GameTime::new(1, 12, 0);
+        time.advance_seconds(30);
+        assert_eq!(time.hour, 12);
+        assert_eq!(time.minute, 0);
+        assert_eq!(time.second, 30);
+    }
+
+    #[test]
+    fn test_advance_seconds_minute_rollover() {
+        // advance_seconds(90) from 12:00:30 yields 12:02:00
+        let mut time = GameTime::new_full_with_seconds(1, 1, 1, 12, 0, 30);
+        time.advance_seconds(90);
+        assert_eq!(time.hour, 12);
+        assert_eq!(time.minute, 2);
+        assert_eq!(time.second, 0);
+    }
+
+    #[test]
+    fn test_advance_seconds_hour_rollover() {
+        // advance_seconds(3600) rolls hours
+        let mut time = GameTime::new(1, 12, 0);
+        time.advance_seconds(3600);
+        assert_eq!(time.hour, 13);
+        assert_eq!(time.minute, 0);
+        assert_eq!(time.second, 0);
+    }
+
+    #[test]
+    fn test_advance_seconds_day_rollover() {
+        // advance_seconds(86400) rolls days
+        let mut time = GameTime::new(1, 12, 0);
+        time.advance_seconds(86400);
+        assert_eq!(time.day, 2);
+        assert_eq!(time.hour, 12);
+        assert_eq!(time.minute, 0);
+        assert_eq!(time.second, 0);
+    }
+
+    #[test]
+    fn test_advance_seconds_multi_year_rollover() {
+        // Large value crossing years
+        let mut time = GameTime::new_full(1, 1, 1, 0, 0);
+        // 2 full years in seconds: 2 × 360 × 24 × 3600
+        let two_years_in_seconds = 2 * DAYS_PER_YEAR * 24 * 3600;
+        time.advance_seconds(two_years_in_seconds);
+        assert_eq!(time.year, 3);
+        assert_eq!(time.month, 1);
+        assert_eq!(time.day, 1);
+        assert_eq!(time.hour, 0);
+        assert_eq!(time.minute, 0);
+        assert_eq!(time.second, 0);
+    }
+
+    #[test]
+    fn test_serde_default_second() {
+        // RON without `second` field deserializes to 0
+        let ron_str = "(year: 2, month: 3, day: 10, hour: 14, minute: 30)";
+        let time: GameTime = ron::from_str(ron_str).expect("RON deserialize failed");
+        assert_eq!(time.year, 2);
+        assert_eq!(time.month, 3);
+        assert_eq!(time.day, 10);
+        assert_eq!(time.hour, 14);
+        assert_eq!(time.minute, 30);
+        assert_eq!(time.second, 0, "second should default to 0");
+    }
+
+    #[test]
+    fn test_advance_minutes_delegates_to_seconds() {
+        // Verify advance_minutes(1) produces the same result as advance_seconds(60)
+        let mut via_minutes = GameTime::new_full_with_seconds(1, 1, 1, 12, 30, 15);
+        let mut via_seconds = GameTime::new_full_with_seconds(1, 1, 1, 12, 30, 15);
+        via_minutes.advance_minutes(1);
+        via_seconds.advance_seconds(60);
+        assert_eq!(via_minutes.year, via_seconds.year);
+        assert_eq!(via_minutes.month, via_seconds.month);
+        assert_eq!(via_minutes.day, via_seconds.day);
+        assert_eq!(via_minutes.hour, via_seconds.hour);
+        assert_eq!(via_minutes.minute, via_seconds.minute);
+        assert_eq!(via_minutes.second, via_seconds.second);
+    }
+
+    #[test]
+    fn test_display_impl() {
+        let time = GameTime::new_full_with_seconds(2, 6, 15, 8, 5, 30);
+        assert_eq!(format!("{}", time), "Y2 M6 D15 08:05:30");
+
+        // Verify zero-padding for hour/minute/second
+        let midnight = GameTime::new(1, 0, 0);
+        assert_eq!(format!("{}", midnight), "Y1 M1 D1 00:00:00");
     }
 }

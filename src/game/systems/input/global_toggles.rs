@@ -118,6 +118,13 @@ pub fn handle_global_mode_toggles(
                     game_state.mode
                 );
             }
+            GameMode::GameLog => {
+                game_state.mode = GameMode::Exploration;
+                bevy::prelude::info!(
+                    "Game log closed via menu key: new_mode = {:?}",
+                    game_state.mode
+                );
+            }
             _ => {
                 toggle_menu_state(game_state);
                 bevy::prelude::info!("Menu toggled: new_mode = {:?}", game_state.mode);
@@ -186,6 +193,26 @@ pub fn handle_global_mode_toggles(
         return true;
     }
 
+    if frame_input.game_log_toggle {
+        match game_state.mode {
+            GameMode::Exploration => {
+                game_state.mode = GameMode::GameLog;
+                bevy::prelude::info!("Fullscreen game log opened");
+            }
+            GameMode::GameLog => {
+                game_state.mode = GameMode::Exploration;
+                bevy::prelude::info!("Fullscreen game log closed via toggle key");
+            }
+            _ => {
+                bevy::prelude::info!(
+                    "Game log toggle pressed but mode is {:?} — ignoring",
+                    game_state.mode
+                );
+            }
+        }
+        return true;
+    }
+
     false
 }
 
@@ -226,6 +253,13 @@ mod tests {
     fn menu_toggle_intent() -> FrameInputIntent {
         FrameInputIntent {
             menu_toggle: true,
+            ..FrameInputIntent::default()
+        }
+    }
+
+    fn game_log_toggle_intent() -> FrameInputIntent {
+        FrameInputIntent {
+            game_log_toggle: true,
             ..FrameInputIntent::default()
         }
     }
@@ -573,6 +607,71 @@ mod tests {
 
         assert!(consumed);
         assert!(matches!(state.mode, GameMode::Menu(_)));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_escape_closes_game_log_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::GameLog;
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_escape_closes_game_log_not_menu() {
+        let mut state = GameState::new();
+        state.mode = GameMode::GameLog;
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(
+            !matches!(state.mode, GameMode::Menu(_)),
+            "ESC from GameLog must return to Exploration, not open Menu"
+        );
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_game_log_opens_from_exploration() {
+        let mut state = GameState::new();
+
+        let consumed = handle_global_mode_toggles(&mut state, game_log_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::GameLog));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_game_log_closes_back_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::GameLog;
+
+        let consumed = handle_global_mode_toggles(&mut state, game_log_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_game_log_ignored_in_combat() {
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Guard Test Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+        state.enter_combat();
+
+        let consumed = handle_global_mode_toggles(&mut state, game_log_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Combat(_)));
     }
 
     #[test]

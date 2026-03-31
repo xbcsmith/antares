@@ -471,26 +471,56 @@ impl<'a> Validator<'a> {
     fn validate_references(&self) -> Vec<ValidationError> {
         let mut errors = Vec::new();
 
-        // Validate item references (e.g., items that reference classes)
-        // This is a placeholder - actual validation depends on item structure
-        for item in self.db.items.all_items() {
-            // Check if item references valid classes via disablement flags
-            // This would require inspecting the item's disablement field
-            // and verifying against class database
-            // Placeholder for now
-            let _ = item;
+        // Validate monster loot references: each loot item_id must exist in the item database
+        for monster_id in self.db.monsters.all_monsters() {
+            if let Some(monster) = self.db.monsters.get_monster(monster_id) {
+                for &(_probability, item_id) in &monster.loot.items {
+                    if !self.db.items.has_item(&(item_id as ItemId)) {
+                        errors.push(ValidationError::MissingItem {
+                            context: format!(
+                                "Monster '{}' (id={}) loot table",
+                                monster.name, monster_id
+                            ),
+                            item_id: item_id as ItemId,
+                        });
+                    }
+                }
+            }
         }
 
-        // Validate spell references
-        // Placeholder - would check if spells reference valid classes/items
+        // Validate spell references: applied_conditions must exist in the condition database
+        for spell_id in self.db.spells.all_spells() {
+            if let Some(spell) = self.db.spells.get_spell(spell_id) {
+                for condition_id in &spell.applied_conditions {
+                    if !self.db.conditions.has_condition(condition_id) {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Warning,
+                            message: format!(
+                                "Spell '{}' (id={}) references unknown condition '{}'",
+                                spell.name, spell_id, condition_id
+                            ),
+                        });
+                    }
+                }
+            }
+        }
 
-        // Validate monster references
-        // Placeholder - would check if monsters reference valid items (loot)
+        // Validate map cross-references using the existing validate_map method
+        for map_id in self.db.maps.all_maps() {
+            if let Some(map) = self.db.maps.get_map(map_id) {
+                match self.validate_map(map) {
+                    Ok(map_errors) => errors.extend(map_errors),
+                    Err(e) => {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Error,
+                            message: format!("Failed to validate map {}: {}", map_id, e),
+                        });
+                    }
+                }
+            }
+        }
 
-        // Validate map references
-        // Placeholder - would check if maps reference valid monsters/items/events
-
-        // Validate character definition references
+        // Validate character definition cross-references
         errors.extend(self.validate_character_references());
 
         errors
@@ -972,16 +1002,64 @@ impl<'a> Validator<'a> {
     }
 
     fn validate_connectivity(&self) -> Vec<ValidationError> {
-        let errors = Vec::new();
+        let mut errors = Vec::new();
 
-        // Placeholder implementation
-        // This would perform a graph traversal starting from the initial map
-        // to identify disconnected map islands
+        let all_maps = self.db.maps.all_maps();
+        if all_maps.is_empty() {
+            return errors;
+        }
 
-        // For now, just check if we have maps
-        let map_count = self.db.maps.count();
-        if map_count > 0 {
-            // Would perform actual connectivity check here
+        // Build adjacency list: map_id -> set of destination map_ids reachable via Teleport
+        let mut adjacency: std::collections::HashMap<MapId, std::collections::HashSet<MapId>> =
+            std::collections::HashMap::new();
+
+        for &map_id in &all_maps {
+            adjacency.entry(map_id).or_default();
+
+            if let Some(map) = self.db.maps.get_map(map_id) {
+                for event in map.events.values() {
+                    if let crate::domain::world::MapEvent::Teleport { map_id: dest, .. } = event {
+                        adjacency.entry(map_id).or_default().insert(*dest);
+                    }
+                }
+            }
+        }
+
+        // BFS from the smallest map ID (assumed starting map)
+        let start_map = *all_maps.iter().min().unwrap_or(&0);
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+
+        visited.insert(start_map);
+        queue.push_back(start_map);
+
+        while let Some(current) = queue.pop_front() {
+            if let Some(neighbors) = adjacency.get(&current) {
+                for &neighbor in neighbors {
+                    if visited.insert(neighbor) {
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+        }
+
+        // Report unreachable maps
+        for &map_id in &all_maps {
+            if !visited.contains(&map_id) {
+                errors.push(ValidationError::DisconnectedMap { map_id });
+            }
+        }
+
+        // Report maps with no teleport exits (dead ends)
+        for &map_id in &all_maps {
+            if let Some(exits) = adjacency.get(&map_id) {
+                if exits.is_empty() {
+                    errors.push(ValidationError::BalanceWarning {
+                        severity: Severity::Warning,
+                        message: format!("Map {} has no teleport exits (dead end)", map_id),
+                    });
+                }
+            }
         }
 
         errors
@@ -3175,5 +3253,31 @@ mod tests {
             Severity::Error,
             "DuplicateLockId should be Error severity"
         );
+    }
+
+    #[test]
+    fn test_validate_connectivity_empty_database() {
+        let db = ContentDatabase::new();
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+        // No maps → no connectivity errors
+        let disconnected = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::DisconnectedMap { .. }))
+            .count();
+        assert_eq!(disconnected, 0);
+    }
+
+    #[test]
+    fn test_validate_references_with_empty_database() {
+        let db = ContentDatabase::new();
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+        // Empty database should have no reference errors
+        let missing_items = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::MissingItem { .. }))
+            .count();
+        assert_eq!(missing_items, 0);
     }
 }

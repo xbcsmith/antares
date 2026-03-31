@@ -921,7 +921,7 @@ pub fn rest_party(
     }
 
     // NOTE: Time is NOT advanced here. The caller (GameState::rest_party) must
-    // call self.advance_time(hours * 60, templates) to tick active-spell
+    // call self.advance_time_minutes(hours * 60, templates) to tick active-spell
     // durations and trigger merchant restocking.
 
     Ok(())

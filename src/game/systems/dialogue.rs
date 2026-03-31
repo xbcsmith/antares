@@ -1099,10 +1099,11 @@ fn execute_action(
                 log.add_dialogue(format!("{} will wait at the inn.", char_def.name));
             }
 
-            // Remove recruitment event from map
+            // Remove recruitment event from map and despawn visual
             if let Some(dlg_state) = dialogue_state {
                 if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
                     if let Some(current_map) = game_state.world.get_current_map_mut() {
+                        let current_map_id = current_map.id;
                         if let Some(_removed_event) =
                             current_map.remove_event(recruitment_ctx.event_position)
                         {
@@ -1110,6 +1111,13 @@ fn execute_action(
                                 "Removed recruitment event at {:?}",
                                 recruitment_ctx.event_position
                             );
+                            if let Some(writer) = despawn_recruitable_visuals.as_deref_mut() {
+                                writer.write(crate::game::systems::map::DespawnRecruitableVisual {
+                                    map_id: current_map_id,
+                                    position: recruitment_ctx.event_position,
+                                    character_id: character_id.to_string(),
+                                });
+                            }
                         }
                     }
                 }
@@ -1654,68 +1662,17 @@ fn apply_service_effect_inline(
     }
 }
 
-/// System to handle recruitment-specific dialogue actions
+/// No-op system preserved for Bevy scheduling compatibility.
 ///
-/// This system processes dialogue actions related to character recruitment,
-/// including recruiting to the active party or to an inn. Currently contains
-/// placeholder implementations (TODO) pending integration with party and inn
-/// management systems.
-fn handle_recruitment_actions(global_state: Res<GlobalState>, content: Res<GameContent>) {
-    // Get current dialogue state if active
-    let Some(dialogue_state) = (match &global_state.0.mode {
-        GameMode::Dialogue(state) => Some(state.clone()),
-        _ => None,
-    }) else {
-        return;
-    };
-
-    let db = content.db();
-
-    // Get active dialogue tree
-    let Some(tree_id) = dialogue_state.active_tree_id else {
-        return;
-    };
-
-    let Some(tree) = db.dialogues.get_dialogue(tree_id) else {
-        return;
-    };
-
-    // Get current node
-    let Some(node) = tree.get_node(dialogue_state.current_node_id) else {
-        return;
-    };
-
-    // Process recruitment actions on this node
-    for action in &node.actions {
-        match action {
-            DialogueAction::RecruitToParty { character_id } => {
-                info!(
-                    "Processing RecruitToParty action for character_id: {}",
-                    character_id
-                );
-                // TODO: Actual implementation would:
-                // - Verify party has space (< 6 members)
-                // - Load character definition
-                // - Add to party.members
-                // - Update global state
-            }
-            DialogueAction::RecruitToInn {
-                character_id,
-                innkeeper_id,
-            } => {
-                info!(
-                    "Processing RecruitToInn action for character_id: {}, innkeeper_id: {}",
-                    character_id, innkeeper_id
-                );
-                // TODO: Actual implementation would:
-                // - Load character definition
-                // - Find innkeeper
-                // - Add character to innkeeper's roster
-                // - Update global state
-            }
-            _ => {} // Other actions handled by execute_action
-        }
-    }
+/// Recruitment logic is fully handled by [`execute_action`] (for
+/// `RecruitToParty` and `RecruitToInn` dialogue actions) and by
+/// [`crate::game::systems::recruitment_dialog::process_recruitment_responses`]
+/// (for the standalone recruitment dialog).  This stub exists solely because
+/// removing it from the `DialoguePlugin` system tuple changes Bevy's internal
+/// scheduling order, which breaks message delivery in integration tests.
+#[allow(clippy::needless_pass_by_value)]
+fn handle_recruitment_actions(_global_state: Res<GlobalState>, _content: Res<GameContent>) {
+    // Intentionally empty — see doc comment above.
 }
 
 #[cfg(test)]
@@ -3735,6 +3692,132 @@ mod tests {
             facing.direction,
             Direction::West,
             "FacingComponent must remain West when speaker has no TileCoord"
+        );
+    }
+
+    /// Verifies that `RecruitToInn` removes the `RecruitableCharacter` map
+    /// event when a `DialogueState` with `recruitment_context` is provided.
+    ///
+    /// The existing `test_recruit_to_inn_action_success` passes `None` for
+    /// `dialogue_state`, so the event-removal branch is never exercised.
+    /// This test supplies a real `DialogueState` with a `recruitment_context`
+    /// pointing at a map position that holds a `RecruitableCharacter` event,
+    /// then asserts the event is gone after the action executes.
+    #[test]
+    fn test_recruit_to_inn_action_removes_map_event_with_recruitment_context() {
+        use crate::application::dialogue::{DialogueState, RecruitmentContext};
+        use crate::domain::character::{Alignment, CharacterLocation, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::types::Position;
+        use crate::domain::world::Map;
+        use crate::domain::world::MapEvent;
+
+        // --- Arrange ---
+
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Add required class and race
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Add test character definition
+        let char_def = CharacterDefinition::new(
+            "test_mage".to_string(),
+            "Test Mage".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        db.characters.add_character(char_def).unwrap();
+
+        // Add innkeeper NPC
+        let innkeeper_def = crate::domain::world::npc::NpcDefinition::new(
+            "innkeeper_1".to_string(),
+            "Innkeeper".to_string(),
+            "innkeeper.png".to_string(),
+        );
+        db.npcs.add_npc(innkeeper_def).unwrap();
+
+        // Create a map with a RecruitableCharacter event at (3, 4).
+        let event_pos = Position::new(3, 4);
+        let mut map = Map::new(0, "Test Map".to_string(), "A test map".to_string(), 10, 10);
+        map.add_event(
+            event_pos,
+            MapEvent::RecruitableCharacter {
+                name: "Test Mage".to_string(),
+                description: "A recruitable mage".to_string(),
+                character_id: "test_mage".to_string(),
+                dialogue_id: None,
+                time_condition: None,
+                facing: None,
+            },
+        );
+
+        // Verify the event exists before the action.
+        assert!(
+            map.events.contains_key(&event_pos),
+            "RecruitableCharacter event must exist before action"
+        );
+
+        // Insert the map into the world and set it as current.
+        game_state.world.add_map(map);
+        game_state.world.current_map = 0;
+
+        // Build a DialogueState with recruitment_context pointing at the event.
+        let mut dlg_state = DialogueState::start(
+            1, // tree id
+            0, // root node
+            None, None,
+        );
+        dlg_state.recruitment_context = Some(RecruitmentContext {
+            character_id: "test_mage".to_string(),
+            event_position: event_pos,
+        });
+
+        // --- Act ---
+
+        let mut despawn_recruitable_visuals = None;
+        execute_action(
+            &DialogueAction::RecruitToInn {
+                character_id: "test_mage".to_string(),
+                innkeeper_id: "innkeeper_1".to_string(),
+            },
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+            None,
+            &mut despawn_recruitable_visuals,
+        );
+
+        // --- Assert ---
+
+        // Character was recruited to the inn.
+        assert_eq!(game_state.roster.characters.len(), 1);
+        assert!(matches!(
+            game_state.roster.character_locations[0],
+            CharacterLocation::AtInn(ref id) if id == "innkeeper_1"
+        ));
+        assert!(game_state.encountered_characters.contains("test_mage"));
+
+        // The recruitment event must have been removed from the map.
+        let current_map = game_state.world.get_current_map_mut().unwrap();
+        assert!(
+            !current_map.events.contains_key(&event_pos),
+            "RecruitableCharacter event must be removed after RecruitToInn with recruitment_context"
         );
     }
 }

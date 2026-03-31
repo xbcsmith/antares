@@ -108,6 +108,10 @@ pub enum CombatError {
 
     #[error("No ammo available for ranged attack")]
     NoAmmo,
+
+    /// The spell cast failed (insufficient SP, wrong class, silenced, etc.)
+    #[error("Spell fizzled: {0}")]
+    SpellFizzled(String),
 }
 
 // ===== Combatant =====
@@ -1054,34 +1058,36 @@ pub fn apply_condition_to_character(
 
     for effect in &cond_def.effects {
         match effect {
-            ConditionEffect::StatusEffect(name) => {
-                match name.to_lowercase().as_str() {
-                    "paralyzed" | "paralysis" | "paralyse" => {
-                        target.conditions.add(Condition::PARALYZED);
-                    }
-                    "silenced" | "silence" => {
-                        target.conditions.add(Condition::SILENCED);
-                    }
-                    "asleep" | "sleep" => {
-                        target.conditions.add(Condition::ASLEEP);
-                    }
-                    "blinded" | "blind" => {
-                        target.conditions.add(Condition::BLINDED);
-                    }
-                    "poisoned" | "poison" => {
-                        target.conditions.add(Condition::POISONED);
-                    }
-                    "unconscious" => {
-                        target.conditions.add(Condition::UNCONSCIOUS);
-                    }
-                    "dead" | "stone" => {
-                        target.conditions.add(Condition::DEAD);
-                    }
-                    _ => {
-                        // Unknown status - no-op for now
-                    }
+            ConditionEffect::StatusEffect(name) => match name.to_lowercase().as_str() {
+                "paralyzed" | "paralysis" | "paralyse" => {
+                    target.conditions.add(Condition::PARALYZED);
                 }
-            }
+                "silenced" | "silence" => {
+                    target.conditions.add(Condition::SILENCED);
+                }
+                "asleep" | "sleep" => {
+                    target.conditions.add(Condition::ASLEEP);
+                }
+                "blinded" | "blind" => {
+                    target.conditions.add(Condition::BLINDED);
+                }
+                "poisoned" | "poison" => {
+                    target.conditions.add(Condition::POISONED);
+                }
+                "unconscious" => {
+                    target.conditions.add(Condition::UNCONSCIOUS);
+                }
+                "dead" | "stone" => {
+                    target.conditions.add(Condition::DEAD);
+                }
+                _ => {
+                    tracing::warn!(
+                        "Unknown status effect '{}' in condition '{}'; ignoring",
+                        name,
+                        cond_def.id
+                    );
+                }
+            },
             ConditionEffect::AttributeModifier { attribute, value } => {
                 match attribute.to_lowercase().as_str() {
                     "might" => target.stats.might.modify(*value),
@@ -1094,7 +1100,14 @@ pub fn apply_condition_to_character(
                     "ac" => target.ac.modify(*value),
                     "hp" => target.hp.modify(*value as i32),
                     "sp" => target.sp.modify(*value as i32),
-                    _ => {}
+                    _ => {
+                        tracing::warn!(
+                            "Unknown attribute modifier '{}' (value={}) in condition '{}'; ignoring",
+                            attribute,
+                            value,
+                            cond_def.id
+                        );
+                    }
                 }
             }
             ConditionEffect::DamageOverTime { .. } | ConditionEffect::HealOverTime { .. } => {
@@ -1138,7 +1151,13 @@ pub fn apply_condition_to_monster(
                 "dead" | "stone" => {
                     monster.conditions = MonsterCondition::Dead;
                 }
-                _ => {}
+                _ => {
+                    tracing::warn!(
+                        "Unknown monster status effect '{}' in condition '{}'; ignoring",
+                        name,
+                        cond_def.id
+                    );
+                }
             },
             ConditionEffect::AttributeModifier { attribute, value } => {
                 match attribute.to_lowercase().as_str() {
@@ -1149,7 +1168,14 @@ pub fn apply_condition_to_monster(
                     "accuracy" => monster.stats.accuracy.modify(*value),
                     "ac" => monster.ac.modify(*value),
                     "hp" => monster.hp.modify(*value as i32),
-                    _ => {}
+                    _ => {
+                        tracing::warn!(
+                            "Unknown monster attribute modifier '{}' (value={}) in condition '{}'; ignoring",
+                            attribute,
+                            value,
+                            cond_def.id
+                        );
+                    }
                 }
             }
             ConditionEffect::DamageOverTime { .. } | ConditionEffect::HealOverTime { .. } => {

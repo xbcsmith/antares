@@ -21,6 +21,7 @@ use crate::application::GameMode;
 /// - `Combat`
 /// - `Resting`
 /// - `RestMenu`
+/// - `GameLog`
 ///
 /// Dialogue is intentionally **not** blocked for movement because the current
 /// input flow allows "move to cancel" behavior.
@@ -51,6 +52,7 @@ pub fn movement_blocked_for_mode(mode: &GameMode) -> bool {
             | GameMode::Combat(_)
             | GameMode::Resting(_)
             | GameMode::RestMenu
+            | GameMode::GameLog
     )
 }
 
@@ -186,6 +188,11 @@ mod tests {
     }
 
     #[test]
+    fn test_movement_blocked_for_mode_game_log_true() {
+        assert!(movement_blocked_for_mode(&GameMode::GameLog));
+    }
+
+    #[test]
     fn test_interaction_blocked_for_mode_exploration_false() {
         assert!(!interaction_blocked_for_mode(&GameMode::Exploration));
     }
@@ -240,5 +247,10 @@ mod tests {
     #[test]
     fn test_input_blocked_for_mode_rest_menu_true() {
         assert!(input_blocked_for_mode(&GameMode::RestMenu));
+    }
+
+    #[test]
+    fn test_input_blocked_for_mode_game_log_true() {
+        assert!(input_blocked_for_mode(&GameMode::GameLog));
     }
 }

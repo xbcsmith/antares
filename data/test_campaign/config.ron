@@ -39,4 +39,10 @@ GameConfig(
         light_range: 60.0,
         shadows_enabled: true,
     ),
+    time: TimeConfig(
+        movement_step_seconds: 30,
+        combat_turn_seconds: 10,
+        map_transition_seconds: 1800,
+        portal_transition_seconds: 0,
+    ),
 )

@@ -161,6 +161,7 @@ fn process_recruitment_responses(
     mut response_messages: MessageReader<RecruitmentResponseMessage>,
     mut global_state: ResMut<GlobalState>,
     content: Res<GameContent>,
+    mut despawn_writer: MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
 ) {
     for response in response_messages.read() {
         match response {
@@ -168,11 +169,21 @@ fn process_recruitment_responses(
                 match global_state.0.recruit_from_map(character_id, content.db()) {
                     Ok(RecruitResult::AddedToParty) => {
                         info!("Character '{}' joined the party", character_id);
+                        remove_recruitment_event_and_despawn(
+                            &mut global_state.0,
+                            character_id,
+                            &mut despawn_writer,
+                        );
                     }
                     Ok(RecruitResult::SentToInn(inn_id)) => {
                         info!(
                             "Character '{}' sent to inn {} (party full)",
                             character_id, inn_id
+                        );
+                        remove_recruitment_event_and_despawn(
+                            &mut global_state.0,
+                            character_id,
+                            &mut despawn_writer,
                         );
                     }
                     Ok(RecruitResult::Declined) => {
@@ -187,6 +198,47 @@ fn process_recruitment_responses(
             RecruitmentResponseMessage::Decline(character_id) => {
                 info!("Player declined to recruit character '{}'", character_id);
                 // Don't mark as encountered - player can return later
+            }
+        }
+    }
+}
+
+/// Removes the recruitment event for a character from the current map and emits a despawn message.
+///
+/// Scans the current map's events to find a `RecruitableCharacter` event matching the
+/// given `character_id`, removes it, and writes a [`DespawnRecruitableVisual`] message
+/// so the 3D mesh is cleaned up.
+fn remove_recruitment_event_and_despawn(
+    game_state: &mut crate::application::GameState,
+    character_id: &str,
+    despawn_writer: &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
+) {
+    use crate::domain::world::MapEvent;
+    if let Some(current_map) = game_state.world.get_current_map_mut() {
+        let map_id = current_map.id;
+        // Scan events to find the matching RecruitableCharacter
+        let position = current_map.events.iter().find_map(|(pos, event)| {
+            if let MapEvent::RecruitableCharacter {
+                character_id: cid, ..
+            } = event
+            {
+                if cid == character_id {
+                    return Some(*pos);
+                }
+            }
+            None
+        });
+        if let Some(pos) = position {
+            if current_map.remove_event(pos).is_some() {
+                info!(
+                    "Removed recruitment event for '{}' at {:?}",
+                    character_id, pos
+                );
+                despawn_writer.write(crate::game::systems::map::DespawnRecruitableVisual {
+                    map_id,
+                    position: pos,
+                    character_id: character_id.to_string(),
+                });
             }
         }
     }

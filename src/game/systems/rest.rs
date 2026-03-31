@@ -821,7 +821,7 @@ pub fn process_rest(
     // Pass `None` for stock templates: the rest system operates without
     // requiring campaign content to be loaded.  Merchant restocking during
     // rest is handled lazily when the player next opens a merchant screen.
-    game_state.advance_time(60, None);
+    game_state.advance_time_minutes(60, None);
 
     // ── Increment the completed-hour counter ────────────────────────────────
     if let GameMode::Resting(ref mut rs) = game_state.mode {

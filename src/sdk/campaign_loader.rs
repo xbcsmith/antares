@@ -502,15 +502,14 @@ impl TryFrom<CampaignMetadata> for Campaign {
 
     fn try_from(metadata: CampaignMetadata) -> Result<Self, Self::Error> {
         // Convert starting_map string to u16
-        // This is a hack: we assume "starter_town" -> 1, or try to parse number
-        let starting_map_id = if let Ok(id) = metadata.starting_map.parse::<u16>() {
-            id
-        } else if metadata.starting_map == "starter_town" {
-            1
-        } else {
-            // Default to 1 if unknown string
-            1
-        };
+        // Numeric IDs are always supported; named map resolution requires
+        // the map directory to be loaded (see Campaign::resolve_starting_map_name).
+        let starting_map_id = metadata.starting_map.parse::<u16>().map_err(|_| {
+            format!(
+                "Cannot resolve starting_map '{}': value must be a numeric map ID (e.g. \"1\")",
+                metadata.starting_map
+            )
+        })?;
 
         // Convert direction string to enum
         let starting_direction = match metadata.starting_direction.to_lowercase().as_str() {
@@ -575,6 +574,34 @@ impl TryFrom<CampaignMetadata> for Campaign {
 }
 
 impl Campaign {
+    /// Resolves a starting map name to its numeric ID by scanning loaded maps.
+    ///
+    /// Call this after loading content if campaign metadata used a named
+    /// `starting_map` value. Returns `None` if no map matches the given name.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The map name to look up
+    /// * `db` - The loaded content database to search
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(MapId)` if a map with the matching name exists, `None` otherwise.
+    pub fn resolve_starting_map_name(
+        name: &str,
+        db: &crate::sdk::database::ContentDatabase,
+    ) -> Option<crate::domain::types::MapId> {
+        let name_lower = name.to_lowercase();
+        for map_id in db.maps.all_maps() {
+            if let Some(map) = db.maps.get_map(map_id) {
+                if map.name.to_lowercase() == name_lower {
+                    return Some(map_id);
+                }
+            }
+        }
+        None
+    }
+
     /// Load campaign content into ContentDatabase
     pub fn load_content(&self) -> Result<ContentDatabase, CampaignError> {
         ContentDatabase::load_campaign(&self.root_path)
@@ -977,6 +1004,68 @@ mod tests {
         assert_eq!(campaign.config.starting_time.day, 1);
         assert_eq!(campaign.config.starting_time.hour, 8);
         assert_eq!(campaign.config.starting_time.minute, 0);
+    }
+
+    #[test]
+    fn test_starting_map_numeric_string_resolves() {
+        // Numeric string "1" should parse to MapId 1
+        let loader = CampaignLoader::new("data");
+        let campaign = loader
+            .load_campaign("test_campaign")
+            .expect("Failed to load test_campaign");
+        assert!(
+            campaign.config.starting_map > 0,
+            "starting_map should be a valid numeric ID"
+        );
+    }
+
+    #[test]
+    fn test_starting_map_non_numeric_string_errors() {
+        use crate::domain::types::GameTime;
+
+        // Build a CampaignMetadata with a non-numeric starting_map
+        let metadata = CampaignMetadata {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            version: "1.0.0".to_string(),
+            author: "Test Author".to_string(),
+            description: "Test desc".to_string(),
+            engine_version: "0.1.0".to_string(),
+            starting_map: "mysterious_dungeon".to_string(),
+            starting_position: (0, 0),
+            starting_direction: "north".to_string(),
+            starting_gold: 100,
+            starting_food: 50,
+            starting_innkeeper: "inn".to_string(),
+            max_party_size: 6,
+            max_roster_size: 20,
+            difficulty: Difficulty::Normal,
+            permadeath: false,
+            allow_multiclassing: false,
+            starting_level: 1,
+            max_level: 20,
+            items_file: "data/items.ron".to_string(),
+            spells_file: "data/spells.ron".to_string(),
+            monsters_file: "data/monsters.ron".to_string(),
+            classes_file: "data/classes.ron".to_string(),
+            races_file: "data/races.ron".to_string(),
+            maps_dir: "data/maps".to_string(),
+            quests_file: "data/quests.ron".to_string(),
+            dialogue_file: "data/dialogues.ron".to_string(),
+            characters_file: "data/characters.ron".to_string(),
+            creatures_file: "data/creatures.ron".to_string(),
+            furniture_file: "data/furniture.ron".to_string(),
+            starting_time: GameTime::new(1, 8, 0),
+        };
+
+        let result: Result<Campaign, String> = metadata.try_into();
+        assert!(result.is_err(), "Non-numeric starting_map should fail");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("mysterious_dungeon"),
+            "Error message should mention the invalid map name: {}",
+            err
+        );
     }
 
     #[test]
