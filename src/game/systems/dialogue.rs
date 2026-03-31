@@ -93,8 +93,7 @@ impl Plugin for DialoguePlugin {
                     dialogue_input_system,
                     handle_start_dialogue,
                     handle_simple_dialogue,
-                    handle_select_choice,
-                    handle_recruitment_actions,
+                    handle_select_choice.before(crate::game::systems::ui::consume_game_log_events),
                     crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
                     crate::game::systems::dialogue_visuals::update_dialogue_text,
                     crate::game::systems::dialogue_choices::spawn_choice_ui,
@@ -1660,19 +1659,6 @@ fn apply_service_effect_inline(
         }
         _ => {}
     }
-}
-
-/// No-op system preserved for Bevy scheduling compatibility.
-///
-/// Recruitment logic is fully handled by [`execute_action`] (for
-/// `RecruitToParty` and `RecruitToInn` dialogue actions) and by
-/// [`crate::game::systems::recruitment_dialog::process_recruitment_responses`]
-/// (for the standalone recruitment dialog).  This stub exists solely because
-/// removing it from the `DialoguePlugin` system tuple changes Bevy's internal
-/// scheduling order, which breaks message delivery in integration tests.
-#[allow(clippy::needless_pass_by_value)]
-fn handle_recruitment_actions(_global_state: Res<GlobalState>, _content: Res<GameContent>) {
-    // Intentionally empty — see doc comment above.
 }
 
 #[cfg(test)]
