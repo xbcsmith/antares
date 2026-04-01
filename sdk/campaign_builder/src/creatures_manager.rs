@@ -25,7 +25,7 @@
 //! # fn main() -> Result<(), EditorError> {
 //! // Load creatures from a campaign's creatures.ron file
 //! let mut manager = CreaturesManager::load_from_file(
-//!     PathBuf::from("campaigns/tutorial/data/creatures.ron")
+//!     PathBuf::from("data/test_campaign/data/creatures.ron")
 //! )?;
 //!
 //! // Validate all creature references
@@ -269,7 +269,7 @@ impl CreaturesManager {
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let manager = CreaturesManager::load_from_file(
-    ///     PathBuf::from("campaigns/tutorial/data/creatures.ron")
+    ///     PathBuf::from("data/test_campaign/data/creatures.ron")
     /// )?;
     /// println!("Loaded {} creatures", manager.creature_count());
     /// # Ok(())

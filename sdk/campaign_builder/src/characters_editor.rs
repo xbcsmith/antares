@@ -15,13 +15,11 @@ use crate::ui_helpers::{
     ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{Alignment, Sex, Stats};
-use antares::domain::character_definition::{
-    CharacterDefinition, CharacterDefinitionId, StartingEquipment,
-};
+use antares::domain::character_definition::{CharacterDefinition, StartingEquipment};
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::Item;
 use antares::domain::races::RaceDefinition;
-use antares::domain::types::{CreatureId, ItemId, RaceId};
+use antares::domain::types::{CreatureId, ItemId};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -1696,6 +1694,7 @@ impl CharactersEditorState {
     }
 
     /// Show character edit/create form
+    #[allow(clippy::too_many_arguments)]
     fn show_character_form(
         &mut self,
         ui: &mut egui::Ui,
@@ -1855,10 +1854,9 @@ impl CharactersEditorState {
                                 .button("🦎")
                                 .on_hover_text("Browse creature assets")
                                 .clicked()
+                                && creature_manager.is_some()
                             {
-                                if creature_manager.is_some() {
-                                    self.creature_picker_open = true;
-                                }
+                                self.creature_picker_open = true;
                             }
                             ui.label("ℹ").on_hover_text(
                                 "Links this character to a procedural mesh creature definition. \
@@ -2252,34 +2250,6 @@ fn item_name_by_id(items: &[Item], item_id: ItemId) -> String {
         .find(|i| i.id == item_id)
         .map(|i| i.name.clone())
         .unwrap_or_else(|| format!("Unknown (ID: {})", item_id))
-}
-
-/// Helper function for tests - creates a test item
-#[cfg(test)]
-fn create_test_item(id: ItemId, name: &str) -> Item {
-    use antares::domain::items::types::{ConsumableData, ConsumableEffect, ItemType};
-
-    Item {
-        id,
-        name: name.to_string(),
-        item_type: ItemType::Consumable(ConsumableData {
-            effect: ConsumableEffect::HealHp(0),
-            is_combat_usable: false,
-            duration_minutes: None,
-        }),
-        base_cost: 10,
-        sell_cost: 5,
-        alignment_restriction: None,
-        constant_bonus: None,
-        temporary_bonus: None,
-        spell_effect: None,
-        max_charges: 0,
-        is_cursed: false,
-        icon_path: None,
-        tags: Vec::new(),
-        mesh_descriptor_override: None,
-        mesh_id: None,
-    }
 }
 
 #[cfg(test)]

@@ -520,7 +520,7 @@ impl CampaignMetadataEditorState {
         ui: &mut egui::Ui,
         metadata: &mut crate::CampaignMetadata,
         campaign_path: &mut Option<PathBuf>,
-        campaign_dir: Option<&PathBuf>,
+        _campaign_dir: Option<&PathBuf>,
         unsaved_changes: &mut bool,
         status_message: &mut String,
         npcs: &[NpcDefinition],
@@ -1550,7 +1550,7 @@ pub fn period_label(tod: antares::domain::types::TimeOfDay) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
+
     use tempfile::tempdir;
 
     /// Test that the editor state initializes correctly

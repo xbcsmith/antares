@@ -1375,7 +1375,7 @@ mod tests {
 
     #[test]
     fn test_edit_definition_in_list() {
-        let mut defs = vec![make_def(1, "Old Name")];
+        let mut defs = [make_def(1, "Old Name")];
         defs[0].name = "New Name".to_string();
         assert_eq!(defs[0].name, "New Name");
     }
@@ -1492,7 +1492,7 @@ mod tests {
 
     #[test]
     fn test_filter_by_category_seating() {
-        let defs = vec![
+        let defs = [
             make_def(1, "Throne"), // Seating
             {
                 let mut d = make_def(2, "Torch");
@@ -1516,7 +1516,7 @@ mod tests {
 
     #[test]
     fn test_filter_by_base_type_torch() {
-        let defs = vec![
+        let defs = [
             make_def(1, "Throne"),
             {
                 let mut d = make_def(2, "Torch A");
@@ -1540,7 +1540,7 @@ mod tests {
 
     #[test]
     fn test_filter_by_name_search() {
-        let defs = vec![
+        let defs = [
             make_def(1, "Iron Throne"),
             make_def(2, "Wooden Bench"),
             make_def(3, "Iron Chest"),

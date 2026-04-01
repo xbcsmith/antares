@@ -159,11 +159,12 @@ impl ConfigEditorState {
             (None, None) => false,
         };
 
-        if (self.needs_initial_load || campaign_changed) && campaign_dir.is_some() {
-            if self.load_config(campaign_dir) {
-                self.needs_initial_load = false;
-                self.last_campaign_dir = campaign_dir.cloned();
-            }
+        if (self.needs_initial_load || campaign_changed)
+            && campaign_dir.is_some()
+            && self.load_config(campaign_dir)
+        {
+            self.needs_initial_load = false;
+            self.last_campaign_dir = campaign_dir.cloned();
         }
 
         // Handle key capture events
@@ -1053,225 +1054,6 @@ impl ConfigEditorState {
             }
         });
     }
-
-    /// Validate key binding for a control action
-    ///
-    /// # Arguments
-    ///
-    /// * `action_id` - The control action identifier
-    /// * `keys_str` - Comma-separated key names
-    ///
-    /// # Returns
-    ///
-    /// Returns Ok(()) if valid, or Err(error message) if invalid
-    fn validate_key_binding(&self, action_id: &str, keys_str: &str) -> Result<(), String> {
-        if keys_str.is_empty() {
-            return Err(format!("{} must have at least one key bound", action_id));
-        }
-
-        // Valid key names (basic validation)
-        let valid_keys = vec![
-            "A",
-            "B",
-            "C",
-            "D",
-            "E",
-            "F",
-            "G",
-            "H",
-            "I",
-            "J",
-            "K",
-            "L",
-            "M",
-            "N",
-            "O",
-            "P",
-            "Q",
-            "R",
-            "S",
-            "T",
-            "U",
-            "V",
-            "W",
-            "X",
-            "Y",
-            "Z",
-            "0",
-            "1",
-            "2",
-            "3",
-            "4",
-            "5",
-            "6",
-            "7",
-            "8",
-            "9",
-            "Space",
-            "Enter",
-            "Escape",
-            "Tab",
-            "Backspace",
-            "Delete",
-            "Insert",
-            "Home",
-            "End",
-            "PageUp",
-            "PageDown",
-            "Shift",
-            "Ctrl",
-            "Alt",
-            "Super",
-            "Up Arrow",
-            "Down Arrow",
-            "Left Arrow",
-            "Right Arrow",
-            "+",
-            "-",
-            "*",
-            "/",
-            ".",
-            ",",
-            ";",
-            "'",
-            "[",
-            "]",
-            "\\",
-            "`",
-            "~",
-            "!",
-            "@",
-            "#",
-            "$",
-            "%",
-            "^",
-            "&",
-        ];
-
-        let keys: Vec<&str> = keys_str.split(',').map(|s| s.trim()).collect();
-        for key in keys {
-            if !valid_keys
-                .iter()
-                .any(|&valid| valid.eq_ignore_ascii_case(key))
-            {
-                return Err(format!("'{}' is not a recognized key name", key));
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Validate all configuration settings
-    ///
-    /// # Returns
-    ///
-    /// Returns Ok(()) if all settings are valid, otherwise populates validation_errors
-    fn validate_config(&mut self) -> Result<(), String> {
-        self.validation_errors.clear();
-
-        // Validate resolution
-        if self.game_config.graphics.resolution.0 < 320
-            || self.game_config.graphics.resolution.0 > 7680
-        {
-            self.validation_errors.insert(
-                "resolution_width".to_string(),
-                "Width must be 320-7680".to_string(),
-            );
-        }
-        if self.game_config.graphics.resolution.1 < 240
-            || self.game_config.graphics.resolution.1 > 4320
-        {
-            self.validation_errors.insert(
-                "resolution_height".to_string(),
-                "Height must be 240-4320".to_string(),
-            );
-        }
-
-        // Validate audio volumes
-        if self.game_config.audio.master_volume < 0.0 || self.game_config.audio.master_volume > 1.0
-        {
-            self.validation_errors
-                .insert("master_volume".to_string(), "Must be 0.0-1.0".to_string());
-        }
-        if self.game_config.audio.music_volume < 0.0 || self.game_config.audio.music_volume > 1.0 {
-            self.validation_errors
-                .insert("music_volume".to_string(), "Must be 0.0-1.0".to_string());
-        }
-        if self.game_config.audio.sfx_volume < 0.0 || self.game_config.audio.sfx_volume > 1.0 {
-            self.validation_errors
-                .insert("sfx_volume".to_string(), "Must be 0.0-1.0".to_string());
-        }
-        if self.game_config.audio.ambient_volume < 0.0
-            || self.game_config.audio.ambient_volume > 1.0
-        {
-            self.validation_errors
-                .insert("ambient_volume".to_string(), "Must be 0.0-1.0".to_string());
-        }
-
-        // Validate controls key bindings
-        if let Err(e) =
-            self.validate_key_binding("move_forward", &self.controls_move_forward_buffer)
-        {
-            self.validation_errors.insert("move_forward".to_string(), e);
-        }
-        if let Err(e) = self.validate_key_binding("move_back", &self.controls_move_back_buffer) {
-            self.validation_errors.insert("move_back".to_string(), e);
-        }
-        if let Err(e) = self.validate_key_binding("turn_left", &self.controls_turn_left_buffer) {
-            self.validation_errors.insert("turn_left".to_string(), e);
-        }
-        if let Err(e) = self.validate_key_binding("turn_right", &self.controls_turn_right_buffer) {
-            self.validation_errors.insert("turn_right".to_string(), e);
-        }
-        if let Err(e) = self.validate_key_binding("interact", &self.controls_interact_buffer) {
-            self.validation_errors.insert("interact".to_string(), e);
-        }
-        if let Err(e) = self.validate_key_binding("menu", &self.controls_menu_buffer) {
-            self.validation_errors.insert("menu".to_string(), e);
-        }
-        if let Err(e) = self.validate_key_binding("inventory", &self.controls_inventory_buffer) {
-            self.validation_errors.insert("inventory".to_string(), e);
-        }
-        if let Err(e) = self.validate_key_binding("rest", &self.controls_rest_buffer) {
-            self.validation_errors.insert("rest".to_string(), e);
-        }
-        if let Err(e) = self.validate_key_binding("automap", &self.controls_automap_buffer) {
-            self.validation_errors.insert("automap".to_string(), e);
-        }
-
-        // Validate camera settings
-        if self.game_config.camera.eye_height < 0.1 || self.game_config.camera.eye_height > 3.0 {
-            self.validation_errors
-                .insert("eye_height".to_string(), "Must be 0.1-3.0".to_string());
-        }
-        if self.game_config.camera.fov < 30.0 || self.game_config.camera.fov > 120.0 {
-            self.validation_errors
-                .insert("fov".to_string(), "Must be 30-120 degrees".to_string());
-        }
-        if self.game_config.camera.near_clip < 0.01 || self.game_config.camera.near_clip > 10.0 {
-            self.validation_errors
-                .insert("near_clip".to_string(), "Must be 0.01-10.0".to_string());
-        }
-        if self.game_config.camera.far_clip < 10.0 || self.game_config.camera.far_clip > 10000.0 {
-            self.validation_errors
-                .insert("far_clip".to_string(), "Must be 10-10000".to_string());
-        }
-        if self.game_config.camera.near_clip >= self.game_config.camera.far_clip {
-            self.validation_errors.insert(
-                "clip_planes".to_string(),
-                "Near clip must be less than far clip".to_string(),
-            );
-        }
-
-        if self.validation_errors.is_empty() {
-            Ok(())
-        } else {
-            Err(format!(
-                "{} validation errors found",
-                self.validation_errors.len()
-            ))
-        }
-    }
 }
 
 /// Convert egui::Key to human-readable string
@@ -1492,139 +1274,6 @@ mod tests {
         state.game_config.camera.eye_height = -1.0;
         let result = state.save_config(None);
         assert!(result.is_err());
-    }
-
-    // Phase 2: Inline Validation Tests
-
-    #[test]
-    fn test_validate_key_binding_valid_keys() {
-        let state = ConfigEditorState::new();
-        let result = state.validate_key_binding("move_forward", "W, A, D");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_validate_key_binding_invalid_key() {
-        let state = ConfigEditorState::new();
-        let result = state.validate_key_binding("move_forward", "InvalidKey");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not a recognized key"));
-    }
-
-    #[test]
-    fn test_validate_key_binding_empty() {
-        let state = ConfigEditorState::new();
-        let result = state.validate_key_binding("move_forward", "");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("must have at least one key"));
-    }
-
-    #[test]
-    fn test_validate_key_binding_with_arrows() {
-        let state = ConfigEditorState::new();
-        let result = state.validate_key_binding("move_forward", "Up Arrow, W");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_validate_key_binding_case_insensitive() {
-        let state = ConfigEditorState::new();
-        let result = state.validate_key_binding("move_forward", "w, space, enter");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_validate_config_all_valid() {
-        let mut state = ConfigEditorState::new();
-        state.controls_move_forward_buffer = "W".to_string();
-        state.controls_move_back_buffer = "S".to_string();
-        state.controls_turn_left_buffer = "A".to_string();
-        state.controls_turn_right_buffer = "D".to_string();
-        state.controls_interact_buffer = "E".to_string();
-        state.controls_menu_buffer = "Escape".to_string();
-        state.controls_inventory_buffer = "I".to_string();
-        state.controls_rest_buffer = "R".to_string();
-        state.controls_automap_buffer = "M".to_string();
-
-        let result = state.validate_config();
-        assert!(result.is_ok());
-        assert!(state.validation_errors.is_empty());
-    }
-
-    #[test]
-    fn test_validate_config_invalid_resolution() {
-        let mut state = ConfigEditorState::new();
-        state.game_config.graphics.resolution = (0, 720);
-        state.controls_move_forward_buffer = "W".to_string();
-        state.controls_move_back_buffer = "S".to_string();
-        state.controls_turn_left_buffer = "A".to_string();
-        state.controls_turn_right_buffer = "D".to_string();
-        state.controls_interact_buffer = "E".to_string();
-        state.controls_menu_buffer = "Escape".to_string();
-        state.controls_inventory_buffer = "I".to_string();
-        state.controls_rest_buffer = "R".to_string();
-        state.controls_automap_buffer = "M".to_string();
-
-        let result = state.validate_config();
-        assert!(result.is_err());
-        assert!(state.validation_errors.contains_key("resolution_width"));
-    }
-
-    #[test]
-    fn test_validate_config_invalid_audio_volume() {
-        let mut state = ConfigEditorState::new();
-        state.game_config.audio.master_volume = 1.5;
-        state.controls_move_forward_buffer = "W".to_string();
-        state.controls_move_back_buffer = "S".to_string();
-        state.controls_turn_left_buffer = "A".to_string();
-        state.controls_turn_right_buffer = "D".to_string();
-        state.controls_interact_buffer = "E".to_string();
-        state.controls_menu_buffer = "Escape".to_string();
-        state.controls_inventory_buffer = "I".to_string();
-        state.controls_rest_buffer = "R".to_string();
-        state.controls_automap_buffer = "M".to_string();
-
-        let result = state.validate_config();
-        assert!(result.is_err());
-        assert!(state.validation_errors.contains_key("master_volume"));
-    }
-
-    #[test]
-    fn test_validate_config_invalid_key_binding() {
-        let mut state = ConfigEditorState::new();
-        state.controls_move_forward_buffer = "InvalidKey".to_string();
-        state.controls_move_back_buffer = "S".to_string();
-        state.controls_turn_left_buffer = "A".to_string();
-        state.controls_turn_right_buffer = "D".to_string();
-        state.controls_interact_buffer = "E".to_string();
-        state.controls_menu_buffer = "Escape".to_string();
-        state.controls_inventory_buffer = "I".to_string();
-        state.controls_rest_buffer = "R".to_string();
-        state.controls_automap_buffer = "M".to_string();
-
-        let result = state.validate_config();
-        assert!(result.is_err());
-        assert!(state.validation_errors.contains_key("move_forward"));
-    }
-
-    #[test]
-    fn test_validate_config_near_far_clip_order() {
-        let mut state = ConfigEditorState::new();
-        state.game_config.camera.near_clip = 10.0;
-        state.game_config.camera.far_clip = 5.0; // far_clip < near_clip
-        state.controls_move_forward_buffer = "W".to_string();
-        state.controls_move_back_buffer = "S".to_string();
-        state.controls_turn_left_buffer = "A".to_string();
-        state.controls_turn_right_buffer = "D".to_string();
-        state.controls_interact_buffer = "E".to_string();
-        state.controls_menu_buffer = "Escape".to_string();
-        state.controls_inventory_buffer = "I".to_string();
-        state.controls_rest_buffer = "R".to_string();
-        state.controls_automap_buffer = "M".to_string();
-
-        let result = state.validate_config();
-        assert!(result.is_err());
-        assert!(state.validation_errors.contains_key("clip_planes"));
     }
 
     #[test]
@@ -1864,24 +1513,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_config_invalid_inventory_key_binding() {
-        let mut state = ConfigEditorState::new();
-        state.controls_move_forward_buffer = "W".to_string();
-        state.controls_move_back_buffer = "S".to_string();
-        state.controls_turn_left_buffer = "A".to_string();
-        state.controls_turn_right_buffer = "D".to_string();
-        state.controls_interact_buffer = "E".to_string();
-        state.controls_menu_buffer = "Escape".to_string();
-        state.controls_inventory_buffer = "BadKey".to_string();
-        state.controls_rest_buffer = "R".to_string();
-        state.controls_automap_buffer = "M".to_string();
-
-        let result = state.validate_config();
-        assert!(result.is_err());
-        assert!(state.validation_errors.contains_key("inventory"));
-    }
-
-    #[test]
     fn test_inventory_buffer_default_is_empty() {
         let state = ConfigEditorState::default();
         assert_eq!(state.controls_inventory_buffer, "");
@@ -1921,28 +1552,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_config_invalid_rest_key_binding() {
-        let mut state = ConfigEditorState::new();
-        state.controls_move_forward_buffer = "W".to_string();
-        state.controls_move_back_buffer = "S".to_string();
-        state.controls_turn_left_buffer = "A".to_string();
-        state.controls_turn_right_buffer = "D".to_string();
-        state.controls_interact_buffer = "E".to_string();
-        state.controls_menu_buffer = "Escape".to_string();
-        state.controls_inventory_buffer = "I".to_string();
-        state.controls_rest_buffer = "BadKey".to_string();
-        state.controls_automap_buffer = "M".to_string();
-
-        let result = state.validate_config();
-        assert!(result.is_err());
-        assert!(
-            state.validation_errors.contains_key("rest"),
-            "validation_errors must contain key \"rest\", got: {:?}",
-            state.validation_errors
-        );
-    }
-
-    #[test]
     fn test_rest_buffer_default_is_empty() {
         let state = ConfigEditorState::default();
         assert_eq!(state.controls_rest_buffer, "");
@@ -1975,24 +1584,6 @@ mod tests {
             state.game_config.controls.automap,
             vec!["M".to_string(), "Tab".to_string()]
         );
-    }
-
-    #[test]
-    fn test_validate_config_invalid_automap_key_binding() {
-        let mut state = ConfigEditorState::new();
-        state.controls_move_forward_buffer = "W".to_string();
-        state.controls_move_back_buffer = "S".to_string();
-        state.controls_turn_left_buffer = "A".to_string();
-        state.controls_turn_right_buffer = "D".to_string();
-        state.controls_interact_buffer = "E".to_string();
-        state.controls_menu_buffer = "Escape".to_string();
-        state.controls_inventory_buffer = "I".to_string();
-        state.controls_rest_buffer = "R".to_string();
-        state.controls_automap_buffer = "BadKey".to_string();
-
-        let result = state.validate_config();
-        assert!(result.is_err());
-        assert!(state.validation_errors.contains_key("automap"));
     }
 
     #[test]

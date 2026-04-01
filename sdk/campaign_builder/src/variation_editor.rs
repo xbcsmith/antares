@@ -267,7 +267,7 @@ impl VariationEditorState {
     fn show_create_dialog(
         &mut self,
         ctx: &egui::Context,
-        creature: &CreatureDefinition,
+        _creature: &CreatureDefinition,
     ) -> Option<CreatureVariation> {
         let mut result = None;
         let mut close_dialog = false;
@@ -326,11 +326,9 @@ impl VariationEditorState {
                 ui.separator();
 
                 ui.horizontal(|ui| {
-                    if ui.button("✓ Create").clicked() {
-                        if !self.create_buffer.name.is_empty() {
-                            result = Some(self.create_buffer.to_variation());
-                            close_dialog = true;
-                        }
+                    if ui.button("✓ Create").clicked() && !self.create_buffer.name.is_empty() {
+                        result = Some(self.create_buffer.to_variation());
+                        close_dialog = true;
                     }
 
                     if ui.button("✗ Cancel").clicked() {

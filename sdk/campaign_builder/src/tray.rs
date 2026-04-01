@@ -56,8 +56,6 @@
 //! }
 //! ```
 
-#![cfg(target_os = "macos")]
-
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::OnceLock;
 use tray_icon::{
@@ -72,12 +70,6 @@ use tray_icon::{
 /// Produced by `scripts/generate_icons.sh` from `assets/icons/antares_tray.png`
 /// and committed to `sdk/campaign_builder/assets/icons/tray_icon_1x.png`.
 const TRAY_ICON_1X: &[u8] = include_bytes!("../assets/icons/tray_icon_1x.png");
-
-/// 44×44 PNG reserved for Retina (2×) menu-bar displays.
-///
-/// Available for future HiDPI support.  Embedded here so that it is
-/// compile-time verified regardless of whether it is currently used.
-const TRAY_ICON_2X: &[u8] = include_bytes!("../assets/icons/tray_icon_2x.png");
 
 // ── Menu item IDs ─────────────────────────────────────────────────────────────
 
@@ -316,23 +308,6 @@ mod tests {
         );
     }
 
-    /// The 2× asset must begin with the PNG magic number.
-    ///
-    /// This confirms that `assets/icons/tray_icon_2x.png` is a valid PNG file
-    /// and has not been accidentally replaced or truncated.
-    #[test]
-    fn test_tray_icon_2x_png_magic() {
-        assert!(
-            TRAY_ICON_2X.len() >= PNG_MAGIC.len(),
-            "TRAY_ICON_2X must be at least 8 bytes long"
-        );
-        assert_eq!(
-            &TRAY_ICON_2X[..PNG_MAGIC.len()],
-            &PNG_MAGIC,
-            "TRAY_ICON_2X must start with the PNG magic number"
-        );
-    }
-
     // ── Phase 2: Decoded dimensions ───────────────────────────────────────────
 
     /// The 1× asset must decode to exactly 22×22 pixels.
@@ -345,18 +320,6 @@ mod tests {
             .into_rgba8();
         assert_eq!(img.width(), 22, "1× tray icon width must be 22 px");
         assert_eq!(img.height(), 22, "1× tray icon height must be 22 px");
-    }
-
-    /// The 2× asset must decode to exactly 44×44 pixels.
-    ///
-    /// macOS uses 44×44 for Retina (2×) menu-bar status items.
-    #[test]
-    fn test_tray_icon_2x_dimensions() {
-        let img = image::load_from_memory(TRAY_ICON_2X)
-            .expect("TRAY_ICON_2X must decode successfully")
-            .into_rgba8();
-        assert_eq!(img.width(), 44, "2× tray icon width must be 44 px");
-        assert_eq!(img.height(), 44, "2× tray icon height must be 44 px");
     }
 
     // ── Phase 2: RGBA buffer length ───────────────────────────────────────────

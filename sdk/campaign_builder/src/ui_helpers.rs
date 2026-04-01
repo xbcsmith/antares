@@ -90,7 +90,6 @@ use antares::domain::proficiency::{
 use eframe::egui;
 use egui_autocomplete::AutoCompleteTextEdit;
 use std::fmt::Display;
-use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use thiserror::Error;
@@ -536,7 +535,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub fn searchable_selector_multi<T, ID, FId, FLabel>(
     ui: &mut egui::Ui,
-    id_salt: &str,
+    _id_salt: &str,
     label: &str,
     selection: &mut Vec<ID>,
     items: &[T],
@@ -600,13 +599,13 @@ where
     ui.horizontal_wrapped(|ui| {
         for item in items {
             let label_text = label_fn(item);
-            if q.is_empty() || label_text.to_lowercase().contains(&q) {
-                if ui.small_button(label_text.clone()).clicked() {
-                    let id = id_fn(item);
-                    if !selection.contains(&id) {
-                        selection.push(id);
-                        changed = true;
-                    }
+            if (q.is_empty() || label_text.to_lowercase().contains(&q))
+                && ui.small_button(label_text.clone()).clicked()
+            {
+                let id = id_fn(item);
+                if !selection.contains(&id) {
+                    selection.push(id);
+                    changed = true;
                 }
             }
         }
@@ -828,14 +827,13 @@ impl<'a> EditorToolbar<'a> {
                 action = ToolbarAction::New;
             }
 
-            if self.show_save {
-                if ui
+            if self.show_save
+                && ui
                     .button("💾 Save")
                     .on_hover_text("Save to campaign (Ctrl+S)")
                     .clicked()
-                {
-                    action = ToolbarAction::Save;
-                }
+            {
+                action = ToolbarAction::Save;
             }
 
             if ui
@@ -1052,41 +1050,37 @@ impl ActionButtons {
 
         ui.horizontal(|ui| {
             ui.add_enabled_ui(self.enabled, |ui| {
-                if self.show_edit {
-                    if ui
+                if self.show_edit
+                    && ui
                         .button("✏️ Edit")
                         .on_hover_text("Edit selected item (Ctrl+E)")
                         .clicked()
-                    {
-                        action = ItemAction::Edit;
-                    }
+                {
+                    action = ItemAction::Edit;
                 }
-                if self.show_delete {
-                    if ui
+                if self.show_delete
+                    && ui
                         .button("🗑️ Delete")
                         .on_hover_text("Delete selected item (Delete)")
                         .clicked()
-                    {
-                        action = ItemAction::Delete;
-                    }
+                {
+                    action = ItemAction::Delete;
                 }
-                if self.show_duplicate {
-                    if ui
+                if self.show_duplicate
+                    && ui
                         .button("📋 Duplicate")
                         .on_hover_text("Duplicate selected item (Ctrl+D)")
                         .clicked()
-                    {
-                        action = ItemAction::Duplicate;
-                    }
+                {
+                    action = ItemAction::Duplicate;
                 }
-                if self.show_export {
-                    if ui
+                if self.show_export
+                    && ui
                         .button("📤 Export")
                         .on_hover_text("Export selected item")
                         .clicked()
-                    {
-                        action = ItemAction::Export;
-                    }
+                {
+                    action = ItemAction::Export;
                 }
             });
         });
@@ -2263,7 +2257,7 @@ impl<'a> AttributePair16Input<'a> {
 /// ```
 pub struct AutocompleteInput<'a> {
     /// Unique widget identifier salt
-    id_salt: &'a str,
+    _id_salt: &'a str,
     /// List of candidate suggestions
     candidates: &'a [String],
     /// Optional placeholder hint text
@@ -2292,7 +2286,7 @@ impl<'a> AutocompleteInput<'a> {
     /// ```
     pub fn new(id_salt: &'a str, candidates: &'a [String]) -> Self {
         Self {
-            id_salt,
+            _id_salt: id_salt,
             candidates,
             placeholder: None,
         }
@@ -2982,12 +2976,10 @@ pub fn autocomplete_creature_selector(
         }
 
         // Clear button
-        if ui.button("Clear").clicked() {
-            if !selected_creature_id.is_empty() {
-                selected_creature_id.clear();
-                remove_autocomplete_buffer(ui.ctx(), buffer_id);
-                changed = true;
-            }
+        if ui.button("Clear").clicked() && !selected_creature_id.is_empty() {
+            selected_creature_id.clear();
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
+            changed = true;
         }
 
         // Persist buffer back into egui memory so it survives frames.
@@ -3544,15 +3536,13 @@ pub fn autocomplete_tag_list_selector(
             let tb = text_buffer.trim().to_string();
 
             // 1) If the text changed and matches an existing candidate exactly, add it.
-            if response.changed() && !tb.is_empty() {
-                if candidates.iter().any(|c| c == &tb) {
-                    if !selected_tags.contains(&tb) {
-                        selected_tags.push(tb.clone());
-                        changed = true;
-                    }
-                    // Clear buffer after successful selection
-                    text_buffer.clear();
+            if response.changed() && !tb.is_empty() && candidates.iter().any(|c| c == &tb) {
+                if !selected_tags.contains(&tb) {
+                    selected_tags.push(tb.clone());
+                    changed = true;
                 }
+                // Clear buffer after successful selection
+                text_buffer.clear();
             }
 
             // 2) If Enter was pressed while this widget had focus, commit the typed text
@@ -3636,15 +3626,13 @@ pub fn autocomplete_ability_list_selector(
             let tb = text_buffer.trim().to_string();
 
             // 1) If the text changed and matches an existing candidate exactly, add it.
-            if response.changed() && !tb.is_empty() {
-                if candidates.iter().any(|c| c == &tb) {
-                    if !selected_abilities.contains(&tb) {
-                        selected_abilities.push(tb.clone());
-                        changed = true;
-                    }
-                    // Clear buffer after successful add
-                    text_buffer.clear();
+            if response.changed() && !tb.is_empty() && candidates.iter().any(|c| c == &tb) {
+                if !selected_abilities.contains(&tb) {
+                    selected_abilities.push(tb.clone());
+                    changed = true;
                 }
+                // Clear buffer after successful add
+                text_buffer.clear();
             }
 
             // 2) If Enter was pressed while this widget had focus, commit the typed text.
@@ -3949,19 +3937,19 @@ pub fn autocomplete_portrait_selector(
         }
 
         // Commit valid selections
-        if response.changed() && !text_buffer.is_empty() && text_buffer != current_value {
-            if available_portraits.contains(&text_buffer) {
-                *selected_portrait_id = text_buffer.clone();
-                changed = true;
-            }
+        if response.changed()
+            && !text_buffer.is_empty()
+            && text_buffer != current_value
+            && available_portraits.contains(&text_buffer)
+        {
+            *selected_portrait_id = text_buffer.clone();
+            changed = true;
         }
 
         // Show clear button
-        if ui.button("Clear").clicked() {
-            if !selected_portrait_id.is_empty() {
-                selected_portrait_id.clear();
-                changed = true;
-            }
+        if ui.button("Clear").clicked() && !selected_portrait_id.is_empty() {
+            selected_portrait_id.clear();
+            changed = true;
         }
 
         // Persist buffer back into egui memory so it survives frames.
@@ -4038,19 +4026,19 @@ pub fn autocomplete_sprite_sheet_selector(
         }
 
         // Commit valid selections (only accept selections that are in candidates)
-        if response.changed() && !text_buffer.is_empty() && text_buffer != current_value {
-            if candidates.contains(&text_buffer) {
-                *selected_sheet = text_buffer.clone();
-                changed = true;
-            }
+        if response.changed()
+            && !text_buffer.is_empty()
+            && text_buffer != current_value
+            && candidates.contains(&text_buffer)
+        {
+            *selected_sheet = text_buffer.clone();
+            changed = true;
         }
 
         // Clear button
-        if ui.button("Clear").clicked() {
-            if !selected_sheet.is_empty() {
-                selected_sheet.clear();
-                changed = true;
-            }
+        if ui.button("Clear").clicked() && !selected_sheet.is_empty() {
+            selected_sheet.clear();
+            changed = true;
         }
     });
 
@@ -4846,11 +4834,13 @@ pub fn autocomplete_creature_asset_selector(
         }
 
         // Only commit when the typed text matches a known candidate
-        if response.changed() && !text_buffer.is_empty() && text_buffer != current_value {
-            if candidates.contains(&text_buffer) {
-                *selected_path = text_buffer.clone();
-                changed = true;
-            }
+        if response.changed()
+            && !text_buffer.is_empty()
+            && text_buffer != current_value
+            && candidates.contains(&text_buffer)
+        {
+            *selected_path = text_buffer.clone();
+            changed = true;
         }
 
         if ui.button("Clear").clicked() && !selected_path.is_empty() {
@@ -5847,7 +5837,7 @@ mod tests {
         let candidates = vec!["Goblin".to_string(), "Orc".to_string()];
         let widget = AutocompleteInput::new("test_autocomplete", &candidates);
 
-        assert_eq!(widget.id_salt, "test_autocomplete");
+        assert_eq!(widget._id_salt, "test_autocomplete");
         assert_eq!(widget.candidates.len(), 2);
         assert_eq!(widget.placeholder, None);
     }
@@ -5871,7 +5861,7 @@ mod tests {
         let widget =
             AutocompleteInput::new("my_widget", &candidates).with_placeholder("Select monster...");
 
-        assert_eq!(widget.id_salt, "my_widget");
+        assert_eq!(widget._id_salt, "my_widget");
         assert_eq!(widget.candidates.len(), 3);
         assert_eq!(widget.placeholder, Some("Select monster..."));
     }
@@ -5900,7 +5890,7 @@ mod tests {
         let widget1 = AutocompleteInput::new("widget1", &candidates);
         let widget2 = AutocompleteInput::new("widget2", &candidates);
 
-        assert_ne!(widget1.id_salt, widget2.id_salt);
+        assert_ne!(widget1._id_salt, widget2._id_salt);
     }
 
     #[test]
@@ -6910,7 +6900,7 @@ mod tests {
 
     #[test]
     fn test_extract_quest_candidates() {
-        use antares::domain::quest::{Quest, QuestId};
+        use antares::domain::quest::Quest;
 
         let mut q1 = Quest::new(1, "Save the Village", "Help save the village from bandits");
         q1.min_level = Some(1);
@@ -7312,7 +7302,7 @@ mod tests {
 
                 // Simulate selecting portrait "1"
                 portrait_id = "1".to_string();
-                let changed = autocomplete_portrait_selector(
+                let _changed = autocomplete_portrait_selector(
                     ui,
                     "test_portrait",
                     "Portrait:",
@@ -7646,7 +7636,7 @@ mod tests {
     fn test_autocomplete_creature_selector_non_numeric_raw_input_rejected() {
         // A string that is neither "id — name" nor a plain number should not parse.
         let typed = "not_a_number";
-        assert!(typed.find(" — ").is_none());
+        assert!(!typed.contains(" — "));
         assert!(typed.trim().parse::<u32>().is_err());
     }
 

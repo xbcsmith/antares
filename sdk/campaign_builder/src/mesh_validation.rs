@@ -322,7 +322,7 @@ pub fn validate_mesh(mesh: &MeshDefinition) -> MeshValidationReport {
 
     // Validate indices
     let max_vertex_index = mesh.vertices.len();
-    for (i, &index) in mesh.indices.iter().enumerate() {
+    for &index in mesh.indices.iter() {
         if index as usize >= max_vertex_index {
             report.errors.push(MeshError::InvalidIndex {
                 index,

@@ -9,17 +9,16 @@
 
 use crate::ui_helpers::{
     autocomplete_ability_list_selector, autocomplete_proficiency_list_selector,
-    autocomplete_tag_list_selector, extract_item_tag_candidates, extract_proficiency_candidates,
+    autocomplete_tag_list_selector, extract_item_tag_candidates,
     extract_special_ability_candidates, show_standard_list_item, EditorToolbar, ItemAction,
     MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::items::types::Item;
-use antares::domain::proficiency::{ProficiencyDatabase, ProficiencyDefinition, ProficiencyId};
+use antares::domain::proficiency::ProficiencyId;
 use antares::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Editor state for races
@@ -832,7 +831,7 @@ impl RacesEditorState {
         items: &[Item],
         campaign_dir: Option<&PathBuf>,
         unsaved_changes: &mut bool,
-        status_message: &mut String,
+        _status_message: &mut String,
     ) {
         let title = if self.mode == RacesEditorMode::Creating {
             "Create New Race"

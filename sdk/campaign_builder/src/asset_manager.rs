@@ -2110,14 +2110,6 @@ mod tests {
         );
     }
 
-    fn test_asset_creation() {
-        let asset = Asset::new(PathBuf::from("test.png"));
-        assert_eq!(asset.path, PathBuf::from("test.png"));
-        assert_eq!(asset.asset_type, AssetType::Tileset);
-        assert_eq!(asset.size, 0);
-        assert!(!asset.is_referenced);
-    }
-
     #[test]
     fn test_asset_size_string() {
         let mut asset = Asset::new(PathBuf::from("test.png"));
@@ -2548,6 +2540,7 @@ mod tests {
                 conditions: vec![],
                 actions: vec![],
                 is_terminal: true,
+                sdk_metadata: Default::default(),
             },
         );
 
@@ -2559,6 +2552,7 @@ mod tests {
             nodes,
             repeatable: false,
             associated_quest: None,
+            sdk_metadata: Default::default(),
         };
         manager.scan_references(&[], &[], &[dialogue], &[], &[], &[], &[]);
 
@@ -2759,7 +2753,7 @@ mod tests {
         let issues = manager.validate_tree_texture_assets();
         assert!(issues.iter().any(|issue| {
             issue.validation_id == "SDK-TEX-03"
-                && issue.expected_path == PathBuf::from("assets/textures/trees/bark.png")
+                && issue.expected_path == Path::new("assets/textures/trees/bark.png")
                 && issue.actual_path.is_none()
                 && issue
                     .message
@@ -2789,11 +2783,9 @@ mod tests {
         let issues = manager.validate_tree_texture_assets();
         assert!(issues.iter().any(|issue| {
             issue.validation_id == "SDK-TEX-02"
-                && issue.expected_path == PathBuf::from("assets/textures/trees/foliage_oak.png")
-                && issue.actual_path
-                    == Some(PathBuf::from(
-                        "assets/textures/trees/foliage_oak_variant.png",
-                    ))
+                && issue.expected_path == Path::new("assets/textures/trees/foliage_oak.png")
+                && issue.actual_path.as_deref()
+                    == Some(Path::new("assets/textures/trees/foliage_oak_variant.png"))
                 && issue.actual_dimensions == Some((128, 128))
                 && issue
                     .message
@@ -2819,8 +2811,8 @@ mod tests {
         let issues = manager.validate_tree_texture_assets();
         assert!(issues.iter().any(|issue| {
             issue.validation_id == "SDK-TEX-03"
-                && issue.expected_path == PathBuf::from("assets/textures/trees/bark.png")
-                && issue.actual_path == Some(PathBuf::from("assets/textures/trees/bark.png"))
+                && issue.expected_path == Path::new("assets/textures/trees/bark.png")
+                && issue.actual_path.as_deref() == Some(Path::new("assets/textures/trees/bark.png"))
                 && issue.expected_dimensions == (64, 128)
                 && issue.actual_dimensions == Some((63, 128))
                 && issue
@@ -2850,9 +2842,9 @@ mod tests {
         let issues = manager.validate_tree_texture_assets();
         assert!(issues.iter().any(|issue| {
             issue.validation_id == "SDK-TEX-05"
-                && issue.expected_path == PathBuf::from("assets/textures/trees/foliage_pine.png")
-                && issue.actual_path
-                    == Some(PathBuf::from("assets/textures/trees/foliage_pine.png"))
+                && issue.expected_path == Path::new("assets/textures/trees/foliage_pine.png")
+                && issue.actual_path.as_deref()
+                    == Some(Path::new("assets/textures/trees/foliage_pine.png"))
                 && issue.expected_dimensions == (64, 128)
                 && issue.actual_dimensions == Some((64, 127))
                 && issue
@@ -2893,7 +2885,7 @@ mod tests {
         let issues = manager.validate_grass_texture_assets();
         assert!(issues.iter().any(|issue| {
             issue.validation_id == "SDK-GRASS-01"
-                && issue.expected_path == PathBuf::from("assets/textures/grass/grass_blade.png")
+                && issue.expected_path == Path::new("assets/textures/grass/grass_blade.png")
                 && issue.actual_path.is_none()
                 && issue
                     .message
@@ -2923,11 +2915,9 @@ mod tests {
         let issues = manager.validate_grass_texture_assets();
         assert!(issues.iter().any(|issue| {
             issue.validation_id == "SDK-GRASS-02"
-                && issue.expected_path == PathBuf::from("assets/textures/grass/grass_blade.png")
-                && issue.actual_path
-                    == Some(PathBuf::from(
-                        "assets/textures/grass/grass_blade_variant.png",
-                    ))
+                && issue.expected_path == Path::new("assets/textures/grass/grass_blade.png")
+                && issue.actual_path.as_deref()
+                    == Some(Path::new("assets/textures/grass/grass_blade_variant.png"))
                 && issue.actual_dimensions == Some((32, 128))
                 && issue
                     .message
@@ -2957,8 +2947,9 @@ mod tests {
         let issues = manager.validate_grass_texture_assets();
         assert!(issues.iter().any(|issue| {
             issue.validation_id == "SDK-GRASS-01"
-                && issue.expected_path == PathBuf::from("assets/textures/grass/grass_blade.png")
-                && issue.actual_path == Some(PathBuf::from("assets/textures/grass/grass_blade.png"))
+                && issue.expected_path == Path::new("assets/textures/grass/grass_blade.png")
+                && issue.actual_path.as_deref()
+                    == Some(Path::new("assets/textures/grass/grass_blade.png"))
                 && issue.expected_dimensions == (32, 128)
                 && issue.actual_dimensions == Some((32, 127))
                 && issue
@@ -3155,17 +3146,12 @@ mod tests {
     }
 
     #[test]
-    fn test_scan_with_actual_tutorial_campaign_data() {
+    fn test_scan_with_actual_test_campaign_data() {
         use std::path::PathBuf;
 
-        // This test uses the actual tutorial campaign data to verify portrait scanning works
-        let campaign_dir = PathBuf::from("campaigns/tutorial");
-
-        // Skip test if campaign directory doesn't exist (e.g., in CI)
-        if !campaign_dir.exists() {
-            eprintln!("Skipping test - tutorial campaign not found");
-            return;
-        }
+        // This test uses the test_campaign fixture data to verify portrait scanning works
+        let campaign_dir =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/test_campaign");
 
         let mut manager = AssetManager::new(campaign_dir.clone());
 

@@ -47,9 +47,8 @@
 //! trees.
 
 use crate::ui_helpers::{
-    autocomplete_item_selector, autocomplete_quest_selector, show_standard_list_item,
-    ActionButtons, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
-    TwoColumnLayout,
+    autocomplete_quest_selector, show_standard_list_item, ActionButtons, EditorToolbar, ItemAction,
+    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::dialogue::{
     DialogueAction, DialogueChoice, DialogueCondition, DialogueId, DialogueNode, DialogueTree,
@@ -418,7 +417,7 @@ impl DialogueEditorState {
             return Err("Invalid dialogue index".to_string());
         }
 
-        let node_id_parsed = self
+        let _node_id_parsed = self
             .node_buffer
             .id
             .parse::<NodeId>()
@@ -2025,7 +2024,7 @@ impl DialogueEditorState {
         // Phase 3: Navigation Controls
         ui.horizontal(|ui| {
             ui.label("Find Node:");
-            let response = ui.text_edit_singleline(&mut self.node_search_filter);
+            let _response = ui.text_edit_singleline(&mut self.node_search_filter);
 
             if !self.node_search_filter.is_empty() {
                 let matches = self.search_nodes(dialogue_idx, &self.node_search_filter);
@@ -2087,7 +2086,7 @@ impl DialogueEditorState {
                 for (node_id, node) in sorted_nodes {
                     // Phase 3: Highlight unreachable nodes
                     let is_unreachable = unreachable.contains(node_id);
-                    let bg_color = if is_unreachable {
+                    let _bg_color = if is_unreachable {
                         egui::Color32::from_rgba_unmultiplied(255, 165, 0, 20)
                     } else {
                         egui::Color32::TRANSPARENT
@@ -2440,7 +2439,6 @@ impl DialogueEditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antares::domain::world::npc::NpcDefinition;
 
     #[test]
     fn test_dialogue_editor_state_creation() {

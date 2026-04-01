@@ -888,13 +888,12 @@ impl ConditionsEditorState {
                                         "Rounds",
                                     )
                                     .clicked()
-                                {
-                                    if !matches!(
+                                    && !matches!(
                                         new_cond.default_duration,
                                         ConditionDuration::Rounds(_)
-                                    ) {
-                                        new_cond.default_duration = ConditionDuration::Rounds(1);
-                                    }
+                                    )
+                                {
+                                    new_cond.default_duration = ConditionDuration::Rounds(1);
                                 }
                                 if ui
                                     .selectable_label(
@@ -905,13 +904,12 @@ impl ConditionsEditorState {
                                         "Minutes",
                                     )
                                     .clicked()
-                                {
-                                    if !matches!(
+                                    && !matches!(
                                         new_cond.default_duration,
                                         ConditionDuration::Minutes(_)
-                                    ) {
-                                        new_cond.default_duration = ConditionDuration::Minutes(1);
-                                    }
+                                    )
+                                {
+                                    new_cond.default_duration = ConditionDuration::Minutes(1);
                                 }
                             });
                         // If Rounds or Minutes selected, show a numeric editor
@@ -965,14 +963,13 @@ impl ConditionsEditorState {
             // Effects list & editing
             ui.horizontal(|ui| {
                 ui.label("Effects:");
-                if !new_cond.effects.is_empty() {
-                    if ui
+                if !new_cond.effects.is_empty()
+                    && ui
                         .small_button("🗑️ Clear All")
                         .on_hover_text("Remove all effects from this condition")
                         .clicked()
-                    {
-                        new_cond.effects.clear();
-                    }
+                {
+                    new_cond.effects.clear();
                 }
             });
 

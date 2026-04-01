@@ -26,7 +26,6 @@
 
 use std::collections::VecDeque;
 use std::fmt;
-use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// Maximum number of log messages to retain in the buffer

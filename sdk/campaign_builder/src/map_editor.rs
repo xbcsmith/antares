@@ -47,9 +47,9 @@ use antares::domain::items::types::Item;
 use antares::domain::types::{Direction, EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
 use antares::domain::world::{
-    FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType,
-    GrassBladeConfig, GrassDensity, LayeredSprite, Map, MapEvent, RockVariant, SpriteLayer,
-    SpriteReference, TerrainType, Tile, TileVisualMetadata, TreeType, WallType, WaterFlowDirection,
+    FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, LayeredSprite, Map, MapEvent,
+    RockVariant, SpriteLayer, SpriteReference, TerrainType, Tile, TileVisualMetadata, TreeType,
+    WallType, WaterFlowDirection,
 };
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -198,13 +198,13 @@ enum EditorAction {
     EventAdded {
         position: Position,
         event: MapEvent,
-        event_id: Option<EventId>,
+        _event_id: Option<EventId>,
     },
     /// Event was removed
     EventRemoved {
         position: Position,
         event: MapEvent,
-        event_id: Option<EventId>,
+        _event_id: Option<EventId>,
     },
     /// NPC placement was added
     NpcPlacementAdded { placement: NpcPlacement },
@@ -262,11 +262,6 @@ impl UndoStack {
         } else {
             None
         }
-    }
-
-    fn clear(&mut self) {
-        self.actions.clear();
-        self.current = 0;
     }
 }
 
@@ -1600,29 +1595,6 @@ impl MapEditorState {
         }
     }
 
-    /// Paints terrain at position (kept for undo compatibility)
-    fn paint_terrain(&mut self, pos: Position, terrain: TerrainType) {
-        if let Some(tile) = self.map.get_tile(pos).cloned() {
-            let mut new_tile = tile;
-            new_tile.terrain = terrain;
-            new_tile.blocked = matches!(terrain, TerrainType::Mountain | TerrainType::Water)
-                || matches!(new_tile.wall_type, WallType::Normal);
-            self.set_tile(pos, new_tile);
-        }
-    }
-
-    /// Paints wall at position (kept for undo compatibility)
-    fn paint_wall(&mut self, pos: Position, wall: WallType) {
-        if let Some(tile) = self.map.get_tile(pos).cloned() {
-            let mut new_tile = tile;
-            new_tile.wall_type = wall;
-            new_tile.blocked =
-                matches!(new_tile.terrain, TerrainType::Mountain | TerrainType::Water)
-                    || matches!(wall, WallType::Normal);
-            self.set_tile(pos, new_tile);
-        }
-    }
-
     /// Fills a rectangular region
     pub fn fill_region(
         &mut self,
@@ -1687,7 +1659,7 @@ impl MapEditorState {
         self.undo_stack.push(EditorAction::EventAdded {
             position: pos,
             event,
-            event_id: None,
+            _event_id: None,
         });
         self.has_changes = true;
     }
@@ -1699,7 +1671,7 @@ impl MapEditorState {
             self.undo_stack.push(EditorAction::EventRemoved {
                 position: pos,
                 event,
-                event_id: None,
+                _event_id: None,
             });
             self.has_changes = true;
         }
@@ -1828,7 +1800,7 @@ impl MapEditorState {
         }
 
         // Check for unreachable events
-        for (pos, _) in &self.map.events {
+        for pos in self.map.events.keys() {
             if self.map.is_blocked(*pos) {
                 self.validation_errors.push(format!(
                     "Error: Event at ({}, {}) is on a blocked tile",
@@ -2044,8 +2016,9 @@ impl Default for EventEditorState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EventType {
+    #[default]
     Encounter,
     Treasure,
     Teleport,
@@ -2056,12 +2029,6 @@ pub enum EventType {
     EnterInn,
     Furniture,
     Container,
-}
-
-impl Default for EventType {
-    fn default() -> Self {
-        EventType::Encounter
-    }
 }
 
 impl EventType {
@@ -3028,28 +2995,6 @@ impl<'a> Widget for MapPreviewWidget<'a> {
 
 // ===== Main Maps Editor State =====
 
-/// Suggest maps by partial input (id or name)
-fn suggest_maps_for_partial(maps: &[Map], partial: &str) -> Vec<(MapId, String)> {
-    let partial_lower = partial.to_lowercase();
-
-    let mut suggestions: Vec<(MapId, String)> = maps
-        .iter()
-        .filter(|m| {
-            // Match against id text or name substring, case-insensitive
-            m.id.to_string().contains(&partial_lower)
-                || m.name.to_lowercase().contains(&partial_lower)
-        })
-        .map(|m| (m.id, m.name.clone()))
-        .take(10)
-        .collect();
-
-    // Sort by ID for deterministic ordering
-    suggestions.sort_unstable_by_key(|(id, _name)| *id);
-    suggestions
-}
-
-// ===== Main Maps Editor State =====
-
 // ===== Main Maps Editor State =====
 
 /// Main maps editor state following the standard SDK editor pattern.
@@ -3808,7 +3753,7 @@ impl MapsEditorState {
                                 .show(left_ui, |ui| {
                                     // Debug logging removed: no additional stderr logs.
 
-                                    let map_response = ui.add(
+                                    let _map_response = ui.add(
                                         MapGridWidget::new(editor_ref)
                                             .tile_size(effective_tile_size),
                                     );
@@ -3925,7 +3870,7 @@ impl MapsEditorState {
     fn show_tool_palette(
         ui: &mut egui::Ui,
         editor: &mut MapEditorState,
-        current_zoom: f32,
+        _current_zoom: f32,
     ) -> Option<ZoomAction> {
         let action: Option<ZoomAction> = None;
 
@@ -3994,54 +3939,11 @@ impl MapsEditorState {
         action
     }
 
-    /// Show map view toggle controls (Grid, Events, NPCs, Auto Fit) and Zoom controls.
-    fn show_map_view_controls(
-        ui: &mut egui::Ui,
-        editor: &mut MapEditorState,
-        current_zoom: f32,
-    ) -> Option<ZoomAction> {
-        let mut action: Option<ZoomAction> = None;
-
-        ui.horizontal(|ui| {
-            // View options
-            ui.checkbox(&mut editor.show_grid, "Grid");
-            ui.checkbox(&mut editor.show_events, "Events");
-            ui.checkbox(&mut editor.show_npcs, "NPCs");
-
-            ui.checkbox(&mut editor.auto_fit_on_resize, "Auto Fit").on_hover_text(
-                "When enabled, the map will automatically scale to fit the left column when the window is resized. Manual zoom persists until Fit is clicked.",
-            );
-
-            ui.separator();
-
-            // Zoom controls
-            ui.label("Zoom:");
-            if ui.button("➖").on_hover_text("Zoom Out").clicked() {
-                action = Some(ZoomAction::Out);
-            }
-
-            ui.label(format!("{}%", (current_zoom * 100.0) as i32));
-
-            if ui.button("➕").on_hover_text("Zoom In").clicked() {
-                action = Some(ZoomAction::In);
-            }
-
-            if ui.button("⊡ Fit").on_hover_text("Fit map to available space").clicked() {
-                action = Some(ZoomAction::Fit);
-            }
-
-            if ui.button("100%").on_hover_text("Reset to 100%").clicked() {
-                action = Some(ZoomAction::Reset);
-            }
-        });
-
-        action
-    }
-
     /// Show inspector panel
     ///
     /// Returns `Some(npc_id)` when the user requests to open the NPC editor for
     /// an NPC placed on the currently selected tile.
+    #[allow(clippy::too_many_arguments)]
     fn show_inspector_panel(
         ui: &mut egui::Ui,
         editor: &mut MapEditorState,
@@ -5485,24 +5387,21 @@ impl MapsEditorState {
                         });
 
                     // Furniture-specific flags
-                    if event_editor.furniture_type == FurnitureType::Torch {
-                        if ui
+                    if event_editor.furniture_type == FurnitureType::Torch
+                        && ui
                             .checkbox(&mut event_editor.furniture_lit, "Lit (emissive)")
                             .changed()
-                        {
-                            editor.has_changes = true;
-                        }
+                    {
+                        editor.has_changes = true;
                     }
 
-                    if event_editor.furniture_type == FurnitureType::Chest
-                        || event_editor.furniture_type == FurnitureType::Door
-                    {
-                        if ui
+                    if (event_editor.furniture_type == FurnitureType::Chest
+                        || event_editor.furniture_type == FurnitureType::Door)
+                        && ui
                             .checkbox(&mut event_editor.furniture_locked, "🔒 Starts Locked")
                             .changed()
-                        {
-                            editor.has_changes = true;
-                        }
+                    {
+                        editor.has_changes = true;
                     }
 
                     // Door-specific: key item ID
@@ -5977,7 +5876,7 @@ impl MapsEditorState {
         }
 
         // Draw event markers
-        for (pos, _) in &map.events {
+        for pos in map.events.keys() {
             if pos.x >= 0 && pos.x < map.width as i32 && pos.y >= 0 && pos.y < map.height as i32 {
                 let marker_pos = rect.min
                     + Vec2::new(
@@ -6175,10 +6074,8 @@ impl MapsEditorState {
                 editor.toggle_multi_select_mode();
             }
 
-            if !editor.selected_tiles.is_empty() {
-                if ui.button("Clear Selection").clicked() {
-                    editor.clear_tile_selection();
-                }
+            if !editor.selected_tiles.is_empty() && ui.button("Clear Selection").clicked() {
+                editor.clear_tile_selection();
             }
         });
 
@@ -6836,33 +6733,6 @@ mod tests {
     }
 
     #[test]
-    fn test_paint_terrain() {
-        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
-        let mut state = MapEditorState::new(map);
-
-        let pos = Position::new(3, 3);
-        state.paint_terrain(pos, TerrainType::Forest);
-
-        assert_eq!(
-            state.map.get_tile(pos).unwrap().terrain,
-            TerrainType::Forest
-        );
-        assert!(state.has_changes);
-    }
-
-    #[test]
-    fn test_paint_wall() {
-        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
-        let mut state = MapEditorState::new(map);
-
-        let pos = Position::new(3, 3);
-        state.paint_wall(pos, WallType::Door);
-
-        assert_eq!(state.map.get_tile(pos).unwrap().wall_type, WallType::Door);
-        assert!(state.has_changes);
-    }
-
-    #[test]
     fn test_add_remove_event() {
         let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let mut state = MapEditorState::new(map);
@@ -6946,32 +6816,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validation_events_on_blocked_tiles() {
-        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
-        let mut state = MapEditorState::new(map);
-
-        // Place a wall
-        let pos = Position::new(5, 5);
-        state.paint_wall(pos, WallType::Normal);
-
-        // Add event on blocked tile
-        let event = MapEvent::Sign {
-            name: "Sign".to_string(),
-            description: "Desc".to_string(),
-            text: "Test".to_string(),
-            time_condition: None,
-            facing: None,
-        };
-        state.add_event(pos, event);
-
-        // Validate
-        state.validate();
-
-        assert!(!state.validation_errors.is_empty());
-        assert!(state.validation_errors[0].contains("blocked tile"));
-    }
-
-    #[test]
     fn test_event_editor_state_to_encounter() {
         let editor = EventEditorState {
             event_type: EventType::Encounter,
@@ -6984,8 +6828,8 @@ mod tests {
         let event = editor.to_map_event().unwrap();
         match event {
             MapEvent::Encounter {
-                name,
-                description,
+                name: _,
+                description: _,
                 monster_group,
                 ..
             } => {
@@ -7700,32 +7544,6 @@ mod tests {
         assert_eq!(snapshot[0].0, 1); // map ID 1 was originally at index 1
         assert_eq!(snapshot[1].0, 2); // map ID 2 was originally at index 2
         assert_eq!(snapshot[2].0, 0); // map ID 3 was originally at index 0
-    }
-
-    #[test]
-    fn test_suggest_maps_for_partial() {
-        // Create a small set of maps to test suggestion behavior
-        let maps = vec![
-            Map::new(1, "Starter Town".to_string(), "Desc".to_string(), 10, 10),
-            Map::new(2, "Dark Forest".to_string(), "Desc".to_string(), 10, 10),
-            Map::new(3, "Ancient Ruins".to_string(), "Desc".to_string(), 10, 10),
-        ];
-
-        // Partial name match
-        let results = suggest_maps_for_partial(&maps, "Dark");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, 2);
-        assert!(results[0].1.to_lowercase().contains("dark"));
-
-        // Partial id match
-        let results = suggest_maps_for_partial(&maps, "1");
-        assert!(!results.is_empty());
-        assert!(results.iter().any(|(id, _)| *id == 1));
-
-        // Partial lowercase name fragment
-        let results = suggest_maps_for_partial(&maps, "anc");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, 3);
     }
 
     #[test]

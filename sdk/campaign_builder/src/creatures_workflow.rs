@@ -59,9 +59,10 @@ use crate::preview_features::PreviewState;
 /// let mode = WorkflowMode::AssetEditor;
 /// assert_eq!(mode.display_name(), "Asset Editor");
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WorkflowMode {
     /// The registry list view – browse and manage creature entries.
+    #[default]
     Registry,
     /// The per-creature asset editor – edit meshes, transforms, and properties.
     AssetEditor,
@@ -97,12 +98,6 @@ impl WorkflowMode {
     /// ```
     pub fn is_asset_editor(&self) -> bool {
         *self == WorkflowMode::AssetEditor
-    }
-}
-
-impl Default for WorkflowMode {
-    fn default() -> Self {
-        WorkflowMode::Registry
     }
 }
 

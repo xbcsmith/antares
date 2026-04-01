@@ -729,14 +729,14 @@ impl ProficienciesEditorState {
                 .interactive(id_enabled),
         );
 
-        if self.mode == ProficienciesEditorMode::Add {
-            if ui.button("💡 Suggest ID from Name").clicked() {
-                self.edit_buffer.id = Self::suggest_proficiency_id(
-                    &self.edit_buffer.name,
-                    self.edit_buffer.category,
-                    proficiencies,
-                );
-            }
+        if self.mode == ProficienciesEditorMode::Add
+            && ui.button("💡 Suggest ID from Name").clicked()
+        {
+            self.edit_buffer.id = Self::suggest_proficiency_id(
+                &self.edit_buffer.name,
+                self.edit_buffer.category,
+                proficiencies,
+            );
         }
 
         ui.label("Name:");
@@ -822,20 +822,17 @@ impl ProficienciesEditorState {
             if ui
                 .add_enabled(save_enabled, egui::Button::new("💾 Save"))
                 .clicked()
+                && save_enabled
             {
-                if save_enabled {
-                    self.mode = ProficienciesEditorMode::List;
-                    *unsaved_changes = true;
-                    *status_message = format!("Saved proficiency: {}", self.edit_buffer.id);
-                }
+                self.mode = ProficienciesEditorMode::List;
+                *unsaved_changes = true;
+                *status_message = format!("Saved proficiency: {}", self.edit_buffer.id);
             }
 
-            if self.mode == ProficienciesEditorMode::Edit {
-                if ui.button("🔄 Reset").clicked() {
-                    if let Some(prof) = proficiencies.iter().find(|p| p.id == self.edit_buffer.id) {
-                        self.edit_buffer = prof.clone();
-                        *status_message = format!("Reset: {}", prof.id);
-                    }
+            if self.mode == ProficienciesEditorMode::Edit && ui.button("🔄 Reset").clicked() {
+                if let Some(prof) = proficiencies.iter().find(|p| p.id == self.edit_buffer.id) {
+                    self.edit_buffer = prof.clone();
+                    *status_message = format!("Reset: {}", prof.id);
                 }
             }
         });
@@ -1232,9 +1229,6 @@ mod tests {
 
     #[test]
     fn test_calculate_usage_no_references() {
-        use antares::domain::classes::ClassDefinition;
-        use antares::domain::races::RaceDefinition;
-
         let prof_ids = vec!["test_prof"];
         let classes = vec![];
         let races = vec![];

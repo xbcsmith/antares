@@ -2199,3 +2199,167 @@ spell casting failure reason from the domain layer to the game layer.
 - [x] No test references `campaigns/tutorial`
 - [x] All test data uses `data/test_campaign` or inline construction
 - [x] No architectural deviations from architecture.md
+
+## SDK Codebase Cleanup — Phase 1: Remove Dead Code and Fix Lint Suppressions (Complete)
+
+### Overview
+
+Phase 1 of the SDK codebase cleanup removes provably-dead code, fixes all
+clippy suppressions that were hidden behind blanket `#![allow(...)]` directives,
+eliminates `campaigns/tutorial` violations in test and documentation code, and
+fixes pre-existing compilation errors. No behavioral changes were introduced.
+
+### 1.1 — Removed 9 Blanket Crate-Level `#![allow(...)]` Directives
+
+Deleted all 9 blanket lint suppressions from `sdk/campaign_builder/src/lib.rs`
+(lines 14–22):
+
+| Suppression                              | Fix Applied                                                           |
+| ---------------------------------------- | --------------------------------------------------------------------- |
+| `#![allow(dead_code)]`                   | Removed; fixed ~30 newly-surfaced dead code warnings                  |
+| `#![allow(unused_variables)]`            | Removed; prefixed unused params with `_`                              |
+| `#![allow(unused_imports)]`              | Removed; deleted ~40 unused imports                                   |
+| `#![allow(clippy::collapsible_if)]`      | Removed; collapsed 35 nested `if` blocks                              |
+| `#![allow(clippy::single_char_add_str)]` | Removed; replaced `push_str("\n")` with `push('\n')`                  |
+| `#![allow(clippy::derivable_impls)]`     | Removed; replaced 6 trivial `Default` impls with `#[derive(Default)]` |
+| `#![allow(clippy::for_kv_map)]`          | Removed; switched to `.values()` / `.values_mut()`                    |
+| `#![allow(clippy::vec_init_then_push)]`  | Removed; used `vec![...]` literal syntax                              |
+| `#![allow(clippy::useless_conversion)]`  | Removed; deleted `.into()` / `.try_into()` on same types              |
+
+After removal, `cargo clippy --all-targets -- -D warnings` surfaced 73+
+warnings across the entire SDK. All were fixed file-by-file.
+
+### 1.2 — Deleted Dead Code
+
+| Item                                        | File                        | Action                                           |
+| ------------------------------------------- | --------------------------- | ------------------------------------------------ |
+| `show_list_mode()` deprecated panic stub    | `creatures_editor.rs`       | Deleted method + `#[allow(dead_code)]` attribute |
+| `FileNode.path` field                       | `lib.rs`                    | Deleted field + `#[allow(dead_code)]` attribute  |
+| `FileNode.children` field                   | `lib.rs`                    | Prefixed with `_` (written but never read)       |
+| `show_file_node()` function                 | `lib.rs`                    | Deleted (no callers)                             |
+| `show_file_browser()` method                | `lib.rs`                    | Deleted (no callers)                             |
+| `show_config_editor()` legacy stub          | `lib.rs`                    | Deleted (no callers)                             |
+| `EditorMode` enum                           | `lib.rs`                    | Moved to `#[cfg(test)]` (only used by tests)     |
+| `ItemTypeFilter` enum + impl                | `lib.rs`                    | Moved to `#[cfg(test)]`, trimmed unused variants |
+| `ValidationFilter::as_str()` method         | `lib.rs`                    | Deleted (never called)                           |
+| 3 dead test helpers                         | `tests/bug_verification.rs` | Deleted `mod helpers` block                      |
+| 2 `#[ignore]`d skeleton tests               | `tests/bug_verification.rs` | Deleted both stub tests                          |
+| `mod test_instructions` documentation block | `tests/bug_verification.rs` | Deleted                                          |
+| `test_asset_creation` dead helper           | `asset_manager.rs`          | Deleted                                          |
+| `create_test_item` dead helper              | `characters_editor.rs`      | Deleted                                          |
+| `create_test_creature` dead helper          | `template_browser.rs`       | Deleted                                          |
+
+Additional dead code surfaced across multiple files after blanket-allow removal:
+
+| Item                                                      | File                  | Action                               |
+| --------------------------------------------------------- | --------------------- | ------------------------------------ |
+| `validate_key_binding`, `validate_config`                 | `config_editor.rs`    | Deleted methods + referencing tests  |
+| `count_by_category`                                       | `item_mesh_editor.rs` | Deleted method + referencing test    |
+| `clear`, `paint_terrain`, `paint_wall`                    | `map_editor.rs`       | Deleted methods + referencing tests  |
+| `suggest_maps_for_partial`                                | `map_editor.rs`       | Deleted function + referencing test  |
+| `show_map_view_controls`                                  | `map_editor.rs`       | Deleted function                     |
+| `import_meshes_for_importer_with_options` (2 funcs)       | `mesh_obj_io.rs`      | Deleted both functions               |
+| `show_preview`, `merchant_dialogue_validation_for_buffer` | `npc_editor.rs`       | Deleted methods                      |
+| `export_campaign`, `import_campaign` (4 methods)          | `packager.rs`         | Deleted methods                      |
+| `launch_test_play`, `can_launch_test_play`                | `test_play.rs`        | Deleted methods                      |
+| `TRAY_ICON_2X` constant                                   | `tray.rs`             | Deleted constant + referencing tests |
+
+### 1.3 — Fixed Clippy Suppressions
+
+All 73 clippy issues surfaced after blanket-allow removal were fixed:
+
+- 35 collapsible `if` blocks collapsed
+- 7 owned-instance-for-comparison patterns fixed (used `Path::new()` instead of `PathBuf::from()`)
+- 6 derivable `Default` impls replaced with `#[derive(Default)]`
+- 4 `vec![...]` replaced with array literals
+- 4 `too_many_arguments` functions annotated with per-site `#[allow(clippy::too_many_arguments)]` (deferred to Phase 6)
+- 3 useless `u16` conversions removed
+- 2 constant-value assertions rewritten
+- 2 field-assignment-outside-initializer patterns converted to struct literal syntax
+- 1 `&PathBuf` parameter changed to `&Path`
+- 1 `push_str("\n")` changed to `push('\n')`
+- 1 `.find().is_none()` changed to `!.contains()`
+- 1 duplicated `#![cfg(target_os = "macos")]` attribute removed
+- 1 enum with common variant suffix renamed (`ObjImporterUiSignal` variants)
+- 1 method chain rewritten as `if`/`else`
+
+### 1.4 — Test-Only Methods Moved to `#[cfg(test)]`
+
+13 methods on `CampaignBuilderApp` that were only used by the `#[cfg(test)]
+mod tests` block were moved to a dedicated `#[cfg(test)] impl
+CampaignBuilderApp` block:
+
+`default_item`, `default_spell`, `default_monster`, `next_available_item_id`,
+`next_available_spell_id`, `next_available_monster_id`, `next_available_map_id`,
+`next_available_quest_id`, `next_available_class_id`,
+`save_stock_templates_to_file`, `sync_state_to_undo_redo`,
+`tree_texture_asset_issues`, `grass_texture_asset_issues`
+
+5 of those (`next_available_class_id`, `save_stock_templates_to_file`,
+`sync_state_to_undo_redo`, `tree_texture_asset_issues`,
+`grass_texture_asset_issues`) were subsequently deleted as no test used them.
+
+### 1.5 — Fixed `campaigns/tutorial` Violations
+
+| File                           | Fix                                                                                                                              |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `asset_manager.rs` (test)      | Changed `PathBuf::from("campaigns/tutorial")` to `env!("CARGO_MANIFEST_DIR")` + `data/test_campaign`; removed early-return guard |
+| `creatures_manager.rs` (docs)  | Updated 2 doc comment examples to `data/test_campaign`                                                                           |
+| `bin/migrate_maps.rs` (docs)   | Updated 2 doc comment examples to `data/test_campaign`                                                                           |
+| `tests/map_data_validation.rs` | Updated doc comment to remove `campaigns/tutorial` reference                                                                     |
+
+### 1.6 — Fixed Pre-Existing Compilation Errors
+
+Before Phase 1 could proceed, 3 pre-existing compilation errors were fixed:
+
+| File               | Issue                                                         | Fix                                               |
+| ------------------ | ------------------------------------------------------------- | ------------------------------------------------- |
+| `asset_manager.rs` | Missing `sdk_metadata` field in `DialogueNode`/`DialogueTree` | Added `sdk_metadata: Default::default()`          |
+| `templates.rs`     | Missing `sdk_metadata` field in 8 struct literals             | Added `sdk_metadata: Default::default()`          |
+| `npc_editor.rs`    | Borrow checker error (E0500) in `show_split` closures         | Pre-computed merchant dialogue state into HashMap |
+
+Additional test-only compilation fixes in `furniture_editor_tests.rs`,
+`furniture_customization_tests.rs`, `furniture_properties_tests.rs`, and
+`ui_improvements_test.rs` (missing `key_item_id` and `sdk_metadata` fields).
+
+### 1.7 — Prefixed Unused Struct Fields
+
+11 fields in `CampaignBuilderApp` that are written to but never read were
+prefixed with `_`:
+
+`_quests_search_filter`, `_quests_show_preview`, `_quests_import_buffer`,
+`_quests_show_import_dialog`, `_stock_templates_file`, `_export_wizard`,
+`_test_play_session`, `_test_play_config`, `_show_export_dialog`,
+`_show_test_play_panel`
+
+Dead fields in other structs were also prefixed: `_custom_maps` (templates.rs),
+`_last_mouse_pos` (preview_renderer.rs), `_id_salt` (ui_helpers.rs),
+`_children` (lib.rs FileNode), `_event_id` (map_editor.rs, 2 instances).
+
+### Deliverables Checklist
+
+- [x] 9 blanket `#![allow(...)]` directives removed from `lib.rs`
+- [x] All surfaced clippy/compiler warnings fixed (73 clippy + 113 compiler warnings)
+- [x] 15+ dead code items deleted (methods, functions, constants, enum variants)
+- [x] 2 `#[ignore]`d tests deleted
+- [x] 3 dead test helpers deleted
+- [x] All trivial clippy suppressions fixed
+- [x] 5 `campaigns/tutorial` violations fixed (1 test + 4 doc comments)
+- [x] 3 pre-existing compilation errors fixed
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all             → No output (all files formatted)
+✅ cargo check --all-targets   → Finished with 0 errors, 0 warnings
+✅ cargo clippy --all-targets -- -D warnings → Finished with 0 warnings
+✅ cargo nextest run --all-features → 4095 passed; 0 failed; 8 skipped
+```
+
+### Success Criteria Verification
+
+- [x] Zero blanket `#![allow(...)]` at crate root
+- [x] Zero `#[allow(dead_code)]` in SDK source
+- [x] Zero `#[allow(deprecated)]` in SDK source
+- [x] Zero `campaigns/tutorial` references in SDK tests or source
+- [x] All quality gates pass

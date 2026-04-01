@@ -9,8 +9,8 @@ use crate::ui_helpers::{
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
     AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
-    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Item,
-    ItemType, MagicItemClassification, QuestData, ResistanceType, WeaponClassification, WeaponData,
+    ArmorData, AttributeType, ConsumableData, ConsumableEffect, Item, ItemType,
+    MagicItemClassification, QuestData, ResistanceType, WeaponClassification, WeaponData,
 };
 use antares::domain::types::{DiceRoll, ItemId};
 use antares::domain::visual::item_mesh::ItemMeshDescriptor;
@@ -408,10 +408,10 @@ impl ItemsEditorState {
         let mut action_requested: Option<ItemAction> = None;
         ui.separator();
 
-        let total_width = ui.available_width();
-        let inspector_min_width = 300.0;
+        let _total_width = ui.available_width();
+        let _inspector_min_width = 300.0;
         // Reserve a small margin for the separator (12.0)
-        let sep_margin = 12.0;
+        let _sep_margin = 12.0;
 
         TwoColumnLayout::new("items").show_split(
             ui,
@@ -575,7 +575,7 @@ impl ItemsEditorState {
     }
 
     /// Static preview method that doesn't require self
-    fn show_preview_static(ui: &mut egui::Ui, item: &Item, classes: &[ClassDefinition]) {
+    fn show_preview_static(ui: &mut egui::Ui, item: &Item, _classes: &[ClassDefinition]) {
         let panel_height = crate::ui_helpers::compute_panel_height(
             ui,
             crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
@@ -810,7 +810,7 @@ impl ItemsEditorState {
         &mut self,
         ui: &mut egui::Ui,
         items: &mut Vec<Item>,
-        classes: &[ClassDefinition],
+        _classes: &[ClassDefinition],
         unsaved_changes: &mut bool,
         status_message: &mut String,
         campaign_dir: Option<&PathBuf>,

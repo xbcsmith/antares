@@ -23,6 +23,7 @@ mod ui_improvements_tests {
             conditions: vec![],
             actions: vec![],
             is_terminal: false,
+            sdk_metadata: Default::default(),
         };
 
         let node2 = DialogueNode {
@@ -33,6 +34,7 @@ mod ui_improvements_tests {
             conditions: vec![],
             actions: vec![],
             is_terminal: true,
+            sdk_metadata: Default::default(),
         };
 
         nodes.insert(0u16, node1);
@@ -46,6 +48,7 @@ mod ui_improvements_tests {
             repeatable: true,
             speaker_name: Some("Town Guard".to_string()),
             associated_quest: Some(5),
+            sdk_metadata: Default::default(),
         };
 
         // Verify dialogue structure for preview display
@@ -101,6 +104,7 @@ mod ui_improvements_tests {
                 conditions: vec![],
                 actions: vec![],
                 is_terminal: i == 9,
+                sdk_metadata: Default::default(),
             };
             nodes.insert(i, node);
         }
@@ -113,6 +117,7 @@ mod ui_improvements_tests {
             repeatable: false,
             speaker_name: None,
             associated_quest: None,
+            sdk_metadata: Default::default(),
         };
 
         // Preview should show up to 5 nodes
@@ -138,6 +143,7 @@ mod ui_improvements_tests {
             repeatable: false,
             speaker_name: Some("Mysterious Stranger".to_string()),
             associated_quest: Some(10),
+            sdk_metadata: Default::default(),
         };
 
         // Verify metadata display in UI
@@ -158,6 +164,7 @@ mod ui_improvements_tests {
             repeatable: true,
             speaker_name: None,
             associated_quest: None,
+            sdk_metadata: Default::default(),
         };
 
         let one_time_dialogue = DialogueTree {
@@ -168,6 +175,7 @@ mod ui_improvements_tests {
             repeatable: false,
             speaker_name: None,
             associated_quest: None,
+            sdk_metadata: Default::default(),
         };
 
         // Repeatable dialogues show 🔄 indicator in UI
@@ -185,6 +193,7 @@ mod ui_improvements_tests {
             conditions: vec![],
             actions: vec![],
             is_terminal: true,
+            sdk_metadata: Default::default(),
         };
 
         let normal_node = DialogueNode {
@@ -195,6 +204,7 @@ mod ui_improvements_tests {
             conditions: vec![],
             actions: vec![],
             is_terminal: false,
+            sdk_metadata: Default::default(),
         };
 
         // Terminal nodes show 🏁 indicator in preview

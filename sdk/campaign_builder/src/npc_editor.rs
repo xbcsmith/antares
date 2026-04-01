@@ -59,16 +59,15 @@
 use crate::creature_assets::CreatureAssetManager;
 use crate::dialogue_editor::{DialogueEditorState, MerchantDialogueUpdate};
 use crate::ui_helpers::{
-    autocomplete_creature_selector, autocomplete_portrait_selector,
-    autocomplete_sprite_sheet_selector, extract_portrait_candidates,
-    extract_sprite_sheet_candidates, resolve_portrait_path, show_standard_list_item, EditorToolbar,
-    ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    autocomplete_creature_selector, autocomplete_portrait_selector, extract_portrait_candidates,
+    resolve_portrait_path, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::dialogue::{DialogueAction, DialogueId, DialogueTree};
 use antares::domain::inventory::{NpcEconomySettings, ServiceCatalog};
 use antares::domain::quest::{Quest, QuestId};
 use antares::domain::world::npc_runtime::MerchantStockTemplate;
-use antares::domain::world::{NpcDefinition, NpcId, SpriteReference};
+use antares::domain::world::{NpcDefinition, SpriteReference};
 use antares::domain::CreatureId;
 use antares::sdk::tool_config::DisplayConfig;
 use eframe::egui;
@@ -269,7 +268,7 @@ pub enum NpcEditorMode {
 /// dialogue tree explicitly contains `DialogueAction::OpenMerchant { npc_id }`.
 /// Later phases use this buffer as the source of truth when deciding whether
 /// merchant dialogue must be generated, augmented, or cleaned up.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NpcEditBuffer {
     pub id: String,
     pub name: String,
@@ -288,26 +287,6 @@ pub struct NpcEditBuffer {
     pub sprite_index: String,
     /// ID of the stock template this merchant uses (empty = no template)
     pub stock_template: String,
-}
-
-impl Default for NpcEditBuffer {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            description: String::new(),
-            portrait_id: String::new(),
-            dialogue_id: String::new(),
-            quest_ids: Vec::new(),
-            faction: String::new(),
-            is_merchant: false,
-            is_innkeeper: false,
-            creature_id: String::new(),
-            sprite_sheet: String::new(),
-            sprite_index: String::new(),
-            stock_template: String::new(),
-        }
-    }
 }
 
 impl Default for NpcEditorState {
@@ -380,6 +359,7 @@ impl NpcEditorState {
     /// # Returns
     ///
     /// Returns `true` if changes were made requiring save
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -547,13 +527,13 @@ impl NpcEditorState {
     fn show_list_view(
         &mut self,
         ui: &mut egui::Ui,
-        display_config: &DisplayConfig,
+        _display_config: &DisplayConfig,
         campaign_dir: Option<&PathBuf>,
         creature_manager: Option<&CreatureAssetManager>,
     ) -> bool {
         let mut needs_save = false;
 
-        let search_lower = self.search_filter.to_lowercase();
+        let _search_lower = self.search_filter.to_lowercase();
 
         // Build filtered list snapshot to avoid borrow conflicts in closures
         let filtered_npcs: Vec<(usize, NpcDefinition)> = self
@@ -574,10 +554,26 @@ impl NpcEditorState {
 
         ui.separator();
 
-        let total_width = ui.available_width();
-        let inspector_min_width = 300.0;
+        let _total_width = ui.available_width();
+        let _inspector_min_width = 300.0;
         // Reserve a small margin for the separator (12.0)
-        let sep_margin = 12.0;
+        let _sep_margin = 12.0;
+
+        // Pre-compute merchant dialogue status and validation for each NPC
+        // before entering closures, to avoid borrowing `self` in the left closure
+        // (which would conflict with the mutable borrow of `self.portrait_textures`
+        // in the right closure).
+        let merchant_info: std::collections::HashMap<
+            usize,
+            (&'static str, bool, MerchantDialogueValidationState),
+        > = sorted_npcs
+            .iter()
+            .map(|(idx, npc)| {
+                let (status, sdk_managed) = self.merchant_dialogue_status_for_definition(npc);
+                let validation = self.merchant_dialogue_validation_for_definition(npc);
+                (*idx, (status, sdk_managed, validation))
+            })
+            .collect();
 
         TwoColumnLayout::new("npcs").show_split(
             ui,
@@ -594,10 +590,11 @@ impl NpcEditorState {
                             let is_selected = selected == Some(*idx);
                             let mut badges = Vec::new();
 
-                            let (merchant_status, merchant_sdk_managed) =
-                                self.merchant_dialogue_status_for_definition(npc);
-                            let merchant_validation_state =
-                                self.merchant_dialogue_validation_for_definition(npc);
+                            let (merchant_status, merchant_sdk_managed, merchant_validation_state) =
+                                merchant_info
+                                    .get(idx)
+                                    .copied()
+                                    .unwrap_or(("Unknown", false, MerchantDialogueValidationState::NotMerchant));
 
                             if npc.is_merchant {
                                 let (merchant_badge_text, merchant_badge_color, merchant_tooltip) =
@@ -795,27 +792,6 @@ impl NpcEditorState {
         }
 
         needs_save
-    }
-
-    /// Show a rich preview of the selected NPC — portrait, identity badges,
-    /// and key property grid — matching the Character Editor preview style.
-    fn show_preview(
-        &mut self,
-        ui: &mut egui::Ui,
-        npc: &NpcDefinition,
-        campaign_dir: Option<&PathBuf>,
-        creature_manager: Option<&CreatureAssetManager>,
-    ) {
-        let (merchant_status_label, _) = self.merchant_dialogue_status_for_definition(npc);
-        show_npc_preview(
-            ui,
-            npc,
-            campaign_dir,
-            creature_manager,
-            &self.available_dialogues,
-            &mut self.portrait_textures,
-        );
-        let _ = merchant_status_label;
     }
 
     fn show_edit_view(
@@ -1276,14 +1252,13 @@ impl NpcEditorState {
                                     }
                                 });
 
-                            if !self.edit_buffer.stock_template.is_empty() {
-                                if ui.small_button("✏ Edit template").clicked() {
+                            if !self.edit_buffer.stock_template.is_empty()
+                                && ui.small_button("✏ Edit template").clicked() {
                                     // Signal the caller to navigate to the Stock Templates tab
                                     // and open this template for editing.
                                     self.requested_template_edit =
                                         Some(self.edit_buffer.stock_template.clone());
                                 }
-                            }
                         });
                     }
 
@@ -1331,8 +1306,8 @@ impl NpcEditorState {
                             }
                         }
 
-                        if self.validation_errors.is_empty() {
-                            if self.save_npc() {
+                        if self.validation_errors.is_empty()
+                            && self.save_npc() {
                                 needs_save = true;
                                 if let Some(dir) = campaign_dir {
                                     let path = dir.join(npcs_file);
@@ -1360,7 +1335,6 @@ impl NpcEditorState {
                                 }
                                 self.mode = NpcEditorMode::List;
                             }
-                        }
                     }
 
                     if ui.button("❌ Cancel").clicked() {
@@ -2012,49 +1986,6 @@ impl NpcEditorState {
         };
 
         self.merchant_dialogue_status_for_definition(&npc)
-    }
-
-    fn merchant_dialogue_validation_for_buffer(&self) -> MerchantDialogueValidationState {
-        let npc = NpcDefinition {
-            id: self.edit_buffer.id.clone(),
-            name: self.edit_buffer.name.clone(),
-            description: self.edit_buffer.description.clone(),
-            portrait_id: self.edit_buffer.portrait_id.clone(),
-            dialogue_id: if self.edit_buffer.dialogue_id.trim().is_empty() {
-                None
-            } else {
-                self.edit_buffer.dialogue_id.parse::<DialogueId>().ok()
-            },
-            creature_id: if self.edit_buffer.creature_id.is_empty() {
-                None
-            } else {
-                self.edit_buffer.creature_id.parse::<CreatureId>().ok()
-            },
-            sprite: None,
-            quest_ids: self
-                .edit_buffer
-                .quest_ids
-                .iter()
-                .filter_map(|s| s.parse::<QuestId>().ok())
-                .collect(),
-            faction: if self.edit_buffer.faction.is_empty() {
-                None
-            } else {
-                Some(self.edit_buffer.faction.clone())
-            },
-            is_merchant: self.edit_buffer.is_merchant,
-            is_innkeeper: self.edit_buffer.is_innkeeper,
-            is_priest: false,
-            stock_template: if self.edit_buffer.stock_template.is_empty() {
-                None
-            } else {
-                Some(self.edit_buffer.stock_template.clone())
-            },
-            service_catalog: None,
-            economy: None,
-        };
-
-        self.merchant_dialogue_validation_for_definition(&npc)
     }
 
     pub fn merchant_dialogue_repair_action_for_buffer(

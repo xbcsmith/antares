@@ -123,6 +123,7 @@ mod furniture_editor_tests {
             flags: FurnitureFlags::new(),
             color_tint: None,
             furniture_id: None,
+            key_item_id: None,
         };
 
         let position = Position::new(5, 7);
@@ -147,6 +148,7 @@ mod furniture_editor_tests {
             flags: FurnitureFlags::new(),
             color_tint: None,
             furniture_id: None,
+            key_item_id: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(0, 0), &event);
@@ -247,6 +249,7 @@ mod furniture_editor_tests {
                 flags: FurnitureFlags::new(),
                 color_tint: None,
                 furniture_id: None,
+                key_item_id: None,
             };
 
             let editor = EventEditorState::from_map_event(pos, &event);
@@ -268,6 +271,7 @@ mod furniture_editor_tests {
             flags: FurnitureFlags::new(),
             color_tint: None,
             furniture_id: None,
+            key_item_id: None,
         };
 
         // Load into editor

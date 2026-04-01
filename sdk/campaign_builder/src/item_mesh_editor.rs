@@ -31,7 +31,7 @@ use crate::ui_helpers::{
 use antares::domain::visual::item_mesh::{ItemMeshCategory, ItemMeshDescriptor};
 use antares::domain::visual::CreatureDefinition;
 use eframe::egui;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Supporting types
@@ -440,7 +440,7 @@ impl ItemMeshEditorState {
     ///
     /// Checks the file stem first (most specific), then the parent folder name
     /// as a fallback, then defaults to [`ItemMeshCategory::Sword`].
-    fn infer_category_from_path(path: &PathBuf) -> ItemMeshCategory {
+    fn infer_category_from_path(path: &Path) -> ItemMeshCategory {
         let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -1240,15 +1240,6 @@ impl ItemMeshEditorState {
     }
 
     // ── Registry helpers ──────────────────────────────────────────────────
-
-    /// Returns a `HashMap<category_name, count>` of entries by category.
-    fn count_by_category(&self) -> std::collections::HashMap<String, usize> {
-        let mut counts = std::collections::HashMap::new();
-        for entry in &self.registry {
-            *counts.entry(format!("{:?}", entry.category)).or_insert(0) += 1;
-        }
-        counts
-    }
 
     /// Returns the indices of registry entries that match the current
     /// `search_query` and `category_filter`, sorted by `registry_sort_by`.
@@ -2751,7 +2742,6 @@ mod tests {
     /// A successful register must append to the registry.
     #[test]
     fn test_register_asset_success_appends_entry() {
-        use antares::domain::visual::item_mesh::ItemMeshDescriptor;
         use tempfile::TempDir;
 
         let tmp = TempDir::new().expect("tempdir");
@@ -2945,25 +2935,5 @@ mod tests {
         state.search_query = "iron".to_string();
         let indices = state.filtered_sorted_registry();
         assert_eq!(indices.len(), 2, "should match 'iron' prefix in name");
-    }
-
-    // ── count_by_category ─────────────────────────────────────────────────────
-
-    #[test]
-    fn test_count_by_category() {
-        let mut state = ItemMeshEditorState::new();
-        state.registry.push(make_entry("Sword A"));
-        state.registry.push(make_entry("Sword B"));
-        state.registry.push(ItemMeshEntry {
-            name: "Potion".to_string(),
-            category: ItemMeshCategory::Potion,
-            file_path: "assets/items/potion.ron".to_string(),
-            descriptor: make_descriptor(1.0),
-            native_creature_def: None,
-        });
-
-        let counts = state.count_by_category();
-        assert_eq!(*counts.get("Sword").unwrap_or(&0), 2);
-        assert_eq!(*counts.get("Potion").unwrap_or(&0), 1);
     }
 }

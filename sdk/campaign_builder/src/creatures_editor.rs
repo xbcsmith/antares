@@ -4,8 +4,7 @@
 use crate::context_menu::ContextMenuManager;
 use crate::creature_id_manager::{CreatureCategory, CreatureIdManager};
 use crate::creature_undo_redo::CreatureUndoRedoManager;
-use crate::creatures_manager::CreaturesManager;
-use crate::creatures_workflow::{CreatureWorkflowState, WorkflowMode};
+use crate::creatures_workflow::CreatureWorkflowState;
 use crate::keyboard_shortcuts::ShortcutManager;
 use crate::mesh_validation;
 use crate::preview_features::PreviewState;
@@ -319,7 +318,7 @@ impl CreaturesEditorState {
         ui: &mut egui::Ui,
         creatures: &mut Vec<CreatureDefinition>,
         campaign_dir: &Option<PathBuf>,
-        creatures_file: &str,
+        _creatures_file: &str,
         unsaved_changes: &mut bool,
     ) -> Option<String> {
         match self.mode {
@@ -1328,17 +1327,6 @@ impl CreaturesEditorState {
         (monsters, npcs, templates, variants, custom)
     }
 
-    #[allow(dead_code)]
-    #[deprecated(note = "Legacy list-mode path is retired; use show_registry_mode instead")]
-    fn show_list_mode(
-        &mut self,
-        _ui: &mut egui::Ui,
-        _creatures: &mut [CreatureDefinition],
-        _unsaved_changes: &mut bool,
-    ) -> Option<String> {
-        panic!("Deprecated show_list_mode() path should never be called")
-    }
-
     fn show_edit_mode(
         &mut self,
         ui: &mut egui::Ui,
@@ -1539,31 +1527,28 @@ impl CreaturesEditorState {
             }
 
             if let Some(mesh_idx) = self.selected_mesh_index {
-                if ui.button("📋 Duplicate").clicked() {
-                    if mesh_idx < self.edit_buffer.meshes.len() {
-                        let mesh = self.edit_buffer.meshes[mesh_idx].clone();
-                        let transform = self.edit_buffer.mesh_transforms[mesh_idx];
-                        self.edit_buffer.meshes.push(mesh);
-                        self.edit_buffer.mesh_transforms.push(transform);
-                        self.mesh_visibility.push(true);
-                        *unsaved_changes = true;
-                        self.preview_dirty = true;
-                    }
+                if ui.button("📋 Duplicate").clicked() && mesh_idx < self.edit_buffer.meshes.len()
+                {
+                    let mesh = self.edit_buffer.meshes[mesh_idx].clone();
+                    let transform = self.edit_buffer.mesh_transforms[mesh_idx];
+                    self.edit_buffer.meshes.push(mesh);
+                    self.edit_buffer.mesh_transforms.push(transform);
+                    self.mesh_visibility.push(true);
+                    *unsaved_changes = true;
+                    self.preview_dirty = true;
                 }
 
-                if ui.button("🗑 Delete").clicked() {
-                    if mesh_idx < self.edit_buffer.meshes.len() {
-                        self.edit_buffer.meshes.remove(mesh_idx);
-                        self.edit_buffer.mesh_transforms.remove(mesh_idx);
-                        if mesh_idx < self.mesh_visibility.len() {
-                            self.mesh_visibility.remove(mesh_idx);
-                        }
-                        self.selected_mesh_index = None;
-                        self.mesh_edit_buffer = None;
-                        self.mesh_transform_buffer = None;
-                        *unsaved_changes = true;
-                        self.preview_dirty = true;
+                if ui.button("🗑 Delete").clicked() && mesh_idx < self.edit_buffer.meshes.len() {
+                    self.edit_buffer.meshes.remove(mesh_idx);
+                    self.edit_buffer.mesh_transforms.remove(mesh_idx);
+                    if mesh_idx < self.mesh_visibility.len() {
+                        self.mesh_visibility.remove(mesh_idx);
                     }
+                    self.selected_mesh_index = None;
+                    self.mesh_edit_buffer = None;
+                    self.mesh_transform_buffer = None;
+                    *unsaved_changes = true;
+                    self.preview_dirty = true;
                 }
             }
         });
@@ -2776,15 +2761,14 @@ impl CreaturesEditorState {
             }
 
             if let Some(mesh_idx) = self.selected_mesh_index {
-                if ui.button("➖ Remove Mesh").clicked() {
-                    if mesh_idx < self.edit_buffer.meshes.len() {
-                        self.edit_buffer.meshes.remove(mesh_idx);
-                        self.edit_buffer.mesh_transforms.remove(mesh_idx);
-                        self.selected_mesh_index = None;
-                        self.mesh_edit_buffer = None;
-                        self.mesh_transform_buffer = None;
-                        self.preview_dirty = true;
-                    }
+                if ui.button("➖ Remove Mesh").clicked() && mesh_idx < self.edit_buffer.meshes.len()
+                {
+                    self.edit_buffer.meshes.remove(mesh_idx);
+                    self.edit_buffer.mesh_transforms.remove(mesh_idx);
+                    self.selected_mesh_index = None;
+                    self.mesh_edit_buffer = None;
+                    self.mesh_transform_buffer = None;
+                    self.preview_dirty = true;
                 }
             }
         });
@@ -3606,12 +3590,11 @@ mod tests {
     /// positive.
     #[test]
     fn test_creature_scale_range_is_valid() {
+        let min = CREATURE_SCALE_MIN;
+        let max = CREATURE_SCALE_MAX;
+        assert!(min > 0.0, "CREATURE_SCALE_MIN must be positive");
         assert!(
-            CREATURE_SCALE_MIN > 0.0,
-            "CREATURE_SCALE_MIN must be positive"
-        );
-        assert!(
-            CREATURE_SCALE_MAX > CREATURE_SCALE_MIN,
+            max > min,
             "CREATURE_SCALE_MAX must be greater than CREATURE_SCALE_MIN"
         );
     }

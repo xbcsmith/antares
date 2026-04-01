@@ -45,20 +45,15 @@ use std::path::{Path, PathBuf};
 // ===== Mode =====
 
 /// Editor mode for the stock templates editor
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum StockTemplatesEditorMode {
     /// Viewing the list of templates
+    #[default]
     List,
     /// Creating a new template
     Add,
     /// Editing an existing template
     Edit,
-}
-
-impl Default for StockTemplatesEditorMode {
-    fn default() -> Self {
-        StockTemplatesEditorMode::List
-    }
 }
 
 // ===== Entry buffer =====

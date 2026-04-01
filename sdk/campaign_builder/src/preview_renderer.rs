@@ -44,18 +44,13 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
 /// Camera control mode for the 3D preview
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CameraMode {
     /// Orbit around target point
+    #[default]
     Orbit,
     /// Free-look camera (not yet implemented)
     FreeLook,
-}
-
-impl Default for CameraMode {
-    fn default() -> Self {
-        Self::Orbit
-    }
 }
 
 /// State for the 3D preview camera
@@ -203,7 +198,7 @@ pub struct PreviewRenderer {
     mesh_visibility: Vec<bool>,
 
     /// Last mouse position for drag interactions
-    last_mouse_pos: Option<(f32, f32)>,
+    _last_mouse_pos: Option<(f32, f32)>,
 }
 
 impl Default for PreviewRenderer {
@@ -230,7 +225,7 @@ impl PreviewRenderer {
             needs_update: true,
             selected_mesh_index: None,
             mesh_visibility: Vec::new(),
-            last_mouse_pos: None,
+            _last_mouse_pos: None,
         }
     }
 

@@ -19,7 +19,7 @@ use crate::ui_helpers::{
 };
 use antares::domain::classes::{ClassDefinition, SpellSchool, SpellStat};
 use antares::domain::items::types::Item;
-use antares::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
+use antares::domain::proficiency::ProficiencyId;
 use antares::domain::types::{DiceRoll, ItemId};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
@@ -1064,7 +1064,6 @@ impl ClassesEditorState {
 mod tests {
     use super::*;
     use antares::domain::classes::ClassDefinition;
-    use antares::domain::proficiency::ProficiencyId;
 
     #[test]
     fn test_class_special_abilities_and_proficiencies_roundtrip() {

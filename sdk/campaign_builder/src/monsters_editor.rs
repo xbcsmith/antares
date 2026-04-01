@@ -746,6 +746,7 @@ impl MonstersEditorState {
     ///
     /// Displays fields for editing monster properties including name (with autocomplete),
     /// stats, abilities, attacks, and loot tables.
+    #[allow(clippy::too_many_arguments)]
     fn show_form(
         &mut self,
         ui: &mut egui::Ui,

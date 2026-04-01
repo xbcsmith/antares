@@ -10,9 +10,7 @@
 //! - Unreachable content detector
 //! - Difficulty curve analyzer
 
-use antares::domain::character::{AttributePair, AttributePair16};
 use antares::domain::combat::database::MonsterDefinition;
-use antares::domain::combat::monster::MonsterCondition;
 use antares::domain::items::types::Item;
 use antares::domain::quest::{Quest, QuestObjective};
 use antares::domain::world::Map;
@@ -698,7 +696,7 @@ impl AdvancedValidator {
                 if let Some(suggestion) = &result.suggestion {
                     report.push_str(&format!("   💡 {}\n", suggestion));
                 }
-                report.push_str("\n");
+                report.push('\n');
             }
         }
 
@@ -709,8 +707,8 @@ impl AdvancedValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antares::domain::character::{AttributePair, Stats};
-    use antares::domain::combat::monster::{LootTable, MonsterResistances};
+    use antares::domain::character::{AttributePair, AttributePair16, Stats};
+    use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
     use antares::domain::combat::types::{Attack, AttackType};
     use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
     use antares::domain::types::DiceRoll;

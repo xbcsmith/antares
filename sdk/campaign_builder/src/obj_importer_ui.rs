@@ -44,11 +44,11 @@ use thiserror::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ObjImporterUiSignal {
     /// A creature asset was exported and the creature registry should be reloaded.
-    CreatureExported,
+    Creature,
     /// An item asset was exported.
-    ItemExported,
+    Item,
     /// A furniture mesh asset was exported.
-    FurnitureExported,
+    Furniture,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -406,9 +406,9 @@ fn render_loaded_mode(
             match export_state_to_campaign(state, campaign_dir.map(|path| path.as_path())) {
                 Ok(outcome) => {
                     let signal = match outcome.export_type {
-                        ExportType::Creature => ObjImporterUiSignal::CreatureExported,
-                        ExportType::Item => ObjImporterUiSignal::ItemExported,
-                        ExportType::Furniture => ObjImporterUiSignal::FurnitureExported,
+                        ExportType::Creature => ObjImporterUiSignal::Creature,
+                        ExportType::Item => ObjImporterUiSignal::Item,
+                        ExportType::Furniture => ObjImporterUiSignal::Furniture,
                     };
                     logger.info(category::FILE_IO, &outcome.status_message);
                     state.clear();
@@ -770,11 +770,11 @@ fn render_custom_palette_section(
             });
 
         if let Some(label) = remove_label {
-            if state.remove_custom_color(&label) {
-                if persist_custom_palette(state, campaign_dir, logger) {
-                    state.status_message = format!("Removed custom color '{}'.", label);
-                    ui.ctx().request_repaint();
-                }
+            if state.remove_custom_color(&label)
+                && persist_custom_palette(state, campaign_dir, logger)
+            {
+                state.status_message = format!("Removed custom color '{}'.", label);
+                ui.ctx().request_repaint();
             }
         }
     }

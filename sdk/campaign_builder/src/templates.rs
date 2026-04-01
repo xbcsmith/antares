@@ -19,7 +19,6 @@ use antares::domain::items::types::{
     ArmorClassification, ArmorData, ConsumableData, Item, ItemType, WeaponClassification,
     WeaponData,
 };
-use std::collections::BTreeMap;
 
 use antares::domain::quest::{Quest, QuestId, QuestObjective, QuestReward, QuestStage};
 use antares::domain::types::{DiceRoll, MonsterId};
@@ -75,7 +74,7 @@ pub struct TemplateManager {
     custom_monsters: Vec<MonsterDefinition>,
     custom_quests: Vec<Quest>,
     custom_dialogues: Vec<DialogueTree>,
-    custom_maps: Vec<Map>,
+    _custom_maps: Vec<Map>,
 }
 
 impl TemplateManager {
@@ -605,7 +604,7 @@ impl TemplateManager {
                 quest_giver_position: None,
             }),
             "kill_quest" => Some(Quest {
-                id: id.try_into().ok()?,
+                id,
                 name: "Goblin Extermination".to_string(),
                 description: "Clear the goblin camp".to_string(),
                 stages: vec![QuestStage {
@@ -629,7 +628,7 @@ impl TemplateManager {
                 quest_giver_position: None,
             }),
             "escort_quest" => Some(Quest {
-                id: id.try_into().ok()?,
+                id,
                 name: "Escort the Merchant".to_string(),
                 description: "Protect the merchant on the road".to_string(),
                 stages: vec![QuestStage {
@@ -654,7 +653,7 @@ impl TemplateManager {
                 quest_giver_position: None,
             }),
             "delivery_quest" => Some(Quest {
-                id: id.try_into().ok()?,
+                id,
                 name: "Deliver the Package".to_string(),
                 description: "Take this package to the inn".to_string(),
                 stages: vec![QuestStage {
@@ -719,7 +718,7 @@ impl TemplateManager {
     pub fn create_dialogue(&self, template_id: &str, id: u32) -> Option<DialogueTree> {
         let id: u16 = id.try_into().ok()?;
         use antares::domain::dialogue::DialogueChoice;
-        use std::collections::{BTreeMap, HashMap};
+        use std::collections::BTreeMap;
 
         match template_id {
             "merchant" => {
@@ -738,6 +737,7 @@ impl TemplateManager {
                         conditions: vec![],
                         actions: vec![],
                         is_terminal: false,
+                        sdk_metadata: Default::default(),
                     },
                 );
                 Some(DialogueTree {
@@ -748,6 +748,7 @@ impl TemplateManager {
                     speaker_name: Some("Merchant".to_string()),
                     repeatable: true,
                     associated_quest: None,
+                    sdk_metadata: Default::default(),
                 })
             }
             "quest_giver" => {
@@ -765,6 +766,7 @@ impl TemplateManager {
                         conditions: vec![],
                         actions: vec![],
                         is_terminal: false,
+                        sdk_metadata: Default::default(),
                     },
                 );
                 Some(DialogueTree {
@@ -775,6 +777,7 @@ impl TemplateManager {
                     speaker_name: Some("Elder".to_string()),
                     repeatable: false,
                     associated_quest: None,
+                    sdk_metadata: Default::default(),
                 })
             }
             "guard" => {
@@ -793,6 +796,7 @@ impl TemplateManager {
                         conditions: vec![],
                         actions: vec![],
                         is_terminal: false,
+                        sdk_metadata: Default::default(),
                     },
                 );
                 Some(DialogueTree {
@@ -803,6 +807,7 @@ impl TemplateManager {
                     speaker_name: Some("Guard".to_string()),
                     repeatable: true,
                     associated_quest: None,
+                    sdk_metadata: Default::default(),
                 })
             }
             "innkeeper" => {
@@ -820,6 +825,7 @@ impl TemplateManager {
                         conditions: vec![],
                         actions: vec![],
                         is_terminal: false,
+                        sdk_metadata: Default::default(),
                     },
                 );
                 Some(DialogueTree {
@@ -830,6 +836,7 @@ impl TemplateManager {
                     speaker_name: Some("Innkeeper".to_string()),
                     repeatable: true,
                     associated_quest: None,
+                    sdk_metadata: Default::default(),
                 })
             }
             _ => None,

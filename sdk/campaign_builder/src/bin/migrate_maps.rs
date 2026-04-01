@@ -16,12 +16,12 @@
 //!
 //! Migrate a single map:
 //! ```bash
-//! cargo run --bin migrate_maps -- ../../campaigns/tutorial/data/maps/map_1.ron
+//! cargo run --bin migrate_maps -- ../../data/test_campaign/data/maps/map_1.ron
 //! ```
 //!
 //! Migrate all maps in a directory:
 //! ```bash
-//! for f in ../../campaigns/tutorial/data/maps/*.ron; do
+//! for f in ../../data/test_campaign/data/maps/*.ron; do
 //!     cargo run --bin migrate_maps -- "$f"
 //! done
 //! ```

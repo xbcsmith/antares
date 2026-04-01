@@ -1056,7 +1056,7 @@ pub fn validate_recruitable_character_references(
     let mut results = Vec::new();
 
     for map in maps {
-        for (position, event) in &map.events {
+        for event in map.events.values() {
             if let antares::domain::world::MapEvent::RecruitableCharacter {
                 name,
                 character_id,
@@ -1100,6 +1100,7 @@ pub fn validate_recruitable_character_references(
     results
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 

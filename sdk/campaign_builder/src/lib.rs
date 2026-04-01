@@ -11,16 +11,6 @@
 //! - Placeholder list views for Items, Spells, Monsters, Maps, Quests
 //! - Unsaved changes tracking and warnings
 
-#![allow(dead_code)]
-#![allow(unused_variables)]
-#![allow(unused_imports)]
-#![allow(clippy::collapsible_if)]
-#![allow(clippy::single_char_add_str)]
-#![allow(clippy::derivable_impls)]
-#![allow(clippy::for_kv_map)]
-#![allow(clippy::vec_init_then_push)]
-#![allow(clippy::useless_conversion)]
-
 pub mod advanced_validation;
 pub mod animation_editor;
 pub mod asset_manager;
@@ -84,22 +74,29 @@ pub mod variation_editor;
 use antares::sdk::tool_config::ToolConfig;
 use logging::{category, LogLevel, Logger};
 
+#[cfg(test)]
 use antares::domain::character::Stats;
 use antares::domain::character::{FOOD_MAX, FOOD_MIN, PARTY_MAX_SIZE};
 use antares::domain::combat::database::MonsterDefinition;
-use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
-use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
+#[cfg(test)]
+use antares::domain::combat::monster::{LootTable, MonsterResistances};
+#[cfg(test)]
+use antares::domain::combat::types::{Attack, AttackType};
 use antares::domain::conditions::ConditionDefinition;
-use antares::domain::dialogue::{DialogueAction, DialogueTree, NodeId};
-use antares::domain::items::types::{
-    AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
-    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Item,
-    ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
-};
-use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+use antares::domain::dialogue::{DialogueAction, DialogueTree};
+use antares::domain::items::types::Item;
+#[cfg(test)]
+use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
+use antares::domain::magic::types::Spell;
+#[cfg(test)]
+use antares::domain::magic::types::{SpellContext, SpellSchool, SpellTarget};
 use antares::domain::proficiency::ProficiencyDefinition;
-use antares::domain::quest::{Quest, QuestId};
-use antares::domain::types::{CreatureId, DiceRoll, GameTime, ItemId, MapId, MonsterId, SpellId};
+use antares::domain::quest::Quest;
+#[cfg(test)]
+use antares::domain::quest::QuestId;
+use antares::domain::types::{CreatureId, GameTime};
+#[cfg(test)]
+use antares::domain::types::{DiceRoll, ItemId, MapId, MonsterId, SpellId};
 use antares::domain::visual::CreatureReference;
 use antares::domain::world::npc_runtime::MerchantStockTemplate;
 use antares::domain::world::Map;
@@ -112,7 +109,6 @@ use monsters_editor::MonstersEditorState;
 use quest_editor::QuestEditorState;
 use serde::{Deserialize, Serialize};
 use spells_editor::SpellsEditorState;
-use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use stock_templates_editor::StockTemplatesEditorState;
@@ -543,14 +539,6 @@ enum EditorTab {
     Validation,
 }
 
-/// Editor mode for data editing panels
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum EditorMode {
-    List,
-    Add,
-    Edit,
-}
-
 impl EditorTab {
     fn name(&self) -> &str {
         match self {
@@ -582,52 +570,6 @@ impl EditorTab {
 // NOTE: ValidationError and Severity types have been replaced by the validation module.
 // Use validation::ValidationResult and validation::ValidationSeverity instead.
 
-/// Item type filter for search
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ItemTypeFilter {
-    Weapon,
-    Armor,
-    Accessory,
-    Consumable,
-    Ammo,
-    Quest,
-}
-
-impl ItemTypeFilter {
-    fn matches(&self, item: &Item) -> bool {
-        match self {
-            ItemTypeFilter::Weapon => item.is_weapon(),
-            ItemTypeFilter::Armor => item.is_armor(),
-            ItemTypeFilter::Accessory => item.is_accessory(),
-            ItemTypeFilter::Consumable => item.is_consumable(),
-            ItemTypeFilter::Ammo => item.is_ammo(),
-            ItemTypeFilter::Quest => item.is_quest_item(),
-        }
-    }
-
-    fn as_str(&self) -> &str {
-        match self {
-            ItemTypeFilter::Weapon => "Weapon",
-            ItemTypeFilter::Armor => "Armor",
-            ItemTypeFilter::Accessory => "Accessory",
-            ItemTypeFilter::Consumable => "Consumable",
-            ItemTypeFilter::Ammo => "Ammo",
-            ItemTypeFilter::Quest => "Quest",
-        }
-    }
-
-    fn all() -> [ItemTypeFilter; 6] {
-        [
-            ItemTypeFilter::Weapon,
-            ItemTypeFilter::Armor,
-            ItemTypeFilter::Accessory,
-            ItemTypeFilter::Consumable,
-            ItemTypeFilter::Ammo,
-            ItemTypeFilter::Quest,
-        ]
-    }
-}
-
 /// Quick validation filter for the Validation Panel.
 ///
 /// The filter controls which severities the UI will display. These are user-facing
@@ -640,17 +582,6 @@ enum ValidationFilter {
     ErrorsOnly,
     /// Only show `Warning` severity checks
     WarningsOnly,
-}
-
-impl ValidationFilter {
-    /// Returns a short label for the control UI
-    fn as_str(&self) -> &str {
-        match self {
-            ValidationFilter::All => "All",
-            ValidationFilter::ErrorsOnly => "Errors Only",
-            ValidationFilter::WarningsOnly => "Warnings Only",
-        }
-    }
 }
 
 /// File I/O errors
@@ -727,10 +658,10 @@ struct CampaignBuilderApp {
     // Quest editor state
     quests: Vec<Quest>,
     quest_editor_state: QuestEditorState,
-    quests_search_filter: String,
-    quests_show_preview: bool,
-    quests_import_buffer: String,
-    quests_show_import_dialog: bool,
+    _quests_search_filter: String,
+    _quests_show_preview: bool,
+    _quests_import_buffer: String,
+    _quests_show_import_dialog: bool,
 
     // Dialogue editor state</parameter>
     // Dialogue editor state
@@ -747,7 +678,7 @@ struct CampaignBuilderApp {
     stock_templates: Vec<MerchantStockTemplate>,
 
     /// Filename for npc_stock_templates.ron relative to campaign data dir
-    stock_templates_file: String,
+    _stock_templates_file: String,
 
     // Classes editor state
     classes_editor_state: classes_editor::ClassesEditorState,
@@ -759,12 +690,12 @@ struct CampaignBuilderApp {
     characters_editor_state: characters_editor::CharactersEditorState,
 
     // Phase 13: Distribution tools state
-    export_wizard: Option<packager::ExportWizard>,
-    test_play_session: Option<test_play::TestPlaySession>,
-    test_play_config: test_play::TestPlayConfig,
+    _export_wizard: Option<packager::ExportWizard>,
+    _test_play_session: Option<test_play::TestPlaySession>,
+    _test_play_config: test_play::TestPlayConfig,
     asset_manager: Option<asset_manager::AssetManager>,
-    show_export_dialog: bool,
-    show_test_play_panel: bool,
+    _show_export_dialog: bool,
+    _show_test_play_panel: bool,
     show_asset_manager: bool,
 
     // Phase 15: Polish & advanced features state
@@ -818,10 +749,8 @@ enum PendingAction {
 #[derive(Debug, Clone)]
 struct FileNode {
     name: String,
-    #[allow(dead_code)]
-    path: PathBuf,
     is_directory: bool,
-    children: Vec<FileNode>,
+    _children: Vec<FileNode>,
 }
 
 impl Default for CampaignBuilderApp {
@@ -876,10 +805,10 @@ impl Default for CampaignBuilderApp {
 
             quests: Vec::new(),
             quest_editor_state: QuestEditorState::default(),
-            quests_search_filter: String::new(),
-            quests_show_preview: true,
-            quests_import_buffer: String::new(),
-            quests_show_import_dialog: false,
+            _quests_search_filter: String::new(),
+            _quests_show_preview: true,
+            _quests_import_buffer: String::new(),
+            _quests_show_import_dialog: false,
 
             dialogues: Vec::new(),
             dialogue_editor_state: DialogueEditorState::default(),
@@ -888,7 +817,7 @@ impl Default for CampaignBuilderApp {
 
             stock_templates_editor_state: StockTemplatesEditorState::default(),
             stock_templates: Vec::new(),
-            stock_templates_file: "data/npc_stock_templates.ron".to_string(),
+            _stock_templates_file: "data/npc_stock_templates.ron".to_string(),
 
             classes_editor_state: classes_editor::ClassesEditorState::default(),
 
@@ -897,12 +826,12 @@ impl Default for CampaignBuilderApp {
             characters_editor_state: characters_editor::CharactersEditorState::default(),
 
             // Phase 13: Distribution tools
-            export_wizard: None,
-            test_play_session: None,
-            test_play_config: test_play::TestPlayConfig::default(),
+            _export_wizard: None,
+            _test_play_session: None,
+            _test_play_config: test_play::TestPlayConfig::default(),
             asset_manager: None,
-            show_export_dialog: false,
-            show_test_play_panel: false,
+            _show_export_dialog: false,
+            _show_test_play_panel: false,
             show_asset_manager: false,
 
             // Phase 15: Polish & advanced features
@@ -966,50 +895,6 @@ impl CampaignBuilderApp {
         }
     }
 
-    /// Create a default item for the edit buffer
-    fn default_item() -> Item {
-        Item {
-            id: 0,
-            name: String::new(),
-            item_type: ItemType::Weapon(WeaponData {
-                damage: DiceRoll::new(1, 6, 0),
-                bonus: 0,
-                hands_required: 1,
-                classification: WeaponClassification::Simple,
-            }),
-            base_cost: 0,
-            sell_cost: 0,
-            alignment_restriction: None,
-            constant_bonus: None,
-            temporary_bonus: None,
-            spell_effect: None,
-            max_charges: 0,
-            is_cursed: false,
-            icon_path: None,
-            tags: vec![],
-            mesh_descriptor_override: None,
-            mesh_id: None,
-        }
-    }
-
-    /// Create a default spell for the edit buffer
-    fn default_spell() -> Spell {
-        Spell::new(
-            0,
-            "",
-            SpellSchool::Cleric,
-            1,
-            1,
-            0,
-            SpellContext::Anytime,
-            SpellTarget::SingleCharacter,
-            "",
-            None,
-            0,
-            false,
-        )
-    }
-
     /// Synchronize importer state that depends on the active campaign.
     fn sync_obj_importer_campaign_state(&mut self) {
         if let Some(campaign_dir) = self.campaign_dir.clone() {
@@ -1046,45 +931,6 @@ impl CampaignBuilderApp {
                 category::APP,
                 &format!("Failed to determine next importer creature ID: {}", error),
             ),
-        }
-    }
-
-    /// Create a default monster for the edit buffer
-    fn default_monster() -> MonsterDefinition {
-        use antares::domain::character::{AttributePair, AttributePair16};
-        use antares::domain::combat::monster::MonsterCondition;
-
-        MonsterDefinition {
-            id: 0,
-            name: String::new(),
-            stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
-            hp: AttributePair16::new(10),
-            ac: AttributePair::new(10),
-            attacks: vec![Attack {
-                damage: DiceRoll::new(1, 4, 0),
-                attack_type: AttackType::Physical,
-                special_effect: None,
-                is_ranged: false,
-            }],
-            flee_threshold: 0,
-            special_attack_threshold: 0,
-            resistances: MonsterResistances::new(),
-            can_regenerate: false,
-            can_advance: true,
-            is_undead: false,
-            magic_resistance: 0,
-            loot: LootTable {
-                gold_min: 0,
-                gold_max: 0,
-                gems_min: 0,
-                gems_max: 0,
-                items: Vec::new(),
-                experience: 0,
-            },
-            creature_id: None,
-            conditions: MonsterCondition::Normal,
-            active_conditions: vec![],
-            has_acted: false,
         }
     }
 
@@ -1858,55 +1704,6 @@ impl CampaignBuilderApp {
         result
     }
 
-    /// Get next available item ID
-    ///
-    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
-    fn next_available_item_id(&self) -> ItemId {
-        self.items
-            .iter()
-            .map(|i| i.id)
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1)
-    }
-
-    /// Get next available spell ID
-    ///
-    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
-    fn next_available_spell_id(&self) -> SpellId {
-        self.spells
-            .iter()
-            .map(|s| s.id)
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1)
-    }
-
-    /// Get next available monster ID
-    ///
-    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
-    fn next_available_monster_id(&self) -> MonsterId {
-        self.monsters
-            .iter()
-            .map(|m| m.id)
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1)
-    }
-
-    /// Get next available map ID
-    ///
-    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
-    fn next_available_map_id(&self) -> MapId {
-        self.maps
-            .iter()
-            .map(|m| m.id)
-            .max()
-            .map(|id| id + 1)
-            .unwrap_or(1)
-    }
-
-    /// Get the next available class ID (string-based, numeric format)
     /// Discovers map files in the maps directory by scanning for .ron files
     ///
     /// This function scans the actual maps directory and returns paths to all .ron files found,
@@ -1938,17 +1735,6 @@ impl CampaignBuilderApp {
         }
 
         map_files
-    }
-
-    fn next_available_class_id(&self) -> String {
-        let max_id = self
-            .classes_editor_state
-            .classes
-            .iter()
-            .filter_map(|c| c.id.parse::<u32>().ok())
-            .max()
-            .unwrap_or(0);
-        (max_id + 1).to_string()
     }
 
     /// Load items from RON file
@@ -2531,24 +2317,6 @@ impl CampaignBuilderApp {
                         path.display()
                     ),
                 );
-            }
-        }
-    }
-
-    /// Save the current stock templates list to `npc_stock_templates.ron`.
-    ///
-    /// Updates `status_message` and clears `unsaved_changes` on success.
-    fn save_stock_templates_to_file(&mut self) {
-        if let Some(dir) = &self.campaign_dir {
-            let path = dir.join(&self.campaign.stock_templates_file);
-            match self.stock_templates_editor_state.save_to_file(&path) {
-                Ok(()) => {
-                    self.status_message = "Stock templates saved.".to_string();
-                    self.unsaved_changes = false;
-                }
-                Err(e) => {
-                    self.status_message = format!("Error saving stock templates: {}", e);
-                }
             }
         }
     }
@@ -3800,9 +3568,8 @@ impl CampaignBuilderApp {
 
                     let node = FileNode {
                         name,
-                        path: path.clone(),
                         is_directory: metadata.is_dir(),
-                        children: if metadata.is_dir() {
+                        _children: if metadata.is_dir() {
                             self.read_directory(&path)
                         } else {
                             Vec::new()
@@ -3829,14 +3596,12 @@ impl CampaignBuilderApp {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 if let Ok(metadata) = entry.metadata() {
-                    let path = entry.path();
                     let name = entry.file_name().to_string_lossy().to_string();
 
                     children.push(FileNode {
                         name,
-                        path,
                         is_directory: metadata.is_dir(),
-                        children: Vec::new(), // Don't recurse deeper for now
+                        _children: Vec::new(), // Don't recurse deeper for now
                     });
                 }
             }
@@ -3870,17 +3635,6 @@ impl CampaignBuilderApp {
         self.maps = state.maps.clone();
         self.quests = state.quests.clone();
         self.dialogues = state.dialogues.clone();
-    }
-
-    /// Sync state to undo/redo manager (before executing commands)
-    fn sync_state_to_undo_redo(&mut self) {
-        let state = self.undo_redo_manager.state_mut();
-        state.items = self.items.clone();
-        state.spells = self.spells.clone();
-        state.monsters = self.monsters.clone();
-        state.maps = self.maps.clone();
-        state.quests = self.quests.clone();
-        state.dialogues = self.dialogues.clone();
     }
 
     /// Converts asset-manager tree texture diagnostics into validation-panel results.
@@ -3929,22 +3683,6 @@ impl CampaignBuilderApp {
                 result
             })
             .collect()
-    }
-
-    /// Returns tree texture asset diagnostics for direct display in the Assets view.
-    fn tree_texture_asset_issues(&self) -> Vec<asset_manager::TreeTextureValidationIssue> {
-        self.asset_manager
-            .as_ref()
-            .map(|manager| manager.validate_tree_texture_assets())
-            .unwrap_or_default()
-    }
-
-    /// Returns grass texture asset diagnostics for direct display in the Assets view.
-    fn grass_texture_asset_issues(&self) -> Vec<asset_manager::GrassTextureValidationIssue> {
-        self.asset_manager
-            .as_ref()
-            .map(|manager| manager.validate_grass_texture_assets())
-            .unwrap_or_default()
     }
 
     /// Run advanced validation and generate report
@@ -4845,16 +4583,16 @@ impl eframe::App for CampaignBuilderApp {
         }
 
         // Ctrl+Y = Redo (alternative)
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Y)) {
-            if self.undo_redo_manager.can_redo() {
-                match self.undo_redo_manager.redo() {
-                    Ok(desc) => {
-                        self.sync_state_from_undo_redo();
-                        self.status_message = format!("Redid: {}", desc);
-                        self.unsaved_changes = true;
-                    }
-                    Err(e) => self.status_message = e,
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Y))
+            && self.undo_redo_manager.can_redo()
+        {
+            match self.undo_redo_manager.redo() {
+                Ok(desc) => {
+                    self.sync_state_from_undo_redo();
+                    self.status_message = format!("Redid: {}", desc);
+                    self.unsaved_changes = true;
                 }
+                Err(e) => self.status_message = e,
             }
         }
 
@@ -5131,16 +4869,16 @@ impl eframe::App for CampaignBuilderApp {
                 ) {
                     self.status_message = self.obj_importer_state.status_message.clone();
                     match signal {
-                        obj_importer_ui::ObjImporterUiSignal::CreatureExported => {
+                        obj_importer_ui::ObjImporterUiSignal::Creature => {
                             self.load_creatures();
                             self.sync_obj_importer_campaign_state();
                             self.active_tab = EditorTab::Creatures;
                             ui.ctx().request_repaint();
                         }
-                        obj_importer_ui::ObjImporterUiSignal::ItemExported => {
+                        obj_importer_ui::ObjImporterUiSignal::Item => {
                             ui.ctx().request_repaint();
                         }
-                        obj_importer_ui::ObjImporterUiSignal::FurnitureExported => {
+                        obj_importer_ui::ObjImporterUiSignal::Furniture => {
                             self.status_message = self.obj_importer_state.status_message.clone();
                             self.active_tab = EditorTab::Furniture;
                             ui.ctx().request_repaint();
@@ -5555,37 +5293,6 @@ impl CampaignBuilderApp {
         }
     }
 
-    /// Show the configuration editor (legacy stub)
-    ///
-    /// NOTE: The configuration editor UI was refactored into the dedicated
-    /// `CampaignMetadataEditorState` (sdk/campaign_builder/src/campaign_editor.rs).
-    /// This function remains as a lightweight compatibility stub and delegates
-    /// to the new editor. It keeps call-sites stable for any code that might
-    /// still reference this function.
-    fn show_config_editor(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Campaign Configuration (Legacy)");
-        ui.add_space(5.0);
-        ui.label("This legacy view has been migrated to the Campaign Metadata Editor.");
-        ui.separator();
-
-        ui.horizontal(|ui| {
-            if ui.button("Open Metadata Editor").clicked() {
-                // Switch the central panel to the Metadata editor (delegation).
-                self.active_tab = EditorTab::Metadata;
-            }
-
-            if ui.button("Open Metadata Editor (and Validate)").clicked() {
-                self.active_tab = EditorTab::Metadata;
-                // If we want to automatically request validation, we can set the editor's
-                // validate flag or run `validate_campaign()` here. Keep behaviour minimal.
-            }
-        });
-
-        // For compatibility in case some callers expect the metadata editing form to be shown
-        // inline here, delegate to the metadata editor rendering.
-        self.show_metadata_editor(ui);
-    }
-
     /// Show quests editor (Phase 4A: Full Quest Editor Integration)
     fn show_quests_editor(&mut self, ui: &mut egui::Ui) {
         self.quest_editor_state.show(
@@ -5652,11 +5359,6 @@ impl CampaignBuilderApp {
             fs::write(&quests_path, contents)?;
         }
         Ok(())
-    }
-
-    /// Get next available quest ID
-    fn next_available_quest_id(&self) -> QuestId {
-        self.quests.iter().map(|q| q.id).max().unwrap_or(0) + 1
     }
 
     /// Load classes from campaign directory
@@ -5740,35 +5442,6 @@ impl CampaignBuilderApp {
             }
         } else {
             eprintln!("No campaign directory set when trying to load races");
-        }
-    }
-
-    /// Show file browser
-    fn show_file_browser(&self, ui: &mut egui::Ui) {
-        ui.heading("📁 Campaign File Structure");
-        ui.add_space(5.0);
-        ui.label("Browse files in your campaign directory");
-        ui.separator();
-
-        if let Some(dir) = &self.campaign_dir {
-            ui.label(format!("Campaign Directory: {}", dir.display()));
-            ui.separator();
-
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                if self.file_tree.is_empty() {
-                    ui.label("No files loaded. Use Tools > Refresh File Tree");
-                } else {
-                    for node in &self.file_tree {
-                        show_file_node(ui, node, 0);
-                    }
-                }
-            });
-        } else {
-            ui.vertical_centered(|ui| {
-                ui.add_space(50.0);
-                ui.label("No campaign directory loaded");
-                ui.label("Open or save a campaign to view its file structure");
-            });
         }
     }
 
@@ -6623,19 +6296,169 @@ impl CampaignBuilderApp {
     }
 }
 
-fn show_file_node(ui: &mut egui::Ui, node: &FileNode, depth: usize) {
-    let indent = depth as f32 * 20.0;
-    ui.horizontal(|ui| {
-        ui.add_space(indent);
+/// Editor mode for data editing panels (test-only)
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EditorMode {
+    List,
+    Add,
+    Edit,
+}
 
-        let icon = if node.is_directory { "📁" } else { "📄" };
-        ui.label(format!("{} {}", icon, node.name));
-    });
+/// Item type filter for search (test-only)
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ItemTypeFilter {
+    Weapon,
+    Armor,
+}
 
-    if node.is_directory && !node.children.is_empty() {
-        for child in &node.children {
-            show_file_node(ui, child, depth + 1);
+#[cfg(test)]
+impl ItemTypeFilter {
+    fn matches(&self, item: &Item) -> bool {
+        match self {
+            ItemTypeFilter::Weapon => item.is_weapon(),
+            ItemTypeFilter::Armor => item.is_armor(),
         }
+    }
+}
+
+#[cfg(test)]
+impl CampaignBuilderApp {
+    /// Create a default item for the edit buffer
+    fn default_item() -> Item {
+        Item {
+            id: 0,
+            name: String::new(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 6, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::Simple,
+            }),
+            base_cost: 0,
+            sell_cost: 0,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        }
+    }
+
+    /// Create a default spell for the edit buffer
+    fn default_spell() -> Spell {
+        Spell::new(
+            0,
+            "",
+            SpellSchool::Cleric,
+            1,
+            1,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "",
+            None,
+            0,
+            false,
+        )
+    }
+
+    /// Create a default monster for the edit buffer
+    fn default_monster() -> MonsterDefinition {
+        use antares::domain::character::{AttributePair, AttributePair16};
+        use antares::domain::combat::monster::MonsterCondition;
+
+        MonsterDefinition {
+            id: 0,
+            name: String::new(),
+            stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
+            hp: AttributePair16::new(10),
+            ac: AttributePair::new(10),
+            attacks: vec![Attack {
+                damage: DiceRoll::new(1, 4, 0),
+                attack_type: AttackType::Physical,
+                special_effect: None,
+                is_ranged: false,
+            }],
+            flee_threshold: 0,
+            special_attack_threshold: 0,
+            resistances: MonsterResistances::new(),
+            can_regenerate: false,
+            can_advance: true,
+            is_undead: false,
+            magic_resistance: 0,
+            loot: LootTable {
+                gold_min: 0,
+                gold_max: 0,
+                gems_min: 0,
+                gems_max: 0,
+                items: Vec::new(),
+                experience: 0,
+            },
+            creature_id: None,
+            conditions: MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
+        }
+    }
+
+    /// Get next available item ID
+    ///
+    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
+    fn next_available_item_id(&self) -> ItemId {
+        self.items
+            .iter()
+            .map(|i| i.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+    }
+
+    /// Get next available spell ID
+    ///
+    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
+    fn next_available_spell_id(&self) -> SpellId {
+        self.spells
+            .iter()
+            .map(|s| s.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+    }
+
+    /// Get next available monster ID
+    ///
+    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
+    fn next_available_monster_id(&self) -> MonsterId {
+        self.monsters
+            .iter()
+            .map(|m| m.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+    }
+
+    /// Get next available map ID
+    ///
+    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
+    fn next_available_map_id(&self) -> MapId {
+        self.maps
+            .iter()
+            .map(|m| m.id)
+            .max()
+            .map(|id| id + 1)
+            .unwrap_or(1)
+    }
+
+    /// Get next available quest ID
+    fn next_available_quest_id(&self) -> QuestId {
+        self.quests.iter().map(|q| q.id).max().unwrap_or(0) + 1
     }
 }
 
@@ -6646,6 +6469,8 @@ mod tests {
     use antares::domain::character_definition::CharacterDefinition;
     use antares::domain::classes::ClassDefinition;
     use antares::domain::combat::monster::MonsterCondition;
+    use antares::domain::combat::SpecialEffect;
+    use antares::domain::items::ArmorClassification;
     use antares::domain::quest::QuestStage;
     use antares::domain::races::RaceDefinition;
 
@@ -6708,8 +6533,10 @@ mod tests {
 
     #[test]
     fn test_handle_validation_open_npc_request_success() {
-        let mut app = CampaignBuilderApp::default();
-        app.active_tab = EditorTab::Validation;
+        let mut app = CampaignBuilderApp {
+            active_tab: EditorTab::Validation,
+            ..Default::default()
+        };
         app.npc_editor_state
             .npcs
             .push(antares::domain::world::npc::NpcDefinition {
@@ -7185,7 +7012,7 @@ mod tests {
     #[test]
     fn test_load_races_from_campaign_populates_races_editor_state() {
         use std::fs;
-        use std::path::PathBuf;
+
         use std::time::{SystemTime, UNIX_EPOCH};
 
         // Build a temporary campaign directory under the system temp dir
@@ -7553,7 +7380,7 @@ mod tests {
 
         // Enable Errors Only filter
         app.validation_filter = ValidationFilter::ErrorsOnly;
-        let grouped = validation::group_results_by_category(&app.validation_errors);
+        let _grouped = validation::group_results_by_category(&app.validation_errors);
 
         // Use the grouped & filtered results (matching what the UI shows)
         let grouped2 = app.grouped_filtered_validation_results();
@@ -8099,7 +7926,6 @@ mod tests {
     // were *never loaded* must not touch the on-disk file.
     #[test]
     fn test_do_save_campaign_does_not_overwrite_stock_templates_when_not_loaded() {
-        use std::io::Write;
         use tempfile::tempdir;
 
         let dir = tempdir().expect("tempdir");
@@ -8153,9 +7979,11 @@ mod tests {
 
         // --- Build app state that mirrors "opened campaign, never visited
         //     Stock Templates tab, stock_templates_editor_state.loaded_from_file = false" ---
-        let mut app = CampaignBuilderApp::default();
-        app.campaign_path = Some(campaign_path.clone());
-        app.campaign_dir = Some(dir.path().to_path_buf());
+        let mut app = CampaignBuilderApp {
+            campaign_path: Some(campaign_path.clone()),
+            campaign_dir: Some(dir.path().to_path_buf()),
+            ..Default::default()
+        };
         // stock_templates_editor_state starts with loaded_from_file = false
         // and templates = Vec::new() — the exact pre-bug state.
         assert!(
@@ -8564,7 +8392,7 @@ mod tests {
         assert!(result.is_ok());
 
         if let antares::domain::quest::QuestObjective::KillMonsters {
-            monster_id,
+            monster_id: _,
             quantity,
         } = &app.quests[0].stages[0].objectives[0]
         {
@@ -9589,7 +9417,7 @@ mod tests {
 
     #[test]
     fn test_item_type_filter_weapon() {
-        let app = CampaignBuilderApp::default();
+        let _app = CampaignBuilderApp::default();
 
         let mut weapon = CampaignBuilderApp::default_item();
         weapon.item_type = ItemType::Weapon(WeaponData {
@@ -10004,10 +9832,6 @@ mod tests {
     #[test]
     fn test_item_preview_displays_all_info() {
         use antares::domain::items::types::*;
-
-        // Standard class bit positions
-        const BIT_KNIGHT: u8 = 0b0000_0001;
-        const BIT_PALADIN: u8 = 0b0000_0010;
 
         let item = Item {
             id: 10,
@@ -10631,7 +10455,7 @@ mod tests {
 
     #[test]
     fn test_monster_preview_fields() {
-        let app = CampaignBuilderApp::default();
+        let _app = CampaignBuilderApp::default();
         let monster = MonsterDefinition {
             id: 1,
             name: "Goblin".to_string(),
@@ -10752,7 +10576,7 @@ mod tests {
             app.quest_editor_state.mode,
             quest_editor::QuestEditorMode::List
         );
-        assert!(app.quests_show_preview);
+        assert!(app._quests_show_preview);
         assert!(app.quest_editor_state.search_filter.is_empty());
     }
 
@@ -10882,13 +10706,13 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
 
         // Default is true
-        assert!(app.quests_show_preview);
+        assert!(app._quests_show_preview);
 
-        app.quests_show_preview = false;
-        assert!(!app.quests_show_preview);
+        app._quests_show_preview = false;
+        assert!(!app._quests_show_preview);
 
-        app.quests_show_preview = true;
-        assert!(app.quests_show_preview);
+        app._quests_show_preview = true;
+        assert!(app._quests_show_preview);
     }
 
     #[test]
@@ -10930,8 +10754,8 @@ mod tests {
     #[test]
     fn test_quest_import_buffer() {
         let app = CampaignBuilderApp::default();
-        assert!(app.quests_import_buffer.is_empty());
-        assert!(!app.quests_show_import_dialog);
+        assert!(app._quests_import_buffer.is_empty());
+        assert!(!app._quests_show_import_dialog);
     }
 
     #[test]

@@ -313,7 +313,7 @@ impl QuestEditorState {
             antares::domain::quest::QuestReward::Items(items) => {
                 // For simplicity in this editor version, we only edit the first item in the list
                 // A more complex editor would handle multiple items per reward entry
-                if let Some((id, qty)) = items.first() {
+                if let Some((id, _qty)) = items.first() {
                     RewardEditBuffer {
                         reward_type: RewardType::Items,
                         item_id: id.to_string(),
