@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Campaign Builder - Phase 2: Foundation UI for Antares SDK
+//! Campaign Builder for Antares SDK
 //!
-//! Phase 2 adds:
+//! Features:
 //! - Full metadata editor with all campaign.ron fields
 //! - Real file I/O (save/load campaign.ron)
 //! - Enhanced validation UI with detailed error reporting
 //! - File structure browser showing campaign directory layout
-//! - Placeholder list views for Items, Spells, Monsters, Maps, Quests
+//! - Data editors for all game content types
 //! - Unsaved changes tracking and warnings
 
 pub mod advanced_validation;
@@ -689,7 +689,7 @@ struct CampaignBuilderApp {
     // Characters editor state
     characters_editor_state: characters_editor::CharactersEditorState,
 
-    // Phase 13: Distribution tools state
+    // Distribution tools state
     _export_wizard: Option<packager::ExportWizard>,
     _test_play_session: Option<test_play::TestPlaySession>,
     _test_play_config: test_play::TestPlayConfig,
@@ -698,13 +698,13 @@ struct CampaignBuilderApp {
     _show_test_play_panel: bool,
     show_asset_manager: bool,
 
-    // Phase 15: Polish & advanced features state
+    // Polish & advanced features state
     undo_redo_manager: undo_redo::UndoRedoManager,
     template_manager: templates::TemplateManager,
     show_template_browser: bool,
     template_category: templates::TemplateCategory,
 
-    // Phase 5: Creature Template Browser
+    // Creature Template Browser
     creature_template_registry: template_metadata::TemplateRegistry,
     creature_template_browser_state: template_browser::TemplateBrowserState,
     show_creature_template_browser: bool,
@@ -718,7 +718,7 @@ struct CampaignBuilderApp {
     // File I/O pattern state
     file_load_merge_mode: bool,
 
-    // Phase 7: Logging and developer experience
+    // Logging and developer experience
     logger: Logger,
     tool_config: ToolConfig,
     show_preferences: bool,
@@ -825,7 +825,7 @@ impl Default for CampaignBuilderApp {
 
             characters_editor_state: characters_editor::CharactersEditorState::default(),
 
-            // Phase 13: Distribution tools
+            // Distribution tools
             _export_wizard: None,
             _test_play_session: None,
             _test_play_config: test_play::TestPlayConfig::default(),
@@ -834,13 +834,13 @@ impl Default for CampaignBuilderApp {
             _show_test_play_panel: false,
             show_asset_manager: false,
 
-            // Phase 15: Polish & advanced features
+            // Polish & advanced features
             undo_redo_manager: undo_redo::UndoRedoManager::new(),
             template_manager: templates::TemplateManager::new(),
             show_template_browser: false,
             template_category: templates::TemplateCategory::Item,
 
-            // Phase 5: Creature Template Browser
+            // Creature Template Browser
             creature_template_registry: creature_templates::initialize_template_registry(),
             creature_template_browser_state: template_browser::TemplateBrowserState::new(),
             show_creature_template_browser: false,
@@ -854,7 +854,7 @@ impl Default for CampaignBuilderApp {
 
             file_load_merge_mode: true, // Default to merge mode
 
-            // Phase 7: Logging and developer experience
+            // Logging and developer experience
             logger: Logger::default(),
             tool_config: ToolConfig::default(),
             show_preferences: false,
@@ -5242,27 +5242,27 @@ impl eframe::App for CampaignBuilderApp {
                 });
         }
 
-        // Phase 15: Template browser dialog
+        // Template browser dialog
         if self.show_template_browser {
             self.show_template_browser_dialog(ctx);
         }
 
-        // Phase 5: Creature Template Browser dialog
+        // Creature Template Browser dialog
         if self.show_creature_template_browser {
             self.show_creature_template_browser_dialog(ctx);
         }
 
-        // Phase 15: Validation report dialog
+        // Validation report dialog
         if self.show_validation_report {
             self.show_validation_report_dialog(ctx);
         }
 
-        // Phase 15: Balance statistics dialog
+        // Balance statistics dialog
         if self.show_balance_stats {
             self.show_balance_stats_dialog(ctx);
         }
 
-        // Phase 7: Debug panel
+        // Debug panel
         if self.show_debug_panel {
             self.show_debug_panel_window(ctx);
         }
@@ -5293,7 +5293,7 @@ impl CampaignBuilderApp {
         }
     }
 
-    /// Show quests editor (Phase 4A: Full Quest Editor Integration)
+    /// Show quests editor
     fn show_quests_editor(&mut self, ui: &mut egui::Ui) {
         self.quest_editor_state.show(
             ui,
@@ -8077,7 +8077,7 @@ mod tests {
     #[test]
     fn test_campaign_backwards_compatibility_missing_proficiencies_file() {
         // Test that old campaign files without proficiencies_file can still load
-        // This ensures campaigns created before Phase 3 still work
+        // This ensures older campaigns still work
         let old_campaign_ron = r#"CampaignMetadata(
     id: "legacy_campaign",
     name: "Legacy Campaign",
@@ -8707,7 +8707,7 @@ mod tests {
         assert!(monster.magic_resistance <= 100);
     }
 
-    // ===== Phase 3A: ID Validation and Generation Tests =====
+    // ===== ID Validation and Generation Tests =====
 
     #[test]
     fn test_item_id_uniqueness_validation() {
@@ -9008,7 +9008,7 @@ mod tests {
         assert!(res.is_err());
     }
 
-    // New tests for effect helpers (Phase 3 - Effects editing helpers)
+    // Effect Editing Helper Tests
     #[test]
     fn test_condition_effect_helpers_success_flow() {
         use crate::conditions_editor::{
@@ -9413,7 +9413,7 @@ mod tests {
         assert_eq!(app.next_available_item_id(), 255);
     }
 
-    // ===== Phase 3B: Items Editor Enhancement Tests =====
+    // ===== Items Editor Enhancement Tests =====
 
     #[test]
     fn test_item_type_filter_weapon() {
@@ -9869,7 +9869,7 @@ mod tests {
         assert_eq!(item.max_charges, 20);
     }
 
-    // ===== Phase 3C Tests: Spell Editor Enhancements =====
+    // ===== Spell Editor Enhancement Tests =====
 
     #[test]
     fn test_spell_school_filter_cleric() {
@@ -10137,7 +10137,7 @@ mod tests {
         assert_eq!(imported.target, original.target);
     }
 
-    // ===== Phase 3C Tests: Monster Editor Enhancements =====
+    // ===== Monster Editor Enhancement Tests =====
 
     #[test]
     fn test_monster_attacks_editor() {
@@ -10564,7 +10564,7 @@ mod tests {
     }
 
     // ============================================================
-    // Phase 4A: Quest Editor Integration Tests
+    // Quest Editor Integration Tests
     // ============================================================
 
     #[test]
@@ -10786,7 +10786,7 @@ mod tests {
     }
 
     // ============================================================
-    // Phase 4B: Dialogue Editor Integration Tests
+    // Dialogue Editor Integration Tests
     // ============================================================
 
     #[test]
@@ -11394,7 +11394,7 @@ mod tests {
     }
 
     // =========================================================================
-    // Phase 5: Testing Infrastructure Improvements
+    // Testing Infrastructure
     // Pattern Matching and Compliance Tests
     // =========================================================================
 
@@ -11836,7 +11836,7 @@ fn test_another() {}
     }
 
     // =========================================================================
-    // Phase 5: Creature Template Browser Tests
+    // Creature Template Browser Tests
     // =========================================================================
 
     #[test]
@@ -11958,7 +11958,7 @@ fn test_another() {}
     }
 
     // =========================================================================
-    // Phase 7: Stock Templates Editor Tests
+    // Stock Templates Editor Tests
     // =========================================================================
 
     #[test]

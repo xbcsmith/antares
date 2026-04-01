@@ -1979,7 +1979,7 @@ mod tests {
     }
 
     // =========================================================================
-    // Phase 5: Duration-Aware Consumable Tests
+    // Duration-Aware Consumable Tests
     // =========================================================================
 
     /// Setting `duration_minutes = Some(60)` in the edit buffer is preserved

@@ -28,7 +28,7 @@
 //! - [`AttributePairInput`] - Widget for editing `AttributePair` (u8 base/current)
 //! - [`AttributePair16Input`] - Widget for editing `AttributePair16` (u16 base/current)
 //!
-//! ## Autocomplete System (Phase 1-3)
+//! ## Autocomplete System
 //!
 //! - [`AutocompleteInput`] - Autocomplete text input widget with dropdown suggestions
 //! - [`autocomplete_item_selector`] - Pre-configured autocomplete for Item selection
@@ -39,7 +39,7 @@
 //! - [`autocomplete_tag_list_selector`] - Multi-select autocomplete for Item Tag lists
 //! - [`autocomplete_ability_list_selector`] - Multi-select autocomplete for Special Ability lists
 //!
-//! ## Candidate Extraction & Caching (Phase 2-3)
+//! ## Candidate Extraction & Caching
 //!
 //! - [`extract_item_candidates`] - Extracts searchable item candidates
 //! - [`extract_monster_candidates`] - Extracts searchable monster candidates
@@ -53,7 +53,7 @@
 //! - [`resolve_portrait_path`] - Resolves portrait ID to full file path
 //! - [`AutocompleteCandidateCache`] - Performance cache for candidate lists (invalidate on data changes)
 //!
-//! ## Entity Validation Warnings (Phase 3)
+//! ## Entity Validation Warnings
 //!
 //! - [`show_entity_validation_warning`] - Generic validation warning display
 //! - [`show_item_validation_warning`] - Item-specific validation warning
@@ -6448,7 +6448,7 @@ mod tests {
     }
 
     // =========================================================================
-    // Phase 3: Candidate Cache Tests
+    // Candidate Cache Tests
     // =========================================================================
 
     #[test]
@@ -6675,7 +6675,7 @@ mod tests {
     }
 
     // =========================================================================
-    // Phase 3: Validation Warning Tests
+    // Validation Warning Tests
     // =========================================================================
 
     #[test]

@@ -94,7 +94,7 @@ pub struct CreaturesEditorState {
     // Preview state
     pub preview_dirty: bool,
 
-    // Phase 1: Registry Management UI
+    // Registry Management UI
     pub category_filter: Option<CreatureCategory>,
     pub show_registry_stats: bool,
     pub id_manager: CreatureIdManager,
@@ -105,14 +105,14 @@ pub struct CreaturesEditorState {
     pub validation_warnings: Vec<String>,
     pub validation_info: Vec<String>,
     pub last_validated_mesh_index: Option<usize>,
-    /// Phase 3: Two-step delete confirmation flag for the registry preview panel.
+    /// Two-step delete confirmation flag for the registry preview panel.
     ///
     /// When `true` the Delete button shows "⚠ Confirm Delete"; a second click
     /// executes the deletion.  Resets whenever `selected_registry_entry` changes
     /// or `back_to_registry()` is called.
     pub registry_delete_confirm_pending: bool,
 
-    // Phase 4: Register Asset Dialog
+    // Register Asset Dialog
     /// When `true`, the "Register Creature Asset" dialog window is visible.
     pub show_register_asset_dialog: bool,
     /// Path buffer for the asset path text field (relative to campaign directory).
@@ -128,7 +128,7 @@ pub struct CreaturesEditorState {
     /// creature asset candidates cache should be refreshed.
     pub last_campaign_dir: Option<PathBuf>,
 
-    // Phase 2: Asset Editor UI
+    // Asset Editor UI
     pub show_primitive_dialog: bool,
     pub primitive_type: PrimitiveType,
     pub primitive_size: f32,
@@ -149,7 +149,7 @@ pub struct CreaturesEditorState {
     pub show_save_as_dialog: bool,
     pub save_as_path_buffer: String,
 
-    // Phase 5: Workflow Integration & Polish
+    // Workflow Integration
     /// Unified workflow state (undo/redo, shortcuts, context menus, auto-save, preview).
     pub workflow: CreatureWorkflowState,
     /// Dedicated undo/redo manager for creature editing operations.
@@ -264,7 +264,7 @@ impl Default for CreaturesEditorState {
 
             registry_delete_confirm_pending: false,
 
-            // Phase 4: Register Asset Dialog
+            // Register Asset Dialog
             show_register_asset_dialog: false,
             register_asset_path_buffer: String::new(),
             register_asset_validated_creature: None,
@@ -272,7 +272,7 @@ impl Default for CreaturesEditorState {
             available_creature_assets: Vec::new(),
             last_campaign_dir: None,
 
-            // Phase 5: Workflow Integration & Polish
+            // Workflow Integration
             workflow: CreatureWorkflowState::new(),
             undo_redo: CreatureUndoRedoManager::new(),
             shortcut_manager: ShortcutManager::new(),
@@ -331,7 +331,7 @@ impl CreaturesEditorState {
         }
     }
 
-    /// Show registry management mode (Phase 1)
+    /// Show registry management mode
     fn show_registry_mode(
         &mut self,
         ui: &mut egui::Ui,
@@ -490,7 +490,7 @@ impl CreaturesEditorState {
 
         ui.separator();
 
-        // ---- Phase 3: Two-column layout (list + preview) ----
+        // ---- Two-column layout (list + preview) ----
         //
         // Uses TwoColumnLayout (the project-standard helper) instead of a raw
         // SidePanel::right.  SidePanel is a layout reservation that egui
@@ -803,7 +803,7 @@ impl CreaturesEditorState {
             });
         }
 
-        // Phase 4: Register Asset Dialog window
+        // Register Asset Dialog window
         if self.show_register_asset_dialog {
             let ctx = ui.ctx().clone();
             let available_paths = self.available_creature_assets.clone();
@@ -1440,7 +1440,7 @@ impl CreaturesEditorState {
 
         ui.separator();
 
-        // Phase 2: Three-panel layout: Mesh List | 3D Preview | Mesh Properties
+        // Three-panel layout: Mesh List | 3D Preview | Mesh Properties
         egui::SidePanel::left("mesh_list_panel")
             .resizable(true)
             .default_width(250.0)
@@ -1511,7 +1511,7 @@ impl CreaturesEditorState {
         result_message
     }
 
-    /// Show mesh list panel (left, 250px) - Phase 2.1
+    /// Show mesh list panel (left, 250px)
     fn show_mesh_list_panel(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
         ui.heading("Meshes");
 
@@ -1612,7 +1612,7 @@ impl CreaturesEditorState {
             });
     }
 
-    /// Show 3D preview panel (center, flex) - Phase 2.2
+    /// Show 3D preview panel (center, flex)
     fn show_preview_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Preview");
 
@@ -1792,7 +1792,7 @@ impl CreaturesEditorState {
         stats
     }
 
-    /// Show mesh properties panel (right, 350px) - Phase 2.3
+    /// Show mesh properties panel (right, 350px)
     fn show_mesh_properties_panel(
         &mut self,
         ui: &mut egui::Ui,
@@ -2095,7 +2095,7 @@ impl CreaturesEditorState {
         result_message
     }
 
-    /// Show creature-level properties (bottom panel) - Phase 2.5
+    /// Show creature-level properties (bottom panel)
     fn show_creature_level_properties(
         &mut self,
         ui: &mut egui::Ui,
@@ -2542,7 +2542,7 @@ impl CreaturesEditorState {
         result_message
     }
 
-    /// Show primitive replacement dialog - Phase 2.4
+    /// Show primitive replacement dialog
     fn show_primitive_replacement_dialog(
         &mut self,
         ctx: &egui::Context,
@@ -2977,7 +2977,7 @@ impl CreaturesEditorState {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 5: Workflow Integration helpers
+    // Workflow Integration helpers
     // -----------------------------------------------------------------------
 
     /// Enter asset-editor mode for the given creature.
@@ -3062,7 +3062,7 @@ impl CreaturesEditorState {
         self.workflow.return_to_registry();
     }
 
-    /// Returns the mode indicator string for the top bar (Phase 5.1).
+    /// Returns the mode indicator string for the top bar.
     ///
     /// Examples: `"Registry Mode"` or `"Asset Editor: goblin.ron"`.
     ///
@@ -3078,7 +3078,7 @@ impl CreaturesEditorState {
         self.workflow.mode_indicator()
     }
 
-    /// Returns the breadcrumb navigation string (Phase 5.1).
+    /// Returns the breadcrumb navigation string.
     ///
     /// Example: `"Creatures > Goblin > left_leg"`.
     ///
@@ -3136,7 +3136,7 @@ impl CreaturesEditorState {
         self.undo_redo.can_redo()
     }
 
-    /// Returns the keyboard shortcut string for an action (Phase 5.3).
+    /// Returns the keyboard shortcut string for an action.
     ///
     /// # Arguments
     ///
@@ -3223,10 +3223,10 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 4: Register Existing Creature Asset .ron File
+    // Register Existing Creature Asset .ron File
     // -----------------------------------------------------------------------
 
-    /// All Phase 4 dialog fields must default to empty / false / None.
+    /// All dialog fields must default to empty / false / None.
     #[test]
     fn test_register_asset_dialog_initial_state() {
         let state = CreaturesEditorState::new();
@@ -3744,7 +3744,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Findings Remediation Phase 4: Preview integration lifecycle
+    // Preview integration lifecycle
     // -----------------------------------------------------------------------
 
     #[test]
@@ -3825,7 +3825,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 2 regression tests: Fix the Silent Data-Loss Bug in Edit Mode
+    // Regression tests: Fix the Silent Data-Loss Bug in Edit Mode
     // -----------------------------------------------------------------------
 
     /// Helper that constructs a named creature with a given id.
@@ -4199,7 +4199,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 3: Preview Panel in Registry List Mode
+    // Preview Panel in Registry List Mode
     // -----------------------------------------------------------------------
 
     /// Confirm that when `selected_registry_entry` is `None` the preview panel

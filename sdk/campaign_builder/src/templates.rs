@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Template System - Phase 15.2
+//! Template System
 //!
 //! Pre-built templates for common game content:
 //! - Items (weapons, armor, consumables)

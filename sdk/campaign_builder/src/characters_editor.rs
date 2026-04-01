@@ -3159,7 +3159,7 @@ mod tests {
         assert!(state.portrait_textures.is_empty());
     }
 
-    // Phase 5: Polish and Edge Cases Tests
+    // Polish and Edge Cases Tests
 
     #[test]
     fn test_portrait_texture_error_handling_missing_file() {

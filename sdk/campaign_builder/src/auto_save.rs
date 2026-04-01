@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Auto-Save and Recovery System - Phase 5.6
+//! Auto-Save and Recovery System
 //!
 //! Provides automatic saving and crash recovery for creature editing.
 //! Supports:

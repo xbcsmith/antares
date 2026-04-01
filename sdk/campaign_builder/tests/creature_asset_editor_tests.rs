@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Unit tests for Phase 2: Creature Asset Editor UI
+//! Unit tests for Creature Asset Editor UI
 //!
 //! Tests cover:
 //! - Loading creature assets

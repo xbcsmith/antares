@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tests for Phase 8: Furniture Properties Extension, Categorization, and Editor UI
+//! Tests for Furniture Properties Extension, Categorization, and Editor UI
 //!
 //! This module contains comprehensive tests for:
 //! - FurnitureMaterial enum variants and properties

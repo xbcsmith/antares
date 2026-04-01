@@ -19,7 +19,7 @@ use std::path::PathBuf;
 ///
 /// This state keeps the user's current search filter, the currently selected
 /// condition (if any), a temporary edit buffer for creating or editing a
-/// condition, and whether the preview pane is visible. In Phase 1 we also add
+/// condition, and whether the preview pane is visible. Additional fields include
 /// import/export and basic delete/duplicate dialog state.
 ///
 /// # Examples
@@ -131,7 +131,7 @@ pub struct ConditionsEditorState {
     /// When deleting a condition, optionally remove references from spells (UI toggle)
     pub remove_refs_on_delete: bool,
 
-    // Phase 1 additions
+    // Additional fields
     pub show_import_dialog: bool,
     pub import_export_buffer: String,
     pub delete_confirmation_open: bool,

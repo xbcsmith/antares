@@ -394,7 +394,7 @@ pub enum VisualPreset {
     /// Diagonal wall (rotation_y=45.0, width_z=0.2)
     DiagonalWall,
 
-    // ===== Phase 6: Advanced Terrain Variants =====
+    // ===== Advanced Terrain Variants =====
     /// Short tree (height=1.0, scale=0.6, medium green tint)
     ShortTree,
     /// Medium tree (height=2.0, scale=0.8, medium green tint)
@@ -457,28 +457,28 @@ impl VisualPreset {
             VisualPreset::Rotated45 => "Rotated 45°",
             VisualPreset::Rotated90 => "Rotated 90°",
             VisualPreset::DiagonalWall => "Diagonal Wall",
-            // Phase 6 trees
+            // Tree variants
             VisualPreset::ShortTree => "Short Tree",
             VisualPreset::MediumTree => "Medium Tree",
             VisualPreset::TallTree => "Tall Tree",
             VisualPreset::DeadTree => "Dead Tree",
-            // Phase 6 shrubs
+            // Shrub variants
             VisualPreset::SmallShrub => "Small Shrub",
             VisualPreset::LargeShrub => "Large Shrub",
             VisualPreset::FloweringShrub => "Flowering Shrub",
-            // Phase 6 grass
+            // Grass variants
             VisualPreset::ShortGrass => "Short Grass",
             VisualPreset::TallGrass => "Tall Grass",
             VisualPreset::DriedGrass => "Dried Grass",
-            // Phase 6 mountains
+            // Mountain variants
             VisualPreset::LowPeak => "Low Peak",
             VisualPreset::HighPeak => "High Peak",
             VisualPreset::JaggedPeak => "Jagged Peak",
-            // Phase 6 swamp
+            // Swamp variants
             VisualPreset::ShallowSwamp => "Shallow Swamp",
             VisualPreset::DeepSwamp => "Deep Swamp",
             VisualPreset::MurkySwamp => "Murky Swamp",
-            // Phase 6 lava
+            // Lava variants
             VisualPreset::LavaPool => "Lava Pool",
             VisualPreset::LavaFlow => "Lava Flow",
             VisualPreset::VolcanicVent => "Volcanic Vent",
@@ -551,28 +551,28 @@ impl VisualPreset {
             VisualPreset::Rotated45,
             VisualPreset::Rotated90,
             VisualPreset::DiagonalWall,
-            // Phase 6 trees
+            // Tree variants
             VisualPreset::ShortTree,
             VisualPreset::MediumTree,
             VisualPreset::TallTree,
             VisualPreset::DeadTree,
-            // Phase 6 shrubs
+            // Shrub variants
             VisualPreset::SmallShrub,
             VisualPreset::LargeShrub,
             VisualPreset::FloweringShrub,
-            // Phase 6 grass
+            // Grass variants
             VisualPreset::ShortGrass,
             VisualPreset::TallGrass,
             VisualPreset::DriedGrass,
-            // Phase 6 mountains
+            // Mountain variants
             VisualPreset::LowPeak,
             VisualPreset::HighPeak,
             VisualPreset::JaggedPeak,
-            // Phase 6 swamp
+            // Swamp variants
             VisualPreset::ShallowSwamp,
             VisualPreset::DeepSwamp,
             VisualPreset::MurkySwamp,
-            // Phase 6 lava
+            // Lava variants
             VisualPreset::LavaPool,
             VisualPreset::LavaFlow,
             VisualPreset::VolcanicVent,
@@ -595,28 +595,28 @@ impl VisualPreset {
             VisualPreset::Rotated45,
             VisualPreset::Rotated90,
             VisualPreset::DiagonalWall,
-            // Phase 6 trees
+            // Tree variants
             VisualPreset::ShortTree,
             VisualPreset::MediumTree,
             VisualPreset::TallTree,
             VisualPreset::DeadTree,
-            // Phase 6 shrubs
+            // Shrub variants
             VisualPreset::SmallShrub,
             VisualPreset::LargeShrub,
             VisualPreset::FloweringShrub,
-            // Phase 6 grass
+            // Grass variants
             VisualPreset::ShortGrass,
             VisualPreset::TallGrass,
             VisualPreset::DriedGrass,
-            // Phase 6 mountains
+            // Mountain variants
             VisualPreset::LowPeak,
             VisualPreset::HighPeak,
             VisualPreset::JaggedPeak,
-            // Phase 6 swamp
+            // Swamp variants
             VisualPreset::ShallowSwamp,
             VisualPreset::DeepSwamp,
             VisualPreset::MurkySwamp,
-            // Phase 6 lava
+            // Lava variants
             VisualPreset::LavaPool,
             VisualPreset::LavaFlow,
             VisualPreset::VolcanicVent,
@@ -682,7 +682,7 @@ impl VisualPreset {
                 width_z: Some(0.2),
                 ..Default::default()
             },
-            // Phase 6: Tree variants
+            // Tree variants
             VisualPreset::ShortTree => TileVisualMetadata {
                 height: Some(1.0),
                 scale: Some(0.6),
@@ -707,7 +707,7 @@ impl VisualPreset {
                 color_tint: Some((0.6, 0.5, 0.4)), // Brown/gray tint
                 ..Default::default()
             },
-            // Phase 6: Shrub variants
+            // Shrub variants
             VisualPreset::SmallShrub => TileVisualMetadata {
                 height: Some(0.4),
                 scale: Some(0.4),
@@ -726,7 +726,7 @@ impl VisualPreset {
                 color_tint: Some((0.8, 0.5, 0.7)), // Flower pink tint
                 ..Default::default()
             },
-            // Phase 6: Grass variants
+            // Grass variants
             VisualPreset::ShortGrass => TileVisualMetadata {
                 height: Some(0.2),
                 scale: Some(0.8),
@@ -745,7 +745,7 @@ impl VisualPreset {
                 color_tint: Some((0.7, 0.6, 0.4)), // Brown/tan tint
                 ..Default::default()
             },
-            // Phase 6: Mountain variants
+            // Mountain variants
             VisualPreset::LowPeak => TileVisualMetadata {
                 height: Some(1.5),
                 rotation_y: Some(0.0),
@@ -764,7 +764,7 @@ impl VisualPreset {
                 color_tint: Some((0.5, 0.5, 0.5)), // Dark gray tint
                 ..Default::default()
             },
-            // Phase 6: Swamp variants
+            // Swamp variants
             VisualPreset::ShallowSwamp => TileVisualMetadata {
                 height: Some(0.1),
                 scale: Some(1.2),
@@ -783,7 +783,7 @@ impl VisualPreset {
                 color_tint: Some((0.15, 0.2, 0.2)), // Very dark swamp tint
                 ..Default::default()
             },
-            // Phase 6: Lava variants
+            // Lava variants
             VisualPreset::LavaPool => TileVisualMetadata {
                 height: Some(0.2),
                 scale: Some(1.0),
@@ -1936,7 +1936,7 @@ pub struct EventEditorState {
     pub npc_id_input_buffer: String,
     pub recruit_character_id_input_buffer: String,
 
-    // Facing / behaviour fields (Phase 5 — applies to Sign, NpcDialogue, Encounter,
+    // Facing / behaviour fields (applies to Sign, NpcDialogue, Encounter,
     // and RecruitableCharacter event types)
     /// Initial facing direction for the spawned entity.
     /// `None` means the engine default (North). Applies to Sign, NpcDialogue,
@@ -7922,7 +7922,7 @@ mod tests {
         assert_eq!(state.npc_id_input_buffer, "Guard (Map: Castle, NPC ID: 5)");
     }
 
-    /// Phase 1: Test that edit button activates PlaceEvent tool
+    /// Test that edit button activates PlaceEvent tool
     #[test]
     fn test_edit_event_button_activates_place_event_tool() {
         let mut editor =
@@ -7951,7 +7951,7 @@ mod tests {
         assert!(editor.event_editor.is_some());
     }
 
-    /// Phase 1: Test that edit button loads correct event into EventEditorState
+    /// Test that edit button loads correct event into EventEditorState
     #[test]
     fn test_edit_event_button_loads_event_into_editor() {
         let mut editor =
@@ -7984,7 +7984,7 @@ mod tests {
         assert_eq!(editor_state.encounter_monsters, vec![1, 2, 3]);
     }
 
-    /// Phase 1: Test editing state indicator when event is being edited
+    /// Test editing state indicator when event is being edited
     #[test]
     fn test_edit_event_button_shows_editing_state() {
         let mut editor =
@@ -8022,7 +8022,7 @@ mod tests {
         assert!(!is_editing_other);
     }
 
-    /// Phase 1: Test that save resets tool to Select mode
+    /// Test that save resets tool to Select mode
     #[test]
     fn test_edit_event_save_resets_tool_to_select() {
         let mut editor =
@@ -8050,7 +8050,7 @@ mod tests {
         assert!(editor.event_editor.is_none());
     }
 
-    /// Phase 1: Test that remove resets tool to Select mode
+    /// Test that remove resets tool to Select mode
     #[test]
     fn test_edit_event_remove_resets_tool_to_select() {
         let mut editor =
@@ -8077,7 +8077,7 @@ mod tests {
         assert!(matches!(editor.current_tool, EditorTool::Select));
     }
 
-    /// Phase 1: Test switching between editing different events
+    /// Test switching between editing different events
     #[test]
     fn test_edit_event_switch_between_multiple_events() {
         let mut editor =
@@ -8124,7 +8124,7 @@ mod tests {
         assert_eq!(editor.event_editor.as_ref().unwrap().trap_damage, 25);
     }
 
-    // Phase 2: Visual Feedback Tests
+    // Visual Feedback Tests
 
     #[test]
     fn test_edit_highlight_appears_when_event_editor_active() {
@@ -8931,7 +8931,7 @@ mod tests {
         assert!(state.selected_tiles.is_empty());
     }
 
-    // ── Phase 7: Container event type tests ──────────────────────────────────
+    // ── Container event type tests ──────────────────────────────────
 
     #[test]
     fn test_event_type_container_name() {
@@ -9082,7 +9082,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 5: Campaign Builder SDK UI — EventEditorState facing / behaviour tests =====
+    // ===== EventEditorState facing / behaviour tests =====
 
     #[test]
     fn test_event_editor_state_default_facing_none() {
@@ -9385,7 +9385,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 5: CombatEventType UI tests =====
+    // ===== CombatEventType UI tests =====
 
     #[test]
     fn test_event_editor_state_default_combat_type() {

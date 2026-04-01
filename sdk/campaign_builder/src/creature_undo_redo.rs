@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Creature Editing Undo/Redo Commands - Phase 5.5
+//! Creature Editing Undo/Redo Commands
 //!
 //! Command pattern implementation for reversible creature editing operations.
 //! Supports undo/redo for:

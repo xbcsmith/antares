@@ -3,7 +3,7 @@
 
 //! UI Improvements Test
 //!
-//! Tests for Phase 8 SDK Campaign Builder UI/UX improvements.
+//! Tests for SDK Campaign Builder UI/UX improvements.
 //! Verifies that the enhanced display components are functional.
 
 #[cfg(test)]

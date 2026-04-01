@@ -2363,3 +2363,150 @@ Dead fields in other structs were also prefixed: `_custom_maps` (templates.rs),
 - [x] Zero `#[allow(deprecated)]` in SDK source
 - [x] Zero `campaigns/tutorial` references in SDK tests or source
 - [x] All quality gates pass
+
+## SDK Codebase Cleanup — Phase 2: Strip Phase References (Complete)
+
+### Overview
+
+Phase 2 of the SDK codebase cleanup mechanically removes all development-phase
+references from source comments, module doc comments, test section headers, and
+documentation files. No functional code was changed — every edit is comment- or
+documentation-only. All 4095 tests continue to pass with zero errors and zero
+warnings.
+
+### 2.1 — Stripped Phase Prefixes from Module-Level Doc Comments
+
+| File                     | Before                                                                   | After                                           |
+| ------------------------ | ------------------------------------------------------------------------ | ----------------------------------------------- |
+| `lib.rs`                 | `//! Campaign Builder - Phase 2: Foundation UI for Antares SDK`          | `//! Campaign Builder for Antares SDK`          |
+| `lib.rs`                 | `//! Phase 2 adds:`                                                      | `//! Features:`                                 |
+| `lib.rs`                 | `//! - Placeholder list views for Items, Spells, Monsters, Maps, Quests` | `//! - Data editors for all game content types` |
+| `advanced_validation.rs` | `//! Advanced Validation Features - Phase 15.4`                          | `//! Advanced Validation Features`              |
+| `auto_save.rs`           | `//! Auto-Save and Recovery System - Phase 5.6`                          | `//! Auto-Save and Recovery System`             |
+| `campaign_editor.rs`     | `//! Phase 5 - Docs, Cleanup & Handoff:` (line 8)                        | Line removed entirely                           |
+| `classes_editor.rs`      | `//! # Autocomplete Integration (Phase 2)`                               | `//! # Autocomplete Integration`                |
+| `context_menu.rs`        | `//! Context Menu System - Phase 5.4`                                    | `//! Context Menu System`                       |
+| `creature_undo_redo.rs`  | `//! Creature Editing Undo/Redo Commands - Phase 5.5`                    | `//! Creature Editing Undo/Redo Commands`       |
+| `creatures_manager.rs`   | `//! Creatures Manager for Phase 6: …`                                   | `//! Creatures Manager: …`                      |
+| `creatures_workflow.rs`  | `//! Creature Editor Unified Workflow - Phase 5.1`                       | `//! Creature Editor Unified Workflow`          |
+| `creatures_workflow.rs`  | `//! integrating all Phase 5 components:`                                | `//! integrating all workflow subsystems:`      |
+| `item_mesh_editor.rs`    | `//! Item Mesh Editor — … (Phase 5).`                                    | `//! Item Mesh Editor — …`                      |
+| `keyboard_shortcuts.rs`  | `//! Keyboard Shortcuts System - Phase 5.3`                              | `//! Keyboard Shortcuts System`                 |
+| `preview_features.rs`    | `//! Preview Features - Phase 5.2`                                       | `//! Preview Features`                          |
+| `templates.rs`           | `//! Template System - Phase 15.2`                                       | `//! Template System`                           |
+| `undo_redo.rs`           | `//! Undo/Redo System - Phase 15.1`                                      | `//! Undo/Redo System`                          |
+| `ui_helpers.rs`          | `//! ## Autocomplete System (Phase 1-3)`                                 | `//! ## Autocomplete System`                    |
+| `ui_helpers.rs`          | `//! ## Candidate Extraction & Caching (Phase 2-3)`                      | `//! ## Candidate Extraction & Caching`         |
+| `ui_helpers.rs`          | `//! ## Entity Validation Warnings (Phase 3)`                            | `//! ## Entity Validation Warnings`             |
+
+### 2.2 — Stripped Phase Prefixes from Inline Code Comments
+
+High-density files and representative changes:
+
+| File                    | Count | Example before → after                                                                                                                    |
+| ----------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `map_editor.rs`         | 36    | `// Phase 6 trees` → `// Tree variants`; `// ===== Phase 6: Advanced Terrain Variants =====` → `// ===== Advanced Terrain Variants =====` |
+| `creatures_editor.rs`   | 25    | `// Phase 1: Registry Management UI` → `// Registry Management UI`                                                                        |
+| `lib.rs`                | 18    | `// Phase 13: Distribution tools state` → `// Distribution tools state`                                                                   |
+| `dialogue_editor.rs`    | 10    | `// Phase 3: Navigation Controls` → `// Navigation Controls`                                                                              |
+| `campaign_editor.rs`    | 1     | `/// Note: For Phase 1 we keep the UI minimal…` — removed entirely                                                                        |
+| `conditions_editor.rs`  | 2     | `// Phase 1 additions` → `// Additional fields`                                                                                           |
+| `creatures_workflow.rs` | 4     | `/// Owns all Phase 5 subsystems:` → `/// Owns all subsystems:`                                                                           |
+| `preview_renderer.rs`   | 4     | `// This is a placeholder - Phase 5 will use proper 3D rendering` → `// TODO: use proper 3D rendering`                                    |
+| `tray.rs`               | 7     | `// ── Phase 2: PNG magic ───` → `// ── PNG magic ───`                                                                                    |
+
+### 2.3 — Stripped Phase Prefixes from Test Section Headers
+
+| File                      | Before                                                                   | After                                                            |
+| ------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `lib.rs`                  | `// ===== Phase 3A: ID Validation and Generation Tests =====`            | `// ===== ID Validation and Generation Tests =====`              |
+| `lib.rs`                  | `// ===== Phase 3B: Items Editor Enhancement Tests =====`                | `// ===== Items Editor Enhancement Tests =====`                  |
+| `lib.rs`                  | `// ===== Phase 3C Tests: Spell Editor Enhancements =====`               | `// ===== Spell Editor Enhancement Tests =====`                  |
+| `lib.rs`                  | `// ===== Phase 3C Tests: Monster Editor Enhancements =====`             | `// ===== Monster Editor Enhancement Tests =====`                |
+| `lib.rs`                  | `// Phase 4A: Quest Editor Integration Tests`                            | `// Quest Editor Integration Tests`                              |
+| `lib.rs`                  | `// Phase 4B: Dialogue Editor Integration Tests`                         | `// Dialogue Editor Integration Tests`                           |
+| `lib.rs`                  | `// Phase 5: Testing Infrastructure Improvements`                        | `// Testing Infrastructure`                                      |
+| `lib.rs`                  | `// Phase 5: Creature Template Browser Tests`                            | `// Creature Template Browser Tests`                             |
+| `lib.rs`                  | `// Phase 7: Stock Templates Editor Tests`                               | `// Stock Templates Editor Tests`                                |
+| `map_editor.rs`           | `// Phase 2: Visual Feedback Tests`                                      | `// Visual Feedback Tests`                                       |
+| `map_editor.rs`           | `// ── Phase 7: Container event type tests ──`                           | `// ── Container event type tests ──`                            |
+| `map_editor.rs`           | `// ===== Phase 5: … EventEditorState facing … =====`                    | `// ===== EventEditorState facing … =====`                       |
+| `map_editor.rs`           | `// ===== Phase 5: CombatEventType UI tests =====`                       | `// ===== CombatEventType UI tests =====`                        |
+| `config_editor.rs`        | `// Phase 3: Key Capture and Auto-Population Tests`                      | `// Key Capture and Auto-Population Tests`                       |
+| `config_editor.rs`        | `// Phase 2: Rest key binding tests`                                     | `// Rest Key Binding Tests`                                      |
+| `characters_editor.rs`    | `// Phase 5: Polish and Edge Cases Tests`                                | `// Polish and Edge Cases Tests`                                 |
+| `items_editor.rs`         | `// Phase 5: Duration-Aware Consumable Tests`                            | `// Duration-Aware Consumable Tests`                             |
+| `npc_editor.rs`           | `// ── Phase 7: stock_template field tests ──`                           | `// ── Stock Template Field Tests ──`                            |
+| `proficiencies_editor.rs` | `// ===== Phase 3: Validation and Polish Tests =====`                    | `// ===== Validation and Polish Tests =====`                     |
+| `ui_helpers.rs`           | `// Phase 3: Candidate Cache Tests`                                      | `// Candidate Cache Tests`                                       |
+| `ui_helpers.rs`           | `// Phase 3: Validation Warning Tests`                                   | `// Validation Warning Tests`                                    |
+| `dialogue_editor.rs`      | `// ========== Phase 3 Tests: Node Navigation and Validation ==========` | `// ========== Node Navigation and Validation Tests ==========`  |
+| `creatures_editor.rs`     | `// Phase 2 regression tests: Fix the Silent Data-Loss Bug in Edit Mode` | `// Regression tests: Fix the Silent Data-Loss Bug in Edit Mode` |
+| `creatures_editor.rs`     | `// Phase 3: Preview Panel in Registry List Mode`                        | `// Preview Panel in Registry List Mode`                         |
+| `tray.rs`                 | `// Phase 2 tests: embedded-asset properties (…)`                        | `// Embedded-asset property tests (…)`                           |
+| `tray.rs`                 | `// Phase 3 tests: TrayCommand variant …`                                | `// TrayCommand variant … tests.`                                |
+
+### 2.4 — Stripped Phase References from Test Files
+
+| File                                         | Before                                                           | After                                                    |
+| -------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------- |
+| `tests/creature_asset_editor_tests.rs`       | `//! Unit tests for Phase 2: Creature Asset Editor UI`           | `//! Unit tests for Creature Asset Editor UI`            |
+| `tests/furniture_customization_tests.rs`     | `//! Comprehensive tests for Phase 9: Furniture Customization …` | `//! Comprehensive tests for Furniture Customization …`  |
+| `tests/furniture_customization_tests.rs`     | `// Create a furniture event using Phase 9 features`             | `// Create a furniture event`                            |
+| `tests/furniture_editor_tests.rs`            | `//! … tests for Phase 7: Campaign Builder SDK -`                | `//! … tests for the Campaign Builder SDK -`             |
+| `tests/furniture_properties_tests.rs`        | `//! Tests for Phase 8: Furniture Properties Extension …`        | `//! Tests for Furniture Properties Extension …`         |
+| `tests/gui_integration_test.rs`              | `//! added to the Campaign Builder map editor in Phase 4.`       | `//! added to the Campaign Builder map editor.`          |
+| `tests/gui_integration_test.rs`              | `// Verify Phase 4 fields are initialized correctly`             | `// Verify fields are initialized correctly`             |
+| `tests/mesh_editing_tests.rs`                | `//! Phase 4: Advanced Mesh Editing Tools - Integration Tests`   | `//! Advanced Mesh Editing Tools - Integration Tests`    |
+| `tests/template_system_integration_tests.rs` | `//! Integration tests for Phase 3: Template System Integration` | `//! Integration tests for the Template System`          |
+| `tests/ui_improvements_test.rs`              | `//! Tests for Phase 8 SDK Campaign Builder UI/UX improvements.` | `//! Tests for SDK Campaign Builder UI/UX improvements.` |
+
+### 2.5 — Rewrote `README.md` and Fixed `QUICKSTART.md`
+
+`README.md` was completely rewritten:
+
+- Title changed from `# Campaign Builder - Phase 2: Foundation` to `# Antares Campaign Builder`
+- Removed phase-roadmap status checklist (`Phase 0` through `Phase 9`)
+- Replaced phase-centric feature sections with current-state feature descriptions
+- Added accurate module list in Source Layout section
+- Removed "Roadmap" and "Known Limitations" sections that described future phases
+- Removed "Phase 2 Complete" footer
+- Updated keyboard shortcuts table to include Ctrl+Z / Ctrl+Y (undo/redo)
+- Updated quality gate commands to use `cargo nextest run`
+
+`QUICKSTART.md` line 74:
+
+- `### Test Quest Editing (NEW in Phase 7.1!)` → `### Test Quest Editing`
+
+### 2.6 — Removed Stale Comments
+
+| File                  | Comment                                                           | Action                                           |
+| --------------------- | ----------------------------------------------------------------- | ------------------------------------------------ |
+| `preview_renderer.rs` | `// This is a placeholder - Phase 5 will use proper 3D rendering` | Replaced with `// TODO: use proper 3D rendering` |
+| `preview_renderer.rs` | `/// For Phase 3, this is a simplified implementation…`           | Reworded to remove phase reference               |
+| `campaign_editor.rs`  | `/// Note: For Phase 1 we keep the UI minimal…`                   | Removed entirely                                 |
+
+### Deliverables Checklist
+
+- [x] ~140 phase references stripped from source comments
+- [x] ~10 phase references stripped from test file module docs
+- [x] `README.md` rewritten as current-state documentation
+- [x] `QUICKSTART.md` phase reference removed
+- [x] Stale "placeholder" / "Phase N will…" comments updated or removed
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all             → No output (all files formatted)
+✅ cargo check --all-targets   → Finished with 0 errors, 0 warnings
+✅ cargo clippy --all-targets -- -D warnings → Finished with 0 warnings
+✅ cargo nextest run --all-features → 4095 passed; 0 failed; 8 skipped
+```
+
+### Success Criteria Verification
+
+- [x] `grep -rn "Phase [0-9]" sdk/campaign_builder/src/` → zero results
+- [x] `grep -rn "Phase [0-9]" sdk/campaign_builder/tests/` → zero results
+- [x] `README.md` contains no phase references
+- [x] `QUICKSTART.md` contains no phase references
+- [x] All quality gates pass

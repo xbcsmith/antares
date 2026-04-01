@@ -171,7 +171,7 @@ impl Default for PreviewOptions {
 ///
 /// # Note
 ///
-/// For Phase 3, this is a simplified implementation that doesn't actually
+/// This is a simplified implementation that does not actually
 /// spawn a full Bevy app (to avoid complexity with nested event loops).
 /// Instead, it provides the state management and will render using egui's
 /// built-in painting primitives or a simple software rasterizer.
@@ -396,7 +396,7 @@ impl PreviewRenderer {
         changed
     }
 
-    /// Render the 3D preview (simplified version for Phase 3)
+    /// Render the 3D preview (simplified implementation)
     ///
     /// This renders a basic wireframe representation of the creature.
     /// Future phases will integrate full Bevy rendering.
@@ -553,8 +553,8 @@ impl PreviewRenderer {
         global_scale: f32,
         is_selected: bool,
     ) {
-        // Simple orthographic-ish projection for Phase 3
-        // This is a placeholder - Phase 5 will use proper 3D rendering
+        // Simple orthographic-ish projection
+        // TODO: use proper 3D rendering
 
         let center = rect.center();
         let scale = 50.0 * global_scale;

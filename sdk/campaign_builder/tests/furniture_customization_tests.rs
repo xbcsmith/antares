@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Comprehensive tests for Phase 9: Furniture Customization & Material System
+//! Comprehensive tests for Furniture Customization & Material System
 //!
 //! This test module validates:
 //! - Material visual properties (base_color, metallic, roughness)
@@ -649,7 +649,7 @@ fn test_color_preview_conversion_blue_flame() {
 
 #[test]
 fn test_furniture_event_with_all_phase9_features() {
-    // Create a furniture event using Phase 9 features
+    // Create a furniture event
     let event = MapEvent::Furniture {
         name: "Golden Throne with Custom Glow".to_string(),
         furniture_type: FurnitureType::Throne,

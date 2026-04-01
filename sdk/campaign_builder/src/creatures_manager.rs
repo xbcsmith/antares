@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Creatures Manager for Phase 6: Campaign Builder Creatures Editor Integration
+//! Creatures Manager: Campaign Builder Creatures Editor Integration
 //!
 //! This module provides file I/O and validation logic for creature registry management.
 //! It complements the UI-focused `creatures_editor.rs` module by handling persistent

@@ -7,7 +7,7 @@
 //! rendering via the `show()` method, following the standard editor pattern.
 //! Uses shared UI components for consistent layout.
 //!
-//! # Autocomplete Integration (Phase 2)
+//! # Autocomplete Integration
 //!
 //! - Starting weapon/armor selection uses `autocomplete_item_selector`
 //! - Proficiency selection uses multi-select autocomplete with quick-add buttons

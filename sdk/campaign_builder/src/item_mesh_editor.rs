@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Item Mesh Editor — Campaign Builder SDK integration (Phase 5).
+//! Item Mesh Editor — Campaign Builder SDK integration.
 //!
 //! This module provides [`ItemMeshEditorState`], the top-level state struct
 //! for the Item Mesh Editor tab.  It supports two navigation modes:

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Advanced Validation Features - Phase 15.4
+//! Advanced Validation Features
 //!
 //! Enhanced validation tools for campaign content:
 //! - Balance analyzer (party power vs monster difficulty)

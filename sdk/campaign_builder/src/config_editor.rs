@@ -1326,7 +1326,7 @@ mod tests {
         );
     }
 
-    // Phase 3: Key Capture and Auto-Population Tests
+    // Key Capture and Auto-Population Tests
 
     #[test]
     fn test_egui_key_to_string_letters() {
@@ -1529,7 +1529,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 2: Rest key binding tests
+    // Rest Key Binding Tests
     // -----------------------------------------------------------------------
 
     #[test]

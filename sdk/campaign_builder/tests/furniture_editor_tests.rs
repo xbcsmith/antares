@@ -3,7 +3,7 @@
 
 //! Tests for Furniture Event Editor functionality
 //!
-//! This module contains comprehensive tests for Phase 7: Campaign Builder SDK -
+//! This module contains comprehensive tests for the Campaign Builder SDK -
 //! Furniture & Props Event Editor, verifying:
 //! - FurnitureType enum integration
 //! - Furniture event serialization/deserialization

@@ -5,7 +5,7 @@
 //!
 //! A dedicated metadata editor for `CampaignMetadata` with a TwoColumn UI.
 //!
-//! Phase 5 - Docs, Cleanup & Handoff:
+
 //! - Finalized API and added examples, targeted unit tests, and developer guidance.
 //! - Consolidated validation request flow so the app remains the single source of truth.
 //! - Cleaned up UI/UX interactions and added tests for editor state transitions.
@@ -483,7 +483,7 @@ impl CampaignMetadataEditorState {
     /// accepts references to the running app's `campaign` and state helpers to
     /// persist and save files.
     ///
-    /// Note: For Phase 1 we keep the UI minimal and rely on paths + save/load functions.
+
     #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,

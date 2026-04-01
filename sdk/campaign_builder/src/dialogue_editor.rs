@@ -1941,7 +1941,7 @@ impl DialogueEditorState {
         }
     }
 
-    /// Show dialogue node tree editor with Phase 3 enhancements:
+    /// Show dialogue node tree editor with navigation and validation enhancements:
     /// - Visual node hierarchy with indented choices
     /// - Node navigation helpers (search, jump-to, show-root)
     /// - Inline validation feedback
@@ -2000,7 +2000,7 @@ impl DialogueEditorState {
             ui.separator();
         }
 
-        // Phase 3: Dialogue Header with Reachability Stats
+        // Dialogue Header with Reachability Stats
         let dialogue = self.dialogues[dialogue_idx].clone();
         let (total_nodes, reachable_nodes, unreachable_count) =
             self.get_reachability_stats(dialogue_idx);
@@ -2021,7 +2021,7 @@ impl DialogueEditorState {
             }
         });
 
-        // Phase 3: Navigation Controls
+        // Navigation Controls
         ui.horizontal(|ui| {
             ui.label("Find Node:");
             let _response = ui.text_edit_singleline(&mut self.node_search_filter);
@@ -2054,7 +2054,7 @@ impl DialogueEditorState {
             }
         });
 
-        // Phase 3: Show Validation Errors
+        // Show Validation Errors
         if !self.dialogue_validation_errors.is_empty() {
             ui.separator();
             ui.colored_label(
@@ -2075,7 +2075,7 @@ impl DialogueEditorState {
         let mut edit_choice_id: Option<(NodeId, usize)> = None;
         let mut delete_choice_id: Option<(NodeId, usize)> = None;
 
-        // Phase 3: Display nodes with hierarchy and enhanced navigation
+        // Display nodes with hierarchy and enhanced navigation
         egui::ScrollArea::vertical()
             .auto_shrink([false, true])
             .show(ui, |ui| {
@@ -2084,7 +2084,7 @@ impl DialogueEditorState {
                 sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
 
                 for (node_id, node) in sorted_nodes {
-                    // Phase 3: Highlight unreachable nodes
+                    // Highlight unreachable nodes
                     let is_unreachable = unreachable.contains(node_id);
                     let _bg_color = if is_unreachable {
                         egui::Color32::from_rgba_unmultiplied(255, 165, 0, 20)
@@ -2155,7 +2155,7 @@ impl DialogueEditorState {
                             ui.label(format!("Speaker: {}", speaker));
                         }
 
-                        // Phase 3: Show choices with visual hierarchy and navigation
+                        // Show choices with visual hierarchy and navigation
                         if !node.choices.is_empty() {
                             ui.separator();
                             ui.label("Choices:");
@@ -2164,14 +2164,14 @@ impl DialogueEditorState {
                                     ui.label(format!("  {}. {}", choice_idx + 1, choice.text));
 
                                     if let Some(target) = choice.target_node {
-                                        // Phase 3: Check if target is valid and show error if not
+                                        // Check if target is valid and show error if not
                                         if !self.is_choice_target_valid(dialogue_idx, target) {
                                             ui.label(
                                                 egui::RichText::new(format!("❌ Node {}", target))
                                                     .color(egui::Color32::from_rgb(255, 0, 0)),
                                             );
                                         } else {
-                                            // Phase 3: Show target with preview and jump button
+                                            // Show target with preview and jump button
                                             let preview =
                                                 self.get_node_preview(dialogue_idx, target);
                                             ui.label(format!("→ Node {}: {}", target, preview));
@@ -3019,7 +3019,7 @@ mod tests {
         assert!(result.unwrap_err().contains("No dialogue selected"));
     }
 
-    // ========== Phase 3 Tests: Node Navigation and Validation ==========
+    // ========== Node Navigation and Validation Tests ==========
 
     #[test]
     fn test_get_unreachable_nodes_for_dialogue() {

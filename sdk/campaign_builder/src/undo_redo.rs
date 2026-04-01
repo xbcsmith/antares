@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Undo/Redo System - Phase 15.1
+//! Undo/Redo System
 //!
 //! Command pattern implementation for reversible operations in the Campaign Builder.
 //! Supports undo/redo for:

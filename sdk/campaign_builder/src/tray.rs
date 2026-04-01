@@ -275,10 +275,10 @@ pub fn handle_tray_events() {
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
 //
-// Phase 2 tests: embedded-asset properties (PNG magic bytes, decoded
+// Embedded-asset property tests (PNG magic bytes, decoded
 // dimensions, RGBA buffer length).  No NSApp / NSStatusItem is touched.
 //
-// Phase 3 tests: `TrayCommand` variant distinctness and channel round-trip.
+// `TrayCommand` variant distinctness and channel round-trip tests.
 // These tests only exercise pure Rust types and require no macOS APIs.
 
 #[cfg(test)]
@@ -289,7 +289,7 @@ mod tests {
     /// The first 8 bytes of every valid PNG file (ISO/IEC 15948:2003 §5.2).
     const PNG_MAGIC: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
 
-    // ── Phase 2: PNG magic ────────────────────────────────────────────────────
+    // ── PNG magic ────────────────────────────────────────────────────────────
 
     /// The 1× asset must begin with the PNG magic number.
     ///
@@ -308,7 +308,7 @@ mod tests {
         );
     }
 
-    // ── Phase 2: Decoded dimensions ───────────────────────────────────────────
+    // ── Decoded dimensions ────────────────────────────────────────────────────
 
     /// The 1× asset must decode to exactly 22×22 pixels.
     ///
@@ -322,7 +322,7 @@ mod tests {
         assert_eq!(img.height(), 22, "1× tray icon height must be 22 px");
     }
 
-    // ── Phase 2: RGBA buffer length ───────────────────────────────────────────
+    // ── RGBA buffer length ────────────────────────────────────────────────────
 
     /// The RGBA byte buffer for the 1× asset must be exactly 22 × 22 × 4 bytes.
     ///
@@ -341,7 +341,7 @@ mod tests {
         );
     }
 
-    // ── Phase 3: TrayCommand enum ─────────────────────────────────────────────
+    // ── TrayCommand enum ──────────────────────────────────────────────────────
 
     /// `TrayCommand::ShowWindow` and `TrayCommand::HideWindow` must be distinct
     /// values so that the `update()` match arm dispatches them to different
@@ -361,7 +361,7 @@ mod tests {
     /// A `TrayCommand::ShowWindow` value sent over an `mpsc` sync channel must
     /// be received on the other end without blocking.
     ///
-    /// This exercises the channel-based dispatch path introduced in Phase 3:
+    /// This exercises the channel-based dispatch path:
     /// `handle_tray_events` sends commands and `update()` drains the receiver
     /// via `try_recv()`.
     #[test]

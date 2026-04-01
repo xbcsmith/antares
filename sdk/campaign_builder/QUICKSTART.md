@@ -71,7 +71,7 @@ That's it! The Campaign Builder UI should launch.
 - Notice the status bar at the bottom
 - Make changes and see "● Unsaved changes" indicator
 
-### Test Quest Editing (NEW in Phase 7.1!)
+### Test Quest Editing
 
 1. Navigate to the **Quests** tab
 2. Click **➕ New Quest** to create a test quest:

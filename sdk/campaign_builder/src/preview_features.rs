@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Preview Features - Phase 5.2
+//! Preview Features
 //!
 //! Provides enhanced preview rendering features for the creature editor.
 //! Supports:

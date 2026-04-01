@@ -4049,7 +4049,7 @@ mod tests {
         assert_eq!(state.npcs[0].portrait_id, "");
     }
 
-    // ── Phase 7: stock_template field tests ───────────────────────────────────
+    // ── Stock Template Field Tests ───────────────────────────────────
 
     #[test]
     fn test_npc_edit_buffer_stock_template_default_empty() {

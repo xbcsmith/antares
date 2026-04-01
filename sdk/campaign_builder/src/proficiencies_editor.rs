@@ -1144,7 +1144,7 @@ mod tests {
         assert!(!ProficiencyCategoryFilter::Weapon.matches(&prof));
     }
 
-    // ===== Phase 3: Validation and Polish Tests =====
+    // ===== Validation and Polish Tests =====
 
     #[test]
     fn test_suggest_proficiency_id_weapon() {
