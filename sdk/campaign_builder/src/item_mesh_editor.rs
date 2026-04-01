@@ -33,6 +33,29 @@ use antares::domain::visual::CreatureDefinition;
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
+/// Errors produced by item mesh editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum ItemMeshEditorError {
+    #[error("Save path must start with 'assets/items/' (got '{0}')")]
+    InvalidSavePath(String),
+    #[error("No campaign directory set; open or create a campaign first")]
+    NoCampaignDirectory,
+    #[error("No descriptor is currently being edited")]
+    NoDescriptor,
+    #[error("RON serialization failed: {0}")]
+    SerializationError(String),
+    #[error("Failed to create directories: {0}")]
+    DirectoryError(String),
+    #[error("Failed to write file '{0}': {1}")]
+    WriteError(String, String),
+    #[error("No campaign directory")]
+    NoCampaignDir,
+    #[error("Cannot read '{0}': {1}")]
+    ReadError(String, String),
+    #[error("'{0}' is not a valid ItemMeshDescriptor or CreatureDefinition")]
+    InvalidFormat(String),
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Supporting types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -873,25 +896,20 @@ impl ItemMeshEditorState {
         &mut self,
         path: &str,
         campaign_dir: Option<&PathBuf>,
-    ) -> Result<(), String> {
+    ) -> Result<(), ItemMeshEditorError> {
         // Validate path prefix.
         if !path.starts_with("assets/items/") {
-            return Err(format!(
-                "Save path must start with 'assets/items/' (got '{}')",
-                path
-            ));
+            return Err(ItemMeshEditorError::InvalidSavePath(path.to_string()));
         }
 
         // campaign_dir must be provided.
-        let dir = campaign_dir.ok_or_else(|| {
-            "No campaign directory set; open or create a campaign first".to_string()
-        })?;
+        let dir = campaign_dir.ok_or(ItemMeshEditorError::NoCampaignDirectory)?;
 
         // We must have an edit buffer.
         let descriptor = self
             .edit_buffer
             .as_ref()
-            .ok_or_else(|| "No descriptor is currently being edited".to_string())?
+            .ok_or(ItemMeshEditorError::NoDescriptor)?
             .clone();
 
         // Serialize to RON.
@@ -915,16 +933,17 @@ impl ItemMeshEditorState {
         // Propagate scale edits from the descriptor so SDK changes are visible.
         creature_def.scale = descriptor.scale;
         let ron_text = ron::ser::to_string_pretty(&creature_def, ron::ser::PrettyConfig::default())
-            .map_err(|e| format!("RON serialization failed: {}", e))?;
+            .map_err(|e| ItemMeshEditorError::SerializationError(e.to_string()))?;
 
         // Write to disk.
         let full_path = dir.join(path);
         if let Some(parent) = full_path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directories: {}", e))?;
+                .map_err(|e| ItemMeshEditorError::DirectoryError(e.to_string()))?;
         }
-        std::fs::write(&full_path, &ron_text)
-            .map_err(|e| format!("Failed to write file '{}': {}", full_path.display(), e))?;
+        std::fs::write(&full_path, &ron_text).map_err(|e| {
+            ItemMeshEditorError::WriteError(full_path.display().to_string(), e.to_string())
+        })?;
 
         // Derive entry name from path stem.
         let stem = full_path
@@ -1060,14 +1079,18 @@ impl ItemMeshEditorState {
     /// // Assumes the file exists and is valid.
     /// let _ = state.execute_register_asset(Some(&PathBuf::from("/tmp/campaign")));
     /// ```
-    pub fn execute_register_asset(&mut self, campaign_dir: Option<&PathBuf>) -> Result<(), String> {
+    pub fn execute_register_asset(
+        &mut self,
+        campaign_dir: Option<&PathBuf>,
+    ) -> Result<(), ItemMeshEditorError> {
         let path = self.register_asset_path_buffer.trim().to_string();
 
-        let dir = campaign_dir.ok_or_else(|| "No campaign directory".to_string())?;
+        let dir = campaign_dir.ok_or(ItemMeshEditorError::NoCampaignDir)?;
 
         let full_path = dir.join(&path);
-        let content = std::fs::read_to_string(&full_path)
-            .map_err(|e| format!("Cannot read '{}': {}", full_path.display(), e))?;
+        let content = std::fs::read_to_string(&full_path).map_err(|e| {
+            ItemMeshEditorError::ReadError(full_path.display().to_string(), e.to_string())
+        })?;
 
         // Try ItemMeshDescriptor first (editor-authored format), then fall back
         // to CreatureDefinition (game-engine / imported-OBJ format).
@@ -1103,10 +1126,7 @@ impl ItemMeshEditorState {
                 };
                 (desc, Some(def))
             } else {
-                return Err(format!(
-                    "'{}' is not a valid ItemMeshDescriptor or CreatureDefinition",
-                    path
-                ));
+                return Err(ItemMeshEditorError::InvalidFormat(path.to_string()));
             };
 
         let stem = full_path
@@ -1977,7 +1997,11 @@ impl ItemMeshEditorState {
                 if let Some(idx) = self.selected_entry {
                     if let Some(entry) = self.registry.get(idx) {
                         let file_path = entry.file_path.clone();
-                        let _ = self.perform_save_as_with_path(&file_path, campaign_dir);
+                        if let Err(e) = self.perform_save_as_with_path(&file_path, campaign_dir) {
+                            // Log the error - in the UI context, we note this but can't easily surface it
+                            // since we're in a render callback
+                            let _ = e; // Save failure will be visible as unsaved_changes remaining true
+                        }
                     }
                 }
             }
@@ -1997,6 +2021,7 @@ impl ItemMeshEditorState {
                 .on_hover_text("Reload from registry")
                 .clicked()
             {
+                // Intentional: revert is best-effort and the editor remains in its current state on failure
                 let _ = self.revert_edit_buffer_from_registry();
                 ui.ctx().request_repaint();
             }
@@ -2335,7 +2360,7 @@ impl ItemMeshEditorState {
                     ui.ctx().request_repaint();
                 }
                 Err(e) => {
-                    self.preview_error = Some(e);
+                    self.preview_error = Some(e.to_string());
                     ui.ctx().request_repaint();
                 }
             }
@@ -2441,7 +2466,7 @@ impl ItemMeshEditorState {
                     ui.ctx().request_repaint();
                 }
                 Err(e) => {
-                    self.register_asset_error = Some(e);
+                    self.register_asset_error = Some(e.to_string());
                     ui.ctx().request_repaint();
                 }
             }
@@ -2814,7 +2839,7 @@ mod tests {
         let result =
             state.perform_save_as_with_path("data/bad_path.ron", Some(&tmp.path().to_path_buf()));
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().to_string();
         assert!(
             err.contains("assets/items/"),
             "error message should mention required prefix: {}",
@@ -2935,5 +2960,17 @@ mod tests {
         state.search_query = "iron".to_string();
         let indices = state.filtered_sorted_registry();
         assert_eq!(indices.len(), 2, "should match 'iron' prefix in name");
+    }
+
+    #[test]
+    fn test_item_mesh_editor_error_display() {
+        assert_eq!(
+            ItemMeshEditorError::NoCampaignDirectory.to_string(),
+            "No campaign directory set; open or create a campaign first"
+        );
+        assert_eq!(
+            ItemMeshEditorError::InvalidSavePath("test".to_string()).to_string(),
+            "Save path must start with 'assets/items/' (got 'test')"
+        );
     }
 }

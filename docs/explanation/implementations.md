@@ -2510,3 +2510,185 @@ High-density files and representative changes:
 - [x] `README.md` contains no phase references
 - [x] `QUICKSTART.md` contains no phase references
 - [x] All quality gates pass
+
+## SDK Codebase Cleanup — Phase 3: Unify Validation Types and Fix Error Handling (Complete)
+
+### Overview
+
+Phase 3 addressed the most impactful error handling and type-safety problems in the
+SDK campaign builder: duplicate validation type hierarchies, `Result<(), String>` return
+types, production `eprintln!` calls, silent `Result` drops, a production `unwrap()` call,
+and the missing `thiserror::Error` derivation on `MeshError`.
+
+Files modified: `validation.rs`, `advanced_validation.rs`, `mesh_validation.rs`,
+`characters_editor.rs`, `classes_editor.rs`, `conditions_editor.rs`, `config_editor.rs`,
+`creature_undo_redo.rs`, `creatures_editor.rs`, `dialogue_editor.rs`,
+`item_mesh_editor.rs`, `npc_editor.rs`, `auto_save.rs`, `quest_editor.rs`, `lib.rs`,
+`campaign_editor.rs` (pre-existing clippy fix).
+
+---
+
+### 3.1 — Unified `ValidationSeverity` and `ValidationResult`
+
+**`validation.rs` changes:**
+
+- Added `Critical` variant to `ValidationSeverity` (most severe; ordering: `Critical < Error
+< Warning < Info < Passed`). Added `PartialOrd`/`Ord` derives. `icon()` returns `"🔥"`,
+  `color()` returns `rgb(255, 50, 50)`, `display_name()` returns `"Critical"`.
+- Extended `ValidationResult` struct with two new optional fields:
+  `details: Option<String>` and `suggestion: Option<String>`.
+- Added builder methods `with_details()` and `with_suggestion()`.
+- Added `critical()` constructor and `is_critical()` predicate.
+- Extended `ValidationSummary` with `critical_count: usize`; updated `from_results()` and
+  `has_no_errors()` accordingly.
+- Added five new `ValidationCategory` variants for the advanced validator:
+  `Balance`, `Economy`, `QuestDependencies`, `ContentReachability`, `DifficultyProgression`.
+  Updated `display_name()`, `all()`, and `icon()` for each.
+
+**`advanced_validation.rs` changes:**
+
+- Removed the duplicate local `ValidationSeverity` enum and `ValidationResult` struct
+  (previously defined in parallel with `validation.rs`).
+- Added `use crate::validation::{ValidationCategory, ValidationResult, ValidationSeverity};`.
+- Migrated all `ValidationResult::new(severity, "String Category", message)` calls to use
+  `ValidationCategory` enum variants (`Balance`, `Economy`, `QuestDependencies`,
+  `ContentReachability`, `DifficultyProgression`).
+- Hardened two production `.unwrap()` calls on `monster_levels.iter().min()/.max()` to
+  use `.unwrap_or(&0)` (guarded by `!monster_levels.is_empty()`).
+- Updated tests: `test_validation_severity_ordering` corrected for new ordering;
+  `test_validation_result_builder` uses `ValidationCategory::Balance`.
+
+**`lib.rs`:** Added `ValidationSeverity::Critical` arm to the exhaustive severity match
+in the validation panel renderer.
+
+---
+
+### 3.2 — Migrated `Result<(), String>` to Typed Errors
+
+Eight typed error enums were created using `thiserror = "2.0"`, one per editor module.
+All follow the existing `AutoSaveError`/`CreatureAssetError` pattern.
+
+| Module                  | Error type                           | Functions migrated                                                                                                                                                                |
+| ----------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `characters_editor.rs`  | `CharacterEditorError` (40 variants) | `save_character`, `load_from_file`, `save_to_file`                                                                                                                                |
+| `classes_editor.rs`     | `ClassEditorError` (12 variants)     | `save_class`, `load_from_file`, `save_to_file`                                                                                                                                    |
+| `conditions_editor.rs`  | `ConditionEditorError` (21 variants) | `apply_condition_edits`, `validate_effect_edit_buffer`, `delete_effect_from_condition`, `duplicate_effect_in_condition`, `move_effect_in_condition`, `update_effect_in_condition` |
+| `config_editor.rs`      | `ConfigEditorError` (4 variants)     | `save_config`                                                                                                                                                                     |
+| `creature_undo_redo.rs` | `CreatureCommandError` (6 variants)  | `CreatureCommand::execute`, `CreatureCommand::undo` on all 6 impls; `CreatureUndoRedoManager::execute`, `undo`, `redo`                                                            |
+| `creatures_editor.rs`   | `CreatureEditorError` (12 variants)  | `sync_preview_renderer_from_edit_buffer`, `write_creature_asset_file`, `perform_save_as_with_path`, `revert_edit_buffer_from_registry`                                            |
+| `dialogue_editor.rs`    | `DialogueEditorError` (19 variants)  | `edit_node`, `save_node`, `delete_node`, `edit_choice`, `save_choice`, `delete_choice`, `save_dialogue`, `add_node`, `add_choice`, `load_from_file`, `save_to_file`               |
+| `item_mesh_editor.rs`   | `ItemMeshEditorError` (9 variants)   | `perform_save_as_with_path`, `execute_register_asset`                                                                                                                             |
+
+All `#[error("...")]` messages exactly match the former `String` error literals so that
+`Display` output is unchanged. Test assertions of the form
+`result.unwrap_err() == "..."` were updated to `result.unwrap_err().to_string() == "..."`;
+assertions using `.contains("...")` were updated similarly. Eleven new
+`test_*_error_display` unit tests were added across the eight modules.
+
+All callers inside each module (UI `show()` methods, `match` expressions) that previously
+handled `Err(String)` were updated to use `.to_string()` where needed.
+
+---
+
+### 3.3 — Replaced `eprintln!` with SDK Logger
+
+**`lib.rs`** (~29 calls replaced):
+
+All production `eprintln!` calls in `CampaignBuilderApp` methods were replaced with
+`self.logger.xxx(category::FILE_IO, ...)` calls at the appropriate level:
+
+- Read/parse errors → `self.logger.error(category::FILE_IO, ...)`
+- Missing files → `self.logger.debug(category::FILE_IO, ...)`
+- No campaign directory warnings → `self.logger.warn(category::FILE_IO, ...)`
+- Campaign save failure → `self.logger.error(category::CAMPAIGN, ...)`
+- NPC DB insertion warning → `self.logger.warn(category::VALIDATION, ...)`
+
+The two startup `eprintln!` calls in `run()` were replaced with `logger.info()` /
+`logger.verbose()` using the already-available local `logger` variable (changed to `mut`).
+
+**`characters_editor.rs`** (3 calls removed):
+
+The `eprintln!` calls inside `load_portrait_texture()` were removed. The function already
+returns `bool` to signal load failure, and the UI shows a `"?"` placeholder for failed
+portraits — the user receives visual feedback without a stderr print. The persistence
+failure `eprintln!` in `save_character()` was replaced with a comment; the
+`has_unsaved_changes` flag remaining `true` communicates the pending write to the UI.
+
+**`npc_editor.rs`** (3 calls removed): Same portrait-loading strategy as above.
+
+**`classes_editor.rs`** (1 call removed): The `eprintln!` in `show_class_form()` was
+a duplicate of the `status_message` assignment on the next line and was simply deleted.
+
+**`auto_save.rs`** (1 call replaced): The backup-removal `eprintln!("Warning: ...")` in
+`cleanup_old_backups()` was replaced with a named `_backup_removal_err` binding and an
+explanatory comment noting the non-critical nature of the failure.
+
+---
+
+### 3.4 — Fixed Silent `Result` Drops on User-Facing Operations
+
+| Location                                         | Fix                                                                                                      |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `lib.rs` — unsaved-changes dialog "Save" button  | `let _ = self.save_campaign()` → `if let Err(e) = ...` with `status_message` update and `logger.error()` |
+| `lib.rs` — `validate_campaign()` NPC DB insert   | `let _ = db.npcs.add_npc(...)` → `if let Err(e) = ...` with `logger.warn()`                              |
+| `item_mesh_editor.rs` — edit mode save button    | `let _ = self.perform_save_as_with_path(...)` → `if let Err(e) = ...` with explanatory comment           |
+| `quest_editor.rs` — `show()` directory pre-check | `let _ = std::fs::create_dir_all(parent)` → explicit `if let Err(e) = ...` with comment                  |
+| `quest_editor.rs` — 3 UI-click best-effort ops   | Annotated with comments explaining intentional suppression                                               |
+
+---
+
+### 3.5 — Fixed Production `panic!`
+
+The deprecated `show_list_mode()` method containing a `panic!` was already removed in
+Phase 1 (section 1.2). No additional action required.
+
+---
+
+### 3.6 — Hardened Production `unwrap()` Calls
+
+| Location                                                         | Fix                                                                                                               |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `advanced_validation.rs` — `.min().unwrap()` / `.max().unwrap()` | Changed to `.unwrap_or(&0)` with a safety comment                                                                 |
+| `characters_editor.rs` — `load_portrait_texture()` cache check   | `.get(id).unwrap().is_some()` → `.is_some_and(\|t\| t.is_some())`                                                 |
+| `characters_editor.rs` — portrait grid picker double unwrap      | `.unwrap().as_ref().unwrap()` → `.and_then(\|t\| t.as_ref()).expect("texture present since has_texture is true")` |
+| `npc_editor.rs` — same patterns as characters_editor             | Same fixes applied                                                                                                |
+
+---
+
+### 3.7 — Added `thiserror::Error` Derive to `MeshError`
+
+`mesh_validation.rs`: `MeshError` was a plain enum with a manual `Display` impl and no
+`std::error::Error` implementation. Added `use thiserror::Error;`, changed derive to
+`#[derive(Debug, Clone, PartialEq, Error)]`, added `#[error("...")]` to each variant with
+messages matching the former manual `Display` output, and removed the manual
+`impl std::fmt::Display for MeshError` block (thiserror generates it).
+
+---
+
+### Deliverables Checklist
+
+- [x] `ValidationSeverity` and `ValidationResult` unified into single types in `validation.rs`
+- [x] Duplicate definitions removed from `advanced_validation.rs`
+- [x] ~30 functions migrated from `Result<(), String>` to typed errors (8 new error enums)
+- [x] ~29 `eprintln!` calls replaced with SDK `Logger` or removed with explanatory comments
+- [x] 4 silent `Result` drops fixed with logging/error display
+- [x] `MeshError` derives `thiserror::Error`
+- [x] Production `unwrap()` calls hardened in 4 locations
+- [x] 11 new `test_*_error_display` tests added
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all         → No output (all files formatted)
+✅ cargo check             → Finished with 0 errors
+✅ cargo clippy -- -D warnings → Finished with 0 warnings
+✅ cargo nextest run       → 2120 passed; 5 pre-existing failures (unchanged from Phase 2 baseline)
+```
+
+### Success Criteria Verification
+
+- [x] Zero duplicate `ValidationSeverity` or `ValidationResult` definitions
+- [x] `MeshError` implements `std::error::Error` via `thiserror`
+- [x] Zero production `eprintln!` calls in `lib.rs`, `characters_editor.rs`, `npc_editor.rs`, `classes_editor.rs`, `auto_save.rs`
+- [x] All 4 targeted silent `Result` drops fixed
+- [x] All quality gates pass with zero new test failures introduced

@@ -62,6 +62,45 @@ use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Errors produced by dialogue editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum DialogueEditorError {
+    #[error("Invalid dialogue index")]
+    InvalidDialogueIndex,
+    #[error("Node not found")]
+    NodeNotFound,
+    #[error("Invalid node ID")]
+    InvalidNodeId,
+    #[error("Cannot delete root node")]
+    CannotDeleteRootNode,
+    #[error("Invalid choice index")]
+    InvalidChoiceIndex,
+    #[error("Invalid target node ID")]
+    InvalidTargetNodeId,
+    #[error("Target node does not exist")]
+    TargetNodeNotFound,
+    #[error("Invalid dialogue ID")]
+    InvalidDialogueId,
+    #[error("Invalid quest ID")]
+    InvalidQuestId,
+    #[error("No dialogue selected")]
+    NoDialogueSelected,
+    #[error("Node text cannot be empty")]
+    EmptyNodeText,
+    #[error("No node selected")]
+    NoNodeSelected,
+    #[error("Failed to read file: {0}")]
+    ReadError(String),
+    #[error("Failed to parse dialogues: {0}")]
+    ParseError(String),
+    #[error("Failed to create directory: {0}")]
+    DirectoryError(String),
+    #[error("Failed to serialize dialogues: {0}")]
+    SerializationError(String),
+    #[error("Failed to write file: {0}")]
+    WriteError(String),
+}
+
 /// Editor state for dialogue tree editing.
 ///
 /// Merchant dialogue lifecycle work integrates here because the editor owns the
@@ -390,9 +429,13 @@ impl DialogueEditorState {
     }
 
     /// Edit an existing node
-    pub fn edit_node(&mut self, dialogue_idx: usize, node_id: NodeId) -> Result<(), String> {
+    pub fn edit_node(
+        &mut self,
+        dialogue_idx: usize,
+        node_id: NodeId,
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
         let dialogue = &self.dialogues[dialogue_idx];
@@ -407,21 +450,25 @@ impl DialogueEditorState {
             self.editing_node = true;
             Ok(())
         } else {
-            Err("Node not found".to_string())
+            Err(DialogueEditorError::NodeNotFound)
         }
     }
 
     /// Save edited node
-    pub fn save_node(&mut self, dialogue_idx: usize, node_id: NodeId) -> Result<(), String> {
+    pub fn save_node(
+        &mut self,
+        dialogue_idx: usize,
+        node_id: NodeId,
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
         let _node_id_parsed = self
             .node_buffer
             .id
             .parse::<NodeId>()
-            .map_err(|_| "Invalid node ID".to_string())?;
+            .map_err(|_| DialogueEditorError::InvalidNodeId)?;
 
         let dialogue = &mut self.dialogues[dialogue_idx];
         if let Some(node) = dialogue.nodes.get_mut(&node_id) {
@@ -439,21 +486,25 @@ impl DialogueEditorState {
             self.node_buffer = NodeEditBuffer::default();
             Ok(())
         } else {
-            Err("Node not found".to_string())
+            Err(DialogueEditorError::NodeNotFound)
         }
     }
 
     /// Delete a node from dialogue
-    pub fn delete_node(&mut self, dialogue_idx: usize, node_id: NodeId) -> Result<(), String> {
+    pub fn delete_node(
+        &mut self,
+        dialogue_idx: usize,
+        node_id: NodeId,
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
         let dialogue = &mut self.dialogues[dialogue_idx];
 
         // Don't allow deleting root node
         if node_id == dialogue.root_node {
-            return Err("Cannot delete root node".to_string());
+            return Err(DialogueEditorError::CannotDeleteRootNode);
         }
 
         dialogue.nodes.remove(&node_id);
@@ -472,15 +523,15 @@ impl DialogueEditorState {
         dialogue_idx: usize,
         node_id: NodeId,
         choice_idx: usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
         let dialogue = &self.dialogues[dialogue_idx];
         if let Some(node) = dialogue.nodes.get(&node_id) {
             if choice_idx >= node.choices.len() {
-                return Err("Invalid choice index".to_string());
+                return Err(DialogueEditorError::InvalidChoiceIndex);
             }
 
             let choice = &node.choices[choice_idx];
@@ -495,7 +546,7 @@ impl DialogueEditorState {
             self.selected_choice = Some(choice_idx);
             Ok(())
         } else {
-            Err("Node not found".to_string())
+            Err(DialogueEditorError::NodeNotFound)
         }
     }
 
@@ -505,15 +556,15 @@ impl DialogueEditorState {
         dialogue_idx: usize,
         node_id: NodeId,
         choice_idx: usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
         let dialogue = &mut self.dialogues[dialogue_idx];
         if let Some(node) = dialogue.nodes.get_mut(&node_id) {
             if choice_idx >= node.choices.len() {
-                return Err("Invalid choice index".to_string());
+                return Err(DialogueEditorError::InvalidChoiceIndex);
             }
 
             let target_node = if self.choice_buffer.target_node.is_empty() {
@@ -523,7 +574,7 @@ impl DialogueEditorState {
                     self.choice_buffer
                         .target_node
                         .parse::<NodeId>()
-                        .map_err(|_| "Invalid target node ID".to_string())?,
+                        .map_err(|_| DialogueEditorError::InvalidTargetNodeId)?,
                 )
             };
 
@@ -536,7 +587,7 @@ impl DialogueEditorState {
             self.selected_choice = None;
             Ok(())
         } else {
-            Err("Node not found".to_string())
+            Err(DialogueEditorError::NodeNotFound)
         }
     }
 
@@ -546,15 +597,15 @@ impl DialogueEditorState {
         dialogue_idx: usize,
         node_id: NodeId,
         choice_idx: usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
         let dialogue = &mut self.dialogues[dialogue_idx];
         if let Some(node) = dialogue.nodes.get_mut(&node_id) {
             if choice_idx >= node.choices.len() {
-                return Err("Invalid choice index".to_string());
+                return Err(DialogueEditorError::InvalidChoiceIndex);
             }
 
             node.choices.remove(choice_idx);
@@ -566,7 +617,7 @@ impl DialogueEditorState {
 
             Ok(())
         } else {
-            Err("Node not found".to_string())
+            Err(DialogueEditorError::NodeNotFound)
         }
     }
 
@@ -827,12 +878,12 @@ impl DialogueEditorState {
     }
 
     /// Save current dialogue being edited
-    pub fn save_dialogue(&mut self) -> Result<(), String> {
+    pub fn save_dialogue(&mut self) -> Result<(), DialogueEditorError> {
         let id = self
             .dialogue_buffer
             .id
             .parse::<DialogueId>()
-            .map_err(|_| "Invalid dialogue ID".to_string())?;
+            .map_err(|_| DialogueEditorError::InvalidDialogueId)?;
 
         let associated_quest = if self.dialogue_buffer.associated_quest.is_empty() {
             None
@@ -841,7 +892,7 @@ impl DialogueEditorState {
                 self.dialogue_buffer
                     .associated_quest
                     .parse::<QuestId>()
-                    .map_err(|_| "Invalid quest ID".to_string())?,
+                    .map_err(|_| DialogueEditorError::InvalidQuestId)?,
             )
         };
 
@@ -891,18 +942,18 @@ impl DialogueEditorState {
     }
 
     /// Add a new node to current dialogue
-    pub fn add_node(&mut self) -> Result<NodeId, String> {
+    pub fn add_node(&mut self) -> Result<NodeId, DialogueEditorError> {
         if self.selected_dialogue.is_none() {
-            return Err("No dialogue selected".to_string());
+            return Err(DialogueEditorError::NoDialogueSelected);
         }
 
         if self.node_buffer.text.trim().is_empty() {
-            return Err("Node text cannot be empty".to_string());
+            return Err(DialogueEditorError::EmptyNodeText);
         }
 
         let node_id = self
             .next_available_node_id()
-            .ok_or_else(|| "No dialogue selected".to_string())?;
+            .ok_or(DialogueEditorError::NoDialogueSelected)?;
 
         let mut node = DialogueNode::new(node_id, &self.node_buffer.text);
 
@@ -917,15 +968,15 @@ impl DialogueEditorState {
             self.node_buffer = NodeEditBuffer::default();
             Ok(node_id)
         } else {
-            Err("No dialogue selected".to_string())
+            Err(DialogueEditorError::NoDialogueSelected)
         }
     }
 
     /// Add a choice to current node
-    pub fn add_choice(&mut self) -> Result<(), String> {
+    pub fn add_choice(&mut self) -> Result<(), DialogueEditorError> {
         if let Some(dialogue_idx) = self.selected_dialogue {
             if dialogue_idx >= self.dialogues.len() {
-                return Err("Invalid dialogue index".to_string());
+                return Err(DialogueEditorError::InvalidDialogueIndex);
             }
 
             if let Some(node_id) = self.selected_node {
@@ -933,7 +984,7 @@ impl DialogueEditorState {
                     .choice_buffer
                     .target_node
                     .parse::<NodeId>()
-                    .map_err(|_| "Invalid target node ID".to_string())?;
+                    .map_err(|_| DialogueEditorError::InvalidTargetNodeId)?;
 
                 let mut choice = DialogueChoice::new(&self.choice_buffer.text, Some(target_node));
                 choice.ends_dialogue = self.choice_buffer.ends_dialogue;
@@ -943,7 +994,7 @@ impl DialogueEditorState {
                     .nodes
                     .contains_key(&target_node)
                 {
-                    return Err("Target node does not exist".to_string());
+                    return Err(DialogueEditorError::TargetNodeNotFound);
                 }
 
                 // Add choice to node (accessing nodes directly since no mutable getter)
@@ -955,12 +1006,12 @@ impl DialogueEditorState {
                     return Ok(());
                 }
 
-                Err("Node not found".to_string())
+                Err(DialogueEditorError::NodeNotFound)
             } else {
-                Err("No node selected".to_string())
+                Err(DialogueEditorError::NoNodeSelected)
             }
         } else {
-            Err("No dialogue selected".to_string())
+            Err(DialogueEditorError::NoDialogueSelected)
         }
     }
 
@@ -1336,25 +1387,26 @@ impl DialogueEditorState {
     }
 
     /// Load dialogues from a file path
-    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), DialogueEditorError> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| DialogueEditorError::ReadError(e.to_string()))?;
         let dialogues: Vec<DialogueTree> =
-            ron::from_str(&content).map_err(|e| format!("Failed to parse dialogues: {}", e))?;
+            ron::from_str(&content).map_err(|e| DialogueEditorError::ParseError(e.to_string()))?;
         self.dialogues = dialogues;
         self.has_unsaved_changes = false;
         Ok(())
     }
 
     /// Save dialogues to a file path
-    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), DialogueEditorError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+                .map_err(|e| DialogueEditorError::DirectoryError(e.to_string()))?;
         }
         let content = ron::ser::to_string_pretty(&self.dialogues, Default::default())
-            .map_err(|e| format!("Failed to serialize dialogues: {}", e))?;
-        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+            .map_err(|e| DialogueEditorError::SerializationError(e.to_string()))?;
+        std::fs::write(path, content)
+            .map_err(|e| DialogueEditorError::WriteError(e.to_string()))?;
         Ok(())
     }
 
@@ -2931,13 +2983,13 @@ mod tests {
         editor.node_buffer.text = "".to_string();
         let result = editor.add_node();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("cannot be empty"));
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
 
         // Try with only whitespace
         editor.node_buffer.text = "   ".to_string();
         let result = editor.add_node();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("cannot be empty"));
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
     }
 
     #[test]
@@ -3016,7 +3068,22 @@ mod tests {
         // Try to add node without selecting dialogue
         let result = editor.add_node();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No dialogue selected"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No dialogue selected"));
+    }
+
+    #[test]
+    fn test_dialogue_editor_error_display() {
+        assert_eq!(
+            DialogueEditorError::InvalidDialogueIndex.to_string(),
+            "Invalid dialogue index"
+        );
+        assert_eq!(
+            DialogueEditorError::EmptyNodeText.to_string(),
+            "Node text cannot be empty"
+        );
     }
 
     // ========== Node Navigation and Validation Tests ==========

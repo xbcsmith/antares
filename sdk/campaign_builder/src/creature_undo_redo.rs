@@ -15,13 +15,30 @@
 use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 use serde::{Deserialize, Serialize};
 
+/// Errors produced by creature editing commands.
+#[derive(Debug, thiserror::Error)]
+pub enum CreatureCommandError {
+    #[error("No meshes to remove")]
+    NoMeshesToRemove,
+    #[error("Invalid mesh index: {0}")]
+    InvalidMeshIndex(usize),
+    #[error("Invalid transform index: {0}")]
+    InvalidTransformIndex(usize),
+    #[error("ReorderMesh: index out of bounds (a={0}, b={1}, len={2})")]
+    ReorderOutOfBounds(usize, usize, usize),
+    #[error("Nothing to undo")]
+    NothingToUndo,
+    #[error("Nothing to redo")]
+    NothingToRedo,
+}
+
 /// Command trait for reversible creature editing operations
 pub trait CreatureCommand: std::fmt::Debug {
     /// Execute the command on a creature
-    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), String>;
+    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError>;
 
     /// Undo the command on a creature
-    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), String>;
+    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError>;
 
     /// Get a human-readable description of this command
     fn description(&self) -> String;
@@ -42,15 +59,15 @@ impl AddMeshCommand {
 }
 
 impl CreatureCommand for AddMeshCommand {
-    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         creature.meshes.push(self.mesh.clone());
         creature.mesh_transforms.push(self.transform);
         Ok(())
     }
 
-    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         if creature.meshes.is_empty() {
-            return Err("No meshes to remove".to_string());
+            return Err(CreatureCommandError::NoMeshesToRemove);
         }
         creature.meshes.pop();
         creature.mesh_transforms.pop();
@@ -85,18 +102,18 @@ impl RemoveMeshCommand {
 }
 
 impl CreatureCommand for RemoveMeshCommand {
-    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         if self.index >= creature.meshes.len() {
-            return Err(format!("Invalid mesh index: {}", self.index));
+            return Err(CreatureCommandError::InvalidMeshIndex(self.index));
         }
         creature.meshes.remove(self.index);
         creature.mesh_transforms.remove(self.index);
         Ok(())
     }
 
-    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         if self.index > creature.meshes.len() {
-            return Err(format!("Invalid mesh index: {}", self.index));
+            return Err(CreatureCommandError::InvalidMeshIndex(self.index));
         }
         creature.meshes.insert(self.index, self.mesh.clone());
         creature.mesh_transforms.insert(self.index, self.transform);
@@ -131,17 +148,17 @@ impl ModifyTransformCommand {
 }
 
 impl CreatureCommand for ModifyTransformCommand {
-    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         if self.index >= creature.mesh_transforms.len() {
-            return Err(format!("Invalid transform index: {}", self.index));
+            return Err(CreatureCommandError::InvalidTransformIndex(self.index));
         }
         creature.mesh_transforms[self.index] = self.new_transform;
         Ok(())
     }
 
-    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         if self.index >= creature.mesh_transforms.len() {
-            return Err(format!("Invalid transform index: {}", self.index));
+            return Err(CreatureCommandError::InvalidTransformIndex(self.index));
         }
         creature.mesh_transforms[self.index] = self.old_transform;
         Ok(())
@@ -172,17 +189,17 @@ impl ModifyMeshCommand {
 }
 
 impl CreatureCommand for ModifyMeshCommand {
-    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         if self.index >= creature.meshes.len() {
-            return Err(format!("Invalid mesh index: {}", self.index));
+            return Err(CreatureCommandError::InvalidMeshIndex(self.index));
         }
         creature.meshes[self.index] = self.new_mesh.clone();
         Ok(())
     }
 
-    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         if self.index >= creature.meshes.len() {
-            return Err(format!("Invalid mesh index: {}", self.index));
+            return Err(CreatureCommandError::InvalidMeshIndex(self.index));
         }
         creature.meshes[self.index] = self.old_mesh.clone();
         Ok(())
@@ -211,12 +228,12 @@ impl ModifyCreaturePropertiesCommand {
 }
 
 impl CreatureCommand for ModifyCreaturePropertiesCommand {
-    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         creature.name = self.new_name.clone();
         Ok(())
     }
 
-    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         creature.name = self.old_name.clone();
         Ok(())
     }
@@ -290,13 +307,14 @@ impl ReorderMeshCommand {
     }
 
     /// Swap two positions in both parallel slices.
-    fn swap(creature: &mut CreatureDefinition, a: usize, b: usize) -> Result<(), String> {
+    fn swap(
+        creature: &mut CreatureDefinition,
+        a: usize,
+        b: usize,
+    ) -> Result<(), CreatureCommandError> {
         let len = creature.meshes.len();
         if a >= len || b >= len {
-            return Err(format!(
-                "ReorderMesh: index out of bounds (a={}, b={}, len={})",
-                a, b, len
-            ));
+            return Err(CreatureCommandError::ReorderOutOfBounds(a, b, len));
         }
         creature.meshes.swap(a, b);
         creature.mesh_transforms.swap(a, b);
@@ -305,11 +323,11 @@ impl ReorderMeshCommand {
 }
 
 impl CreatureCommand for ReorderMeshCommand {
-    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn execute(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         Self::swap(creature, self.index, self.target)
     }
 
-    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), String> {
+    fn undo(&self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         // Swapping is its own inverse.
         Self::swap(creature, self.target, self.index)
     }
@@ -358,7 +376,7 @@ impl CreatureUndoRedoManager {
         &mut self,
         command: Box<dyn CreatureCommand>,
         creature: &mut CreatureDefinition,
-    ) -> Result<(), String> {
+    ) -> Result<(), CreatureCommandError> {
         command.execute(creature)?;
 
         // Clear redo stack when new command is executed
@@ -376,26 +394,24 @@ impl CreatureUndoRedoManager {
     }
 
     /// Undo the last command
-    pub fn undo(&mut self, creature: &mut CreatureDefinition) -> Result<String, String> {
+    pub fn undo(&mut self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         if let Some(command) = self.undo_stack.pop() {
-            let description = command.description();
             command.undo(creature)?;
             self.redo_stack.push(command);
-            Ok(description)
+            Ok(())
         } else {
-            Err("Nothing to undo".to_string())
+            Err(CreatureCommandError::NothingToUndo)
         }
     }
 
     /// Redo the last undone command
-    pub fn redo(&mut self, creature: &mut CreatureDefinition) -> Result<String, String> {
+    pub fn redo(&mut self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
         if let Some(command) = self.redo_stack.pop() {
-            let description = command.description();
             command.execute(creature)?;
             self.undo_stack.push(command);
-            Ok(description)
+            Ok(())
         } else {
-            Err("Nothing to redo".to_string())
+            Err(CreatureCommandError::NothingToRedo)
         }
     }
 
@@ -928,5 +944,33 @@ mod tests {
         assert!(!manager.can_redo());
         assert_eq!(manager.undo_count(), 0);
         assert_eq!(manager.redo_count(), 0);
+    }
+
+    #[test]
+    fn test_creature_command_error_display() {
+        assert_eq!(
+            CreatureCommandError::InvalidMeshIndex(3).to_string(),
+            "Invalid mesh index: 3"
+        );
+        assert_eq!(
+            CreatureCommandError::NoMeshesToRemove.to_string(),
+            "No meshes to remove"
+        );
+        assert_eq!(
+            CreatureCommandError::InvalidTransformIndex(5).to_string(),
+            "Invalid transform index: 5"
+        );
+        assert_eq!(
+            CreatureCommandError::ReorderOutOfBounds(1, 10, 3).to_string(),
+            "ReorderMesh: index out of bounds (a=1, b=10, len=3)"
+        );
+        assert_eq!(
+            CreatureCommandError::NothingToUndo.to_string(),
+            "Nothing to undo"
+        );
+        assert_eq!(
+            CreatureCommandError::NothingToRedo.to_string(),
+            "Nothing to redo"
+        );
     }
 }

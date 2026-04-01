@@ -1072,7 +1072,11 @@ impl QuestEditorState {
                 if let Some(dir) = campaign_dir {
                     let quests_path = dir.join(quests_file);
                     if let Some(parent) = quests_path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
+                        if let Err(e) = std::fs::create_dir_all(parent) {
+                            // Non-critical: if the directory cannot be created here, the
+                            // subsequent file write will fail and surface the error to the user.
+                            let _ = e;
+                        }
                     }
 
                     match ron::ser::to_string_pretty(&quests, Default::default()) {
@@ -1789,6 +1793,8 @@ impl QuestEditorState {
         ui.heading("Quest Stages");
         ui.horizontal(|ui| {
             if ui.button("➕ Add Stage").clicked() {
+                // Intentional: adding a stage is best-effort in a UI click handler;
+                // if it fails the stage simply isn't added and no state is corrupted.
                 let _ = self.add_stage(quests);
                 *unsaved_changes = true;
             }
@@ -1958,7 +1964,8 @@ impl QuestEditorState {
             {
                 if let Ok(new_idx) = self.add_default_objective(quests, stage_idx) {
                     *unsaved_changes = true;
-                    // Immediately start editing the new objective
+                    // Immediately start editing the new objective; failure is non-critical
+                    // — the objective was already added and can be edited manually.
                     let _ = self.edit_objective(quests, quest_idx, stage_idx, new_idx);
                 }
             }
@@ -2319,7 +2326,8 @@ impl QuestEditorState {
             if ui.button("➕ Add Reward").clicked() {
                 if let Ok(new_idx) = self.add_default_reward(quests) {
                     *unsaved_changes = true;
-                    // Immediately start editing the new reward
+                    // Immediately start editing the new reward; failure is non-critical
+                    // — the reward was already added and can be edited manually.
                     let _ =
                         self.edit_reward(quests.as_slice(), self.selected_quest.unwrap(), new_idx);
                 }

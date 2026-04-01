@@ -482,8 +482,6 @@ impl CampaignMetadataEditorState {
     /// rendering and form state to `CampaignMetadataEditorState`. The function
     /// accepts references to the running app's `campaign` and state helpers to
     /// persist and save files.
-    ///
-
     #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,

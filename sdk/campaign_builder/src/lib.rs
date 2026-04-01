@@ -118,18 +118,24 @@ const STARTING_GOLD_MAX: u32 = 100_000;
 
 pub fn run() -> Result<(), eframe::Error> {
     // Initialize logger from command-line arguments
-    let logger = Logger::from_args();
+    let mut logger = Logger::from_args();
     let log_level = logger.level();
 
     // Print startup message based on log level
     if log_level >= LogLevel::Info {
-        eprintln!(
-            "[INFO] Antares Campaign Builder starting (log level: {})",
-            log_level
+        logger.info(
+            category::APP,
+            &format!(
+                "Antares Campaign Builder starting (log level: {})",
+                log_level
+            ),
         );
     }
     if log_level >= LogLevel::Verbose {
-        eprintln!("[VERBOSE] Verbose logging enabled - showing detailed trace information");
+        logger.verbose(
+            category::APP,
+            "Verbose logging enabled - showing detailed trace information",
+        );
     }
 
     let mut viewport = egui::ViewportBuilder::default()
@@ -1928,7 +1934,10 @@ impl CampaignBuilderApp {
                             manager.mark_data_file_error(&spells_file, &e.to_string());
                         }
                         self.status_message = format!("Failed to read spells file: {}", e);
-                        eprintln!("Failed to read spells file {:?}: {}", spells_path, e);
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!("Failed to read spells file {:?}: {}", spells_path, e),
+                        );
                     }
                 }
             }
@@ -1993,25 +2002,37 @@ impl CampaignBuilderApp {
                         }
                         Err(e) => {
                             self.status_message = format!("Failed to parse conditions: {}", e);
-                            eprintln!(
-                                "Failed to parse conditions from {:?}: {}",
-                                conditions_path, e
+                            self.logger.error(
+                                category::FILE_IO,
+                                &format!(
+                                    "Failed to parse conditions from {:?}: {}",
+                                    conditions_path, e
+                                ),
                             );
                         }
                     },
                     Err(e) => {
                         self.status_message = format!("Failed to read conditions file: {}", e);
-                        eprintln!(
-                            "Failed to read conditions file {:?}: {}",
-                            conditions_path, e
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!(
+                                "Failed to read conditions file {:?}: {}",
+                                conditions_path, e
+                            ),
                         );
                     }
                 }
             } else {
-                eprintln!("Conditions file does not exist: {:?}", conditions_path);
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!("Conditions file does not exist: {:?}", conditions_path),
+                );
             }
         } else {
-            eprintln!("No campaign directory set when trying to load conditions");
+            self.logger.warn(
+                category::FILE_IO,
+                "No campaign directory set when trying to load conditions",
+            );
         }
     }
 
@@ -2366,14 +2387,23 @@ impl CampaignBuilderApp {
                             manager.mark_data_file_error(&monsters_file, &e.to_string());
                         }
                         self.status_message = format!("Failed to read monsters file: {}", e);
-                        eprintln!("Failed to read monsters file {:?}: {}", monsters_path, e);
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!("Failed to read monsters file {:?}: {}", monsters_path, e),
+                        );
                     }
                 }
             } else {
-                eprintln!("Monsters file does not exist: {:?}", monsters_path);
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!("Monsters file does not exist: {:?}", monsters_path),
+                );
             }
         } else {
-            eprintln!("No campaign directory set when trying to load monsters");
+            self.logger.warn(
+                category::FILE_IO,
+                "No campaign directory set when trying to load monsters",
+            );
         }
     }
 
@@ -2565,9 +2595,12 @@ impl CampaignBuilderApp {
                                         load_errors.len(),
                                         load_errors.join("\n")
                                     );
-                                    eprintln!(
-                                        "Creature loading errors: {}",
-                                        load_errors.join("\n")
+                                    self.logger.error(
+                                        category::FILE_IO,
+                                        &format!(
+                                            "Creature loading errors: {}",
+                                            load_errors.join("\n")
+                                        ),
                                     );
                                 }
                             }
@@ -2577,9 +2610,12 @@ impl CampaignBuilderApp {
                                 }
                                 self.status_message =
                                     format!("Failed to parse creatures registry: {}", e);
-                                eprintln!(
-                                    "Failed to parse creatures registry {:?}: {}",
-                                    creatures_path, e
+                                self.logger.error(
+                                    category::FILE_IO,
+                                    &format!(
+                                        "Failed to parse creatures registry {:?}: {}",
+                                        creatures_path, e
+                                    ),
                                 );
                             }
                         }
@@ -2589,17 +2625,26 @@ impl CampaignBuilderApp {
                             manager.mark_data_file_error(&creatures_file, &e.to_string());
                         }
                         self.status_message = format!("Failed to read creatures registry: {}", e);
-                        eprintln!(
-                            "Failed to read creatures registry {:?}: {}",
-                            creatures_path, e
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!(
+                                "Failed to read creatures registry {:?}: {}",
+                                creatures_path, e
+                            ),
                         );
                     }
                 }
             } else {
-                eprintln!("Creatures file does not exist: {:?}", creatures_path);
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!("Creatures file does not exist: {:?}", creatures_path),
+                );
             }
         } else {
-            eprintln!("No campaign directory set when trying to load creatures");
+            self.logger.warn(
+                category::FILE_IO,
+                "No campaign directory set when trying to load creatures",
+            );
         }
     }
 
@@ -3061,8 +3106,15 @@ impl CampaignBuilderApp {
 
             // Populate NPC database from the editor state
             for npc in &self.npc_editor_state.npcs {
-                // Ignore insertion errors from the DB helper (should be infrequent)
-                let _ = db.npcs.add_npc(npc.clone());
+                if let Err(e) = db.npcs.add_npc(npc.clone()) {
+                    self.logger.warn(
+                        category::VALIDATION,
+                        &format!(
+                            "NPC '{}' could not be added to validation DB: {}",
+                            npc.id, e
+                        ),
+                    );
+                }
             }
 
             // Invoke SDK validator for campaign config checks
@@ -3147,6 +3199,7 @@ impl CampaignBuilderApp {
             // Log individual errors at debug level
             for result in &self.validation_errors {
                 let level_str = match result.severity {
+                    validation::ValidationSeverity::Critical => "CRITICAL",
                     validation::ValidationSeverity::Error => "ERROR",
                     validation::ValidationSeverity::Warning => "WARN",
                     validation::ValidationSeverity::Info => "INFO",
@@ -5204,7 +5257,13 @@ impl eframe::App for CampaignBuilderApp {
                     ui.horizontal(|ui| {
                         if ui.button("💾 Save").clicked() {
                             if self.campaign_path.is_some() {
-                                let _ = self.save_campaign();
+                                if let Err(e) = self.save_campaign() {
+                                    self.status_message = format!("Failed to save campaign: {}", e);
+                                    self.logger.error(
+                                        category::CAMPAIGN,
+                                        &format!("Failed to save campaign: {}", e),
+                                    );
+                                }
                             } else {
                                 self.save_campaign_as();
                             }
@@ -5323,21 +5382,36 @@ impl CampaignBuilderApp {
                                     format!("Loaded {} quests", self.quests.len());
                             }
                             Err(e) => {
-                                eprintln!("Failed to parse quests from {:?}: {}", quests_path, e);
+                                self.logger.error(
+                                    category::FILE_IO,
+                                    &format!(
+                                        "Failed to parse quests from {:?}: {}",
+                                        quests_path, e
+                                    ),
+                                );
                                 return Err(CampaignError::Deserialization(e));
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to read quests file {:?}: {}", quests_path, e);
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!("Failed to read quests file {:?}: {}", quests_path, e),
+                        );
                         return Err(CampaignError::Io(e));
                     }
                 }
             } else {
-                eprintln!("Quests file does not exist: {:?}", quests_path);
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!("Quests file does not exist: {:?}", quests_path),
+                );
             }
         } else {
-            eprintln!("No campaign directory set when trying to load quests");
+            self.logger.warn(
+                category::FILE_IO,
+                "No campaign directory set when trying to load quests",
+            );
         }
         Ok(())
     }
@@ -5373,14 +5447,23 @@ impl CampaignBuilderApp {
                     }
                     Err(e) => {
                         self.status_message = format!("Failed to load classes: {}", e);
-                        eprintln!("Failed to load classes from {:?}: {}", path, e);
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!("Failed to load classes from {:?}: {}", path, e),
+                        );
                     }
                 }
             } else {
-                eprintln!("Classes file does not exist: {:?}", path);
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!("Classes file does not exist: {:?}", path),
+                );
             }
         } else {
-            eprintln!("No campaign directory set when trying to load classes");
+            self.logger.warn(
+                category::FILE_IO,
+                "No campaign directory set when trying to load classes",
+            );
         }
     }
 
@@ -5400,7 +5483,10 @@ impl CampaignBuilderApp {
                     }
                     Err(e) => {
                         self.status_message = format!("Failed to load characters: {}", e);
-                        eprintln!("Failed to load characters from {:?}: {}", path, e);
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!("Failed to load characters from {:?}: {}", path, e),
+                        );
                         // Mark data file as error in asset manager
                         if let Some(ref mut manager) = self.asset_manager {
                             manager.mark_data_file_error(
@@ -5418,7 +5504,10 @@ impl CampaignBuilderApp {
                 );
             }
         } else {
-            eprintln!("No campaign directory set when trying to load characters");
+            self.logger.warn(
+                category::FILE_IO,
+                "No campaign directory set when trying to load characters",
+            );
         }
     }
 
@@ -5434,14 +5523,23 @@ impl CampaignBuilderApp {
                     }
                     Err(e) => {
                         self.status_message = format!("Failed to load races: {}", e);
-                        eprintln!("Failed to load races from {:?}: {}", path, e);
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!("Failed to load races from {:?}: {}", path, e),
+                        );
                     }
                 }
             } else {
-                eprintln!("Races file does not exist: {:?}", path);
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!("Races file does not exist: {:?}", path),
+                );
             }
         } else {
-            eprintln!("No campaign directory set when trying to load races");
+            self.logger.warn(
+                category::FILE_IO,
+                "No campaign directory set when trying to load races",
+            );
         }
     }
 
@@ -5694,12 +5792,21 @@ impl CampaignBuilderApp {
                                 format!("Loaded {} dialogues", self.dialogues.len());
                         }
                         Err(e) => {
-                            eprintln!("Failed to parse dialogues from {:?}: {}", dialogue_path, e);
+                            self.logger.error(
+                                category::FILE_IO,
+                                &format!(
+                                    "Failed to parse dialogues from {:?}: {}",
+                                    dialogue_path, e
+                                ),
+                            );
                             return Err(CampaignError::Deserialization(e));
                         }
                     },
                     Err(e) => {
-                        eprintln!("Failed to read dialogues file {:?}: {}", dialogue_path, e);
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!("Failed to read dialogues file {:?}: {}", dialogue_path, e),
+                        );
                         return Err(CampaignError::Io(e));
                     }
                 }

@@ -1419,27 +1419,28 @@ impl NpcEditorState {
     ) -> bool {
         // Check if already cached
         if self.portrait_textures.contains_key(portrait_id) {
-            return self.portrait_textures.get(portrait_id).unwrap().is_some();
+            return self
+                .portrait_textures
+                .get(portrait_id)
+                .is_some_and(|t| t.is_some());
         }
 
-        // Attempt to load and decode image with error logging
+        // Attempt to load and decode image
         let texture_handle = (|| {
             let path = resolve_portrait_path(campaign_dir, portrait_id)?;
 
-            // Read image file with error handling
+            // Read image file; return None on failure (caller sees a "?" placeholder)
             let image_bytes = match std::fs::read(&path) {
                 Ok(bytes) => bytes,
-                Err(e) => {
-                    eprintln!("Failed to read portrait file '{}': {}", path.display(), e);
+                Err(_) => {
                     return None;
                 }
             };
 
-            // Decode image using image crate with error handling
+            // Decode image; return None on failure
             let dynamic_image = match image::load_from_memory(&image_bytes) {
                 Ok(img) => img,
-                Err(e) => {
-                    eprintln!("Failed to decode portrait '{}': {}", portrait_id, e);
+                Err(_) => {
                     return None;
                 }
             };
@@ -1464,12 +1465,6 @@ impl NpcEditorState {
 
         // Cache result (even None for failed loads to avoid repeated attempts)
         let loaded = texture_handle.is_some();
-        if !loaded {
-            eprintln!(
-                "Portrait '{}' could not be loaded or was not found",
-                portrait_id
-            );
-        }
 
         self.portrait_textures
             .insert(portrait_id.to_string(), texture_handle);
@@ -1571,9 +1566,8 @@ impl NpcEditorState {
                                         let texture = self
                                             .portrait_textures
                                             .get(portrait_id)
-                                            .unwrap()
-                                            .as_ref()
-                                            .unwrap();
+                                            .and_then(|t| t.as_ref())
+                                            .expect("texture present since has_texture is true");
                                         ui.add(
                                             egui::Button::image(
                                                 egui::Image::new(texture).fit_to_exact_size(
@@ -2409,9 +2403,9 @@ impl NpcEditorState {
                         // Persisted successfully; clear unsaved flag
                         self.has_unsaved_changes = false;
                     }
-                    Err(e) => {
-                        // Log error; leave unsaved flag true so user is aware
-                        eprintln!("Failed to persist NPCs to {}: {}", path.display(), e);
+                    Err(_persist_err) => {
+                        // Persistence failure: NPCs are saved in memory; has_unsaved_changes
+                        // stays true to indicate a pending disk write.
                     }
                 }
             }
@@ -2561,16 +2555,16 @@ fn load_npc_portrait_texture(
 
         let image_bytes = match std::fs::read(&path) {
             Ok(bytes) => bytes,
-            Err(e) => {
-                eprintln!("Failed to read portrait file '{}': {}", path.display(), e);
+            Err(_e) => {
+                // Portrait read failure is non-critical; the UI shows a "?" placeholder.
                 return None;
             }
         };
 
         let dynamic_image = match image::load_from_memory(&image_bytes) {
             Ok(img) => img,
-            Err(e) => {
-                eprintln!("Failed to decode portrait '{}': {}", portrait_id, e);
+            Err(_e) => {
+                // Portrait decode failure is non-critical; the UI shows a "?" placeholder.
                 return None;
             }
         };
@@ -2589,12 +2583,7 @@ fn load_npc_portrait_texture(
     })();
 
     let loaded = texture_handle.is_some();
-    if !loaded {
-        eprintln!(
-            "Portrait '{}' could not be loaded or was not found",
-            portrait_id
-        );
-    }
+    // If loading failed, `loaded` is false and the UI will show a "?" placeholder.
 
     portrait_textures.insert(portrait_id.to_string(), texture_handle);
     loaded

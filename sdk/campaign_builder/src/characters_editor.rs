@@ -25,6 +25,85 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Errors produced by character editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum CharacterEditorError {
+    #[error("ID cannot be empty")]
+    EmptyId,
+    #[error("Name cannot be empty")]
+    EmptyName,
+    #[error("Race ID cannot be empty")]
+    EmptyRaceId,
+    #[error("Class ID cannot be empty")]
+    EmptyClassId,
+    #[error("Invalid Might base value")]
+    InvalidMightBase,
+    #[error("Invalid Might current value")]
+    InvalidMightCurrent,
+    #[error("Might current cannot exceed base")]
+    MightCurrentExceedsBase,
+    #[error("Invalid Intellect base value")]
+    InvalidIntellectBase,
+    #[error("Invalid Intellect current value")]
+    InvalidIntellectCurrent,
+    #[error("Intellect current cannot exceed base")]
+    IntellectCurrentExceedsBase,
+    #[error("Invalid Personality base value")]
+    InvalidPersonalityBase,
+    #[error("Invalid Personality current value")]
+    InvalidPersonalityCurrent,
+    #[error("Personality current cannot exceed base")]
+    PersonalityCurrentExceedsBase,
+    #[error("Invalid Endurance base value")]
+    InvalidEnduranceBase,
+    #[error("Invalid Endurance current value")]
+    InvalidEnduranceCurrent,
+    #[error("Endurance current cannot exceed base")]
+    EnduranceCurrentExceedsBase,
+    #[error("Invalid Speed base value")]
+    InvalidSpeedBase,
+    #[error("Invalid Speed current value")]
+    InvalidSpeedCurrent,
+    #[error("Speed current cannot exceed base")]
+    SpeedCurrentExceedsBase,
+    #[error("Invalid Accuracy base value")]
+    InvalidAccuracyBase,
+    #[error("Invalid Accuracy current value")]
+    InvalidAccuracyCurrent,
+    #[error("Accuracy current cannot exceed base")]
+    AccuracyCurrentExceedsBase,
+    #[error("Invalid Luck base value")]
+    InvalidLuckBase,
+    #[error("Invalid Luck current value")]
+    InvalidLuckCurrent,
+    #[error("Luck current cannot exceed base")]
+    LuckCurrentExceedsBase,
+    #[error("Invalid HP override base value")]
+    InvalidHpOverrideBase,
+    #[error("Invalid HP override current value")]
+    InvalidHpOverrideCurrent,
+    #[error("HP override current cannot exceed base")]
+    HpOverrideCurrentExceedsBase,
+    #[error("Invalid Starting Gold")]
+    InvalidStartingGold,
+    #[error("Invalid Starting Gems")]
+    InvalidStartingGems,
+    #[error("Invalid Starting Food")]
+    InvalidStartingFood,
+    #[error("Character ID already exists")]
+    DuplicateId,
+    #[error("Failed to read file: {0}")]
+    ReadError(String),
+    #[error("Failed to parse characters: {0}")]
+    ParseError(String),
+    #[error("Failed to create directory: {0}")]
+    DirectoryError(String),
+    #[error("Failed to serialize characters: {0}")]
+    SerializationError(String),
+    #[error("Failed to write file: {0}")]
+    WriteError(String),
+}
+
 /// Editor state for characters
 #[derive(Serialize, Deserialize)]
 pub struct CharactersEditorState {
@@ -298,25 +377,25 @@ impl CharactersEditorState {
     }
 
     /// Saves the current character from the edit buffer
-    pub fn save_character(&mut self) -> Result<(), String> {
+    pub fn save_character(&mut self) -> Result<(), CharacterEditorError> {
         let id = self.buffer.id.trim().to_string();
         if id.is_empty() {
-            return Err("ID cannot be empty".to_string());
+            return Err(CharacterEditorError::EmptyId);
         }
 
         let name = self.buffer.name.trim().to_string();
         if name.is_empty() {
-            return Err("Name cannot be empty".to_string());
+            return Err(CharacterEditorError::EmptyName);
         }
 
         let race_id = self.buffer.race_id.trim().to_string();
         if race_id.is_empty() {
-            return Err("Race ID cannot be empty".to_string());
+            return Err(CharacterEditorError::EmptyRaceId);
         }
 
         let class_id = self.buffer.class_id.trim().to_string();
         if class_id.is_empty() {
-            return Err("Class ID cannot be empty".to_string());
+            return Err(CharacterEditorError::EmptyClassId);
         }
 
         // Parse base stats (base and current for each attribute)
@@ -325,15 +404,15 @@ impl CharactersEditorState {
             .might_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Might base value")?;
+            .map_err(|_| CharacterEditorError::InvalidMightBase)?;
         let might_current = self
             .buffer
             .might_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Might current value")?;
+            .map_err(|_| CharacterEditorError::InvalidMightCurrent)?;
         if might_current > might_base {
-            return Err("Might current cannot exceed base".to_string());
+            return Err(CharacterEditorError::MightCurrentExceedsBase);
         }
 
         let intellect_base = self
@@ -341,15 +420,15 @@ impl CharactersEditorState {
             .intellect_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Intellect base value")?;
+            .map_err(|_| CharacterEditorError::InvalidIntellectBase)?;
         let intellect_current = self
             .buffer
             .intellect_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Intellect current value")?;
+            .map_err(|_| CharacterEditorError::InvalidIntellectCurrent)?;
         if intellect_current > intellect_base {
-            return Err("Intellect current cannot exceed base".to_string());
+            return Err(CharacterEditorError::IntellectCurrentExceedsBase);
         }
 
         let personality_base = self
@@ -357,15 +436,15 @@ impl CharactersEditorState {
             .personality_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Personality base value")?;
+            .map_err(|_| CharacterEditorError::InvalidPersonalityBase)?;
         let personality_current = self
             .buffer
             .personality_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Personality current value")?;
+            .map_err(|_| CharacterEditorError::InvalidPersonalityCurrent)?;
         if personality_current > personality_base {
-            return Err("Personality current cannot exceed base".to_string());
+            return Err(CharacterEditorError::PersonalityCurrentExceedsBase);
         }
 
         let endurance_base = self
@@ -373,15 +452,15 @@ impl CharactersEditorState {
             .endurance_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Endurance base value")?;
+            .map_err(|_| CharacterEditorError::InvalidEnduranceBase)?;
         let endurance_current = self
             .buffer
             .endurance_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Endurance current value")?;
+            .map_err(|_| CharacterEditorError::InvalidEnduranceCurrent)?;
         if endurance_current > endurance_base {
-            return Err("Endurance current cannot exceed base".to_string());
+            return Err(CharacterEditorError::EnduranceCurrentExceedsBase);
         }
 
         let speed_base = self
@@ -389,15 +468,15 @@ impl CharactersEditorState {
             .speed_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Speed base value")?;
+            .map_err(|_| CharacterEditorError::InvalidSpeedBase)?;
         let speed_current = self
             .buffer
             .speed_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Speed current value")?;
+            .map_err(|_| CharacterEditorError::InvalidSpeedCurrent)?;
         if speed_current > speed_base {
-            return Err("Speed current cannot exceed base".to_string());
+            return Err(CharacterEditorError::SpeedCurrentExceedsBase);
         }
 
         let accuracy_base = self
@@ -405,15 +484,15 @@ impl CharactersEditorState {
             .accuracy_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Accuracy base value")?;
+            .map_err(|_| CharacterEditorError::InvalidAccuracyBase)?;
         let accuracy_current = self
             .buffer
             .accuracy_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Accuracy current value")?;
+            .map_err(|_| CharacterEditorError::InvalidAccuracyCurrent)?;
         if accuracy_current > accuracy_base {
-            return Err("Accuracy current cannot exceed base".to_string());
+            return Err(CharacterEditorError::AccuracyCurrentExceedsBase);
         }
 
         let luck_base = self
@@ -421,15 +500,15 @@ impl CharactersEditorState {
             .luck_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Luck base value")?;
+            .map_err(|_| CharacterEditorError::InvalidLuckBase)?;
         let luck_current = self
             .buffer
             .luck_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Luck current value")?;
+            .map_err(|_| CharacterEditorError::InvalidLuckCurrent)?;
         if luck_current > luck_base {
-            return Err("Luck current cannot exceed base".to_string());
+            return Err(CharacterEditorError::LuckCurrentExceedsBase);
         }
 
         // Create Stats with AttributePair for each stat
@@ -476,7 +555,7 @@ impl CharactersEditorState {
                 .hp_override_base
                 .trim()
                 .parse::<u16>()
-                .map_err(|_| "Invalid HP override base value")?;
+                .map_err(|_| CharacterEditorError::InvalidHpOverrideBase)?;
             let current = if self.buffer.hp_override_current.trim().is_empty() {
                 base // If current is empty, default to base
             } else {
@@ -484,10 +563,10 @@ impl CharactersEditorState {
                     .hp_override_current
                     .trim()
                     .parse::<u16>()
-                    .map_err(|_| "Invalid HP override current value")?
+                    .map_err(|_| CharacterEditorError::InvalidHpOverrideCurrent)?
             };
             if current > base {
-                return Err("HP override current cannot exceed base".to_string());
+                return Err(CharacterEditorError::HpOverrideCurrentExceedsBase);
             }
             Some(AttributePair16 { base, current })
         };
@@ -500,17 +579,17 @@ impl CharactersEditorState {
             .buffer
             .starting_gold
             .parse::<u32>()
-            .map_err(|_| "Invalid Starting Gold")?;
+            .map_err(|_| CharacterEditorError::InvalidStartingGold)?;
         let starting_gems = self
             .buffer
             .starting_gems
             .parse::<u32>()
-            .map_err(|_| "Invalid Starting Gems")?;
+            .map_err(|_| CharacterEditorError::InvalidStartingGems)?;
         let starting_food = self
             .buffer
             .starting_food
             .parse::<u8>()
-            .map_err(|_| "Invalid Starting Food")?;
+            .map_err(|_| CharacterEditorError::InvalidStartingFood)?;
 
         // Starting items as typed Vec<ItemId> from the edit buffer
         let starting_items: Vec<ItemId> = self.buffer.starting_items.clone();
@@ -590,7 +669,7 @@ impl CharactersEditorState {
         } else {
             // Check for duplicate ID if creating new
             if self.characters.iter().any(|c| c.id == id) {
-                return Err("Character ID already exists".to_string());
+                return Err(CharacterEditorError::DuplicateId);
             }
             self.characters.push(character);
         }
@@ -607,8 +686,9 @@ impl CharactersEditorState {
                     // Successfully persisted: clear unsaved flag
                     self.has_unsaved_changes = false;
                 }
-                Err(e) => {
-                    eprintln!("Failed to persist characters to {}: {}", path.display(), e);
+                Err(_persist_err) => {
+                    // Persistence failure: character is saved in memory; has_unsaved_changes
+                    // stays true to indicate a pending disk write.
                 }
             }
         }
@@ -737,27 +817,28 @@ impl CharactersEditorState {
     ) -> bool {
         // Check if already cached
         if self.portrait_textures.contains_key(portrait_id) {
-            return self.portrait_textures.get(portrait_id).unwrap().is_some();
+            return self
+                .portrait_textures
+                .get(portrait_id)
+                .is_some_and(|t| t.is_some());
         }
 
-        // Attempt to load and decode image with error logging
+        // Attempt to load and decode image
         let texture_handle = (|| {
             let path = resolve_portrait_path(campaign_dir, portrait_id)?;
 
-            // Read image file with error handling
+            // Read image file; return None on failure (caller sees a "?" placeholder)
             let image_bytes = match std::fs::read(&path) {
                 Ok(bytes) => bytes,
-                Err(e) => {
-                    eprintln!("Failed to read portrait file '{}': {}", path.display(), e);
+                Err(_) => {
                     return None;
                 }
             };
 
-            // Decode image using image crate with error handling
+            // Decode image; return None on failure
             let dynamic_image = match image::load_from_memory(&image_bytes) {
                 Ok(img) => img,
-                Err(e) => {
-                    eprintln!("Failed to decode portrait '{}': {}", portrait_id, e);
+                Err(_) => {
                     return None;
                 }
             };
@@ -782,12 +863,6 @@ impl CharactersEditorState {
 
         // Cache result (even None for failed loads to avoid repeated attempts)
         let loaded = texture_handle.is_some();
-        if !loaded {
-            eprintln!(
-                "Portrait '{}' could not be loaded or was not found",
-                portrait_id
-            );
-        }
 
         self.portrait_textures
             .insert(portrait_id.to_string(), texture_handle);
@@ -889,9 +964,8 @@ impl CharactersEditorState {
                                         let texture = self
                                             .portrait_textures
                                             .get(portrait_id)
-                                            .unwrap()
-                                            .as_ref()
-                                            .unwrap();
+                                            .and_then(|t| t.as_ref())
+                                            .expect("texture present since has_texture is true");
                                         ui.add(
                                             egui::Button::image(
                                                 egui::Image::new(texture).fit_to_exact_size(
@@ -957,11 +1031,11 @@ impl CharactersEditorState {
     }
 
     /// Loads characters from a file path
-    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), CharacterEditorError> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| CharacterEditorError::ReadError(e.to_string()))?;
         let characters: Vec<CharacterDefinition> =
-            ron::from_str(&content).map_err(|e| format!("Failed to parse characters: {}", e))?;
+            ron::from_str(&content).map_err(|e| CharacterEditorError::ParseError(e.to_string()))?;
         self.characters = characters;
         self.has_unsaved_changes = false;
         Ok(())
@@ -987,14 +1061,15 @@ impl CharactersEditorState {
     }
 
     /// Saves characters to a file path
-    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), CharacterEditorError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+                .map_err(|e| CharacterEditorError::DirectoryError(e.to_string()))?;
         }
         let content = ron::ser::to_string_pretty(&self.characters, Default::default())
-            .map_err(|e| format!("Failed to serialize characters: {}", e))?;
-        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+            .map_err(|e| CharacterEditorError::SerializationError(e.to_string()))?;
+        std::fs::write(path, content)
+            .map_err(|e| CharacterEditorError::WriteError(e.to_string()))?;
         Ok(())
     }
 
@@ -2090,7 +2165,9 @@ impl CharactersEditorState {
                             }
                             Err(e) => {
                                 // Show error - in real impl this would be a toast/status
-                                ui.label(egui::RichText::new(e).color(egui::Color32::RED));
+                                ui.label(
+                                    egui::RichText::new(e.to_string()).color(egui::Color32::RED),
+                                );
                             }
                         }
                     }
@@ -2360,7 +2437,7 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "ID cannot be empty");
+        assert_eq!(result.unwrap_err().to_string(), "ID cannot be empty");
     }
 
     #[test]
@@ -2373,7 +2450,7 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Name cannot be empty");
+        assert_eq!(result.unwrap_err().to_string(), "Name cannot be empty");
     }
 
     #[test]
@@ -2386,7 +2463,7 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Race ID cannot be empty");
+        assert_eq!(result.unwrap_err().to_string(), "Race ID cannot be empty");
     }
 
     #[test]
@@ -2399,7 +2476,7 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Class ID cannot be empty");
+        assert_eq!(result.unwrap_err().to_string(), "Class ID cannot be empty");
     }
 
     #[test]
@@ -2423,7 +2500,10 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Character ID already exists");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Character ID already exists"
+        );
     }
 
     #[test]
@@ -2870,7 +2950,31 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Invalid Starting Gold");
+        assert_eq!(result.unwrap_err().to_string(), "Invalid Starting Gold");
+    }
+
+    #[test]
+    fn test_character_editor_error_display() {
+        assert_eq!(
+            CharacterEditorError::EmptyId.to_string(),
+            "ID cannot be empty"
+        );
+        assert_eq!(
+            CharacterEditorError::DuplicateId.to_string(),
+            "Character ID already exists"
+        );
+        assert_eq!(
+            CharacterEditorError::ReadError("test".to_string()).to_string(),
+            "Failed to read file: test"
+        );
+        assert_eq!(
+            CharacterEditorError::ParseError("bad ron".to_string()).to_string(),
+            "Failed to parse characters: bad ron"
+        );
+        assert_eq!(
+            CharacterEditorError::WriteError("disk full".to_string()).to_string(),
+            "Failed to write file: disk full"
+        );
     }
 
     #[test]

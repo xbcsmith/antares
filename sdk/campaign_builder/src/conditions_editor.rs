@@ -15,6 +15,55 @@ use eframe::egui;
 use std::fs;
 use std::path::PathBuf;
 
+/// Errors produced by condition editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum ConditionEditorError {
+    #[error("ID cannot be empty")]
+    EmptyId,
+    #[error("Name cannot be empty")]
+    EmptyName,
+    #[error("Attribute modifier must have a non-empty attribute")]
+    EmptyAttribute,
+    #[error("Attribute modifier value {0} is out of range ({1} to {2})")]
+    AttributeValueOutOfRange(i16, i16, i16),
+    #[error("Status effect must have a non-empty tag")]
+    EmptyStatusTag,
+    #[error("Damage over time dice count must be >= 1")]
+    DotDiceCountTooLow,
+    #[error("Damage over time dice sides must be >= 2")]
+    DotDiceSidesTooLow,
+    #[error("Damage over time must have a non-empty element")]
+    EmptyDotElement,
+    #[error("Heal over time dice count must be >= 1")]
+    HotDiceCountTooLow,
+    #[error("Heal over time dice sides must be >= 2")]
+    HotDiceSidesTooLow,
+    #[error("ID already in use")]
+    DuplicateId,
+    #[error("Original condition not found")]
+    ConditionNotFound,
+    #[error("Index {0} out of bounds (effects count: {1})")]
+    IndexOutOfBounds(usize, usize),
+    #[error("New index {0} out of bounds (effects count: {1})")]
+    NewIndexOutOfBounds(usize, usize),
+    #[error("Attribute name cannot be empty")]
+    EmptyAttributeName,
+    #[error("Attribute value must be in range [-255..255]")]
+    AttributeValueRange,
+    #[error("Status tag cannot be empty")]
+    EmptyStatusTagBuffer,
+    #[error("Damage dice count must be >= 1")]
+    DamageDiceCountTooLow,
+    #[error("Damage dice sides must be >= 2")]
+    DamageDiceSidesTooLow,
+    #[error("Damage element cannot be empty")]
+    EmptyDamageElement,
+    #[error("Heal dice count must be >= 1")]
+    HealDiceCountTooLow,
+    #[error("Heal dice sides must be >= 2")]
+    HealDiceSidesTooLow,
+}
+
 /// Transient state used by the Conditions editor UI.
 ///
 /// This state keeps the user's current search filter, the currently selected
@@ -1250,7 +1299,7 @@ impl ConditionsEditorState {
                 ui.horizontal(|ui| {
                     let effect_validation = validate_effect_edit_buffer(&buf);
                     if let Err(ref validation_error) = effect_validation {
-                        ui.colored_label(egui::Color32::RED, validation_error);
+                        ui.colored_label(egui::Color32::RED, validation_error.to_string());
                         ui.add_enabled(false, egui::Button::new("💾 Save Effect"));
                     } else if ui.button("💾 Save Effect").clicked() {
                         let new_effect = match buf.effect_type.as_deref() {
@@ -1715,13 +1764,13 @@ pub(crate) fn apply_condition_edits(
     conditions: &mut Vec<ConditionDefinition>,
     original_id: Option<&str>,
     new_cond: &ConditionDefinition,
-) -> Result<(), String> {
+) -> Result<(), ConditionEditorError> {
     // Validate the condition
     if new_cond.id.trim().is_empty() {
-        return Err("ID cannot be empty".to_string());
+        return Err(ConditionEditorError::EmptyId);
     }
     if new_cond.name.trim().is_empty() {
-        return Err("Name cannot be empty".to_string());
+        return Err(ConditionEditorError::EmptyName);
     }
 
     // Validate each effect
@@ -1729,38 +1778,39 @@ pub(crate) fn apply_condition_edits(
         match effect {
             ConditionEffect::AttributeModifier { attribute, value } => {
                 if attribute.trim().is_empty() {
-                    return Err("Attribute modifier must have a non-empty attribute".to_string());
+                    return Err(ConditionEditorError::EmptyAttribute);
                 }
                 // Check value is in reasonable range using defined constants
                 if *value < ATTRIBUTE_MODIFIER_MIN || *value > ATTRIBUTE_MODIFIER_MAX {
-                    return Err(format!(
-                        "Attribute modifier value {} is out of range ({} to {})",
-                        value, ATTRIBUTE_MODIFIER_MIN, ATTRIBUTE_MODIFIER_MAX
+                    return Err(ConditionEditorError::AttributeValueOutOfRange(
+                        *value,
+                        ATTRIBUTE_MODIFIER_MIN,
+                        ATTRIBUTE_MODIFIER_MAX,
                     ));
                 }
             }
             ConditionEffect::StatusEffect(tag) => {
                 if tag.trim().is_empty() {
-                    return Err("Status effect must have a non-empty tag".to_string());
+                    return Err(ConditionEditorError::EmptyStatusTag);
                 }
             }
             ConditionEffect::DamageOverTime { damage, element } => {
                 if damage.count < 1 {
-                    return Err("Damage over time dice count must be >= 1".to_string());
+                    return Err(ConditionEditorError::DotDiceCountTooLow);
                 }
                 if damage.sides < 2 {
-                    return Err("Damage over time dice sides must be >= 2".to_string());
+                    return Err(ConditionEditorError::DotDiceSidesTooLow);
                 }
                 if element.trim().is_empty() {
-                    return Err("Damage over time must have a non-empty element".to_string());
+                    return Err(ConditionEditorError::EmptyDotElement);
                 }
             }
             ConditionEffect::HealOverTime { amount } => {
                 if amount.count < 1 {
-                    return Err("Heal over time dice count must be >= 1".to_string());
+                    return Err(ConditionEditorError::HotDiceCountTooLow);
                 }
                 if amount.sides < 2 {
-                    return Err("Heal over time dice sides must be >= 2".to_string());
+                    return Err(ConditionEditorError::HotDiceSidesTooLow);
                 }
             }
         }
@@ -1777,7 +1827,7 @@ pub(crate) fn apply_condition_edits(
     });
 
     if id_collision {
-        return Err("ID already in use".to_string());
+        return Err(ConditionEditorError::DuplicateId);
     }
 
     if let Some(orig_id) = original_id {
@@ -1785,7 +1835,7 @@ pub(crate) fn apply_condition_edits(
         if let Some(existing) = conditions.iter_mut().find(|c| c.id == orig_id) {
             *existing = new_cond.clone();
         } else {
-            return Err("Original condition not found".to_string());
+            return Err(ConditionEditorError::ConditionNotFound);
         }
     } else {
         // Add new condition
@@ -1841,41 +1891,43 @@ pub(crate) fn render_condition_effect_preview(effect: &ConditionEffect, magnitud
 }
 
 /// Validate the UI-side effect edit buffer.
-pub(crate) fn validate_effect_edit_buffer(buf: &EffectEditBuffer) -> Result<(), String> {
+pub(crate) fn validate_effect_edit_buffer(
+    buf: &EffectEditBuffer,
+) -> Result<(), ConditionEditorError> {
     match buf.effect_type.as_deref() {
         Some("AttributeModifier") => {
             if buf.attribute.trim().is_empty() {
-                return Err("Attribute name cannot be empty".to_string());
+                return Err(ConditionEditorError::EmptyAttributeName);
             }
             if buf.attribute_value.abs() > 255 {
-                return Err("Attribute value must be in range [-255..255]".to_string());
+                return Err(ConditionEditorError::AttributeValueRange);
             }
             Ok(())
         }
         Some("StatusEffect") => {
             if buf.status_tag.trim().is_empty() {
-                return Err("Status tag cannot be empty".to_string());
+                return Err(ConditionEditorError::EmptyStatusTagBuffer);
             }
             Ok(())
         }
         Some("DamageOverTime") => {
             if buf.dice.count < 1 {
-                return Err("Damage dice count must be >= 1".to_string());
+                return Err(ConditionEditorError::DamageDiceCountTooLow);
             }
             if buf.dice.sides < 2 {
-                return Err("Damage dice sides must be >= 2".to_string());
+                return Err(ConditionEditorError::DamageDiceSidesTooLow);
             }
             if buf.element.trim().is_empty() {
-                return Err("Damage element cannot be empty".to_string());
+                return Err(ConditionEditorError::EmptyDamageElement);
             }
             Ok(())
         }
         Some("HealOverTime") => {
             if buf.dice.count < 1 {
-                return Err("Heal dice count must be >= 1".to_string());
+                return Err(ConditionEditorError::HealDiceCountTooLow);
             }
             if buf.dice.sides < 2 {
-                return Err("Heal dice sides must be >= 2".to_string());
+                return Err(ConditionEditorError::HealDiceSidesTooLow);
             }
             Ok(())
         }
@@ -1898,12 +1950,11 @@ pub fn add_effect_to_condition(
 pub fn delete_effect_from_condition(
     condition: &mut antares::domain::conditions::ConditionDefinition,
     index: usize,
-) -> Result<(), String> {
+) -> Result<(), ConditionEditorError> {
     if index >= condition.effects.len() {
-        return Err(format!(
-            "Index {} out of bounds (effects count: {})",
+        return Err(ConditionEditorError::IndexOutOfBounds(
             index,
-            condition.effects.len()
+            condition.effects.len(),
         ));
     }
     condition.effects.remove(index);
@@ -1916,12 +1967,11 @@ pub fn delete_effect_from_condition(
 pub fn duplicate_effect_in_condition(
     condition: &mut antares::domain::conditions::ConditionDefinition,
     index: usize,
-) -> Result<(), String> {
+) -> Result<(), ConditionEditorError> {
     if index >= condition.effects.len() {
-        return Err(format!(
-            "Index {} out of bounds (effects count: {})",
+        return Err(ConditionEditorError::IndexOutOfBounds(
             index,
-            condition.effects.len()
+            condition.effects.len(),
         ));
     }
     let effect = condition.effects[index].clone();
@@ -1936,20 +1986,18 @@ pub fn move_effect_in_condition(
     condition: &mut antares::domain::conditions::ConditionDefinition,
     index: usize,
     offset: i32,
-) -> Result<(), String> {
+) -> Result<(), ConditionEditorError> {
     if index >= condition.effects.len() {
-        return Err(format!(
-            "Index {} out of bounds (effects count: {})",
+        return Err(ConditionEditorError::IndexOutOfBounds(
             index,
-            condition.effects.len()
+            condition.effects.len(),
         ));
     }
     let new_index = (index as i32 + offset) as usize;
     if new_index >= condition.effects.len() {
-        return Err(format!(
-            "New index {} out of bounds (effects count: {})",
+        return Err(ConditionEditorError::NewIndexOutOfBounds(
             new_index,
-            condition.effects.len()
+            condition.effects.len(),
         ));
     }
     let effect = condition.effects.remove(index);
@@ -1963,12 +2011,11 @@ pub fn update_effect_in_condition(
     condition: &mut antares::domain::conditions::ConditionDefinition,
     index: usize,
     new_effect: antares::domain::conditions::ConditionEffect,
-) -> Result<(), String> {
+) -> Result<(), ConditionEditorError> {
     if index >= condition.effects.len() {
-        return Err(format!(
-            "Index {} out of bounds (effects count: {})",
+        return Err(ConditionEditorError::IndexOutOfBounds(
             index,
-            condition.effects.len()
+            condition.effects.len(),
         ));
     }
     condition.effects[index] = new_effect;
@@ -2377,5 +2424,17 @@ mod tests {
 
         state.show_statistics = false;
         assert!(!state.show_statistics);
+    }
+
+    #[test]
+    fn test_condition_editor_error_display() {
+        assert_eq!(
+            ConditionEditorError::EmptyId.to_string(),
+            "ID cannot be empty"
+        );
+        assert_eq!(
+            ConditionEditorError::DuplicateId.to_string(),
+            "ID already in use"
+        );
     }
 }

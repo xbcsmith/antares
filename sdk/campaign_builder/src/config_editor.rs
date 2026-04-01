@@ -29,6 +29,19 @@ use antares::sdk::game_config::{CameraMode, GameConfig, ShadowQuality};
 use eframe::egui;
 use std::path::PathBuf;
 
+/// Errors produced by config editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigEditorError {
+    #[error("No campaign directory set")]
+    NoCampaignDirectory,
+    #[error("Validation failed: {0}")]
+    ValidationFailed(String),
+    #[error("Failed to serialize config: {0}")]
+    SerializationError(String),
+    #[error("Failed to write config file: {0}")]
+    WriteError(String),
+}
+
 /// State for the configuration editor
 ///
 /// Manages the UI state and edit buffer for the game configuration editor.
@@ -188,8 +201,8 @@ impl ConfigEditorState {
                         *status_message = msg;
                         *unsaved_changes = false;
                     }
-                    Err(msg) => {
-                        *status_message = msg;
+                    Err(e) => {
+                        *status_message = e.to_string();
                     }
                 }
             }
@@ -942,14 +955,14 @@ impl ConfigEditorState {
     /// # Returns
     ///
     /// Returns Ok(message) if save was successful, Err(message) otherwise
-    fn save_config(&mut self, campaign_dir: Option<&PathBuf>) -> Result<String, String> {
+    fn save_config(&mut self, campaign_dir: Option<&PathBuf>) -> Result<String, ConfigEditorError> {
         match campaign_dir {
             Some(dir) => {
                 let config_path = dir.join("config.ron");
 
                 // Validate before saving
                 if let Err(e) = self.game_config.validate() {
-                    return Err(format!("Validation failed: {}", e));
+                    return Err(ConfigEditorError::ValidationFailed(e.to_string()));
                 }
 
                 // Serialize to RON
@@ -958,13 +971,13 @@ impl ConfigEditorState {
                         // Write to file
                         match std::fs::write(&config_path, contents) {
                             Ok(_) => Ok(format!("Config saved to: {}", config_path.display())),
-                            Err(e) => Err(format!("Failed to write config file: {}", e)),
+                            Err(e) => Err(ConfigEditorError::WriteError(e.to_string())),
                         }
                     }
-                    Err(e) => Err(format!("Failed to serialize config: {}", e)),
+                    Err(e) => Err(ConfigEditorError::SerializationError(e.to_string())),
                 }
             }
-            None => Err("No campaign directory set".to_string()),
+            None => Err(ConfigEditorError::NoCampaignDirectory),
         }
     }
 
@@ -1234,7 +1247,15 @@ mod tests {
         let mut state = ConfigEditorState::new();
         let result = state.save_config(None);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "No campaign directory set");
+        assert_eq!(result.unwrap_err().to_string(), "No campaign directory set");
+    }
+
+    #[test]
+    fn test_config_editor_error_display() {
+        assert_eq!(
+            ConfigEditorError::NoCampaignDirectory.to_string(),
+            "No campaign directory set"
+        );
     }
 
     #[test]

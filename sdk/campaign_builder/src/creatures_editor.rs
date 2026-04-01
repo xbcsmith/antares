@@ -22,6 +22,35 @@ use antares::domain::visual::{
 use eframe::egui;
 use std::path::PathBuf;
 
+/// Errors produced by creature editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum CreatureEditorError {
+    #[error("preview renderer is not available")]
+    PreviewRendererUnavailable,
+    #[error("Save As requires an open campaign directory")]
+    NoCampaignDirectory,
+    #[error("Save As path cannot be empty")]
+    EmptySavePath,
+    #[error("Save As path must be under assets/creatures/ and use a .ron filename")]
+    InvalidSavePath,
+    #[error("Invalid Save As path")]
+    InvalidPathFormat,
+    #[error("Save As file must end with .ron")]
+    MissingRonExtension,
+    #[error("Save As filename cannot be empty")]
+    EmptyFilename,
+    #[error("Failed to create Save As directory '{0}': {1}")]
+    DirectoryCreationError(String, String),
+    #[error("Failed to serialize creature for Save As: {0}")]
+    SerializationError(String),
+    #[error("Failed to write Save As asset '{0}': {1}")]
+    WriteError(String, String),
+    #[error("Cannot revert: selected creature is no longer available")]
+    RevertCreatureUnavailable,
+    #[error("Cannot revert while in registry mode")]
+    RevertInListMode,
+}
+
 /// Sentinel string returned by the creatures editor `show()` method to signal
 /// that the Campaign Builder should open the Creature Template Browser dialog.
 ///
@@ -1671,7 +1700,7 @@ impl CreaturesEditorState {
 
         if self.preview_dirty {
             if let Err(error) = self.sync_preview_renderer_from_edit_buffer() {
-                self.preview_error = Some(error);
+                self.preview_error = Some(error.to_string());
             }
         }
 
@@ -1734,7 +1763,7 @@ impl CreaturesEditorState {
         );
     }
 
-    fn sync_preview_renderer_from_edit_buffer(&mut self) -> Result<(), String> {
+    fn sync_preview_renderer_from_edit_buffer(&mut self) -> Result<(), CreatureEditorError> {
         let visible = self.current_mesh_visibility();
         let preview_creature = self.edit_buffer.clone();
         let selected_mesh_index = self.selected_mesh_index;
@@ -1742,7 +1771,7 @@ impl CreaturesEditorState {
         let renderer = self
             .preview_renderer
             .as_mut()
-            .ok_or_else(|| "preview renderer is not available".to_string())?;
+            .ok_or(CreatureEditorError::PreviewRendererUnavailable)?;
 
         renderer.options.show_grid = self.show_grid;
         renderer.options.show_wireframe = self.show_wireframe;
@@ -2243,7 +2272,7 @@ impl CreaturesEditorState {
                         result_message = Some(message);
                     }
                     Err(error) => {
-                        result_message = Some(error);
+                        result_message = Some(error.to_string());
                     }
                 }
             }
@@ -2342,7 +2371,7 @@ impl CreaturesEditorState {
     fn revert_edit_buffer_from_registry(
         &mut self,
         creatures: &[CreatureDefinition],
-    ) -> Result<String, String> {
+    ) -> Result<String, CreatureEditorError> {
         match self.mode {
             CreaturesEditorMode::Edit => {
                 if let Some(idx) = self.selected_creature {
@@ -2358,7 +2387,7 @@ impl CreaturesEditorState {
                         return Ok(format!("Reverted changes for '{}'", creature.name));
                     }
                 }
-                Err("Cannot revert: selected creature is no longer available".to_string())
+                Err(CreatureEditorError::RevertCreatureUnavailable)
             }
             CreaturesEditorMode::Add => {
                 self.edit_buffer = Self::default_creature();
@@ -2371,7 +2400,7 @@ impl CreaturesEditorState {
                 self.workflow.mark_clean();
                 Ok("Reverted new creature form to defaults".to_string())
             }
-            CreaturesEditorMode::List => Err("Cannot revert while in registry mode".to_string()),
+            CreaturesEditorMode::List => Err(CreatureEditorError::RevertInListMode),
         }
     }
 
@@ -2403,29 +2432,27 @@ impl CreaturesEditorState {
         relative_path: &str,
         campaign_dir: &Option<PathBuf>,
         unsaved_changes: &mut bool,
-    ) -> Result<String, String> {
+    ) -> Result<String, CreatureEditorError> {
         let mut normalized = Self::normalize_relative_creature_asset_path(relative_path);
         if normalized.is_empty() {
-            return Err("Save As path cannot be empty".to_string());
+            return Err(CreatureEditorError::EmptySavePath);
         }
         if !normalized.ends_with(".ron") {
             normalized.push_str(".ron");
         }
         if !normalized.starts_with("assets/creatures/") {
-            return Err(
-                "Save As path must be under assets/creatures/ and use a .ron filename".to_string(),
-            );
+            return Err(CreatureEditorError::InvalidSavePath);
         }
 
         let file_name = normalized
             .split('/')
             .next_back()
-            .ok_or_else(|| "Invalid Save As path".to_string())?;
+            .ok_or(CreatureEditorError::InvalidPathFormat)?;
         let stem = file_name
             .strip_suffix(".ron")
-            .ok_or_else(|| "Save As file must end with .ron".to_string())?;
+            .ok_or(CreatureEditorError::MissingRonExtension)?;
         if stem.is_empty() {
-            return Err("Save As filename cannot be empty".to_string());
+            return Err(CreatureEditorError::EmptyFilename);
         }
 
         let mut new_creature = self.edit_buffer.clone();
@@ -2459,18 +2486,17 @@ impl CreaturesEditorState {
         campaign_dir: &Option<PathBuf>,
         relative_path: &str,
         creature: &CreatureDefinition,
-    ) -> Result<(), String> {
+    ) -> Result<(), CreatureEditorError> {
         let base_dir = campaign_dir
             .as_ref()
-            .ok_or_else(|| "Save As requires an open campaign directory".to_string())?;
+            .ok_or(CreatureEditorError::NoCampaignDirectory)?;
         let absolute_path = base_dir.join(relative_path);
 
         if let Some(parent) = absolute_path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
-                format!(
-                    "Failed to create Save As directory '{}': {}",
-                    parent.display(),
-                    error
+                CreatureEditorError::DirectoryCreationError(
+                    parent.display().to_string(),
+                    error.to_string(),
                 )
             })?;
         }
@@ -2480,14 +2506,10 @@ impl CreaturesEditorState {
             .enumerate_arrays(false)
             .depth_limit(3);
         let contents = ron::ser::to_string_pretty(creature, ron_config)
-            .map_err(|error| format!("Failed to serialize creature for Save As: {}", error))?;
+            .map_err(|error| CreatureEditorError::SerializationError(error.to_string()))?;
 
         std::fs::write(&absolute_path, contents).map_err(|error| {
-            format!(
-                "Failed to write Save As asset '{}': {}",
-                absolute_path.display(),
-                error
-            )
+            CreatureEditorError::WriteError(absolute_path.display().to_string(), error.to_string())
         })
     }
 
@@ -2524,7 +2546,7 @@ impl CreaturesEditorState {
                                 self.save_as_path_buffer.clear();
                             }
                             Err(error) => {
-                                result_message = Some(error);
+                                result_message = Some(error.to_string());
                             }
                         }
                         ui.ctx().request_repaint();
@@ -3972,7 +3994,7 @@ mod tests {
         );
 
         assert!(result.is_err());
-        let error = result.err().unwrap();
+        let error = result.err().unwrap().to_string();
         assert!(error.contains("requires an open campaign directory"));
         assert_eq!(
             creatures.len(),
@@ -4004,7 +4026,7 @@ mod tests {
         );
 
         assert!(result.is_err());
-        let error = result.err().unwrap();
+        let error = result.err().unwrap().to_string();
         assert!(error.contains("must be under assets/creatures/"));
         assert_eq!(creatures.len(), 1, "invalid path must not mutate registry");
         assert!(!unsaved_changes, "invalid path must not set unsaved flag");
@@ -4036,7 +4058,7 @@ mod tests {
         );
 
         assert!(result.is_err());
-        let error = result.err().unwrap();
+        let error = result.err().unwrap().to_string();
         assert!(error.contains("Failed to create Save As directory"));
         assert_eq!(creatures.len(), 1, "failed write must not mutate registry");
         assert!(!unsaved_changes, "failed write must not set unsaved flag");
@@ -4050,8 +4072,8 @@ mod tests {
         let result = state.revert_edit_buffer_from_registry(&creatures);
         assert!(result.is_err());
         assert_eq!(
-            result.err().unwrap(),
-            "Cannot revert while in registry mode".to_string()
+            result.err().unwrap().to_string(),
+            "Cannot revert while in registry mode"
         );
     }
 
@@ -4066,8 +4088,20 @@ mod tests {
         let result = state.revert_edit_buffer_from_registry(&creatures);
         assert!(result.is_err());
         assert_eq!(
-            result.err().unwrap(),
-            "Cannot revert: selected creature is no longer available".to_string()
+            result.err().unwrap().to_string(),
+            "Cannot revert: selected creature is no longer available"
+        );
+    }
+
+    #[test]
+    fn test_creature_editor_error_display() {
+        assert_eq!(
+            CreatureEditorError::NoCampaignDirectory.to_string(),
+            "Save As requires an open campaign directory"
+        );
+        assert_eq!(
+            CreatureEditorError::EmptySavePath.to_string(),
+            "Save As path cannot be empty"
         );
     }
 

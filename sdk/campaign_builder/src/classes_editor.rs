@@ -25,6 +25,33 @@ use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Errors produced by class editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum ClassEditorError {
+    #[error("ID cannot be empty")]
+    EmptyId,
+    #[error("Name cannot be empty")]
+    EmptyName,
+    #[error("Invalid HP Die Count")]
+    InvalidHpDieCount,
+    #[error("Invalid HP Die Sides")]
+    InvalidHpDieSides,
+    #[error("Invalid HP Die Modifier")]
+    InvalidHpDieModifier,
+    #[error("Class ID already exists")]
+    DuplicateId,
+    #[error("Failed to read file: {0}")]
+    ReadError(String),
+    #[error("Failed to parse classes: {0}")]
+    ParseError(String),
+    #[error("Failed to create directory: {0}")]
+    DirectoryError(String),
+    #[error("Failed to serialize classes: {0}")]
+    SerializationError(String),
+    #[error("Failed to write file: {0}")]
+    WriteError(String),
+}
+
 /// Editor state for classes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClassesEditorState {
@@ -174,32 +201,32 @@ impl ClassesEditorState {
         campaign_dir: Option<&PathBuf>,
         classes_file: &str,
         status_message: &mut String,
-    ) -> Result<(), String> {
+    ) -> Result<(), ClassEditorError> {
         let id = self.buffer.id.trim().to_string();
         if id.is_empty() {
-            return Err("ID cannot be empty".to_string());
+            return Err(ClassEditorError::EmptyId);
         }
 
         let name = self.buffer.name.trim().to_string();
         if name.is_empty() {
-            return Err("Name cannot be empty".to_string());
+            return Err(ClassEditorError::EmptyName);
         }
 
         let hp_count = self
             .buffer
             .hp_die_count
             .parse::<u8>()
-            .map_err(|_| "Invalid HP Die Count")?;
+            .map_err(|_| ClassEditorError::InvalidHpDieCount)?;
         let hp_sides = self
             .buffer
             .hp_die_sides
             .parse::<u8>()
-            .map_err(|_| "Invalid HP Die Sides")?;
+            .map_err(|_| ClassEditorError::InvalidHpDieSides)?;
         let hp_mod = self
             .buffer
             .hp_die_modifier
             .parse::<i8>()
-            .map_err(|_| "Invalid HP Die Modifier")?;
+            .map_err(|_| ClassEditorError::InvalidHpDieModifier)?;
 
         // Ensure strings are trimmed and filtered
         let abilities: Vec<String> = self
@@ -243,7 +270,7 @@ impl ClassesEditorState {
         } else {
             // Check for duplicate ID if creating new
             if self.classes.iter().any(|c| c.id == id) {
-                return Err("Class ID already exists".to_string());
+                return Err(ClassEditorError::DuplicateId);
             }
             let new_idx = self.classes.len();
             self.classes.push(class_def);
@@ -315,25 +342,25 @@ impl ClassesEditorState {
     }
 
     /// Loads classes from a file path
-    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), ClassEditorError> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| ClassEditorError::ReadError(e.to_string()))?;
         let classes: Vec<ClassDefinition> =
-            ron::from_str(&content).map_err(|e| format!("Failed to parse classes: {}", e))?;
+            ron::from_str(&content).map_err(|e| ClassEditorError::ParseError(e.to_string()))?;
         self.classes = classes;
         self.has_unsaved_changes = false;
         Ok(())
     }
 
     /// Saves classes to a file path
-    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), ClassEditorError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+                .map_err(|e| ClassEditorError::DirectoryError(e.to_string()))?;
         }
         let content = ron::ser::to_string_pretty(&self.classes, Default::default())
-            .map_err(|e| format!("Failed to serialize classes: {}", e))?;
-        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+            .map_err(|e| ClassEditorError::SerializationError(e.to_string()))?;
+        std::fs::write(path, content).map_err(|e| ClassEditorError::WriteError(e.to_string()))?;
         Ok(())
     }
 
@@ -1046,7 +1073,6 @@ impl ClassesEditorState {
                     if ui.button("✅ Save").clicked() {
                         if let Err(e) = self.save_class(campaign_dir, classes_file, status_message)
                         {
-                            eprintln!("Error saving class: {}", e);
                             *status_message = format!("Error saving class: {}", e);
                         } else {
                             *unsaved_changes = true;
@@ -1142,7 +1168,10 @@ mod tests {
 
         let result = state.save_class(None, "classes.ron", &mut String::new());
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("ID cannot be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("ID cannot be empty"));
     }
 
     #[test]
@@ -1154,7 +1183,10 @@ mod tests {
 
         let result = state.save_class(None, "classes.ron", &mut String::new());
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Name cannot be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Name cannot be empty"));
     }
 
     #[test]
@@ -1176,7 +1208,7 @@ mod tests {
 
         let result = state.save_class(None, "classes.ron", &mut String::new());
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("already exists"));
+        assert!(result.unwrap_err().to_string().contains("already exists"));
     }
 
     #[test]
@@ -1313,6 +1345,15 @@ mod tests {
         assert!(buffer.spell_school.is_none());
         assert!(!buffer.is_pure_caster);
         assert!(buffer.spell_stat.is_none());
+    }
+
+    #[test]
+    fn test_class_editor_error_display() {
+        assert_eq!(ClassEditorError::EmptyId.to_string(), "ID cannot be empty");
+        assert_eq!(
+            ClassEditorError::DuplicateId.to_string(),
+            "Class ID already exists"
+        );
     }
 
     #[test]
