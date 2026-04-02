@@ -12,6 +12,7 @@
 //! - Reordering meshes (move up/down)
 //! - Template applications
 
+use crate::undo_redo::UndoRedoStack;
 use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 use serde::{Deserialize, Serialize};
 
@@ -342,11 +343,16 @@ impl CreatureCommand for ReorderMeshCommand {
 }
 
 /// Creature undo/redo manager
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CreatureUndoRedoManager {
-    undo_stack: Vec<Box<dyn CreatureCommand>>,
-    redo_stack: Vec<Box<dyn CreatureCommand>>,
-    max_history: usize,
+    /// The underlying generic undo/redo stack holding boxed creature commands.
+    stack: UndoRedoStack<Box<dyn CreatureCommand>>,
+}
+
+impl Default for CreatureUndoRedoManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CreatureUndoRedoManager {
@@ -356,18 +362,14 @@ impl CreatureUndoRedoManager {
     /// Create a new creature undo/redo manager
     pub fn new() -> Self {
         Self {
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
-            max_history: Self::DEFAULT_MAX_HISTORY,
+            stack: UndoRedoStack::new(Self::DEFAULT_MAX_HISTORY),
         }
     }
 
     /// Create with custom max history size
     pub fn with_max_history(max_history: usize) -> Self {
         Self {
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
-            max_history,
+            stack: UndoRedoStack::new(max_history),
         }
     }
 
@@ -378,26 +380,15 @@ impl CreatureUndoRedoManager {
         creature: &mut CreatureDefinition,
     ) -> Result<(), CreatureCommandError> {
         command.execute(creature)?;
-
-        // Clear redo stack when new command is executed
-        self.redo_stack.clear();
-
-        // Add to undo stack
-        self.undo_stack.push(command);
-
-        // Limit stack size
-        if self.undo_stack.len() > self.max_history {
-            self.undo_stack.remove(0);
-        }
-
+        self.stack.push_new(command);
         Ok(())
     }
 
     /// Undo the last command
     pub fn undo(&mut self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
-        if let Some(command) = self.undo_stack.pop() {
+        if let Some(command) = self.stack.pop_undo() {
             command.undo(creature)?;
-            self.redo_stack.push(command);
+            self.stack.push_to_redo(command);
             Ok(())
         } else {
             Err(CreatureCommandError::NothingToUndo)
@@ -406,9 +397,9 @@ impl CreatureUndoRedoManager {
 
     /// Redo the last undone command
     pub fn redo(&mut self, creature: &mut CreatureDefinition) -> Result<(), CreatureCommandError> {
-        if let Some(command) = self.redo_stack.pop() {
+        if let Some(command) = self.stack.pop_redo() {
             command.execute(creature)?;
-            self.undo_stack.push(command);
+            self.stack.push_to_undo(command);
             Ok(())
         } else {
             Err(CreatureCommandError::NothingToRedo)
@@ -417,44 +408,43 @@ impl CreatureUndoRedoManager {
 
     /// Check if undo is available
     pub fn can_undo(&self) -> bool {
-        !self.undo_stack.is_empty()
+        self.stack.can_undo()
     }
 
     /// Check if redo is available
     pub fn can_redo(&self) -> bool {
-        !self.redo_stack.is_empty()
+        self.stack.can_redo()
     }
 
     /// Get the number of actions in the undo stack
     pub fn undo_count(&self) -> usize {
-        self.undo_stack.len()
+        self.stack.undo_count()
     }
 
     /// Get the number of actions in the redo stack
     pub fn redo_count(&self) -> usize {
-        self.redo_stack.len()
+        self.stack.redo_count()
     }
 
     /// Get the description of the next undo action
     pub fn next_undo_description(&self) -> Option<String> {
-        self.undo_stack.last().map(|cmd| cmd.description())
+        self.stack.last_undo().map(|cmd| cmd.description())
     }
 
     /// Get the description of the next redo action
     pub fn next_redo_description(&self) -> Option<String> {
-        self.redo_stack.last().map(|cmd| cmd.description())
+        self.stack.last_redo().map(|cmd| cmd.description())
     }
 
     /// Clear all undo/redo history
     pub fn clear(&mut self) {
-        self.undo_stack.clear();
-        self.redo_stack.clear();
+        self.stack.clear();
     }
 
     /// Get all undo descriptions (newest first)
     pub fn undo_descriptions(&self) -> Vec<String> {
-        self.undo_stack
-            .iter()
+        self.stack
+            .undo_iter()
             .rev()
             .map(|cmd| cmd.description())
             .collect()
@@ -462,8 +452,8 @@ impl CreatureUndoRedoManager {
 
     /// Get all redo descriptions (newest first)
     pub fn redo_descriptions(&self) -> Vec<String> {
-        self.redo_stack
-            .iter()
+        self.stack
+            .redo_iter()
             .rev()
             .map(|cmd| cmd.description())
             .collect()

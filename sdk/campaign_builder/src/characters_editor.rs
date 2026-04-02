@@ -11,8 +11,9 @@ use crate::creature_assets::CreatureAssetManager;
 use crate::ui_helpers::{
     autocomplete_class_selector, autocomplete_creature_selector, autocomplete_item_list_selector,
     autocomplete_item_selector, autocomplete_portrait_selector, autocomplete_race_selector,
-    extract_portrait_candidates, resolve_portrait_path, show_standard_list_item, EditorToolbar,
-    ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    extract_portrait_candidates, handle_file_load, handle_file_save, resolve_portrait_path,
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{Alignment, Sex, Stats};
 use antares::domain::character_definition::{CharacterDefinition, StartingEquipment};
@@ -1158,63 +1159,19 @@ impl CharactersEditorState {
                 }
             }
             ToolbarAction::Load => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<CharacterDefinition>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_characters) => {
-                            if *file_load_merge_mode {
-                                for character in loaded_characters {
-                                    if let Some(existing) =
-                                        self.characters.iter_mut().find(|c| c.id == character.id)
-                                    {
-                                        *existing = character;
-                                    } else {
-                                        self.characters.push(character);
-                                    }
-                                }
-                            } else {
-                                self.characters = loaded_characters;
-                            }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded characters from: {}", path.display());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to load characters: {}", e);
-                        }
-                    }
-                }
+                handle_file_load(
+                    &mut self.characters,
+                    *file_load_merge_mode,
+                    |c: &CharacterDefinition| c.id.clone(),
+                    status_message,
+                    unsaved_changes,
+                );
             }
             ToolbarAction::Import => {
                 *status_message = "Import not yet implemented for characters".to_string();
             }
             ToolbarAction::Export => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("characters.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(&self.characters, Default::default()) {
-                        Ok(contents) => match std::fs::write(&path, contents) {
-                            Ok(_) => {
-                                *status_message =
-                                    format!("Exported characters to: {}", path.display());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to export characters: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            *status_message = format!("Failed to serialize characters: {}", e);
-                        }
-                    }
-                }
+                handle_file_save(&self.characters, "characters.ron", status_message);
             }
             ToolbarAction::Reload => {
                 if let Some(dir) = campaign_dir {

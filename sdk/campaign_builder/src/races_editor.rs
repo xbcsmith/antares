@@ -10,8 +10,9 @@
 use crate::ui_helpers::{
     autocomplete_ability_list_selector, autocomplete_proficiency_list_selector,
     autocomplete_tag_list_selector, extract_item_tag_candidates,
-    extract_special_ability_candidates, show_standard_list_item, EditorToolbar, ItemAction,
-    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    extract_special_ability_candidates, handle_file_load, handle_file_save,
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::items::types::Item;
 use antares::domain::proficiency::ProficiencyId;
@@ -466,63 +467,20 @@ impl RacesEditorState {
                 }
             }
             ToolbarAction::Load => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<RaceDefinition>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_races) => {
-                            if *file_load_merge_mode {
-                                for race in loaded_races {
-                                    if let Some(existing) =
-                                        self.races.iter_mut().find(|r| r.id == race.id)
-                                    {
-                                        *existing = race;
-                                    } else {
-                                        self.races.push(race);
-                                    }
-                                }
-                            } else {
-                                self.races = loaded_races;
-                            }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded races from: {}", path.display());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to load races: {}", e);
-                        }
-                    }
-                }
+                handle_file_load(
+                    &mut self.races,
+                    *file_load_merge_mode,
+                    |r: &RaceDefinition| r.id.clone(),
+                    status_message,
+                    unsaved_changes,
+                );
             }
             ToolbarAction::Import => {
                 self.show_import_dialog = true;
                 self.import_export_buffer.clear();
             }
             ToolbarAction::Export => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("races.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(&self.races, Default::default()) {
-                        Ok(contents) => match std::fs::write(&path, contents) {
-                            Ok(_) => {
-                                *status_message = format!("Saved races to: {}", path.display());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to save races: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            *status_message = format!("Failed to serialize races: {}", e);
-                        }
-                    }
-                }
+                handle_file_save(&self.races, "races.ron", status_message);
             }
             ToolbarAction::Reload => {
                 if let Some(dir) = campaign_dir {

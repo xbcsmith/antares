@@ -14,8 +14,8 @@
 //! - Entity validation warnings display for missing item/proficiency references
 
 use crate::ui_helpers::{
-    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout,
+    handle_file_load, handle_file_save, show_standard_list_item, EditorToolbar, ItemAction,
+    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::classes::{ClassDefinition, SpellSchool, SpellStat};
 use antares::domain::items::types::Item;
@@ -418,63 +418,20 @@ impl ClassesEditorState {
                 }
             }
             ToolbarAction::Load => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<ClassDefinition>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_classes) => {
-                            if *file_load_merge_mode {
-                                for class in loaded_classes {
-                                    if let Some(existing) =
-                                        self.classes.iter_mut().find(|c| c.id == class.id)
-                                    {
-                                        *existing = class;
-                                    } else {
-                                        self.classes.push(class);
-                                    }
-                                }
-                            } else {
-                                self.classes = loaded_classes;
-                            }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded classes from: {}", path.display());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to load classes: {}", e);
-                        }
-                    }
-                }
+                handle_file_load(
+                    &mut self.classes,
+                    *file_load_merge_mode,
+                    |c: &ClassDefinition| c.id.clone(),
+                    status_message,
+                    unsaved_changes,
+                );
             }
             ToolbarAction::Import => {
                 // Import not yet implemented for classes
                 *status_message = "Import not yet implemented for classes".to_string();
             }
             ToolbarAction::Export => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("classes.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(&self.classes, Default::default()) {
-                        Ok(contents) => match std::fs::write(&path, contents) {
-                            Ok(_) => {
-                                *status_message = format!("Saved classes to: {}", path.display());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to save classes: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            *status_message = format!("Failed to serialize classes: {}", e);
-                        }
-                    }
-                }
+                handle_file_save(&self.classes, "classes.ron", status_message);
             }
             ToolbarAction::Reload => {
                 if let Some(dir) = campaign_dir {

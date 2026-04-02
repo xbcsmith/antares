@@ -36,8 +36,9 @@
 //! ```
 
 use crate::ui_helpers::{
-    handle_reload, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
-    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    dispatch_list_action, handle_file_load, handle_file_save, handle_reload,
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::Item;
@@ -384,65 +385,20 @@ impl ProficienciesEditorState {
                 );
             }
             ToolbarAction::Load => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<ProficiencyDefinition>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_proficiencies) => {
-                            if *file_load_merge_mode {
-                                for proficiency in loaded_proficiencies {
-                                    if let Some(existing) =
-                                        proficiencies.iter_mut().find(|p| p.id == proficiency.id)
-                                    {
-                                        *existing = proficiency;
-                                    } else {
-                                        proficiencies.push(proficiency);
-                                    }
-                                }
-                            } else {
-                                *proficiencies = loaded_proficiencies;
-                            }
-                            *unsaved_changes = true;
-                            *status_message =
-                                format!("Loaded proficiencies from: {}", path.display());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to load proficiencies: {}", e);
-                        }
-                    }
-                }
+                handle_file_load(
+                    proficiencies,
+                    *file_load_merge_mode,
+                    |p: &ProficiencyDefinition| p.id.clone(),
+                    status_message,
+                    unsaved_changes,
+                );
             }
             ToolbarAction::Import => {
                 self.show_import_dialog = true;
                 self.import_export_buffer.clear();
             }
             ToolbarAction::Export => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("proficiencies.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(proficiencies, Default::default()) {
-                        Ok(contents) => match std::fs::write(&path, contents) {
-                            Ok(_) => {
-                                *status_message =
-                                    format!("Saved proficiencies to: {}", path.display());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to save proficiencies: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            *status_message = format!("Failed to serialize proficiencies: {}", e);
-                        }
-                    }
-                }
+                handle_file_save(proficiencies, "proficiencies.ron", status_message);
             }
             ToolbarAction::Reload => {
                 handle_reload(
@@ -664,12 +620,26 @@ impl ProficienciesEditorState {
                 }
                 ItemAction::Duplicate => {
                     if action_idx < proficiencies.len() {
-                        let mut new_prof = proficiencies[action_idx].clone();
-                        new_prof.id = Self::next_proficiency_id(proficiencies, new_prof.category);
-                        new_prof.name = format!("{} (Copy)", new_prof.name);
-                        proficiencies.push(new_prof);
-                        *unsaved_changes = true;
-                        *status_message = "Duplicated proficiency".to_string();
+                        let mut dummy_show = false;
+                        let mut dummy_buf = String::new();
+                        let category = proficiencies[action_idx].category;
+                        if dispatch_list_action(
+                            ItemAction::Duplicate,
+                            proficiencies,
+                            &mut self.selected_proficiency,
+                            move |entry, all| {
+                                entry.id =
+                                    ProficienciesEditorState::next_proficiency_id(all, category);
+                                entry.name = format!("{} (Copy)", entry.name);
+                            },
+                            "proficiency",
+                            &mut dummy_buf,
+                            &mut dummy_show,
+                            status_message,
+                        ) {
+                            *unsaved_changes = true;
+                            *status_message = "Duplicated proficiency".to_string();
+                        }
                     }
                 }
                 ItemAction::Export => {

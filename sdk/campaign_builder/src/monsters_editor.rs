@@ -3,9 +3,9 @@
 
 use crate::creature_assets::CreatureAssetManager;
 use crate::ui_helpers::{
-    handle_reload, show_standard_list_item, AttributePair16Input, AttributePairInput,
-    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
-    TwoColumnLayout,
+    dispatch_list_action, handle_reload, show_standard_list_item, AttributePair16Input,
+    AttributePairInput, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
@@ -393,66 +393,36 @@ impl MonstersEditorState {
 
         // Handle action button clicks after closures
         if let Some(action) = action_requested {
-            match action {
-                ItemAction::Edit => {
-                    if let Some(idx) = self.selected_monster {
-                        if idx < monsters.len() {
-                            self.mode = MonstersEditorMode::Edit;
-                            self.edit_buffer = monsters[idx].clone();
-                        }
+            if action == ItemAction::Edit {
+                if let Some(idx) = self.selected_monster {
+                    if idx < monsters.len() {
+                        self.mode = MonstersEditorMode::Edit;
+                        self.edit_buffer = monsters[idx].clone();
                     }
                 }
-                ItemAction::Delete => {
-                    if let Some(idx) = self.selected_monster {
-                        if idx < monsters.len() {
-                            monsters.remove(idx);
-                            self.selected_monster = None;
-                            self.save_monsters(
-                                monsters,
-                                campaign_dir,
-                                monsters_file,
-                                unsaved_changes,
-                                status_message,
-                            );
-                        }
-                    }
+            } else {
+                let data_changed = dispatch_list_action(
+                    action,
+                    monsters,
+                    &mut self.selected_monster,
+                    |entry, all| {
+                        entry.id = all.iter().map(|m| m.id).max().unwrap_or(0) + 1;
+                        entry.name = format!("{} (Copy)", entry.name);
+                    },
+                    "monster",
+                    &mut self.import_export_buffer,
+                    &mut self.show_import_dialog,
+                    status_message,
+                );
+                if data_changed {
+                    self.save_monsters(
+                        monsters,
+                        campaign_dir,
+                        monsters_file,
+                        unsaved_changes,
+                        status_message,
+                    );
                 }
-                ItemAction::Duplicate => {
-                    if let Some(idx) = self.selected_monster {
-                        if idx < monsters.len() {
-                            let mut new_monster = monsters[idx].clone();
-                            let next_id = monsters.iter().map(|m| m.id).max().unwrap_or(0) + 1;
-                            new_monster.id = next_id;
-                            new_monster.name = format!("{} (Copy)", new_monster.name);
-                            monsters.push(new_monster);
-                            self.save_monsters(
-                                monsters,
-                                campaign_dir,
-                                monsters_file,
-                                unsaved_changes,
-                                status_message,
-                            );
-                        }
-                    }
-                }
-                ItemAction::Export => {
-                    if let Some(idx) = self.selected_monster {
-                        if idx < monsters.len() {
-                            if let Ok(ron_str) = ron::ser::to_string_pretty(
-                                &monsters[idx],
-                                ron::ser::PrettyConfig::default(),
-                            ) {
-                                self.import_export_buffer = ron_str;
-                                self.show_import_dialog = true;
-                                *status_message =
-                                    "Monster exported to clipboard dialog".to_string();
-                            } else {
-                                *status_message = "Failed to export monster".to_string();
-                            }
-                        }
-                    }
-                }
-                ItemAction::None => {}
             }
         }
     }

@@ -1,5 +1,417 @@
 # Implementations
 
+## SDK Codebase Cleanup — Phase 4: Consolidate Duplicate Code (Complete)
+
+### Overview
+
+Phase 4 is the highest line-count-impact cleanup phase, extracting shared
+patterns into reusable generic abstractions across the SDK Campaign Builder.
+All six deliverables are complete. Net new tests added: **47**.
+
+### All Deliverables
+
+| #    | Deliverable                                                                            | Files Changed                                                     | Approx Lines Saved |
+| ---- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------ |
+| 4.1  | 2 generic autocomplete selector functions; 13 wrappers refactored                      | `ui_helpers.rs`                                                   | ~600               |
+| 4.2  | `handle_file_load` generalised to generic key; 5 editors migrated                      | `ui_helpers.rs` + 5 editors                                       | ~300               |
+| 4.3  | `dispatch_list_action<T,C>` created; 6 editors migrated                                | `ui_helpers.rs` + 6 editors                                       | ~180               |
+| 4.4  | `UndoRedoStack<C>` created; 3 managers refactored                                      | `undo_redo.rs`, `creature_undo_redo.rs`, `item_mesh_undo_redo.rs` | ~120               |
+| 4.5a | `LinearHistory<Op>` created; 2 mesh editors refactored                                 | `linear_history.rs` (new), 2 editors                              | ~80                |
+| 4.5b | `read_ron_collection` / `write_ron_collection` helpers; 5 load/save pairs consolidated | `lib.rs`                                                          | ~350               |
+
+### Quality Gates (Final)
+
+```
+cargo fmt         → ✅ clean
+cargo check       → ✅ 0 errors
+cargo clippy      → ✅ 0 warnings
+cargo nextest run → ✅ 2168 passed, 5 pre-existing failures (unrelated to Phase 4)
+```
+
+### Architecture Compliance
+
+- All new generic functions have `///` doc comments with compilable examples
+- `#[allow(clippy::too_many_arguments)]` applied where parameter count exceeds 7
+- No public API signatures changed on existing functions
+- Behavioral equivalence preserved for all refactored editor methods
+- SPDX headers present on all new `.rs` files
+
+---
+
+## Phase 4.1 — Generic Autocomplete Selectors (Complete)
+
+### Overview
+
+Extracted two generic autocomplete selector functions into
+`sdk/campaign_builder/src/ui_helpers.rs` and refactored 13 existing
+entity-specific selector functions to be thin wrappers, removing ≈600 lines
+of duplicated pattern code.
+
+### Changes
+
+| File                                     | Change                                                                                                                                                                                                                                                                                      |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/ui_helpers.rs` | Added `autocomplete_entity_selector_generic` (single-select core)                                                                                                                                                                                                                           |
+| `sdk/campaign_builder/src/ui_helpers.rs` | Added `autocomplete_list_selector_generic` (multi-select core)                                                                                                                                                                                                                              |
+| `sdk/campaign_builder/src/ui_helpers.rs` | Refactored 8 single-select wrappers: `autocomplete_item_selector`, `autocomplete_quest_selector`, `autocomplete_monster_selector`, `autocomplete_condition_selector`, `autocomplete_map_selector`, `autocomplete_npc_selector`, `autocomplete_race_selector`, `autocomplete_class_selector` |
+| `sdk/campaign_builder/src/ui_helpers.rs` | Refactored 5 multi-select wrappers: `autocomplete_item_list_selector`, `autocomplete_proficiency_list_selector`, `autocomplete_tag_list_selector`, `autocomplete_ability_list_selector`, `autocomplete_monster_list_selector`                                                               |
+| `sdk/campaign_builder/src/ui_helpers.rs` | Added 6 new unit tests for the two generic functions                                                                                                                                                                                                                                        |
+
+### `autocomplete_entity_selector_generic` API
+
+Single-entity autocomplete (single selection, shows ✖ clear button):
+
+| Parameter                             | Description                                                      |
+| ------------------------------------- | ---------------------------------------------------------------- |
+| `id_salt`                             | Unique egui widget salt                                          |
+| `buffer_tag`                          | Short key for egui Memory persistence (e.g. `"item"`, `"quest"`) |
+| `label`                               | Text label; skipped when empty                                   |
+| `candidates`                          | Display strings for autocomplete dropdown                        |
+| `current_name`                        | Current selection display string (empty = none)                  |
+| `placeholder`                         | Placeholder shown when input is empty                            |
+| `is_selected`                         | Controls visibility of ✖ clear button                            |
+| `on_select: impl FnMut(&str) -> bool` | Called when user picks a value; returns `true` if valid          |
+| `on_clear: impl FnMut()`              | Called when user clicks ✖                                        |
+
+### `autocomplete_list_selector_generic` API
+
+Multi-entity autocomplete (list with remove buttons and add input):
+
+| Parameter                              | Description                                                 |
+| -------------------------------------- | ----------------------------------------------------------- |
+| `buffer_tag`                           | egui Memory key for the "add" input buffer                  |
+| `selected: &mut Vec<T>`                | Mutable list of selected entities                           |
+| `display_fn: Fn(&T) -> String`         | How to render each selected item                            |
+| `candidates`                           | Autocomplete dropdown strings                               |
+| `add_label`                            | Label for the "add" row                                     |
+| `on_changed: FnMut(&str) -> Option<T>` | Called on autocomplete selection; `None` = no match         |
+| `on_enter: FnMut(&str) -> Option<T>`   | Called on Enter; may differ (e.g. free-text entry for tags) |
+
+### Selectors Left As-Is (Intentional)
+
+`autocomplete_creature_selector`, `autocomplete_portrait_selector`,
+`autocomplete_sprite_sheet_selector`, and `autocomplete_creature_asset_selector`
+were intentionally **not** refactored — they have unique hover-tooltip logic,
+non-standard clear button styles, or asset-path–specific display formatting
+that does not fit the generic template without obfuscating the intent.
+
+### Design Decisions
+
+- **`on_changed` vs `on_enter` separation**: Tags and abilities allow
+  free-text entry on Enter but restrict to candidate matches on autocomplete
+  selection. Two separate closures preserve this behavioral distinction without
+  a boolean flag.
+- **`cleared` flag pattern**: The generic uses the cleaner `cleared` pattern
+  (skip `store_autocomplete_buffer` after a clear) rather than the `remove` +
+  `store` pattern used inconsistently in some original selectors. This improves
+  correctness: after clearing, the next frame reinitialises the buffer to the
+  new (empty) `current_name`.
+- **`#[allow(clippy::too_many_arguments)]`**: Both generic functions have > 7
+  params; the attribute is applied per project rules.
+
+---
+
+## Phase 4.2 — Generic Toolbar Action Handler (Complete)
+
+### Overview
+
+Generalised `handle_file_load` in `ui_helpers.rs` to support any comparable
+key type (not just `u32`), then migrated the `Load` and `Export`
+`ToolbarAction` arms of five editors from inlined copy-paste code to the
+existing shared helpers (`handle_file_load`, `handle_file_save`,
+`handle_reload`).
+
+### Changes
+
+| File                                               | Change                                                                                                                                             |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/ui_helpers.rs`           | Updated `handle_file_load<T, K, F>` signature: `id_getter: F` now uses `K: PartialEq + Clone` instead of `u32`, making it generic over any ID type |
+| `sdk/campaign_builder/src/classes_editor.rs`       | `ToolbarAction::Load` → `handle_file_load(&mut self.classes, …, \|c\| c.id.clone(), …)`; `Export` → `handle_file_save`                             |
+| `sdk/campaign_builder/src/races_editor.rs`         | Same pattern for `RaceDefinition`                                                                                                                  |
+| `sdk/campaign_builder/src/conditions_editor.rs`    | Same pattern for `ConditionDefinition`; uses `self.file_load_merge_mode`                                                                           |
+| `sdk/campaign_builder/src/proficiencies_editor.rs` | Same pattern for `ProficiencyDefinition`                                                                                                           |
+| `sdk/campaign_builder/src/characters_editor.rs`    | Same pattern for `CharacterDefinition`                                                                                                             |
+
+### Already-Using-Shared-Helpers (Unchanged)
+
+`items_editor.rs`, `spells_editor.rs`, and `monsters_editor.rs` were already
+using `handle_reload` and, after this change, now also benefit from the
+type-generalised `handle_file_load` without any code modification (since `u32:
+PartialEq + Clone`).
+
+### Updated `handle_file_load` Signature
+
+```rust
+pub fn handle_file_load<T, K, F>(
+    data: &mut Vec<T>,
+    merge_mode: bool,
+    id_getter: F,          // was: Fn(&T) -> u32
+    status_message: &mut String,
+    unsaved_changes: &mut bool,
+) -> bool
+where
+    T: Clone + serde::de::DeserializeOwned,
+    K: PartialEq + Clone,  // was: implied u32
+    F: Fn(&T) -> K,        // was: Fn(&T) -> u32
+```
+
+This change is backward-compatible: existing callers with `u32` ID fields
+compile unchanged via type inference.
+
+### Design Decisions
+
+- **`Reload` arm kept as-is in all 5 editors**: `handle_reload` replaces the
+  data slice wholesale and does not reset editor-internal flags such as
+  `has_unsaved_changes = false`. The editors' own `load_from_file` methods
+  (which do reset those flags) are therefore preserved for the Reload arm.
+- **`Save` arm unchanged**: Each editor's `save_to_file` / `save_X` method
+  has a unique return type (e.g. `Result<(), ClassEditorError>` vs
+  `Result<(), String>`); a generic wrapper would require additional trait
+  bounds without meaningful simplification.
+- **`New` and `Import` arms unchanged**: These are inherently editor-specific.
+
+---
+
+## Phase 4.3 — Generic List/Action Dispatch (`dispatch_list_action`) (Complete)
+
+### Overview
+
+Added a generic `dispatch_list_action<T, C>` free function to
+`sdk/campaign_builder/src/ui_helpers.rs` and refactored six data editors to
+delegate their `Delete`, `Duplicate`, and `Export` action arms to it, removing
+≈180 lines of duplicated CRUD dispatch code across the codebase.
+
+### Changes
+
+| File                                               | Change                                                                                                                               |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `sdk/campaign_builder/src/ui_helpers.rs`           | Added `dispatch_list_action<T, C>` with full `///` doc comments and a compilable doctest                                             |
+| `sdk/campaign_builder/src/ui_helpers.rs`           | Added 5 unit tests in `mod tests`: duplicate, delete, export, edit-is-noop, no-selection-is-noop                                     |
+| `sdk/campaign_builder/src/spells_editor.rs`        | Replaced `Delete`/`Duplicate`/`Export` arms in `show_list` with `dispatch_list_action`; added import                                 |
+| `sdk/campaign_builder/src/monsters_editor.rs`      | Replaced `Delete`/`Duplicate`/`Export` arms in `show_list` with `dispatch_list_action`; added import                                 |
+| `sdk/campaign_builder/src/items_editor.rs`         | Replaced `Delete`/`Duplicate`/`Export` arms in `show_list` with `dispatch_list_action`; added import                                 |
+| `sdk/campaign_builder/src/conditions_editor.rs`    | Replaced `Duplicate` and `Export` arms in `show_list` with `dispatch_list_action`; `Delete` retained (opens confirmation dialog)     |
+| `sdk/campaign_builder/src/proficiencies_editor.rs` | Replaced `Duplicate` arm in `show_list` with `dispatch_list_action`; `Delete`/`Export` retained (confirmation dialog / file dialog)  |
+| `sdk/campaign_builder/src/dialogue_editor.rs`      | Replaced `Duplicate` arm in `show_dialogue_list` with `dispatch_list_action`; `Delete`/`Export` retained (delete helper / clipboard) |
+
+### `dispatch_list_action<T, C>` API
+
+| Parameter              | Type                  | Description                                                                                     |
+| ---------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
+| `action`               | `ItemAction`          | The action to dispatch                                                                          |
+| `data`                 | `&mut Vec<T>`         | Mutable entity collection                                                                       |
+| `selected_idx`         | `&mut Option<usize>`  | Current selection; cleared to `None` after a successful `Delete`                                |
+| `prepare_duplicate`    | `C: Fn(&mut T, &[T])` | Closure called on the cloned entry before it is pushed; sets collision-free ID and updated name |
+| `entity_label`         | `&str`                | Human-readable label used in status messages (e.g. `"spell"`, `"item"`)                         |
+| `import_export_buffer` | `&mut String`         | Written with serialised RON on `Export`                                                         |
+| `show_import_dialog`   | `&mut bool`           | Set to `true` on `Export`                                                                       |
+| `status_message`       | `&mut String`         | Updated with a result description                                                               |
+| **Returns**            | `bool`                | `true` if the collection was mutated (`Delete` or `Duplicate`); caller should trigger a save    |
+
+### Design Decisions
+
+- **`Edit` arm intentionally excluded**: Setting editor-specific mode types (e.g.
+  `SpellsEditorMode::Edit`) and cloning into the editor's `edit_buffer` cannot be
+  expressed generically without adding trait bounds that would couple `dispatch_list_action`
+  to domain types. Callers handle `Edit` themselves with a simple `if action == ItemAction::Edit`
+  guard before delegating the rest to the generic.
+- **`dummy_buf` / `dummy_show` pattern**: Editors where `Export` uses a different mechanism
+  (file dialog in `proficiencies_editor`, clipboard in `dialogue_editor`) pass throwaway
+  variables for the `import_export_buffer` / `show_import_dialog` parameters so they can
+  still use the generic for `Duplicate` without a separate code path.
+- **Outer bounds guard preserved for `conditions_editor` Duplicate**: The original code had
+  `if action_idx < conditions.len()` around the duplicate block. This outer guard is kept for
+  behavioural equivalence even though `dispatch_list_action` performs the same bounds check
+  internally.
+- **`#[allow(clippy::too_many_arguments)]`**: The function takes 8 parameters (exceeds the
+  default Clippy limit of 7). The attribute is applied per the project rule for functions with
+  more than 7 params.
+
+---
+
+## Phase 4.4 — Generic `UndoRedoStack<C>` (Complete)
+
+### Overview
+
+Added a generic `UndoRedoStack<C>` struct to `sdk/campaign_builder/src/undo_redo.rs`
+and refactored all three concrete undo/redo managers to delegate to it, eliminating
+≈120 lines of duplicated stack-management code across the codebase.
+
+### Changes
+
+| File                                              | Change                                                                                                                                            |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/undo_redo.rs`           | Added `UndoRedoStack<C>` struct with 13 public methods and full `///` doc comments                                                                |
+| `sdk/campaign_builder/src/undo_redo.rs`           | Refactored `UndoRedoManager` to hold `stack: UndoRedoStack<Box<dyn Command>>`                                                                     |
+| `sdk/campaign_builder/src/undo_redo.rs`           | Removed `#[derive(Default)]`; added manual `impl Default` calling `Self::new()`                                                                   |
+| `sdk/campaign_builder/src/undo_redo.rs`           | Added 9 new `UndoRedoStack<String>` unit tests in the existing `mod tests` block                                                                  |
+| `sdk/campaign_builder/src/creature_undo_redo.rs`  | Added `use crate::undo_redo::UndoRedoStack` import                                                                                                |
+| `sdk/campaign_builder/src/creature_undo_redo.rs`  | Refactored `CreatureUndoRedoManager` to hold `stack: UndoRedoStack<Box<dyn CreatureCommand>>`                                                     |
+| `sdk/campaign_builder/src/creature_undo_redo.rs`  | Removed redundant `max_history` field (ownership transferred to the stack)                                                                        |
+| `sdk/campaign_builder/src/creature_undo_redo.rs`  | Updated `undo_descriptions` / `redo_descriptions` to use `self.stack.undo_iter().rev()`                                                           |
+| `sdk/campaign_builder/src/item_mesh_undo_redo.rs` | Added `use crate::undo_redo::UndoRedoStack` import                                                                                                |
+| `sdk/campaign_builder/src/item_mesh_undo_redo.rs` | Refactored `ItemMeshUndoRedo` to hold `stack: UndoRedoStack<ItemMeshEditAction>` with `usize::MAX` limit (preserves original unlimited behaviour) |
+
+### `UndoRedoStack<C>` API
+
+| Method                        | Description                                                      |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `new(max_history)`            | Creates a stack; `usize::MAX` means unbounded                    |
+| `push_new(cmd)`               | Appends to undo, clears redo, enforces limit                     |
+| `pop_undo() -> Option<C>`     | Pops from undo stack                                             |
+| `push_to_redo(cmd)`           | Pushes onto redo stack                                           |
+| `pop_redo() -> Option<C>`     | Pops from redo stack                                             |
+| `push_to_undo(cmd)`           | Pushes onto undo stack **without** clearing redo; enforces limit |
+| `can_undo() / can_redo()`     | Availability predicates                                          |
+| `undo_count() / redo_count()` | Stack depths                                                     |
+| `last_undo() / last_redo()`   | Peek at top of each stack                                        |
+| `undo_iter() / redo_iter()`   | `impl DoubleEndedIterator` oldest→newest (supports `.rev()`)     |
+| `clear()`                     | Empties both stacks                                              |
+
+### Design Decisions
+
+- **`push_to_undo` vs `push_new`**: `push_new` is used for new user commands (clears redo);
+  `push_to_undo` is used when a redo operation pushes the command back onto the undo stack
+  without disturbing the remaining redo entries.
+- **`impl DoubleEndedIterator`** return on `undo_iter` / `redo_iter`: exposes `.rev()` to
+  callers (needed by `undo_descriptions` / `redo_descriptions`), while keeping the concrete
+  slice type hidden.
+- **No `Default` for `UndoRedoStack<C>`**: each consumer specifies its own limit explicitly;
+  a misleading blanket default (e.g. 0 or `usize::MAX`) is avoided.
+
+---
+
+## Phase 4.5a — Generic `LinearHistory<Op>` (Complete)
+
+### Overview
+
+Created `sdk/campaign_builder/src/linear_history.rs` with a cursor-based
+`LinearHistory<Op: Clone>` type and migrated both mesh editors
+(`MeshVertexEditor`, `MeshIndexEditor`) to use it, removing two copies of
+identical inline history-management logic.
+
+### Changes
+
+| File                                             | Change                                                                                                                   |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `sdk/campaign_builder/src/linear_history.rs`     | **New file**: `DEFAULT_MAX_HISTORY = 100`, `LinearHistory<Op: Clone>` struct + impl with 9 public methods, 29 unit tests |
+| `sdk/campaign_builder/src/lib.rs`                | Added `pub mod linear_history;` (alphabetically between `keyboard_shortcuts` and `lod_editor`)                           |
+| `sdk/campaign_builder/src/mesh_vertex_editor.rs` | Replaced `history: Vec<VertexOperation>` + `history_position: usize` with `history: LinearHistory<VertexOperation>`      |
+| `sdk/campaign_builder/src/mesh_vertex_editor.rs` | Rewrote `add_to_history`, `undo`, `redo`, `can_undo`, `can_redo`, `clear_history` to delegate to `LinearHistory`         |
+| `sdk/campaign_builder/src/mesh_index_editor.rs`  | Same refactor as `mesh_vertex_editor.rs` for `IndexOperation`                                                            |
+
+### `LinearHistory<Op>` API
+
+| Method                    | Description                                             |
+| ------------------------- | ------------------------------------------------------- |
+| `new(max_history)`        | Creates a history with the given cap                    |
+| `with_default_max()`      | Creates a history capped at `DEFAULT_MAX_HISTORY` (100) |
+| `push(op)`                | Truncates forward history, appends op, enforces cap     |
+| `undo() -> Option<Op>`    | Decrements cursor, returns clone of op at that position |
+| `redo() -> Option<Op>`    | Returns clone of op at cursor, then increments          |
+| `can_undo() / can_redo()` | Cursor-based availability predicates                    |
+| `clear()`                 | Empties history and resets cursor to 0                  |
+| `len() / is_empty()`      | Total stored operations (undo-able + redo-able)         |
+
+### Design Decisions
+
+- **Cursor semantics**: The single `position: usize` cursor separates the
+  undo-able region (`0..position`) from the redo-able region (`position..len`).
+  This exactly matches the previous inline implementation in both editors,
+  preserving all existing test behaviour.
+- **`DEFAULT_MAX_HISTORY = 100`**: Matches the `const MAX_HISTORY: usize = 100`
+  that was previously inlined in both editors. `LinearHistory` and `UndoRedoStack`
+  intentionally use different defaults (100 vs 50) because they serve different
+  subsystems (mesh geometry editing vs command history).
+- **`#[derive(Debug, Clone)]`**: Both editors' containing structs derive `Clone`
+  and `Debug`, so `LinearHistory` must as well.
+- **`usize::MAX` cap is safe**: The condition `len > usize::MAX` in `push` can
+  never be satisfied, giving the caller an effectively unbounded history when
+  needed (used by `ItemMeshUndoRedo`).
+
+## Phase 4.5b — Generic RON load/save helpers in `lib.rs` (Complete)
+
+### Overview
+
+Extracted two private free functions — `read_ron_collection` and
+`write_ron_collection` — from the repeated file-read / parse / write pattern
+that appeared identically in five `load_X` / `save_X` method pairs inside
+`sdk/campaign_builder/src/lib.rs`. The five pairs (items, spells, conditions,
+monsters, furniture) were then refactored to call the helpers, eliminating
+≈230 lines of duplicated boilerplate.
+
+`load_creatures` / `save_creatures` and `load_proficiencies` /
+`save_proficiencies` are intentionally left alone — the creatures pair has
+unique nested-file structure, and the proficiencies pair has extensive
+per-step logging that would change observable behaviour if collapsed.
+
+### Changes
+
+| File                              | Change                                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/lib.rs` | Added `read_ron_collection<T>` free function (module level, before `impl CampaignBuilderApp`)           |
+| `sdk/campaign_builder/src/lib.rs` | Added `write_ron_collection<T>` free function (module level, before `impl CampaignBuilderApp`)          |
+| `sdk/campaign_builder/src/lib.rs` | Refactored `load_items` to call `read_ron_collection::<Item>`; preserved asset_manager marking, logging |
+| `sdk/campaign_builder/src/lib.rs` | Refactored `save_items` to call `write_ron_collection`; preserved logging and `unsaved_changes = true`  |
+| `sdk/campaign_builder/src/lib.rs` | Refactored `load_spells` / `save_spells` to call the helpers                                            |
+| `sdk/campaign_builder/src/lib.rs` | Refactored `load_conditions` / `save_conditions` to call the helpers                                    |
+| `sdk/campaign_builder/src/lib.rs` | Refactored `load_monsters` / `save_monsters` to call the helpers                                        |
+| `sdk/campaign_builder/src/lib.rs` | Refactored `load_furniture` / `save_furniture` to call the helpers                                      |
+
+### Helper API
+
+#### `read_ron_collection<T: serde::de::DeserializeOwned>`
+
+```
+fn read_ron_collection(
+    campaign_dir: &Option<PathBuf>,
+    filename: &str,
+    type_label: &str,
+    status_message: &mut String,
+) -> Option<Vec<T>>
+```
+
+- Returns `None` silently if `campaign_dir` is `None` or the file does not exist.
+- Returns `None` and sets `*status_message` on any I/O or parse error.
+- Returns `Some(Vec<T>)` on success; `status_message` is untouched.
+
+#### `write_ron_collection<T: serde::Serialize>`
+
+```
+fn write_ron_collection(
+    campaign_dir: &Option<PathBuf>,
+    filename: &str,
+    data: &[T],
+    type_label: &str,
+) -> Result<(), String>
+```
+
+- Returns `Err("No campaign directory set")` when `campaign_dir` is `None`.
+- Creates parent directories with `fs::create_dir_all` before writing.
+- Serialises with `PrettyConfig::new().struct_names(false).enumerate_arrays(false)`.
+- Does **not** set `self.unsaved_changes` — that remains in each caller.
+
+### Design Decisions
+
+- **Free functions, not methods**: Both helpers take `&Option<PathBuf>` and
+  `&mut String` as separate parameters rather than `&mut self`. This avoids
+  borrow-checker conflicts (the callers need `&mut self` simultaneously for
+  other fields) and keeps the helpers testable in isolation without constructing
+  a full `CampaignBuilderApp`.
+- **`None` vs `Err` for missing file in `read_ron_collection`**: A missing file
+  is a normal "not yet created" state for opt-in data (e.g. furniture), so
+  `None` without an error message is the correct signal. Parse/IO failures are
+  genuine errors and do set `status_message`.
+- **`unsaved_changes = true` stays in callers**: The flag represents a
+  deliberate user-visible action ("I saved something"). Encoding it inside the
+  helper would make the helper's name misleading and would break callers (like
+  `save_furniture`) that intentionally omit it.
+- **Consistent `PrettyConfig`**: `struct_names(false)` and
+  `enumerate_arrays(false)` match the settings used by the original per-method
+  code, so existing RON files round-trip identically.
+
+---
+
 ## Dynamic Monster/Item ID Loading in `validate_map` (Complete)
 
 ### Overview

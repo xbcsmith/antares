@@ -36,6 +36,7 @@
 //! assert!(stack.can_redo());
 //! ```
 
+use crate::undo_redo::UndoRedoStack;
 use antares::domain::visual::item_mesh::ItemMeshDescriptor;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,10 +141,16 @@ pub enum ItemMeshEditAction {
 /// assert!(!mgr.can_undo());
 /// assert!(mgr.can_redo());
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ItemMeshUndoRedo {
-    undo_stack: Vec<ItemMeshEditAction>,
-    redo_stack: Vec<ItemMeshEditAction>,
+    /// The underlying generic undo/redo stack holding concrete edit actions.
+    stack: UndoRedoStack<ItemMeshEditAction>,
+}
+
+impl Default for ItemMeshUndoRedo {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ItemMeshUndoRedo {
@@ -159,7 +166,9 @@ impl ItemMeshUndoRedo {
     /// assert!(!mgr.can_redo());
     /// ```
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            stack: UndoRedoStack::new(usize::MAX),
+        }
     }
 
     /// Pushes a new action onto the undo stack and clears the redo stack.
@@ -182,8 +191,7 @@ impl ItemMeshUndoRedo {
     /// assert_eq!(mgr.redo_count(), 0);
     /// ```
     pub fn push(&mut self, action: ItemMeshEditAction) {
-        self.undo_stack.push(action);
-        self.redo_stack.clear();
+        self.stack.push_new(action);
     }
 
     /// Undoes the most recent action.
@@ -209,8 +217,8 @@ impl ItemMeshUndoRedo {
     /// assert!(mgr.can_redo());
     /// ```
     pub fn undo(&mut self) -> Option<ItemMeshEditAction> {
-        let action = self.undo_stack.pop()?;
-        self.redo_stack.push(action.clone());
+        let action = self.stack.pop_undo()?;
+        self.stack.push_to_redo(action.clone());
         Some(action)
     }
 
@@ -237,8 +245,8 @@ impl ItemMeshUndoRedo {
     /// assert!(!mgr.can_redo());
     /// ```
     pub fn redo(&mut self) -> Option<ItemMeshEditAction> {
-        let action = self.redo_stack.pop()?;
-        self.undo_stack.push(action.clone());
+        let action = self.stack.pop_redo()?;
+        self.stack.push_to_undo(action.clone());
         Some(action)
     }
 
@@ -255,7 +263,7 @@ impl ItemMeshUndoRedo {
     /// assert!(mgr.can_undo());
     /// ```
     pub fn can_undo(&self) -> bool {
-        !self.undo_stack.is_empty()
+        self.stack.can_undo()
     }
 
     /// Returns `true` if there is at least one action that can be redone.
@@ -271,7 +279,7 @@ impl ItemMeshUndoRedo {
     /// assert!(mgr.can_redo());
     /// ```
     pub fn can_redo(&self) -> bool {
-        !self.redo_stack.is_empty()
+        self.stack.can_redo()
     }
 
     /// Clears both the undo and redo stacks.
@@ -291,8 +299,7 @@ impl ItemMeshUndoRedo {
     /// assert!(!mgr.can_redo());
     /// ```
     pub fn clear(&mut self) {
-        self.undo_stack.clear();
-        self.redo_stack.clear();
+        self.stack.clear();
     }
 
     /// Returns the number of actions currently on the undo stack.
@@ -308,7 +315,7 @@ impl ItemMeshUndoRedo {
     /// assert_eq!(mgr.undo_count(), 1);
     /// ```
     pub fn undo_count(&self) -> usize {
-        self.undo_stack.len()
+        self.stack.undo_count()
     }
 
     /// Returns the number of actions currently on the redo stack.
@@ -324,7 +331,7 @@ impl ItemMeshUndoRedo {
     /// assert_eq!(mgr.redo_count(), 1);
     /// ```
     pub fn redo_count(&self) -> usize {
-        self.redo_stack.len()
+        self.stack.redo_count()
     }
 }
 

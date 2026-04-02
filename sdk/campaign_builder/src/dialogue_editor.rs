@@ -47,8 +47,9 @@
 //! trees.
 
 use crate::ui_helpers::{
-    autocomplete_quest_selector, show_standard_list_item, ActionButtons, EditorToolbar, ItemAction,
-    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    autocomplete_quest_selector, dispatch_list_action, show_standard_list_item, ActionButtons,
+    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
+    TwoColumnLayout,
 };
 use antares::domain::dialogue::{
     DialogueAction, DialogueChoice, DialogueCondition, DialogueId, DialogueNode, DialogueTree,
@@ -1863,11 +1864,23 @@ impl DialogueEditorState {
                     *unsaved_changes = true;
                 }
                 ItemAction::Duplicate => {
-                    if let Some(dialogue) = self.dialogues.get(action_idx) {
-                        let mut new_dialogue = dialogue.clone();
-                        new_dialogue.id = self.next_available_dialogue_id();
-                        new_dialogue.name = format!("{} (Copy)", new_dialogue.name);
-                        self.dialogues.push(new_dialogue);
+                    let next_id = self.next_available_dialogue_id();
+                    let mut dummy_show = false;
+                    let mut dummy_buf = String::new();
+                    let mut dummy_msg = String::new();
+                    if dispatch_list_action(
+                        ItemAction::Duplicate,
+                        &mut self.dialogues,
+                        &mut self.selected_dialogue,
+                        move |entry, _all| {
+                            entry.id = next_id;
+                            entry.name = format!("{} (Copy)", entry.name);
+                        },
+                        "dialogue",
+                        &mut dummy_buf,
+                        &mut dummy_show,
+                        &mut dummy_msg,
+                    ) {
                         *dialogues = self.dialogues.clone();
                         *unsaved_changes = true;
                         *status_message = "Dialogue duplicated".to_string();

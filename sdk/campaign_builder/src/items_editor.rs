@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{
-    autocomplete_tag_list_selector, extract_item_tag_candidates, handle_reload,
-    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout,
+    autocomplete_tag_list_selector, dispatch_list_action, extract_item_tag_candidates,
+    handle_reload, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
@@ -511,65 +511,36 @@ impl ItemsEditorState {
 
         // Handle action button clicks after closures
         if let Some(action) = action_requested {
-            match action {
-                ItemAction::Edit => {
-                    if let Some(idx) = self.selected_item {
-                        if idx < items.len() {
-                            self.mode = ItemsEditorMode::Edit;
-                            self.edit_buffer = items[idx].clone();
-                        }
+            if action == ItemAction::Edit {
+                if let Some(idx) = self.selected_item {
+                    if idx < items.len() {
+                        self.mode = ItemsEditorMode::Edit;
+                        self.edit_buffer = items[idx].clone();
                     }
                 }
-                ItemAction::Delete => {
-                    if let Some(idx) = self.selected_item {
-                        if idx < items.len() {
-                            items.remove(idx);
-                            self.selected_item = None;
-                            self.save_items(
-                                items,
-                                campaign_dir,
-                                items_file,
-                                unsaved_changes,
-                                status_message,
-                            );
-                        }
-                    }
+            } else {
+                let data_changed = dispatch_list_action(
+                    action,
+                    items,
+                    &mut self.selected_item,
+                    |entry, all| {
+                        entry.id = all.iter().map(|i| i.id).max().unwrap_or(0) + 1;
+                        entry.name = format!("{} (Copy)", entry.name);
+                    },
+                    "item",
+                    &mut self.import_export_buffer,
+                    &mut self.show_import_dialog,
+                    status_message,
+                );
+                if data_changed {
+                    self.save_items(
+                        items,
+                        campaign_dir,
+                        items_file,
+                        unsaved_changes,
+                        status_message,
+                    );
                 }
-                ItemAction::Duplicate => {
-                    if let Some(idx) = self.selected_item {
-                        if idx < items.len() {
-                            let mut new_item = items[idx].clone();
-                            let next_id = items.iter().map(|i| i.id).max().unwrap_or(0) + 1;
-                            new_item.id = next_id;
-                            new_item.name = format!("{} (Copy)", new_item.name);
-                            items.push(new_item);
-                            self.save_items(
-                                items,
-                                campaign_dir,
-                                items_file,
-                                unsaved_changes,
-                                status_message,
-                            );
-                        }
-                    }
-                }
-                ItemAction::Export => {
-                    if let Some(idx) = self.selected_item {
-                        if idx < items.len() {
-                            if let Ok(ron_str) = ron::ser::to_string_pretty(
-                                &items[idx],
-                                ron::ser::PrettyConfig::default(),
-                            ) {
-                                self.import_export_buffer = ron_str;
-                                self.show_import_dialog = true;
-                                *status_message = "Item exported to clipboard dialog".to_string();
-                            } else {
-                                *status_message = "Failed to export item".to_string();
-                            }
-                        }
-                    }
-                }
-                ItemAction::None => {}
             }
         }
     }

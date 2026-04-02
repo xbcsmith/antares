@@ -45,20 +45,380 @@ pub struct UndoRedoState {
     pub dialogues: Vec<DialogueTree>,
 }
 
+/// A generic push-down undo/redo stack.
+///
+/// `UndoRedoStack<C>` provides the core mechanics for maintaining separate undo
+/// and redo histories for any command type `C`. It enforces a maximum history
+/// size on the undo stack, automatically evicting the oldest entry when the
+/// limit is exceeded.
+///
+/// # Type Parameters
+///
+/// * `C` – The command type stored in the stack. Typically a trait object like
+///   `Box<dyn Command>` or a concrete action enum.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::undo_redo::UndoRedoStack;
+///
+/// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+/// stack.push_new("first".to_string());
+/// stack.push_new("second".to_string());
+///
+/// assert_eq!(stack.undo_count(), 2);
+/// assert!(!stack.can_redo());
+///
+/// let cmd = stack.pop_undo().unwrap();
+/// stack.push_to_redo(cmd);
+///
+/// assert_eq!(stack.undo_count(), 1);
+/// assert!(stack.can_redo());
+/// ```
+#[derive(Debug)]
+pub struct UndoRedoStack<C> {
+    /// Commands available to undo (oldest at index 0, newest at the end)
+    undo_stack: Vec<C>,
+    /// Commands available to redo (oldest at index 0, newest at the end)
+    redo_stack: Vec<C>,
+    /// Maximum number of entries the undo stack may hold
+    max_history: usize,
+}
+
+impl<C> UndoRedoStack<C> {
+    /// Creates a new stack with the given maximum undo-history size.
+    ///
+    /// When `max_history` is `usize::MAX` the stack behaves as unbounded.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_history` – The maximum number of commands stored in the undo stack.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let stack: UndoRedoStack<String> = UndoRedoStack::new(50);
+    /// assert_eq!(stack.undo_count(), 0);
+    /// ```
+    pub fn new(max_history: usize) -> Self {
+        Self {
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            max_history,
+        }
+    }
+
+    /// Pushes a new command onto the undo stack, clearing the redo stack.
+    ///
+    /// Any forward (redo) history is discarded because a new command branches
+    /// the timeline. If the undo stack exceeds `max_history` the oldest entry
+    /// is evicted.
+    ///
+    /// # Arguments
+    ///
+    /// * `cmd` – The command to push.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(2);
+    /// stack.push_new("a".to_string());
+    /// stack.push_new("b".to_string());
+    /// stack.push_new("c".to_string()); // "a" is evicted
+    ///
+    /// assert_eq!(stack.undo_count(), 2);
+    /// assert_eq!(stack.last_undo(), Some(&"c".to_string()));
+    /// ```
+    pub fn push_new(&mut self, cmd: C) {
+        self.redo_stack.clear();
+        self.undo_stack.push(cmd);
+        if self.undo_stack.len() > self.max_history {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Pops the most recent command from the undo stack.
+    ///
+    /// Returns `None` if the undo stack is empty. The caller is responsible
+    /// for executing the undo logic and then calling
+    /// [`push_to_redo`](Self::push_to_redo) with the command.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// stack.push_new("cmd".to_string());
+    ///
+    /// let cmd = stack.pop_undo().unwrap();
+    /// assert_eq!(cmd, "cmd");
+    /// assert!(!stack.can_undo());
+    /// ```
+    pub fn pop_undo(&mut self) -> Option<C> {
+        self.undo_stack.pop()
+    }
+
+    /// Pushes a command onto the redo stack.
+    ///
+    /// Typically called after a successful undo operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// stack.push_new("cmd".to_string());
+    /// let cmd = stack.pop_undo().unwrap();
+    /// stack.push_to_redo(cmd);
+    ///
+    /// assert!(stack.can_redo());
+    /// ```
+    pub fn push_to_redo(&mut self, cmd: C) {
+        self.redo_stack.push(cmd);
+    }
+
+    /// Pops the most recent command from the redo stack.
+    ///
+    /// Returns `None` if the redo stack is empty. The caller is responsible
+    /// for re-executing the command and then calling
+    /// [`push_to_undo`](Self::push_to_undo) with the command.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// stack.push_new("cmd".to_string());
+    /// let cmd = stack.pop_undo().unwrap();
+    /// stack.push_to_redo(cmd);
+    ///
+    /// let cmd = stack.pop_redo().unwrap();
+    /// assert_eq!(cmd, "cmd");
+    /// assert!(!stack.can_redo());
+    /// ```
+    pub fn pop_redo(&mut self) -> Option<C> {
+        self.redo_stack.pop()
+    }
+
+    /// Pushes a command onto the undo stack **without** clearing the redo stack.
+    ///
+    /// This is used when a redo operation re-executes a command and needs to
+    /// push it back to the undo stack while preserving any remaining redo
+    /// entries. Enforces `max_history` by evicting the oldest entry when needed.
+    ///
+    /// # Arguments
+    ///
+    /// * `cmd` – The command to push.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// stack.push_new("cmd1".to_string());
+    /// let cmd = stack.pop_undo().unwrap();
+    /// stack.push_to_redo(cmd);
+    ///
+    /// // Redo: re-push to undo without clearing redo
+    /// stack.push_to_undo("cmd1".to_string());
+    /// assert!(stack.can_undo());
+    /// // Redo stack is untouched by push_to_undo
+    /// assert!(stack.can_redo());
+    /// ```
+    pub fn push_to_undo(&mut self, cmd: C) {
+        self.undo_stack.push(cmd);
+        if self.undo_stack.len() > self.max_history {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Returns `true` if there is at least one command that can be undone.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// assert!(!stack.can_undo());
+    /// stack.push_new("cmd".to_string());
+    /// assert!(stack.can_undo());
+    /// ```
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+
+    /// Returns `true` if there is at least one command that can be redone.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// assert!(!stack.can_redo());
+    /// stack.push_new("cmd".to_string());
+    /// let cmd = stack.pop_undo().unwrap();
+    /// stack.push_to_redo(cmd);
+    /// assert!(stack.can_redo());
+    /// ```
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
+
+    /// Returns the number of commands currently on the undo stack.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// assert_eq!(stack.undo_count(), 0);
+    /// stack.push_new("cmd".to_string());
+    /// assert_eq!(stack.undo_count(), 1);
+    /// ```
+    pub fn undo_count(&self) -> usize {
+        self.undo_stack.len()
+    }
+
+    /// Returns the number of commands currently on the redo stack.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// stack.push_new("cmd".to_string());
+    /// let cmd = stack.pop_undo().unwrap();
+    /// stack.push_to_redo(cmd);
+    /// assert_eq!(stack.redo_count(), 1);
+    /// ```
+    pub fn redo_count(&self) -> usize {
+        self.redo_stack.len()
+    }
+
+    /// Returns a reference to the most recently pushed undo command (top of the undo stack).
+    ///
+    /// Returns `None` if the undo stack is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// assert!(stack.last_undo().is_none());
+    /// stack.push_new("cmd".to_string());
+    /// assert_eq!(stack.last_undo(), Some(&"cmd".to_string()));
+    /// ```
+    pub fn last_undo(&self) -> Option<&C> {
+        self.undo_stack.last()
+    }
+
+    /// Returns a reference to the most recently undone command (top of the redo stack).
+    ///
+    /// Returns `None` if the redo stack is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// stack.push_new("cmd".to_string());
+    /// let cmd = stack.pop_undo().unwrap();
+    /// stack.push_to_redo(cmd);
+    /// assert_eq!(stack.last_redo(), Some(&"cmd".to_string()));
+    /// ```
+    pub fn last_redo(&self) -> Option<&C> {
+        self.redo_stack.last()
+    }
+
+    /// Returns an iterator over the undo stack from oldest to newest.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// stack.push_new("first".to_string());
+    /// stack.push_new("second".to_string());
+    ///
+    /// let items: Vec<&String> = stack.undo_iter().collect();
+    /// assert_eq!(items, vec!["first", "second"]);
+    /// ```
+    pub fn undo_iter(&self) -> impl DoubleEndedIterator<Item = &C> {
+        self.undo_stack.iter()
+    }
+
+    /// Returns an iterator over the redo stack from oldest to newest.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// stack.push_new("first".to_string());
+    /// let cmd = stack.pop_undo().unwrap();
+    /// stack.push_to_redo(cmd);
+    ///
+    /// let items: Vec<&String> = stack.redo_iter().collect();
+    /// assert_eq!(items, vec!["first"]);
+    /// ```
+    pub fn redo_iter(&self) -> impl DoubleEndedIterator<Item = &C> {
+        self.redo_stack.iter()
+    }
+
+    /// Clears both the undo and redo stacks.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::undo_redo::UndoRedoStack;
+    ///
+    /// let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+    /// stack.push_new("cmd".to_string());
+    /// stack.clear();
+    ///
+    /// assert!(!stack.can_undo());
+    /// assert!(!stack.can_redo());
+    /// ```
+    pub fn clear(&mut self) {
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+    }
+}
+
 /// Undo/Redo manager
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct UndoRedoManager {
-    undo_stack: Vec<Box<dyn Command>>,
-    redo_stack: Vec<Box<dyn Command>>,
+    stack: UndoRedoStack<Box<dyn Command>>,
     state: UndoRedoState,
+}
+
+impl Default for UndoRedoManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl UndoRedoManager {
     /// Create a new undo/redo manager
     pub fn new() -> Self {
         Self {
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            stack: UndoRedoStack::new(MAX_HISTORY_SIZE),
             state: UndoRedoState::default(),
         }
     }
@@ -66,27 +426,16 @@ impl UndoRedoManager {
     /// Execute a command and add it to the undo stack
     pub fn execute(&mut self, command: Box<dyn Command>) -> Result<(), String> {
         command.execute(&mut self.state)?;
-
-        // Clear redo stack when new command is executed
-        self.redo_stack.clear();
-
-        // Add to undo stack
-        self.undo_stack.push(command);
-
-        // Limit stack size
-        if self.undo_stack.len() > MAX_HISTORY_SIZE {
-            self.undo_stack.remove(0);
-        }
-
+        self.stack.push_new(command);
         Ok(())
     }
 
     /// Undo the last command
     pub fn undo(&mut self) -> Result<String, String> {
-        if let Some(command) = self.undo_stack.pop() {
+        if let Some(command) = self.stack.pop_undo() {
             let description = command.description();
             command.undo(&mut self.state)?;
-            self.redo_stack.push(command);
+            self.stack.push_to_redo(command);
             Ok(description)
         } else {
             Err("Nothing to undo".to_string())
@@ -95,10 +444,10 @@ impl UndoRedoManager {
 
     /// Redo the last undone command
     pub fn redo(&mut self) -> Result<String, String> {
-        if let Some(command) = self.redo_stack.pop() {
+        if let Some(command) = self.stack.pop_redo() {
             let description = command.description();
             command.execute(&mut self.state)?;
-            self.undo_stack.push(command);
+            self.stack.push_to_undo(command);
             Ok(description)
         } else {
             Err("Nothing to redo".to_string())
@@ -107,38 +456,37 @@ impl UndoRedoManager {
 
     /// Check if undo is available
     pub fn can_undo(&self) -> bool {
-        !self.undo_stack.is_empty()
+        self.stack.can_undo()
     }
 
     /// Check if redo is available
     pub fn can_redo(&self) -> bool {
-        !self.redo_stack.is_empty()
+        self.stack.can_redo()
     }
 
     /// Get the number of actions that can be undone
     pub fn undo_count(&self) -> usize {
-        self.undo_stack.len()
+        self.stack.undo_count()
     }
 
     /// Get the number of actions that can be redone
     pub fn redo_count(&self) -> usize {
-        self.redo_stack.len()
+        self.stack.redo_count()
     }
 
     /// Get description of the next undo action
     pub fn next_undo_description(&self) -> Option<String> {
-        self.undo_stack.last().map(|cmd| cmd.description())
+        self.stack.last_undo().map(|cmd| cmd.description())
     }
 
     /// Get description of the next redo action
     pub fn next_redo_description(&self) -> Option<String> {
-        self.redo_stack.last().map(|cmd| cmd.description())
+        self.stack.last_redo().map(|cmd| cmd.description())
     }
 
     /// Clear all history
     pub fn clear(&mut self) {
-        self.undo_stack.clear();
-        self.redo_stack.clear();
+        self.stack.clear();
     }
 
     /// Get read-only access to state
@@ -826,5 +1174,129 @@ mod tests {
         manager.clear();
         assert!(!manager.can_undo());
         assert!(!manager.can_redo());
+    }
+
+    // ── UndoRedoStack<C> tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_undo_redo_stack_new() {
+        let stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+        assert!(!stack.can_undo());
+        assert!(!stack.can_redo());
+        assert_eq!(stack.undo_count(), 0);
+        assert_eq!(stack.redo_count(), 0);
+        assert!(stack.last_undo().is_none());
+        assert!(stack.last_redo().is_none());
+    }
+
+    #[test]
+    fn test_undo_redo_stack_push_new() {
+        let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+        stack.push_new("cmd1".to_string());
+        assert!(stack.can_undo());
+        assert!(!stack.can_redo());
+        assert_eq!(stack.undo_count(), 1);
+        assert_eq!(stack.last_undo(), Some(&"cmd1".to_string()));
+    }
+
+    #[test]
+    fn test_undo_redo_stack_push_new_clears_redo() {
+        let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+        stack.push_new("cmd1".to_string());
+        let cmd = stack.pop_undo().unwrap();
+        stack.push_to_redo(cmd);
+        assert!(stack.can_redo());
+        stack.push_new("cmd2".to_string());
+        assert!(!stack.can_redo(), "push_new must clear redo stack");
+    }
+
+    #[test]
+    fn test_undo_redo_stack_max_history() {
+        let mut stack: UndoRedoStack<String> = UndoRedoStack::new(3);
+        stack.push_new("a".to_string());
+        stack.push_new("b".to_string());
+        stack.push_new("c".to_string());
+        stack.push_new("d".to_string()); // "a" is evicted
+        assert_eq!(stack.undo_count(), 3);
+        assert_eq!(stack.last_undo(), Some(&"d".to_string()));
+        let items: Vec<&String> = stack.undo_iter().collect();
+        assert_eq!(items, vec!["b", "c", "d"]);
+    }
+
+    #[test]
+    fn test_undo_redo_stack_pop_undo_and_redo() {
+        let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+        stack.push_new("cmd".to_string());
+        let cmd = stack.pop_undo().unwrap();
+        assert_eq!(cmd, "cmd");
+        assert!(!stack.can_undo());
+        stack.push_to_redo(cmd);
+        assert!(stack.can_redo());
+        assert_eq!(stack.last_redo(), Some(&"cmd".to_string()));
+        let cmd = stack.pop_redo().unwrap();
+        assert_eq!(cmd, "cmd");
+        assert!(!stack.can_redo());
+    }
+
+    #[test]
+    fn test_undo_redo_stack_push_to_undo_preserves_redo() {
+        let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+        stack.push_new("cmd1".to_string());
+        let cmd1 = stack.pop_undo().unwrap();
+        stack.push_to_redo(cmd1);
+        // push_to_undo should NOT clear redo
+        stack.push_to_undo("cmd1".to_string());
+        assert!(stack.can_undo());
+        assert!(
+            stack.can_redo(),
+            "redo stack must be preserved by push_to_undo"
+        );
+    }
+
+    #[test]
+    fn test_undo_redo_stack_push_to_undo_enforces_max_history() {
+        let mut stack: UndoRedoStack<String> = UndoRedoStack::new(2);
+        stack.push_to_undo("a".to_string());
+        stack.push_to_undo("b".to_string());
+        stack.push_to_undo("c".to_string()); // "a" evicted
+        assert_eq!(stack.undo_count(), 2);
+        assert_eq!(stack.last_undo(), Some(&"c".to_string()));
+    }
+
+    #[test]
+    fn test_undo_redo_stack_iterators() {
+        let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+        stack.push_new("first".to_string());
+        stack.push_new("second".to_string());
+        stack.push_new("third".to_string());
+        let undo_items: Vec<&String> = stack.undo_iter().collect();
+        assert_eq!(undo_items, vec!["first", "second", "third"]);
+        let cmd3 = stack.pop_undo().unwrap();
+        stack.push_to_redo(cmd3);
+        let cmd2 = stack.pop_undo().unwrap();
+        stack.push_to_redo(cmd2);
+        // redo_stack oldest→newest: third was pushed first, second second
+        let redo_items: Vec<&String> = stack.redo_iter().collect();
+        assert_eq!(redo_items, vec!["third", "second"]);
+    }
+
+    #[test]
+    fn test_undo_redo_stack_clear() {
+        let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+        stack.push_new("cmd".to_string());
+        let cmd = stack.pop_undo().unwrap();
+        stack.push_to_redo(cmd);
+        stack.clear();
+        assert!(!stack.can_undo());
+        assert!(!stack.can_redo());
+        assert_eq!(stack.undo_count(), 0);
+        assert_eq!(stack.redo_count(), 0);
+    }
+
+    #[test]
+    fn test_undo_redo_stack_pop_empty_returns_none() {
+        let mut stack: UndoRedoStack<String> = UndoRedoStack::new(10);
+        assert!(stack.pop_undo().is_none());
+        assert!(stack.pop_redo().is_none());
     }
 }

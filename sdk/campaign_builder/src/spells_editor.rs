@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{
-    autocomplete_condition_selector, handle_reload, show_standard_list_item, EditorToolbar,
-    ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    autocomplete_condition_selector, dispatch_list_action, handle_reload, show_standard_list_item,
+    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
+    TwoColumnLayout,
 };
 use antares::domain::conditions::ConditionDefinition;
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
@@ -414,65 +415,36 @@ impl SpellsEditorState {
 
         // Handle action button clicks after closures
         if let Some(action) = action_requested {
-            match action {
-                ItemAction::Edit => {
-                    if let Some(idx) = self.selected_spell {
-                        if idx < spells.len() {
-                            self.mode = SpellsEditorMode::Edit;
-                            self.edit_buffer = spells[idx].clone();
-                        }
+            if action == ItemAction::Edit {
+                if let Some(idx) = self.selected_spell {
+                    if idx < spells.len() {
+                        self.mode = SpellsEditorMode::Edit;
+                        self.edit_buffer = spells[idx].clone();
                     }
                 }
-                ItemAction::Delete => {
-                    if let Some(idx) = self.selected_spell {
-                        if idx < spells.len() {
-                            spells.remove(idx);
-                            self.selected_spell = None;
-                            self.save_spells(
-                                spells,
-                                campaign_dir,
-                                spells_file,
-                                unsaved_changes,
-                                status_message,
-                            );
-                        }
-                    }
+            } else {
+                let data_changed = dispatch_list_action(
+                    action,
+                    spells,
+                    &mut self.selected_spell,
+                    |entry, all| {
+                        entry.id = all.iter().map(|s| s.id).max().unwrap_or(0) + 1;
+                        entry.name = format!("{} (Copy)", entry.name);
+                    },
+                    "spell",
+                    &mut self.import_export_buffer,
+                    &mut self.show_import_dialog,
+                    status_message,
+                );
+                if data_changed {
+                    self.save_spells(
+                        spells,
+                        campaign_dir,
+                        spells_file,
+                        unsaved_changes,
+                        status_message,
+                    );
                 }
-                ItemAction::Duplicate => {
-                    if let Some(idx) = self.selected_spell {
-                        if idx < spells.len() {
-                            let mut new_spell = spells[idx].clone();
-                            let next_id = spells.iter().map(|s| s.id).max().unwrap_or(0) + 1;
-                            new_spell.id = next_id;
-                            new_spell.name = format!("{} (Copy)", new_spell.name);
-                            spells.push(new_spell);
-                            self.save_spells(
-                                spells,
-                                campaign_dir,
-                                spells_file,
-                                unsaved_changes,
-                                status_message,
-                            );
-                        }
-                    }
-                }
-                ItemAction::Export => {
-                    if let Some(idx) = self.selected_spell {
-                        if idx < spells.len() {
-                            if let Ok(ron_str) = ron::ser::to_string_pretty(
-                                &spells[idx],
-                                ron::ser::PrettyConfig::default(),
-                            ) {
-                                self.import_export_buffer = ron_str;
-                                self.show_import_dialog = true;
-                                *status_message = "Spell exported to clipboard dialog".to_string();
-                            } else {
-                                *status_message = "Failed to export spell".to_string();
-                            }
-                        }
-                    }
-                }
-                ItemAction::None => {}
             }
         }
     }

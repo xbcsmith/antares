@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{
-    handle_reload, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
-    StandardListItemConfig, ToolbarAction, TwoColumnLayout, DEFAULT_PANEL_MIN_HEIGHT,
+    dispatch_list_action, handle_file_load, handle_file_save, handle_reload,
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout, DEFAULT_PANEL_MIN_HEIGHT,
 };
 use antares::domain::character::{ATTRIBUTE_MODIFIER_MAX, ATTRIBUTE_MODIFIER_MIN};
 use antares::domain::conditions::{
@@ -347,64 +348,20 @@ impl ConditionsEditorState {
                 );
             }
             ToolbarAction::Load => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<ConditionDefinition>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_conditions) => {
-                            if self.file_load_merge_mode {
-                                for cond in loaded_conditions {
-                                    if let Some(existing) =
-                                        conditions.iter_mut().find(|c| c.id == cond.id)
-                                    {
-                                        *existing = cond;
-                                    } else {
-                                        conditions.push(cond);
-                                    }
-                                }
-                            } else {
-                                *conditions = loaded_conditions;
-                            }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded conditions from: {}", path.display());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to load conditions: {}", e);
-                        }
-                    }
-                }
+                handle_file_load(
+                    conditions,
+                    self.file_load_merge_mode,
+                    |c: &ConditionDefinition| c.id.clone(),
+                    status_message,
+                    unsaved_changes,
+                );
             }
             ToolbarAction::Import => {
                 self.show_import_dialog = true;
                 self.import_export_buffer.clear();
             }
             ToolbarAction::Export => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("conditions.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(conditions, Default::default()) {
-                        Ok(contents) => match fs::write(&path, contents) {
-                            Ok(_) => {
-                                *status_message =
-                                    format!("Saved conditions to: {}", path.display());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to save conditions: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            *status_message = format!("Failed to serialize conditions: {}", e);
-                        }
-                    }
-                }
+                handle_file_save(conditions, "conditions.ron", status_message);
             }
             ToolbarAction::Reload => {
                 handle_reload(conditions, campaign_dir, conditions_file, status_message);
@@ -715,37 +672,47 @@ impl ConditionsEditorState {
                 }
                 ItemAction::Duplicate => {
                     if action_idx < conditions.len() {
-                        let mut dup = conditions[action_idx].clone();
-                        let base = dup.id.clone();
-                        let mut suffix = 1;
-                        while conditions.iter().any(|c| c.id == dup.id) {
-                            dup.id = format!("{}_copy{}", base, suffix);
-                            suffix += 1;
-                        }
-                        dup.name = format!("{} (Copy)", dup.name);
-                        conditions.push(dup);
-                        self.save_conditions(
+                        let mut dummy_show = false;
+                        let mut dummy_buf = String::new();
+                        if dispatch_list_action(
+                            ItemAction::Duplicate,
                             conditions,
-                            campaign_dir,
-                            conditions_file,
-                            unsaved_changes,
+                            &mut self.selected_condition_idx,
+                            |entry, all| {
+                                let base = entry.id.clone();
+                                let mut suffix = 1;
+                                while all.iter().any(|c| c.id == entry.id) {
+                                    entry.id = format!("{}_copy{}", base, suffix);
+                                    suffix += 1;
+                                }
+                                entry.name = format!("{} (Copy)", entry.name);
+                            },
+                            "condition",
+                            &mut dummy_buf,
+                            &mut dummy_show,
                             status_message,
-                        );
+                        ) {
+                            self.save_conditions(
+                                conditions,
+                                campaign_dir,
+                                conditions_file,
+                                unsaved_changes,
+                                status_message,
+                            );
+                        }
                     }
                 }
                 ItemAction::Export => {
-                    if action_idx < conditions.len() {
-                        if let Ok(ron_str) = ron::ser::to_string_pretty(
-                            &conditions[action_idx],
-                            ron::ser::PrettyConfig::default(),
-                        ) {
-                            self.import_export_buffer = ron_str;
-                            self.show_import_dialog = true;
-                            *status_message = "Condition exported to clipboard dialog".to_string();
-                        } else {
-                            *status_message = "Failed to export condition".to_string();
-                        }
-                    }
+                    dispatch_list_action(
+                        ItemAction::Export,
+                        conditions,
+                        &mut self.selected_condition_idx,
+                        |_, _| {},
+                        "condition",
+                        &mut self.import_export_buffer,
+                        &mut self.show_import_dialog,
+                        status_message,
+                    );
                 }
                 ItemAction::None => {}
             }

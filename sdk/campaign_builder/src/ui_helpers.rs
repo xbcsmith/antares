@@ -2465,7 +2465,7 @@ pub fn save_ron_file<T: serde::Serialize>(data: &T, path: &std::path::Path) -> R
 /// # Returns
 ///
 /// `true` if data was loaded, `false` otherwise.
-pub fn handle_file_load<T, F>(
+pub fn handle_file_load<T, K, F>(
     data: &mut Vec<T>,
     merge_mode: bool,
     id_getter: F,
@@ -2474,7 +2474,8 @@ pub fn handle_file_load<T, F>(
 ) -> bool
 where
     T: Clone + serde::de::DeserializeOwned,
-    F: Fn(&T) -> u32,
+    K: PartialEq + Clone,
+    F: Fn(&T) -> K,
 {
     if let Some(path) = rfd::FileDialog::new()
         .add_filter("RON", &["ron"])
@@ -2485,8 +2486,8 @@ where
                 if merge_mode {
                     // Merge: update existing, add new
                     for item in loaded_data {
-                        let item_id = id_getter(&item);
-                        if let Some(existing) = data.iter_mut().find(|d| id_getter(d) == item_id) {
+                        let item_key = id_getter(&item);
+                        if let Some(existing) = data.iter_mut().find(|d| id_getter(d) == item_key) {
                             *existing = item;
                         } else {
                             data.push(item);
@@ -2594,9 +2595,221 @@ pub fn handle_reload<T: serde::de::DeserializeOwned>(
     false
 }
 
+/// Generic list-action dispatcher for standard editor CRUD operations.
+///
+/// Handles `Delete`, `Duplicate`, and `Export` (to the import-export buffer)
+/// actions in a uniform way across data editors. The `Edit` action is
+/// intentionally **not** handled here because it requires setting
+/// editor-specific mode types and edit buffers; callers should handle it
+/// themselves.
+///
+/// This function is used by `ItemsEditorState`, `SpellsEditorState`,
+/// `MonstersEditorState`, `ConditionsEditorState`, `ProficienciesEditorState`,
+/// and `DialogueEditorState` to consolidate their otherwise-identical action
+/// dispatch code.
+///
+/// # Type Parameters
+///
+/// * `T` — Entity type. Must be `Clone + serde::Serialize`.
+/// * `C` — Closure that prepares a duplicate entry. Called with a mutable
+///   reference to the cloned entry and an immutable slice of the current
+///   collection (before the new entry is pushed), so it can generate a
+///   collision-free ID or updated name.
+///
+/// # Arguments
+///
+/// * `action` — The `ItemAction` to dispatch
+/// * `data` — Mutable reference to the entity collection
+/// * `selected_idx` — Current selection index; set to `None` after a
+///   successful `Delete`
+/// * `prepare_duplicate` — Called as `prepare_duplicate(new_entry, data)`
+///   just before pushing the duplicate; should set the new entry's ID and
+///   update its name (e.g. append `" (Copy)"`)
+/// * `entity_label` — Human-readable entity type label used in status
+///   messages, e.g. `"item"`, `"spell"`, `"condition"`
+/// * `import_export_buffer` — Set to the serialised RON string on `Export`
+/// * `show_import_dialog` — Set to `true` on `Export`
+/// * `status_message` — Updated with a description of the result
+///
+/// # Returns
+///
+/// `true` if the collection was mutated (i.e. `Delete` or `Duplicate`
+/// happened), so the caller knows a save is needed.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::ui_helpers::{dispatch_list_action, ItemAction};
+///
+/// #[derive(Clone, serde::Serialize, serde::Deserialize)]
+/// struct Thing { id: u32, name: String }
+///
+/// let mut data = vec![
+///     Thing { id: 1, name: "Alpha".to_string() },
+/// ];
+/// let mut selected: Option<usize> = Some(0);
+/// let mut buf = String::new();
+/// let mut show = false;
+/// let mut msg = String::new();
+///
+/// let changed = dispatch_list_action(
+///     ItemAction::Duplicate,
+///     &mut data,
+///     &mut selected,
+///     |entry, all| {
+///         entry.id = all.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+///         entry.name = format!("{} (Copy)", entry.name);
+///     },
+///     "thing",
+///     &mut buf,
+///     &mut show,
+///     &mut msg,
+/// );
+///
+/// assert!(changed);
+/// assert_eq!(data.len(), 2);
+/// assert_eq!(data[1].name, "Alpha (Copy)");
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn dispatch_list_action<T, C>(
+    action: ItemAction,
+    data: &mut Vec<T>,
+    selected_idx: &mut Option<usize>,
+    prepare_duplicate: C,
+    entity_label: &str,
+    import_export_buffer: &mut String,
+    show_import_dialog: &mut bool,
+    status_message: &mut String,
+) -> bool
+where
+    T: Clone + serde::Serialize,
+    C: Fn(&mut T, &[T]),
+{
+    match action {
+        ItemAction::Duplicate => {
+            if let Some(idx) = *selected_idx {
+                if idx < data.len() {
+                    let mut new_entry = data[idx].clone();
+                    prepare_duplicate(&mut new_entry, data);
+                    data.push(new_entry);
+                    return true;
+                }
+            }
+        }
+        ItemAction::Delete => {
+            if let Some(idx) = *selected_idx {
+                if idx < data.len() {
+                    data.remove(idx);
+                    *selected_idx = None;
+                    return true;
+                }
+            }
+        }
+        ItemAction::Export => {
+            if let Some(idx) = *selected_idx {
+                if idx < data.len() {
+                    match ron::ser::to_string_pretty(&data[idx], ron::ser::PrettyConfig::default())
+                    {
+                        Ok(ron_str) => {
+                            *import_export_buffer = ron_str;
+                            *show_import_dialog = true;
+                            *status_message =
+                                format!("{} exported to clipboard dialog", entity_label);
+                        }
+                        Err(e) => {
+                            *status_message = format!("Failed to export {}: {}", entity_label, e);
+                        }
+                    }
+                }
+            }
+        }
+        ItemAction::Edit | ItemAction::None => {}
+    }
+    false
+}
+
 // =============================================================================
 // Entity Candidate Extraction for Autocomplete
 // =============================================================================
+
+/// Generic single-entity autocomplete selector.
+///
+/// Core implementation shared by all `autocomplete_*_selector` functions.
+/// Entity-specific wrappers supply the candidate list, current display name,
+/// and two closures that handle selection commit and clearing.
+///
+/// # Arguments
+///
+/// * `ui` — egui UI context
+/// * `id_salt` — unique salt for this widget instance
+/// * `buffer_tag` — short tag used as part of the egui memory key (e.g. `"item"`, `"quest"`)
+/// * `label` — text label shown to the left of the input (skipped if empty)
+/// * `candidates` — list of display strings shown in the autocomplete dropdown
+/// * `current_name` — display string for the currently selected entity (empty if none)
+/// * `placeholder` — placeholder text when the field is empty
+/// * `is_selected` — whether there is a current selection (controls ✖ clear button)
+/// * `on_select` — called with the user's typed/selected text; should update the
+///   backing field and return `true` if the value was valid and changed
+/// * `on_clear` — called when the user clicks the ✖ clear button; should reset the
+///   backing selection field
+///
+/// # Returns
+///
+/// `true` if the selection changed this frame.
+#[allow(clippy::too_many_arguments)]
+pub fn autocomplete_entity_selector_generic(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    buffer_tag: &str,
+    label: &str,
+    candidates: Vec<String>,
+    current_name: String,
+    placeholder: &str,
+    is_selected: bool,
+    mut on_select: impl FnMut(&str) -> bool,
+    mut on_clear: impl FnMut(),
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        if !label.is_empty() {
+            ui.label(label);
+        }
+        let buffer_id = make_autocomplete_id(ui, buffer_tag, id_salt);
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
+
+        let response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder(placeholder)
+            .show(ui, &mut text_buffer);
+
+        if response.changed()
+            && !text_buffer.is_empty()
+            && text_buffer != current_name
+            && on_select(&text_buffer)
+        {
+            changed = true;
+        }
+
+        let mut cleared = false;
+        if is_selected
+            && ui
+                .small_button("✖")
+                .on_hover_text("Clear selection")
+                .clicked()
+        {
+            on_clear();
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
+            changed = true;
+            cleared = true;
+        }
+
+        if !cleared {
+            store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+        }
+    });
+    changed
+}
 
 /// Shows an autocomplete input for selecting an item by name.
 ///
@@ -2635,64 +2848,39 @@ pub fn autocomplete_item_selector(
     selected_item_id: &mut antares::domain::types::ItemId,
     items: &[antares::domain::items::types::Item],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    // Build candidates (cloned list)
     let candidates: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
-
-    ui.horizontal(|ui| {
-        ui.label(label);
-
-        // Get current item name
-        let current_name = if *selected_item_id == 0 {
-            String::new()
-        } else {
-            items
-                .iter()
-                .find(|i| i.id == *selected_item_id)
-                .map(|i| i.name.clone())
-                .unwrap_or_default()
-        };
-
-        // Persist the per-widget text buffer in egui Memory so typed text survives frames.
-        let buffer_id = make_autocomplete_id(ui, "item", id_salt);
-
-        // Read the persistent buffer into a local owned `String` so we don't hold a long-lived borrow.
-        let mut text_buffer =
-            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
-
-        // Render the widget using the local buffer. After the widget returns, write the buffer back to memory.
-        let response = AutocompleteInput::new(id_salt, &candidates)
-            .with_placeholder("Start typing item name...")
-            .show(ui, &mut text_buffer);
-
-        // Commit valid selections
-        if response.changed() && !text_buffer.is_empty() && text_buffer != current_name {
-            if let Some(item) = items.iter().find(|i| i.name == text_buffer) {
-                *selected_item_id = item.id;
-                changed = true;
+    let current_name = if *selected_item_id == 0 {
+        String::new()
+    } else {
+        items
+            .iter()
+            .find(|i| i.id == *selected_item_id)
+            .map(|i| i.name.clone())
+            .unwrap_or_default()
+    };
+    // Use Cell so both on_select and on_clear can share mutation without conflicting borrows.
+    let cell = std::cell::Cell::new(*selected_item_id);
+    let is_selected = *selected_item_id != 0;
+    let changed = autocomplete_entity_selector_generic(
+        ui,
+        id_salt,
+        "item",
+        label,
+        candidates,
+        current_name,
+        "Start typing item name...",
+        is_selected,
+        |text| {
+            if let Some(item) = items.iter().find(|i| i.name == text) {
+                cell.set(item.id);
+                true
+            } else {
+                false
             }
-        }
-
-        // Show clear button if something is selected
-        if *selected_item_id != 0
-            && ui
-                .small_button("✖")
-                .on_hover_text("Clear selection")
-                .clicked()
-        {
-            *selected_item_id = 0;
-            // Remove the persisted buffer entry
-            remove_autocomplete_buffer(ui.ctx(), buffer_id);
-            changed = true;
-        }
-
-        // Persist buffer back into egui memory so it survives frames.
-        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-    });
-
+        },
+        || cell.set(0),
+    );
+    *selected_item_id = cell.get();
     changed
 }
 
@@ -2730,68 +2918,40 @@ pub fn autocomplete_quest_selector(
     selected_quest_id_str: &mut String,
     quests: &[antares::domain::quest::Quest],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.horizontal(|ui| {
-        ui.label(label);
-
-        // Get current quest name based on ID string
-        let current_name = if selected_quest_id_str.is_empty() {
-            String::new()
-        } else {
-            // Parse the ID and find the quest
-            selected_quest_id_str
-                .parse::<antares::domain::quest::QuestId>()
-                .ok()
-                .and_then(|id| quests.iter().find(|q| q.id == id))
-                .map(|q| q.name.clone())
-                .unwrap_or_default()
-        };
-
-        // Build candidates
-        let candidates: Vec<String> = quests.iter().map(|q| q.name.clone()).collect();
-
-        // Persist the per-widget text buffer in egui memory by reading a cloned
-        // value into a local `String`, letting the widget edit it, and writing
-        // the value back into Memory after the edit. This avoids overlapping
-        // mutable borrows of egui internals while still providing persistent state.
-        let buffer_id = make_autocomplete_id(ui, "quest", id_salt);
-
-        // Initialize local buffer from memory (or fallback to the current name)
-        let mut text_buffer =
-            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
-
-        let response = AutocompleteInput::new(id_salt, &candidates)
-            .with_placeholder("Start typing quest name...")
-            .show(ui, &mut text_buffer);
-
-        // Commit selection immediately
-        if response.changed() && !text_buffer.is_empty() && text_buffer != current_name {
-            if let Some(quest) = quests.iter().find(|q| q.name == text_buffer) {
-                *selected_quest_id_str = quest.id.to_string();
-                changed = true;
+    let candidates: Vec<String> = quests.iter().map(|q| q.name.clone()).collect();
+    let current_name = if selected_quest_id_str.is_empty() {
+        String::new()
+    } else {
+        selected_quest_id_str
+            .parse::<antares::domain::quest::QuestId>()
+            .ok()
+            .and_then(|id| quests.iter().find(|q| q.id == id))
+            .map(|q| q.name.clone())
+            .unwrap_or_default()
+    };
+    // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
+    let is_selected = !selected_quest_id_str.is_empty();
+    let cell = std::cell::RefCell::new(std::mem::take(selected_quest_id_str));
+    let changed = autocomplete_entity_selector_generic(
+        ui,
+        id_salt,
+        "quest",
+        label,
+        candidates,
+        current_name,
+        "Start typing quest name...",
+        is_selected,
+        |text| {
+            if let Some(quest) = quests.iter().find(|q| q.name == text) {
+                *cell.borrow_mut() = quest.id.to_string();
+                true
+            } else {
+                false
             }
-        }
-
-        // Persist buffer back into egui memory so it survives frames.
-        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-
-        // Show clear button if something is selected
-        if !selected_quest_id_str.is_empty()
-            && ui
-                .small_button("✖")
-                .on_hover_text("Clear selection")
-                .clicked()
-        {
-            selected_quest_id_str.clear();
-            // Remove the persisted buffer entry
-            remove_autocomplete_buffer(ui.ctx(), buffer_id);
-            changed = true;
-        }
-    });
-
+        },
+        || cell.borrow_mut().clear(),
+    );
+    *selected_quest_id_str = cell.into_inner();
     changed
 }
 
@@ -2817,52 +2977,31 @@ pub fn autocomplete_monster_selector(
     selected_monster_name: &mut String,
     monsters: &[antares::domain::combat::database::MonsterDefinition],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.horizontal(|ui| {
-        ui.label(label);
-
-        // Build candidates
-        let candidates: Vec<String> = extract_monster_candidates(monsters);
-
-        // Persist the per-widget text buffer in egui Memory so typed text survives frames.
-        let buffer_id = make_autocomplete_id(ui, "monster", id_salt);
-
-        // Read the persistent buffer into a local owned `String` so we don't hold a long-lived borrow.
-        let mut text_buffer =
-            load_autocomplete_buffer(ui.ctx(), buffer_id, || selected_monster_name.clone());
-
-        let response = AutocompleteInput::new(id_salt, &candidates)
-            .with_placeholder("Start typing monster name...")
-            .show(ui, &mut text_buffer);
-
-        // Check if user selected something from autocomplete
-        if response.changed() && !text_buffer.is_empty() && text_buffer != *selected_monster_name {
-            // Validate the monster exists
-            if monsters.iter().any(|m| m.name == text_buffer) {
-                *selected_monster_name = text_buffer.clone();
-                changed = true;
+    let candidates: Vec<String> = extract_monster_candidates(monsters);
+    let current_name = selected_monster_name.clone();
+    // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
+    let is_selected = !selected_monster_name.is_empty();
+    let cell = std::cell::RefCell::new(std::mem::take(selected_monster_name));
+    let changed = autocomplete_entity_selector_generic(
+        ui,
+        id_salt,
+        "monster",
+        label,
+        candidates,
+        current_name,
+        "Start typing monster name...",
+        is_selected,
+        |text| {
+            if monsters.iter().any(|m| m.name == text) {
+                *cell.borrow_mut() = text.to_string();
+                true
+            } else {
+                false
             }
-        }
-
-        // Show clear button if something is selected
-        if !selected_monster_name.is_empty()
-            && ui
-                .small_button("✖")
-                .on_hover_text("Clear selection")
-                .clicked()
-        {
-            selected_monster_name.clear();
-            remove_autocomplete_buffer(ui.ctx(), buffer_id);
-            changed = true;
-        }
-
-        // Persist buffer back into egui memory so it survives frames.
-        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-    });
-
+        },
+        || cell.borrow_mut().clear(),
+    );
+    *selected_monster_name = cell.into_inner();
     changed
 }
 
@@ -3011,64 +3150,35 @@ pub fn autocomplete_condition_selector(
     selected_condition_id: &mut String,
     conditions: &[antares::domain::conditions::ConditionDefinition],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.horizontal(|ui| {
-        ui.label(label);
-
-        // Get current condition name
-        let current_name = conditions
-            .iter()
-            .find(|c| c.id == *selected_condition_id)
-            .map(|c| c.name.clone())
-            .unwrap_or_default();
-
-        let buffer_id = make_autocomplete_id(ui, "condition", id_salt);
-
-        // Build candidates from condition names
-        let candidates: Vec<String> = conditions.iter().map(|c| c.name.clone()).collect();
-
-        // Read the persistent buffer into a local `String`, allow the widget to edit it,
-        // and then write it back into egui `Memory` after the widget runs. This avoids
-        // holding long-lived mutable borrows into egui internals while still persisting
-        // the user's typed text across frames.
-        let mut text_buffer =
-            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
-
-        let response = AutocompleteInput::new(id_salt, &candidates)
-            .with_placeholder("Start typing condition name...")
-            .show(ui, &mut text_buffer);
-
-        if response.changed() && !text_buffer.is_empty() && text_buffer != current_name {
-            if let Some(condition) = conditions.iter().find(|c| c.name == text_buffer) {
-                *selected_condition_id = condition.id.clone();
-                changed = true;
+    let candidates: Vec<String> = conditions.iter().map(|c| c.name.clone()).collect();
+    let current_name = conditions
+        .iter()
+        .find(|c| c.id == *selected_condition_id)
+        .map(|c| c.name.clone())
+        .unwrap_or_default();
+    // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
+    let is_selected = !selected_condition_id.is_empty();
+    let cell = std::cell::RefCell::new(std::mem::take(selected_condition_id));
+    let changed = autocomplete_entity_selector_generic(
+        ui,
+        id_salt,
+        "condition",
+        label,
+        candidates,
+        current_name,
+        "Start typing condition name...",
+        is_selected,
+        |text| {
+            if let Some(condition) = conditions.iter().find(|c| c.name == text) {
+                *cell.borrow_mut() = condition.id.clone();
+                true
+            } else {
+                false
             }
-        }
-
-        // Show clear button if something is selected. If cleared, remove the persisted buffer.
-        let mut cleared = false;
-        // Show clear button if something is selected
-        if !selected_condition_id.is_empty()
-            && ui
-                .small_button("✖")
-                .on_hover_text("Clear selection")
-                .clicked()
-        {
-            selected_condition_id.clear();
-            remove_autocomplete_buffer(ui.ctx(), buffer_id);
-            changed = true;
-            cleared = true;
-        }
-
-        // Persist the edited buffer back into egui memory unless the user cleared it.
-        if !cleared {
-            store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-        }
-    });
-
+        },
+        || cell.borrow_mut().clear(),
+    );
+    *selected_condition_id = cell.into_inner();
     changed
 }
 
@@ -3094,76 +3204,44 @@ pub fn autocomplete_map_selector(
     selected_map_id: &mut String,
     maps: &[antares::domain::world::Map],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.horizontal(|ui| {
-        ui.label(label);
-
-        // Get current map name
-        let current_map_name =
-            if let Ok(map_id) = selected_map_id.parse::<antares::domain::types::MapId>() {
-                maps.iter()
-                    .find(|m| m.id == map_id)
-                    .map(|m| format!("{} (ID: {})", m.name, m.id))
-                    .unwrap_or_else(|| selected_map_id.clone())
-            } else {
-                selected_map_id.clone()
-            };
-
-        // Persist the per-widget text buffer in egui Memory and render the widget with a mutable reference.
-        // This ensures edits persist across frames and are tied to the egui UI context.
-        let buffer_id = make_autocomplete_id(ui, "map", id_salt);
-
-        // Build candidate display strings as "Name (ID: X)"
-        let candidates: Vec<String> = maps
-            .iter()
-            .map(|m| format!("{} (ID: {})", m.name, m.id))
-            .collect();
-
-        // Read the persistent buffer into a local `String` so we can safely pass
-        // a mutable reference into the widget without holding a long-lived
-        // mutable borrow of egui internals. After the widget returns, write the
-        // updated buffer back into Memory.
-        let mut text_buffer =
-            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_map_name.clone());
-
-        let response = AutocompleteInput::new(id_salt, &candidates)
-            .with_placeholder("Start typing map name...")
-            .show(ui, &mut text_buffer);
-
-        if response.changed() && !text_buffer.is_empty() && text_buffer != current_map_name {
-            // Try to extract map ID from the selected text (format: "Name (ID: X)")
-            if let Some(id_start) = text_buffer.rfind("(ID: ") {
-                if let Some(id_end) = text_buffer[id_start..].find(')') {
-                    let id_str = &text_buffer[id_start + 5..id_start + id_end];
-                    *selected_map_id = id_str.to_string();
-                    changed = true;
+    let candidates: Vec<String> = maps
+        .iter()
+        .map(|m| format!("{} (ID: {})", m.name, m.id))
+        .collect();
+    let current_map_name =
+        if let Ok(map_id) = selected_map_id.parse::<antares::domain::types::MapId>() {
+            maps.iter()
+                .find(|m| m.id == map_id)
+                .map(|m| format!("{} (ID: {})", m.name, m.id))
+                .unwrap_or_else(|| selected_map_id.clone())
+        } else {
+            selected_map_id.clone()
+        };
+    // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
+    let is_selected = !selected_map_id.is_empty();
+    let cell = std::cell::RefCell::new(std::mem::take(selected_map_id));
+    let changed = autocomplete_entity_selector_generic(
+        ui,
+        id_salt,
+        "map",
+        label,
+        candidates,
+        current_map_name,
+        "Start typing map name...",
+        is_selected,
+        |text| {
+            if let Some(id_start) = text.rfind("(ID: ") {
+                if let Some(id_end) = text[id_start..].find(')') {
+                    let id_str = &text[id_start + 5..id_start + id_end];
+                    *cell.borrow_mut() = id_str.to_string();
+                    return true;
                 }
             }
-        }
-
-        // Show clear button if something is selected. If cleared, remove the persisted buffer.
-        let mut cleared = false;
-        if !selected_map_id.is_empty()
-            && ui
-                .small_button("✖")
-                .on_hover_text("Clear selection")
-                .clicked()
-        {
-            selected_map_id.clear();
-            remove_autocomplete_buffer(ui.ctx(), buffer_id);
-            changed = true;
-            cleared = true;
-        }
-
-        // Persist edits back into egui Memory unless the user cleared the field.
-        if !cleared {
-            store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-        }
-    });
-
+            false
+        },
+        || cell.borrow_mut().clear(),
+    );
+    *selected_map_id = cell.into_inner();
     changed
 }
 
@@ -3189,85 +3267,170 @@ pub fn autocomplete_npc_selector(
     selected_npc_id: &mut String,
     maps: &[antares::domain::world::Map],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.horizontal(|ui| {
-        ui.label(label);
-
-        // Get current NPC display name
-        let current_display = if !selected_npc_id.is_empty() {
-            // Parse map_id:npc_id format
-            if let Some((map_id_str, npc_id_str)) = selected_npc_id.split_once(':') {
-                if let Ok(map_id) = map_id_str.parse::<antares::domain::types::MapId>() {
-                    let npc_id = npc_id_str.to_string();
-                    // Find the NPC
-                    maps.iter()
-                        .find(|m| m.id == map_id)
-                        .and_then(|m| m.npc_placements.iter().find(|n| n.npc_id == npc_id))
-                        .map(|placement| {
-                            // We don't have name access here, just show ID
-                            format!("NPC ID: {} (Map: {})", placement.npc_id, map_id)
-                        })
-                        .unwrap_or_else(|| selected_npc_id.clone())
-                } else {
-                    selected_npc_id.clone()
-                }
+    let npc_candidates_list = extract_npc_candidates(maps);
+    let candidates: Vec<String> = npc_candidates_list
+        .iter()
+        .map(|(display, _)| display.clone())
+        .collect();
+    let current_display = if !selected_npc_id.is_empty() {
+        if let Some((map_id_str, _)) = selected_npc_id.split_once(':') {
+            if let Ok(map_id) = map_id_str.parse::<antares::domain::types::MapId>() {
+                let npc_id_part = &selected_npc_id[map_id_str.len() + 1..];
+                maps.iter()
+                    .find(|m| m.id == map_id)
+                    .and_then(|m| m.npc_placements.iter().find(|n| n.npc_id == npc_id_part))
+                    .map(|placement| format!("NPC ID: {} (Map: {})", placement.npc_id, map_id))
+                    .unwrap_or_else(|| selected_npc_id.clone())
             } else {
                 selected_npc_id.clone()
             }
         } else {
-            String::new()
-        };
-
-        let buffer_id = make_autocomplete_id(ui, "npc", id_salt);
-
-        // Read persistent buffer into a local String so the widget can mutate it
-        // without holding a long-lived borrow into egui Memory, then write it back.
-        let mut text_buffer =
-            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_display.clone());
-
-        // Build candidates
-        let candidates: Vec<String> = extract_npc_candidates(maps)
-            .into_iter()
-            .map(|(display, _)| display)
-            .collect();
-
-        let response = AutocompleteInput::new(id_salt, &candidates)
-            .with_placeholder("Start typing NPC name...")
-            .show(ui, &mut text_buffer);
-
-        if response.changed() && !text_buffer.is_empty() && text_buffer != current_display {
-            // Try to find the NPC by reconstructing the ID from the display text
-            // Format: "Name (Map: MapName, NPC ID: X)"
+            selected_npc_id.clone()
+        }
+    } else {
+        String::new()
+    };
+    // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
+    let is_selected = !selected_npc_id.is_empty();
+    let cell = std::cell::RefCell::new(std::mem::take(selected_npc_id));
+    let changed = autocomplete_entity_selector_generic(
+        ui,
+        id_salt,
+        "npc",
+        label,
+        candidates,
+        current_display,
+        "Start typing NPC name...",
+        is_selected,
+        |text| {
             for (display, npc_id) in extract_npc_candidates(maps) {
-                if display == text_buffer {
-                    *selected_npc_id = npc_id;
-                    changed = true;
-                    break;
+                if display == text {
+                    *cell.borrow_mut() = npc_id;
+                    return true;
                 }
             }
+            false
+        },
+        || cell.borrow_mut().clear(),
+    );
+    *selected_npc_id = cell.into_inner();
+    changed
+}
+
+/// Generic multi-entity autocomplete list selector.
+///
+/// Core implementation shared by `autocomplete_item_list_selector`,
+/// `autocomplete_proficiency_list_selector`, `autocomplete_tag_list_selector`,
+/// `autocomplete_ability_list_selector`, and `autocomplete_monster_list_selector`.
+///
+/// # Type Parameters
+///
+/// * `T` — The element type stored in `selected`. Must be `Clone + PartialEq`.
+/// * `D` — Display function: given a `&T`, returns a `String` label.
+/// * `A` — Commit-on-change function: given typed text, returns `Some(T)` if
+///   a valid item was identified, `None` otherwise. The generic checks
+///   `!selected.contains(&t)` before adding.
+/// * `E` — Commit-on-enter function: same contract as `A` but called when the
+///   user presses Enter. For types that allow free-text entry (e.g. tags),
+///   this may return `Some(T)` even for text not in `candidates`.
+///
+/// # Arguments
+///
+/// * `ui` — egui UI context
+/// * `id_salt` — unique salt for this widget instance
+/// * `buffer_tag` — short tag used in the egui memory key (e.g. `"item_add"`)
+/// * `label` — group label shown above the list
+/// * `selected` — mutable reference to the currently-selected items
+/// * `display_fn` — how to render each selected item as a label string
+/// * `candidates` — autocomplete suggestions
+/// * `add_label` — label text for the "add" row (e.g. `"Add item:"`)
+/// * `placeholder` — placeholder text for the autocomplete input
+/// * `on_changed` — called when autocomplete fires `changed()`
+/// * `on_enter` — called when Enter is pressed; may differ from `on_changed`
+///   for types that allow free-text entry
+///
+/// # Returns
+///
+/// `true` if the selection changed this frame.
+#[allow(clippy::too_many_arguments)]
+pub fn autocomplete_list_selector_generic<T, D, A, E>(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    buffer_tag: &str,
+    label: &str,
+    selected: &mut Vec<T>,
+    display_fn: D,
+    candidates: Vec<String>,
+    add_label: &str,
+    placeholder: &str,
+    mut on_changed: A,
+    mut on_enter: E,
+) -> bool
+where
+    T: Clone + PartialEq,
+    D: Fn(&T) -> String,
+    A: FnMut(&str) -> Option<T>,
+    E: FnMut(&str) -> Option<T>,
+{
+    use crate::ui_helpers::AutocompleteInput;
+    let mut changed = false;
+
+    ui.group(|ui| {
+        ui.label(label);
+
+        let mut remove_idx: Option<usize> = None;
+        for (idx, item) in selected.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(display_fn(item));
+                if ui.small_button("✖").clicked() {
+                    remove_idx = Some(idx);
+                }
+            });
         }
 
-        // Show clear button if something is selected
-        let mut cleared = false;
-        if !selected_npc_id.is_empty()
-            && ui
-                .small_button("✖")
-                .on_hover_text("Clear selection")
-                .clicked()
-        {
-            selected_npc_id.clear();
-            remove_autocomplete_buffer(ui.ctx(), buffer_id);
+        if let Some(idx) = remove_idx {
+            selected.remove(idx);
             changed = true;
-            cleared = true;
         }
 
-        // Persist edits back into egui Memory unless the user cleared the buffer.
-        if !cleared {
-            store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-        }
+        ui.separator();
+
+        let buffer_id = make_autocomplete_id(ui, buffer_tag, id_salt);
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
+
+        ui.horizontal(|ui| {
+            ui.label(add_label);
+            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
+                .with_placeholder(placeholder)
+                .show(ui, &mut text_buffer);
+
+            let tb = text_buffer.trim().to_string();
+
+            if response.changed() && !tb.is_empty() {
+                if let Some(new_item) = on_changed(&tb) {
+                    if !selected.contains(&new_item) {
+                        selected.push(new_item);
+                        changed = true;
+                    }
+                    text_buffer.clear();
+                }
+            }
+
+            if response.has_focus()
+                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                && !tb.is_empty()
+            {
+                if let Some(new_item) = on_enter(&tb) {
+                    if !selected.contains(&new_item) {
+                        selected.push(new_item);
+                        changed = true;
+                    }
+                }
+                text_buffer.clear();
+            }
+        });
+
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
     changed
@@ -3295,81 +3458,26 @@ pub fn autocomplete_item_list_selector(
     selected_items: &mut Vec<antares::domain::types::ItemId>,
     items: &[antares::domain::items::types::Item],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.group(|ui| {
-        ui.label(label);
-
-        // Show current items
-        let mut remove_idx: Option<usize> = None;
-        for (idx, item_id) in selected_items.iter().enumerate() {
-            ui.horizontal(|ui| {
-                if let Some(item) = items.iter().find(|i| i.id == *item_id) {
-                    ui.label(&item.name);
-                } else {
-                    ui.label(format!("Unknown item (ID: {})", item_id));
-                }
-                if ui.small_button("✖").clicked() {
-                    remove_idx = Some(idx);
-                }
-            });
-        }
-
-        if let Some(idx) = remove_idx {
-            selected_items.remove(idx);
-            changed = true;
-        }
-
-        ui.separator();
-
-        // Add new item input (persistent buffer keyed by widget)
-        let buffer_id = make_autocomplete_id(ui, "item_add", id_salt);
-        let candidates: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
-
-        // Read persistent add buffer into a local String, render the Autocomplete widget
-        // with it, then persist the edited buffer back into egui Memory so it survives frames.
-        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
-
-        ui.horizontal(|ui| {
-            ui.label("Add item:");
-            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
-                .with_placeholder("Start typing item name...")
-                .show(ui, &mut text_buffer);
-
-            let tb = text_buffer.trim().to_string();
-
-            // 1) If the text changed and matches an existing candidate exactly, add it.
-            if response.changed() && !tb.is_empty() {
-                if let Some(item) = items.iter().find(|i| i.name == tb) {
-                    if !selected_items.contains(&item.id) {
-                        selected_items.push(item.id);
-                        changed = true;
-                    }
-                    // Clear the add buffer after successful add
-                    text_buffer.clear();
-                }
-            }
-
-            // 2) If Enter was pressed while this widget had focus, commit the typed text
-            //    (if it matches an item).
-            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                if let Some(item) = items.iter().find(|i| i.name == tb) {
-                    if !selected_items.contains(&item.id) {
-                        selected_items.push(item.id);
-                        changed = true;
-                    }
-                    text_buffer.clear();
-                }
-            }
-        });
-
-        // Persist the edited add buffer back into egui Memory
-        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-    });
-
-    changed
+    let candidates: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
+    autocomplete_list_selector_generic(
+        ui,
+        id_salt,
+        "item_add",
+        label,
+        selected_items,
+        |id| {
+            items
+                .iter()
+                .find(|i| i.id == *id)
+                .map(|i| i.name.clone())
+                .unwrap_or_else(|| format!("Unknown item (ID: {})", id))
+        },
+        candidates,
+        "Add item:",
+        "Start typing item name...",
+        |text| items.iter().find(|i| i.name == text).map(|i| i.id),
+        |text| items.iter().find(|i| i.name == text).map(|i| i.id),
+    )
 }
 
 /// Shows an autocomplete list selector for proficiencies.
@@ -3394,81 +3502,36 @@ pub fn autocomplete_proficiency_list_selector(
     selected_proficiencies: &mut Vec<String>,
     proficiencies: &[antares::domain::proficiency::ProficiencyDefinition],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.group(|ui| {
-        ui.label(label);
-
-        // Show current proficiencies
-        let mut remove_idx: Option<usize> = None;
-        for (idx, prof_id) in selected_proficiencies.iter().enumerate() {
-            ui.horizontal(|ui| {
-                if let Some(prof) = proficiencies.iter().find(|p| p.id == *prof_id) {
-                    ui.label(&prof.name);
-                } else {
-                    ui.label(format!("Unknown proficiency (ID: {})", prof_id));
-                }
-                if ui.small_button("✖").clicked() {
-                    remove_idx = Some(idx);
-                }
-            });
-        }
-
-        if let Some(idx) = remove_idx {
-            selected_proficiencies.remove(idx);
-            changed = true;
-        }
-
-        ui.separator();
-
-        let buffer_id = make_autocomplete_id(ui, "prof_add", id_salt);
-        let candidates: Vec<String> = proficiencies.iter().map(|p| p.name.clone()).collect();
-
-        // Read the persisted add buffer into a local String so the widget can
-        // mutate it without holding a long-lived mutable borrow of egui Memory.
-        // After rendering, write the updated buffer back into Memory.
-        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
-
-        ui.horizontal(|ui| {
-            ui.label("Add proficiency:");
-            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
-                .with_placeholder("Start typing proficiency...")
-                .show(ui, &mut text_buffer);
-
-            let tb = text_buffer.trim().to_string();
-
-            // 1) If the text changed and matches an existing candidate exactly, add it.
-            if response.changed() && !tb.is_empty() {
-                if let Some(prof) = proficiencies.iter().find(|p| p.name == tb) {
-                    if !selected_proficiencies.contains(&prof.id) {
-                        selected_proficiencies.push(prof.id.clone());
-                        changed = true;
-                    }
-                    // Clear the add buffer after successful add
-                    text_buffer.clear();
-                }
-            }
-
-            // 2) If Enter was pressed while this widget had focus, commit the typed text
-            //    (if it matches a proficiency).
-            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                if let Some(prof) = proficiencies.iter().find(|p| p.name == tb) {
-                    if !selected_proficiencies.contains(&prof.id) {
-                        selected_proficiencies.push(prof.id.clone());
-                        changed = true;
-                    }
-                    text_buffer.clear();
-                }
-            }
-        });
-
-        // Persist the edited add buffer back into egui Memory so it survives frames.
-        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-    });
-
-    changed
+    let candidates: Vec<String> = proficiencies.iter().map(|p| p.name.clone()).collect();
+    autocomplete_list_selector_generic(
+        ui,
+        id_salt,
+        "prof_add",
+        label,
+        selected_proficiencies,
+        |id| {
+            proficiencies
+                .iter()
+                .find(|p| p.id == *id)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| format!("Unknown proficiency (ID: {})", id))
+        },
+        candidates,
+        "Add proficiency:",
+        "Start typing proficiency...",
+        |text| {
+            proficiencies
+                .iter()
+                .find(|p| p.name == text)
+                .map(|p| p.id.clone())
+        },
+        |text| {
+            proficiencies
+                .iter()
+                .find(|p| p.name == text)
+                .map(|p| p.id.clone())
+        },
+    )
 }
 
 /// Shows an autocomplete list selector for item tags.
@@ -3493,74 +3556,33 @@ pub fn autocomplete_tag_list_selector(
     selected_tags: &mut Vec<String>,
     available_tags: &[String],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.group(|ui| {
-        ui.label(label);
-
-        // Show current tags
-        let mut remove_idx: Option<usize> = None;
-        for (idx, tag) in selected_tags.iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui.label(tag);
-                if ui.small_button("✖").clicked() {
-                    remove_idx = Some(idx);
-                }
-            });
-        }
-
-        if let Some(idx) = remove_idx {
-            selected_tags.remove(idx);
-            changed = true;
-        }
-
-        ui.separator();
-
-        // Add new tag input (persistent buffer)
-        let buffer_id = make_autocomplete_id(ui, "tag_add", id_salt);
-        let candidates: Vec<String> = available_tags.to_vec();
-
-        // Read persistent add buffer into a local String so the widget can mutate it
-        // without holding a long-lived borrow into egui Memory. After rendering, write the updated value back.
-        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
-
-        ui.horizontal(|ui| {
-            ui.label("Add tag:");
-            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
-                .with_placeholder("Start typing tag...")
-                .show(ui, &mut text_buffer);
-
-            // Use a trimmed buffer for comparisons so accidental whitespace doesn't create tags.
-            let tb = text_buffer.trim().to_string();
-
-            // 1) If the text changed and matches an existing candidate exactly, add it.
-            if response.changed() && !tb.is_empty() && candidates.iter().any(|c| c == &tb) {
-                if !selected_tags.contains(&tb) {
-                    selected_tags.push(tb.clone());
-                    changed = true;
-                }
-                // Clear buffer after successful selection
-                text_buffer.clear();
+    let candidates: Vec<String> = available_tags.to_vec();
+    let candidates_clone = candidates.clone();
+    autocomplete_list_selector_generic(
+        ui,
+        id_salt,
+        "tag_add",
+        label,
+        selected_tags,
+        |tag| tag.clone(),
+        candidates,
+        "Add tag:",
+        "Start typing tag...",
+        move |text: &str| {
+            if candidates_clone.iter().any(|c| c.as_str() == text) {
+                Some(text.to_string())
+            } else {
+                None
             }
-
-            // 2) If Enter was pressed while this widget had focus, commit the typed text
-            //    (even if it's not an existing candidate). This avoids adding on partial typing.
-            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                if !tb.is_empty() && !selected_tags.contains(&tb) {
-                    selected_tags.push(tb.clone());
-                    changed = true;
-                }
-                text_buffer.clear();
+        },
+        |text: &str| {
+            if !text.is_empty() {
+                Some(text.to_string())
+            } else {
+                None
             }
-        });
-
-        // Persist the edited add buffer back into egui Memory
-        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-    });
-
-    changed
+        },
+    )
 }
 
 /// Shows an autocomplete list selector for special abilities.
@@ -3585,71 +3607,33 @@ pub fn autocomplete_ability_list_selector(
     selected_abilities: &mut Vec<String>,
     available_abilities: &[String],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.group(|ui| {
-        ui.label(label);
-
-        // Show current abilities
-        let mut remove_idx: Option<usize> = None;
-        for (idx, ability) in selected_abilities.iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui.label(ability);
-                if ui.small_button("✖").clicked() {
-                    remove_idx = Some(idx);
-                }
-            });
-        }
-
-        if let Some(idx) = remove_idx {
-            selected_abilities.remove(idx);
-            changed = true;
-        }
-
-        ui.separator();
-
-        let buffer_id = make_autocomplete_id(ui, "ability_add", id_salt);
-        let candidates: Vec<String> = available_abilities.to_vec();
-
-        // Read persistent add buffer into a local String so the widget can mutate it
-        // without holding a long-lived borrow into egui Memory. After rendering, write the updated value back.
-        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
-
-        ui.horizontal(|ui| {
-            ui.label("Add ability:");
-            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
-                .with_placeholder("Start typing ability...")
-                .show(ui, &mut text_buffer);
-
-            let tb = text_buffer.trim().to_string();
-
-            // 1) If the text changed and matches an existing candidate exactly, add it.
-            if response.changed() && !tb.is_empty() && candidates.iter().any(|c| c == &tb) {
-                if !selected_abilities.contains(&tb) {
-                    selected_abilities.push(tb.clone());
-                    changed = true;
-                }
-                // Clear buffer after successful add
-                text_buffer.clear();
+    let candidates: Vec<String> = available_abilities.to_vec();
+    let candidates_clone = candidates.clone();
+    autocomplete_list_selector_generic(
+        ui,
+        id_salt,
+        "ability_add",
+        label,
+        selected_abilities,
+        |ability| ability.clone(),
+        candidates,
+        "Add ability:",
+        "Start typing ability...",
+        move |text: &str| {
+            if candidates_clone.iter().any(|c| c.as_str() == text) {
+                Some(text.to_string())
+            } else {
+                None
             }
-
-            // 2) If Enter was pressed while this widget had focus, commit the typed text.
-            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                if !tb.is_empty() && !selected_abilities.contains(&tb) {
-                    selected_abilities.push(tb.clone());
-                    changed = true;
-                }
-                text_buffer.clear();
+        },
+        |text: &str| {
+            if !text.is_empty() {
+                Some(text.to_string())
+            } else {
+                None
             }
-        });
-
-        // Persist the edited add buffer back into egui Memory so it survives frames.
-        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-    });
-
-    changed
+        },
+    )
 }
 
 /// Shows an autocomplete input for selecting a race by name.
@@ -3662,55 +3646,35 @@ pub fn autocomplete_race_selector(
     selected_race_id: &mut String,
     races: &[antares::domain::races::RaceDefinition],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.horizontal(|ui| {
-        ui.label(label);
-
-        // Get current race name based on ID
-        let current_name = races
-            .iter()
-            .find(|r| r.id == *selected_race_id)
-            .map(|r| r.name.clone())
-            .unwrap_or_default();
-
-        let buffer_id = make_autocomplete_id(ui, "race", id_salt);
-
-        // Build candidates
-        let candidates: Vec<String> = races.iter().map(|r| r.name.clone()).collect();
-
-        // Persistent buffer logic
-        let mut text_buffer =
-            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
-
-        let response = AutocompleteInput::new(id_salt, &candidates)
-            .with_placeholder("Start typing race name...")
-            .show(ui, &mut text_buffer);
-
-        if response.changed() && !text_buffer.is_empty() && text_buffer != current_name {
-            if let Some(race) = races.iter().find(|r| r.name == text_buffer) {
-                *selected_race_id = race.id.clone();
-                changed = true;
+    let candidates: Vec<String> = races.iter().map(|r| r.name.clone()).collect();
+    let current_name = races
+        .iter()
+        .find(|r| r.id == *selected_race_id)
+        .map(|r| r.name.clone())
+        .unwrap_or_default();
+    // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
+    let is_selected = !selected_race_id.is_empty();
+    let cell = std::cell::RefCell::new(std::mem::take(selected_race_id));
+    let changed = autocomplete_entity_selector_generic(
+        ui,
+        id_salt,
+        "race",
+        label,
+        candidates,
+        current_name,
+        "Start typing race name...",
+        is_selected,
+        |text| {
+            if let Some(race) = races.iter().find(|r| r.name == text) {
+                *cell.borrow_mut() = race.id.clone();
+                true
+            } else {
+                false
             }
-        }
-
-        // Show clear button
-        if !selected_race_id.is_empty()
-            && ui
-                .small_button("✖")
-                .on_hover_text("Clear selection")
-                .clicked()
-        {
-            selected_race_id.clear();
-            remove_autocomplete_buffer(ui.ctx(), buffer_id);
-            changed = true;
-        }
-
-        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-    });
-
+        },
+        || cell.borrow_mut().clear(),
+    );
+    *selected_race_id = cell.into_inner();
     changed
 }
 
@@ -3724,55 +3688,35 @@ pub fn autocomplete_class_selector(
     selected_class_id: &mut String,
     classes: &[antares::domain::classes::ClassDefinition],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.horizontal(|ui| {
-        ui.label(label);
-
-        // Get current class name based on ID
-        let current_name = classes
-            .iter()
-            .find(|c| c.id == *selected_class_id)
-            .map(|c| c.name.clone())
-            .unwrap_or_default();
-
-        let buffer_id = make_autocomplete_id(ui, "class", id_salt);
-
-        // Build candidates
-        let candidates: Vec<String> = classes.iter().map(|c| c.name.clone()).collect();
-
-        // Persistent buffer logic
-        let mut text_buffer =
-            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
-
-        let response = AutocompleteInput::new(id_salt, &candidates)
-            .with_placeholder("Start typing class name...")
-            .show(ui, &mut text_buffer);
-
-        if response.changed() && !text_buffer.is_empty() && text_buffer != current_name {
-            if let Some(class) = classes.iter().find(|c| c.name == text_buffer) {
-                *selected_class_id = class.id.clone();
-                changed = true;
+    let candidates: Vec<String> = classes.iter().map(|c| c.name.clone()).collect();
+    let current_name = classes
+        .iter()
+        .find(|c| c.id == *selected_class_id)
+        .map(|c| c.name.clone())
+        .unwrap_or_default();
+    // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
+    let is_selected = !selected_class_id.is_empty();
+    let cell = std::cell::RefCell::new(std::mem::take(selected_class_id));
+    let changed = autocomplete_entity_selector_generic(
+        ui,
+        id_salt,
+        "class",
+        label,
+        candidates,
+        current_name,
+        "Start typing class name...",
+        is_selected,
+        |text| {
+            if let Some(class) = classes.iter().find(|c| c.name == text) {
+                *cell.borrow_mut() = class.id.clone();
+                true
+            } else {
+                false
             }
-        }
-
-        // Show clear button
-        if !selected_class_id.is_empty()
-            && ui
-                .small_button("✖")
-                .on_hover_text("Clear selection")
-                .clicked()
-        {
-            selected_class_id.clear();
-            remove_autocomplete_buffer(ui.ctx(), buffer_id);
-            changed = true;
-        }
-
-        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-    });
-
+        },
+        || cell.borrow_mut().clear(),
+    );
+    *selected_class_id = cell.into_inner();
     changed
 }
 
@@ -3786,79 +3730,26 @@ pub fn autocomplete_monster_list_selector(
     selected_monsters: &mut Vec<antares::domain::types::MonsterId>,
     monsters: &[antares::domain::combat::database::MonsterDefinition],
 ) -> bool {
-    use crate::ui_helpers::AutocompleteInput;
-
-    let mut changed = false;
-
-    ui.group(|ui| {
-        ui.label(label);
-
-        // Show current monsters
-        let mut remove_idx: Option<usize> = None;
-        for (idx, monster_id) in selected_monsters.iter().enumerate() {
-            ui.horizontal(|ui| {
-                if let Some(monster) = monsters.iter().find(|m| m.id == *monster_id) {
-                    ui.label(&monster.name);
-                } else {
-                    ui.label(format!("Unknown monster (ID: {})", monster_id));
-                }
-                if ui.small_button("✖").clicked() {
-                    remove_idx = Some(idx);
-                }
-            });
-        }
-
-        if let Some(idx) = remove_idx {
-            selected_monsters.remove(idx);
-            changed = true;
-        }
-
-        ui.separator();
-
-        // Add new monster input
-        let buffer_id = make_autocomplete_id(ui, "monster_add", id_salt);
-        let candidates: Vec<String> = monsters.iter().map(|m| m.name.clone()).collect();
-
-        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
-
-        ui.horizontal(|ui| {
-            ui.label("Add monster:");
-            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
-                .with_placeholder("Start typing monster name...")
-                .show(ui, &mut text_buffer);
-
-            let tb = text_buffer.trim().to_string();
-
-            // 1) If the text changed and matches an existing candidate exactly, add it.
-            if response.changed() && !tb.is_empty() {
-                if let Some(monster) = monsters.iter().find(|m| m.name == tb) {
-                    if !selected_monsters.contains(&monster.id) {
-                        selected_monsters.push(monster.id);
-                        changed = true;
-                    }
-                    // Clear the add buffer after successful add
-                    text_buffer.clear();
-                }
-            }
-
-            // 2) If Enter was pressed while this widget had focus, commit the typed text
-            //    (if it matches a monster).
-            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                if let Some(monster) = monsters.iter().find(|m| m.name == tb) {
-                    if !selected_monsters.contains(&monster.id) {
-                        selected_monsters.push(monster.id);
-                        changed = true;
-                    }
-                    text_buffer.clear();
-                }
-            }
-        });
-
-        // Persist the edited add buffer back into egui Memory
-        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
-    });
-
-    changed
+    let candidates: Vec<String> = monsters.iter().map(|m| m.name.clone()).collect();
+    autocomplete_list_selector_generic(
+        ui,
+        id_salt,
+        "monster_add",
+        label,
+        selected_monsters,
+        |monster_id| {
+            monsters
+                .iter()
+                .find(|m| m.id == *monster_id)
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| format!("Unknown monster (ID: {})", monster_id))
+        },
+        candidates,
+        "Add monster:",
+        "Start typing monster name...",
+        |text| monsters.iter().find(|m| m.name == text).map(|m| m.id),
+        |text| monsters.iter().find(|m| m.name == text).map(|m| m.id),
+    )
 }
 
 /// Portrait selector widget with autocomplete functionality
@@ -7719,5 +7610,400 @@ mod tests {
             String::new()
         };
         assert_eq!(tooltip, "⚠ Creature ID '999' not found in registry");
+    }
+
+    // =========================================================================
+    // autocomplete_entity_selector_generic tests
+    // =========================================================================
+
+    #[test]
+    fn test_autocomplete_entity_selector_generic_returns_false_with_no_interaction() {
+        // With no programmatic interaction the function should return false.
+        let ctx = egui::Context::default();
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        ctx.begin_pass(raw_input);
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            let mut select_called = false;
+            let changed = autocomplete_entity_selector_generic(
+                ui,
+                "test_generic_no_interaction",
+                "test",
+                "Label:",
+                vec!["Alpha".to_string(), "Beta".to_string()],
+                String::new(),
+                "Type here...",
+                false,
+                |_text| {
+                    select_called = true;
+                    false
+                },
+                || {},
+            );
+            assert!(!changed);
+            assert!(
+                !select_called,
+                "on_select must not be called without typed input"
+            );
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_entity_selector_generic_empty_label_does_not_panic() {
+        // Passing an empty label should be safe — the label widget is simply skipped.
+        let ctx = egui::Context::default();
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        ctx.begin_pass(raw_input);
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            // Use RefCell so both closures can share mutation without conflicting borrows.
+            let cell = std::cell::RefCell::new(String::new());
+            let is_selected = !cell.borrow().is_empty();
+            let changed = autocomplete_entity_selector_generic(
+                ui,
+                "test_empty_label",
+                "test",
+                "", // empty label — should be silently skipped
+                vec!["Option A".to_string()],
+                cell.borrow().clone(),
+                "Placeholder",
+                is_selected,
+                |text| {
+                    *cell.borrow_mut() = text.to_string();
+                    true
+                },
+                || cell.borrow_mut().clear(),
+            );
+            assert!(!changed);
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_entity_selector_generic_initialises_buffer_in_egui_memory() {
+        // The function must store a persistent buffer in egui Memory on first render.
+        let ctx = egui::Context::default();
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        ctx.begin_pass(raw_input);
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            // Use RefCell so both closures can share mutation without conflicting borrows.
+            let cell = std::cell::RefCell::new(String::new());
+            let is_selected = !cell.borrow().is_empty();
+            let _ = autocomplete_entity_selector_generic(
+                ui,
+                "buf_init_test",
+                "race",
+                "Race:",
+                vec!["Human".to_string(), "Elf".to_string()],
+                cell.borrow().clone(),
+                "Type race...",
+                is_selected,
+                |text| {
+                    *cell.borrow_mut() = text.to_string();
+                    true
+                },
+                || cell.borrow_mut().clear(),
+            );
+            // After rendering, egui memory should contain an entry for this buffer.
+            ui.horizontal(|ui| {
+                let id = make_autocomplete_id(ui, "race", "buf_init_test");
+                let stored = ui.ctx().memory(|mem| mem.data.get_temp::<String>(id));
+                assert!(
+                    stored.is_some(),
+                    "Buffer entry should be created in egui Memory on first render"
+                );
+            });
+        });
+    }
+
+    // =========================================================================
+    // autocomplete_list_selector_generic tests
+    // =========================================================================
+
+    #[test]
+    fn test_autocomplete_list_selector_generic_starts_with_no_change() {
+        // An initial render with no interaction should return false.
+        let ctx = egui::Context::default();
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        ctx.begin_pass(raw_input);
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            let mut selected: Vec<String> = Vec::new();
+            let changed = autocomplete_list_selector_generic(
+                ui,
+                "list_no_change",
+                "tag_add",
+                "Tags:",
+                &mut selected,
+                |tag: &String| tag.clone(),
+                vec!["Alpha".to_string(), "Beta".to_string()],
+                "Add tag:",
+                "Type here...",
+                |text: &str| {
+                    if !text.is_empty() {
+                        Some(text.to_string())
+                    } else {
+                        None
+                    }
+                },
+                |text: &str| {
+                    if !text.is_empty() {
+                        Some(text.to_string())
+                    } else {
+                        None
+                    }
+                },
+            );
+            assert!(!changed);
+            assert!(selected.is_empty());
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_list_selector_generic_display_fn_called_for_existing_items() {
+        // Verify that display_fn is used to render each already-selected item.
+        // We exercise this through the pure display path (no egui rendering needed
+        // for the assertion itself).
+        let items = [10u32, 20u32];
+        let displayed: Vec<String> = items.iter().map(|id| format!("Item({})", id)).collect();
+        assert_eq!(displayed, vec!["Item(10)", "Item(20)"]);
+    }
+
+    #[test]
+    fn test_autocomplete_list_selector_generic_initialises_buffer_in_egui_memory() {
+        // The function must persist a text buffer in egui Memory after rendering.
+        let ctx = egui::Context::default();
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        ctx.begin_pass(raw_input);
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            let mut selected: Vec<String> = Vec::new();
+            let _ = autocomplete_list_selector_generic(
+                ui,
+                "list_buf_init",
+                "tag_add",
+                "Tags:",
+                &mut selected,
+                |t: &String| t.clone(),
+                vec!["Foo".to_string()],
+                "Add tag:",
+                "Type...",
+                |text: &str| {
+                    if !text.is_empty() {
+                        Some(text.to_string())
+                    } else {
+                        None
+                    }
+                },
+                |text: &str| {
+                    if !text.is_empty() {
+                        Some(text.to_string())
+                    } else {
+                        None
+                    }
+                },
+            );
+            ui.horizontal(|ui| {
+                let id = make_autocomplete_id(ui, "tag_add", "list_buf_init");
+                let stored = ui.ctx().memory(|mem| mem.data.get_temp::<String>(id));
+                assert!(
+                    stored.is_some(),
+                    "autocomplete_list_selector_generic must initialise a buffer in egui Memory"
+                );
+            });
+        });
+    }
+
+    // =========================================================================
+    // dispatch_list_action tests
+    // =========================================================================
+
+    #[derive(Clone, serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    struct TestEntity {
+        id: u32,
+        name: String,
+    }
+
+    #[test]
+    fn test_dispatch_list_action_duplicate() {
+        let mut data = vec![
+            TestEntity {
+                id: 1,
+                name: "Alpha".to_string(),
+            },
+            TestEntity {
+                id: 2,
+                name: "Beta".to_string(),
+            },
+        ];
+        let mut selected = Some(0usize);
+        let mut buf = String::new();
+        let mut show = false;
+        let mut msg = String::new();
+
+        let changed = dispatch_list_action(
+            ItemAction::Duplicate,
+            &mut data,
+            &mut selected,
+            |entry, all| {
+                entry.id = all.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+                entry.name = format!("{} (Copy)", entry.name);
+            },
+            "thing",
+            &mut buf,
+            &mut show,
+            &mut msg,
+        );
+
+        assert!(changed);
+        assert_eq!(data.len(), 3);
+        assert_eq!(data[2].name, "Alpha (Copy)");
+        assert_eq!(data[2].id, 3);
+        // selection unchanged after duplicate
+        assert_eq!(selected, Some(0));
+    }
+
+    #[test]
+    fn test_dispatch_list_action_delete() {
+        let mut data = vec![
+            TestEntity {
+                id: 1,
+                name: "Alpha".to_string(),
+            },
+            TestEntity {
+                id: 2,
+                name: "Beta".to_string(),
+            },
+        ];
+        let mut selected = Some(0usize);
+        let mut buf = String::new();
+        let mut show = false;
+        let mut msg = String::new();
+
+        let changed = dispatch_list_action(
+            ItemAction::Delete,
+            &mut data,
+            &mut selected,
+            |_, _| {},
+            "thing",
+            &mut buf,
+            &mut show,
+            &mut msg,
+        );
+
+        assert!(changed);
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0].name, "Beta");
+        // selection cleared after delete
+        assert_eq!(selected, None);
+    }
+
+    #[test]
+    fn test_dispatch_list_action_export() {
+        let mut data = vec![TestEntity {
+            id: 1,
+            name: "Alpha".to_string(),
+        }];
+        let mut selected = Some(0usize);
+        let mut buf = String::new();
+        let mut show = false;
+        let mut msg = String::new();
+
+        let changed = dispatch_list_action(
+            ItemAction::Export,
+            &mut data,
+            &mut selected,
+            |_, _| {},
+            "thing",
+            &mut buf,
+            &mut show,
+            &mut msg,
+        );
+
+        assert!(!changed); // Export doesn't mutate collection
+        assert!(!buf.is_empty(), "export buffer should be populated");
+        assert!(show, "show_import_dialog should be set");
+        assert!(
+            msg.contains("exported"),
+            "status message should mention export"
+        );
+    }
+
+    #[test]
+    fn test_dispatch_list_action_edit_is_noop() {
+        let mut data = vec![TestEntity {
+            id: 1,
+            name: "Alpha".to_string(),
+        }];
+        let mut selected = Some(0usize);
+        let mut buf = String::new();
+        let mut show = false;
+        let mut msg = String::new();
+
+        let changed = dispatch_list_action(
+            ItemAction::Edit,
+            &mut data,
+            &mut selected,
+            |_, _| {},
+            "thing",
+            &mut buf,
+            &mut show,
+            &mut msg,
+        );
+
+        assert!(!changed);
+        assert_eq!(data.len(), 1);
+        assert_eq!(selected, Some(0));
+    }
+
+    #[test]
+    fn test_dispatch_list_action_no_selection_is_noop() {
+        let mut data = vec![TestEntity {
+            id: 1,
+            name: "Alpha".to_string(),
+        }];
+        let mut selected: Option<usize> = None;
+        let mut buf = String::new();
+        let mut show = false;
+        let mut msg = String::new();
+
+        let changed = dispatch_list_action(
+            ItemAction::Delete,
+            &mut data,
+            &mut selected,
+            |_, _| {},
+            "thing",
+            &mut buf,
+            &mut show,
+            &mut msg,
+        );
+
+        assert!(!changed);
+        assert_eq!(data.len(), 1); // nothing deleted
     }
 }

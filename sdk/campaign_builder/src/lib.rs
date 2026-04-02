@@ -37,6 +37,7 @@ pub mod item_mesh_undo_redo;
 pub mod item_mesh_workflow;
 pub mod items_editor;
 pub mod keyboard_shortcuts;
+pub mod linear_history;
 pub mod lod_editor;
 pub mod logging;
 pub mod map_editor;
@@ -874,6 +875,85 @@ impl Default for CampaignBuilderApp {
             tray_cmd_rx: None,
         }
     }
+}
+
+/// Reads a RON file and parses it as `Vec<T>`.
+///
+/// Returns `Some(Vec<T>)` on success and updates `status_message`.
+/// Returns `None` on any I/O or parse error, updating `status_message` with
+/// a description of the failure.
+///
+/// This is a private helper shared by the various `load_X` methods on
+/// [`CampaignBuilderApp`] to avoid duplicating the file-read / parse /
+/// error-message pattern.
+///
+/// # Arguments
+///
+/// * `campaign_dir` - Optional campaign directory; `None` → returns `None`
+/// * `filename` - Relative filename within the campaign directory
+/// * `type_label` - Human-readable label used in status messages, e.g. `"items"`
+/// * `status_message` - Updated with success/failure info
+fn read_ron_collection<T: serde::de::DeserializeOwned>(
+    campaign_dir: &Option<PathBuf>,
+    filename: &str,
+    type_label: &str,
+    status_message: &mut String,
+) -> Option<Vec<T>> {
+    let dir = campaign_dir.as_ref()?;
+    let path = dir.join(filename);
+    if !path.exists() {
+        return None;
+    }
+    match fs::read_to_string(&path) {
+        Ok(contents) => match ron::from_str::<Vec<T>>(&contents) {
+            Ok(data) => Some(data),
+            Err(e) => {
+                *status_message = format!("Failed to parse {}: {}", type_label, e);
+                None
+            }
+        },
+        Err(e) => {
+            *status_message = format!("Failed to read {} file: {}", type_label, e);
+            None
+        }
+    }
+}
+
+/// Serialises `data` as pretty-printed RON and writes it to
+/// `<campaign_dir>/<filename>`.
+///
+/// Returns `Ok(())` on success or `Err(String)` with an error description.
+///
+/// This is a private helper shared by the various `save_X` methods on
+/// [`CampaignBuilderApp`] to avoid duplicating the dir-create / serialize /
+/// write pattern.
+///
+/// # Arguments
+///
+/// * `campaign_dir` - Optional campaign directory; `None` → `Err("No campaign directory set")`
+/// * `filename` - Relative filename within the campaign directory
+/// * `data` - The slice to serialise
+/// * `type_label` - Human-readable label used in error messages, e.g. `"items"`
+fn write_ron_collection<T: serde::Serialize>(
+    campaign_dir: &Option<PathBuf>,
+    filename: &str,
+    data: &[T],
+    type_label: &str,
+) -> Result<(), String> {
+    let dir = campaign_dir
+        .as_ref()
+        .ok_or_else(|| "No campaign directory set".to_string())?;
+    let path = dir.join(filename);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create {} directory: {}", type_label, e))?;
+    }
+    let ron_config = ron::ser::PrettyConfig::new()
+        .struct_names(false)
+        .enumerate_arrays(false);
+    let contents = ron::ser::to_string_pretty(data, ron_config)
+        .map_err(|e| format!("Failed to serialize {}: {}", type_label, e))?;
+    fs::write(&path, contents).map_err(|e| format!("Failed to write {} file: {}", type_label, e))
 }
 
 impl CampaignBuilderApp {
@@ -1747,90 +1827,52 @@ impl CampaignBuilderApp {
     fn load_items(&mut self) {
         self.logger.debug(category::FILE_IO, "load_items() called");
         let items_file = self.campaign.items_file.clone();
-        if let Some(ref dir) = self.campaign_dir {
-            let items_path = dir.join(&items_file);
-            self.logger.verbose(
-                category::FILE_IO,
-                &format!("Loading items from: {}", items_path.display()),
-            );
-            if items_path.exists() {
-                match fs::read_to_string(&items_path) {
-                    Ok(contents) => {
-                        self.logger.verbose(
-                            category::FILE_IO,
-                            &format!("Read {} bytes from items file", contents.len()),
-                        );
-                        match ron::from_str::<Vec<Item>>(&contents) {
-                            Ok(items) => {
-                                let count = items.len();
-                                self.items = items;
-
-                                // Mark data file as loaded in asset manager
-                                if let Some(ref mut manager) = self.asset_manager {
-                                    manager.mark_data_file_loaded(&items_file, count);
-                                }
-
-                                // Validate IDs after loading
-                                let id_errors = self.validate_item_ids();
-                                if !id_errors.is_empty() {
-                                    self.validation_errors.extend(id_errors.clone());
-                                    self.logger.warn(
-                                        category::DATA,
-                                        &format!(
-                                            "Loaded {} items with {} ID conflicts",
-                                            self.items.len(),
-                                            id_errors.len()
-                                        ),
-                                    );
-                                    self.status_message = format!(
-                                        "⚠️ Loaded {} items with {} ID conflicts",
-                                        self.items.len(),
-                                        id_errors.len()
-                                    );
-                                } else {
-                                    self.logger.info(
-                                        category::FILE_IO,
-                                        &format!("Loaded {} items", self.items.len()),
-                                    );
-                                    self.status_message =
-                                        format!("Loaded {} items", self.items.len());
-                                }
-                            }
-                            Err(e) => {
-                                // Mark data file as error in asset manager
-                                if let Some(ref mut manager) = self.asset_manager {
-                                    manager.mark_data_file_error(&items_file, &e.to_string());
-                                }
-                                self.logger.error(
-                                    category::FILE_IO,
-                                    &format!("Failed to parse items: {}", e),
-                                );
-                                self.status_message = format!("Failed to parse items: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        // Mark data file as error in asset manager
-                        if let Some(ref mut manager) = self.asset_manager {
-                            manager.mark_data_file_error(&items_file, &e.to_string());
-                        }
-                        self.logger.error(
-                            category::FILE_IO,
-                            &format!("Failed to read items file: {}", e),
-                        );
-                        self.status_message = format!("Failed to read items file: {}", e);
-                    }
-                }
-            } else {
+        self.logger.verbose(
+            category::FILE_IO,
+            &format!("Loading items from campaign dir"),
+        );
+        if let Some(items) = read_ron_collection::<Item>(
+            &self.campaign_dir,
+            &items_file,
+            "items",
+            &mut self.status_message,
+        ) {
+            let count = items.len();
+            self.items = items;
+            if let Some(ref mut manager) = self.asset_manager {
+                manager.mark_data_file_loaded(&items_file, count);
+            }
+            let id_errors = self.validate_item_ids();
+            if !id_errors.is_empty() {
+                self.validation_errors.extend(id_errors.clone());
                 self.logger.warn(
-                    category::FILE_IO,
-                    &format!("Items file does not exist: {}", items_path.display()),
+                    category::DATA,
+                    &format!(
+                        "Loaded {} items with {} ID conflicts",
+                        self.items.len(),
+                        id_errors.len()
+                    ),
                 );
+                self.status_message = format!(
+                    "⚠️ Loaded {} items with {} ID conflicts",
+                    self.items.len(),
+                    id_errors.len()
+                );
+            } else {
+                self.logger.info(
+                    category::FILE_IO,
+                    &format!("Loaded {} items", self.items.len()),
+                );
+                self.status_message = format!("Loaded {} items", self.items.len());
             }
         } else {
-            self.logger.warn(
+            // read_ron_collection already set self.status_message on error
+            if let Some(ref mut manager) = self.asset_manager {
+                manager.mark_data_file_error(&items_file, &self.status_message.clone());
+            }
+            self.logger.error(
                 category::FILE_IO,
-                "No campaign directory set when trying to load items",
+                &format!("Failed to load items: {}", self.status_message),
             );
         }
     }
@@ -1838,234 +1880,100 @@ impl CampaignBuilderApp {
     /// Save items to RON file
     fn save_items(&mut self) -> Result<(), String> {
         self.logger.debug(category::FILE_IO, "save_items() called");
-        if let Some(ref dir) = self.campaign_dir {
-            let items_path = dir.join(&self.campaign.items_file);
-            self.logger.verbose(
-                category::FILE_IO,
-                &format!(
-                    "Saving {} items to: {}",
-                    self.items.len(),
-                    items_path.display()
-                ),
-            );
-
-            // Create items directory if it doesn't exist
-            if let Some(parent) = items_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create items directory: {}", e))?;
-            }
-
-            let ron_config = ron::ser::PrettyConfig::new()
-                .struct_names(false)
-                .enumerate_arrays(false);
-
-            // Sort by ID before serializing so the file order is always
-            // deterministic regardless of the order items were added/edited.
-            let mut sorted_items = self.items.clone();
-            sorted_items.sort_by_key(|i| i.id);
-
-            let contents = ron::ser::to_string_pretty(&sorted_items, ron_config)
-                .map_err(|e| format!("Failed to serialize items: {}", e))?;
-
-            fs::write(&items_path, &contents)
-                .map_err(|e| format!("Failed to write items file: {}", e))?;
-
-            self.logger.info(
-                category::FILE_IO,
-                &format!(
-                    "Saved {} items ({} bytes)",
-                    self.items.len(),
-                    contents.len()
-                ),
-            );
-            self.unsaved_changes = true;
-            Ok(())
-        } else {
-            self.logger.error(
-                category::FILE_IO,
-                "No campaign directory set when trying to save items",
-            );
-            Err("No campaign directory set".to_string())
-        }
+        let mut sorted = self.items.clone();
+        sorted.sort_by_key(|i| i.id);
+        write_ron_collection(
+            &self.campaign_dir,
+            &self.campaign.items_file,
+            &sorted,
+            "items",
+        )?;
+        self.logger.info(
+            category::FILE_IO,
+            &format!("Saved {} items", self.items.len()),
+        );
+        self.unsaved_changes = true;
+        Ok(())
     }
 
     /// Load spells from RON file
     fn load_spells(&mut self) {
         let spells_file = self.campaign.spells_file.clone();
-        if let Some(ref dir) = self.campaign_dir {
-            let spells_path = dir.join(&spells_file);
-            if spells_path.exists() {
-                match fs::read_to_string(&spells_path) {
-                    Ok(contents) => match ron::from_str::<Vec<Spell>>(&contents) {
-                        Ok(spells) => {
-                            let count = spells.len();
-                            self.spells = spells;
-
-                            // Mark data file as loaded in asset manager
-                            if let Some(ref mut manager) = self.asset_manager {
-                                manager.mark_data_file_loaded(&spells_file, count);
-                            }
-
-                            // Validate IDs after loading
-                            let id_errors = self.validate_spell_ids();
-                            if !id_errors.is_empty() {
-                                self.validation_errors.extend(id_errors.clone());
-                                self.status_message = format!(
-                                    "⚠️ Loaded {} spells with {} ID conflicts",
-                                    self.spells.len(),
-                                    id_errors.len()
-                                );
-                            } else {
-                                self.status_message =
-                                    format!("Loaded {} spells", self.spells.len());
-                            }
-                        }
-                        Err(e) => {
-                            // Mark data file as error in asset manager
-                            if let Some(ref mut manager) = self.asset_manager {
-                                manager.mark_data_file_error(&spells_file, &e.to_string());
-                            }
-                            self.status_message = format!("Failed to parse spells: {}", e);
-                        }
-                    },
-                    Err(e) => {
-                        // Mark data file as error in asset manager
-                        if let Some(ref mut manager) = self.asset_manager {
-                            manager.mark_data_file_error(&spells_file, &e.to_string());
-                        }
-                        self.status_message = format!("Failed to read spells file: {}", e);
-                        self.logger.error(
-                            category::FILE_IO,
-                            &format!("Failed to read spells file {:?}: {}", spells_path, e),
-                        );
-                    }
-                }
+        if let Some(spells) = read_ron_collection::<Spell>(
+            &self.campaign_dir,
+            &spells_file,
+            "spells",
+            &mut self.status_message,
+        ) {
+            let count = spells.len();
+            self.spells = spells;
+            if let Some(ref mut manager) = self.asset_manager {
+                manager.mark_data_file_loaded(&spells_file, count);
+            }
+            let id_errors = self.validate_spell_ids();
+            if !id_errors.is_empty() {
+                self.validation_errors.extend(id_errors.clone());
+                self.status_message = format!(
+                    "⚠️ Loaded {} spells with {} ID conflicts",
+                    self.spells.len(),
+                    id_errors.len()
+                );
+            } else {
+                self.status_message = format!("Loaded {} spells", self.spells.len());
             }
         }
     }
 
     /// Save spells to RON file
     fn save_spells(&mut self) -> Result<(), String> {
-        if let Some(ref dir) = self.campaign_dir {
-            let spells_path = dir.join(&self.campaign.spells_file);
-
-            // Create spells directory if it doesn't exist
-            if let Some(parent) = spells_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create spells directory: {}", e))?;
-            }
-
-            let ron_config = ron::ser::PrettyConfig::new()
-                .struct_names(false)
-                .enumerate_arrays(false);
-
-            // Sort by ID before serializing for stable file order.
-            let mut sorted_spells = self.spells.clone();
-            sorted_spells.sort_by_key(|s| s.id);
-
-            let contents = ron::ser::to_string_pretty(&sorted_spells, ron_config)
-                .map_err(|e| format!("Failed to serialize spells: {}", e))?;
-
-            fs::write(&spells_path, contents)
-                .map_err(|e| format!("Failed to write spells file: {}", e))?;
-
-            self.unsaved_changes = true;
-            Ok(())
-        } else {
-            Err("No campaign directory set".to_string())
-        }
+        let mut sorted = self.spells.clone();
+        sorted.sort_by_key(|s| s.id);
+        write_ron_collection(
+            &self.campaign_dir,
+            &self.campaign.spells_file,
+            &sorted,
+            "spells",
+        )?;
+        self.unsaved_changes = true;
+        Ok(())
     }
 
     /// Load conditions from RON file
     fn load_conditions(&mut self) {
-        if let Some(ref dir) = self.campaign_dir {
-            let conditions_path = dir.join(&self.campaign.conditions_file);
-            if conditions_path.exists() {
-                match fs::read_to_string(&conditions_path) {
-                    Ok(contents) => match ron::from_str::<Vec<ConditionDefinition>>(&contents) {
-                        Ok(conditions) => {
-                            self.conditions = conditions;
-
-                            // Validate IDs after loading
-                            let id_errors = self.validate_condition_ids();
-                            if !id_errors.is_empty() {
-                                self.validation_errors.extend(id_errors.clone());
-                                self.status_message = format!(
-                                    "⚠️ Loaded {} conditions with {} ID conflicts",
-                                    self.conditions.len(),
-                                    id_errors.len()
-                                );
-                            } else {
-                                self.status_message =
-                                    format!("Loaded {} conditions", self.conditions.len());
-                            }
-                        }
-                        Err(e) => {
-                            self.status_message = format!("Failed to parse conditions: {}", e);
-                            self.logger.error(
-                                category::FILE_IO,
-                                &format!(
-                                    "Failed to parse conditions from {:?}: {}",
-                                    conditions_path, e
-                                ),
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        self.status_message = format!("Failed to read conditions file: {}", e);
-                        self.logger.error(
-                            category::FILE_IO,
-                            &format!(
-                                "Failed to read conditions file {:?}: {}",
-                                conditions_path, e
-                            ),
-                        );
-                    }
-                }
-            } else {
-                self.logger.debug(
-                    category::FILE_IO,
-                    &format!("Conditions file does not exist: {:?}", conditions_path),
+        let conditions_file = self.campaign.conditions_file.clone();
+        if let Some(conditions) = read_ron_collection::<ConditionDefinition>(
+            &self.campaign_dir,
+            &conditions_file,
+            "conditions",
+            &mut self.status_message,
+        ) {
+            self.conditions = conditions;
+            let id_errors = self.validate_condition_ids();
+            if !id_errors.is_empty() {
+                self.validation_errors.extend(id_errors.clone());
+                self.status_message = format!(
+                    "⚠️ Loaded {} conditions with {} ID conflicts",
+                    self.conditions.len(),
+                    id_errors.len()
                 );
+            } else {
+                self.status_message = format!("Loaded {} conditions", self.conditions.len());
             }
-        } else {
-            self.logger.warn(
-                category::FILE_IO,
-                "No campaign directory set when trying to load conditions",
-            );
         }
     }
 
     /// Save conditions to RON file
     fn save_conditions(&mut self) -> Result<(), String> {
-        if let Some(ref dir) = self.campaign_dir {
-            let conditions_path = dir.join(&self.campaign.conditions_file);
-
-            // Create conditions directory if it doesn't exist
-            if let Some(parent) = conditions_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create conditions directory: {}", e))?;
-            }
-
-            let ron_config = ron::ser::PrettyConfig::new()
-                .struct_names(false)
-                .enumerate_arrays(false);
-
-            // Sort by ID (String) before serializing for stable file order.
-            let mut sorted_conditions = self.conditions.clone();
-            sorted_conditions.sort_by(|a, b| a.id.cmp(&b.id));
-
-            let contents = ron::ser::to_string_pretty(&sorted_conditions, ron_config)
-                .map_err(|e| format!("Failed to serialize conditions: {}", e))?;
-
-            fs::write(&conditions_path, contents)
-                .map_err(|e| format!("Failed to write conditions file: {}", e))?;
-
-            self.unsaved_changes = true;
-            Ok(())
-        } else {
-            Err("No campaign directory set".to_string())
-        }
+        let mut sorted = self.conditions.clone();
+        sorted.sort_by(|a, b| a.id.cmp(&b.id));
+        write_ron_collection(
+            &self.campaign_dir,
+            &self.campaign.conditions_file,
+            &sorted,
+            "conditions",
+        )?;
+        self.unsaved_changes = true;
+        Ok(())
     }
 
     /// Load proficiencies from RON file
@@ -2345,98 +2253,43 @@ impl CampaignBuilderApp {
     /// Load monsters from RON file
     fn load_monsters(&mut self) {
         let monsters_file = self.campaign.monsters_file.clone();
-        if let Some(ref dir) = self.campaign_dir {
-            let monsters_path = dir.join(&monsters_file);
-            if monsters_path.exists() {
-                match fs::read_to_string(&monsters_path) {
-                    Ok(contents) => match ron::from_str::<Vec<MonsterDefinition>>(&contents) {
-                        Ok(monsters) => {
-                            let count = monsters.len();
-                            self.monsters = monsters;
-
-                            // Mark data file as loaded in asset manager
-                            if let Some(ref mut manager) = self.asset_manager {
-                                manager.mark_data_file_loaded(&monsters_file, count);
-                            }
-
-                            // Validate IDs after loading
-                            let id_errors = self.validate_monster_ids();
-                            if !id_errors.is_empty() {
-                                self.validation_errors.extend(id_errors.clone());
-                                self.status_message = format!(
-                                    "⚠️ Loaded {} monsters with {} ID conflicts",
-                                    self.monsters.len(),
-                                    id_errors.len()
-                                );
-                            } else {
-                                self.status_message =
-                                    format!("Loaded {} monsters", self.monsters.len());
-                            }
-                        }
-                        Err(e) => {
-                            // Mark data file as error in asset manager
-                            if let Some(ref mut manager) = self.asset_manager {
-                                manager.mark_data_file_error(&monsters_file, &e.to_string());
-                            }
-                            self.status_message = format!("Failed to parse monsters: {}", e);
-                        }
-                    },
-                    Err(e) => {
-                        // Mark data file as error in asset manager
-                        if let Some(ref mut manager) = self.asset_manager {
-                            manager.mark_data_file_error(&monsters_file, &e.to_string());
-                        }
-                        self.status_message = format!("Failed to read monsters file: {}", e);
-                        self.logger.error(
-                            category::FILE_IO,
-                            &format!("Failed to read monsters file {:?}: {}", monsters_path, e),
-                        );
-                    }
-                }
-            } else {
-                self.logger.debug(
-                    category::FILE_IO,
-                    &format!("Monsters file does not exist: {:?}", monsters_path),
-                );
+        if let Some(monsters) = read_ron_collection::<MonsterDefinition>(
+            &self.campaign_dir,
+            &monsters_file,
+            "monsters",
+            &mut self.status_message,
+        ) {
+            let count = monsters.len();
+            self.monsters = monsters;
+            if let Some(ref mut manager) = self.asset_manager {
+                manager.mark_data_file_loaded(&monsters_file, count);
             }
-        } else {
-            self.logger.warn(
-                category::FILE_IO,
-                "No campaign directory set when trying to load monsters",
-            );
+            let id_errors = self.validate_monster_ids();
+            if !id_errors.is_empty() {
+                self.validation_errors.extend(id_errors.clone());
+                self.status_message = format!(
+                    "⚠️ Loaded {} monsters with {} ID conflicts",
+                    self.monsters.len(),
+                    id_errors.len()
+                );
+            } else {
+                self.status_message = format!("Loaded {} monsters", self.monsters.len());
+            }
         }
     }
 
     /// Save monsters to RON file
     fn save_monsters(&mut self) -> Result<(), String> {
-        if let Some(ref dir) = self.campaign_dir {
-            let monsters_path = dir.join(&self.campaign.monsters_file);
-
-            // Create monsters directory if it doesn't exist
-            if let Some(parent) = monsters_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create monsters directory: {}", e))?;
-            }
-
-            let ron_config = ron::ser::PrettyConfig::new()
-                .struct_names(false)
-                .enumerate_arrays(false);
-
-            // Sort by ID before serializing for stable file order.
-            let mut sorted_monsters = self.monsters.clone();
-            sorted_monsters.sort_by_key(|m| m.id);
-
-            let contents = ron::ser::to_string_pretty(&sorted_monsters, ron_config)
-                .map_err(|e| format!("Failed to serialize monsters: {}", e))?;
-
-            fs::write(&monsters_path, contents)
-                .map_err(|e| format!("Failed to write monsters file: {}", e))?;
-
-            self.unsaved_changes = true;
-            Ok(())
-        } else {
-            Err("No campaign directory set".to_string())
-        }
+        let mut sorted = self.monsters.clone();
+        sorted.sort_by_key(|m| m.id);
+        write_ron_collection(
+            &self.campaign_dir,
+            &self.campaign.monsters_file,
+            &sorted,
+            "monsters",
+        )?;
+        self.unsaved_changes = true;
+        Ok(())
     }
 
     /// Load furniture definitions from the campaign furniture RON file.
@@ -2444,50 +2297,25 @@ impl CampaignBuilderApp {
     /// Missing file is not an error — furniture support is opt-in per campaign.
     /// Syncs the loaded definitions into `furniture_editor_state` too.
     fn load_furniture(&mut self) {
-        if let Some(ref dir) = self.campaign_dir {
-            let furniture_path = dir.join(&self.campaign.furniture_file);
-            if furniture_path.exists() {
-                match fs::read_to_string(&furniture_path) {
-                    Ok(contents) => {
-                        match ron::from_str::<Vec<antares::domain::FurnitureDefinition>>(&contents)
-                        {
-                            Ok(defs) => {
-                                let count = defs.len();
-                                self.furniture_definitions = defs;
-                                self.furniture_editor_state =
-                                    furniture_editor::FurnitureEditorState::new();
-                                self.logger.info(
-                                    category::FILE_IO,
-                                    &format!("Loaded {} furniture definitions", count),
-                                );
-                                self.status_message =
-                                    format!("Loaded {} furniture definitions", count);
-                            }
-                            Err(e) => {
-                                self.furniture_definitions.clear();
-                                self.logger.warn(
-                                    category::FILE_IO,
-                                    &format!("Failed to parse furniture.ron: {}", e),
-                                );
-                                self.status_message =
-                                    format!("Failed to parse furniture.ron: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        self.furniture_definitions.clear();
-                        self.logger.warn(
-                            category::FILE_IO,
-                            &format!("Failed to read furniture.ron: {}", e),
-                        );
-                    }
-                }
-            } else {
-                self.furniture_definitions.clear();
-                self.furniture_editor_state = furniture_editor::FurnitureEditorState::new();
-                self.logger
-                    .debug(category::FILE_IO, "No furniture.ron found (opt-in)");
-            }
+        if let Some(defs) = read_ron_collection::<antares::domain::FurnitureDefinition>(
+            &self.campaign_dir,
+            &self.campaign.furniture_file,
+            "furniture",
+            &mut self.status_message,
+        ) {
+            let count = defs.len();
+            self.furniture_definitions = defs;
+            self.furniture_editor_state = furniture_editor::FurnitureEditorState::new();
+            self.logger.info(
+                category::FILE_IO,
+                &format!("Loaded {} furniture definitions", count),
+            );
+            self.status_message = format!("Loaded {} furniture definitions", count);
+        } else {
+            self.furniture_definitions.clear();
+            self.furniture_editor_state = furniture_editor::FurnitureEditorState::new();
+            self.logger
+                .debug(category::FILE_IO, "No furniture.ron found (opt-in)");
         }
     }
 
@@ -2495,28 +2323,20 @@ impl CampaignBuilderApp {
     ///
     /// Returns an Err string on failure so the caller can aggregate warnings.
     fn save_furniture(&mut self) -> Result<(), String> {
-        if let Some(ref dir) = self.campaign_dir {
-            let furniture_path = dir.join(&self.campaign.furniture_file);
-            if let Some(parent) = furniture_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create furniture dir: {}", e))?;
-            }
-            let contents =
-                ron::ser::to_string_pretty(&self.furniture_definitions, Default::default())
-                    .map_err(|e| format!("Failed to serialize furniture: {}", e))?;
-            fs::write(&furniture_path, contents)
-                .map_err(|e| format!("Failed to write furniture file: {}", e))?;
-            self.logger.info(
-                category::FILE_IO,
-                &format!(
-                    "Saved {} furniture definitions",
-                    self.furniture_definitions.len()
-                ),
-            );
-            Ok(())
-        } else {
-            Err("No campaign directory set".to_string())
-        }
+        write_ron_collection(
+            &self.campaign_dir,
+            &self.campaign.furniture_file,
+            &self.furniture_definitions,
+            "furniture",
+        )?;
+        self.logger.info(
+            category::FILE_IO,
+            &format!(
+                "Saved {} furniture definitions",
+                self.furniture_definitions.len()
+            ),
+        );
+        Ok(())
     }
 
     /// Load creatures from RON file
